@@ -1,0 +1,62 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running pre-commit checks..."
+
+# ===== 配置锁定检查 =====
+echo "🔒 Checking config locks..."
+
+LOCKED_CONFIGS=(
+  "CRM-Client/tsconfig.json"
+  "CRM-Client/eslint.config.js"
+  "CRM-Server/pyproject.toml"
+)
+
+for config in "${LOCKED_CONFIGS[@]}"; do
+  if git diff --cached --name-only | grep -q "$config"; then
+    echo "::error::Modification of $config requires human approval"
+    echo "Please submit change request via CRM-Docs/SPEC-CHANGELOG.md"
+    exit 1
+  fi
+done
+
+# ===== 前端检查 =====
+cd CRM-Client
+
+echo "📝 Running ESLint..."
+npm run lint || {
+  echo "::error::ESLint check failed. Fix the errors before commit."
+  exit 1
+}
+
+echo "🔢 Running TypeScript type check..."
+npm run type-check || {
+  echo "::error::TypeScript type check failed. Fix the type errors before commit."
+  exit 1
+}
+
+cd ..
+
+# ===== 后端检查 =====
+cd CRM-Server
+
+# 检查是否安装了开发依赖
+if command -v ruff &> /dev/null; then
+  echo "📝 Running Ruff lint..."
+  ruff check app/ || {
+    echo "::error::Ruff lint check failed. Fix the errors before commit."
+    exit 1
+  }
+fi
+
+if command -v mypy &> /dev/null; then
+  echo "🔢 Running MyPy type check..."
+  mypy app/ || {
+    echo "::warning::MyPy type check has issues. Review them carefully."
+    # 不阻止提交，仅警告
+  }
+fi
+
+cd ..
+
+echo "✅ Pre-commit checks passed"

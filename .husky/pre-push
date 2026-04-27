@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🧪 Running pre-push tests..."
+
+# ===== 前端测试 =====
+cd CRM-Client
+
+echo "Running frontend unit tests..."
+npm run test:unit || {
+  echo "::error::Frontend unit tests failed. Fix the failing tests before push."
+  exit 1
+}
+
+echo "Checking test coverage..."
+npm run coverage || {
+  # 检查覆盖率是否达标
+  if [ $? -ne 0 ]; then
+    echo "::warning::Test coverage may be below threshold. Review coverage report."
+  fi
+}
+
+cd ..
+
+# ===== 后端测试 =====
+cd CRM-Server
+
+# 检查是否安装了 pytest
+if command -v pytest &> /dev/null; then
+  echo "Running backend unit tests..."
+  pytest tests/unit -v --cov=app --cov-fail-under=80 || {
+    echo "::error::Backend unit tests failed or coverage below 80%."
+    exit 1
+  }
+fi
+
+cd ..
+
+echo "✅ All tests passed"

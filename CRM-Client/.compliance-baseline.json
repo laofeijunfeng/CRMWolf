@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json.schemastore.org/json",
+  "generatedDate": "2026-04-21",
+  "version": "1.0",
+  "description": "CRMWolf TypeScript 合规基线 - 存量违规跟踪",
+
+  "typeScriptViolations": {
+    ":any": {
+      "total": 158,
+      "description": "使用 : any 类型注解",
+      "policy": "存量跟踪，新增零容忍",
+      "highPriorityFiles": [
+        "src/stores/user.ts",
+        "src/stores/permissions.ts",
+        "src/utils/request.ts"
+      ],
+      "mediumPriorityFiles": [
+        "src/api/*.ts"
+      ],
+      "lowPriorityFiles": [
+        "src/views/*.vue",
+        "src/components/*.vue"
+      ]
+    },
+    "as any": {
+      "total": 119,
+      "description": "使用 as any 类型转换",
+      "policy": "存量跟踪，新增零容忍",
+      "highPriorityFiles": [
+        "src/api/*.ts"
+      ],
+      "mediumPriorityFiles": [
+        "src/views/CustomerDetail.vue",
+        "src/views/ContractDetail.vue"
+      ],
+      "lowPriorityFiles": [
+        "src/views/*.vue"
+      ]
+    },
+    "@ts-ignore": {
+      "total": 0,
+      "description": "使用 @ts-ignore 注释",
+      "policy": "零容忍",
+      "files": []
+    },
+    "! non-null": {
+      "total": 7,
+      "description": "使用 ! 非空断言",
+      "policy": "存量跟踪，新增零容忍",
+      "files": [
+        "src/views/Customers.vue",
+        "src/views/ContractDetail.vue",
+        "src/views/ProcurementMethods.vue"
+      ]
+    }
+  },
+
+  "testCoverage": {
+    "frontend": {
+      "current": 0,
+      "target": 100,
+      "policy": "新代码必须 100%，存量渐进提升"
+    },
+    "backend": {
+      "current": 0,
+      "target": 80,
+      "policy": "单元测试覆盖率 ≥ 80%"
+    }
+  },
+
+  "policy": {
+    "newCode": "ZERO_TOLERANCE",
+    "existingCode": "TRACKED",
+    "baselineReductionTarget": "60%",
+    "baselineReductionDeadline": "Week 12"
+  },
+
+  "cleanupSchedule": {
+    "phase1": {
+      "week": "5-6",
+      "target": "stores/ + api/",
+      "files": 10,
+      "description": "核心类型和 API 层修复"
+    },
+    "phase2": {
+      "week": "7-8",
+      "target": "components/",
+      "files": 15,
+      "description": "共享组件修复"
+    },
+    "phase3": {
+      "week": "9-12",
+      "target": "views/",
+      "files": 45,
+      "description": "页面视图修复（最大工作量）"
+    }
+  },
+
+  "modificationPolicy": {
+    "description": "此文件记录存量违规，修改需人工审批",
+    "allowedBy": ["human"],
+    "aiPolicy": "AI Agent 禁止修改此文件"
+  }
+}

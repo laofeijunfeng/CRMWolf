@@ -1,0 +1,522 @@
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, func, text
+from sqlalchemy.orm import joinedload
+from typing import Optional, List, Tuple
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+
+from app.models.payment import PaymentPlan, PaymentRecord, PaymentPlanStatus
+from app.models.contract import Contract, ContractStatus, PaymentStatus
+from app.schemas.payment import (
+    PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate,
+    PaymentRecordCreate, PaymentRecordUpdate
+)
+
+
+class PaymentPlanCRUD:
+    def get_by_id(self, db: Session, plan_id: int) -> Optional[PaymentPlan]:
+        return db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
+    
+    def get_by_contract_id(self, db: Session, contract_id: int, status: Optional[str] = None) -> List[PaymentPlan]:
+        query = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id)
+        
+        if status:
+            query = query.filter(PaymentPlan.status == status)
+        
+        return query.order_by(PaymentPlan.due_date.asc()).all()
+    
+    def get_multi(self, db: Session, skip: int = 0, limit: int = 100, status: Optional[str] = None) -> Tuple[List[PaymentPlan], int]:
+        query = db.query(PaymentPlan)
+        
+        if status:
+            query = query.filter(PaymentPlan.status == status)
+        
+        total = query.count()
+        plans = query.order_by(PaymentPlan.due_date.asc()).offset(skip).limit(limit).all()
+        
+        return plans, total
+    
+    def list_plans(
+        self,
+        db: Session,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        due_date_start: Optional[date] = None,
+        due_date_end: Optional[date] = None,
+        current_user_id: Optional[str] = None
+    ) -> Tuple[List[PaymentPlan], int]:
+        from app.models.contract import Contract
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+        
+        plans_query = db.query(PaymentPlan).join(Contract, PaymentPlan.contract_id == Contract.id)
+        
+        if status:
+            plans_query = plans_query.filter(PaymentPlan.status == status)
+        
+        if due_date_start:
+            plans_query = plans_query.filter(PaymentPlan.due_date >= due_date_start)
+        
+        if due_date_end:
+            plans_query = plans_query.filter(PaymentPlan.due_date <= due_date_end)
+        
+        if owner_id:
+            plans_query = plans_query.filter(Contract.creator_id == owner_id)
+        
+        if current_user_id:
+            plans_query = plans_query.filter(Contract.creator_id == current_user_id)
+        
+        total = plans_query.count()
+        
+        plans = plans_query.order_by(PaymentPlan.due_date.asc()).offset(skip).limit(limit).all()
+        
+        for plan in plans:
+            contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
+            if contract:
+                plan.contract = contract
+                if contract.customer_id:
+                    customer = db.query(Customer).filter(Customer.id == contract.customer_id).first()
+                    if customer:
+                        contract.customer = customer
+                if contract.opportunity_id:
+                    opportunity = db.query(Opportunity).filter(Opportunity.id == contract.opportunity_id).first()
+                    if opportunity:
+                        contract.opportunity = opportunity
+        
+        return plans, total
+    
+    def create(self, db: Session, contract_id: int, obj_in: PaymentPlanCreate) -> PaymentPlan:
+        db_plan = PaymentPlan(
+            contract_id=contract_id,
+            **obj_in.model_dump()
+        )
+        db.add(db_plan)
+        db.commit()
+        db.refresh(db_plan)
+        return db_plan
+    
+    def batch_create(self, db: Session, contract_id: int, plans_data: List[PaymentPlanCreate], creator_id: str) -> List[PaymentPlan]:
+        from app.crud.user import user_crud
+        from app.crud.customer import customer_crud
+        from app.models.payment import PaymentPlan
+        from app.services.operation_log_service import operation_log_service
+        
+        total_planned = sum(p.planned_amount for p in plans_data)
+        
+        contract = db.query(Contract).filter(Contract.id == contract_id).first()
+        if not contract:
+            raise ValueError("合同不存在")
+        
+        if total_planned > float(contract.total_amount):
+            raise ValueError(f"回款计划总额({total_planned})不能超过合同总额({contract.total_amount})")
+        
+        plans = []
+        for plan_data in plans_data:
+            db_plan = PaymentPlan(
+                contract_id=contract_id,
+                **plan_data.model_dump()
+            )
+            db.add(db_plan)
+            plans.append(db_plan)
+        
+        db.commit()
+        for plan in plans:
+            db.refresh(plan)
+        
+        operator = user_crud.get_by_feishu_open_id(db, creator_id)
+        operator_name = operator.name if operator else None
+        
+        customer = customer_crud.get_by_id(db, contract.customer_id)
+        
+        operation_log_service.log(
+            db=db,
+            event_type="PAYMENT_PLAN_CREATED",
+            event_action="CREATE",
+            resource_type="CUSTOMER",
+            resource_id=contract.customer_id,
+            secondary_resource_type="CONTRACT",
+            secondary_resource_id=contract_id,
+            operator_id=creator_id,
+            operator_name=operator_name,
+            content={
+                "contractNumber": contract.contract_number,
+                "contractName": contract.contract_name,
+                "planCount": len(plans),
+                "totalPlannedAmount": float(total_planned),
+                "customerId": contract.customer_id,
+                "customerName": customer.account_name if customer else None
+            }
+        )
+        
+        return plans
+    
+    def update(self, db: Session, db_obj: PaymentPlan, obj_in: PaymentPlanUpdate) -> PaymentPlan:
+        update_data = obj_in.model_dump(exclude_unset=True)
+        
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+        
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+    
+    def delete(self, db: Session, plan_id: int) -> bool:
+        plan = self.get_by_id(db, plan_id)
+        if not plan:
+            return False
+        
+        if plan.payment_records:
+            raise ValueError("存在关联的回款记录，无法删除")
+        
+        db.delete(plan)
+        db.commit()
+        return True
+    
+    def update_status(self, db: Session, plan: PaymentPlan) -> PaymentPlan:
+        from app.models.payment import PaymentRecord
+        
+        # 从数据库重新查询回款记录，确保获取最新数据
+        payment_records = db.query(PaymentRecord).filter(
+            PaymentRecord.payment_plan_id == plan.id
+        ).all()
+        
+        total_paid = sum(float(r.actual_amount) for r in payment_records)
+        planned = float(plan.planned_amount)
+        
+        if total_paid >= planned:
+            plan.status = PaymentPlanStatus.COMPLETED
+        elif total_paid > 0:
+            plan.status = PaymentPlanStatus.PARTIAL
+        elif plan.due_date < date.today():
+            plan.status = PaymentPlanStatus.OVERDUE
+        else:
+            plan.status = PaymentPlanStatus.PENDING
+        
+        db.commit()
+        db.refresh(plan)
+        return plan
+    
+    def get_upcoming_payments(self, db: Session, days: int = 7) -> List[PaymentPlan]:
+        from app.models.contract import Contract
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+        
+        target_date = date.today() + timedelta(days=days)
+        
+        plans = db.query(PaymentPlan).filter(
+            and_(
+                PaymentPlan.status == PaymentPlanStatus.PENDING,
+                PaymentPlan.due_date <= target_date,
+                PaymentPlan.due_date >= date.today()
+            )
+        ).order_by(PaymentPlan.due_date.asc()).all()
+        
+        for plan in plans:
+            contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
+            if contract:
+                plan.contract = contract
+                if contract.customer_id:
+                    customer = db.query(Customer).filter(Customer.id == contract.customer_id).first()
+                    if customer:
+                        contract.customer = customer
+                if contract.opportunity_id:
+                    opportunity = db.query(Opportunity).filter(Opportunity.id == contract.opportunity_id).first()
+                    if opportunity:
+                        contract.opportunity = opportunity
+        
+        return plans
+    
+    def get_overdue_payments(self, db: Session) -> List[PaymentPlan]:
+        from app.models.contract import Contract
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+        
+        plans = db.query(PaymentPlan).filter(
+            and_(
+                PaymentPlan.due_date < date.today(),
+                PaymentPlan.status != PaymentPlanStatus.COMPLETED
+            )
+        ).order_by(PaymentPlan.due_date.asc()).all()
+        
+        for plan in plans:
+            contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
+            if contract:
+                plan.contract = contract
+                if contract.customer_id:
+                    customer = db.query(Customer).filter(Customer.id == contract.customer_id).first()
+                    if customer:
+                        contract.customer = customer
+                if contract.opportunity_id:
+                    opportunity = db.query(Opportunity).filter(Opportunity.id == contract.opportunity_id).first()
+                    if opportunity:
+                        contract.opportunity = opportunity
+        
+        return plans
+
+
+class PaymentRecordCRUD:
+    def get_by_id(self, db: Session, record_id: int) -> Optional[PaymentRecord]:
+        return db.query(PaymentRecord).filter(PaymentRecord.id == record_id).first()
+    
+    def get_by_plan_id(self, db: Session, plan_id: int) -> List[PaymentRecord]:
+        return db.query(PaymentRecord).filter(
+            PaymentRecord.payment_plan_id == plan_id
+        ).order_by(PaymentRecord.payment_date.desc()).all()
+    
+    def list_records(
+        self,
+        db: Session,
+        skip: int = 0,
+        limit: int = 100,
+        contract_id: Optional[int] = None,
+        payment_plan_id: Optional[int] = None,
+        payment_date_start: Optional[date] = None,
+        payment_date_end: Optional[date] = None,
+        min_amount: Optional[float] = None,
+        creator_id: Optional[str] = None,
+        current_user_id: Optional[str] = None
+    ) -> Tuple[List[PaymentRecord], int]:
+        from app.models.contract import Contract
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+        
+        records_query = db.query(PaymentRecord).join(
+            PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id
+        ).join(
+            Contract, PaymentPlan.contract_id == Contract.id
+        )
+        
+        if contract_id:
+            records_query = records_query.filter(PaymentPlan.contract_id == contract_id)
+        
+        if payment_plan_id:
+            records_query = records_query.filter(PaymentRecord.payment_plan_id == payment_plan_id)
+        
+        if payment_date_start:
+            records_query = records_query.filter(PaymentRecord.payment_date >= payment_date_start)
+        
+        if payment_date_end:
+            records_query = records_query.filter(PaymentRecord.payment_date <= payment_date_end)
+        
+        if min_amount:
+            records_query = records_query.filter(PaymentRecord.actual_amount >= min_amount)
+        
+        if creator_id:
+            records_query = records_query.filter(PaymentRecord.creator_id == creator_id)
+        
+        if current_user_id:
+            records_query = records_query.filter(Contract.creator_id == current_user_id)
+        
+        total = records_query.count()
+        records = records_query.order_by(PaymentRecord.payment_date.desc()).offset(skip).limit(limit).all()
+        
+        for record in records:
+            payment_plan = record.payment_plan if hasattr(record, 'payment_plan') else None
+            if not payment_plan:
+                payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == record.payment_plan_id).first()
+                if payment_plan:
+                    record.payment_plan = payment_plan
+            
+            if payment_plan:
+                contract = payment_plan.contract if hasattr(payment_plan, 'contract') else None
+                if not contract:
+                    contract = db.query(Contract).filter(Contract.id == payment_plan.contract_id).first()
+                    if contract:
+                        payment_plan.contract = contract
+                
+                if contract:
+                    customer = contract.customer if hasattr(contract, 'customer') else None
+                    if not customer and contract.customer_id:
+                        customer = db.query(Customer).filter(Customer.id == contract.customer_id).first()
+                        if customer:
+                            contract.customer = customer
+                    
+                    opportunity = contract.opportunity if hasattr(contract, 'opportunity') else None
+                    if not opportunity and contract.opportunity_id:
+                        opportunity = db.query(Opportunity).filter(Opportunity.id == contract.opportunity_id).first()
+                        if opportunity:
+                            contract.opportunity = opportunity
+        
+        return records, total
+    
+    def create(self, db: Session, plan_id: int, obj_in: PaymentRecordCreate, creator_id: str, creator_name: str) -> PaymentRecord:
+        from app.crud.user import user_crud
+        from app.crud.customer import customer_crud
+        from app.services.operation_log_service import operation_log_service
+        
+        plan = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
+        if not plan:
+            raise ValueError("回款计划不存在")
+        
+        total_paid = sum(float(r.actual_amount) for r in plan.payment_records)
+        planned = float(plan.planned_amount)
+        
+        if total_paid + obj_in.actual_amount > planned:
+            raise ValueError(f"回款金额超出计划，计划金额: {planned}，已回款: {total_paid}，本次: {obj_in.actual_amount}")
+        
+        db_record = PaymentRecord(
+            payment_plan_id=plan_id,
+            **obj_in.model_dump(),
+            creator_id=creator_id,
+            creator_name=creator_name
+        )
+        db.add(db_record)
+        db.flush()
+        
+        from app.crud.payment import payment_plan_crud
+        payment_plan_crud.update_status(db, plan)
+        self._update_contract_payment_status(db, plan.contract_id)
+        
+        db.commit()
+        db.refresh(db_record)
+        
+        contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
+        if contract:
+            operator = user_crud.get_by_feishu_open_id(db, creator_id)
+            operator_name_display = operator.name if operator else creator_name
+            
+            customer = customer_crud.get_by_id(db, contract.customer_id)
+            
+            operation_log_service.log(
+                db=db,
+                event_type="PAYMENT_RECEIVED",
+                event_action="CREATE",
+                resource_type="CUSTOMER",
+                resource_id=contract.customer_id,
+                secondary_resource_type="CONTRACT",
+                secondary_resource_id=contract.id,
+                operator_id=creator_id,
+                operator_name=operator_name_display,
+                content={
+                    "contractNumber": contract.contract_number,
+                    "contractName": contract.contract_name,
+                    "actualAmount": float(db_record.actual_amount),
+                    "paymentDate": db_record.payment_date.isoformat() if db_record.payment_date else None,
+                    "customerId": contract.customer_id,
+                    "customerName": customer.account_name if customer else None
+                }
+            )
+        
+        return db_record
+    
+    def update(self, db: Session, db_obj: PaymentRecord, obj_in: PaymentRecordUpdate) -> PaymentRecord:
+        update_data = obj_in.model_dump(exclude_unset=True)
+        
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+        
+        db.commit()
+        
+        from app.crud.payment import payment_plan_crud
+        plan = db.query(PaymentPlan).filter(PaymentPlan.id == db_obj.payment_plan_id).first()
+        if plan:
+            payment_plan_crud.update_status(db, plan)
+            self._update_contract_payment_status(db, plan.contract_id)
+        
+        db.refresh(db_obj)
+        return db_obj
+    
+    def delete(self, db: Session, record_id: int) -> bool:
+        record = self.get_by_id(db, record_id)
+        if not record:
+            return False
+        
+        plan_id = record.payment_plan_id
+        db.delete(record)
+        db.flush()
+        
+        from app.crud.payment import payment_plan_crud
+        plan = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
+        if plan:
+            payment_plan_crud.update_status(db, plan)
+            self._update_contract_payment_status(db, plan.contract_id)
+        
+        db.commit()
+        return True
+    
+    def confirm_payment(
+        self,
+        db: Session,
+        record_id: int,
+        confirmer_id: str,
+        confirmer_name: str,
+        action: str,
+        notes: Optional[str] = None,
+        invoice_application_ids: Optional[List[int]] = None
+    ) -> Optional[PaymentRecord]:
+        from app.models.payment import PaymentConfirmationStatus
+        from app.models.invoice import InvoiceApplication
+        
+        record = self.get_by_id(db, record_id)
+        if not record:
+            return None
+        
+        if record.confirmation_status != PaymentConfirmationStatus.PENDING:
+            raise ValueError("只能确认待确认状态的回款记录")
+        
+        if action == "confirm":
+            record.confirmation_status = PaymentConfirmationStatus.CONFIRMED
+        elif action == "dispute":
+            record.confirmation_status = PaymentConfirmationStatus.DISPUTED
+        else:
+            raise ValueError("无效的确认操作")
+        
+        record.confirmed_by = confirmer_id
+        record.confirmed_by_name = confirmer_name
+        record.confirmed_time = datetime.now()
+        record.confirmation_notes = notes
+        
+        if invoice_application_ids:
+            invoice_applications = db.query(InvoiceApplication).filter(
+                InvoiceApplication.id.in_(invoice_application_ids)
+            ).all()
+            
+            for inv_app in invoice_applications:
+                if inv_app.payment_record_id is not None:
+                    raise ValueError(f"发票申请 {inv_app.application_number} 已经关联了回款记录")
+            
+            for inv_app in invoice_applications:
+                inv_app.payment_record_id = record_id
+        
+        db.commit()
+        db.refresh(record)
+        return record
+    
+    def _update_contract_payment_status(self, db: Session, contract_id: int):
+        from app.models.contract import Contract
+        from app.models.payment import PaymentPlanStatus
+        
+        contract = db.query(Contract).filter(Contract.id == contract_id).first()
+        if not contract:
+            return
+        
+        plans = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id).all()
+        
+        if not plans:
+            contract.payment_status = PaymentStatus.UNPAID
+            contract.total_paid_amount = 0
+        else:
+            total_paid = sum(float(r.actual_amount) for p in plans for r in p.payment_records)
+            contract.total_paid_amount = total_paid
+            
+            total_planned = sum(float(p.planned_amount) for p in plans)
+            
+            has_overdue = any(p.status == PaymentPlanStatus.OVERDUE for p in plans)
+            all_completed = all(p.status == PaymentPlanStatus.COMPLETED for p in plans)
+            
+            if has_overdue:
+                contract.payment_status = PaymentStatus.OVERDUE
+            elif total_paid >= total_planned:
+                contract.payment_status = PaymentStatus.COMPLETED
+            elif total_paid > 0:
+                contract.payment_status = PaymentStatus.PARTIAL
+            else:
+                contract.payment_status = PaymentStatus.UNPAID
+        
+        db.commit()
+
+
+payment_plan_crud = PaymentPlanCRUD()
+payment_record_crud = PaymentRecordCRUD()

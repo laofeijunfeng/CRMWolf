@@ -1,0 +1,1295 @@
+// ==================== CRMWolf 极简中性风设计系统 ====================
+// 核心原则：极致克制、柔和低噪、统一有序、服务内容
+
+@use './variables.scss' as *;
+
+// ==================== CSS 变量 ====================
+
+:root {
+  // 背景色
+  --wolf-bg-page: #{$wolf-bg-page};
+  --wolf-bg-card: #{$wolf-bg-card};
+  --wolf-bg-hover: #{$wolf-bg-hover};
+  --wolf-bg-active: #{$wolf-bg-active};
+  --wolf-bg-sidebar: #{$wolf-bg-sidebar};
+
+  // 品牌色
+  --wolf-primary: #{$wolf-primary};
+  --wolf-primary-hover: #{$wolf-primary-hover};
+  --wolf-primary-active: #{$wolf-primary-active};
+  --wolf-primary-light: #{$wolf-primary-light};
+
+  // 功能色
+  --wolf-success-text: #{$wolf-success-text};
+  --wolf-success-bg: #{$wolf-success-bg};
+  --wolf-warning-text: #{$wolf-warning-text};
+  --wolf-warning-bg: #{$wolf-warning-bg};
+  --wolf-danger-text: #{$wolf-danger-text};
+  --wolf-danger-bg: #{$wolf-danger-bg};
+
+  // 文字色
+  --wolf-text-primary: #{$wolf-text-primary};
+  --wolf-text-secondary: #{$wolf-text-secondary};
+  --wolf-text-tertiary: #{$wolf-text-tertiary};
+  --wolf-text-placeholder: #{$wolf-text-placeholder};
+  --wolf-text-disabled: #{$wolf-text-disabled};
+  --wolf-text-link: #{$wolf-text-link};
+  --wolf-text-link-hover: #{$wolf-text-link-hover};
+  --wolf-text-inverse: #{$wolf-text-inverse};
+
+  // 边框色
+  --wolf-border-default: #{$wolf-border-default};
+  --wolf-border-hover: #{$wolf-border-hover};
+  --wolf-border-light: #{$wolf-border-light};
+  --wolf-border-divider: #{$wolf-border-divider};
+
+  // 圆角
+  --wolf-radius-sm: #{$wolf-radius-sm};
+  --wolf-radius-md: #{$wolf-radius-md};
+  --wolf-radius-lg: #{$wolf-radius-lg};
+  --wolf-radius-xl: #{$wolf-radius-xl};
+
+  // 字号
+  --wolf-font-size-title: #{$wolf-font-size-title};
+  --wolf-font-size-body: #{$wolf-font-size-body};
+  --wolf-font-size-auxiliary: #{$wolf-font-size-auxiliary};
+  --wolf-font-size-caption: #{$wolf-font-size-caption};
+
+  // 字重
+  --wolf-font-weight-normal: #{$wolf-font-weight-normal};
+  --wolf-font-weight-medium: #{$wolf-font-weight-medium};
+  --wolf-font-weight-semibold: #{$wolf-font-weight-semibold};
+
+  // 行高
+  --wolf-line-height-title: #{$wolf-line-height-title};
+  --wolf-line-height-body: #{$wolf-line-height-body};
+
+  // 间距
+  --wolf-space-xs: #{$wolf-space-xs};
+  --wolf-space-sm: #{$wolf-space-sm};
+  --wolf-space-md: #{$wolf-space-md};
+  --wolf-space-lg: #{$wolf-space-lg};
+  --wolf-page-padding: #{$wolf-page-padding};
+  --wolf-card-padding: #{$wolf-card-padding};
+  --wolf-button-gap: #{$wolf-button-gap};
+}
+
+// ==================== 全局基础样式 ====================
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  font-family: $wolf-font-family;
+  font-size: $wolf-font-size-body;
+  color: $wolf-text-secondary;
+  background-color: $wolf-bg-page;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: $wolf-line-height-body;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+// ==================== 通用布局类 ====================
+
+.wolf-page {
+  padding: $wolf-page-padding;
+  background-color: $wolf-bg-page;
+  min-height: 100vh;
+}
+
+.wolf-card {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+  box-shadow: $wolf-shadow-card;
+  padding: $wolf-card-padding;
+  margin-bottom: $wolf-card-gap;
+}
+
+.wolf-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $wolf-space-md;
+}
+
+.wolf-card__title {
+  font-size: $wolf-font-size-body;
+  font-weight: $wolf-font-weight-medium;
+  color: $wolf-text-primary;
+}
+
+.wolf-card__extra {
+  font-size: $wolf-font-size-body;
+  color: $wolf-text-link;
+  cursor: pointer;
+
+  &:hover {
+    color: $wolf-text-link-hover;
+  }
+}
+
+// ==================== Element Plus 样式覆盖 ====================
+
+// ==================== 按钮规范 ====================
+// 全系统仅3种按钮类型：通用次按钮（胶囊型）、文本按钮、危险按钮
+// 小尺寸按钮用于表格操作等紧凑场景
+
+// 按钮基础样式（所有按钮共享）
+.el-button {
+  font-size: $wolf-font-size-body !important;          // 14px
+  font-weight: $wolf-font-weight-medium !important;    // 500
+  transition: all 0.2s ease-in-out !important;
+  border: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: $wolf-space-xs !important;
+
+  // 胶囊按钮（常规尺寸，非small）- 页面核心操作
+  &:not(.el-button--small):not(.el-button--text):not(.el-button--danger) {
+    height: $wolf-button-height-md !important;         // 32px 固定高度
+    padding: $wolf-button-padding-md !important;       // 24px 8px
+    border-radius: $wolf-button-radius !important;     // 16px 胶囊圆角
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
+  }
+
+  // 默认态：暖调浅灰白背景
+  &.el-button--default {
+    background-color: $wolf-btn-bg !important;         // #F7F7F5
+    color: $wolf-btn-text !important;                  // #3A3A3A
+
+    &:hover {
+      background-color: $wolf-btn-bg-hover !important; // #F0F0ED
+      color: $wolf-btn-text-hover !important;          // #1C1C1C
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06) !important;
+    }
+
+    &:active {
+      background-color: $wolf-btn-bg-active !important; // #EAEAE7
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04) !important;
+    }
+
+    &:disabled {
+      background-color: $wolf-btn-bg !important;
+      color: $wolf-text-placeholder !important;        // #909090
+      box-shadow: none !important;
+      cursor: not-allowed !important;
+    }
+  }
+
+  // 主按钮 - 品牌色填充（克制使用）
+  &.el-button--primary {
+    background-color: $wolf-primary !important;
+    color: $wolf-text-inverse !important;
+
+    &:hover {
+      background-color: $wolf-primary-hover !important;
+    }
+
+    &:active {
+      background-color: $wolf-primary-active !important;
+    }
+
+    &:disabled {
+      background-color: $wolf-primary-disabled !important;
+      color: rgba(#FFFFFF, 0.5) !important;
+    }
+  }
+
+  // 危险按钮 - 仅文字色区分，无强视觉冲击
+  &.el-button--danger {
+    background-color: transparent !important;
+    color: $wolf-btn-danger-text !important;           // #A83232 低饱和暗红
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: $wolf-button-radius-sm !important;  // 4px
+    height: $wolf-button-height-sm !important;         // 24px
+    padding: $wolf-button-padding-sm !important;       // 8px 4px
+    font-weight: $wolf-font-weight-normal !important;  // 400
+
+    &:hover {
+      background-color: $wolf-btn-danger-bg-hover !important; // #FCECEC
+      color: $wolf-btn-danger-text-hover !important;          // #7A2828
+    }
+
+    &:active {
+      background-color: $wolf-btn-danger-bg-active !important; // #F8E0E0
+    }
+
+    &:disabled {
+      background-color: transparent !important;
+      color: #D4A0A0 !important;
+    }
+  }
+
+  // 成功按钮 - 浅底色 + 同色系文字
+  &.el-button--success {
+    background-color: $wolf-success-bg !important;
+    color: $wolf-success-text !important;
+
+    &:hover {
+      background-color: #D8EFE0 !important;
+    }
+  }
+
+  // 警告按钮 - 浅底色 + 同色系文字
+  &.el-button--warning {
+    background-color: $wolf-warning-bg !important;
+    color: $wolf-warning-text !important;
+
+    &:hover {
+      background-color: #FFE5CC !important;
+    }
+  }
+
+  // 文本按钮 - 弱操作、次要操作
+  &.el-button--text {
+    background-color: transparent !important;
+    color: $wolf-btn-text-color !important;            // #636363
+    padding: $wolf-button-padding-sm !important;       // 8px 4px
+    height: $wolf-button-height-sm !important;         // 24px
+    border-radius: $wolf-button-radius-sm !important;  // 4px
+    font-weight: $wolf-font-weight-normal !important;  // 400
+    box-shadow: none !important;
+
+    &:hover {
+      background-color: $wolf-btn-text-bg-hover !important; // #F5F5F3
+      color: $wolf-btn-text !important;                      // #3A3A3A
+    }
+
+    &:active {
+      background-color: $wolf-btn-text-bg-active !important; // #EFEFED
+    }
+
+    &:disabled {
+      background-color: transparent !important;
+      color: $wolf-text-disabled !important;          // #C4C4C4
+    }
+
+    // 危险文本按钮
+    &.el-button--danger {
+      color: $wolf-btn-danger-text !important;
+
+      &:hover {
+        background-color: $wolf-btn-danger-bg-hover !important;
+        color: $wolf-btn-danger-text-hover !important;
+      }
+    }
+
+    // 主色文本按钮
+    &.el-button--primary {
+      color: $wolf-text-link !important;
+
+      &:hover {
+        background-color: $wolf-btn-text-bg-hover !important;
+      }
+    }
+  }
+
+  // 小尺寸按钮（表格操作等紧凑场景）
+  &.el-button--small {
+    height: $wolf-button-height-sm !important;         // 24px
+    padding: $wolf-button-padding-sm !important;       // 8px 4px
+    border-radius: $wolf-button-radius-sm !important;  // 4px（非胶囊）
+    font-size: $wolf-font-size-auxiliary !important;   // 13px
+    box-shadow: none !important;
+  }
+
+  // 按钮内图标
+  .el-icon {
+    font-size: $wolf-font-size-body !important;        // 14px，与文字一致
+    margin-right: $wolf-space-xs !important;           // 4px 间距
+  }
+}
+
+// ==================== 下拉框（Select 选择器）规范 ====================
+// select 内部的 input__wrapper 样式
+
+.el-select {
+  .el-input__wrapper {
+    height: $wolf-select-height !important;            // 28px 固定高度
+    border-radius: $wolf-select-radius !important;     // 6px 中等圆角
+    background-color: $wolf-select-bg !important;      // #F5F5F3 暖调浅灰
+    border: none !important;                            // 无边框
+    box-shadow: none !important;
+    padding: 1px 12px !important;                       // 覆盖默认 padding
+
+    &:hover {
+      background-color: $wolf-select-bg-hover !important; // #F0F0ED
+    }
+
+    &.is-focused {
+      background-color: $wolf-select-bg-active !important; // #EFEFED
+    }
+
+    .el-input__inner {
+      font-size: $wolf-font-size-auxiliary !important;  // 13px
+      color: $wolf-text-secondary !important;           // #3A3A3A
+    }
+  }
+
+  // 下拉箭头
+  .el-select__caret {
+    color: $wolf-text-placeholder !important;          // #909090
+    font-size: 12px !important;
+
+    &:hover {
+      color: $wolf-btn-text-color !important;          // #636363
+    }
+  }
+
+  .el-select__placeholder {
+    color: $wolf-text-placeholder !important;
+  }
+}
+
+// ==================== 输入框（Input）规范 ====================
+// 普通 input 框样式，与 select 完全统一
+
+.el-input {
+  .el-input__wrapper {
+    height: $wolf-input-height !important;                 // 28px
+    border-radius: $wolf-input-radius !important;          // 6px
+    background-color: $wolf-input-bg !important;           // #F5F5F3
+    border: none !important;
+    box-shadow: none !important;
+    padding: 1px 12px !important;
+
+    &:hover {
+      background-color: $wolf-input-bg-hover !important;   // #F0F0ED
+    }
+
+    &.is-focused {
+      background-color: $wolf-input-bg-active !important;  // #EFEFED
+    }
+
+    &.is-disabled {
+      background-color: $wolf-input-bg !important;
+      cursor: not-allowed !important;
+    }
+
+    .el-input__inner {
+      font-size: $wolf-input-font-size !important;         // 13px
+      color: $wolf-text-secondary !important;
+
+      &::placeholder {
+        color: $wolf-text-placeholder !important;
+      }
+    }
+  }
+}
+
+// ==================== 下拉面板规范 ====================
+
+.el-popper.is-pure.is-light,
+.el-dropdown__popper,
+.el-select-dropdown {
+  z-index: 9999 !important;
+  border-radius: $wolf-dropdown-radius !important;     // 8px
+  box-shadow: $wolf-dropdown-shadow !important;        // 0 4px 16px rgba(0,0,0,0.06)
+  border: none !important;
+  background-color: $wolf-dropdown-bg !important;      // #FFFFFF 纯白
+  padding: $wolf-space-sm 0 !important;                // 上下8px，左右0
+
+  .el-dropdown-menu,
+  .el-select-dropdown__list {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    background-color: transparent !important;
+  }
+}
+
+// 下拉选项
+.el-dropdown-menu__item,
+.el-select-dropdown__item {
+  height: $wolf-dropdown-item-height !important;       // 36px 固定高度
+  border-radius: $wolf-radius-sm !important;           // 4px
+  margin: $wolf-dropdown-item-gap $wolf-space-sm !important; // 2px 12px 间距
+  padding: $wolf-dropdown-item-padding !important;     // 12px 8px
+  font-size: $wolf-font-size-auxiliary !important;     // 13px
+  font-weight: $wolf-font-weight-normal !important;    // 400
+  color: $wolf-btn-text !important;                    // #3A3A3A
+  display: flex !important;
+  align-items: center !important;
+  gap: $wolf-space-sm !important;
+  line-height: $wolf-line-height-body !important;
+  background-color: transparent !important;
+  transition: all 0.15s ease-in-out !important;
+
+  .el-icon {
+    font-size: 14px !important;                         // 图标与文字同尺寸
+    color: $wolf-btn-text-color !important;            // #636363
+    flex-shrink: 0 !important;
+  }
+
+  &:hover,
+  &:focus {
+    background-color: $wolf-btn-bg !important;          // #F7F7F5 悬停背景
+    color: $wolf-btn-text !important;
+
+    .el-icon {
+      color: $wolf-btn-text !important;
+    }
+  }
+
+  // 选中态 - 仅用背景与文字色区分，无勾选标记
+  &.selected,
+  &.is-selected {
+    background-color: $wolf-btn-bg-hover !important;   // #F0F0ED
+    color: $wolf-text-primary !important;              // #1C1C1C
+    font-weight: $wolf-font-weight-medium !important;  // 500
+
+    .el-icon {
+      color: $wolf-text-primary !important;
+    }
+  }
+
+  &.is-disabled {
+    color: $wolf-text-placeholder !important;          // #909090
+    cursor: not-allowed !important;
+    background-color: transparent !important;
+
+    .el-icon {
+      color: $wolf-text-disabled !important;
+    }
+  }
+
+  // 危险选项（删除等）
+  &.is-danger,
+  &.danger {
+    color: $wolf-btn-danger-text !important;           // #A83232
+    margin-top: $wolf-space-sm !important;             // 与其他选项间距8px
+
+    .el-icon {
+      color: $wolf-btn-danger-text !important;
+    }
+
+    &:hover {
+      background-color: $wolf-btn-danger-bg-hover !important;
+    }
+  }
+}
+
+// wolf-dropdown 自定义类（保持兼容）
+.wolf-dropdown {
+  border-radius: $wolf-dropdown-radius !important;
+  box-shadow: $wolf-dropdown-shadow !important;
+  border: none !important;
+  padding: $wolf-space-sm 0 !important;
+  background-color: $wolf-dropdown-bg !important;
+
+  .el-dropdown-menu {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    background-color: transparent !important;
+  }
+
+  .el-dropdown-menu__item {
+    height: $wolf-dropdown-item-height !important;
+    border-radius: $wolf-radius-sm !important;
+    margin: $wolf-dropdown-item-gap $wolf-space-sm !important;
+    padding: $wolf-dropdown-item-padding !important;
+    font-size: $wolf-font-size-auxiliary !important;
+    font-weight: $wolf-font-weight-normal !important;
+    color: $wolf-btn-text !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: $wolf-space-sm !important;
+    line-height: $wolf-line-height-body !important;
+    background-color: transparent !important;
+    transition: all 0.15s ease-in-out !important;
+
+    .el-icon {
+      font-size: 14px !important;
+      color: $wolf-btn-text-color !important;
+    }
+
+    &:hover,
+    &:focus {
+      background-color: $wolf-btn-bg !important;
+      color: $wolf-btn-text !important;
+    }
+
+    &.is-disabled {
+      color: $wolf-text-placeholder !important;
+      cursor: not-allowed !important;
+    }
+  }
+}
+
+// ==================== 表格固定列溢出修复 ====================
+
+.el-table__fixed,
+.el-table__fixed-right {
+  overflow: visible !important;
+}
+
+.el-table__fixed-body-wrapper,
+.el-table__fixed-footer-wrapper {
+  overflow: visible !important;
+}
+
+.el-table__fixed-right-patch {
+  overflow: visible !important;
+}
+
+// Popover
+.el-popover {
+  border-radius: $wolf-radius-md !important;
+  box-shadow: $wolf-shadow-card !important;
+  border: none !important;
+  padding: $wolf-space-md !important;
+  background-color: $wolf-bg-card !important;
+}
+
+// 卡片
+.el-card {
+  border: none !important;
+  border-radius: $wolf-radius-md !important;
+  box-shadow: $wolf-shadow-card !important;
+  background-color: $wolf-bg-card !important;
+
+  .el-card__header {
+    border-bottom: none !important;
+    padding: $wolf-space-md $wolf-card-padding !important;
+    font-size: $wolf-font-size-body;
+    font-weight: $wolf-font-weight-medium;
+    color: $wolf-text-primary;
+  }
+
+  .el-card__body {
+    padding: $wolf-card-padding !important;
+  }
+}
+
+// ==================== 标签（Tag）规范 ====================
+// 全系统仅用「浅底色+同色系文字」样式，禁止纯色填充、描边样式
+
+.el-tag {
+  height: $wolf-tag-height !important;                 // 22px 固定高度
+  border-radius: $wolf-tag-radius !important;          // 4px 小圆角
+  padding: $wolf-tag-padding !important;               // 8px 3px
+  font-size: $wolf-tag-font-size !important;          // 12px
+  font-weight: $wolf-font-weight-normal !important;    // 400
+  line-height: $wolf-line-height-body !important;
+  border: none !important;                              // 无描边
+  display: inline-flex !important;
+  align-items: center !important;
+
+  // 中性默认标签 - 通用状态、类型标记
+  &.el-tag--default,
+  &.el-tag--info {
+    background-color: $wolf-tag-neutral-bg !important;  // #F5F5F3
+    color: $wolf-tag-neutral-text !important;           // #636363
+  }
+
+  // 成功/允许标签
+  &.el-tag--success {
+    background-color: $wolf-tag-success-bg !important;  // #EDF7EF
+    color: $wolf-tag-success-text !important;           // #2B633C
+  }
+
+  // 警告标签 - 警告、待处理、风险状态
+  &.el-tag--warning {
+    background-color: $wolf-tag-warning-bg !important;  // #FFF6E8
+    color: $wolf-tag-warning-text !important;           // #7A4F1E
+  }
+
+  // 危险标签 - 禁用、错误、失败状态
+  &.el-tag--danger {
+    background-color: $wolf-tag-danger-bg !important;   // #FCECEC
+    color: $wolf-tag-danger-text !important;            // #7A2828
+  }
+
+  // 主色标签（克制使用）
+  &.el-tag--primary {
+    background-color: $wolf-primary-light !important;
+    color: $wolf-primary !important;
+  }
+
+  // 小尺寸标签
+  &.el-tag--small {
+    height: 18px !important;
+    padding: 2px 6px !important;
+    font-size: 11px !important;
+  }
+}
+
+// wolf-tag 自定义类（用于需要更精细控制的场景）
+.wolf-tag {
+  height: $wolf-tag-height !important;
+  border-radius: $wolf-tag-radius !important;
+  padding: $wolf-tag-padding !important;
+  font-size: $wolf-tag-font-size !important;
+  font-weight: $wolf-font-weight-normal !important;
+  line-height: $wolf-line-height-body !important;
+  border: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+
+  // 中性默认
+  &.wolf-tag--neutral,
+  &.wolf-tag--gray {
+    background-color: $wolf-tag-neutral-bg !important;
+    color: $wolf-tag-neutral-text !important;
+  }
+
+  // 成功
+  &.wolf-tag--success {
+    background-color: $wolf-tag-success-bg !important;
+    color: $wolf-tag-success-text !important;
+  }
+
+  // 警告
+  &.wolf-tag--warning {
+    background-color: $wolf-tag-warning-bg !important;
+    color: $wolf-tag-warning-text !important;
+  }
+
+  // 危险
+  &.wolf-tag--danger {
+    background-color: $wolf-tag-danger-bg !important;
+    color: $wolf-tag-danger-text !important;
+  }
+
+  // 信息（主色）
+  &.wolf-tag--info,
+  &.wolf-tag--primary {
+    background-color: $wolf-primary-light !important;
+    color: $wolf-primary !important;
+  }
+}
+
+// ==================== 表格（Table）规范 ====================
+// 极简中性风：无竖分割线、自适应行高、柔和色差、内容优先
+
+.el-table {
+  // 覆盖 Element Plus CSS 变量，控制固定列背景
+  --el-table-bg-color: #FFFFFF;
+  --el-table-tr-bg-color: #FFFFFF;
+  --el-table-header-bg-color: #{$wolf-table-header-bg};
+  --el-table-row-hover-bg-color: #{$wolf-table-hover-bg};
+  --el-table-current-row-bg-color: #{$wolf-table-selected-bg};
+  --el-table-index: 10;                               // 表格整体 z-index（低于 dropdown）
+  z-index: 10;                                        // 确保 z-index 低
+
+  background-color: transparent !important;           // 表格容器透明
+  border: none !important;                            // 无外边框
+  border-radius: 0 !important;                        // 无圆角，融入页面
+
+  // 表头样式（固定高度，不换行）
+  th.el-table__cell {
+    height: $wolf-table-header-height !important;     // 44px 固定
+    background-color: $wolf-table-header-bg !important; // #F5F5F3
+    color: $wolf-table-header-text !important;        // #3A3A3A
+    font-size: $wolf-table-header-font-size !important; // 13px
+    font-weight: $wolf-table-header-font-weight !important; // 500
+    padding: $wolf-table-cell-padding-y $wolf-table-cell-padding-x !important;
+    border-bottom: 1px solid $wolf-table-header-border !important;
+    border-right: none !important;
+    text-align: left !important;
+    vertical-align: middle !important;
+    white-space: nowrap !important;
+  }
+
+  // 内容行样式（自适应高度，允许换行）
+  .el-table__row {
+    td.el-table__cell {
+      padding: $wolf-table-cell-padding-y $wolf-table-cell-padding-x !important;
+      font-size: $wolf-table-cell-font-size !important;
+      color: $wolf-table-cell-text !important;
+      line-height: $wolf-table-line-height !important;
+      background-color: #FFFFFF !important;           // 固定白色背景
+      border-bottom: 1px solid $wolf-table-border-color !important;
+      border-right: none !important;
+      text-align: left !important;
+      vertical-align: middle !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+    }
+
+    // Hover态
+    &:hover td.el-table__cell {
+      background-color: $wolf-table-hover-bg !important;
+    }
+
+    // 选中态
+    &.current-row td.el-table__cell {
+      background-color: $wolf-table-selected-bg !important;
+    }
+  }
+
+  // 禁用斑马纹
+  .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+    background-color: #FFFFFF !important;
+  }
+
+  // 空状态
+  .el-table__empty-block {
+    min-height: 120px !important;
+  }
+
+  // 滚动条
+  .el-table__body-wrapper {
+    scrollbar-width: thin;
+    scrollbar-color: #E5E5E0 transparent;
+
+    &::-webkit-scrollbar {
+      width: 4px !important;
+      height: 4px !important;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background-color: #E5E5E0 !important;
+      border-radius: 2px !important;
+
+      &:hover {
+        background-color: #C4C4C0 !important;
+      }
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent !important;
+    }
+  }
+}
+
+// ==================== 下拉菜单（Dropdown）核心样式 ====================
+// 样式已在上面的"下拉面板规范"部分统一定义
+// 此处仅保留自定义 popper 类用于特殊场景
+
+.wolf-dropdown-popper {
+  z-index: 9999 !important;
+}
+
+// ==================== 表格单元格辅助类 ====================
+
+.cell-nowrap {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.cell-wrap {
+  white-space: normal !important;
+  overflow: hidden !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  word-break: break-all !important;
+}
+
+// ==================== 表格固定列（操作列等）====================
+// 通过覆盖 CSS 变量和强制背景色确保不透明
+// 固定列 z-index 必须低于 dropdown 的 z-index
+
+.el-table__fixed,
+.el-table__fixed-right {
+  z-index: 20 !important;                             // 固定列 z-index（低于 dropdown 3000）
+}
+
+.el-table td.el-table-fixed-column--left,
+.el-table td.el-table-fixed-column--right {
+  background-color: #FFFFFF !important;
+  z-index: 20 !important;
+}
+
+.el-table th.el-table-fixed-column--left,
+.el-table th.el-table-fixed-column--right {
+  background-color: $wolf-table-header-bg !important;
+  z-index: 21 !important;                             // 表头固定列略高
+}
+
+// 固定列 hover 态
+.el-table .el-table__body tr:hover td.el-table-fixed-column--left,
+.el-table .el-table__body tr:hover td.el-table-fixed-column--right {
+  background-color: $wolf-table-hover-bg !important;
+}
+
+// 固定列选中态
+.el-table .el-table__body tr.current-row td.el-table-fixed-column--left,
+.el-table .el-table__body tr.current-row td.el-table-fixed-column--right {
+  background-color: $wolf-table-selected-bg !important;
+}
+
+// 右侧固定列 patch
+.el-table__fixed-right-patch {
+  background-color: #FFFFFF !important;
+  z-index: 20 !important;
+}
+
+// 选择器 - 继承下拉框规范（28px高度）
+// 注意：此处的样式会叠加到上面的 .el-select 规则
+
+// 日期选择器
+.el-date-editor {
+  .el-input__wrapper {
+    border-radius: $wolf-radius-sm !important;
+  }
+}
+
+// 对话框
+.el-dialog {
+  border-radius: $wolf-radius-lg !important;
+  box-shadow: $wolf-shadow-modal !important;
+  background-color: $wolf-bg-card !important;
+
+  .el-dialog__header {
+    padding: $wolf-space-lg $wolf-card-padding !important;
+    border-bottom: none !important;
+
+    .el-dialog__title {
+      font-size: $wolf-font-size-title !important;
+      font-weight: $wolf-font-weight-semibold !important;
+      color: $wolf-text-primary !important;
+    }
+
+    .el-dialog__headerbtn {
+      top: $wolf-space-lg !important;
+      right: $wolf-card-padding !important;
+
+      .el-dialog__close {
+        color: $wolf-text-placeholder !important;
+
+        &:hover {
+          color: $wolf-text-tertiary !important;
+        }
+      }
+    }
+  }
+
+  .el-dialog__body {
+    padding: $wolf-card-padding !important;
+    color: $wolf-text-secondary !important;
+  }
+
+  .el-dialog__footer {
+    padding: $wolf-space-md $wolf-card-padding !important;
+    border-top: none !important;
+  }
+}
+
+// 抽屉
+.el-drawer {
+  .el-drawer__header {
+    padding: $wolf-space-lg $wolf-card-padding !important;
+    margin-bottom: 0 !important;
+    border-bottom: none !important;
+    font-size: $wolf-font-size-title !important;
+    font-weight: $wolf-font-weight-semibold !important;
+    color: $wolf-text-primary !important;
+  }
+
+  .el-drawer__body {
+    padding: $wolf-card-padding !important;
+    background-color: $wolf-bg-card !important;
+  }
+}
+
+// 分页
+.el-pagination {
+  .el-pager li {
+    border-radius: $wolf-radius-sm !important;
+    background-color: transparent !important;
+    color: $wolf-text-tertiary !important;
+    font-size: $wolf-font-size-auxiliary !important;
+    transition: all 0.2s ease-in-out !important;
+    min-width: 28px !important;
+    height: 28px !important;
+
+    &.is-active {
+      background-color: $wolf-primary !important;
+      color: $wolf-text-inverse !important;
+    }
+
+    &:hover {
+      background-color: $wolf-bg-hover !important;
+      color: $wolf-text-secondary !important;
+    }
+  }
+
+  button {
+    border-radius: $wolf-radius-sm !important;
+    background-color: transparent !important;
+    color: $wolf-text-tertiary !important;
+    min-width: 28px !important;
+    height: 28px !important;
+
+    &:hover {
+      background-color: $wolf-bg-hover !important;
+      color: $wolf-text-secondary !important;
+    }
+
+    &:disabled {
+      color: $wolf-text-disabled !important;
+      background-color: transparent !important;
+    }
+  }
+
+  .el-pagination__sizes .el-select {
+    .el-input__wrapper {
+      height: 28px !important;
+    }
+  }
+
+  .el-pagination__jump {
+    font-size: $wolf-font-size-auxiliary !important;
+    color: $wolf-text-tertiary !important;
+  }
+}
+
+// 面包屑
+.el-breadcrumb {
+  font-size: $wolf-font-size-auxiliary !important;
+
+  .el-breadcrumb__item {
+    .el-breadcrumb__inner {
+      color: $wolf-text-tertiary !important;
+
+      &:hover {
+        color: $wolf-text-link !important;
+      }
+    }
+
+    &:last-child .el-breadcrumb__inner {
+      color: $wolf-text-secondary !important;
+    }
+
+    .el-breadcrumb__separator {
+      color: $wolf-text-placeholder !important;
+    }
+  }
+}
+
+// 空状态
+.el-empty {
+  padding: $wolf-section-gap 0;
+
+  .el-empty__description {
+    color: $wolf-text-tertiary !important;
+    font-size: $wolf-font-size-auxiliary !important;
+  }
+}
+
+// 消息提示
+.el-message {
+  border-radius: $wolf-radius-md !important;
+  box-shadow: $wolf-shadow-card !important;
+  padding: $wolf-space-sm $wolf-space-md !important;
+  border: none !important;
+
+  .el-message__content {
+    font-size: $wolf-font-size-body !important;
+    color: $wolf-text-secondary !important;
+  }
+
+  &.el-message--success {
+    background-color: $wolf-success-bg !important;
+    .el-message__icon { color: $wolf-success-text !important; }
+  }
+
+  &.el-message--warning {
+    background-color: $wolf-warning-bg !important;
+    .el-message__icon { color: $wolf-warning-text !important; }
+  }
+
+  &.el-message--error {
+    background-color: $wolf-danger-bg !important;
+    .el-message__icon { color: $wolf-danger-text !important; }
+  }
+
+  &.el-message--info {
+    background-color: $wolf-bg-hover !important;
+    .el-message__icon { color: $wolf-text-tertiary !important; }
+  }
+}
+
+// 通知
+.el-notification {
+  border-radius: $wolf-radius-lg !important;
+  box-shadow: $wolf-shadow-modal !important;
+  border: none !important;
+  background-color: $wolf-bg-card !important;
+
+  .el-notification__title {
+    font-size: $wolf-font-size-body !important;
+    font-weight: $wolf-font-weight-medium !important;
+    color: $wolf-text-primary !important;
+  }
+
+  .el-notification__content {
+    font-size: $wolf-font-size-auxiliary !important;
+    color: $wolf-text-secondary !important;
+  }
+}
+
+// Tooltip
+.el-tooltip__popper {
+  border-radius: $wolf-radius-sm !important;
+  background-color: rgba(0, 0, 0, 0.85) !important;
+  color: #FFFFFF !important;
+  font-size: $wolf-font-size-caption !important;
+  padding: 6px 10px !important;
+}
+
+// 菜单
+.el-menu {
+  border-right: none !important;
+  background-color: transparent !important;
+
+  .el-menu-item {
+    font-size: $wolf-font-size-body !important;
+    color: $wolf-text-tertiary !important;
+    background-color: transparent !important;
+
+    &:hover {
+      background-color: $wolf-bg-hover !important;
+    }
+
+    &.is-active {
+      background-color: $wolf-primary-light !important;
+      color: $wolf-primary !important;
+    }
+  }
+
+  .el-sub-menu__title {
+    font-size: $wolf-font-size-body !important;
+    color: $wolf-text-tertiary !important;
+
+    &:hover {
+      background-color: $wolf-bg-hover !important;
+    }
+  }
+}
+
+// Tabs
+.el-tabs {
+  .el-tabs__item {
+    font-size: $wolf-font-size-body !important;
+    color: $wolf-text-tertiary !important;
+
+    &:hover {
+      color: $wolf-text-secondary !important;
+    }
+
+    &.is-active {
+      color: $wolf-text-primary !important;
+      font-weight: $wolf-font-weight-medium !important;
+    }
+  }
+
+  .el-tabs__active-bar {
+    background-color: $wolf-primary !important;
+    height: 2px !important;
+  }
+
+  .el-tabs__nav-wrap::after {
+    height: 1px !important;
+    background-color: $wolf-border-light !important;
+  }
+}
+
+// Form
+.el-form {
+  .el-form-item__label {
+    font-size: $wolf-font-size-auxiliary !important;
+    color: $wolf-text-tertiary !important;
+    font-weight: $wolf-font-weight-normal !important;
+  }
+
+  .el-form-item__error {
+    font-size: $wolf-font-size-caption !important;
+    color: $wolf-danger-text !important;
+  }
+}
+
+// Switch
+.el-switch {
+  height: 22px !important;
+
+  .el-switch__core {
+    height: 22px !important;
+    width: 40px !important;
+    border-radius: 11px !important;
+    border: none !important;
+    background-color: $wolf-border-default !important;
+    transition: all 0.2s ease-in-out !important;
+  }
+
+  .el-switch__action {
+    width: 18px !important;
+    height: 18px !important;
+    background-color: #FFFFFF !important;
+  }
+
+  &.is-checked {
+    .el-switch__core {
+      background-color: $wolf-text-tertiary !important;
+    }
+  }
+
+  &.is-disabled {
+    .el-switch__core {
+      background-color: $wolf-bg-hover !important;
+    }
+  }
+}
+
+// Radio
+.el-radio {
+  .el-radio__inner {
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 50% !important;
+    border: 1px solid $wolf-border-hover !important;
+    background-color: $wolf-bg-card !important;
+
+    &:hover {
+      border-color: $wolf-text-tertiary !important;
+    }
+  }
+
+  .el-radio__input.is-checked {
+    .el-radio__inner {
+      background-color: $wolf-primary !important;
+      border-color: $wolf-primary !important;
+    }
+  }
+
+  .el-radio__label {
+    font-size: $wolf-font-size-body !important;
+    color: $wolf-text-secondary !important;
+  }
+}
+
+// Checkbox
+.el-checkbox {
+  .el-checkbox__inner {
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 3px !important;
+    border: 1px solid $wolf-border-hover !important;
+    background-color: $wolf-bg-card !important;
+
+    &:hover {
+      border-color: $wolf-text-tertiary !important;
+    }
+  }
+
+  .el-checkbox__input.is-checked {
+    .el-checkbox__inner {
+      background-color: $wolf-primary !important;
+      border-color: $wolf-primary !important;
+    }
+  }
+
+  .el-checkbox__label {
+    font-size: $wolf-font-size-body !important;
+    color: $wolf-text-secondary !important;
+  }
+}
+
+// ==================== 工具类 ====================
+
+// Flex
+.wolf-flex {
+  display: flex;
+}
+
+.wolf-flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wolf-flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wolf-flex-start {
+  display: flex;
+  align-items: center;
+}
+
+.wolf-flex-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.wolf-flex-1 {
+  flex: 1;
+}
+
+// 间距
+.wolf-gap-xs { gap: $wolf-space-xs; }
+.wolf-gap-sm { gap: $wolf-space-sm; }
+.wolf-gap-md { gap: $wolf-space-md; }
+.wolf-gap-lg { gap: $wolf-space-lg; }
+
+.wolf-mb-xs { margin-bottom: $wolf-space-xs; }
+.wolf-mb-sm { margin-bottom: $wolf-space-sm; }
+.wolf-mb-md { margin-bottom: $wolf-space-md; }
+.wolf-mb-lg { margin-bottom: $wolf-space-lg; }
+
+.wolf-mt-xs { margin-top: $wolf-space-xs; }
+.wolf-mt-sm { margin-top: $wolf-space-sm; }
+.wolf-mt-md { margin-top: $wolf-space-md; }
+.wolf-mt-lg { margin-top: $wolf-space-lg; }
+
+// 文本
+.wolf-text-primary { color: $wolf-text-primary; }
+.wolf-text-secondary { color: $wolf-text-secondary; }
+.wolf-text-tertiary { color: $wolf-text-tertiary; }
+.wolf-text-placeholder { color: $wolf-text-placeholder; }
+.wolf-text-link { color: $wolf-text-link; }
+.wolf-text-success { color: $wolf-success-text; }
+.wolf-text-warning { color: $wolf-warning-text; }
+.wolf-text-danger { color: $wolf-danger-text; }
+
+.wolf-text-medium {
+  font-weight: $wolf-font-weight-medium;
+}
+
+.wolf-text-semibold {
+  font-weight: $wolf-font-weight-semibold;
+}
+
+// 字号
+.wolf-text-caption { font-size: $wolf-font-size-caption; }
+.wolf-text-body { font-size: $wolf-font-size-body; }
+.wolf-text-title { font-size: $wolf-font-size-title; }
+
+// ==================== 响应式 ====================
+
+@media (max-width: 768px) {
+  .wolf-page {
+    padding: $wolf-space-md;
+  }
+
+  .wolf-card {
+    padding: $wolf-space-md;
+  }
+}
+
+@media (max-width: 480px) {
+  .wolf-page {
+    padding: $wolf-space-sm;
+  }
+
+  .wolf-card {
+    padding: $wolf-space-sm;
+  }
+}

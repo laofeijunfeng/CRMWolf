@@ -1,0 +1,43 @@
+{
+  "name": "crm-wolf",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --max-warnings=0",
+    "lint:fix": "eslint src --fix",
+    "type-check": "vue-tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "prepare": "cd .. && husky install .husky"
+  },
+  "dependencies": {
+    "@arco-design/web-vue": "^2.50.0",
+    "@element-plus/icons-vue": "^2.3.2",
+    "axios": "^1.7.9",
+    "element-plus": "^2.13.2",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.6",
+    "eslint": "^9.15.0",
+    "typescript-eslint": "^8.15.0",
+    "eslint-plugin-vue": "^9.30.0",
+    "husky": "^9.1.7",
+    "less": "^4.5.1",
+    "sass-embedded": "^1.97.3",
+    "typescript": "~5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8",
+    "vue-tsc": "^2.2.0"
+  }
+}

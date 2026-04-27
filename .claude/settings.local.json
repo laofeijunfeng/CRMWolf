@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(chmod +x *)",
+      "Bash(lsof -ti:5173 -ti:5174)",
+      "Bash(curl -s http://localhost:8000/roles/)",
+      "Bash(mysql *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(PYTHONPATH=/Users/eddie/Code/CRMWolf/CRM-Server python3 *)",
+      "Bash(./run.sh)",
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Bash(curl *)",
+      "Bash(pkill -f \"uvicorn app.main:app\")",
+      "Bash(pkill -f \"uvicorn\")",
+      "Bash(./venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000)",
+      "Bash(npx sass *)",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs -I {} ps -p {} -o stderr=)",
+      "Bash(lsof -ti:8000)",
+      "Bash(xargs kill *)",
+      "Bash(npx vue-tsc *)",
+      "Bash(kill 14159)",
+      "Bash(ruff check *)",
+      "Bash(sqlite3 -header -column data/crmwolf.db \"SELECT s.skill_name, s.module_type, a.action_name, a.handler_type, a.handler_config, a.required_params, a.optional_params FROM ai_skill s JOIN ai_skill_action a ON s.id = a.skill_id WHERE s.skill_name = 'LeadSkill' AND a.action_name = 'create';\")",
+      "Bash(git add *)"
+    ]
+  }
+}

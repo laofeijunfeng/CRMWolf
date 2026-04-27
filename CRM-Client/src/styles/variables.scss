@@ -1,0 +1,280 @@
+// ==================== CRMWolf 极简中性风设计系统 ====================
+// 核心原则：极致克制、柔和低噪、统一有序、服务内容
+
+// ==================== 背景色规范 ====================
+// 用色彩分层替代分割线，拒绝纯白
+
+$wolf-bg-page: #F9F8F5;        // 页面画布底色（暖调浅米白）
+$wolf-bg-card: #FFFFFF;        // 卡片/模块容器底色
+$wolf-bg-elevated: #FAF9F7;    // 弹窗/抽屉内容区底色
+$wolf-bg-sidebar: #F2F0EB;     // 侧边栏底色（浅米灰）
+$wolf-bg-hover: #F5F5F5;       // hover态背景、斑马纹行背景
+$wolf-bg-active: #EAEAEA;      // active/pressed态背景
+$wolf-bg-disabled: #F5F5F5;    // 禁用态背景
+
+// ==================== 中性色梯度 ====================
+// 全页面95%的色彩来源，仅用中性色区分信息层级
+
+$wolf-text-primary: #1C1C1C;      // 页面主标题、一级最高优先级信息（≤5%）
+$wolf-text-secondary: #3A3A3A;    // 正文、按钮文字、表格核心信息
+$wolf-text-tertiary: #636363;     // 辅助信息、未选中导航、标签文字
+$wolf-text-placeholder: #909090;  // 备注信息、禁用态、图标默认色
+$wolf-text-disabled: #C4C4C4;     // 禁用态文字
+
+$wolf-border-default: #E5E5E5;    // 输入框默认边框、控件边框
+$wolf-border-hover: #C4C4C4;      // hover态边框
+$wolf-border-light: #F2F3F5;      // 极浅分割（尽量用留白替代）
+$wolf-border-divider: #E5E5E5;    // 分割线
+$wolf-border-color: #E5E5E5;      // 兼容旧变量名
+
+// ==================== 品牌色（极度克制使用）====================
+// 低饱和商务蓝，同一页面内主色填充元素不超过2个
+
+$wolf-primary: #4A6FA5;           // 品牌主色（低饱和蓝）
+$wolf-primary-hover: #4065A0;     // hover态（加深10%）
+$wolf-primary-active: #365A95;    // active态（加深15%）
+$wolf-primary-light: rgba(#4A6FA5, 0.1);  // 浅底色
+$wolf-primary-disabled: rgba(#4A6FA5, 0.3); // 禁用态
+
+// 链接色（与正文区分，但不用高饱和蓝）
+$wolf-text-link: #4A6FA5;
+$wolf-text-link-hover: #4065A0;
+$wolf-text-inverse: #FFFFFF;
+
+// ==================== 功能色（仅用于状态标签）====================
+// 必须搭配浅底色+同色系文字，禁止纯色填充
+
+$wolf-success-text: #2B633C;      // 成功文字色
+$wolf-success-bg: #EDF7EF;        // 成功背景色
+
+$wolf-warning-text: #7A4F1E;      // 警告文字色
+$wolf-warning-bg: #FFF6E8;        // 警告背景色
+
+$wolf-danger-text: #7A2828;       // 危险文字色
+$wolf-danger-bg: #FCECEC;         // 危险背景色
+
+// 兼容旧变量名（保持向后兼容）
+$wolf-success: $wolf-success-text;
+$wolf-success-border: $wolf-success-bg;
+$wolf-warning: $wolf-warning-text;
+$wolf-warning-border: $wolf-warning-bg;
+$wolf-danger: $wolf-danger-text;
+$wolf-danger-border: $wolf-danger-bg;
+$wolf-info: $wolf-primary;
+$wolf-info-bg: $wolf-primary-light;
+$wolf-info-border: $wolf-primary-light;
+$wolf-purple: #636363;
+$wolf-purple-bg: #F5F5F5;
+$wolf-purple-border: #E5E5E5;
+
+// ==================== 字体系统 ====================
+// 仅用5种组合，无多余样式
+
+$wolf-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+$wolf-font-mono: "SF Mono", Monaco, "Cascadia Code", monospace;
+
+// 字号（仅4种）
+$wolf-font-size-title: 16px;      // 页面主标题
+$wolf-font-size-body: 14px;       // 正文
+$wolf-font-size-auxiliary: 13px;  // 辅助信息
+$wolf-font-size-caption: 12px;    // 次要备注
+
+// 兼容旧变量名
+$wolf-font-size-display: 16px;
+$wolf-font-size-card-title: 14px;
+$wolf-font-size-subtitle: 14px;
+$wolf-font-size-small: 13px;
+$wolf-font-size-label: 12px;
+
+// 字重（仅2种）
+$wolf-font-weight-normal: 400;
+$wolf-font-weight-medium: 500;
+$wolf-font-weight-semibold: 600;
+$wolf-font-weight-bold: 600;      // 禁用700+
+
+// 行高
+$wolf-line-height-title: 1.2;     // 标题
+$wolf-line-height-body: 1.5;      // 正文
+$wolf-line-height-auxiliary: 1.4; // 辅助文字
+$wolf-line-height-tight: 1.2;
+$wolf-line-height-normal: 1.5;
+$wolf-line-height-relaxed: 1.5;
+
+// ==================== 间距系统 ====================
+// 所有间距均为8px的倍数，仅用4个固定数值
+
+$wolf-space-xs: 4px;    // 元素内间距（图标与文字）
+$wolf-space-sm: 8px;    // 关联元素间距
+$wolf-space-md: 16px;   // 模块内间距（卡片内边距）
+$wolf-space-lg: 24px;   // 模块间间距、页面安全边距
+
+// 兼容旧变量名
+$wolf-space-0: 0px;
+$wolf-space-1: 4px;
+$wolf-space-2: 8px;
+$wolf-space-3: 12px;
+$wolf-space-4: 16px;
+$wolf-space-5: 20px;
+$wolf-space-6: 24px;
+$wolf-space-8: 32px;
+$wolf-space-10: 40px;
+$wolf-space-12: 48px;
+
+// 页面/组件间距
+$wolf-page-padding: 24px;
+$wolf-card-gap: 16px;
+$wolf-card-padding: 16px;
+$wolf-card-padding-sm: 16px;
+$wolf-card-padding-xs: 12px;
+$wolf-section-gap: 24px;
+$wolf-form-item-gap: 16px;
+$wolf-header-height: 48px;
+$wolf-button-gap: 8px;
+
+// ==================== 表格尺寸 ====================
+// 极简中性风：无竖分割线、自适应行高、柔和色差
+
+$wolf-table-row-height: 44px;        // 最小行高（内容多时自动撑高）
+$wolf-table-header-height: 44px;     // 表头固定高度
+$wolf-table-cell-padding-y: 12px;    // 单元格上下内边距（支持换行）
+$wolf-table-cell-padding-x: 8px;     // 单元格左右内边距
+$wolf-table-header-bg: #F5F5F3;      // 表头背景（比页面深0.5色阶）
+$wolf-table-header-text: #3A3A3A;    // 表头文字色
+$wolf-table-header-font-size: 13px;  // 表头字号
+$wolf-table-header-font-weight: 500; // 表头字重（仅用此区分）
+$wolf-table-border-color: #F2F2F0;   // 行分割线（极淡暖灰）
+$wolf-table-header-border: #F0F0ED;  // 表头底部分割线
+$wolf-table-hover-bg: #F0F0ED;       // 行hover背景
+$wolf-table-selected-bg: #EFEFED;    // 行选中背景
+$wolf-table-cell-font-size: 14px;    // 内容字号
+$wolf-table-cell-text: #3A3A3A;      // 内容文字色
+$wolf-table-line-height: 1.5;        // 行高（支持换行）
+
+// ==================== 圆角系统 ====================
+// 全页面仅4个固定数值
+
+$wolf-radius-sm: 4px;   // 按钮、标签、输入框、开关
+$wolf-radius-md: 8px;   // 卡片、表格、下拉面板
+$wolf-radius-lg: 12px;  // 弹窗、对话框
+$wolf-radius-xl: 16px;  // 页面级大容器（极少使用）
+$wolf-radius-full: 9999px;
+
+// ==================== 阴影系统 ====================
+// 仅2种固定阴影，极淡极柔
+
+$wolf-shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);       // 卡片、下拉面板
+$wolf-shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.06);      // hover态
+$wolf-shadow-dropdown: 0 2px 8px rgba(0, 0, 0, 0.04);   // 下拉面板
+$wolf-shadow-modal: 0 4px 16px rgba(0, 0, 0, 0.08);     // 弹窗、对话框
+$wolf-shadow-bottom: 0 -2px 8px rgba(0, 0, 0, 0.04);
+
+// ==================== 按钮尺寸 ====================
+// 全页面仅2种固定尺寸
+
+$wolf-button-height-sm: 24px;   // 迷你型（文本按钮）
+$wolf-button-height-md: 32px;   // 常规型（胶囊按钮）
+$wolf-button-padding-sm: 4px 8px;   // 上下4px 左右8px
+$wolf-button-padding-md: 8px 24px;  // 上下8px 左右24px
+
+// 按钮圆角（胶囊型）
+$wolf-button-radius: 16px;      // 胶囊按钮圆角 = 高度的50%
+$wolf-button-radius-sm: 4px;    // 文本按钮圆角
+
+// 按钮间距
+$wolf-button-gap: 12px;         // 胶囊按钮间距
+$wolf-button-gap-sm: 8px;       // 文本按钮间距
+
+// 按钮背景色（中性暖调）
+$wolf-btn-bg: #F7F7F5;          // 胶囊按钮默认背景
+$wolf-btn-bg-hover: #F0F0ED;    // hover态
+$wolf-btn-bg-active: #EAEAE7;   // active态
+$wolf-btn-text: #3A3A3A;        // 按钮文字色
+$wolf-btn-text-hover: #1C1C1C;  // hover文字色
+
+// 文本按钮背景色
+$wolf-btn-text-bg-hover: #F5F5F3;
+$wolf-btn-text-bg-active: #EFEFED;
+$wolf-btn-text-color: #636363;
+
+// 危险按钮色
+$wolf-btn-danger-text: #A83232;      // 低饱和暗红
+$wolf-btn-danger-bg-hover: #FCECEC;
+$wolf-btn-danger-bg-active: #F8E0E0;
+$wolf-btn-danger-text-hover: #7A2828;
+
+// ==================== 下拉框尺寸 ====================
+$wolf-select-height: 28px;
+$wolf-select-radius: 6px;
+$wolf-select-padding: 12px 4px;
+$wolf-select-bg: #F5F5F3;
+$wolf-select-bg-hover: #F0F0ED;
+$wolf-select-bg-active: #EFEFED;
+
+// ==================== 输入框尺寸（与下拉框统一）====================
+$wolf-input-height: 28px;
+$wolf-input-radius: 6px;
+$wolf-input-padding: 12px;
+$wolf-input-bg: #F5F5F3;
+$wolf-input-bg-hover: #F0F0ED;
+$wolf-input-bg-active: #EFEFED;
+$wolf-input-font-size: 13px;
+
+// 下拉面板
+$wolf-dropdown-bg: #FFFFFF;
+$wolf-dropdown-radius: 8px;
+$wolf-dropdown-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+$wolf-dropdown-item-height: 36px;
+$wolf-dropdown-item-padding: 12px 8px;
+$wolf-dropdown-item-gap: 2px;
+
+// ==================== 标签尺寸 ====================
+$wolf-tag-height: 22px;
+$wolf-tag-radius: 4px;
+$wolf-tag-padding: 8px 3px;
+$wolf-tag-gap: 6px;
+$wolf-tag-font-size: 12px;
+
+// 标签背景色（浅底色+同色系文字）
+$wolf-tag-neutral-bg: #F5F5F3;
+$wolf-tag-neutral-text: #636363;
+$wolf-tag-success-bg: #EDF7EF;
+$wolf-tag-success-text: #2B633C;
+$wolf-tag-warning-bg: #FFF6E8;
+$wolf-tag-warning-text: #7A4F1E;
+$wolf-tag-danger-bg: #FCECEC;
+$wolf-tag-danger-text: #7A2828;
+
+// ==================== Element Plus 兼容变量 ====================
+
+$--color-primary: $wolf-primary;
+$--color-success: $wolf-success-text;
+$--color-warning: $wolf-warning-text;
+$--color-danger: $wolf-danger-text;
+$--color-info: $wolf-primary;
+
+$--color-text-primary: $wolf-text-primary;
+$--color-text-regular: $wolf-text-secondary;
+$--color-text-secondary: $wolf-text-tertiary;
+$--color-text-placeholder: $wolf-text-placeholder;
+
+$--background-color-base: $wolf-bg-page;
+$--background-color-light: $wolf-bg-card;
+
+$--border-color-light: $wolf-border-light;
+$--border-color-base: $wolf-border-default;
+$--border-radius-base: $wolf-radius-sm;
+$--border-radius-medium: $wolf-radius-md;
+$--border-radius-large: $wolf-radius-lg;
+
+$--spacing-unit: 8px;
+$--spacing-xs: $wolf-space-xs;
+$--spacing-sm: $wolf-space-sm;
+$--spacing-base: $wolf-space-md;
+$--spacing-lg: $wolf-space-lg;
+$--spacing-xl: 32px;
+
+// ==================== 过渡动画 ====================
+// 仅状态切换，时长固定0.2s
+
+$--transition-base: all 0.2s ease-in-out;
+$--transition-fade: opacity 0.2s ease-in-out;

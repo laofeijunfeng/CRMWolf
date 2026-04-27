@@ -1,0 +1,202 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ===== 前端 Lint 检查 =====
+  frontend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'CRM-Client/package-lock.json'
+
+      - name: Install dependencies
+        run: cd CRM-Client && npm ci
+
+      - name: Run ESLint
+        run: cd CRM-Client && npm run lint
+
+      - name: Run TypeScript check
+        run: cd CRM-Client && npm run type-check
+
+  # ===== 前端测试 =====
+  frontend-test:
+    runs-on: ubuntu-latest
+    needs: frontend-lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: cd CRM-Client && npm ci
+
+      - name: Run unit tests
+        run: cd CRM-Client && npm run test:unit -- --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          directory: CRM-Client/coverage
+          flags: frontend
+
+  # ===== 后端 Lint 检查 =====
+  backend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd CRM-Server
+          pip install -r requirements.txt
+          pip install ruff mypy
+
+      - name: Run Ruff
+        run: cd CRM-Server && ruff check app/
+
+      - name: Run MyPy
+        run: cd CRM-Server && mypy app/ --ignore-missing-imports
+
+  # ===== 后端测试 =====
+  backend-test:
+    runs-on: ubuntu-latest
+    needs: backend-lint
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: crm_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          cd CRM-Server
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run unit tests
+        run: cd CRM-Server && pytest tests/unit -v --cov=app --cov-report=xml
+        env:
+          DATABASE_URL: mysql+pymysql://root:test@localhost:3306/crm_test
+          REDIS_URL: redis://localhost:6379
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: CRM-Server/coverage.xml
+          flags: backend
+
+  # ===== 合规检查 =====
+  compliance-check:
+    runs-on: ubuntu-latest
+    needs: [frontend-lint, backend-lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check TypeScript violations
+        run: |
+          cd CRM-Client
+
+          # 检查新增的 : any
+          count_any=$(git diff HEAD~1 --name-only --diff-filter=A | xargs grep -l ": any" 2>/dev/null | wc -l)
+          if [ "$count_any" -gt 0 ]; then
+            echo "::error::Found TypeScript ': any' violations in new files"
+            exit 1
+          fi
+
+          # 检查新增的 as any
+          count_as_any=$(git diff HEAD~1 --name-only --diff-filter=A | xargs grep -l "as any" 2>/dev/null | wc -l)
+          if [ "$count_as_any" -gt 0 ]; then
+            echo "::error::Found TypeScript 'as any' violations in new files"
+            exit 1
+          fi
+
+          echo "✅ No TypeScript violations in new files"
+
+      - name: Check config lock
+        run: |
+          # 检查配置文件是否被修改
+          if git diff HEAD~1 --name-only | grep -qE "(tsconfig.json|eslint.config.js|pyproject.toml)"; then
+            echo "::error::Config file modified without approval"
+            echo "Changes to config files require human approval via SPEC-CHANGELOG.md"
+            exit 1
+          fi
+
+          echo "✅ Config files not modified"
+
+      - name: Generate compliance report
+        run: |
+          echo "## Compliance Report" > compliance-report.md
+          echo "" >> compliance-report.md
+          echo "### TypeScript Violations" >> compliance-report.md
+          cd CRM-Client
+          echo "- : any count: $(grep -r ": any" src --include="*.ts" --include="*.vue" 2>/dev/null | wc -l)" >> ../compliance-report.md
+          echo "- as any count: $(grep -r "as any" src --include="*.ts" --include="*.vue" 2>/dev/null | wc -l)" >> ../compliance-report.md
+          cd ..
+
+          cat compliance-report.md
+
+  # ===== 文档同步检查 =====
+  doc-sync-check:
+    runs-on: ubuntu-latest
+    needs: [frontend-test, backend-test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check API doc sync
+        run: |
+          # 检查 API 文件变更是否同步更新文档
+          api_changed=$(git diff HEAD~1 --name-only | grep -c "CRM-Client/src/api/" || echo "0")
+          doc_changed=$(git diff HEAD~1 --name-only | grep -c "CRM-Docs/05-API接口.md" || echo "0")
+
+          if [ "$api_changed" -gt 0 ] && [ "$doc_changed" -eq 0 ]; then
+            echo "::warning::API files changed but API documentation not updated"
+          fi
+
+      - name: Check TypeScript doc sync
+        run: |
+          # 检查类型变更是否同步更新文档
+          type_changed=$(git diff HEAD~1 --name-only | grep -c "CRM-Client/src/schemas/" || echo "0")
+          typescript_doc_changed=$(git diff HEAD~1 --name-only | grep -c "CRM-Client/docs/TYPESCRIPT.md" || echo "0")
+
+          if [ "$type_changed" -gt 0 ] && [ "$typescript_doc_changed" -eq 0 ]; then
+            echo "::warning::Schema files changed but TYPESCRIPT.md not updated"
+          fi
