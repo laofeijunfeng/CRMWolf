@@ -222,7 +222,7 @@ class BaseHandler(ABC):
             status_keys: 状态键列表（如 ["CONVERTED", "INVALID"]）
 
         Returns:
-            Enum 值列表
+            Enum 值列表（返回 .value 属性，兼容数据库 INTEGER 类型）
         """
         from app.crud.ai_enum_mapping import ai_enum_mapping_crud
 
@@ -246,7 +246,8 @@ class BaseHandler(ABC):
         for key in status_keys:
             try:
                 enum_value = getattr(enum_class, key)
-                values.append(enum_value)
+                # 返回 .value 属性，兼容数据库 INTEGER 类型存储
+                values.append(enum_value.value if hasattr(enum_value, 'value') else enum_value)
             except AttributeError:
                 continue
         return values
