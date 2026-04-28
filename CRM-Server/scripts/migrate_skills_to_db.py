@@ -325,6 +325,37 @@ ACTION_MIGRATION_DATA = [
         "sort_order": 3,
         "is_active": 1
     },
+    {
+        "skill_name": "OpportunitySkill",
+        "action_name": "create",
+        "display_name": "创建新商机",
+        "description": "创建新商机",
+        "handler_type": "CreateHandler",
+        "handler_config": {
+            "crud_mapping": "opportunity",
+            "schema_class": "OpportunityCreate",
+            "parent_lookup": {
+                "parent_crud_mapping": "customer",
+                "parent_lookup_field": "customer_name",
+                "parent_name_field": "account_name",
+                "parent_result_field": "customer_id",
+                "exclude_status": ["LOST", "INACTIVE"]
+            },
+            "enum_mappings": {
+                "purchase_type": "purchase_type",
+                "license_type": "license_type"
+            },
+            "auto_fields": {
+                "owner_id": "user_feishu_open_id"
+            },
+            "result_template": "商机创建成功\n商机ID：{id}\n商机名称：{opportunity_name}\n客户：{customer_name}\n金额：{total_amount}\n用户数：{user_count}"
+        },
+        "required_params": ["customer_name", "opportunity_name", "total_amount", "user_count", "expected_closing_date"],
+        "optional_params": ["purchase_type", "license_type", "subscription_years", "decision_maker_count"],
+        "permission_code": "opportunity:create",
+        "sort_order": 4,
+        "is_active": 1
+    },
 
     # ContractSkill - 3 个 Action
     {
@@ -778,6 +809,36 @@ ENUM_MAPPING_DATA = [
             "跟进中": "FOLLOWING",
             "已转化": "CONVERTED",
             "无效": "INVALID"
+        }
+    },
+    {
+        "enum_name": "purchase_type",
+        "display_name": "采购类型",
+        "enum_class": "app.models.opportunity:PurchaseType",
+        "values": {
+            "新购": "NEW",
+            "续购": "RENEWAL",
+            "增购": "EXPANSION"
+        }
+    },
+    {
+        "enum_name": "license_type",
+        "display_name": "授权模式",
+        "enum_class": "app.models.opportunity:LicenseType",
+        "values": {
+            "订阅": "SUBSCRIPTION",
+            "买断": "PERPETUAL"
+        }
+    },
+    {
+        "enum_name": "customer_status",
+        "display_name": "客户状态",
+        "enum_class": "app.models.customer:CustomerStatus",
+        "values": {
+            "跟进中": "FOLLOWING",
+            "赢单": "WON",
+            "输单": "LOST",
+            "暂停跟进": "INACTIVE"
         }
     },
 ]

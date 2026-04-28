@@ -1,9 +1,11 @@
 """
 创建 Handler
 
-处理创建记录类型的 Action（如 LeadSkill.create）
+处理创建记录类型的 Action（如 LeadSkill.create, OpportunitySkill.create）
 
-注意：唯一性检查时默认过滤已转化/无效状态的实体
+注意：
+1. 唯一性检查时默认过滤已转化/无效状态的实体
+2. 支持 parent_lookup，可根据父实体名称查找 ID（如根据客户名称找 customer_id）
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -34,16 +36,18 @@ class CreateHandler(BaseHandler):
 
         handler_config 结构:
         {
-            "crud_mapping": "lead",
-            "schema_class": "LeadCreate",
-            "enum_mappings": {"source": "lead_source", ...},
-            "unique_check": {
-                "field": "contact_phone",
-                "message": "电话已存在",
-                "exclude_status": ["CONVERTED", "INVALID"]  // 可选，过滤已转化/无效
+            "crud_mapping": "opportunity",
+            "schema_class": "OpportunityCreate",
+            "parent_lookup": {  // 可选，根据父实体名称查找 ID
+                "parent_crud_mapping": "customer",
+                "parent_lookup_field": "customer_name",  // 用户传入的参数名
+                "parent_name_field": "account_name",     // 父实体中的名称字段
+                "parent_result_field": "customer_id",    // 要填充的字段名
+                "exclude_status": ["LOST", "PAUSED"]     // 可选，过滤无效状态的父实体
             },
+            "enum_mappings": {"purchase_type": "purchase_type", ...},
             "auto_fields": {"owner_id": "user_feishu_open_id"},
-            "result_template": "线索创建成功..."
+            "result_template": "商机创建成功..."
         }
         """
         crud_mapping_name = handler_config.get("crud_mapping")
@@ -62,6 +66,70 @@ class CreateHandler(BaseHandler):
         user = user_crud.get_by_id(db, user_id)
         if not user:
             return self.build_result(False, "用户不存在")
+
+        # 处理 parent_lookup（根据父实体名称查找 ID）
+        parent_lookup = handler_config.get("parent_lookup")
+        if parent_lookup:
+            parent_crud_mapping_name = parent_lookup.get("parent_crud_mapping")
+            parent_lookup_field = parent_lookup.get("parent_lookup_field", "name")
+            parent_name_field = parent_lookup.get("parent_name_field", "name")
+            parent_result_field = parent_lookup.get("parent_result_field", "parent_id")
+            exclude_status_keys = parent_lookup.get("exclude_status", self.DEFAULT_EXCLUDE_STATUS)
+
+            if parent_crud_mapping_name:
+                parent_crud_mapping = ai_crud_mapping_crud.get_by_name(db, parent_crud_mapping_name)
+                if not parent_crud_mapping:
+                    return self.build_result(False, f"父实体 CRUD 映射不存在: {parent_crud_mapping_name}")
+
+                # 获取用户传入的父实体名称
+                parent_lookup_value = params.get(parent_lookup_field)
+                if not parent_lookup_value:
+                    return self.build_result(False, f"缺少参数: {parent_lookup_field}")
+
+                # 获取父实体 Model
+                parent_model = self.get_model_class(
+                    f"app.models.{parent_crud_mapping_name.split('_')[0]}",
+                    parent_crud_mapping.model_class
+                )
+
+                # 获取排除状态枚举值
+                if exclude_status_keys and parent_crud_mapping.status_field:
+                    parent_type = parent_crud_mapping_name.split("_")[0]
+                    status_enum_name = f"{parent_type}_status"
+                    exclude_status_values = self.get_status_enum_values(db, status_enum_name, exclude_status_keys)
+                else:
+                    exclude_status_values = []
+
+                # 搜索父实体
+                try:
+                    name_field_attr, parents = self.search_active_entities(
+                        db,
+                        parent_model,
+                        parent_name_field,
+                        parent_lookup_value,
+                        exclude_status=exclude_status_values,
+                        status_field=parent_crud_mapping.status_field
+                    )
+                except Exception as e:
+                    return self.build_result(False, f"查询父实体失败: {str(e)}")
+
+                if not parents:
+                    return self.build_result(False, f"未找到匹配的{parent_crud_mapping_name}: {parent_lookup_value}")
+
+                if len(parents) > 1:
+                    parent_names = [getattr(p, parent_name_field) for p in parents[:5]]
+                    return self.build_result(
+                        False,
+                        f"找到多个匹配的{parent_crud_mapping_name}，请提供更精确的名称。匹配结果: {', '.join(parent_names)}"
+                    )
+
+                parent_entity = parents[0]
+                parent_id = parent_entity.id
+                parent_name = getattr(parent_entity, parent_name_field)
+
+                # 将 parent_id 填充到 params（后续会复制到 schema_data）
+                params[parent_result_field] = parent_id
+                params[parent_lookup_field] = parent_name  # 保存名称用于结果模板
 
         # 获取 CRUD 实例
         crud_instance = self.get_crud_instance(
