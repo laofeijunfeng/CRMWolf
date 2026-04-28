@@ -13,6 +13,7 @@ from app.api import auth, users, roles, permissions, dev, leads, customers, cust
 from app.api.ai_config import router as ai_config_router
 from app.api.ai_skills import router as ai_skills_router
 from app.api.ai_skill_generator import router as ai_skill_generator_router
+from app.api.ai_assistant import router as ai_assistant_router
 from app.api.chat import router as chat_router
 from app.api.api_keys import router as api_keys_router
 from app.api.openapi import openapi_router
@@ -87,6 +88,9 @@ app.include_router(ai_skill_generator_router)
 
 # 聊天机器人路由（通用接口，支持飞书/钉钉/企业微信等）
 app.include_router(chat_router)
+
+# AI 助手路由（内置 Web 端）
+app.include_router(ai_assistant_router)
 
 
 @app.get("/")

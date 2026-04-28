@@ -55,8 +55,143 @@ class AISkillMainService:
             "feishu": "飞书",
             "dingtalk": "钉钉",
             "wechat": "企业微信",
-            "slack": "Slack"
+            "slack": "Slack",
+            "web_assistant": "AI 助手"
         }.get(channel_type, channel_type)
+
+    async def handle_message_stream_for_user(
+        self,
+        db: Session,
+        user: Any,
+        content: str = ""
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        处理 AI 助手聊天消息（SSE 流式响应，面向 Web 用户）
+
+        Args:
+            db: 数据库 session
+            user: 用户对象（直接传入，跳过渠道查找）
+            content: 用户输入内容
+
+        Yields:
+            SSE 事件字典: {"event": "status/content/result/error", ...}
+        """
+        user_id = user.id
+        channel_type = "web_assistant"
+
+        # 创建会话日志
+        log = conversation_log_crud.create_log(
+            db,
+            user_id=user_id,
+            channel_user_id=str(user_id),
+            channel_type=channel_type,
+            request_text=content,
+            status="PENDING"
+        )
+
+        # 发送状态事件
+        yield {"event": "status", "message": "正在解析您的请求..."}
+
+        # 获取 AI 配置
+        config, api_key = ai_service.get_config_and_key(db)
+        if not config or not api_key:
+            error_msg = "AI 配置未设置，请联系管理员先配置 AI 服务"
+            conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
+            yield {"event": "error", "message": error_msg}
+            return
+
+        # 流式解析意图
+        parsed_intent = None
+        ai_content_collected = ""
+
+        async for event in ai_service.stream_intent_parse(db, config, api_key, content):
+            if event["event"] == "content":
+                ai_content_collected += event.get("content", "")
+                yield event
+            elif event["event"] == "parsed":
+                parsed_intent = AIParsedIntent(
+                    skill=event.get("skill"),
+                    action=event.get("action"),
+                    params=event.get("params", {}),
+                    reply_text=event.get("reply_text", "正在为你执行操作...")
+                )
+            elif event["event"] == "error":
+                error_msg = event.get("message", "AI 解析失败")
+                conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
+                yield event
+                return
+
+        # 检查是否成功解析
+        if not parsed_intent or parsed_intent.skill is None or parsed_intent.action is None:
+            reply_text = parsed_intent.reply_text if parsed_intent else "无法解析您的请求"
+            conversation_log_crud.update_result(db, log.id, execution_result=reply_text, status="PARAM_MISSING")
+            yield {"event": "result", "message": reply_text}
+            return
+
+        # 更新日志
+        conversation_log_crud.update_result(db, log.id, status="PARSED")
+
+        # 校验 skill/action 合法性
+        yield {"event": "status", "message": "正在校验参数和权限..."}
+
+        is_supported, error_msg = dynamic_skill_service.validate_action_supported(
+            db, parsed_intent.skill, parsed_intent.action
+        )
+        if not is_supported:
+            conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
+            yield {"event": "error", "message": error_msg}
+            return
+
+        # 获取 Action 定义并校验必填参数
+        action_def = self._get_action_definition(db, parsed_intent.skill, parsed_intent.action)
+        if not action_def:
+            error_msg = f"抱歉，系统不支持该操作：【{parsed_intent.skill}.{parsed_intent.action}】"
+            conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
+            yield {"event": "error", "message": error_msg}
+            return
+
+        params_valid, params_error = self._validate_params(action_def, parsed_intent.params)
+        if not params_valid:
+            conversation_log_crud.update_result(db, log.id, execution_result=params_error, status="PARAM_MISSING")
+            yield {"event": "result", "message": params_error}
+            return
+
+        # 校验用户权限
+        if not self._check_permission(db, user_id, action_def.permission_code):
+            error_msg = f"抱歉，您没有执行该操作的权限，请联系管理员申请【{action_def.permission_code}】权限"
+            conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
+            yield {"event": "error", "message": error_msg}
+            return
+
+        # 执行 Skill
+        skill_def = self._get_skill_definition(db, parsed_intent.skill)
+        yield {"event": "status", "message": f"正在执行【{skill_def.description if skill_def else parsed_intent.skill}】的【{action_def.description}】操作..."}
+
+        try:
+            result: SkillExecutionResult = await dynamic_skill_service.execute_action(
+                db=db,
+                skill_name=parsed_intent.skill,
+                action_name=parsed_intent.action,
+                params=parsed_intent.params,
+                user_id=user_id,
+                user_feishu_open_id=user.feishu_open_id
+            )
+
+            reply_text = self._format_result(result)
+
+            conversation_log_crud.update_result(
+                db,
+                log.id,
+                execution_result=reply_text,
+                status="SUCCESS" if result.success else "FAILED"
+            )
+
+            yield {"event": "result", "message": reply_text, "success": result.success}
+
+        except Exception as e:
+            error_msg = f"执行失败：{str(e)}"
+            conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED", error_message=str(e))
+            yield {"event": "error", "message": error_msg}
 
     async def handle_message(self, db: Session, channel_user_id: str, channel_type: str = "feishu", content: str = "") -> str:
         """
