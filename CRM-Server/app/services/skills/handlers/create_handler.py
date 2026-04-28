@@ -6,6 +6,7 @@
 注意：
 1. 唯一性检查时默认过滤已转化/无效状态的实体
 2. 支持 parent_lookup，可根据父实体名称查找 ID（如根据客户名称找 customer_id）
+3. 支持 name_auto_generate，当用户未提供名称时自动生成标准化名称
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -43,7 +44,18 @@ class CreateHandler(BaseHandler):
                 "parent_lookup_field": "customer_name",  // 用户传入的参数名
                 "parent_name_field": "account_name",     // 父实体中的名称字段
                 "parent_result_field": "customer_id",    // 要填充的字段名
-                "exclude_status": ["LOST", "PAUSED"]     // 可选，过滤无效状态的父实体
+                "exclude_status": ["LOST", "INACTIVE"]   // 可选，过滤无效状态的父实体
+            },
+            "name_auto_generate": {  // 可选，自动生成名称
+                "name_field": "opportunity_name",  // 名称字段
+                "template": "{parent_name}-{purchase_type}-{license_type}-{user_count}人-{year}",
+                "field_mappings": {  // 字段映射到模板变量
+                    "parent_name": "customer_name",  // 从 parent_lookup 获取
+                    "purchase_type": "purchase_type",  // 从 params 获取（enum 会转中文）
+                    "license_type": "license_type",
+                    "user_count": "user_count",
+                    "year": "auto:year"  // 自动值：year/month/day
+                }
             },
             "enum_mappings": {"purchase_type": "purchase_type", ...},
             "auto_fields": {"owner_id": "user_feishu_open_id"},
@@ -130,6 +142,47 @@ class CreateHandler(BaseHandler):
                 # 将 parent_id 填充到 params（后续会复制到 schema_data）
                 params[parent_result_field] = parent_id
                 params[parent_lookup_field] = parent_name  # 保存名称用于结果模板
+
+        # 处理 name_auto_generate（自动生成标准化名称）
+        name_auto_generate = handler_config.get("name_auto_generate")
+        if name_auto_generate:
+            name_field = name_auto_generate.get("name_field", "name")
+            template = name_auto_generate.get("template", "{parent_name}-{year}")
+            field_mappings = name_auto_generate.get("field_mappings", {})
+            default_values = name_auto_generate.get("default_values", {})  # 默认值配置
+
+            # 检查用户是否已提供名称
+            if not params.get(name_field):
+                # 构建模板变量
+                template_vars = {}
+                now = datetime.now()
+
+                for var_name, field_source in field_mappings.items():
+                    if field_source.startswith("auto:"):
+                        # 自动值
+                        auto_type = field_source.split(":")[1]
+                        if auto_type == "year":
+                            template_vars[var_name] = str(now.year)
+                        elif auto_type == "month":
+                            template_vars[var_name] = str(now.month)
+                        elif auto_type == "day":
+                            template_vars[var_name] = str(now.day)
+                    else:
+                        # 从 params 获取
+                        value = params.get(field_source)
+                        if not value and default_values.get(field_source):
+                            # 使用默认值
+                            value = default_values.get(field_source)
+                            params[field_source] = value  # 同时填充到 params，后续 enum 处理会用
+                        if value:
+                            template_vars[var_name] = value
+
+                # 生成名称
+                try:
+                    generated_name = template.format(**template_vars)
+                    params[name_field] = generated_name
+                except KeyError as e:
+                    return self.build_result(False, f"名称自动生成失败，缺少字段: {e}")
 
         # 获取 CRUD 实例
         crud_instance = self.get_crud_instance(

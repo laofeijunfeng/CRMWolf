@@ -341,6 +341,21 @@ ACTION_MIGRATION_DATA = [
                 "parent_result_field": "customer_id",
                 "exclude_status": ["LOST", "INACTIVE"]
             },
+            "name_auto_generate": {
+                "name_field": "opportunity_name",
+                "template": "{parent_name}-{purchase_type}-{license_type}-{user_count}人-{year}",
+                "field_mappings": {
+                    "parent_name": "customer_name",
+                    "purchase_type": "purchase_type",
+                    "license_type": "license_type",
+                    "user_count": "user_count",
+                    "year": "auto:year"
+                },
+                "default_values": {
+                    "purchase_type": "新购",
+                    "license_type": "订阅"
+                }
+            },
             "enum_mappings": {
                 "purchase_type": "purchase_type",
                 "license_type": "license_type"
@@ -350,8 +365,8 @@ ACTION_MIGRATION_DATA = [
             },
             "result_template": "商机创建成功\n商机ID：{id}\n商机名称：{opportunity_name}\n客户：{customer_name}\n金额：{total_amount}\n用户数：{user_count}"
         },
-        "required_params": ["customer_name", "opportunity_name", "total_amount", "user_count", "expected_closing_date"],
-        "optional_params": ["purchase_type", "license_type", "subscription_years", "decision_maker_count"],
+        "required_params": ["customer_name", "total_amount", "user_count", "expected_closing_date"],
+        "optional_params": ["opportunity_name", "purchase_type", "license_type", "subscription_years", "decision_maker_count"],
         "permission_code": "opportunity:create",
         "sort_order": 4,
         "is_active": 1
