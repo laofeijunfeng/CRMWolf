@@ -68,7 +68,7 @@ def migrate_opportunity_stage_skill(db: Session):
             },
             "required_params": [],
             "optional_params": ["opportunity_name", "opportunity_id", "customer_name"],
-            "permission_code": "opportunity:view_own",
+            "permission_code": "opportunity:view:own",
             "sort_order": 1
         },
         {
@@ -163,7 +163,7 @@ def migrate_opportunity_stage_skill(db: Session):
             },
             "required_params": [],
             "optional_params": ["opportunity_name", "opportunity_id", "customer_name"],
-            "permission_code": "opportunity:view_own",
+            "permission_code": "opportunity:view:own",
             "sort_order": 5
         }
     ]
