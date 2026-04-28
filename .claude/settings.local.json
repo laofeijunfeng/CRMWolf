@@ -24,7 +24,8 @@
       "Bash(kill 14159)",
       "Bash(ruff check *)",
       "Bash(sqlite3 -header -column data/crmwolf.db \"SELECT s.skill_name, s.module_type, a.action_name, a.handler_type, a.handler_config, a.required_params, a.optional_params FROM ai_skill s JOIN ai_skill_action a ON s.id = a.skill_id WHERE s.skill_name = 'LeadSkill' AND a.action_name = 'create';\")",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }
