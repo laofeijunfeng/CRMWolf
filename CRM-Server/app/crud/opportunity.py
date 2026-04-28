@@ -364,7 +364,82 @@ class OpportunityCRUD:
                     "winProbability": new_snapshot.win_probability
                 }
             )
-        
+
+        return opportunity
+
+    def set_procurement_method(
+        self,
+        db: Session,
+        opportunity_id: int,
+        procurement_method_id: int,
+        operator_id: str
+    ) -> Opportunity:
+        """设置商机采购方式，自动进入默认起始阶段"""
+        from app.crud.procurement import (
+            procurement_method_crud,
+            procurement_stage_template_crud,
+            opportunity_stage_snapshot_crud
+        )
+        from app.services.operation_log_service import operation_log_service
+        from app.crud.user import user_crud
+
+        opportunity = self.get_by_id(db, opportunity_id)
+        if not opportunity:
+            raise ValueError("商机不存在")
+
+        # 检查是否已有阶段
+        existing_snapshot = opportunity_stage_snapshot_crud.get_current(db, opportunity_id)
+        if existing_snapshot:
+            raise ValueError("商机已有阶段，不能修改采购方式")
+
+        # 检查采购方式是否存在
+        procurement_method = procurement_method_crud.get(db, procurement_method_id)
+        if not procurement_method:
+            raise ValueError(f"采购方式 {procurement_method_id} 不存在")
+
+        # 获取默认起始阶段
+        default_stage = procurement_stage_template_crud.get_default_stage(
+            db, procurement_method_id
+        )
+        if not default_stage:
+            raise ValueError(f"采购方式 {procurement_method_id} 没有设置默认起始阶段")
+
+        # 创建阶段快照
+        new_snapshot = opportunity_stage_snapshot_crud.create(
+            db, opportunity_id, default_stage
+        )
+
+        # 更新商机
+        opportunity.procurement_method_id = procurement_method_id
+        opportunity.current_stage_snapshot_id = new_snapshot.id
+        opportunity.current_stage_name = new_snapshot.stage_name
+        opportunity.current_win_probability = new_snapshot.win_probability
+        opportunity.current_stage_entered_at = new_snapshot.entered_at
+
+        db.commit()
+        db.refresh(opportunity)
+
+        # 记录操作日志
+        operator = user_crud.get_by_feishu_open_id(db, operator_id)
+        operator_name = operator.name if operator else None
+
+        operation_log_service.log(
+            db=db,
+            event_type="OPPORTUNITY_SET_PROCUREMENT_METHOD",
+            event_action="UPDATE",
+            resource_type="OPPORTUNITY",
+            resource_id=opportunity.id,
+            operator_id=operator_id,
+            operator_name=operator_name,
+            content={
+                "opportunityName": opportunity.opportunity_name,
+                "procurementMethodId": procurement_method_id,
+                "procurementMethodName": procurement_method.name,
+                "defaultStageName": default_stage.stage_name,
+                "defaultWinProbability": default_stage.win_probability
+            }
+        )
+
         return opportunity
 
     def mark_as_won(

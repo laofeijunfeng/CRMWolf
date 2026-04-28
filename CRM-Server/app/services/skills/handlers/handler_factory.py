@@ -14,6 +14,9 @@ from app.services.skills.handlers.follow_up_handler import FollowUpHandler
 from app.services.skills.handlers.status_change_handler import StatusChangeHandler
 from app.services.skills.handlers.lead_convert_handler import LeadConvertHandler
 from app.services.skills.handlers.aggregate_handler import AggregateHandler
+from app.services.skills.handlers.stage_query_handler import StageQueryHandler
+from app.services.skills.handlers.stage_advance_handler import StageAdvanceHandler
+from app.services.skills.handlers.set_procurement_method_handler import SetProcurementMethodHandler
 
 
 class HandlerFactory:
@@ -28,6 +31,9 @@ class HandlerFactory:
         "StatusChangeHandler": StatusChangeHandler,
         "LeadConvertHandler": LeadConvertHandler,
         "AggregateHandler": AggregateHandler,
+        "StageQueryHandler": StageQueryHandler,
+        "StageAdvanceHandler": StageAdvanceHandler,
+        "SetProcurementMethodHandler": SetProcurementMethodHandler,
     }
 
     @classmethod
