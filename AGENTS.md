@@ -27,6 +27,7 @@
 | 写单测 | TESTING.md | 禁止跳过测试 |
 | 改代码 | DOCS-STANDARD.md | 必须同步文档 |
 | 查权限码 | GLOSSARY.md | 禁止猜测编码 |
+| **提交代码** | **GIT-STANDARD.md** | **任务完成主动提交** |
 | **写 UI 样式** | **DESIGN-COMPONENTS.md** | **禁止纯色标签** |
 | **写列表页** | **DESIGN-TABLE.md** | **禁止竖分割线** |
 | **查状态色** | **DESIGN-QUICK-REF.md** | **禁止高饱和色** |
@@ -60,6 +61,7 @@ CRMWolf/
 │   ├── DOCS-STANDARD.md         ← 文档同步规则
 │   ├── GLOSSARY.md              ← 术语、权限码、状态枚举
 │   ├── COMPLIANCE-STANDARD.md   ← 合规报告模板
+│   ├── GIT-STANDARD.md          ← Git 提交规范（AI 自主执行）
 │   ├── SPEC-CHANGELOG.md        ← 规范变更日志
 │   └── AI-KNOWLEDGE.md          ← AI 知识沉淀
 │
@@ -102,6 +104,7 @@ CRMWolf/
 | 新增 Pinia Store | STATE-MANAGEMENT.md → 模板 → TYPESCRIPT.md 取类型 |
 | 写单测 | TESTING.md → 模板 → 先写测试再写代码 |
 | 修复类型错误 | TYPESCRIPT.md → 查 Approved Types → 不用 any |
+| **提交代码** | **GIT-STANDARD.md → 判断时机 → 执行校验 → 分组提交** |
 | **写列表页表格** | **DESIGN-TABLE.md → 表头/行规范 → 状态标签用 DESIGN-QUICK-REF.md** |
 | **写按钮/标签** | **DESIGN-COMPONENTS.md → 按钮规范 → DESIGN-QUICK-REF.md 查色** |
 | **调整间距/圆角** | **DESIGN-SPACING.md → 间距 token → 圆角速查** |
