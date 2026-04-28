@@ -3,15 +3,15 @@
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="header-left">
-        <span class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
-        </span>
+        </el-button>
         <h1 class="page-title">{{ opportunity?.opportunity_name || '商机详情' }}</h1>
       </div>
       <div class="header-right">
-        <span v-if="opportunity?.status === 0 && canEditOpportunity" class="action-link" @click="handleEdit">
+        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="primary" size="small" @click="handleEdit">
           编辑
-        </span>
+        </el-button>
       </div>
     </div>
 
@@ -132,7 +132,9 @@
     </div>
 
     <!-- 采购阶段流程 -->
-    <ProcurementStageFlow v-if="opportunity" :opportunity-id="opportunity.id" />
+    <div class="stage-flow-wrapper">
+      <ProcurementStageFlow v-if="opportunity" :opportunity-id="opportunity.id" />
+    </div>
 
     <!-- 关联合同卡片 -->
     <div class="contract-card">
@@ -371,17 +373,23 @@ onMounted(() => {
 @use '@/styles/variables.scss' as *;
 
 .opportunity-detail-page {
-  padding: $wolf-page-padding;
+  padding: 0;
   background: $wolf-bg-page;
   min-height: calc(100vh - 48px);
 }
 
-// 页面标题
+// 页面标题（sticky）
 .page-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: $wolf-bg-card;
+  border-bottom: 1px solid $wolf-border-default;
+  height: $wolf-header-height;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: $wolf-space-lg;
+  padding: 0 $wolf-page-padding;
 }
 
 .header-left {
@@ -397,19 +405,15 @@ onMounted(() => {
 }
 
 .back-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: $wolf-radius-md;
-  cursor: pointer;
-  color: $wolf-text-tertiary;
-  transition: all 0.2s ease;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  border-radius: $wolf-radius-md !important;
+  background: transparent !important;
+  border: none !important;
 
   &:hover {
-    background: $wolf-bg-hover;
-    color: $wolf-text-secondary;
+    background: $wolf-bg-hover !important;
   }
 }
 
@@ -420,13 +424,17 @@ onMounted(() => {
   margin: 0;
 }
 
-// 信息卡片
+// 内容区域
+.stage-flow-wrapper {
+  margin: 0 $wolf-page-padding;
+}
+
 .info-card,
 .contract-card {
   background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
+  border-radius: $wolf-card-radius;
+  padding: $wolf-card-padding;
+  margin: $wolf-page-padding;
   box-shadow: $wolf-shadow-card;
 }
 
@@ -665,7 +673,13 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .opportunity-detail-page { padding: $wolf-space-md; }
+  .info-card,
+  .contract-card {
+    margin: $wolf-space-md;
+  }
+  .stage-flow-wrapper {
+    margin: 0 $wolf-space-md;
+  }
   .attributes-grid { grid-template-columns: 1fr; }
   .contract-header { flex-direction: column; }
 }
