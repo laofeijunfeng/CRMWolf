@@ -311,6 +311,12 @@ class CreateHandler(BaseHandler):
                 else:
                     template_data[key] = attr_value
 
+        # 补充 parent_lookup 相关字段（如 customer_name）
+        if parent_lookup:
+            parent_lookup_field = parent_lookup.get("parent_lookup_field")
+            if parent_lookup_field and parent_lookup_field not in template_data:
+                template_data[parent_lookup_field] = params.get(parent_lookup_field)
+
         message = result_template.format(**template_data)
 
         return self.build_result(True, message, {"entity": entity})
