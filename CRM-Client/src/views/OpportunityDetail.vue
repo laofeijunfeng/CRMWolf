@@ -432,7 +432,7 @@ onMounted(() => {
 .info-card,
 .contract-card {
   background: $wolf-bg-card;
-  border-radius: $wolf-card-radius;
+  border-radius: $wolf-radius-md;
   padding: $wolf-card-padding;
   margin: $wolf-page-padding;
   box-shadow: $wolf-shadow-card;
