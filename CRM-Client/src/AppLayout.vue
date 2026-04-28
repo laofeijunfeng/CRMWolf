@@ -2,6 +2,16 @@
   <div class="app-layout">
     <aside class="sidebar">
       <nav class="nav">
+        <!-- AI 助手入口（顶部突出） -->
+        <div class="menu-item ai-entry" :class="{ active: currentPath === '/ai-assistant' }" @click="handleMenuClick('/ai-assistant')">
+          <el-icon class="item-icon"><Cpu /></el-icon>
+          <span class="item-text">AI 助手</span>
+          <el-icon class="item-arrow"><ArrowRight /></el-icon>
+        </div>
+
+        <!-- 分隔线 -->
+        <div class="menu-divider"></div>
+
         <div class="menu-item" :class="{ active: currentPath === '/leads' || currentPath === '/leads/public' || currentPath === '/leads/my' }" @click="handleMenuClick('/leads')">
           <el-icon class="item-icon"><Flag /></el-icon>
           <span class="item-text">线索管理</span>
@@ -56,7 +66,7 @@ import { computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
-import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight } from '@element-plus/icons-vue'
+import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, Cpu } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -161,6 +171,39 @@ onMounted(async () => {
     background: $wolf-bg-hover;
     color: $wolf-primary;
   }
+}
+
+// AI 助手入口特殊样式
+.ai-entry {
+  background: linear-gradient(135deg, rgba($wolf-primary, 0.1) 0%, transparent 100%);
+  border-left: 3px solid $wolf-primary;
+  margin-left: -$wolf-space-xs;
+  padding-left: $wolf-space-md + $wolf-space-xs;
+
+  .item-icon {
+    color: $wolf-primary;
+    font-size: 20px;
+  }
+
+  .item-text {
+    font-weight: $wolf-font-weight-semibold;
+    color: $wolf-primary;
+  }
+
+  &:hover {
+    background: linear-gradient(135deg, rgba($wolf-primary, 0.15) 0%, rgba($wolf-primary, 0.05) 100%);
+  }
+
+  &.active {
+    background: linear-gradient(135deg, rgba($wolf-primary, 0.2) 0%, rgba($wolf-primary, 0.1) 100%);
+  }
+}
+
+// 分隔线
+.menu-divider {
+  height: 1px;
+  background: $wolf-border-light;
+  margin: $wolf-space-sm $wolf-space-md;
 }
 
 .item-icon {

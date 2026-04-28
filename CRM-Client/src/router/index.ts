@@ -5,7 +5,7 @@ import { useUserStore } from '@/stores/user'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/leads'
+    redirect: '/ai-assistant'
   },
   {
     path: '/login',
@@ -24,6 +24,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/AppLayout.vue'),
     meta: { requiresAuth: true },
     children: [
+      {
+        path: 'ai-assistant',
+        name: 'AIAssistant',
+        component: () => import('@/views/AIAssistant.vue'),
+        meta: { requiresAuth: true }
+      },
       {
         path: 'leads',
         name: 'Leads',
@@ -317,7 +323,7 @@ router.beforeEach((to, from, next) => {
   if (requiresAuth && !userStore.isLoggedIn()) {
     next('/login')
   } else if (to.path === '/login' && userStore.isLoggedIn()) {
-    next('/leads')
+    next('/ai-assistant')
   } else {
     next()
   }
