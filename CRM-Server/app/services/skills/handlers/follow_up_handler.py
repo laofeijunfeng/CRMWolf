@@ -159,9 +159,9 @@ class FollowUpHandler(BaseHandler):
             "next_follow_time": next_follow_time_dt
         }
 
-        # 获取 Schema 类
+        # 获取 Schema 类（使用 crud_mapping_name 推断 schema_module）
         if crud_mapping.schema_create_class:
-            schema_module = f"app.schemas.{parent_crud_mapping_name.split('_')[0]}"
+            schema_module = f"app.schemas.{crud_mapping_name}"
             try:
                 SchemaClass = self.get_schema_class(schema_module, crud_mapping.schema_create_class)
                 schema_obj = SchemaClass(**follow_up_data)
