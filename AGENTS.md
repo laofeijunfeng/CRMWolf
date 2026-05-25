@@ -21,17 +21,50 @@
 | 场景 | 必查文档 | 违规后果 |
 |------|----------|----------|
 | 定义类型 | TYPESCRIPT.md | 禁止创建新类型 |
-| 放置文件 | ARCHITECTURE.md | 禁止跨模块 |
+| 放置文件 | system/ARCHITECTURE.md | 禁止跨模块 |
 | 写 Vue 组件 | COMPONENTS.md | 禁止内联类型 |
 | 用 Pinia | STATE-MANAGEMENT.md | 禁止 any 状态 |
 | 写单测 | TESTING.md | 禁止跳过测试 |
-| 改代码 | DOCS-STANDARD.md | 必须同步文档 |
-| 查权限码 | GLOSSARY.md | 禁止猜测编码 |
-| **提交代码** | **GIT-STANDARD.md** | **任务完成主动提交** |
+| 改代码 | standards/DOCS-STANDARD.md | 必须同步文档 |
+| 查权限码 | system/GLOSSARY.md | 禁止猜测编码 |
+| 查业务流程 | system/SYSTEM-DESCRIPTION.md | 禁止猜测逻辑 |
+| **提交代码** | **standards/GIT-STANDARD.md** | **任务完成主动提交** |
 | **写 UI 样式** | **DESIGN-COMPONENTS.md** | **禁止纯色标签** |
 | **写列表页** | **DESIGN-TABLE.md** | **禁止竖分割线** |
 | **查状态色** | **DESIGN-QUICK-REF.md** | **禁止高饱和色** |
 | **写二级页面** | **DESIGN-PAGE-LAYOUT.md** | **必须有 sticky 头部** |
+| **复用逻辑** | **先搜索现有实现** | **禁止重复编写** |
+
+---
+
+## 代码复用原则
+
+**核心要求**：在实现任何功能前，必须先搜索项目中是否已有类似实现。
+
+| 复用场景 | 搜索关键词 | 复用目标 |
+|----------|------------|----------|
+| 时间解析 | `parse_relative_time`, `parse_date` | `follow_up_parser_service` |
+| ID 提取 | `extract_id`, `ID_PATTERN` | `follow_up_parser_service` |
+| 枚举匹配 | `enum_mapping`, `get_enum` | `ai_enum_mapping_crud` |
+| 跟进记录 | `follow_up`, `FollowUpHandler` | `follow_up_handler.py` |
+| SSE 流式 | `SSE`, `stream`, `chatSSE` | `ai_assistant_api` |
+| 权限检查 | `permission`, `has_permission` | `usePermissionStore` |
+
+**实施流程**：
+1. **搜索先行**：使用 `grep` 或文件搜索查找关键词
+2. **评估复用**：确认现有实现是否可复用
+3. **抽离共享**：如需多处使用，抽离到独立服务
+4. **文档记录**：在服务注释中标注可复用场景
+
+**违规示例**：
+- ❌ 重复编写时间解析逻辑（应复用 `follow_up_parser_service`）
+- ❌ 重复编写 ID 提取正则（应复用 `ID_PATTERN`）
+- ❌ 重复编写 SSE 流式响应（应复用现有 SSE 模式）
+
+**正确示例**：
+- ✅ 新增 AI 功能复用 `follow_up_parser_service.parse_relative_time`
+- ✅ FollowUpHandler 导入共享服务的正则和方法
+- ✅ 多处调用统一抽离为独立服务文件
 
 ---
 
@@ -40,7 +73,8 @@
 ```
 CRMWolf/
 ├── AGENTS.md                    ← 本文件（唯一入口）
-├── CRM-Docs/QUICK-START.md      ← 团队快速上手（5分钟）
+├── CRM-Docs/README.md           ← 文档目录导航
+│   ├── standards/QUICK-START.md ← 团队快速上手（5分钟）
 │
 ├── CRM-Client/docs/
 │   ├── TYPESCRIPT.md            ← 类型定义、禁令替代方案
@@ -57,13 +91,25 @@ CRMWolf/
 │   ├── DESIGN-PAGE-LAYOUT.md    ← 二级页面布局（表单页、管理页）
 │
 ├── CRM-Docs/
-│   ├── ARCHITECTURE.md          ← 前后端目录、模块边界
-│   ├── DOCS-STANDARD.md         ← 文档同步规则
-│   ├── GLOSSARY.md              ← 术语、权限码、状态枚举
-│   ├── COMPLIANCE-STANDARD.md   ← 合规报告模板
-│   ├── GIT-STANDARD.md          ← Git 提交规范（AI 自主执行）
-│   ├── SPEC-CHANGELOG.md        ← 规范变更日志
-│   └── AI-KNOWLEDGE.md          ← AI 知识沉淀
+│   ├── system/                  ← 系统说明文档
+│   │   ├── SYSTEM-DESCRIPTION.md ← 系统综合说明（功能模块、业务流程）
+│   │   ├── ARCHITECTURE.md       ← 前后端目录、模块边界
+│   │   ├── GLOSSARY.md           ← 术语、权限码、状态枚举
+│   │   ├── BUSINESS-CHAIN-API.md ← 业务链路接口说明
+│   │   ├── UI-DESIGN-SPEC.md     ← UI 设计规范
+│   │   └── LOGGING-STANDARD.md   ← 日志规范
+│   │
+│   ├── standards/               ← 开发规范
+│   │   ├── GIT-STANDARD.md       ← Git 提交规范（AI 自主执行）
+│   │   ├── COMPLIANCE-STANDARD.md ← 合规报告模板
+│   │   ├── DOCS-STANDARD.md      ← 文档同步规则
+│   │   ├── SPEC-CHANGELOG.md     ← 规范变更日志
+│   │   ├── AI-KNOWLEDGE.md       ← AI 知识沉淀
+│   │   └── QUICK-START.md        ← 快速上手指南
+│   │
+│   └── requirements/            ← 需求文档
+│       ├── AI-OPENAPI-REQUIREMENTS.md ← AI 专用 OpenAPI 需求
+│       └── OPEN-API-REQUIREMENTS.md   ← 开放接口需求规格
 │
 └── 示例代码（参考）
     ├── CRM-Client/src/api/example-customer.ts
@@ -99,12 +145,15 @@ CRMWolf/
 
 | 任务 | 起点 |
 |------|------|
-| 新增 API 端点 | ARCHITECTURE.md → api/层 → TYPESCRIPT.md 取类型 |
-| 创建 Vue 页面 | COMPONENTS.md → 模板 → GLOSSARY.md 查状态码 |
+| 新增 API 端点 | system/ARCHITECTURE.md → api/层 → TYPESCRIPT.md 取类型 |
+| 创建 Vue 页面 | COMPONENTS.md → 模板 → system/GLOSSARY.md 查状态码 |
 | 新增 Pinia Store | STATE-MANAGEMENT.md → 模板 → TYPESCRIPT.md 取类型 |
 | 写单测 | TESTING.md → 模板 → 先写测试再写代码 |
 | 修复类型错误 | TYPESCRIPT.md → 查 Approved Types → 不用 any |
-| **提交代码** | **GIT-STANDARD.md → 判断时机 → 执行校验 → 分组提交** |
+| 查权限码 | system/GLOSSARY.md → 权限码清单 |
+| 查业务流程 | system/SYSTEM-DESCRIPTION.md → 业务模块说明 |
+| 查 API 接口 | system/BUSINESS-CHAIN-API.md → 接口清单 |
+| **提交代码** | **standards/GIT-STANDARD.md → 判断时机 → 执行校验 → 分组提交** |
 | **写列表页表格** | **DESIGN-TABLE.md → 表头/行规范 → 状态标签用 DESIGN-QUICK-REF.md** |
 | **写按钮/标签** | **DESIGN-COMPONENTS.md → 按钮规范 → DESIGN-QUICK-REF.md 查色** |
 | **调整间距/圆角** | **DESIGN-SPACING.md → 间距 token → 圆角速查** |

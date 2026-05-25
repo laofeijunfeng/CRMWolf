@@ -21,11 +21,13 @@
 
 | 任务类型 | 查阅文档 | 关键内容 |
 |----------|----------|----------|
-| 新增 API | TYPESCRIPT.md → ARCHITECTURE.md | Approved Types + api/ 目录规则 |
-| 新增页面 | COMPONENTS.md → GLOSSARY.md | 组件模板 + 状态枚举 |
+| 新增 API | TYPESCRIPT.md → system/ARCHITECTURE.md | Approved Types + api/ 目录规则 |
+| 新增页面 | COMPONENTS.md → system/GLOSSARY.md | 组件模板 + 状态枚举 |
 | 新增 Store | STATE-MANAGEMENT.md | Store 模板 + ref 类型规则 |
 | 写单测 | TESTING.md | 测试模板 + Mock 数据规则 |
 | 修复类型错误 | TYPESCRIPT.md §一 | 四禁令替代方案 |
+| 查业务流程 | system/SYSTEM-DESCRIPTION.md | 功能模块、业务逻辑 |
+| 查 API 接口 | system/BUSINESS-CHAIN-API.md | 接口清单、参数说明 |
 
 **阅读时间**：2 分钟
 

@@ -10,14 +10,14 @@
 
 | 代码变更类型 | 必须更新的文档 | 同步时机 |
 |--------------|----------------|----------|
-| 新增 API 端点 | CRM-Docs/05-API接口.md + TYPESCRIPT.md | 同 PR |
-| 修改 API 参数 | CRM-Docs/05-API接口.md | 同 PR |
+| 新增 API 端点 | system/BUSINESS-CHAIN-API.md + TYPESCRIPT.md | 同 PR |
+| 修改 API 参数 | system/BUSINESS-CHAIN-API.md | 同 PR |
 | 新增数据类型 | TYPESCRIPT.md + Zod Schema | 同 PR |
 | 新增 Vue 组件 | COMPONENTS.md + Stories | 同 PR |
 | 新增 Pinia Store | STATE-MANAGEMENT.md | 同 PR |
-| 修改权限码 | GLOSSARY.md + CRM-Docs/06-权限体系.md | 同 PR |
-| 新增状态枚举 | GLOSSARY.md | 同 PR |
-| 修改目录结构 | ARCHITECTURE.md | 同 PR |
+| 修改权限码 | system/GLOSSARY.md | 同 PR |
+| 新增状态枚举 | system/GLOSSARY.md | 同 PR |
+| 修改目录结构 | system/ARCHITECTURE.md | 同 PR |
 | 新增测试模板 | TESTING.md | 同 PR |
 
 ### 1.2 同步检查清单
@@ -27,9 +27,9 @@
 ```markdown
 ## 文档同步检查
 
-- [ ] API 变更：已更新 05-API接口.md
+- [ ] API 变更：已更新 system/BUSINESS-CHAIN-API.md
 - [ ] 类型变更：已更新 TYPESCRIPT.md + Zod Schema
-- [ ] 权限变更：已更新 GLOSSARY.md + 权限体系.md
+- [ ] 权限变更：已更新 system/GLOSSARY.md
 - [ ] 组件变更：已创建/更新 Stories 文件
 - [ ] 变更说明：已填写 PR 描述
 ```
@@ -49,20 +49,27 @@ CRMWolf/
 │   └── TESTING.md               # 测试规范
 │
 ├── CRM-Docs/
-│   ├── 01-系统概述.md            # 系统简介
-│   ├── 02-技术架构.md            # 技术栈说明
-│   ├── 03-业务模块.md            # 业务模块说明
-│   ├── 04-数据库设计.md          # 数据库表结构
-│   ├── 05-API接口.md             # API 接口文档
-│   ├── 06-权限体系.md            # 权限定义
-│   ├── 07-开发指南.md            # 开发环境指南
-│   ├── 08-部署运维.md            # 部署说明
-│   ├── ARCHITECTURE.md          # 架构规范
-│   ├── DOCS-STANDARD.md         # 本文档
-│   ├── GLOSSARY.md              # 术语定义
-│   ├── COMPLIANCE-STANDARD.md   # 合规规范
-│   ├── SPEC-CHANGELOG.md        # 规范变更日志
-│   └── AI-KNOWLEDGE.md          # AI 知识沉淀
+│   ├── README.md                # 文档目录导航
+│   │
+│   ├── system/                  # 系统说明文档
+│   │   ├── SYSTEM-DESCRIPTION.md # 系统综合说明
+│   │   ├── ARCHITECTURE.md       # 架构规范
+│   │   ├── GLOSSARY.md           # 术语定义
+│   │   ├── BUSINESS-CHAIN-API.md # 业务链路接口
+│   │   ├── UI-DESIGN-SPEC.md     # UI 设计规范
+│   │   └── LOGGING-STANDARD.md   # 日志规范
+│   │
+│   ├── standards/               # 开发规范
+│   │   ├── GIT-STANDARD.md       # Git 提交规范
+│   │   ├── COMPLIANCE-STANDARD.md # 合规规范
+│   │   ├── DOCS-STANDARD.md      # 本文档
+│   │   ├── SPEC-CHANGELOG.md     # 规范变更日志
+│   │   ├── AI-KNOWLEDGE.md       # AI 知识沉淀
+│   │   └── QUICK-START.md        # 快速上手指南
+│   │
+│   └── requirements/            # 需求文档
+│       ├── AI-OPENAPI-REQUIREMENTS.md
+│       └── OPEN-API-REQUIREMENTS.md
 │
 ├── CRM-Server/docs/
 │   ├── README.md                # 后端说明
