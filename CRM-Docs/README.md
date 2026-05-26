@@ -27,6 +27,13 @@ CRM-Docs/
 | [BUSINESS-CHAIN-API.md](system/BUSINESS-CHAIN-API.md) | 业务链路接口 | 核心 API 接口清单、业务逻辑说明 |
 | [UI-DESIGN-SPEC.md](system/UI-DESIGN-SPEC.md) | UI 设计规范 | 极简中性风设计标准 |
 | [LOGGING-STANDARD.md](system/LOGGING-STANDARD.md) | 日志规范 | 后端日志配置与使用 |
+| [AI-GLUE-IMPLEMENTED-FEATURES.md](system/AI-GLUE-IMPLEMENTED-FEATURES.md) | ✅ AI 对话胶水层功能说明 | 已实现组件、状态流转、使用示例 |
+
+### 模块功能说明
+
+| 文档 | 说明 | 内容 |
+|------|------|------|
+| [MODULE-CUSTOMER.md](system/MODULE-CUSTOMER.md) | 客户管理模块 | 客户创建、联系人、公海池、AI档案、API接口 |
 
 ---
 
@@ -34,7 +41,8 @@ CRM-Docs/
 
 | 文档 | 说明 | 状态 |
 |------|------|------|
-| [AI-OPENAPI-REQUIREMENTS.md](requirements/AI-OPENAPI-REQUIREMENTS.md) | AI 专用 OpenAPI 需求 | 规划中 |
+| [AI-OPENAPI-REQUIREMENTS.md](requirements/AI-OPENAPI-REQUIREMENTS.md) | AI 专用 OpenAPI 需求 | 已实现 |
+| [AI-GLUE-REQUIREMENTS.md](requirements/AI-GLUE-REQUIREMENTS.md) | ✅ AI 对话胶水层需求 | 已实现 |
 | [OPEN-API-REQUIREMENTS.md](requirements/OPEN-API-REQUIREMENTS.md) | 开放接口需求规格 | 规划中 |
 
 ---
@@ -43,7 +51,8 @@ CRM-Docs/
 
 | 文档 | 说明 | 配套需求 | 状态 |
 |------|------|---------|------|
-| [AI-OPENAPI-IMPLEMENTATION-PLAN.md](plans/AI-OPENAPI-IMPLEMENTATION-PLAN.md) | AI 专用 OpenAPI 实施计划 | AI-OPENAPI-REQUIREMENTS.md | 规划中 |
+| [AI-OPENAPI-IMPLEMENTATION-PLAN.md](plans/AI-OPENAPI-IMPLEMENTATION-PLAN.md) | AI OpenAPI 实施计划 | AI-OPENAPI-REQUIREMENTS.md | 已完成 |
+| [AI-GLUE-IMPLEMENTATION-PLAN.md](plans/AI-GLUE-IMPLEMENTATION-PLAN.md) | ✅ AI 对话胶水层实施计划 | AI-GLUE-REQUIREMENTS.md | 已完成 |
 
 ---
 
@@ -56,7 +65,9 @@ CRM-Docs/
 | [COMPLIANCE-STANDARD.md](standards/COMPLIANCE-STANDARD.md) | 合规规范 | 违规处理、合规报告 |
 | [DOCS-STANDARD.md](standards/DOCS-STANDARD.md) | 文档规范 | 文档同步规则 |
 | [SPEC-CHANGELOG.md](standards/SPEC-CHANGELOG.md) | 规范变更日志 | 变更记录与审批 |
-| [AI-KNOWLEDGE.md](standards/AI-KNOWLEDGE.md) | AI 知识沉淀 | 常见错误、优秀案例 |
+| [AI-KNOWLEDGE.md](standards/AI-KNOWLEDGE.md) | AI 知识沉淀 | 见错误、优秀案例 |
+| [AI-API-STANDARD.md](standards/AI-API-STANDARD.md) | 🤖 AI OpenAPI 接口规范 | Preview 协议、风险分级、幂等性 |
+| [AI-API-IMPLEMENTATION.md](standards/AI-API-IMPLEMENTATION.md) | ✅ AI OpenAPI 实现状态 | 端点清单、组件结构、流程说明 |
 | [SKILL-NAME-LOOKUP-SPEC.md](standards/SKILL-NAME-LOOKUP-SPEC.md) | Handler 名称查找规范 | Skill 配置规范 |
 
 ---
@@ -76,6 +87,7 @@ CRM-Docs/
 | 修复 Bug | SYSTEM-DESCRIPTION.md（业务逻辑） |
 | 权限相关 | GLOSSARY.md（权限码清单） |
 | 日志排查 | LOGGING-STANDARD.md |
+| 模块开发 | MODULE-CUSTOMER.md 等（功能、API、数据模型） |
 
 ### 规范查阅
 - TypeScript 类型规范 → `CRM-Client/docs/TYPESCRIPT.md`
@@ -96,4 +108,4 @@ CRM-Docs/
 ---
 
 > **维护团队**：CRMWolf 开发团队
-> **最后更新**：2026-05-25
+> **最后更新**：2026-05-26
