@@ -115,14 +115,18 @@ def assign_role_to_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="角色ID不匹配"
         )
-    
-    return role_crud.assign_to_user(db, user_role.user_id, user_role.role_id)
+
+    result = role_crud.assign_to_user(db, user_role.user_id, user_role.role_id, user_role.team_id)
+    # 清除用户权限缓存
+    permission_service.clear_user_permissions_cache(user_role.user_id, user_role.team_id)
+    return result
 
 
-@router.delete("/{role_id}/users/{user_id}", summary="移除用户角色", description="移除指定用户的角色")
+@router.delete("/{role_id}/users/{user_id}", summary="移除用户角色", description="移除指定用户在指定团队的角色")
 def remove_role_from_user(
     role_id: int,
     user_id: int,
+    team_id: int = Query(..., description="团队ID"),
     current_user = Depends(require_permission("role:manage")),
     db: Session = Depends(get_db)
 ):
@@ -132,14 +136,16 @@ def remove_role_from_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="角色不存在"
         )
-    
-    success = role_crud.remove_from_user(db, user_id, role_id)
+
+    success = role_crud.remove_from_user(db, user_id, role_id, team_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="用户角色关联不存在"
         )
-    
+
+    # 清除用户权限缓存
+    permission_service.clear_user_permissions_cache(user_id, team_id)
     return {"message": "角色已移除"}
 
 

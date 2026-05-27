@@ -34,6 +34,9 @@
 | **查状态色** | **DESIGN-QUICK-REF.md** | **禁止高饱和色** |
 | **写二级页面** | **DESIGN-PAGE-LAYOUT.md** | **必须有 sticky 头部** |
 | **复用逻辑** | **先搜索现有实现** | **禁止重复编写** |
+| **改数据库表** | **Alembic migrations/** | **禁止独立脚本** |
+| **🤖 AI OpenAPI 开发** | **standards/AI-API-STANDARD.md** | **禁止绕过规范** |
+| **🤖 AI OpenAPI 迭代** | **plans/AI-OPENAPI-IMPLEMENTATION-PLAN.md** | **禁止跳过检查清单** |
 
 ---
 
@@ -65,6 +68,44 @@
 - ✅ 新增 AI 功能复用 `follow_up_parser_service.parse_relative_time`
 - ✅ FollowUpHandler 导入共享服务的正则和方法
 - ✅ 多处调用统一抽离为独立服务文件
+
+---
+
+## 数据库迁移规则
+
+**核心要求**：所有数据库表结构变更必须使用 Alembic 迁移，禁止创建独立 Python 脚本。
+
+| 操作 | 正确方式 | 错误方式 |
+|------|----------|----------|
+| 新增字段 | `alembic revision` → 编写 upgrade/downgrade | 独立 `.py` 脚本 |
+| 修改字段 | Alembic migration | 直接改模型不写迁移 |
+| 新建表 | Alembic migration | `Base.metadata.create_all()` |
+| 数据迁移 | 在 migration 的 upgrade() 中用 op.execute() | 独立数据脚本 |
+
+**标准流程**：
+```bash
+# 1. 创建迁移文件
+alembic revision -m "描述变更内容"
+
+# 2. 编辑 migrations/versions/xxx.py
+#    编写 upgrade() 和 downgrade()
+
+# 3. 执行迁移
+alembic upgrade head
+
+# 4. 验证
+alembic current  # 查看当前版本
+```
+
+**迁移文件命名**：
+- `001_initial.py` - 初始化
+- `002_xxx.py` - 按顺序编号
+- 文件头必须包含 `revision`、`down_revision`
+
+**违规示例**：
+- ❌ 创建 `migrations/add_xxx_column.py` 独立脚本
+- ❌ 直接修改模型后不写迁移文件
+- ❌ 在 main.py 启动时执行数据库变更
 
 ---
 
@@ -105,7 +146,11 @@ CRMWolf/
 │   │   ├── DOCS-STANDARD.md      ← 文档同步规则
 │   │   ├── SPEC-CHANGELOG.md     ← 规范变更日志
 │   │   ├── AI-KNOWLEDGE.md       ← AI 知识沉淀
+│   │   ├── AI-API-STANDARD.md    ← 🤖 AI OpenAPI 接口规范（必读）
 │   │   └── QUICK-START.md        ← 快速上手指南
+│   │
+│   ├── plans/                    ← 实施计划
+│   │   └── AI-OPENAPI-IMPLEMENTATION-PLAN.md ← 🤖 AI OpenAPI 实施计划
 │   │
 │   └── requirements/            ← 需求文档
 │       ├── AI-OPENAPI-REQUIREMENTS.md ← AI 专用 OpenAPI 需求
@@ -158,7 +203,9 @@ CRMWolf/
 | **写按钮/标签** | **DESIGN-COMPONENTS.md → 按钮规范 → DESIGN-QUICK-REF.md 查色** |
 | **调整间距/圆角** | **DESIGN-SPACING.md → 间距 token → 圆角速查** |
 | **写表单/管理页** | **DESIGN-PAGE-LAYOUT.md → 选择布局类型 → 模板复用** |
+| **改数据库表** | **alembic revision → 编写 migrations/versions/*.py** |
+| **🤖 AI OpenAPI 开发** | **standards/AI-API-STANDARD.md → 查协议规范 → plans/ 查进度** |
 
 ---
 
-**版本：1.0 | 最后更新：2026-04-21 | 修改需人工审批**
+**版本：1.1 | 最后更新：2026-05-25 | 修改需人工审批**

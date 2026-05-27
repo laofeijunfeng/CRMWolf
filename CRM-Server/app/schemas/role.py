@@ -36,6 +36,7 @@ class RoleWithPermissions(RoleResponse):
 class UserRoleCreate(BaseModel):
     user_id: int = Field(..., description="用户ID")
     role_id: int = Field(..., description="角色ID")
+    team_id: int = Field(..., description="团队ID")
 
 
 class UserRoleResponse(BaseModel):
