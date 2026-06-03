@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+import json
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, get_user_teams
@@ -16,11 +17,19 @@ from app.schemas.team import (
     TeamSwitchRequest,
     TeamInviteRequest,
     AddMemberRequest,
+    AssignRolesRequest,
     TeamMemberResponse,
+    RoleSimpleResponse,
     UserTeamsListResponse
 )
 
-router = APIRouter(prefix="/teams", tags=["团队"])
+router = APIRouter(prefix="/v1/teams", tags=["团队"])
+
+
+def is_team_admin(db: Session, team_id: int, user_id: int) -> bool:
+    """判断用户是否为团队管理员（拥有 TEAM_ADMIN 角色）"""
+    user_roles = role_crud.get_user_roles(db, user_id, team_id)
+    return any(r.code == "TEAM_ADMIN" for r in user_roles)
 
 
 @router.post("/", response_model=TeamResponse, summary="创建团队", description="创建新团队，创建者自动成为团队管理员")
@@ -159,20 +168,8 @@ async def invite_member(
     """发送邀请邮件"""
     from app.services.email_service import email_service
 
-    # 验证用户属于该团队
-    if not team_crud.is_member(db, team_id, current_user.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权邀请成员"
-        )
-
-    # 验证用户是团队管理员（在该团队内）
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_owner = team_crud.is_owner(db, team_id, current_user.id)
-
-    if not (is_admin or is_owner):
+    # 验证用户是团队管理员
+    if not is_team_admin(db, team_id, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有团队管理员可以邀请成员"
@@ -202,7 +199,7 @@ async def invite_member(
     return {"message": "邀请邮件已发送", "email": request.email}
 
 
-@router.get("/{team_id}/members", response_model=List[TeamMemberResponse], summary="获取团队成员列表", description="获取团队成员列表")
+@router.get("/{team_id}/members", response_model=List[TeamMemberResponse], summary="获取团队成员列表", description="获取团队成员列表（包含角色信息）")
 def get_team_members(
     team_id: int,
     current_user: User = Depends(get_current_active_user),
@@ -225,13 +222,17 @@ def get_team_members(
             email=m["email"],
             avatar_url=m["avatar_url"],
             current_team=m["current_team"],
-            joined_at=m["joined_at"]
+            joined_at=m["joined_at"],
+            roles=[
+                RoleSimpleResponse(id=r["id"], name=r["name"], code=r["code"])
+                for r in (json.loads(m["roles"]) if isinstance(m["roles"], str) else m["roles"])
+            ]
         )
         for m in members
     ]
 
 
-@router.delete("/{team_id}/members/{user_id}", summary="移除团队成员", description="从团队中移除指定成员")
+@router.delete("/{team_id}/members/{user_id}", summary="移除团队成员", description="从团队中移除指定成员，同步删除角色关系")
 def remove_member(
     team_id: int,
     user_id: int,
@@ -240,25 +241,20 @@ def remove_member(
 ):
     """移除团队成员"""
     # 验证用户是团队管理员
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_owner = team_crud.is_owner(db, team_id, current_user.id)
-
-    if not (is_admin or is_owner):
+    if not is_team_admin(db, team_id, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有团队管理员可以移除成员"
         )
 
-    # 不能移除自己（除非是团队创建者）
-    if user_id == current_user.id and not is_owner:
+    # 不能移除自己
+    if user_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="不能移除自己"
         )
 
-    # 移除成员
+    # 移除成员（CRUD 已包含删除角色逻辑）
     success = team_crud.remove_member(db, team_id, user_id)
     if not success:
         raise HTTPException(
@@ -278,12 +274,7 @@ def update_team(
 ):
     """更新团队信息"""
     # 验证用户是团队管理员
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_owner = team_crud.is_owner(db, team_id, current_user.id)
-
-    if not (is_admin or is_owner):
+    if not is_team_admin(db, team_id, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有团队管理员可以更新团队信息"
@@ -308,12 +299,7 @@ def regenerate_invite_code(
 ):
     """重新生成邀请码"""
     # 验证用户是团队管理员
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_owner = team_crud.is_owner(db, team_id, current_user.id)
-
-    if not (is_admin or is_owner):
+    if not is_team_admin(db, team_id, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有团队管理员可以重置邀请码"
@@ -332,13 +318,8 @@ def add_member_direct(
     db: Session = Depends(get_db)
 ):
     """直接添加成员到团队"""
-    # 验证操作者是团队管理员或创建者
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_owner = team_crud.is_owner(db, team_id, current_user.id)
-
-    if not (is_admin or is_owner):
+    # 验证用户是团队管理员
+    if not is_team_admin(db, team_id, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有团队管理员可以添加成员"
@@ -375,3 +356,74 @@ def add_member_direct(
             permission_service.clear_user_permissions_cache(request.user_id, team_id)
 
     return {"message": "成员已添加", "user_id": request.user_id}
+
+
+@router.post("/{team_id}/members/{user_id}/roles", summary="分配成员角色", description="为团队成员分配角色（替换模式）")
+def assign_member_roles(
+    team_id: int,
+    user_id: int,
+    request: AssignRolesRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """为团队成员分配角色"""
+    # 验证用户是团队管理员
+    if not is_team_admin(db, team_id, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有团队管理员可以分配角色"
+        )
+
+    # 不能修改自己的角色（防止误删自己的 TEAM_ADMIN）
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不能修改自己的角色"
+        )
+
+    # 检查目标用户是否在团队中
+    if not team_crud.is_member(db, team_id, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该用户不在团队中"
+        )
+
+    # 验证角色是否存在
+    for role_id in request.role_ids:
+        role = role_crud.get_by_id(db, role_id)
+        if not role:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"角色 ID {role_id} 不存在"
+            )
+
+    # 批量分配角色（替换模式）
+    role_crud.assign_roles_to_user(db, user_id, request.role_ids, team_id)
+
+    return {"message": "角色已分配", "user_id": user_id, "role_ids": request.role_ids}
+
+
+@router.get("/{team_id}/members/{user_id}/roles", response_model=List[RoleSimpleResponse], summary="获取成员角色", description="获取团队成员的角色列表")
+def get_member_roles(
+    team_id: int,
+    user_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """获取团队成员的角色列表"""
+    # 验证用户属于该团队
+    if not team_crud.is_member(db, team_id, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权查看"
+        )
+
+    # 检查目标用户是否在团队中
+    if not team_crud.is_member(db, team_id, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该用户不在团队中"
+        )
+
+    roles = role_crud.get_user_roles(db, user_id, team_id)
+    return [RoleSimpleResponse(id=r.id, name=r.name, code=r.code) for r in roles]
