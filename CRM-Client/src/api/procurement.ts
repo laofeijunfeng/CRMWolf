@@ -108,7 +108,7 @@ export interface StageTemplateListParams {
 
 const procurementApi = {
   getProcurementMethods: (params?: ProcurementMethodListParams) => {
-    return request.get<ProcurementMethodResponse[]>('/api/v1/procurement-methods/', { params })
+    return request.get<ProcurementMethodResponse[]>('/v1/procurement-methods/', { params })
   },
 
   getProcurementMethod: (methodId: number) => {
@@ -116,7 +116,7 @@ const procurementApi = {
   },
 
   createProcurementMethod: (data: ProcurementMethodCreate) => {
-    return request.post<ProcurementMethodResponse>('/api/v1/procurement-methods/', data)
+    return request.post<ProcurementMethodResponse>('/v1/procurement-methods/', data)
   },
 
   updateProcurementMethod: (methodId: number, data: ProcurementMethodUpdate) => {
@@ -136,7 +136,7 @@ const procurementApi = {
   },
 
   getStageTemplates: (params: StageTemplateListParams) => {
-    return request.get<ProcurementStageTemplateResponse[]>('/api/v1/procurement-stage-templates/', { params })
+    return request.get<ProcurementStageTemplateResponse[]>('/v1/procurement-stage-templates/', { params })
   },
 
   getStageTemplate: (templateId: number) => {
@@ -144,7 +144,7 @@ const procurementApi = {
   },
 
   createStageTemplate: (data: ProcurementStageTemplateCreate) => {
-    return request.post<ProcurementStageTemplateResponse>('/api/v1/procurement-stage-templates/', data)
+    return request.post<ProcurementStageTemplateResponse>('/v1/procurement-stage-templates/', data)
   },
 
   updateStageTemplate: (templateId: number, data: ProcurementStageTemplateUpdate) => {
@@ -180,7 +180,7 @@ const procurementApi = {
   },
 
   batchMigrateOpportunities: (sourceMethodId: number, targetMethodId: number, opportunityIds?: number[]) => {
-    return request.post<{ message: string; migrated_count: number; failed_count: number }>('/api/v1/procurement-admin/batch-migrate-opportunities', {
+    return request.post<{ message: string; migrated_count: number; failed_count: number }>('/v1/procurement-admin/batch-migrate-opportunities', {
       source_method_id: sourceMethodId,
       target_method_id: targetMethodId,
       opportunity_ids: opportunityIds
@@ -222,7 +222,7 @@ const procurementApi = {
   },
 
   getProcurementMethodOptions: () => {
-    return request.get<ProcurementMethodOption[]>('/api/v1/procurement-methods/options')
+    return request.get<ProcurementMethodOption[]>('/v1/procurement-methods/options')
   }
 }
 

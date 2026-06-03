@@ -540,10 +540,9 @@ onMounted(() => {
 
 // 表单内容
 .form-content {
+  max-width: 1200px;
+  margin: 0 auto;
   padding: $wolf-page-padding;
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-md;
 }
 
 // 表单卡片

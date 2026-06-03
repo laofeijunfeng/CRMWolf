@@ -466,63 +466,114 @@
 </template>
 ```
 
-**详情页/表单页结构（简化的 page-header）：**
+**详情页/表单页结构（sticky page-header）：**
+
+> ⚠️ **重要**：详情页采用 sticky header 设计，确保滚动时头部固定，内容区撑满页面宽度。
 
 ```vue
 <template>
-  <div class="detail-container">
-    <!-- 简化的页面头部：返回按钮 + 标题 + 操作按钮 -->
+  <div class="detail-page">
+    <!-- sticky 页面头部：返回按钮 + 标题 + 操作按钮 -->
     <div class="page-header">
-      <el-button type="text" class="wolf-btn wolf-btn--back" @click="handleBack">
-        <el-icon><ArrowLeft /></el-icon>
-      </el-button>
-      <h1 class="page-header__title">{{ pageTitle }}</h1>
-      <el-space>
-        <el-button type="primary" class="wolf-btn wolf-btn--primary" @click="handleEdit">
-          编辑
+      <div class="page-header-left">
+        <el-button class="back-btn" @click="handleBack">
+          <el-icon><ArrowLeft /></el-icon>
         </el-button>
-      </el-space>
+        <h1 class="page-title">{{ pageTitle }}</h1>
+      </div>
+      <div class="page-header-right">
+        <el-button type="primary" size="small" @click="handleEdit">编辑</el-button>
+      </div>
     </div>
 
-    <!-- 内容区 -->
-    <div class="detail-content">...</div>
+    <!-- 内容区：撑满页面宽度 -->
+    <div v-loading="loading" class="detail-content">
+      <!-- 信息卡片 -->
+      <div class="info-card">...</div>
+      <!-- 其他卡片 -->
+      <div class="tabs-card">...</div>
+    </div>
   </div>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables.scss' as *;
 
+// 详情页容器
+.detail-page {
+  padding: 0;
+  background: $wolf-bg-page;
+  min-height: calc(100vh - 48px);
+}
+
+// sticky 页面头部（关键样式）
 .page-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: $wolf-bg-card;
+  border-bottom: 1px solid $wolf-border-default;
+  height: $wolf-header-height;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 $wolf-page-padding;
+}
+
+.page-header-left,
+.page-header-right {
   display: flex;
   align-items: center;
   gap: $wolf-space-sm;
-  padding: $wolf-card-padding;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  box-shadow: $wolf-shadow-card;
-  margin-bottom: $wolf-space-md;
 }
 
-.page-header__title {
+.page-header-left {
   flex: 1;
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
+  min-width: 0;
 }
 
-.wolf-btn--back {
+.page-header-right {
+  flex-shrink: 0;
+}
+
+// 返回按钮
+.back-btn {
   width: 32px !important;
   height: 32px !important;
   padding: 0 !important;
   border-radius: $wolf-radius-md !important;
-  background: $wolf-purple-bg !important;
+  background: transparent !important;
   border: none !important;
-  color: $wolf-text-secondary !important;
 
   &:hover {
     background: $wolf-bg-hover !important;
   }
+}
+
+// 页面标题
+.page-title {
+  font-size: $wolf-font-size-title;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// 内容区：撑满页面宽度（关键样式）
+.detail-content {
+  padding: $wolf-page-padding;
+}
+
+// 信息卡片：撑满父容器宽度
+.info-card,
+.tabs-card {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+  padding: $wolf-space-md;
+  margin-bottom: $wolf-space-md;
+  box-shadow: $wolf-shadow-card;
 }
 </style>
 ```
@@ -541,6 +592,112 @@
 - ❌ **列表页**：Leads、Customers、Contracts、Opportunities 等列表页面不需要 page-header
 - ✅ **详情页**：LeadDetail、CustomerDetail、ContractDetail 等需要返回按钮
 - ✅ **表单页**：LeadForm、ContractCreate、ApprovalFlowForm 等需要返回按钮
+
+#### 7.1.2 表单页布局规范
+
+**表单页分类：**
+
+| 表单类型 | 最大宽度 | 说明 |
+|---------|---------|------|
+| **简单表单** | 800px | 单列布局，表单项较少 |
+| **复杂配置表单** | 1200px | 双列布局，带右侧预览区 |
+
+**简单表单页示例（800px）：**
+
+适用于 LeadForm、CustomerEdit、OpportunityEdit、ContractCreate、PaymentPlanCreate、InvoiceForm 等。
+
+```vue
+<template>
+  <div class="form-page">
+    <!-- sticky 页面头部 -->
+    <div class="page-header">
+      <div class="page-header-left">
+        <el-button class="back-btn" @click="handleBack">
+          <el-icon><ArrowLeft /></el-icon>
+        </el-button>
+        <h1 class="page-title">{{ pageTitle }}</h1>
+      </div>
+    </div>
+
+    <!-- 表单内容：居中布局，最大宽度 800px -->
+    <div class="form-container">
+      <div class="form-card">
+        <el-form :model="form" :rules="rules" label-position="top">
+          <!-- 表单项... -->
+        </el-form>
+        <div class="form-actions">
+          <el-button @click="handleBack">取消</el-button>
+          <el-button type="primary" @click="handleSubmit">保存</el-button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped lang="scss">
+@use '@/styles/variables.scss' as *;
+
+// 表单容器：居中布局，最大宽度 800px
+.form-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: $wolf-page-padding;
+}
+
+.form-card {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-lg;
+  padding: $wolf-card-padding;
+  box-shadow: $wolf-shadow-card;
+}
+</style>
+```
+
+**复杂配置表单页示例（1200px）：**
+
+适用于 ApprovalFlowForm、ProcurementMethodForm 等，包含左侧表单 + 右侧预览区的双列布局。
+
+```vue
+<template>
+  <div class="config-form-page">
+    <!-- sticky 页面头部 -->
+    <div class="page-header">
+      <div class="page-header-left">
+        <el-button class="back-btn" @click="handleBack">
+          <el-icon><ArrowLeft /></el-icon>
+        </el-button>
+        <h1 class="page-title">{{ pageTitle }}</h1>
+      </div>
+    </div>
+
+    <!-- 表单内容：居中布局，最大宽度 1200px -->
+    <div class="form-content">
+      <el-row :gutter="16">
+        <el-col :span="14">
+          <!-- 左侧表单区 -->
+          <div class="form-card">...</div>
+        </el-col>
+        <el-col :span="10">
+          <!-- 右侧预览区 -->
+          <div class="preview-card">...</div>
+        </el-col>
+      </el-row>
+      <div class="form-actions">...</div>
+    </div>
+  </div>
+</template>
+
+<style scoped lang="scss">
+@use '@/styles/variables.scss' as *;
+
+// 表单内容：居中布局，最大宽度 1200px
+.form-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: $wolf-page-padding;
+}
+</style>
+```
 
 ### 7.2 网格布局
 

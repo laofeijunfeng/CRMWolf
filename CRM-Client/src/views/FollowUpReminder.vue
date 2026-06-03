@@ -195,7 +195,8 @@ const handleFollowUpModalOk = async () => {
     const data: LeadFollowUpCreate = {
       content: followUpForm.content,
       method: followUpForm.method,
-      next_follow_time: followUpForm.next_follow_time || undefined
+      next_follow_time: followUpForm.next_follow_time || null,
+      next_action: null
     }
     await leadApi.addFollowUp(selectedLead.value.id, data)
     ElMessage.success('添加成功')

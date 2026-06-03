@@ -17,43 +17,50 @@ from app.schemas.procurement import (
 
 class ProcurementMethodCRUD:
     """采购方式 CRUD 操作"""
-    
+
     def get(self, db: Session, id: int) -> Optional[ProcurementMethod]:
         """根据ID获取采购方式"""
         return db.query(ProcurementMethod).filter(ProcurementMethod.id == id).first()
-    
-    def get_by_code(self, db: Session, code: str) -> Optional[ProcurementMethod]:
+
+    def get_by_code(self, db: Session, code: str, team_id: Optional[int] = None) -> Optional[ProcurementMethod]:
         """根据编码获取采购方式"""
-        return db.query(ProcurementMethod).filter(ProcurementMethod.code == code).first()
-    
+        query = db.query(ProcurementMethod).filter(ProcurementMethod.code == code)
+        if team_id is not None:
+            query = query.filter(ProcurementMethod.team_id == team_id)
+        return query.first()
+
     def get_multi(
-        self, 
-        db: Session, 
-        skip: int = 0, 
+        self,
+        db: Session,
+        team_id: Optional[int] = None,
+        skip: int = 0,
         limit: int = 100,
         is_active: Optional[int] = None
     ) -> Tuple[List[ProcurementMethod], int]:
         """获取采购方式列表"""
         query = db.query(ProcurementMethod)
-        
+
+        if team_id is not None:
+            query = query.filter(ProcurementMethod.team_id == team_id)
         if is_active is not None:
             query = query.filter(ProcurementMethod.is_active == is_active)
-        
+
         total = query.count()
         items = query.order_by(ProcurementMethod.sort_order).offset(skip).limit(limit).all()
-        
+
         return items, total
-    
-    def create(self, db: Session, obj_in: ProcurementMethodCreate, creator_id: str) -> ProcurementMethod:
+
+    def create(self, db: Session, obj_in: ProcurementMethodCreate, creator_id: str, team_id: int) -> ProcurementMethod:
         """创建采购方式"""
-        # 校验code唯一性
-        existing = self.get_by_code(db, obj_in.code)
+        # 校验code唯一性（在同一团队内）
+        existing = self.get_by_code(db, obj_in.code, team_id)
         if existing:
             raise ValueError(f"采购方式编码 {obj_in.code} 已存在")
-        
+
         db_obj = ProcurementMethod(
             **obj_in.model_dump(),
-            created_by=creator_id
+            created_by=creator_id,
+            team_id=team_id
         )
         db.add(db_obj)
         db.commit()
@@ -105,63 +112,79 @@ class ProcurementMethodCRUD:
 
 class ProcurementStageTemplateCRUD:
     """采购阶段模板 CRUD 操作"""
-    
+
     def get(self, db: Session, id: int) -> Optional[ProcurementStageTemplate]:
         """根据ID获取阶段模板"""
         return db.query(ProcurementStageTemplate).filter(ProcurementStageTemplate.id == id).first()
-    
+
     def get_by_method(
-        self, 
-        db: Session, 
-        method_id: int
+        self,
+        db: Session,
+        method_id: int,
+        team_id: Optional[int] = None
     ) -> List[ProcurementStageTemplate]:
         """获取采购方式下的所有阶段模板"""
-        return db.query(ProcurementStageTemplate).filter(
+        query = db.query(ProcurementStageTemplate).filter(
             ProcurementStageTemplate.procurement_method_id == method_id
-        ).order_by(ProcurementStageTemplate.sort_order).all()
-    
+        )
+        if team_id is not None:
+            query = query.filter(ProcurementStageTemplate.team_id == team_id)
+        return query.order_by(ProcurementStageTemplate.sort_order).all()
+
     def get_default_stage(
-        self, 
-        db: Session, 
-        method_id: int
+        self,
+        db: Session,
+        method_id: int,
+        team_id: Optional[int] = None
     ) -> Optional[ProcurementStageTemplate]:
         """获取采购方式的默认起始阶段"""
-        return db.query(ProcurementStageTemplate).filter(
+        query = db.query(ProcurementStageTemplate).filter(
             ProcurementStageTemplate.procurement_method_id == method_id,
             ProcurementStageTemplate.is_default_start == 1
-        ).first()
+        )
+        if team_id is not None:
+            query = query.filter(ProcurementStageTemplate.team_id == team_id)
+        return query.first()
     
     def create(
-        self, 
-        db: Session, 
-        obj_in: ProcurementStageTemplateCreate, 
-        creator_id: str
+        self,
+        db: Session,
+        obj_in: ProcurementStageTemplateCreate,
+        creator_id: str,
+        team_id: Optional[int] = None
     ) -> ProcurementStageTemplate:
         """创建阶段模板"""
         # 校验同一方式下template_code唯一性
-        existing = db.query(ProcurementStageTemplate).filter(
+        query = db.query(ProcurementStageTemplate).filter(
             ProcurementStageTemplate.procurement_method_id == obj_in.procurement_method_id,
             ProcurementStageTemplate.template_code == obj_in.template_code
-        ).first()
-        
+        )
+        if team_id is not None:
+            query = query.filter(ProcurementStageTemplate.team_id == team_id)
+        existing = query.first()
+
         if existing:
             raise ValueError(f"阶段编码 {obj_in.template_code} 已存在")
-        
+
         # 校验默认起始阶段唯一性
         if obj_in.is_default_start == 1:
-            existing_default = db.query(ProcurementStageTemplate).filter(
+            query = db.query(ProcurementStageTemplate).filter(
                 ProcurementStageTemplate.procurement_method_id == obj_in.procurement_method_id,
                 ProcurementStageTemplate.is_default_start == 1
-            ).first()
-            
+            )
+            if team_id is not None:
+                query = query.filter(ProcurementStageTemplate.team_id == team_id)
+            existing_default = query.first()
+
             if existing_default:
                 raise ValueError("每个采购方式下只能有一个默认起始阶段")
-        
+
         db_obj = ProcurementStageTemplate(
             **obj_in.model_dump(),
             created_by=creator_id,
             version=1,
-            version_lock=0
+            version_lock=0,
+            team_id=team_id
         )
         db.add(db_obj)
         db.commit()
@@ -438,27 +461,30 @@ class ProcurementManagementToolCRUD:
     """采购管理工具 CRUD 操作"""
     
     def assess_template_change_impact(
-        self, 
-        db: Session, 
-        template_id: int
+        self,
+        db: Session,
+        template_id: int,
+        team_id: int
     ) -> dict:
         """评估阶段模板变更的影响
-        
+
         返回受影响的商机列表
         """
-        # 获取阶段模板
+        # 获取阶段模板并验证团队归属
         template = db.query(ProcurementStageTemplate).filter(
-            ProcurementStageTemplate.id == template_id
+            ProcurementStageTemplate.id == template_id,
+            ProcurementStageTemplate.team_id == team_id
         ).first()
-        
+
         if not template:
-            raise ValueError(f"阶段模板 {template_id} 不存在")
-        
-        # 查找使用该阶段的活跃商机
+            raise ValueError(f"阶段模板不存在或不属于当前团队")
+
+        # 查找使用该阶段的活跃商机（限制在当前团队）
         from app.models.opportunity import Opportunity
-        
+
         active_opportunities = db.query(Opportunity).filter(
             Opportunity.procurement_method_id == template.procurement_method_id,
+            Opportunity.team_id == team_id,
             Opportunity.current_stage_snapshot_id == db.query(OpportunityStageSnapshot.id).filter(
                 OpportunityStageSnapshot.procurement_stage_template_id == template_id,
                 OpportunityStageSnapshot.exited_at == None
@@ -486,51 +512,57 @@ class ProcurementManagementToolCRUD:
         source_method_id: int,
         target_method_id: int,
         opportunity_ids: Optional[List[int]] = None,
-        operator_id: str = None
+        operator_id: str = None,
+        team_id: int = None
     ) -> dict:
         """批量迁移商机到新采购方式
-        
+
         Args:
             db: 数据库会话
             source_method_id: 源采购方式ID
             target_method_id: 目标采购方式ID
             opportunity_ids: 要迁移的商机ID列表，为空则迁移所有使用源方式的商机
             operator_id: 操作人ID
-        
+            team_id: 团队ID
+
         Returns:
             迁移结果统计
         """
-        # 获取源和目标采购方式
+        # 获取源和目标采购方式（验证团队归属）
         source_method = db.query(ProcurementMethod).filter(
-            ProcurementMethod.id == source_method_id
+            ProcurementMethod.id == source_method_id,
+            ProcurementMethod.team_id == team_id
         ).first()
-        
+
         target_method = db.query(ProcurementMethod).filter(
-            ProcurementMethod.id == target_method_id
+            ProcurementMethod.id == target_method_id,
+            ProcurementMethod.team_id == team_id
         ).first()
-        
+
         if not source_method:
-            raise ValueError(f"源采购方式 {source_method_id} 不存在")
+            raise ValueError(f"源采购方式不存在或不属于当前团队")
         if not target_method:
-            raise ValueError(f"目标采购方式 {target_method_id} 不存在")
-        
+            raise ValueError(f"目标采购方式不存在或不属于当前团队")
+
         # 获取目标采购方式的默认起始阶段
         default_stage = db.query(ProcurementStageTemplate).filter(
             ProcurementStageTemplate.procurement_method_id == target_method_id,
+            ProcurementStageTemplate.team_id == team_id,
             ProcurementStageTemplate.is_default_start == 1
         ).first()
-        
+
         if not default_stage:
-            raise ValueError(f"目标采购方式 {target_method_id} 没有设置默认起始阶段")
-        
-        # 查询要迁移的商机
+            raise ValueError(f"目标采购方式没有设置默认起始阶段")
+
+        # 查询要迁移的商机（限制在当前团队）
         from app.models.opportunity import Opportunity
-        
+
         query = db.query(Opportunity).filter(
             Opportunity.procurement_method_id == source_method_id,
+            Opportunity.team_id == team_id,
             Opportunity.status == 0  # 只迁移跟进中的商机
         )
-        
+
         if opportunity_ids:
             query = query.filter(Opportunity.id.in_(opportunity_ids))
         
@@ -559,7 +591,8 @@ class ProcurementManagementToolCRUD:
                     win_probability=default_stage.win_probability,
                     template_sort_order=default_stage.sort_order,
                     template_code=default_stage.template_code,
-                    snapshot_version=default_stage.version
+                    snapshot_version=default_stage.version,
+                    team_id=team_id
                 )
                 db.add(new_snapshot)
                 db.flush()
@@ -595,27 +628,30 @@ class ProcurementManagementToolCRUD:
         template_id: int,
         target_version: int,
         operator_id: str,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
+        team_id: int = None
     ) -> ProcurementStageTemplate:
         """回滚阶段模板到指定版本
-        
+
         Args:
             db: 数据库会话
             template_id: 阶段模板ID
             target_version: 目标版本号
             operator_id: 操作人ID
             reason: 回滚原因
-        
+            team_id: 团队ID
+
         Returns:
             回滚后的阶段模板对象
         """
-        # 获取当前模板
+        # 获取当前模板并验证团队归属
         template = db.query(ProcurementStageTemplate).filter(
-            ProcurementStageTemplate.id == template_id
+            ProcurementStageTemplate.id == template_id,
+            ProcurementStageTemplate.team_id == team_id
         ).first()
-        
+
         if not template:
-            raise ValueError(f"阶段模板 {template_id} 不存在")
+            raise ValueError(f"阶段模板不存在或不属于当前团队")
         
         if template.version == target_version:
             raise ValueError(f"当前版本已经是 {target_version}，无需回滚")
@@ -678,17 +714,28 @@ class ProcurementManagementToolCRUD:
     def get_active_opportunities_by_stage(
         self,
         db: Session,
-        stage_template_id: int
+        stage_template_id: int,
+        team_id: int
     ) -> List[dict]:
         """获取使用指定阶段的活跃商机列表"""
-        # 查询当前使用该阶段的商机
+        # 验证阶段模板属于当前团队
+        template = db.query(ProcurementStageTemplate).filter(
+            ProcurementStageTemplate.id == stage_template_id,
+            ProcurementStageTemplate.team_id == team_id
+        ).first()
+
+        if not template:
+            raise ValueError(f"阶段模板不存在或不属于当前团队")
+
+        # 查询当前使用该阶段的商机（限制在当前团队）
         from app.models.opportunity import Opportunity
-        
+
         opportunities = db.query(Opportunity).filter(
             Opportunity.current_stage_snapshot_id == db.query(OpportunityStageSnapshot.id).filter(
                 OpportunityStageSnapshot.procurement_stage_template_id == stage_template_id,
                 OpportunityStageSnapshot.exited_at == None
             ).subquery(),
+            Opportunity.team_id == team_id,
             Opportunity.status == 0
         ).all()
         

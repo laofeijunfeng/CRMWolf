@@ -1,51 +1,24 @@
 <template>
   <div class="opportunities-page">
-    <!-- 快捷筛选标签 -->
-    <div class="filter-tabs">
-      <span
-        :class="['filter-tab', { active: activeTab === 'all' }]"
-        @click="handleTabChange('all')"
-      >所有商机</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'active' }]"
-        @click="handleTabChange('active')"
-      >跟进中</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'won' }]"
-        @click="handleTabChange('won')"
-      >已赢单</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'lost' }]"
-        @click="handleTabChange('lost')"
-      >已输单</span>
-    </div>
-
-    <!-- 搜索筛选区 -->
-    <div class="filter-card">
-      <div class="filter-row">
-        <div class="filter-left">
-          <el-input
-            v-model="searchForm.keyword"
-            placeholder="搜索商机名称或客户名称"
-            clearable
-            class="search-input"
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-        </div>
-        <div class="filter-center">
-          <el-select v-model="searchForm.customer_id" placeholder="客户" clearable class="filter-item">
-            <el-option v-for="customer in customers" :key="customer.id" :value="customer.id" :label="customer.account_name" />
-          </el-select>
-          <el-input v-model="searchForm.owner_id" placeholder="负责人ID" clearable class="filter-item" />
-        </div>
-        <div class="filter-right">
-          <el-button @click="handleReset">重置</el-button>
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-        </div>
+    <!-- 快捷筛选标签 + 操作按钮 -->
+    <div class="filter-tabs-bar">
+      <div class="filter-tabs">
+        <span
+          :class="['filter-tab', { active: activeTab === 'all' }]"
+          @click="handleTabChange('all')"
+        >所有商机</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'active' }]"
+          @click="handleTabChange('active')"
+        >跟进中</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'won' }]"
+          @click="handleTabChange('won')"
+        >已赢单</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'lost' }]"
+          @click="handleTabChange('lost')"
+        >已输单</span>
       </div>
     </div>
 
@@ -56,9 +29,27 @@
         v-loading="loading"
         stripe
       >
-        <el-table-column prop="opportunity_name" label="商机名称" min-width="200">
+        <el-table-column prop="opportunity_name" min-width="220">
+          <template #header>
+            <FilterTableHeader
+              label="商机名称"
+              field="opportunity_name"
+              :filter="{ type: 'search', placeholder: '搜索商机名称' }"
+              :sortable="true"
+              :filter-value="filterValues['opportunity_name']"
+              :sort-state="sortState.field === 'opportunity_name' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
-            <span class="link-text" @click="router.push(`/opportunities/${row.id}`)">{{ row.opportunity_name }}</span>
+            <div class="name-cell">
+              <el-icon class="magicwand-icon" @click="handleMagicWand(row)">
+                <MagicStick />
+              </el-icon>
+              <span class="link-text" @click="router.push(`/opportunities/${row.id}`)">{{ row.opportunity_name }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="customer_name" label="客户名称" min-width="150">
@@ -66,7 +57,16 @@
             <span class="link-text" @click="handleViewCustomer(row.customer_id)">{{ row.customer_name || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="预计金额" width="130" align="right">
+        <el-table-column width="130" align="right">
+          <template #header>
+            <FilterTableHeader
+              label="预计金额"
+              field="total_amount"
+              :sortable="true"
+              :sort-state="sortState.field === 'total_amount' ? sortState : null"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             <span class="amount-text">{{ formatAmount(row.total_amount) }}</span>
           </template>
@@ -90,7 +90,16 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="预计成交日期" width="140">
+        <el-table-column width="140">
+          <template #header>
+            <FilterTableHeader
+              label="预计成交日期"
+              field="expected_closing_date"
+              :sortable="true"
+              :sort-state="sortState.field === 'expected_closing_date' ? sortState : null"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             {{ formatDate(row.expected_closing_date) }}
           </template>
@@ -112,18 +121,48 @@
             {{ row.owner_info?.name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column width="100">
+          <template #header>
+            <FilterTableHeader
+              label="状态"
+              field="status"
+              :filter="{ type: 'select', placeholder: '选择状态', options: [
+                { value: 0, label: '跟进中' },
+                { value: 1, label: '已赢单' },
+                { value: 2, label: '已输单' }
+              ] }"
+              :sortable="true"
+              :filter-value="filterValues['status']"
+              :sort-state="sortState.field === 'status' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             <span :class="['status-tag', getStatusClass(row.status)]">
               {{ getStatusText(row.status) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <div class="action-cell">
-              <span v-if="canEditOpportunity" class="action-link" @click="router.push(`/opportunities/${row.id}/edit`)">编辑</span>
-              <span v-if="canDeleteOpportunity" class="action-link action-danger" @click="handleDelete(row)">删除</span>
+              <el-tooltip content="查看" placement="top">
+                <el-icon class="action-icon" @click="router.push(`/opportunities/${row.id}`)">
+                  <View />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canEditRow(row)" content="编辑" placement="top">
+                <el-icon class="action-icon" @click="router.push(`/opportunities/${row.id}/edit`)">
+                  <Edit />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canDeleteRow(row)" content="删除" placement="top">
+                <el-icon class="action-icon action-danger" @click="handleDelete(row)">
+                  <Delete />
+                </el-icon>
+              </el-tooltip>
             </div>
           </template>
         </el-table-column>
@@ -143,6 +182,15 @@
         />
       </div>
     </div>
+
+    <!-- Magic Wand 弹窗 -->
+    <MagicWandDialog
+      v-model="showMagicWand"
+      entity-type="opportunity"
+      :entity-id="magicWandEntityId"
+      :entity-name="magicWandEntityName"
+      @refresh="fetchOpportunities"
+    />
   </div>
 </template>
 
@@ -150,20 +198,31 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  Search, Delete
-} from '@element-plus/icons-vue'
+import { Search, View, Edit, Delete, MagicStick } from '@element-plus/icons-vue'
+import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
+import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
+import MagicWandDialog from '@/components/MagicWandDialog.vue'
 import { opportunityApi, type Opportunity, type OpportunityListParams } from '@/api/opportunity'
 import customerApi from '@/api/customer'
 import { usePermissionStore } from '@/stores/permissions'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const tableData = ref<Opportunity[]>([])
 const customers = ref<any[]>([])
 const activeTab = ref('all')
+
+const filterValues = ref<Record<string, FilterValue>>({})
+const sortState = ref<SortState>({ field: '', order: null })
+
+// MagicWand 弹窗
+const showMagicWand = ref(false)
+const magicWandEntityId = ref(0)
+const magicWandEntityName = ref('')
 
 const searchForm = reactive({
   keyword: '',
@@ -179,13 +238,32 @@ const pagination = reactive({
   total: 0
 })
 
-const canEditOpportunity = computed(() =>
-  permissionStore.hasAnyPermission(['opportunity:update', 'opportunity:edit_own', 'opportunity:edit_all'])
+// 权限计算属性
+const canEditAllOpportunity = computed(() =>
+  permissionStore.hasPermission('opportunity:edit:all')
+)
+const canEditOwnOpportunity = computed(() =>
+  permissionStore.hasPermission('opportunity:edit:own')
+)
+const canDeleteAllOpportunity = computed(() =>
+  permissionStore.hasPermission('opportunity:delete:all')
+)
+const canDeleteOwnOpportunity = computed(() =>
+  permissionStore.hasPermission('opportunity:delete:own')
 )
 
-const canDeleteOpportunity = computed(() =>
-  permissionStore.hasAnyPermission(['opportunity:delete', 'opportunity:delete_own', 'opportunity:delete_all'])
-)
+// 行级权限检查函数
+const canEditRow = (row: Opportunity): boolean => {
+  if (canEditAllOpportunity.value) return true
+  if (canEditOwnOpportunity.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
+
+const canDeleteRow = (row: Opportunity): boolean => {
+  if (canDeleteAllOpportunity.value) return true
+  if (canDeleteOwnOpportunity.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
 
 const fetchCustomers = async () => {
   try {
@@ -196,14 +274,43 @@ const fetchCustomers = async () => {
   }
 }
 
+const handleFilterChange = (field: string, value: FilterValue) => {
+  filterValues.value[field] = value
+  pagination.current = 1
+  fetchOpportunities()
+}
+
+const handleFilterClear = (field: string) => {
+  delete filterValues.value[field]
+  pagination.current = 1
+  fetchOpportunities()
+}
+
+const handleSortChange = (newSortState: SortState) => {
+  sortState.value = newSortState
+  pagination.current = 1
+  fetchOpportunities()
+}
+
 const fetchOpportunities = async () => {
   loading.value = true
   try {
+    // 从 filterValues 提取筛选值
+    const keyword = filterValues.value['opportunity_name']?.search || searchForm.keyword || undefined
+    const statusSelect = filterValues.value['status']?.select
+    const statusFilter = statusSelect !== undefined && statusSelect !== null ? statusSelect : searchForm.status
+
     const params: OpportunityListParams = {
       skip: (pagination.current - 1) * pagination.pageSize,
-      limit: pagination.pageSize
+      limit: pagination.pageSize,
+      keyword,
+      customer_id: searchForm.customer_id,
+      procurement_stage_id: searchForm.procurement_stage_id,
+      owner_id: searchForm.owner_id,
+      status: statusFilter
     }
 
+    // 快捷筛选标签覆盖
     if (activeTab.value === 'active') {
       params.status = 0
     } else if (activeTab.value === 'won') {
@@ -212,17 +319,9 @@ const fetchOpportunities = async () => {
       params.status = 2
     }
 
-    if (searchForm.keyword) {
-      params.keyword = searchForm.keyword
-    }
-    if (searchForm.customer_id) {
-      params.customer_id = searchForm.customer_id
-    }
-    if (searchForm.procurement_stage_id) {
-      params.procurement_stage_id = searchForm.procurement_stage_id
-    }
-    if (searchForm.owner_id) {
-      params.owner_id = searchForm.owner_id
+    if (sortState.value.order) {
+      params.order_by = sortState.value.field
+      params.order_dir = sortState.value.order
     }
 
     const response = await opportunityApi.getOpportunities(params) as any
@@ -251,6 +350,8 @@ const handleReset = () => {
   searchForm.customer_id = undefined
   searchForm.procurement_stage_id = undefined
   searchForm.owner_id = undefined
+  filterValues.value = {}
+  sortState.value = { field: '', order: null }
   handleSearch()
 }
 
@@ -267,6 +368,12 @@ const handlePageSizeChange = (pageSize: number) => {
 
 const handleViewCustomer = (customerId: number) => {
   router.push(`/customers/${customerId}`)
+}
+
+const handleMagicWand = (record: Opportunity) => {
+  magicWandEntityId.value = record.id
+  magicWandEntityName.value = record.opportunity_name
+  showMagicWand.value = true
 }
 
 const handleDelete = async (record: Opportunity) => {
@@ -357,11 +464,22 @@ onMounted(async () => {
   min-height: calc(100vh - 48px);
 }
 
-// 快捷筛选标签
+// 快捷筛选标签 + 操作按钮栏
+.filter-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $wolf-space-md;
+}
+
 .filter-tabs {
   display: flex;
   gap: $wolf-space-xs;
-  margin-bottom: $wolf-space-md;
+}
+
+.filter-actions {
+  display: flex;
+  gap: $wolf-space-xs;
 }
 
 .filter-tab {
@@ -386,25 +504,6 @@ onMounted(async () => {
   }
 }
 
-// 筛选区
-.filter-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
-  box-shadow: $wolf-shadow-card;
-}
-
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-lg;
-}
-
-.filter-left {
-  flex-shrink: 0;
-}
-
 .search-input {
   width: 280px;
 }
@@ -425,10 +524,11 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 
-// 表格区
-// 表格样式由全局 wolf-design.scss 统一控制
+// 表格区 - 卡片容器样式
 .table-card {
-  background: transparent;
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+  box-shadow: $wolf-shadow-card;
   overflow: visible;
 }
 
@@ -446,6 +546,26 @@ onMounted(async () => {
     color: $wolf-text-link-hover;
   }
 }
+
+// 名称列布局
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.magicwand-icon {
+  font-size: 14px;
+  color: $wolf-primary;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    transform: scale(1.15);
+    color: $wolf-primary-hover;
+  }
+}
+
 
 // 金额样式
 .amount-text {
@@ -494,22 +614,19 @@ onMounted(async () => {
 .action-cell {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md;
+  gap: $wolf-space-sm;
 }
 
-.action-cell {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-md;
-  flex-wrap: wrap;
-}
-
-.action-link {
+.action-icon {
+  font-size: 16px;
   color: $wolf-text-link;
-  font-size: $wolf-font-size-auxiliary;
   cursor: pointer;
-  white-space: nowrap;
-  &:hover { color: $wolf-text-link-hover; }
+  transition: all 0.2s;
+
+  &:hover {
+    color: $wolf-text-link-hover;
+    transform: scale(1.1);
+  }
 }
 
 .action-danger {

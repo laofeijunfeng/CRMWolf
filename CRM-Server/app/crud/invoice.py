@@ -15,33 +15,46 @@ from app.schemas.invoice import (
 
 
 class InvoiceTitleCRUD:
-    def get_by_id(self, db: Session, title_id: int) -> Optional[InvoiceTitle]:
-        return db.query(InvoiceTitle).filter(InvoiceTitle.id == title_id).first()
-    
-    def get_by_customer_id(self, db: Session, customer_id: int) -> List[InvoiceTitle]:
-        return db.query(InvoiceTitle).filter(
+    def get_by_id(self, db: Session, title_id: int, team_id: Optional[int] = None) -> Optional[InvoiceTitle]:
+        query = db.query(InvoiceTitle).filter(InvoiceTitle.id == title_id)
+        if team_id is not None:
+            query = query.filter(InvoiceTitle.team_id == team_id)
+        return query.first()
+
+    def get_by_customer_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> List[InvoiceTitle]:
+        query = db.query(InvoiceTitle).filter(
             InvoiceTitle.customer_id == customer_id
-        ).order_by(InvoiceTitle.is_default.desc(), InvoiceTitle.created_time.desc()).all()
-    
-    def get_default_title(self, db: Session, customer_id: int) -> Optional[InvoiceTitle]:
-        return db.query(InvoiceTitle).filter(
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceTitle.team_id == team_id)
+        return query.order_by(InvoiceTitle.is_default.desc(), InvoiceTitle.created_time.desc()).all()
+
+    def get_default_title(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[InvoiceTitle]:
+        query = db.query(InvoiceTitle).filter(
             and_(
                 InvoiceTitle.customer_id == customer_id,
                 InvoiceTitle.is_default == True
             )
-        ).first()
-    
-    def get_by_taxpayer_id(self, db: Session, customer_id: int, taxpayer_id: str) -> Optional[InvoiceTitle]:
-        return db.query(InvoiceTitle).filter(
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceTitle.team_id == team_id)
+        return query.first()
+
+    def get_by_taxpayer_id(self, db: Session, customer_id: int, taxpayer_id: str, team_id: Optional[int] = None) -> Optional[InvoiceTitle]:
+        query = db.query(InvoiceTitle).filter(
             and_(
                 InvoiceTitle.customer_id == customer_id,
                 InvoiceTitle.taxpayer_id == taxpayer_id
             )
-        ).first()
-    
-    def create(self, db: Session, customer_id: int, obj_in: InvoiceTitleCreate) -> InvoiceTitle:
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceTitle.team_id == team_id)
+        return query.first()
+
+    def create(self, db: Session, customer_id: int, obj_in: InvoiceTitleCreate, team_id: int) -> InvoiceTitle:
         db_obj = InvoiceTitle(
             customer_id=customer_id,
+            team_id=team_id,
             **obj_in.model_dump()
         )
         db.add(db_obj)
@@ -86,32 +99,48 @@ class InvoiceTitleCRUD:
 
 
 class InvoiceApplicationCRUD:
-    def get_by_id(self, db: Session, application_id: int) -> Optional[InvoiceApplication]:
-        return db.query(InvoiceApplication).filter(InvoiceApplication.id == application_id).first()
-    
-    def get_by_application_number(self, db: Session, application_number: str) -> Optional[InvoiceApplication]:
-        return db.query(InvoiceApplication).filter(
+    def get_by_id(self, db: Session, application_id: int, team_id: Optional[int] = None) -> Optional[InvoiceApplication]:
+        query = db.query(InvoiceApplication).filter(InvoiceApplication.id == application_id)
+        if team_id is not None:
+            query = query.filter(InvoiceApplication.team_id == team_id)
+        return query.first()
+
+    def get_by_application_number(self, db: Session, application_number: str, team_id: Optional[int] = None) -> Optional[InvoiceApplication]:
+        query = db.query(InvoiceApplication).filter(
             InvoiceApplication.application_number == application_number
-        ).first()
-    
-    def get_by_payment_plan(self, db: Session, payment_plan_id: int) -> List[InvoiceApplication]:
-        return db.query(InvoiceApplication).filter(
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceApplication.team_id == team_id)
+        return query.first()
+
+    def get_by_payment_plan(self, db: Session, payment_plan_id: int, team_id: Optional[int] = None) -> List[InvoiceApplication]:
+        query = db.query(InvoiceApplication).filter(
             InvoiceApplication.payment_plan_id == payment_plan_id
-        ).order_by(InvoiceApplication.created_time.desc()).all()
-    
-    def get_by_contract(self, db: Session, contract_id: int) -> List[InvoiceApplication]:
-        return db.query(InvoiceApplication).filter(
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceApplication.team_id == team_id)
+        return query.order_by(InvoiceApplication.created_time.desc()).all()
+
+    def get_by_contract(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> List[InvoiceApplication]:
+        query = db.query(InvoiceApplication).filter(
             InvoiceApplication.contract_id == contract_id
-        ).order_by(InvoiceApplication.created_time.desc()).all()
-    
-    def get_by_customer(self, db: Session, customer_id: int) -> List[InvoiceApplication]:
-        return db.query(InvoiceApplication).filter(
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceApplication.team_id == team_id)
+        return query.order_by(InvoiceApplication.created_time.desc()).all()
+
+    def get_by_customer(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> List[InvoiceApplication]:
+        query = db.query(InvoiceApplication).filter(
             InvoiceApplication.customer_id == customer_id
-        ).order_by(InvoiceApplication.created_time.desc()).all()
-    
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceApplication.team_id == team_id)
+        return query.order_by(InvoiceApplication.created_time.desc()).all()
+
     def list_applications(
         self,
         db: Session,
+        team_id: int,
         skip: int = 0,
         limit: int = 100,
         customer_id: Optional[int] = None,
@@ -121,8 +150,8 @@ class InvoiceApplicationCRUD:
         current_user_id: Optional[str] = None
     ) -> Tuple[List[InvoiceApplication], int]:
         from app.models.user import User
-        
-        query = db.query(InvoiceApplication)
+
+        query = db.query(InvoiceApplication).filter(InvoiceApplication.team_id == team_id)
         
         if customer_id:
             query = query.filter(InvoiceApplication.customer_id == customer_id)
@@ -150,7 +179,8 @@ class InvoiceApplicationCRUD:
         self,
         db: Session,
         obj_in: InvoiceApplicationCreate,
-        applicant_id: str
+        applicant_id: str,
+        team_id: int
     ) -> InvoiceApplication:
         payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == obj_in.payment_plan_id).first()
         if not payment_plan:
@@ -174,6 +204,7 @@ class InvoiceApplicationCRUD:
             customer_id=contract.customer_id,
             contract_id=contract.id,
             opportunity_id=contract.opportunity_id,
+            team_id=team_id,
             applicant_id=applicant_id,
             payment_plan_id=obj_in.payment_plan_id,
             invoice_title_id=obj_in.invoice_title_id,

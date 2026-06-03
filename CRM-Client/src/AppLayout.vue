@@ -1,16 +1,34 @@
 <template>
   <div class="app-layout">
     <aside class="sidebar">
+      <!-- 团队选择器 -->
+      <div class="team-selector" @click="showTeamSwitcher = true">
+        <el-icon class="team-icon"><OfficeBuilding /></el-icon>
+        <span class="team-name">{{ teamStore.currentTeam?.name || '未选择团队' }}</span>
+        <el-icon class="switch-icon"><ArrowDown /></el-icon>
+      </div>
+
+      <!-- 团队切换对话框 -->
+      <el-dialog v-model="showTeamSwitcher" title="切换团队" width="300px">
+        <div v-for="team in teamStore.teams" :key="team.id"
+             class="team-option"
+             :class="{ active: team.id === teamStore.currentTeam?.id }"
+             @click="handleSwitchTeam(team.id)">
+          <span>{{ team.name }}</span>
+          <el-icon v-if="team.id === teamStore.currentTeam?.id"><Check /></el-icon>
+        </div>
+        <div v-if="teamStore.teams.length === 0" class="no-teams">
+          暂无团队
+        </div>
+      </el-dialog>
+
       <nav class="nav">
-        <!-- AI 助手入口（顶部突出） -->
-        <div class="menu-item ai-entry" :class="{ active: currentPath === '/ai-assistant' }" @click="handleMenuClick('/ai-assistant')">
-          <el-icon class="item-icon"><Cpu /></el-icon>
-          <span class="item-text">AI 助手</span>
+        
+        <div class="menu-item" :class="{ active: currentPath === '/calendar' }" @click="handleMenuClick('/calendar')">
+          <el-icon class="item-icon"><Calendar /></el-icon>
+          <span class="item-text">我的日历</span>
           <el-icon class="item-arrow"><ArrowRight /></el-icon>
         </div>
-
-        <!-- 分隔线 -->
-        <div class="menu-divider"></div>
 
         <div class="menu-item" :class="{ active: currentPath === '/leads' || currentPath === '/leads/public' || currentPath === '/leads/my' }" @click="handleMenuClick('/leads')">
           <el-icon class="item-icon"><Flag /></el-icon>
@@ -62,15 +80,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useTeamStore } from '@/stores/team'
 import { ElMessage } from 'element-plus'
-import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, Cpu } from '@element-plus/icons-vue'
+import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const teamStore = useTeamStore()
+const showTeamSwitcher = ref(false)
 
 const currentPath = computed(() => {
   const path = route.path
@@ -102,8 +123,25 @@ const handleUserProfile = () => {
 
 const handleLogout = () => {
   userStore.logout()
+  teamStore.clearTeam()
   ElMessage.success('已退出登录')
   router.push('/login')
+}
+
+const handleSwitchTeam = async (teamId: number) => {
+  if (teamId === teamStore.currentTeam?.id) {
+    showTeamSwitcher.value = false
+    return
+  }
+  try {
+    await teamStore.switchTeam(teamId)
+    showTeamSwitcher.value = false
+    ElMessage.success('已切换团队')
+    // 刷新当前页面数据
+    router.go(0)
+  } catch (error) {
+    ElMessage.error('切换团队失败')
+  }
 }
 
 onMounted(async () => {
@@ -113,6 +151,10 @@ onMounted(async () => {
     try {
       if (!userStore.userInfo) {
         await userStore.fetchUserInfo()
+      }
+      // 获取用户团队信息
+      if (!teamStore.hasAnyTeam()) {
+        await teamStore.fetchUserTeams()
       }
       const { usePermissionStore } = await import('@/stores/permissions')
       const permissionStore = usePermissionStore()
@@ -145,6 +187,70 @@ onMounted(async () => {
   border-right: 1px solid $wolf-border-default;
 }
 
+// 团队选择器
+.team-selector {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;
+  padding: $wolf-space-md;
+  margin: $wolf-space-md;
+  background: $wolf-bg-hover;
+  border-radius: $wolf-radius-sm;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover {
+    background: $wolf-bg-active;
+  }
+}
+
+.team-icon {
+  font-size: 16px;
+  color: $wolf-primary;
+}
+
+.team-name {
+  font-size: $wolf-font-size-body;
+  font-weight: $wolf-font-weight-medium;
+  color: $wolf-text-primary;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.switch-icon {
+  font-size: 12px;
+  color: $wolf-text-tertiary;
+}
+
+// 团队选项样式
+.team-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  margin: 4px 0;
+  border-radius: $wolf-radius-sm;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover {
+    background: $wolf-bg-hover;
+  }
+
+  &.active {
+    background: $wolf-bg-active;
+    color: $wolf-primary;
+  }
+}
+
+.no-teams {
+  padding: 16px;
+  color: $wolf-text-tertiary;
+  text-align: center;
+}
+
 .nav {
   flex: 1;
   padding: $wolf-space-md $wolf-space-md;
@@ -173,38 +279,6 @@ onMounted(async () => {
   }
 }
 
-// AI 助手入口特殊样式
-.ai-entry {
-  background: linear-gradient(135deg, rgba($wolf-primary, 0.1) 0%, transparent 100%);
-  border-left: 3px solid $wolf-primary;
-  margin-left: -$wolf-space-xs;
-  padding-left: $wolf-space-md + $wolf-space-xs;
-
-  .item-icon {
-    color: $wolf-primary;
-    font-size: 20px;
-  }
-
-  .item-text {
-    font-weight: $wolf-font-weight-semibold;
-    color: $wolf-primary;
-  }
-
-  &:hover {
-    background: linear-gradient(135deg, rgba($wolf-primary, 0.15) 0%, rgba($wolf-primary, 0.05) 100%);
-  }
-
-  &.active {
-    background: linear-gradient(135deg, rgba($wolf-primary, 0.2) 0%, rgba($wolf-primary, 0.1) 100%);
-  }
-}
-
-// 分隔线
-.menu-divider {
-  height: 1px;
-  background: $wolf-border-light;
-  margin: $wolf-space-sm $wolf-space-md;
-}
 
 .item-icon {
   font-size: 18px;

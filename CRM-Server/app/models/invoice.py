@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Numeric, Boolean, ForeignKey, func
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, Numeric, Boolean, ForeignKey, func, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -25,6 +25,7 @@ class InvoiceTitle(Base):
     __tablename__ = "crm_invoice_titles"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
     title_type = Column(String(10), nullable=False, comment="抬头类型：COMPANY(单位), PERSONAL(个人)")
     title = Column(String(255), nullable=False, comment="开票抬头")
@@ -40,6 +41,10 @@ class InvoiceTitle(Base):
     customer = relationship("Customer", back_populates="invoice_titles")
     invoice_applications = relationship("InvoiceApplication", back_populates="invoice_title")
 
+    __table_args__ = (
+        Index('idx_invoice_title_team_id', 'team_id'),
+    )
+
     def __repr__(self):
         return f"<InvoiceTitle(id={self.id}, title={self.title}, taxpayer_id={self.taxpayer_id})>"
 
@@ -48,6 +53,7 @@ class InvoiceApplication(Base):
     __tablename__ = "crm_invoice_applications"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     application_number = Column(String(50), nullable=False, unique=True, comment="申请单号")
     customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
     contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='CASCADE'), nullable=False, comment="关联合同ID")
@@ -80,6 +86,10 @@ class InvoiceApplication(Base):
     payment_plan = relationship("PaymentPlan", back_populates="invoice_applications")
     payment_record = relationship("PaymentRecord", back_populates="invoice_applications")
     invoice_title = relationship("InvoiceTitle", back_populates="invoice_applications")
+
+    __table_args__ = (
+        Index('idx_invoice_application_team_id', 'team_id'),
+    )
 
     def __repr__(self):
         return f"<InvoiceApplication(id={self.id}, application_number={self.application_number}, status={self.status})>"

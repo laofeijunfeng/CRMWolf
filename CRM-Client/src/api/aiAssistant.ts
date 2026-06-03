@@ -1,10 +1,13 @@
 /**
- * AI 助手 API
+ * Web AI 助手 API
+ * 用于 MagicWand 魔术棒功能
  */
-import request from '@/utils/request'
 
-export interface AIAssistantChatRequest {
+export interface AIAssistantRequest {
   content: string
+  skill?: string
+  action?: string
+  params?: Record<string, unknown>
 }
 
 export interface AIAssistantSSEEvent {
@@ -14,42 +17,26 @@ export interface AIAssistantSSEEvent {
   skill?: string
   action?: string
   params?: Record<string, unknown>
+  missing_params?: string[]
+  param_definitions?: Record<string, unknown>
   reply_text?: string
   success?: boolean
 }
 
-export interface ChatHistoryItem {
-  id: number
-  request_text: string
-  execution_result: string | null
-  status: string
-  created_at: string | null
-}
-
 export const aiAssistantApi = {
   /**
-   * 获取聊天历史记录
-   */
-  getHistory: (limit: number = 20) => {
-    return request.get<any, { code: number; message: string; data: ChatHistoryItem[] }>(
-      `/api/v1/ai/history?limit=${limit}`
-    )
-  },
-
-  /**
-   * 发送聊天消息（SSE 流式响应）
-   * @param data 聊天请求数据
-   * @param onEvent SSE 事件回调
-   * @param token JWT token
-   * @returns Promise
+   * AI 助手聊天（SSE 流式响应）
    */
   chatSSE: async (
-    data: AIAssistantChatRequest,
+    data: AIAssistantRequest,
     onEvent: (event: AIAssistantSSEEvent) => void,
     token: string
   ): Promise<void> => {
     const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    const url = `${baseURL}/api/v1/ai/chat`
+    const url = `${baseURL}/api/v1/assistant/chat`
+    console.log('[AIAssistant] SSE request URL:', url)
+    console.log('[AIAssistant] SSE request data:', data)
+    console.log('[AIAssistant] SSE request token:', token ? 'exists' : 'empty')
 
     const response = await fetch(url, {
       method: 'POST',
@@ -60,8 +47,12 @@ export const aiAssistantApi = {
       body: JSON.stringify(data)
     })
 
+    console.log('[AIAssistant] SSE response status:', response.status)
+
     if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`)
+      const errorText = await response.text()
+      console.error('[AIAssistant] SSE error response:', errorText)
+      throw new Error(`HTTP error: ${response.status} - ${errorText}`)
     }
 
     const reader = response.body?.getReader()
@@ -77,8 +68,6 @@ export const aiAssistantApi = {
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
-
-      // 解析 SSE 数据（按双换行分隔）
       const lines = buffer.split('\n\n')
       buffer = lines.pop() || ''
 
@@ -88,7 +77,6 @@ export const aiAssistantApi = {
             const eventData = JSON.parse(line.slice(6)) as AIAssistantSSEEvent
             onEvent(eventData)
 
-            // 收到 result 或 error 事件后结束
             if (eventData.event === 'result' || eventData.event === 'error') {
               return
             }

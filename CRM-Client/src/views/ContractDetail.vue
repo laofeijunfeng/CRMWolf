@@ -12,17 +12,6 @@
         <el-button v-if="canEditContract" type="primary" class="primary-btn" @click="handleEdit">
           编辑
         </el-button>
-        <el-dropdown v-if="canEditContract" @command="handleAction">
-          <el-button class="default-btn">
-            更多
-            <el-icon><ArrowDown /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item v-if="canDeleteContract" command="delete">删除</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
       </div>
     </div>
 
@@ -199,8 +188,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft,
-  ArrowDown,
-  Document,
   Ticket,
   User,
   TrendCharts,
@@ -220,7 +207,7 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
-const currentUserId = userStore.userInfo?.feishu_open_id || ''
+const currentUserId = userStore.userInfo?.id ? String(userStore.userInfo.id) : ''
 
 const contractInfo = ref<ContractResponse | null>(null)
 const approvalDetail = ref<any>(null)
@@ -265,10 +252,6 @@ const getStatusClass = (status: string) => {
 
 const canEditContract = computed(() => {
   return permissionStore.canEditOwn('contract') || permissionStore.canEditAll('contract')
-})
-
-const canDeleteContract = computed(() => {
-  return permissionStore.canDeleteOwn('contract') || permissionStore.canDeleteAll('contract')
 })
 
 const canSubmitApproval = computed(() => {
@@ -536,35 +519,6 @@ const handleEdit = () => {
   router.push(`/contracts/edit/${contractInfo.value?.id}`)
 }
 
-const handleAction = (command: string) => {
-  if (command === 'delete') {
-    handleDelete()
-  }
-}
-
-const handleDelete = async () => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除合同"${contractInfo.value?.contract_name}"吗？此操作不可恢复。`,
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
-    await contractApi.deleteContract(contractInfo.value!.id)
-    ElMessage.success('删除成功')
-    router.push('/contracts')
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error('删除失败', error)
-      ElMessage.error(error.response?.data?.detail || '删除失败')
-    }
-  }
-}
-
 const handleSubmitApproval = async () => {
   try {
     await ElMessageBox.confirm(
@@ -767,6 +721,7 @@ onMounted(async () => {
 .header-right {
   flex-shrink: 0;
 }
+
 
 .header-title {
   font-size: $wolf-font-size-title;

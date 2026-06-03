@@ -20,33 +20,41 @@ class OpportunityStageCRUD:
     def get_by_id(self, db: Session, stage_id: int) -> Optional[OpportunityStage]:
         return db.query(OpportunityStage).filter(OpportunityStage.id == stage_id).first()
 
-    def get_by_code(self, db: Session, stage_code: str) -> Optional[OpportunityStage]:
-        return db.query(OpportunityStage).filter(OpportunityStage.stage_code == stage_code).first()
+    def get_by_code(self, db: Session, stage_code: str, team_id: Optional[int] = None) -> Optional[OpportunityStage]:
+        query = db.query(OpportunityStage).filter(OpportunityStage.stage_code == stage_code)
+        if team_id is not None:
+            query = query.filter(OpportunityStage.team_id == team_id)
+        return query.first()
 
-    def get_all_active(self, db: Session) -> List[OpportunityStage]:
-        return db.query(OpportunityStage).filter(
-            OpportunityStage.is_active == 1
-        ).order_by(OpportunityStage.sort_order).all()
+    def get_all_active(self, db: Session, team_id: Optional[int] = None) -> List[OpportunityStage]:
+        query = db.query(OpportunityStage).filter(OpportunityStage.is_active == 1)
+        if team_id is not None:
+            query = query.filter(OpportunityStage.team_id == team_id)
+        return query.order_by(OpportunityStage.sort_order).all()
 
     def get_multi(
         self,
         db: Session,
+        team_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100,
         is_active: Optional[int] = None
     ) -> Tuple[List[OpportunityStage], int]:
         query = db.query(OpportunityStage)
-        
+
+        if team_id is not None:
+            query = query.filter(OpportunityStage.team_id == team_id)
         if is_active is not None:
             query = query.filter(OpportunityStage.is_active == is_active)
-        
+
         total = query.count()
         stages = query.order_by(OpportunityStage.sort_order).offset(skip).limit(limit).all()
-        
+
         return stages, total
 
-    def create(self, db: Session, obj_in: OpportunityStageCreate) -> OpportunityStage:
+    def create(self, db: Session, obj_in: OpportunityStageCreate, team_id: int) -> OpportunityStage:
         stage_data = obj_in.model_dump()
+        stage_data['team_id'] = team_id
         db_obj = OpportunityStage(**stage_data)
         db.add(db_obj)
         db.commit()
@@ -71,17 +79,23 @@ class OpportunityStageCRUD:
 
 
 class OpportunityCRUD:
-    def get_by_id(self, db: Session, opportunity_id: int) -> Optional[Opportunity]:
-        return db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
+    def get_by_id(self, db: Session, opportunity_id: int, team_id: Optional[int] = None) -> Optional[Opportunity]:
+        query = db.query(Opportunity).filter(Opportunity.id == opportunity_id)
+        if team_id is not None:
+            query = query.filter(Opportunity.team_id == team_id)
+        return query.first()
 
     def get_by_customer_id(
         self,
         db: Session,
         customer_id: int,
+        team_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100
     ) -> Tuple[List[Opportunity], int]:
         query = db.query(Opportunity).filter(Opportunity.customer_id == customer_id)
+        if team_id is not None:
+            query = query.filter(Opportunity.team_id == team_id)
         total = query.count()
         opportunities = query.order_by(Opportunity.created_time.desc()).offset(skip).limit(limit).all()
         return opportunities, total
@@ -89,16 +103,19 @@ class OpportunityCRUD:
     def get_multi(
         self,
         db: Session,
+        team_id: int,
         skip: int = 0,
         limit: int = 100,
         status: Optional[int] = None,
         stage_id: Optional[int] = None,
         owner_id: Optional[str] = None,
         customer_id: Optional[int] = None,
-        keyword: Optional[str] = None
+        keyword: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None
     ) -> Tuple[List[Opportunity], int]:
-        query = db.query(Opportunity)
-        
+        query = db.query(Opportunity).filter(Opportunity.team_id == team_id)
+
         if status is not None:
             query = query.filter(Opportunity.status == status)
         if stage_id is not None:
@@ -109,13 +126,24 @@ class OpportunityCRUD:
             query = query.filter(Opportunity.customer_id == customer_id)
         if keyword:
             query = query.filter(Opportunity.opportunity_name.like(f"%{keyword}%"))
-        
+
         total = query.count()
-        opportunities = query.order_by(Opportunity.created_time.desc()).offset(skip).limit(limit).all()
-        
+
+        allowed_sort_fields = ['created_time', 'opportunity_name', 'total_amount', 'status', 'expected_closing_date']
+        if order_by and order_dir and order_by in allowed_sort_fields:
+            order_column = getattr(Opportunity, order_by)
+            if order_dir.lower() == 'desc':
+                query = query.order_by(order_column.desc())
+            else:
+                query = query.order_by(order_column.asc())
+        else:
+            query = query.order_by(Opportunity.created_time.desc())
+
+        opportunities = query.offset(skip).limit(limit).all()
+
         return opportunities, total
 
-    def create(self, db: Session, obj_in: OpportunityCreate, creator_id: str) -> Opportunity:
+    def create(self, db: Session, obj_in: OpportunityCreate, creator_id: str, team_id: int) -> Opportunity:
         from app.crud.opportunity import opportunity_stage_crud
         from app.crud.user import user_crud
         from app.crud.procurement import procurement_stage_template_crud
@@ -163,6 +191,7 @@ class OpportunityCRUD:
             'expected_closing_date': obj_in.expected_closing_date,
             'owner_id': obj_in.owner_id,
             'creator_id': creator_id,
+            'team_id': team_id,
             'status': 0,
             'win_probability': stage.win_probability
         }
@@ -205,9 +234,9 @@ class OpportunityCRUD:
         db.refresh(db_obj)
         
         # 8. 记录操作日志
-        operator = user_crud.get_by_feishu_open_id(db, creator_id)
+        operator = user_crud.get_by_id(db, int(creator_id))
         operator_name = operator.name if operator else None
-        
+
         operation_log_service.log(
             db=db,
             event_type="OPPORTUNITY_CREATED",
@@ -224,7 +253,8 @@ class OpportunityCRUD:
                 "procurementMethodId": procurement_method_id,
                 "currentStage": stage.stage_name,
                 "customerId": db_obj.customer_id
-            }
+            },
+            team_id=team_id
         )
         
         return db_obj
@@ -312,7 +342,7 @@ class OpportunityCRUD:
         db.commit()
         db.refresh(opportunity)
         
-        operator = user_crud.get_by_feishu_open_id(db, operator_id)
+        operator = user_crud.get_by_id(db, int(operator_id))
         operator_name = operator.name if operator else None
         
         if target_stage.win_probability == 100:
@@ -347,7 +377,8 @@ class OpportunityCRUD:
                     "stageName": new_snapshot.stage_name,
                     "autoWon": True,
                     "reason": "推进到100%赢率阶段，自动标记为赢单"
-                }
+                },
+                team_id=opportunity.team_id
             )
         else:
             operation_log_service.log(
@@ -362,7 +393,8 @@ class OpportunityCRUD:
                     "fromStage": current_snapshot.stage_name if current_snapshot else "初始",
                     "toStage": new_snapshot.stage_name,
                     "winProbability": new_snapshot.win_probability
-                }
+                },
+                team_id=opportunity.team_id
             )
 
         return opportunity
@@ -420,7 +452,7 @@ class OpportunityCRUD:
         db.refresh(opportunity)
 
         # 记录操作日志
-        operator = user_crud.get_by_feishu_open_id(db, operator_id)
+        operator = user_crud.get_by_id(db, int(operator_id))
         operator_name = operator.name if operator else None
 
         operation_log_service.log(
@@ -437,7 +469,8 @@ class OpportunityCRUD:
                 "procurementMethodName": procurement_method.name,
                 "defaultStageName": default_stage.stage_name,
                 "defaultWinProbability": default_stage.win_probability
-            }
+            },
+            team_id=opportunity.team_id
         )
 
         return opportunity
@@ -472,7 +505,7 @@ class OpportunityCRUD:
         db.commit()
         db.refresh(db_obj)
         
-        operator = user_crud.get_by_feishu_open_id(db, operator_id)
+        operator = user_crud.get_by_id(db, int(operator_id))
         operator_name = operator.name if operator else None
         
         customer = db.query(Customer).filter(Customer.id == db_obj.customer_id).first()
@@ -493,7 +526,8 @@ class OpportunityCRUD:
                 "actualClosingDate": db_obj.actual_closing_date.isoformat() if db_obj.actual_closing_date else None,
                 "customerId": db_obj.customer_id,
                 "customerName": customer.account_name if customer else None
-            }
+            },
+            team_id=db_obj.team_id
         )
         
         return db_obj
@@ -520,7 +554,7 @@ class OpportunityCRUD:
         db.commit()
         db.refresh(db_obj)
         
-        operator = user_crud.get_by_feishu_open_id(db, operator_id)
+        operator = user_crud.get_by_id(db, int(operator_id))
         operator_name = operator.name if operator else None
         
         customer = db.query(Customer).filter(Customer.id == db_obj.customer_id).first()
@@ -541,18 +575,31 @@ class OpportunityCRUD:
                 "expectedAmount": float(db_obj.total_amount),
                 "customerId": db_obj.customer_id,
                 "customerName": customer.account_name if customer else None
-            }
+            },
+            team_id=db_obj.team_id
         )
         
         return db_obj
 
     def delete(self, db: Session, opportunity_id: int) -> bool:
+        """删除商机
+
+        注意：存在关联合同的商机无法删除
+        """
+        from app.models.contract import Contract
+
         opportunity = self.get_by_id(db, opportunity_id)
-        if opportunity:
-            db.delete(opportunity)
-            db.commit()
-            return True
-        return False
+        if not opportunity:
+            return False
+
+        # 检查是否存在关联合同
+        contracts = db.query(Contract).filter(Contract.opportunity_id == opportunity_id).count()
+        if contracts > 0:
+            raise ValueError(f"该商机存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
+
+        db.delete(opportunity)
+        db.commit()
+        return True
 
     def get_sales_funnel(
         self,
@@ -671,25 +718,30 @@ class OpportunityCRUD:
     def get_available_for_contract(
         self,
         db: Session,
-        customer_id: int
+        customer_id: int,
+        team_id: Optional[int] = None
     ) -> List[Opportunity]:
         """
         获取客户可创建合同的商机列表
-        
+
         业务规则：
         - 只返回"已赢单"（status=1）的商机
         - 排除已经创建合同的商机
         - 不需要分页，返回所有符合条件的商机
-        
+
         参数：
         - customer_id: 客户ID（必填）
+        - team_id: 团队ID（可选，用于团队过滤）
         """
         from app.models.contract import Contract
-        
+
         query = db.query(Opportunity).filter(
             Opportunity.customer_id == customer_id,
             Opportunity.status == 1  # 已赢单
         )
+
+        if team_id is not None:
+            query = query.filter(Opportunity.team_id == team_id)
         
         # 排除已经创建合同的商机
         opportunity_ids_with_contract = db.query(

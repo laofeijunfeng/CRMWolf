@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user
+from app.core.deps import get_current_active_user, get_current_user_team
 from app.models.user import User
 from app.schemas.procurement import MessageResponse
 from app.crud.customer import customer_crud
@@ -29,19 +29,20 @@ router = APIRouter(
 def set_customer_default_procurement_method(
     customer_id: int,
     procurement_method_id: int,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # 检查客户是否存在
-    customer = customer_crud.get(db, customer_id)
+    # 检查客户是否存在且属于当前团队
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"客户 {customer_id} 不存在"
+            detail="客户不存在或不属于当前团队"
         )
     
     # 权限校验
-    if customer.owner_id != current_user.feishu_open_id and not current_user.is_admin:
+    if customer.owner_id != str(current_user.id) and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只有客户负责人或管理员可以设置"
@@ -80,15 +81,16 @@ def set_customer_default_procurement_method(
 """)
 def get_customer_default_procurement_method(
     customer_id: int,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # 检查客户是否存在
-    customer = customer_crud.get(db, customer_id)
+    # 检查客户是否存在且属于当前团队
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"客户 {customer_id} 不存在"
+            detail="客户不存在或不属于当前团队"
         )
     
     if customer.default_procurement_method_id:

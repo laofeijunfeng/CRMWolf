@@ -13,6 +13,7 @@
     <!-- 表单内容 -->
     <div class="form-container">
       <div class="form-card">
+        <div class="card-title">基本信息</div>
         <el-form
           ref="formRef"
           :model="form"
@@ -20,147 +21,121 @@
           label-position="top"
           v-loading="loading"
         >
-          <div class="form-section">
-            <div class="section-title">基本信息</div>
+          <div class="form-grid">
+            <el-form-item label="客户">
+              <el-input
+                :model-value="customerInfo?.account_name || ''"
+                disabled
+              />
+            </el-form-item>
 
-            <div class="form-grid">
-              <div class="form-item">
-                <el-form-item label="客户">
-                  <el-input
-                    :model-value="customerInfo?.account_name || ''"
-                    disabled
-                    class="form-input"
-                  />
-                </el-form-item>
-              </div>
-
-              <div class="form-item">
-                <el-form-item prop="opportunity_name" label="商机名称" required>
-                  <el-input
-                    v-model="form.opportunity_name"
-                    placeholder="请输入商机名称"
-                    class="form-input"
-                  />
-                </el-form-item>
-              </div>
-            </div>
+            <el-form-item prop="opportunity_name" label="商机名称" required>
+              <el-input
+                v-model="form.opportunity_name"
+                placeholder="请输入商机名称"
+              />
+            </el-form-item>
+          </div>
 
           <div class="form-grid">
-            <div class="form-item">
-              <el-form-item prop="total_amount" label="预计总金额" required>
-                <el-input-number
-                  v-model="form.total_amount"
-                  placeholder="请输入预计总金额"
-                  :min="0"
-                  :precision="2"
-                  :controls="false"
-                  class="form-input"
-                >
-                  <template #prefix>¥</template>
-                </el-input-number>
-              </el-form-item>
-            </div>
+            <el-form-item prop="total_amount" label="预计总金额" required>
+              <el-input-number
+                v-model="form.total_amount"
+                placeholder="请输入预计总金额"
+                :min="0"
+                :precision="2"
+                :controls="false"
+                style="width: 100%"
+              >
+                <template #prefix>¥</template>
+              </el-input-number>
+            </el-form-item>
 
-            <div class="form-item">
-              <el-form-item prop="user_count" label="采购用户数" required>
-                <el-input-number
-                  v-model="form.user_count"
-                  placeholder="请输入采购用户数"
-                  :min="1"
-                  :precision="0"
-                  :controls="false"
-                  class="form-input"
+            <el-form-item prop="user_count" label="采购用户数" required>
+              <el-input-number
+                v-model="form.user_count"
+                placeholder="请输入采购用户数"
+                :min="1"
+                :precision="0"
+                :controls="false"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </div>
+
+          <div class="form-grid">
+            <el-form-item prop="license_type" label="授权模式" required>
+              <el-select v-model="form.license_type" placeholder="请选择授权模式" style="width: 100%">
+                <el-option value="SUBSCRIPTION" label="订阅制" />
+                <el-option value="PERPETUAL" label="买断制" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item v-if="form.license_type === 'SUBSCRIPTION'" prop="subscription_years" label="订阅年限" required>
+              <el-input-number
+                v-model="form.subscription_years"
+                placeholder="请输入订阅年限"
+                :min="1"
+                :max="10"
+                :precision="0"
+                :controls="false"
+                style="width: 100%"
+              >
+                <template #append>年</template>
+              </el-input-number>
+            </el-form-item>
+          </div>
+
+          <div class="form-grid">
+            <el-form-item prop="purchase_type" label="采购类型" required>
+              <el-select v-model="form.purchase_type" placeholder="请选择采购类型" style="width: 100%">
+                <el-option value="NEW" label="新购" />
+                <el-option value="RENEWAL" label="续购" />
+                <el-option value="EXPANSION" label="增购" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item prop="expected_closing_date" label="预计成交日期" required>
+              <el-date-picker
+                v-model="form.expected_closing_date"
+                style="width: 100%"
+                placeholder="请选择预计成交日期"
+              />
+            </el-form-item>
+          </div>
+
+          <div class="form-grid">
+            <el-form-item label="采购方式">
+              <el-select
+                v-model="form.procurement_method_id"
+                placeholder="请选择采购方式"
+                clearable
+                style="width: 100%"
+                @change="handleProcurementMethodChange"
+              >
+                <el-option
+                  v-for="method in procurementMethods"
+                  :key="method.id"
+                  :value="method.id"
+                  :label="method.name"
                 />
-              </el-form-item>
-            </div>
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="负责人">
+              <el-input :model-value="userStore.userInfo?.name || ''" placeholder="当前登录用户" disabled />
+              <div class="form-tip">默认为当前登录用户</div>
+            </el-form-item>
           </div>
-
-          <div class="form-grid">
-            <div class="form-item">
-              <el-form-item prop="license_type" label="授权模式" required>
-                <el-select v-model="form.license_type" placeholder="请选择授权模式" class="form-select">
-                  <el-option value="SUBSCRIPTION" label="订阅制" />
-                  <el-option value="PERPETUAL" label="买断制" />
-                </el-select>
-              </el-form-item>
-            </div>
-
-            <div v-if="form.license_type === 'SUBSCRIPTION'" class="form-item">
-              <el-form-item prop="subscription_years" label="订阅年限" required>
-                <el-input-number
-                  v-model="form.subscription_years"
-                  placeholder="请输入订阅年限"
-                  :min="1"
-                  :max="10"
-                  :precision="0"
-                  :controls="false"
-                  class="form-input"
-                >
-                  <template #append>年</template>
-                </el-input-number>
-              </el-form-item>
-            </div>
-          </div>
-
-          <div class="form-grid">
-            <div class="form-item">
-              <el-form-item prop="purchase_type" label="采购类型" required>
-                <el-select v-model="form.purchase_type" placeholder="请选择采购类型" class="form-select">
-                  <el-option value="NEW" label="新购" />
-                  <el-option value="RENEWAL" label="续购" />
-                  <el-option value="EXPANSION" label="增购" />
-                </el-select>
-              </el-form-item>
-            </div>
-
-            <div class="form-item">
-              <el-form-item prop="expected_closing_date" label="预计成交日期" required>
-                <el-date-picker
-                  v-model="form.expected_closing_date"
-                  class="form-input"
-                  placeholder="请选择预计成交日期"
-                />
-              </el-form-item>
-            </div>
-          </div>
-
-          <div class="form-grid">
-            <div class="form-item">
-              <el-form-item label="采购方式">
-                <el-select
-                  v-model="form.procurement_method_id"
-                  placeholder="请选择采购方式"
-                  clearable
-                  class="form-select"
-                  @change="handleProcurementMethodChange"
-                >
-                  <el-option
-                    v-for="method in procurementMethods"
-                    :key="method.id"
-                    :value="method.id"
-                    :label="method.name"
-                  />
-                </el-select>
-              </el-form-item>
-            </div>
-
-            <div class="form-item">
-              <el-form-item label="负责人">
-                <el-input :model-value="userStore.userInfo?.name || ''" placeholder="当前登录用户" disabled class="form-input" />
-                <div class="form-tip">默认为当前登录用户</div>
-              </el-form-item>
-            </div>
-          </div>
-        </div>
         </el-form>
+      </div>
 
-        <!-- 表单操作区 -->
-        <div class="form-actions">
-          <el-button @click="handleBack">取消</el-button>
-          <el-button type="primary" @click="handleSubmit" :loading="submitting">
-            {{ isEdit ? '保存' : '创建' }}
-          </el-button>
-        </div>
+      <!-- 表单操作 -->
+      <div class="form-actions-card">
+        <el-button @click="handleBack">取消</el-button>
+        <el-button type="primary" @click="handleSubmit" :loading="submitting">
+          {{ isEdit ? '保存' : '创建' }}
+        </el-button>
       </div>
     </div>
   </div>
@@ -202,7 +177,7 @@ const form = reactive({
   purchase_type: 'NEW' as PurchaseType,
   expected_closing_date: '',
   procurement_method_id: undefined as number | undefined,
-  owner_id: userStore.userInfo?.feishu_open_id || ''
+  owner_id: userStore.userInfo?.id ? String(userStore.userInfo.id) : ''
 })
 
 const handleProcurementMethodChange = async (methodId: number | undefined) => {
@@ -435,27 +410,30 @@ onMounted(async () => {
   margin: 0;
 }
 
-// 表单容器
+// 表单容器（撑满页面宽度）
 .form-container {
-  max-width: 800px;
-  margin: 0 auto;
   padding: $wolf-page-padding;
 }
 
-// 表单卡片
+// 表单卡片（撑满页面宽度）
 .form-card {
   background: $wolf-bg-card;
   border-radius: $wolf-radius-lg;
-  padding: $wolf-card-padding;
+  padding: $wolf-space-md;
+  margin-bottom: $wolf-space-md;
   box-shadow: $wolf-shadow-card;
 }
 
-// 表单区块
-.form-section {
-  margin-bottom: $wolf-space-lg;
+.section-title {
+  font-size: $wolf-font-size-body;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+  margin-bottom: $wolf-space-md;
+  padding-bottom: $wolf-space-sm;
+  border-bottom: 1px solid $wolf-border-light;
 }
 
-.section-title {
+.card-title {
   font-size: $wolf-font-size-body;
   font-weight: $wolf-font-weight-semibold;
   color: $wolf-text-primary;
@@ -469,41 +447,6 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
-}
-
-.form-item {
-  min-width: 0;
-}
-
-// 表单元素样式
-.form-card :deep(.el-form-item__label) {
-  font-weight: $wolf-font-weight-medium;
-  color: $wolf-text-secondary;
-  font-size: $wolf-font-size-body;
-  padding-bottom: $wolf-space-xs;
-}
-
-.form-input,
-.form-select {
-  width: 100%;
-}
-
-.form-input :deep(.el-input__wrapper),
-.form-select :deep(.el-input__wrapper) {
-  border-radius: $wolf-radius-sm;
-  transition: all 0.2s ease;
-}
-
-.form-input :deep(.el-input__wrapper:hover),
-.form-select :deep(.el-input__wrapper:hover) {
-  border-color: $wolf-border-hover;
-}
-
-.form-input :deep(.el-input__wrapper.is-focus),
-.form-select :deep(.el-input__wrapper.is-focus) {
-  border-color: $wolf-primary;
-  box-shadow: 0 0 0 2px rgba($wolf-primary, 0.1);
 }
 
 .form-tip {
@@ -512,13 +455,40 @@ onMounted(async () => {
   margin-top: $wolf-space-xs;
 }
 
-// 表单操作区
-.form-actions {
+// 表单标签样式
+:deep(.el-form-item__label) {
+  font-weight: $wolf-font-weight-medium;
+  color: $wolf-text-secondary;
+  font-size: $wolf-font-size-body;
+  padding-bottom: $wolf-space-xs;
+}
+
+// 输入框样式
+:deep(.el-input__wrapper),
+:deep(.el-textarea__inner) {
+  border-radius: $wolf-radius-md;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: $wolf-border-hover;
+  }
+
+  &.is-focus,
+  &:focus {
+    border-color: $wolf-primary;
+    box-shadow: 0 0 0 2px rgba($wolf-primary, 0.1);
+  }
+}
+
+// 表单操作卡片
+.form-actions-card {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-lg;
+  padding: $wolf-space-md;
+  box-shadow: $wolf-shadow-card;
   display: flex;
   justify-content: flex-end;
   gap: $wolf-space-sm;
-  padding-top: $wolf-space-lg;
-  border-top: 1px solid $wolf-border-light;
 }
 
 // 响应式
@@ -527,11 +497,15 @@ onMounted(async () => {
     padding: $wolf-space-md;
   }
 
+  .form-card {
+    padding: $wolf-space-md;
+  }
+
   .form-grid {
     grid-template-columns: 1fr;
   }
 
-  .form-actions {
+  .form-actions-card {
     flex-direction: column-reverse;
 
     .el-button {

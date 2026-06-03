@@ -77,12 +77,20 @@ class PermissionCRUD:
             RolePermission.role_id == role_id
         ).all()
 
-    def get_user_permissions(self, db: Session, user_id: int) -> List[Permission]:
+    def get_user_permissions(self, db: Session, user_id: int, team_id: Optional[int] = None) -> List[Permission]:
+        """
+        获取用户的权限列表
+
+        Args:
+            user_id: 用户ID
+            team_id: 团队ID（可选，不传则返回用户在所有团队的权限）
+        """
         from app.models.user_role import UserRole
-        
-        return db.query(Permission).join(RolePermission, Permission.id == RolePermission.permission_id).join(UserRole, RolePermission.role_id == UserRole.role_id).filter(
-            UserRole.user_id == user_id
-        ).all()
+
+        query = db.query(Permission).join(RolePermission, Permission.id == RolePermission.permission_id).join(UserRole, RolePermission.role_id == UserRole.role_id).filter(UserRole.user_id == user_id)
+        if team_id is not None:
+            query = query.filter(UserRole.team_id == team_id)
+        return query.all()
 
 
 permission_crud = PermissionCRUD()

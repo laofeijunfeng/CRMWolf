@@ -7,10 +7,12 @@
 1. 默认过滤已转化/无效状态的实体，避免重复变更
 2. 支持前置状态校验，确保状态变更符合业务流程
 3. 支持名称查找实体（类似于 FollowUpHandler）
+4. 支持从名称中提取 ID（格式：名称（ID：xxx）或 名称(ID:xxx)）
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from datetime import datetime
+import re
 
 from app.services.skills.handlers.base_handler import BaseHandler
 from app.crud.user import user_crud
@@ -24,13 +26,17 @@ class StatusChangeHandler(BaseHandler):
     # 默认排除的状态（已转化、无效的实体不应再变更状态）
     DEFAULT_EXCLUDE_STATUS = ["CONVERTED", "INVALID"]
 
+    # 从名称中提取 ID 的正则表达式
+    ID_PATTERN = re.compile(r'[（(]\s*ID[：:]\s*(\d+)\s*[）)]')
+
     async def execute(
         self,
         db: Session,
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行状态变更操作
@@ -93,7 +99,7 @@ class StatusChangeHandler(BaseHandler):
         exclude_status_values = self.get_status_enum_values(db, status_enum_name, exclude_status_keys) if exclude_status_keys else []
         pre_check_status_values = self.get_status_enum_values(db, status_enum_name, pre_check_status_keys) if pre_check_status_keys else []
 
-        # 尝试通过名称查找实体
+        # 尝试获取实体
         entity = None
         entity_id = None
         name_lookup_field = handler_config.get("name_lookup_field")
@@ -101,59 +107,114 @@ class StatusChangeHandler(BaseHandler):
         # 提前定义 status_field，用于多条匹配时的状态显示
         status_field = handler_config.get("status_field", crud_mapping.status_field)
 
-        if name_lookup_field and name_field:
+        # === 第一步：优先使用 AI 提取的 ID 参数 ===
+        module_prefix = crud_mapping_name.split("_")[0]
+        expected_id_key = f"{module_prefix}_id"
+        if expected_id_key in params:
+            entity_id = params.get(expected_id_key)
+            with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
+                f.write(f"=== 从 params 获取 ID ===\n")
+                f.write(f"expected_id_key: {expected_id_key}\n")
+                f.write(f"entity_id: {entity_id}\n")
+            # 立刻通过 ID 获取实体
+            try:
+                entity = self.get_active_entity_by_id(
+                    db,
+                    model_class,
+                    entity_id,
+                    exclude_status=exclude_status_values,
+                    status_field=crud_mapping.status_field
+                )
+            except Exception as e:
+                return self.build_result(False, f"查询失败: {str(e)}")
+
+            if not entity:
+                return self.build_result(False, f"{crud_mapping_name} ID {entity_id} 不存在或已完成")
+
+        # === 第二步：尝试从名称中提取 ID 或模糊查找 ===
+        if not entity_id and name_lookup_field and name_field:
             name_lookup_value = params.get(name_lookup_field)
+
+            # 写入调试日志文件
+            with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
+                f.write(f"\n=== StatusChangeHandler 调试 ===\n")
+                f.write(f"params: {params}\n")
+                f.write(f"name_lookup_field: {name_lookup_field}\n")
+                f.write(f"name_lookup_value: {name_lookup_value}\n")
+
             if name_lookup_value:
-                # 根据名称模糊查找（过滤无效状态）
-                try:
-                    _, entities = self.search_active_entities(
-                        db,
-                        model_class,
-                        name_field,
-                        name_lookup_value,
-                        exclude_status=exclude_status_values,
-                        status_field=crud_mapping.status_field
-                    )
-                except Exception as e:
-                    return self.build_result(False, f"查询失败: {str(e)}")
+                # 先尝试从名称中提取 ID
+                id_match = self.ID_PATTERN.search(name_lookup_value)
+                with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
+                    f.write(f"ID_PATTERN: {self.ID_PATTERN.pattern}\n")
+                    f.write(f"ID匹配结果: {id_match}\n")
+                    if id_match:
+                        f.write(f"提取的ID: {id_match.group(1)}\n")
+                if id_match:
+                    entity_id = int(id_match.group(1))
+                    # 直接通过 ID 获取实体
+                    try:
+                        entity = self.get_active_entity_by_id(
+                            db,
+                            model_class,
+                            entity_id,
+                            exclude_status=exclude_status_values,
+                            status_field=crud_mapping.status_field
+                        )
+                    except Exception as e:
+                        return self.build_result(False, f"查询失败: {str(e)}")
 
-                if not entities:
-                    return self.build_result(False, f"未找到匹配的{crud_mapping_name}: {name_lookup_value}")
+                    if not entity:
+                        return self.build_result(False, f"{crud_mapping_name} ID {entity_id} 不存在或已完成")
+                else:
+                    # 没有 ID，使用名称模糊查找（过滤无效状态）
+                    try:
+                        _, entities = self.search_active_entities(
+                            db,
+                            model_class,
+                            name_field,
+                            name_lookup_value,
+                            exclude_status=exclude_status_values,
+                            status_field=crud_mapping.status_field
+                        )
+                    except Exception as e:
+                        return self.build_result(False, f"查询失败: {str(e)}")
 
-                if len(entities) > 1:
-                    # 显示更多信息帮助用户区分：ID、状态、创建时间
-                    entity_list = []
-                    for e in entities[:5]:
-                        entity_name = getattr(e, name_field)
-                        entity_status = getattr(e, status_field, None)
-                        # 获取状态名称（枚举的 name 属性）
-                        if hasattr(entity_status, 'name'):
-                            status_str = entity_status.name
-                        elif hasattr(entity_status, 'value'):
-                            status_str = str(entity_status.value)
-                        else:
-                            status_str = str(entity_status)
-                        created_time = getattr(e, 'created_time', None)
-                        time_str = created_time.strftime('%Y-%m-%d') if created_time else '未知'
-                        entity_list.append(f"{entity_name}(ID:{e.id}, 状态:{status_str}, 创建:{time_str})")
-                    return self.build_result(
-                        False,
-                        f"找到多个匹配的{crud_mapping_name}，请使用 ID 或更精确的名称指定。匹配结果:\n{chr(10).join(entity_list)}"
-                    )
+                    if not entities:
+                        return self.build_result(False, f"未找到匹配的{crud_mapping_name}: {name_lookup_value}")
 
-                entity = entities[0]
-                entity_id = entity.id
+                    if len(entities) > 1:
+                        # 显示更多信息帮助用户区分：ID、状态、创建时间
+                        entity_list = []
+                        for e in entities[:5]:
+                            entity_name = getattr(e, name_field)
+                            entity_status = getattr(e, status_field, None)
+                            # 获取状态名称（枚举的 name 属性）
+                            if hasattr(entity_status, 'name'):
+                                status_str = entity_status.name
+                            elif hasattr(entity_status, 'value'):
+                                status_str = str(entity_status.value)
+                            else:
+                                status_str = str(entity_status)
+                            created_time = getattr(e, 'created_time', None)
+                            time_str = created_time.strftime('%Y-%m-%d') if created_time else '未知'
+                            entity_list.append(f"{entity_name}(ID:{e.id}, 状态:{status_str}, 创建:{time_str})")
+                        return self.build_result(
+                            False,
+                            f"找到多个匹配的{crud_mapping_name}，请使用 ID 或更精确的名称指定。匹配结果:\n{chr(10).join(entity_list)}"
+                        )
 
-        # 如果名称查找失败，尝试从参数获取 ID
+                    entity = entities[0]
+                    entity_id = entity.id
+
+        # 如果名称查找失败，尝试从其他 ID 参数获取
         if not entity_id:
-            for key in ["entity_id", "id", f"{crud_mapping_name}_id"]:
+            for key in ["entity_id", "id"]:
                 if key in params:
                     entity_id = params.get(key)
                     break
 
         if not entity_id:
-            module_prefix = crud_mapping_name.split("_")[0]
-            expected_id_key = f"{module_prefix}_id"
             # 如果支持名称查找，提示用户可以提供名称
             if name_lookup_field:
                 return self.build_result(False, f"缺少参数: {expected_id_key} 或 {name_lookup_field}")
@@ -201,6 +262,15 @@ class StatusChangeHandler(BaseHandler):
         status_enum_name = crud_mapping_name + "_status"
         status_enum_mapping = ai_enum_mapping_crud.get_by_name(db, status_enum_name)
 
+        with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
+            f.write(f"\n=== 状态枚举处理 ===\n")
+            f.write(f"status_enum_name: {status_enum_name}\n")
+            f.write(f"status_enum_mapping: {status_enum_mapping}\n")
+            f.write(f"target_status: {target_status}\n")
+            if status_enum_mapping:
+                f.write(f"values: {status_enum_mapping.values}\n")
+                f.write(f"values.values(): {list(status_enum_mapping.values.values())}\n")
+
         if status_enum_mapping:
             enum_class = self.get_model_class(status_enum_mapping.enum_class)
 
@@ -224,8 +294,29 @@ class StatusChangeHandler(BaseHandler):
         else:
             target_status_enum = target_status
 
-        # 更新状态
-        setattr(entity, status_field, target_status_enum)
+        with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
+            f.write(f"target_status_enum: {target_status_enum}\n")
+            f.write(f"type: {type(target_status_enum)}\n")
+
+        # 更新状态 - 根据字段类型决定使用枚举对象还是整数值
+        status_attr = getattr(model_class, status_field, None)
+        final_status_value = target_status_enum
+
+        if status_attr is not None:
+            from sqlalchemy import Integer
+            # 如果字段是 Integer 类型，使用枚举的 value（整数）
+            if hasattr(status_attr, 'type') and isinstance(status_attr.type, Integer):
+                if hasattr(target_status_enum, 'value'):
+                    final_status_value = target_status_enum.value
+                else:
+                    # 没有枚举映射，直接使用传入的值
+                    final_status_value = target_status_enum
+
+        setattr(entity, status_field, final_status_value)
+
+        with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
+            f.write(f"final_status_value: {final_status_value}\n")
+            f.write(f"status_attr.type: {status_attr.type if status_attr else None}\n")
 
         # 更新其他字段
         update_fields = handler_config.get("update_fields", [])
@@ -259,6 +350,8 @@ class StatusChangeHandler(BaseHandler):
         )
 
         template_data = {"id": entity_id}
+        # 同时添加模块特定的 ID 字段（如 opportunity_id）
+        template_data[expected_id_key] = entity_id
         # 添加名称字段到模板数据
         if name_field and hasattr(entity, name_field):
             template_data[name_field] = getattr(entity, name_field)

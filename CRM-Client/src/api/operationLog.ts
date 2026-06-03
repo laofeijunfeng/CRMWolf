@@ -76,13 +76,13 @@ const operationLogApi = {
       queryParams.event_types = params.event_types.join(',')
     }
 
-    return request.get<OperationLogListResponse>('/api/v1/operation-logs', {
+    return request.get<OperationLogListResponse>('/v1/operation-logs', {
       params: queryParams
     })
   },
 
   getMyLogs: (params?: GetMyLogsParams) => {
-    return request.get<OperationLogListResponse>('/api/v1/operation-logs/my-logs', {
+    return request.get<OperationLogListResponse>('/v1/operation-logs/my-logs', {
       params: params || {}
     })
   }

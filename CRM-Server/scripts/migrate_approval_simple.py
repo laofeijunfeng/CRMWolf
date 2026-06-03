@@ -34,7 +34,7 @@ def create_approval_tables():
                 node_code VARCHAR(50) NOT NULL COMMENT '节点编码',
                 node_order INT NOT NULL COMMENT '节点顺序',
                 description TEXT COMMENT '节点描述',
-                approve_role VARCHAR(50) COMMENT '审批角色（SYSTEM_ADMIN, SALES_DIRECTOR等）',
+                approve_role VARCHAR(50) COMMENT '审批角色（TEAM_ADMIN, SALES_DIRECTOR等）',
                 is_required INT NOT NULL DEFAULT 1 COMMENT '是否必须审批：0:否, 1:是',
                 created_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                 PRIMARY KEY (id),

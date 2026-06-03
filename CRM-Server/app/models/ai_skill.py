@@ -96,3 +96,27 @@ class AIEnumMapping(Base):
         Index('idx_enum_name', 'enum_name'),
         {'comment': 'AI Enum映射表'}
     )
+
+
+class AIActionParam(Base):
+    """Action 参数定义表 - 用于动态表单渲染"""
+    __tablename__ = "crm_ai_action_params"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    action_id = Column(BigInteger, nullable=False, comment="关联Action ID")
+    param_name = Column(String(50), nullable=False, comment="参数名（如 customer_name）")
+    label = Column(String(100), nullable=False, comment="显示标签（如 客户名称）")
+    param_type = Column(String(20), nullable=False, default='text', comment="参数类型：text/number/date/select/textarea")
+    required = Column(Integer, nullable=False, default=1, comment="是否必填：1必填 0可选")
+    placeholder = Column(String(200), nullable=True, comment="占位提示文本")
+    default_value = Column(String(200), nullable=True, comment="默认值")
+    options = Column(JSON, nullable=True, comment="选项列表（用于 select 类型）")
+    sort_order = Column(Integer, nullable=False, default=0, comment="排序序号")
+    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+
+    __table_args__ = (
+        Index('idx_action_id', 'action_id'),
+        Index('idx_param_name', 'param_name'),
+        {'comment': 'AI Action参数定义表'}
+    )

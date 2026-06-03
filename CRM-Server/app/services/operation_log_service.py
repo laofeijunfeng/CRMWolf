@@ -14,7 +14,7 @@
         event_action=EventActions.CREATE,
         resource_type=ResourceTypes.LEAD,
         resource_id=lead.id,
-        operator_id=user.feishu_open_id,
+        operator_id=str(user.id),
         operator_name=user.name,
         content={
             "leadName": lead.lead_name,
@@ -45,11 +45,12 @@ class OperationLogService:
         operator_name: Optional[str] = None,
         secondary_resource_type: Optional[str] = None,
         secondary_resource_id: Optional[int] = None,
-        remark: Optional[str] = None
+        remark: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Optional[object]:
         """
         记录操作日志
-        
+
         参数:
             db: 数据库会话
             event_type: 事件类型
@@ -76,8 +77,8 @@ class OperationLogService:
                 content=content,
                 remark=remark
             )
-            
-            return operation_log_crud.create(db, log_data)
+
+            return operation_log_crud.create(db, log_data, team_id=team_id)
         except Exception as e:
             print(f"记录操作日志失败: {str(e)}")
             return None
@@ -116,7 +117,8 @@ class OperationLogService:
         customer_id: int,
         customer_name: str,
         operator_id: str,
-        operator_name: Optional[str] = None
+        operator_name: Optional[str] = None,
+        team_id: Optional[int] = None
     ):
         """记录线索转化"""
         return self.log(
@@ -129,6 +131,7 @@ class OperationLogService:
             secondary_resource_id=customer_id,
             operator_id=operator_id,
             operator_name=operator_name,
+            team_id=team_id,
             content={
                 "originalLeadName": lead_name,
                 "newCustomerName": customer_name,
@@ -144,7 +147,10 @@ class OperationLogService:
         method: str,
         operator_id: str,
         operator_name: Optional[str] = None,
-        next_follow_time: Optional[str] = None
+        next_follow_time: Optional[str] = None,
+        next_action: Optional[str] = None,
+        team_id: Optional[int] = None,
+        follow_up_id: Optional[int] = None
     ):
         """记录客户跟进"""
         content_data = {
@@ -152,8 +158,12 @@ class OperationLogService:
             "method": method
         }
         if next_follow_time:
-            content_data["nextFollowTime"] = next_follow_time
-        
+            content_data["next_follow_up_date"] = next_follow_time
+        if next_action:
+            content_data["next_action"] = next_action
+        if follow_up_id:
+            content_data["follow_up_id"] = follow_up_id
+
         return self.log(
             db=db,
             event_type="MANUAL_FOLLOW_UP",
@@ -162,7 +172,45 @@ class OperationLogService:
             resource_id=customer_id,
             operator_id=operator_id,
             operator_name=operator_name,
-            content=content_data
+            content=content_data,
+            team_id=team_id
+        )
+
+    def log_lead_follow_up(
+        self,
+        db: Session,
+        lead_id: int,
+        follow_up_content: str,
+        method: str,
+        operator_id: str,
+        operator_name: Optional[str] = None,
+        next_follow_time: Optional[str] = None,
+        next_action: Optional[str] = None,
+        team_id: Optional[int] = None,
+        follow_up_id: Optional[int] = None
+    ):
+        """记录线索跟进"""
+        content_data = {
+            "content": follow_up_content,
+            "method": method
+        }
+        if next_follow_time:
+            content_data["next_follow_up_date"] = next_follow_time
+        if next_action:
+            content_data["next_action"] = next_action
+        if follow_up_id:
+            content_data["follow_up_id"] = follow_up_id
+
+        return self.log(
+            db=db,
+            event_type="MANUAL_FOLLOW_UP",
+            event_action="CREATE",
+            resource_type="LEAD",
+            resource_id=lead_id,
+            operator_id=operator_id,
+            operator_name=operator_name,
+            content=content_data,
+            team_id=team_id
         )
     
     def log_opportunity_created(

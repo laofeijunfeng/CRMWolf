@@ -194,14 +194,19 @@ class CustomerUpdate(BaseModel):
     company_scale: Optional[str] = Field(None, max_length=50, description="公司规模")
     source: Optional[CustomerSource] = Field(None, description="客户来源")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
-    
+    # 档案字段（支持编辑）
+    company_background: Optional[str] = Field(None, description="企业背景")
+    company_website: Optional[str] = Field(None, description="公司官网")
+    main_business: Optional[str] = Field(None, description="主营业务")
+    project_background: Optional[str] = Field(None, description="项目需求背景")
+
     @field_validator('account_name')
     @classmethod
     def account_name_must_not_be_empty(cls, v):
         if v is not None and (not v or not v.strip()):
             raise ValueError('客户公司名称不能为空')
         return v.strip() if v else v
-    
+
     @field_validator('city')
     @classmethod
     def city_must_not_be_empty(cls, v):
@@ -217,7 +222,6 @@ class CustomerStatusUpdate(BaseModel):
 class ConvertLeadToCustomer(BaseModel):
     lead_id: int = Field(..., description="线索ID")
     account_name: Optional[str] = Field(None, min_length=1, max_length=255, description="客户公司名称（可覆盖）")
-    industry: Optional[str] = Field(None, max_length=100, description="所属行业")
     address: Optional[str] = Field(None, max_length=500, description="公司地址")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
 
@@ -225,7 +229,7 @@ class ConvertLeadToCustomer(BaseModel):
 class CustomerResponse(BaseModel):
     id: int = Field(..., description="客户ID（主键）")
     account_name: str = Field(..., description="客户公司名称")
-    industry: Optional[str] = Field(None, description="所属行业")
+    industry: Optional[str] = Field(None, description="所属行业（AI自动匹配）")
     city: str = Field(..., description="所在城市")
     address: Optional[str] = Field(None, description="公司地址")
     company_scale: Optional[str] = Field(None, description="公司规模")
@@ -234,13 +238,26 @@ class CustomerResponse(BaseModel):
     owner_id: Optional[str] = Field(None, description="负责人飞书用户ID（status=3时为空）")
     source_lead_id: Optional[int] = Field(None, description="来源线索ID（从线索转化而来时记录）")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
+    loss_reason: Optional[str] = Field(None, description="输单原因（status=2时有值）")
     return_reason: Optional[str] = Field(None, description="退回公海原因（status=3时有值）")
     returned_time: Optional[datetime] = Field(None, description="退回公海时间（status=3时有值）")
     creator_id: str = Field(..., description="创建人飞书用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
-    
+    # 档案字段
+    company_background: Optional[str] = Field(None, description="企业背景")
+    company_website: Optional[str] = Field(None, description="公司官网")
+    main_business: Optional[str] = Field(None, description="主营业务")
+    similar_customers: Optional[str] = Field(None, description="同行业客户")
+    project_background: Optional[str] = Field(None, description="项目需求背景")
+    profile_status: Optional[str] = Field(None, description="档案生成状态")
+    profile_generated_time: Optional[datetime] = Field(None, description="档案生成完成时间")
+    profile_error_message: Optional[str] = Field(None, description="档案生成失败原因")
+    # 热力值字段
+    score: Optional[int] = Field(None, description="热力值分数（0-100）")
+    score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -273,6 +290,7 @@ class CustomerDetailResponse(BaseModel):
     source_lead_id: Optional[int] = None
     default_procurement_method_id: Optional[int] = None
     default_procurement_method_info: Optional[ProcurementMethodInfo] = Field(None, description="默认采购方式信息")
+    loss_reason: Optional[str] = None
     return_reason: Optional[str] = None
     returned_time: Optional[datetime] = None
     creator_id: str
@@ -282,7 +300,19 @@ class CustomerDetailResponse(BaseModel):
     contacts: List[ContactResponse] = []
     owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")
     creator_info: Optional[OwnerInfo] = Field(None, description="创建人信息")
-    
+    # 档案字段
+    company_background: Optional[str] = None
+    company_website: Optional[str] = None
+    main_business: Optional[str] = None
+    similar_customers: Optional[str] = None
+    project_background: Optional[str] = None
+    profile_status: Optional[str] = None
+    profile_generated_time: Optional[datetime] = None
+    profile_error_message: Optional[str] = None
+    # 热力值字段
+    score: Optional[int] = Field(None, description="热力值分数（0-100）")
+    score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -360,3 +390,14 @@ class OwnerOption(BaseModel):
 
 class OwnerListResponse(BaseModel):
     data: List[OwnerOption] = Field(..., description="负责人选项列表")
+
+
+class CustomerLoseRequest(BaseModel):
+    loss_reason: str = Field(..., min_length=1, max_length=500, description="输单原因（必填）")
+
+    @field_validator('loss_reason')
+    @classmethod
+    def loss_reason_must_not_be_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('输单原因不能为空')
+        return v.strip()

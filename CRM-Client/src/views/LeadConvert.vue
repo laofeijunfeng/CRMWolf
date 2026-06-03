@@ -97,39 +97,11 @@
 
             <el-row :gutter="24">
               <el-col :span="12">
-                <el-form-item label="所属行业" prop="industry">
-                  <el-select
-                    v-model="convertForm.industry"
-                    placeholder="请选择所属行业"
-                    style="width: 100%"
-                    clearable
-                  >
-                    <el-option
-                      v-for="option in industryOptions"
-                      :key="option.value"
-                      :label="option.label"
-                      :value="option.value"
-                    />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
                 <el-form-item label="所在城市" prop="city" required>
                   <el-input v-model="convertForm.city" placeholder="请输入所在城市" />
                 </el-form-item>
               </el-col>
-            </el-row>
-
-            <el-row :gutter="24">
-              <el-col :span="24">
-                <el-form-item label="公司地址" prop="address">
-                  <el-input v-model="convertForm.address" placeholder="请输入公司地址" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-
-            <el-row :gutter="24">
-              <el-col :span="24">
+              <el-col :span="12">
                 <el-form-item label="默认采购方式" prop="default_procurement_method_id" required>
                   <el-select
                     v-model="convertForm.default_procurement_method_id"
@@ -144,6 +116,14 @@
                       :value="option.id"
                     />
                   </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="24">
+              <el-col :span="24">
+                <el-form-item label="公司地址" prop="address">
+                  <el-input v-model="convertForm.address" placeholder="请输入公司地址" />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -182,12 +162,10 @@ const leadId = Number(route.params.id || route.query.lead_id)
 const loading = ref(false)
 const leadData = ref<LeadDetail | null>(null)
 const procurementMethodOptions = ref<any[]>([])
-const industryOptions = ref<any[]>([])
 const convertFormRef = ref()
 
 const convertForm = reactive({
   account_name: '',
-  industry: '',
   city: '',
   address: '',
   default_procurement_method_id: undefined as number | undefined
@@ -236,15 +214,6 @@ const fetchProcurementMethodOptions = async () => {
   }
 }
 
-const fetchIndustryOptions = async () => {
-  try {
-    const res = await customerApi.getIndustryOptions() as any
-    industryOptions.value = res || []
-  } catch (error) {
-    console.error('获取行业选项失败:', error)
-  }
-}
-
 const handleSubmit = async () => {
   try {
     await convertFormRef.value?.validate()
@@ -257,12 +226,11 @@ const handleSubmit = async () => {
     const data = {
       lead_id: leadId,
       account_name: convertForm.account_name || undefined,
-      industry: convertForm.industry || undefined,
       address: convertForm.address || undefined,
       default_procurement_method_id: convertForm.default_procurement_method_id || undefined
     }
     const result = await customerApi.convertLeadToCustomer(data) as any
-    ElMessage.success(`转化成功！客户ID：${result.customer_id}，联系人ID：${result.contact_id}`)
+    ElMessage.success(result.message || `转化成功！客户ID：${result.customer_id}`)
     router.push(`/customers/${result.customer_id}`)
   } catch (error: any) {
     ElMessage.error(error.response?.data?.detail || error.message || '转化失败')
@@ -286,10 +254,7 @@ onMounted(async () => {
     return
   }
 
-  await Promise.all([
-    fetchProcurementMethodOptions(),
-    fetchIndustryOptions()
-  ])
+  await fetchProcurementMethodOptions()
   await fetchLeadDetail()
 })
 </script>
@@ -356,8 +321,6 @@ onMounted(async () => {
 }
 
 .convert-content {
-  max-width: 800px;
-  margin: 0 auto;
   padding: $wolf-page-padding;
   display: flex;
   flex-direction: column;

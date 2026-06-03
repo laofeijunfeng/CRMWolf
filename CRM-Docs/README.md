@@ -33,6 +33,7 @@ CRM-Docs/
 
 | 文档 | 说明 | 内容 |
 |------|------|------|
+| [MODULE-LEAD.md](system/MODULE-LEAD.md) | 线索管理模块 | 线索创建、跟进记录、公海池、转化流程、AI智能创建 |
 | [MODULE-CUSTOMER.md](system/MODULE-CUSTOMER.md) | 客户管理模块 | 客户创建、联系人、公海池、AI档案、API接口 |
 
 ---
@@ -108,4 +109,4 @@ CRM-Docs/
 ---
 
 > **维护团队**：CRMWolf 开发团队
-> **最后更新**：2026-05-26
+> **最后更新**：2026-06-01

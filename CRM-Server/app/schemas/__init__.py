@@ -3,9 +3,9 @@ from app.schemas.user import (
     UserCreate,
     UserUpdate,
     UserResponse,
+    LoginResponse,
     FeishuUserInfo,
-    FeishuTokenResponse,
-    LoginResponse
+    FeishuTokenResponse
 )
 from app.schemas.role import (
     RoleBase,
@@ -41,15 +41,23 @@ from app.schemas.ai_skill import (
     SkillDefinition,
     SkillActionDefinition
 )
+from app.schemas.ai import (
+    AIRequestBase,
+    AIResponseBase,
+    AIErrorResponse,
+    ActionPlan,
+    FieldChange,
+    generate_action_id,
+)
 
 __all__ = [
     "UserBase",
     "UserCreate",
     "UserUpdate",
     "UserResponse",
+    "LoginResponse",
     "FeishuUserInfo",
     "FeishuTokenResponse",
-    "LoginResponse",
     "RoleBase",
     "RoleCreate",
     "RoleUpdate",
@@ -73,5 +81,11 @@ __all__ = [
     "AIParsedIntent",
     "SkillExecutionResult",
     "SkillDefinition",
-    "SkillActionDefinition"
+    "SkillActionDefinition",
+    "AIRequestBase",
+    "AIResponseBase",
+    "AIErrorResponse",
+    "ActionPlan",
+    "FieldChange",
+    "generate_action_id",
 ]

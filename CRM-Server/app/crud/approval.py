@@ -14,34 +14,41 @@ from app.schemas.approval import (
 class ApprovalFlowCRUD:
     def get_by_id(self, db: Session, flow_id: int) -> Optional[ApprovalFlow]:
         return db.query(ApprovalFlow).filter(ApprovalFlow.id == flow_id).first()
-    
-    def get_by_code(self, db: Session, flow_code: str) -> Optional[ApprovalFlow]:
-        return db.query(ApprovalFlow).filter(ApprovalFlow.flow_code == flow_code).first()
-    
-    def get_multi(self, db: Session, skip: int = 0, limit: int = 100, is_active: Optional[bool] = None) -> Tuple[List[ApprovalFlow], int]:
+
+    def get_by_code(self, db: Session, flow_code: str, team_id: Optional[int] = None) -> Optional[ApprovalFlow]:
+        query = db.query(ApprovalFlow).filter(ApprovalFlow.flow_code == flow_code)
+        if team_id is not None:
+            query = query.filter(ApprovalFlow.team_id == team_id)
+        return query.first()
+
+    def get_multi(self, db: Session, team_id: Optional[int] = None, skip: int = 0, limit: int = 100, is_active: Optional[bool] = None) -> Tuple[List[ApprovalFlow], int]:
         query = db.query(ApprovalFlow)
-        
+
+        if team_id is not None:
+            query = query.filter(ApprovalFlow.team_id == team_id)
         if is_active is not None:
             query = query.filter(ApprovalFlow.is_active == (1 if is_active else 0))
-        
+
         total = query.count()
         flows = query.order_by(ApprovalFlow.created_time.desc()).offset(skip).limit(limit).all()
-        
+
         return flows, total
-    
-    def create(self, db: Session, obj_in: ApprovalFlowCreate) -> ApprovalFlow:
+
+    def create(self, db: Session, obj_in: ApprovalFlowCreate, team_id: int) -> ApprovalFlow:
         flow_data = obj_in.model_dump(exclude={'nodes'})
-        
+        flow_data['team_id'] = team_id
+
         db_flow = ApprovalFlow(**flow_data)
         db.add(db_flow)
         db.flush()
-        
+
         for node_data in obj_in.nodes:
             node_dict = node_data.model_dump()
             node_dict['flow_id'] = db_flow.id
+            node_dict['team_id'] = team_id
             db_node = ApprovalNode(**node_dict)
             db.add(db_node)
-        
+
         db.commit()
         db.refresh(db_flow)
         return db_flow
@@ -87,11 +94,14 @@ class ApprovalFlowCRUD:
         db.commit()
         return True
     
-    def match_flow(self, db: Session, contract: Contract) -> Optional[ApprovalFlow]:
+    def match_flow(self, db: Session, contract: Contract, team_id: Optional[int] = None) -> Optional[ApprovalFlow]:
         query = db.query(ApprovalFlow).filter(ApprovalFlow.is_active == 1)
-        
+
+        if team_id is not None:
+            query = query.filter(ApprovalFlow.team_id == team_id)
+
         total_amount = float(contract.total_amount) if contract.total_amount else 0
-        
+
         flows = query.all()
         for flow in flows:
             if flow.min_amount and total_amount < float(flow.min_amount):
@@ -128,15 +138,16 @@ class ApprovalCRUD:
     
     def create_approval(self, db: Session, contract: Contract, flow: ApprovalFlow, submitter_id: str, submitter_name: str) -> Approval:
         from app.models.approval import ApprovalNode
-        
+
         first_node = db.query(ApprovalNode).filter(
             ApprovalNode.flow_id == flow.id,
             ApprovalNode.node_order == 1
         ).first()
-        
+
         db_approval = Approval(
             contract_id=contract.id,
             flow_id=flow.id,
+            team_id=contract.team_id,
             current_node_id=first_node.id if first_node else None,
             status=ApprovalStatus.PENDING,
             submitter_id=submitter_id,

@@ -31,7 +31,8 @@ class OperationLog(Base):
     __tablename__ = "crm_operation_logs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
-    
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
+
     event_id = Column(String(64), nullable=False, unique=True, comment="事件唯一ID")
     event_type = Column(String(50), nullable=False, comment="事件类型")
     event_action = Column(String(20), nullable=False, comment="事件动作")
@@ -56,6 +57,7 @@ class OperationLog(Base):
         Index('idx_event_type', 'event_type'),
         Index('idx_operator_id', 'operator_id'),
         Index('idx_operated_at', 'operated_at'),
+        Index('idx_operation_log_team_id', 'team_id'),
         {'comment': '操作记录表'}
     )
 

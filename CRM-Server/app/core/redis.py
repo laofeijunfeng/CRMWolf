@@ -39,6 +39,11 @@ async def get_async_redis_client() -> aioredis.Redis:
     return async_redis_client
 
 
+async def get_redis() -> aioredis.Redis:
+    """FastAPI 依赖：获取 Redis client"""
+    return await get_async_redis_client()
+
+
 async def close_redis_connections():
     global redis_client, async_redis_client
     if redis_client:

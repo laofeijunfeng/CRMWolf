@@ -9,6 +9,12 @@
         <h1 class="page-title">{{ opportunity?.opportunity_name || '商机详情' }}</h1>
       </div>
       <div class="header-right">
+        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="success" size="small" @click="handleShowWinModal">
+          赢单
+        </el-button>
+        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="danger" size="small" @click="handleShowLoseModal">
+          输单
+        </el-button>
         <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="primary" size="small" @click="handleEdit">
           编辑
         </el-button>
@@ -201,15 +207,73 @@
         </div>
       </div>
     </div>
+
+    <!-- 赢单弹窗 -->
+    <el-dialog
+      v-model="winModalVisible"
+      title="标记赢单"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="winForm" :rules="winFormRules" label-position="top" ref="winFormRef">
+        <el-form-item prop="actual_amount" label="实际成交金额" required>
+          <el-input-number
+            v-model="winForm.actual_amount"
+            :min="0"
+            :precision="2"
+            :controls="false"
+            style="width: 100%"
+          >
+            <template #prefix>¥</template>
+          </el-input-number>
+        </el-form-item>
+        <el-form-item prop="actual_closing_date" label="实际成交日期" required>
+          <el-date-picker
+            v-model="winForm.actual_closing_date"
+            style="width: 100%"
+            placeholder="请选择实际成交日期"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="winModalVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleWinModalOk">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 输单弹窗 -->
+    <el-dialog
+      v-model="loseModalVisible"
+      title="标记输单"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="loseForm" :rules="loseFormRules" label-position="top" ref="loseFormRef">
+        <el-form-item prop="loss_reason" label="输单原因" required>
+          <el-input
+            v-model="loseForm.loss_reason"
+            type="textarea"
+            placeholder="请输入输单原因说明"
+            :rows="4"
+            :maxlength="500"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="loseModalVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleLoseModalOk">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { opportunityApi, type Opportunity } from '@/api/opportunity'
+import { opportunityApi, type Opportunity, type OpportunityWinRequest, type OpportunityLossRequest } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import ProcurementStageFlow from '@/components/ProcurementStageFlow.vue'
 import { usePermissionStore } from '@/stores/permissions'
@@ -222,6 +286,25 @@ const loading = ref(false)
 const opportunity = ref<Opportunity | null>(null)
 const relatedContract = ref<ContractListResponse | null>(null)
 const contractLoading = ref(false)
+
+// Win/Lose dialogs
+const winModalVisible = ref(false)
+const winFormRef = ref()
+const winForm = reactive<OpportunityWinRequest>({
+  actual_amount: 0,
+  actual_closing_date: new Date().toISOString().split('T')[0] || ''
+})
+const winFormRules = {
+  actual_amount: [{ required: true, message: '请输入实际金额', trigger: 'blur' }],
+  actual_closing_date: [{ required: true, message: '请选择成交日期', trigger: 'change' }]
+}
+
+const loseModalVisible = ref(false)
+const loseFormRef = ref()
+const loseForm = reactive<OpportunityLossRequest>({ loss_reason: '' })
+const loseFormRules = {
+  loss_reason: [{ required: true, message: '请输入输单原因', trigger: 'blur' }]
+}
 
 const canEditOpportunity = computed(() =>
   permissionStore.hasAnyPermission(['opportunity:update', 'opportunity:edit_own', 'opportunity:edit_all'])
@@ -364,6 +447,54 @@ const getPurchaseTypeClass = (type: string) => {
   return map[type] || 'status-default'
 }
 
+const handleShowWinModal = () => {
+  if (!opportunity.value) return
+  Object.assign(winForm, {
+    actual_amount: opportunity.value.total_amount || 0,
+    actual_closing_date: new Date().toISOString().split('T')[0]
+  })
+  winModalVisible.value = true
+}
+
+const handleShowLoseModal = () => {
+  Object.assign(loseForm, { loss_reason: '' })
+  loseModalVisible.value = true
+}
+
+const handleWinModalOk = async () => {
+  if (!opportunity.value) return
+  try {
+    await winFormRef.value?.validate()
+  } catch {
+    return
+  }
+  try {
+    await opportunityApi.markAsWon(opportunity.value.id, winForm)
+    ElMessage.success('已标记赢单')
+    winModalVisible.value = false
+    fetchOpportunityDetail()
+  } catch (error: any) {
+    ElMessage.error(error.message || '操作失败')
+  }
+}
+
+const handleLoseModalOk = async () => {
+  if (!opportunity.value) return
+  try {
+    await loseFormRef.value?.validate()
+  } catch {
+    return
+  }
+  try {
+    await opportunityApi.markAsLost(opportunity.value.id, loseForm)
+    ElMessage.success('已标记输单')
+    loseModalVisible.value = false
+    fetchOpportunityDetail()
+  } catch (error: any) {
+    ElMessage.error(error.message || '操作失败')
+  }
+}
+
 onMounted(() => {
   fetchOpportunityDetail()
 })
@@ -403,6 +534,7 @@ onMounted(() => {
   align-items: center;
   gap: $wolf-space-sm;
 }
+
 
 .back-btn {
   width: 32px !important;

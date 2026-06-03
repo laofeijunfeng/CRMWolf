@@ -22,7 +22,9 @@ class ConversationLogCRUD:
         ai_reply_text: Optional[str] = None,
         execution_result: Optional[str] = None,
         status: str = "PENDING",
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        session_id: Optional[str] = None,
+        context_data: Optional[Dict[str, Any]] = None
     ) -> ConversationLog:
         """创建会话日志"""
         db_obj = ConversationLog(
@@ -36,7 +38,9 @@ class ConversationLogCRUD:
             ai_reply_text=ai_reply_text,
             execution_result=execution_result,
             status=status,
-            error_message=error_message
+            error_message=error_message,
+            session_id=session_id,
+            context_data=context_data
         )
         db.add(db_obj)
         db.commit()
@@ -83,6 +87,14 @@ class ConversationLogCRUD:
     def get_by_id(self, db: Session, log_id: int) -> Optional[ConversationLog]:
         """获取单条日志"""
         return db.query(ConversationLog).filter(ConversationLog.id == log_id).first()
+
+    def get_by_session(self, db: Session, session_id: str, limit: int = 10) -> List[ConversationLog]:
+        """根据会话 ID 获取历史日志（多轮对话）"""
+        return db.query(ConversationLog)\
+            .filter(ConversationLog.session_id == session_id)\
+            .order_by(ConversationLog.created_at.asc())\
+            .limit(limit)\
+            .all()
 
 
 conversation_log_crud = ConversationLogCRUD()

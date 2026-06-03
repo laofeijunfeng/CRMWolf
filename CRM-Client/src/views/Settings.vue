@@ -29,12 +29,6 @@
         <span class="card-title">系统管理</span>
       </div>
       <div class="settings-list">
-        <div v-if="canManageUsers" class="settings-item" @click="goToUsers">
-          <el-icon class="item-icon"><User /></el-icon>
-          <span class="item-text">用户管理</span>
-          <span class="item-desc">管理系统用户账号</span>
-          <el-icon class="item-arrow"><ArrowRight /></el-icon>
-        </div>
         <div v-if="canManageRoles" class="settings-item" @click="goToRoles">
           <el-icon class="item-icon"><UserFilled /></el-icon>
           <span class="item-text">角色管理</span>
@@ -65,6 +59,12 @@
           <span class="item-desc">管理 Skill/Action 定义</span>
           <el-icon class="item-arrow"><ArrowRight /></el-icon>
         </div>
+        <div v-if="canManageTeam" class="settings-item" @click="goToTeamMembers">
+          <el-icon class="item-icon"><UserFilled /></el-icon>
+          <span class="item-text">团队成员</span>
+          <span class="item-desc">管理团队成员与邀请</span>
+          <el-icon class="item-arrow"><ArrowRight /></el-icon>
+        </div>
       </div>
     </div>
 
@@ -79,8 +79,8 @@
           <span class="detail-value">{{ userInfo?.id || '-' }}</span>
         </div>
         <div class="detail-item">
-          <span class="detail-label">飞书 Open ID</span>
-          <span class="detail-value">{{ userInfo?.feishu_open_id || '-' }}</span>
+          <span class="detail-label">邮箱</span>
+          <span class="detail-value">{{ userInfo?.email || '-' }}</span>
         </div>
         <div class="detail-item">
           <span class="detail-label">注册时间</span>
@@ -115,6 +115,7 @@
         :loading="myOperationsLoading"
         :has-more="myOperationsHasMore"
         :filters="myOperationsFilters"
+        :show-filter="false"
         @load-more="handleMyOperationsLoadMore"
         @filter-change="handleMyOperationsFilterChange"
         @reset="handleMyOperationsReset"
@@ -147,13 +148,14 @@ const canManageRoles = computed(() => permissionStore.hasPermission('role:manage
 const canManageApprovalFlows = computed(() => permissionStore.hasAnyPermission(['approval:flow:create', 'approval:flow:update']))
 const canManageProcurementMethods = computed(() => permissionStore.hasPermission('procurement_method:view'))
 const canManageAIConfig = computed(() => permissionStore.hasAnyPermission(['system:config', 'ai:manage']))
+const canManageTeam = computed(() => userRoles.value?.some(r => r.code === 'TEAM_ADMIN') ?? false)
 
-const goToUsers = () => router.push('/users')
 const goToRoles = () => router.push('/roles')
 const goToApprovalFlows = () => router.push('/approval-flows')
 const goToProcurementMethods = () => router.push('/procurement-methods')
 const goToAIConfig = () => router.push('/ai-config')
 const goToAISkills = () => router.push('/ai-skills')
+const goToTeamMembers = () => router.push('/team-members')
 
 const myTimeline = useTimeline({
   useMyLogs: true,
@@ -437,7 +439,8 @@ const handleLogout = () => {
 }
 
 .logs-card :deep(.timeline-container) {
-  padding: $wolf-space-md;
+  padding: 0;
+  background: transparent;
 }
 
 // 响应式

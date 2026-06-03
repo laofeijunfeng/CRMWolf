@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission
+from app.core.deps import get_current_active_user, require_permission, get_current_user_team
 from app.models.user import User
 from app.schemas.procurement import (
     ProcurementMethodCreate, ProcurementMethodUpdate, ProcurementMethodResponse,
@@ -31,11 +31,12 @@ router = APIRouter(prefix="/api/v1/procurement-methods", tags=["采购方式管�
 - 轻量级接口，适合前端下拉选择
 """)
 def get_procurement_method_options(
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     methods, _ = procurement_method_crud.get_multi(
-        db, skip=0, limit=100, is_active=1
+        db, team_id=team_id, skip=0, limit=100, is_active=1
     )
     return methods
 
@@ -56,12 +57,13 @@ def get_procurement_methods(
     is_active: Optional[int] = Query(None, ge=0, le=1, description="启用状态筛选：1=启用, 0=停用（可选）"),
     page: int = Query(1, ge=1, description="页码，从1开始（默认1）"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量，最大100（默认20）"),
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     skip = (page - 1) * page_size
     methods, total = procurement_method_crud.get_multi(
-        db, skip=skip, limit=page_size, is_active=is_active
+        db, team_id=team_id, skip=skip, limit=page_size, is_active=is_active
     )
     return methods
 
@@ -76,6 +78,7 @@ def get_procurement_methods(
 """)
 def get_procurement_method(
     method_id: int,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -85,9 +88,9 @@ def get_procurement_method(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"采购方式 ID {method_id} 不存在"
         )
-    
+
     # 获取阶段模板
-    stage_templates = procurement_stage_template_crud.get_by_method(db, method_id)
+    stage_templates = procurement_stage_template_crud.get_by_method(db, method_id, team_id)
     
     # 构造响应
     response_dict = {
@@ -111,12 +114,13 @@ def get_procurement_method(
 """)
 def create_procurement_method(
     method_in: ProcurementMethodCreate,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement_method:create"))
 ):
     try:
         method = procurement_method_crud.create(
-            db, method_in, creator_id=current_user.feishu_open_id
+            db, method_in, creator_id=str(current_user.id), team_id=team_id
         )
         return method
     except ValueError as e:
@@ -152,7 +156,7 @@ def update_procurement_method(
     
     try:
         updated_method = procurement_method_crud.update(
-            db, method, method_in, updater_id=current_user.feishu_open_id
+            db, method, method_in, updater_id=str(current_user.id)
         )
         return updated_method
     except ValueError as e:
@@ -212,6 +216,7 @@ def delete_procurement_method(
 def batch_update_stages(
     method_id: int,
     stages_in: BatchUpdateStagesRequest,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement_stage:update"))
 ):
@@ -254,7 +259,7 @@ def batch_update_stages(
                     version_lock=existing_stage.version_lock
                 )
                 updated_stage = procurement_stage_template_crud.update(
-                    db, existing_stage, stage_update, current_user.feishu_open_id
+                    db, existing_stage, stage_update, str(current_user.id)
                 )
                 updated_stages.append(updated_stage)
             # 处理新增
@@ -270,14 +275,14 @@ def batch_update_stages(
                     description=stage_in.description
                 )
                 new_stage = procurement_stage_template_crud.create(
-                    db, stage_create, current_user.feishu_open_id
+                    db, stage_create, str(current_user.id), team_id
                 )
                 updated_stages.append(new_stage)
         
         db.commit()
         
         # 返回更新后的阶段列表
-        return procurement_stage_template_crud.get_by_method(db, method_id)
+        return procurement_stage_template_crud.get_by_method(db, method_id, team_id)
         
     except ValueError as e:
         db.rollback()
@@ -318,6 +323,7 @@ def batch_update_stages(
 def full_update_procurement_method(
     method_id: int,
     update_in: ProcurementMethodWithStagesUpdate,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -335,7 +341,7 @@ def full_update_procurement_method(
         # 更新采购方式
         if update_in.method:
             procurement_method_crud.update(
-                db, method, update_in.method, current_user.feishu_open_id
+                db, method, update_in.method, str(current_user.id)
             )
         
         # 批量更新阶段
@@ -367,7 +373,7 @@ def full_update_procurement_method(
                         version_lock=existing_stage.version_lock
                     )
                     updated_stage = procurement_stage_template_crud.update(
-                        db, existing_stage, stage_update, current_user.feishu_open_id
+                        db, existing_stage, stage_update, str(current_user.id)
                     )
                     updated_stages.append(updated_stage)
                 # 处理新增
@@ -383,7 +389,7 @@ def full_update_procurement_method(
                         description=stage_in.description
                     )
                     new_stage = procurement_stage_template_crud.create(
-                        db, stage_create, current_user.feishu_open_id
+                        db, stage_create, str(current_user.id)
                     )
                     updated_stages.append(new_stage)
         
@@ -391,7 +397,7 @@ def full_update_procurement_method(
         
         # 重新查询以确保获取最新数据
         db.refresh(method)
-        stage_templates = procurement_stage_template_crud.get_by_method(db, method_id)
+        stage_templates = procurement_stage_template_crud.get_by_method(db, method_id, team_id)
         
         # 构造阶段模板响应列表 - 添加异常处理以便调试
         logger.info(f"开始序列化阶段模板，共 {len(stage_templates)} 个阶段")

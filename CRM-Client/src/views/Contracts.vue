@@ -1,67 +1,42 @@
 <template>
   <div class="contracts-page">
-    <!-- 快捷筛选标签 -->
-    <div class="filter-tabs">
-      <span
-        :class="['filter-tab', { active: activeTab === 'all' }]"
-        @click="handleTabChange('all')"
-      >全部合同</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'DRAFT' }]"
-        @click="handleTabChange('DRAFT')"
-      >草稿</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'PENDING_REVIEW' }]"
-        @click="handleTabChange('PENDING_REVIEW')"
-      >审批中</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'SIGNED' }]"
-        @click="handleTabChange('SIGNED')"
-      >已签署</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'EFFECTIVE' }]"
-        @click="handleTabChange('EFFECTIVE')"
-      >生效中</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'EXPIRED' }]"
-        @click="handleTabChange('EXPIRED')"
-      >已到期</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'TERMINATED' }]"
-        @click="handleTabChange('TERMINATED')"
-      >已终止</span>
-    </div>
-
-    <!-- 搜索筛选区 -->
-    <div class="filter-card">
-      <div class="filter-row">
-        <div class="filter-left">
-          <el-input
-            v-model="searchForm.keyword"
-            placeholder="搜索合同编号或名称"
-            clearable
-            class="search-input"
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-        </div>
-        <div class="filter-center">
-          <el-select v-model="searchForm.license_type" placeholder="授权模式" clearable class="filter-item">
-            <el-option value="SUBSCRIPTION" label="订阅" />
-            <el-option value="PERPETUAL" label="买断" />
-          </el-select>
-        </div>
-        <div class="filter-right">
-          <el-button @click="handleReset">重置</el-button>
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button type="primary" @click="handleCreate">
-            <el-icon><Plus /></el-icon>
-            新建
-          </el-button>
-        </div>
+    <!-- 快捷筛选标签 + 操作按钮 -->
+    <div class="filter-tabs-bar">
+      <div class="filter-tabs">
+        <span
+          :class="['filter-tab', { active: activeTab === 'all' }]"
+          @click="handleTabChange('all')"
+        >全部合同</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'DRAFT' }]"
+          @click="handleTabChange('DRAFT')"
+        >草稿</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'PENDING_REVIEW' }]"
+          @click="handleTabChange('PENDING_REVIEW')"
+        >审批中</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'SIGNED' }]"
+          @click="handleTabChange('SIGNED')"
+        >已签署</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'EFFECTIVE' }]"
+          @click="handleTabChange('EFFECTIVE')"
+        >生效中</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'EXPIRED' }]"
+          @click="handleTabChange('EXPIRED')"
+        >已到期</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'TERMINATED' }]"
+          @click="handleTabChange('TERMINATED')"
+        >已终止</span>
+      </div>
+      <div class="filter-actions">
+        <el-button v-if="canCreateContract" type="primary" @click="handleCreate">
+          <el-icon><Plus /></el-icon>
+          新建合同
+        </el-button>
       </div>
     </div>
 
@@ -73,9 +48,27 @@
         stripe
       >
         <el-table-column prop="contract_number" label="合同编号" width="180" />
-        <el-table-column prop="contract_name" label="合同名称" min-width="200">
+        <el-table-column prop="contract_name" min-width="220">
+          <template #header>
+            <FilterTableHeader
+              label="合同名称"
+              field="contract_name"
+              :filter="{ type: 'search', placeholder: '搜索合同名称' }"
+              :sortable="true"
+              :filter-value="filterValues['contract_name']"
+              :sort-state="sortState.field === 'contract_name' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
-            <span class="link-text" @click="handleViewDetail(row)">{{ row.contract_name }}</span>
+            <div class="name-cell">
+              <el-icon class="magicwand-icon" @click="handleMagicWand(row)">
+                <MagicStick />
+              </el-icon>
+              <span class="link-text" @click="handleViewDetail(row)">{{ row.contract_name }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="关联客户" min-width="160">
@@ -88,7 +81,16 @@
             {{ row.opportunity_info?.opportunity_name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="total_amount" label="总金额" width="140">
+        <el-table-column width="140">
+          <template #header>
+            <FilterTableHeader
+              label="总金额"
+              field="total_amount"
+              :sortable="true"
+              :sort-state="sortState.field === 'total_amount' ? sortState : null"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             ¥{{ formatAmount(row.total_amount) }}
           </template>
@@ -100,7 +102,27 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column width="100">
+          <template #header>
+            <FilterTableHeader
+              label="状态"
+              field="status"
+              :filter="{ type: 'select', placeholder: '选择状态', options: [
+                { value: 'DRAFT', label: '草稿' },
+                { value: 'PENDING_REVIEW', label: '审批中' },
+                { value: 'SIGNED', label: '已签署' },
+                { value: 'EFFECTIVE', label: '生效中' },
+                { value: 'EXPIRED', label: '已到期' },
+                { value: 'TERMINATED', label: '已终止' }
+              ] }"
+              :sortable="true"
+              :filter-value="filterValues['status']"
+              :sort-state="sortState.field === 'status' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             <span :class="['status-tag', getStatusClass(row.status)]">
               {{ getStatusText(row.status) }}
@@ -112,16 +134,38 @@
             {{ row.creator_info?.name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="signing_date" label="签署日期" width="120">
+        <el-table-column width="120">
+          <template #header>
+            <FilterTableHeader
+              label="签署日期"
+              field="signing_date"
+              :sortable="true"
+              :sort-state="sortState.field === 'signing_date' ? sortState : null"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             {{ row.signing_date || '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <div class="action-cell">
-              <span class="action-btn" @click="handleViewDetail(row)">查看</span>
-              <span v-if="row.status === 'DRAFT'" class="action-btn" @click="handleEdit(row)">编辑</span>
+              <el-tooltip content="查看" placement="top">
+                <el-icon class="action-icon" @click="handleViewDetail(row)">
+                  <View />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canEditRow(row)" content="编辑" placement="top">
+                <el-icon class="action-icon" @click="handleEdit(row)">
+                  <Edit />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canDeleteRow(row)" content="删除" placement="top">
+                <el-icon class="action-icon action-danger" @click="handleDelete(row)">
+                  <Delete />
+                </el-icon>
+              </el-tooltip>
             </div>
           </template>
         </el-table-column>
@@ -141,21 +185,69 @@
         />
       </div>
     </div>
+
+    <!-- Magic Wand 弹窗 -->
+    <MagicWandDialog
+      v-model="showMagicWand"
+      entity-type="contract"
+      :entity-id="magicWandEntityId"
+      :entity-name="magicWandEntityName"
+      @refresh="fetchContractList"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Search, View, Edit, Delete, MagicStick } from '@element-plus/icons-vue'
+import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
+import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
+import MagicWandDialog from '@/components/MagicWandDialog.vue'
 import contractApi, { type ContractListResponse, type ContractQueryParams } from '@/api/contract'
+import { usePermissionStore } from '@/stores/permissions'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const permissionStore = usePermissionStore()
+const userStore = useUserStore()
 
 const tableData = ref<ContractListResponse[]>([])
 const loading = ref(false)
 const activeTab = ref<string>('all')
+
+const filterValues = ref<Record<string, FilterValue>>({})
+const sortState = ref<SortState>({ field: '', order: null })
+
+// MagicWand 弹窗
+const showMagicWand = ref(false)
+const magicWandEntityId = ref(0)
+const magicWandEntityName = ref('')
+
+// 权限计算属性
+const canCreateContract = computed(() => permissionStore.hasPermission('contract:create'))
+const canEditAllContract = computed(() => permissionStore.hasPermission('contract:edit:all'))
+const canEditOwnContract = computed(() => permissionStore.hasPermission('contract:edit:own'))
+const canDeleteAllContract = computed(() => permissionStore.hasPermission('contract:delete:all'))
+const canDeleteOwnContract = computed(() => permissionStore.hasPermission('contract:delete:own'))
+
+// 行级权限检查函数
+const canEditRow = (row: ContractListResponse): boolean => {
+  // 合同编辑需要额外检查状态（只有草稿状态可编辑）
+  if (row.status !== 'DRAFT') return false
+  if (canEditAllContract.value) return true
+  if (canEditOwnContract.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
+
+const canDeleteRow = (row: ContractListResponse): boolean => {
+  // 合同删除需要额外检查状态（只有草稿状态可删除）
+  if (row.status !== 'DRAFT') return false
+  if (canDeleteAllContract.value) return true
+  if (canDeleteOwnContract.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
 
 const searchForm = reactive<ContractQueryParams>({
   keyword: '',
@@ -193,22 +285,49 @@ const getStatusClass = (status: string) => {
   return map[status] || 'status-draft'
 }
 
+const handleFilterChange = (field: string, value: FilterValue) => {
+  filterValues.value[field] = value
+  pagination.current = 1
+  fetchContractList()
+}
+
+const handleFilterClear = (field: string) => {
+  delete filterValues.value[field]
+  pagination.current = 1
+  fetchContractList()
+}
+
+const handleSortChange = (newSortState: SortState) => {
+  sortState.value = newSortState
+  pagination.current = 1
+  fetchContractList()
+}
+
 const fetchContractList = async () => {
   loading.value = true
   try {
+    // 从 filterValues 提取筛选值
+    const keyword = filterValues.value['contract_name']?.search || searchForm.keyword || undefined
+    const statusSelect = filterValues.value['status']?.select
+    const statusFilter = statusSelect !== undefined && statusSelect !== null && statusSelect !== '' ? statusSelect : undefined
+
     const params: ContractQueryParams = {
       skip: (pagination.current - 1) * pagination.pageSize,
-      limit: pagination.pageSize
+      limit: pagination.pageSize,
+      keyword,
+      license_type: searchForm.license_type || undefined
     }
 
-    if (searchForm.keyword) {
-      params.keyword = searchForm.keyword
-    }
+    // 快捷筛选标签
     if (activeTab.value !== 'all') {
       params.status = activeTab.value as any
+    } else if (statusFilter) {
+      params.status = statusFilter as any
     }
-    if (searchForm.license_type) {
-      params.license_type = searchForm.license_type
+
+    if (sortState.value.order) {
+      params.order_by = sortState.value.field
+      params.order_dir = sortState.value.order
     }
 
     const data = await contractApi.getContracts(params) as unknown as ContractListResponse[]
@@ -230,6 +349,8 @@ const handleSearch = () => {
 const handleReset = () => {
   searchForm.keyword = ''
   searchForm.license_type = null
+  filterValues.value = {}
+  sortState.value = { field: '', order: null }
   handleSearch()
 }
 
@@ -262,6 +383,33 @@ const handleEdit = (record: ContractListResponse) => {
   router.push(`/contracts/edit/${record.id}`)
 }
 
+const handleMagicWand = (record: ContractListResponse) => {
+  magicWandEntityId.value = record.id
+  magicWandEntityName.value = record.contract_name
+  showMagicWand.value = true
+}
+
+const handleDelete = async (record: ContractListResponse) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认要删除合同 "${record.contract_name}" 吗？此操作不可恢复。`,
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await contractApi.deleteContract(record.id)
+    ElMessage.success('删除成功')
+    fetchContractList()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '删除失败')
+    }
+  }
+}
+
 const formatAmount = (amount: string) => {
   const num = parseFloat(amount)
   if (isNaN(num)) return amount
@@ -282,11 +430,22 @@ onMounted(() => {
   min-height: calc(100vh - 48px);
 }
 
-// 快捷筛选标签（合同状态 tabs）
+// 快捷筛选标签 + 操作按钮栏
+.filter-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $wolf-space-md;
+}
+
 .filter-tabs {
   display: flex;
   gap: $wolf-space-xs;
-  margin-bottom: $wolf-space-md;
+}
+
+.filter-actions {
+  display: flex;
+  gap: $wolf-space-xs;
 }
 
 .filter-tab {
@@ -298,9 +457,6 @@ onMounted(() => {
   border-radius: $wolf-radius-sm;
   cursor: pointer;
   transition: all 0.2s ease-in-out;
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
 
   &:hover {
     background: $wolf-bg-hover;
@@ -314,44 +470,11 @@ onMounted(() => {
   }
 }
 
-.tab-icon {
-  font-size: 14px;
-}
-
-// 新建按钮区
-.action-bar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: $wolf-space-md;
-}
-
-// 筛选区
-.filter-card {
+// 表格区 - 卡片容器样式
+.table-card {
   background: $wolf-bg-card;
   border-radius: $wolf-radius-md;
-  padding: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
   box-shadow: $wolf-shadow-card;
-}
-
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-lg;
-  flex-wrap: wrap;
-}
-
-.filter-item {
-  width: 120px;
-}
-
-.search-input {
-  width: 240px;
-}
-
-// 表格样式由全局 wolf-design.scss 统一控制
-.table-card {
-  background: transparent;
   overflow: visible;
 }
 
@@ -364,6 +487,26 @@ onMounted(() => {
     color: $wolf-text-link-hover;
   }
 }
+
+// 名称列布局
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.magicwand-icon {
+  font-size: 14px;
+  color: $wolf-primary;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    transform: scale(1.15);
+    color: $wolf-primary-hover;
+  }
+}
+
 
 // 状态标签（中性色系）
 .status-tag {
@@ -418,19 +561,18 @@ onMounted(() => {
 .action-cell {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs;
+  gap: $wolf-space-sm;
 }
 
-.action-btn {
-  padding: 4px 8px;
-  font-size: $wolf-font-size-caption;
+.action-icon {
+  font-size: 16px;
   color: $wolf-text-link;
   cursor: pointer;
-  border-radius: $wolf-radius-sm;
+  transition: all 0.2s;
 
   &:hover {
-    background: $wolf-bg-hover;
     color: $wolf-text-link-hover;
+    transform: scale(1.1);
   }
 }
 

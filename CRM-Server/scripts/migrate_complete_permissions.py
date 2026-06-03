@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
-engine = create_engine(str(settings.DATABASE_URL))
+engine = create_engine(settings.get_database_url())
 
 
 def check_permission_exists(code: str) -> bool:
@@ -863,7 +863,7 @@ def assign_role_permissions():
     ]
     
     role_permission_map = {
-        "SYSTEM_ADMIN": admin_permissions,
+        "TEAM_ADMIN": admin_permissions,
         "SALES_DIRECTOR": sales_director_permissions,
         "SALES_MEMBER": sales_member_permissions,
         "finance": finance_permissions

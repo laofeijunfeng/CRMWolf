@@ -7,10 +7,12 @@
 1. 唯一性检查时默认过滤已转化/无效状态的实体
 2. 支持 parent_lookup，可根据父实体名称查找 ID（如根据客户名称找 customer_id）
 3. 支持 name_auto_generate，当用户未提供名称时自动生成标准化名称
+4. 支持从名称中提取 ID（格式：名称（ID：xxx）或 名称(ID:xxx)）
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from datetime import datetime
+import re
 
 from app.services.skills.handlers.base_handler import BaseHandler
 from app.crud.user import user_crud
@@ -24,13 +26,17 @@ class CreateHandler(BaseHandler):
     # 默认排除的状态（已转化、无效的实体不应影响新创建）
     DEFAULT_EXCLUDE_STATUS = ["CONVERTED", "INVALID"]
 
+    # 从名称中提取 ID 的正则表达式
+    ID_PATTERN = re.compile(r'[（(]\s*ID[：:]\s*(\d+)\s*[）)]')
+
     async def execute(
         self,
         db: Session,
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行创建操作
@@ -79,6 +85,9 @@ class CreateHandler(BaseHandler):
         if not user:
             return self.build_result(False, "用户不存在")
 
+        # 初始化 team_id（后续可能从 parent_entity 获取）
+        team_id = None
+
         # 处理 parent_lookup（根据父实体名称查找 ID）
         parent_lookup = handler_config.get("parent_lookup")
         if parent_lookup:
@@ -112,39 +121,62 @@ class CreateHandler(BaseHandler):
                 else:
                     exclude_status_values = []
 
-                # 搜索父实体
-                try:
-                    name_field_attr, parents = self.search_active_entities(
+                parent_entity = None
+                parent_id = None
+
+                # 先尝试从名称中提取 ID
+                id_match = self.ID_PATTERN.search(parent_lookup_value)
+                if id_match:
+                    parent_id = int(id_match.group(1))
+                    parent_entity = self.get_active_entity_by_id(
                         db,
                         parent_model,
-                        parent_name_field,
-                        parent_lookup_value,
+                        parent_id,
                         exclude_status=exclude_status_values,
                         status_field=parent_crud_mapping.status_field
                     )
-                except Exception as e:
-                    return self.build_result(False, f"查询父实体失败: {str(e)}")
+                    if not parent_entity:
+                        return self.build_result(False, f"{parent_crud_mapping_name} ID {parent_id} 不存在或已完成")
+                else:
+                    # 没有 ID，使用名称模糊搜索
+                    try:
+                        name_field_attr, parents = self.search_active_entities(
+                            db,
+                            parent_model,
+                            parent_name_field,
+                            parent_lookup_value,
+                            exclude_status=exclude_status_values,
+                            status_field=parent_crud_mapping.status_field
+                        )
+                    except Exception as e:
+                        return self.build_result(False, f"查询父实体失败: {str(e)}")
 
-                if not parents:
-                    return self.build_result(False, f"未找到匹配的{parent_crud_mapping_name}: {parent_lookup_value}")
+                    if not parents:
+                        return self.build_result(False, f"未找到匹配的{parent_crud_mapping_name}: {parent_lookup_value}")
 
-                if len(parents) > 1:
-                    parent_names = [getattr(p, parent_name_field) for p in parents[:5]]
-                    return self.build_result(
-                        False,
-                        f"找到多个匹配的{parent_crud_mapping_name}，请提供更精确的名称。匹配结果: {', '.join(parent_names)}"
-                    )
+                    if len(parents) > 1:
+                        parent_names = [getattr(p, parent_name_field) for p in parents[:5]]
+                        return self.build_result(
+                            False,
+                            f"找到多个匹配的{parent_crud_mapping_name}，请提供更精确的名称。匹配结果: {', '.join(parent_names)}"
+                        )
 
-                parent_entity = parents[0]
-                parent_id = parent_entity.id
+                    parent_entity = parents[0]
+                    parent_id = parent_entity.id
+
                 parent_name = getattr(parent_entity, parent_name_field)
 
                 # 将 parent_id 填充到 params（后续会复制到 schema_data）
                 params[parent_result_field] = parent_id
                 params[parent_lookup_field] = parent_name  # 保存名称用于结果模板
 
+                # 获取 team_id（从父实体）
+                team_id = getattr(parent_entity, 'team_id', None)
+
         # 处理 name_auto_generate（自动生成标准化名称）
         name_auto_generate = handler_config.get("name_auto_generate")
+        enum_mappings = handler_config.get("enum_mappings", {})  # 获取 enum_mappings 配置
+
         if name_auto_generate:
             name_field = name_auto_generate.get("name_field", "name")
             template = name_auto_generate.get("template", "{parent_name}-{year}")
@@ -174,7 +206,20 @@ class CreateHandler(BaseHandler):
                             # 使用默认值
                             value = default_values.get(field_source)
                             params[field_source] = value  # 同时填充到 params，后续 enum 处理会用
+
                         if value:
+                            # 如果该字段有 enum_mapping，尝试转换为中文显示值
+                            if field_source in enum_mappings:
+                                enum_name = enum_mappings[field_source]
+                                enum_mapping = ai_enum_mapping_crud.get_by_name(db, enum_name)
+                                if enum_mapping:
+                                    # 检查 value 是否是枚举 key（英文），找到对应的中文值
+                                    for chinese_val, eng_key in enum_mapping.values.items():
+                                        if value == eng_key:
+                                            value = chinese_val
+                                            break
+                                    # 如果 value 本身就是中文，保持不变
+
                             template_vars[var_name] = value
 
                 # 生成名称
@@ -241,7 +286,16 @@ class CreateHandler(BaseHandler):
                 enum_mapping = ai_enum_mapping_crud.get_by_name(db, enum_name)
                 if enum_mapping:
                     user_value = params.get(param_key)
+                    # 先尝试用中文值查找（标准方式）
                     enum_key = enum_mapping.values.get(user_value)
+
+                    # 如果找不到，尝试用英文值反向查找（兼容 AI 返回英文值的情况）
+                    if not enum_key:
+                        # 检查 user_value 是否直接是枚举 key（如 SUBSCRIPTION）
+                        for chinese_key, eng_key in enum_mapping.values.items():
+                            if user_value == eng_key:
+                                enum_key = eng_key
+                                break
 
                     if enum_key:
                         # 获取 Enum 类
@@ -266,7 +320,7 @@ class CreateHandler(BaseHandler):
         auto_fields = handler_config.get("auto_fields", {})
         for field_name, source in auto_fields.items():
             if source == "user_feishu_open_id":
-                schema_data[field_name] = user.feishu_open_id
+                schema_data[field_name] = str(user.id)
             elif source == "user_id":
                 schema_data[field_name] = user_id
             elif source in params:
@@ -284,10 +338,21 @@ class CreateHandler(BaseHandler):
         # 执行创建
         try:
             if hasattr(crud_instance, "create"):
+                # 检查 create 方法是否需要 team_id 参数
+                import inspect
+                create_sig = inspect.signature(crud_instance.create)
+                needs_team_id = 'team_id' in create_sig.parameters
+
                 if crud_mapping.schema_create_class:
-                    entity = crud_instance.create(db, schema_obj, user.feishu_open_id)
+                    if needs_team_id and team_id is not None:
+                        entity = crud_instance.create(db, schema_obj, str(user.id), team_id)
+                    else:
+                        entity = crud_instance.create(db, schema_obj, str(user.id))
                 else:
-                    entity = crud_instance.create(db, schema_data, user.feishu_open_id)
+                    if needs_team_id and team_id is not None:
+                        entity = crud_instance.create(db, schema_data, str(user.id), team_id)
+                    else:
+                        entity = crud_instance.create(db, schema_data, str(user.id))
             else:
                 return self.build_result(False, "CRUD 实例不支持 create 方法")
         except Exception as e:

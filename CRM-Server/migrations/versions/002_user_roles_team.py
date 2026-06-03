@@ -19,43 +19,57 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """为 user_roles 表添加 team_id 字段"""
+    conn = op.get_bind()
+
     # 1. 添加 team_id 列（先允许 NULL）
     op.add_column('user_roles', sa.Column('team_id', sa.BigInteger(), nullable=True))
 
-    # 2. 为现有数据设置 team_id（取用户所属的第一个团队）
-    # 假设用户通过 current_team_id 或 teams 关联
-    op.execute("""
+    # 2. 为现有数据设置 team_id（取用户的当前团队）
+    # 使用正确的表名: user_teams
+    conn.execute(sa.text("""
         UPDATE user_roles ur
         SET team_id = (
-            SELECT MIN(ct.team_id)
-            FROM crm_customer_teams ct
-            WHERE ct.user_id = ur.user_id
+            SELECT ut.team_id
+            FROM user_teams ut
+            WHERE ut.user_id = ur.user_id AND ut.current_team = 1
+            LIMIT 1
         )
         WHERE ur.team_id IS NULL
-    """)
+    """))
 
-    # 3. 处理没有团队的用户的 user_roles（分配到默认团队，如果存在）
-    op.execute("""
+    # 3. 处理没有当前团队的 user_roles（取第一个所属团队）
+    conn.execute(sa.text("""
         UPDATE user_roles ur
         SET team_id = (
-            SELECT id FROM crm_teams WHERE is_default = 1 LIMIT 1
+            SELECT MIN(ut.team_id)
+            FROM user_teams ut
+            WHERE ut.user_id = ur.user_id
         )
         WHERE ur.team_id IS NULL
-    """)
+    """))
 
-    # 4. 删除旧的唯一约束（如果存在）
+    # 4. 处理完全没有团队的 user_roles（取第一个团队作为默认）
+    conn.execute(sa.text("""
+        UPDATE user_roles ur
+        SET team_id = (
+            SELECT MIN(id) FROM teams
+        )
+        WHERE ur.team_id IS NULL
+    """))
+
+    # 5. 删除旧的唯一约束（如果存在）
     try:
         op.drop_constraint('uq_user_role', 'user_roles', type_='unique')
     except:
         pass
 
-    # 5. 设置 NOT NULL
+    # 6. 设置 NOT NULL
     op.alter_column('user_roles', 'team_id', nullable=False)
 
-    # 6. 添加索引
+    # 7. 添加索引
     op.create_index('idx_user_roles_team_id', 'user_roles', ['team_id'])
 
-    # 7. 添加新的唯一约束
+    # 8. 添加新的唯一约束
     op.create_unique_constraint('uq_user_role_team', 'user_roles', ['user_id', 'team_id', 'role_id'])
 
 

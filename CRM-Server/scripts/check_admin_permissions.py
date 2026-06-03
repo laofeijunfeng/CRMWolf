@@ -16,11 +16,11 @@ def check_admin_permissions():
         print("检查系统管理员权限")
         print("=" * 60)
 
-        # 查找系统管理员角色
-        admin_role = db.query(Role).filter(Role.code == "SYSTEM_ADMIN").first()
-        
+        # 查找团队管理员角色
+        admin_role = db.query(Role).filter(Role.code == "TEAM_ADMIN").first()
+
         if not admin_role:
-            print("\n❌ 未找到系统管理员角色（SYSTEM_ADMIN）")
+            print("\n❌ 未找到团队管理员角色（TEAM_ADMIN）")
             return
 
         print(f"\n✅ 角色名称: {admin_role.name}")

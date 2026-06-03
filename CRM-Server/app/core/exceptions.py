@@ -5,7 +5,9 @@ from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 import logging
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger, log_with_fields
+
+logger = get_logger(__name__)
 
 
 class AppException(Exception):
@@ -67,7 +69,13 @@ class UnauthorizedException(AppException):
 
 
 async def app_exception_handler(request: Request, exc: AppException):
-    logger.error(f"AppException: {exc.error_code} - {exc.detail}")
+    log_with_fields(
+        logger, logging.ERROR,
+        f"业务异常: {exc.error_code} - {exc.detail}",
+        path=str(request.url.path),
+        error_code=exc.error_code,
+        status_code=exc.status_code
+    )
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -79,8 +87,14 @@ async def app_exception_handler(request: Request, exc: AppException):
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.error(f"Validation error: {exc.errors()}")
-    
+    log_with_fields(
+        logger, logging.ERROR,
+        "请求参数验证失败",
+        path=str(request.url.path),
+        method=request.method,
+        errors=[{"field": " -> ".join(str(loc) for loc in e["loc"]), "msg": e["msg"]} for e in exc.errors()]
+    )
+
     errors = []
     for error in exc.errors():
         field = " -> ".join(str(loc) for loc in error["loc"])
@@ -89,7 +103,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "message": error["msg"],
             "type": error["type"]
         })
-    
+
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -102,8 +116,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
-    logger.error(f"Pydantic validation error: {exc.errors()}")
-    
+    log_with_fields(
+        logger, logging.ERROR,
+        "数据验证失败",
+        path=str(request.url.path),
+        errors=[{"field": " -> ".join(str(loc) for loc in e["loc"]), "msg": e["msg"]} for e in exc.errors()]
+    )
+
     errors = []
     for error in exc.errors():
         field = " -> ".join(str(loc) for loc in error["loc"])
@@ -112,7 +131,7 @@ async def pydantic_validation_exception_handler(request: Request, exc: Validatio
             "message": error["msg"],
             "type": error["type"]
         })
-    
+
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -125,7 +144,15 @@ async def pydantic_validation_exception_handler(request: Request, exc: Validatio
 
 
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    logger.error(f"Database error: {str(exc)}")
+    logger.error(
+        "数据库错误",
+        exc_info=True,
+        extra={"extra_fields": {
+            "path": str(request.url.path),
+            "method": request.method,
+            "error_type": type(exc).__name__
+        }}
+    )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -137,7 +164,16 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 
 
 async def generic_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unexpected error: {type(exc).__name__} - {str(exc)}", exc_info=True)
+    logger.error(
+        f"未处理异常: {type(exc).__name__}",
+        exc_info=True,
+        extra={"extra_fields": {
+            "path": str(request.url.path),
+            "method": request.method,
+            "error_type": type(exc).__name__,
+            "message": str(exc)
+        }}
+    )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={

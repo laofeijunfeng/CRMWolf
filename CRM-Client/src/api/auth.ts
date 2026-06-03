@@ -1,53 +1,50 @@
 import request from '@/utils/request'
 
-export interface LoginParams {
+export interface SendCodeParams {
+  email: string
+  purpose: 'register' | 'login' | 'reset_password'
+}
+
+export interface RegisterRequest {
+  email: string
   code: string
+  name: string
+  password?: string
+}
+
+export interface RegisterPasswordRequest {
+  email: string
+  name: string
+  password: string
+}
+
+export interface LoginCodeRequest {
+  email: string
+  code: string
+}
+
+export interface LoginPasswordRequest {
+  email: string
+  password: string
 }
 
 export interface LoginResponse {
   access_token: string
   token_type: string
-  user: {
-    id: string
-    name: string
-    email?: string
-    avatar_url?: string
-  }
+  user: UserResponse
 }
 
-export interface UserInfoResponse {
-  id: string
-  feishu_open_id: string
+export interface UserResponse {
+  id: number
   name: string
-  email?: string
+  email: string
+  mobile?: string
   avatar_url?: string
+  employee_no?: string
+  region?: string
   status: string
-  created_time: string
-  roles?: RoleResponse[]
-}
-
-export interface MockLoginRequest {
-  name: string
-  email: string
-  mobile: string
-  region: string
-}
-
-export interface CreateAdminRequest {
-  name: string
-  email: string
-}
-
-export interface CreateSalesDirectorRequest {
-  name: string
-  email: string
-  region: string
-}
-
-export interface CreateSalesMemberRequest {
-  name: string
-  email: string
-  region: string
+  created_at: string
+  updated_at: string
 }
 
 export interface RoleResponse {
@@ -59,32 +56,54 @@ export interface RoleResponse {
   updated_at: string
 }
 
+export interface PermissionResponse {
+  id: number
+  code: string
+  name: string
+  resource: string
+  action: string
+  scope?: string
+  description?: string
+}
+
 export const authApi = {
-  login: (params: LoginParams) => {
-    return request.post<LoginResponse>('/auth/login', null, { params })
+  // 发送验证码
+  sendCode: (params: SendCodeParams) => {
+    return request.post<{ message: string }>('/auth/send-code', params)
   },
 
+  // 邮箱注册
+  register: (data: RegisterRequest) => {
+    return request.post<LoginResponse>('/auth/register', data)
+  },
+
+  // 验证码登录
+  loginWithCode: (data: LoginCodeRequest) => {
+    return request.post<LoginResponse>('/auth/login', data)
+  },
+
+  // 密码登录
+  loginWithPassword: (data: LoginPasswordRequest) => {
+    return request.post<LoginResponse>('/auth/login-password', data)
+  },
+
+  // 密码注册
+  registerWithPassword: (data: RegisterPasswordRequest) => {
+    return request.post<LoginResponse>('/auth/register-password', data)
+  },
+
+  // 获取当前用户信息
   getUserInfo: () => {
-    return request.get<UserInfoResponse>('/auth/me')
+    return request.get<UserResponse>('/auth/me')
   },
 
+  // 获取当前用户角色
   getUserRoles: () => {
     return request.get<RoleResponse[]>('/auth/me/roles')
   },
 
-  mockLogin: (data: MockLoginRequest) => {
-    return request.post<LoginResponse>('/dev/mock-login', data)
-  },
-
-  createAdmin: (data: CreateAdminRequest) => {
-    return request.post<LoginResponse>('/dev/create-admin', data)
-  },
-
-  createSalesDirector: (data: CreateSalesDirectorRequest) => {
-    return request.post<LoginResponse>('/dev/create-sales-director', data)
-  },
-
-  createSalesMember: (data: CreateSalesMemberRequest) => {
-    return request.post<LoginResponse>('/dev/create-sales-member', data)
+  // 获取当前用户权限
+  getUserPermissions: (useCache = true) => {
+    return request.get<{ permissions: PermissionResponse[], total: number, cached: boolean }>('/auth/me/permissions', { params: { use_cache: useCache } })
   }
 }

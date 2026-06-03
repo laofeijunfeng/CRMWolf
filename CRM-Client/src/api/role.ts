@@ -45,6 +45,7 @@ export interface RoleUpdate {
 export interface UserRoleCreate {
   user_id: number
   role_id: number
+  team_id: number
 }
 
 export interface RoleQueryParams {
@@ -82,12 +83,12 @@ const roleApi = {
     return response
   },
 
-  assignRoleToUser: (roleId: number, userId: number) => {
-    return request.post(`/roles/${roleId}/users`, { user_id: userId, role_id: roleId })
+  assignRoleToUser: (roleId: number, userId: number, teamId: number) => {
+    return request.post(`/roles/${roleId}/users`, { user_id: userId, role_id: roleId, team_id: teamId })
   },
 
-  removeRoleFromUser: (roleId: number, userId: number) => {
-    return request.delete(`/roles/${roleId}/users/${userId}`)
+  removeRoleFromUser: (roleId: number, userId: number, teamId: number) => {
+    return request.delete(`/roles/${roleId}/users/${userId}`, { params: { team_id: teamId } })
   },
 
   updateRolePermissions: async (roleId: number, permissionIds: number[]): Promise<PermissionResponse[]> => {

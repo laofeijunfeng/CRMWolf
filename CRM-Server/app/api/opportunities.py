@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission
+from app.core.deps import get_current_active_user, require_permission, get_current_user_team, check_opportunity_edit_permission, check_opportunity_delete_permission
 from app.crud.opportunity import opportunity_crud, opportunity_stage_crud
 from app.crud.customer import customer_crud
 from app.schemas.opportunity import (
@@ -36,20 +36,21 @@ router = APIRouter(prefix="/api/v1/opportunities", tags=["商机管理"])
 @router.post("/", response_model=OpportunityResponse, status_code=status.HTTP_201_CREATED, summary="创建商机", description="为指定客户创建商机")
 def create_opportunity(
     opportunity: OpportunityCreate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("opportunity:create")),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, opportunity.customer_id)
+    customer = customer_crud.get_by_id(db, opportunity.customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户不存在"
         )
-    
-    return opportunity_crud.create(db, opportunity, current_user.feishu_open_id)
+
+    return opportunity_crud.create(db, opportunity, str(current_user.id), team_id)
 
 
-@router.get("/", response_model=List[OpportunityListResponse], summary="查询商机列表", description="支持分页、按状态/阶段/负责人等多条件筛选，返回客户名称、采购阶段、负责人信息")
+@router.get("/", response_model=List[OpportunityListResponse], summary="查询商机列表", description="支持分页、按状态/阶段/负责人等多条件筛选和动态排序，返回客户名称、采购阶段、负责人信息")
 def get_opportunities(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
@@ -58,32 +59,38 @@ def get_opportunities(
     owner_id: str = Query(None, description="负责人ID"),
     customer_id: int = Query(None, description="客户ID"),
     keyword: str = Query(None, description="关键词搜索"),
+    order_by: str = Query(None, description="排序字段"),
+    order_dir: str = Query(None, description="排序方向（asc/desc）"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
     from app.models.user import User
-    
+
     opportunities, _ = opportunity_crud.get_multi(
         db=db,
+        team_id=team_id,
         skip=skip,
         limit=limit,
         status=status,
         stage_id=stage_id,
         owner_id=owner_id,
         customer_id=customer_id,
-        keyword=keyword
+        keyword=keyword,
+        order_by=order_by,
+        order_dir=order_dir
     )
     
     result = []
     for opp in opportunities:
-        customer = customer_crud.get_by_id(db, opp.customer_id)
+        customer = customer_crud.get_by_id(db, opp.customer_id, team_id)
         
         owner_info = db.execute(text("""
-            SELECT feishu_open_id, name, avatar_url
+            SELECT id, name, avatar_url
             FROM users
-            WHERE feishu_open_id = :owner_id
-        """), {"owner_id": opp.owner_id}).first()
+            WHERE id = :owner_id
+        """), {"owner_id": int(opp.owner_id)}).first()
         
         stage_info = None
         if opp.current_stage_snapshot_id:
@@ -132,7 +139,7 @@ def get_opportunities(
             "customer_name": customer.account_name if customer else None,
             "stage": stage_info,
             "owner_info": {
-                "id": owner_info[0],
+                "id": str(owner_info[0]),
                 "name": owner_info[1],
                 "avatar_url": owner_info[2]
             } if owner_info else None
@@ -173,23 +180,24 @@ def get_opportunities(
 """)
 def get_available_opportunities_for_contract(
     customer_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id)
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户不存在"
         )
-    
-    opportunities = opportunity_crud.get_available_for_contract(db, customer_id)
+
+    opportunities = opportunity_crud.get_available_for_contract(db, customer_id, team_id)
     
     result = []
     for opp in opportunities:
         customer_info = None
         if opp.customer_id:
-            customer = customer_crud.get_by_id(db, opp.customer_id)
+            customer = customer_crud.get_by_id(db, opp.customer_id, team_id)
             if customer:
                 customer_info = {
                     "id": customer.id,
@@ -199,25 +207,25 @@ def get_available_opportunities_for_contract(
         owner_info = None
         if opp.owner_id:
             from app.crud.user import user_crud
-            owner = user_crud.get_by_feishu_open_id(db, opp.owner_id)
+            owner = user_crud.get_by_id(db, int(opp.owner_id))
             if owner:
                 owner_info = {
-                    "id": owner.feishu_open_id,
+                    "id": str(owner.id),
                     "name": owner.name,
                     "avatar_url": owner.avatar_url
                 }
-        
+
         creator_info = None
         if opp.creator_id:
             from app.crud.user import user_crud
-            creator = user_crud.get_by_feishu_open_id(db, opp.creator_id)
+            creator = user_crud.get_by_id(db, int(opp.creator_id))
             if creator:
                 creator_info = {
-                    "id": creator.feishu_open_id,
+                    "id": str(creator.id),
                     "name": creator.name,
                     "avatar_url": creator.avatar_url
                 }
-        
+
         result.append(OpportunityListResponse(**{
             "id": opp.id,
             "opportunity_name": opp.opportunity_name,
@@ -246,40 +254,41 @@ def get_available_opportunities_for_contract(
             "owner_info": owner_info,
             "creator_info": creator_info
         }))
-    
+
     return result
 
 
 @router.get("/{opportunity_id}", response_model=OpportunityDetailResponse, summary="获取商机详情", description="返回商机完整信息及关联的客户、负责人、创建人等信息")
 def get_opportunity(
     opportunity_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
     from app.schemas.opportunity import CurrentStageSnapshotInfo
     from app.schemas.customer import ProcurementMethodInfo
-    
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id)
+
+    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="商机不存在"
         )
-    
-    customer = customer_crud.get_by_id(db, opportunity.customer_id)
+
+    customer = customer_crud.get_by_id(db, opportunity.customer_id, team_id)
     
     owner_info = db.execute(text("""
-        SELECT feishu_open_id, name, avatar_url
+        SELECT id, name, avatar_url
         FROM users
-        WHERE feishu_open_id = :owner_id
-    """), {"owner_id": opportunity.owner_id}).first()
-    
+        WHERE id = :owner_id
+    """), {"owner_id": int(opportunity.owner_id)}).first()
+
     creator_info = db.execute(text("""
-        SELECT feishu_open_id, name, avatar_url
+        SELECT id, name, avatar_url
         FROM users
-        WHERE feishu_open_id = :creator_id
-    """), {"creator_id": opportunity.creator_id}).first()
+        WHERE id = :creator_id
+    """), {"creator_id": int(opportunity.creator_id)}).first()
     
     procurement_stage_info = None
     if opportunity.current_stage_snapshot_id:
@@ -362,12 +371,12 @@ def get_opportunity(
             "owner_id": customer.owner_id
         } if customer else None,
         'owner_info': {
-            "id": owner_info[0],
+            "id": str(owner_info[0]),
             "name": owner_info[1],
             "avatar_url": owner_info[2]
         } if owner_info else None,
         'creator_info': {
-            "id": creator_info[0],
+            "id": str(creator_info[0]),
             "name": creator_info[1],
             "avatar_url": creator_info[2]
         } if creator_info else None
@@ -376,123 +385,19 @@ def get_opportunity(
     return result
 
 
-@router.get("/available-for-contract", response_model=List[OpportunityListResponse], summary="获取可创建合同的商机列表", description="""
-获取指定客户的可创建合同的商机列表，只返回"跟进中"且"未创建合同"的商机。
-
-**功能说明：**
-- 获取客户可创建合同的商机
-- 只返回"跟进中"（status=0）的商机
-- 排除已经创建合同的商机
-- 不需要分页，返回所有符合条件的商机
-
-**业务场景：**
-- 创建合同时，在商机下拉框中选择
-- 避免选择已赢单或已输单的商机
-- 避免重复创建合同
-
-**路径参数：**
-- customer_id: 客户ID（必填）
-
-**业务规则：**
-- 只返回跟进中（status=0）的商机
-- 排除已经有关联合同的商机（opportunity_id在contracts表中存在）
-- 不需要分页，返回所有符合条件的商机
-
-**返回字段：**
-- 商机基本信息：ID、名称、预计金额等
-- 当前阶段信息：阶段名称、赢率
-- 客户信息：客户名称
-- 负责人信息：负责人姓名
-""")
-def get_available_opportunities_for_contract(
-    customer_id: int,
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    customer = customer_crud.get_by_id(db, customer_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
-    
-    opportunities = opportunity_crud.get_available_for_contract(db, customer_id)
-    
-    result = []
-    for opp in opportunities:
-        customer_info = None
-        if opp.customer_id:
-            customer = customer_crud.get_by_id(db, opp.customer_id)
-            if customer:
-                customer_info = {
-                    "id": customer.id,
-                    "account_name": customer.account_name
-                }
-        
-        owner_info = None
-        if opp.owner_id:
-            from app.crud.user import user_crud
-            owner = user_crud.get_by_feishu_open_id(db, opp.owner_id)
-            if owner:
-                owner_info = {
-                    "id": owner.feishu_open_id,
-                    "name": owner.name,
-                    "avatar_url": owner.avatar_url
-                }
-        
-        creator_info = None
-        if opp.creator_id:
-            from app.crud.user import user_crud
-            creator = user_crud.get_by_feishu_open_id(db, opp.creator_id)
-            if creator:
-                creator_info = {
-                    "id": creator.feishu_open_id,
-                    "name": creator.name,
-                    "avatar_url": creator.avatar_url
-                }
-        
-        result.append(OpportunityListResponse(**{
-            "id": opp.id,
-            "opportunity_name": opp.opportunity_name,
-            "customer_id": opp.customer_id,
-            "procurement_method_id": opp.procurement_method_id,
-            "total_amount": float(opp.total_amount),
-            "user_count": opp.user_count,
-            "unit_price": float(opp.unit_price),
-            "license_type": opp.license_type,
-            "subscription_years": opp.subscription_years,
-            "purchase_type": opp.purchase_type,
-            "decision_maker_count": opp.decision_maker_count,
-            "expected_closing_date": opp.expected_closing_date,
-            "stage_id": opp.procurement_stage_id,
-            "win_probability": opp.win_probability,
-            "owner_id": opp.owner_id,
-            "status": opp.status,
-            "loss_reason": opp.loss_reason,
-            "actual_amount": float(opp.actual_amount) if opp.actual_amount else None,
-            "actual_closing_date": opp.actual_closing_date,
-            "creator_id": opp.creator_id,
-            "created_time": opp.created_time,
-            "last_modified_time": opp.last_modified_time,
-            "version": opp.version,
-            "customer_info": customer_info,
-            "owner_info": owner_info,
-            "creator_info": creator_info
-        }))
-    
-    return result
 
 
 @router.get("/{opportunity_id}/procurement-stages", response_model=List[OpportunityProcurementStageInfo], summary="获取商机采购阶段", description="获取商机对应的采购方式的所有阶段，标注当前商机的阶段")
 def get_opportunity_procurement_stages(
     opportunity_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
     from app.crud.procurement import procurement_stage_template_crud
-    
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id)
+
+    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -534,15 +439,9 @@ def get_opportunity_procurement_stages(
 def update_opportunity(
     opportunity_id: int,
     opportunity: OpportunityUpdate,
-    current_user = Depends(require_permission("opportunity:update")),
+    db_opportunity = Depends(check_opportunity_edit_permission),
     db: Session = Depends(get_db)
 ):
-    db_opportunity = opportunity_crud.get_by_id(db, opportunity_id)
-    if not db_opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
     return opportunity_crud.update(db, db_opportunity, opportunity)
 
 
@@ -550,25 +449,19 @@ def update_opportunity(
 async def move_opportunity_stage(
     opportunity_id: int,
     stage_move: OpportunityMoveToStage,
-    current_user = Depends(require_permission("opportunity:update")),
+    db_opportunity = Depends(check_opportunity_edit_permission),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
     from app.schemas.opportunity import CurrentStageSnapshotInfo
     from datetime import datetime
-    
-    db_opportunity = opportunity_crud.get_by_id(db, opportunity_id)
-    if not db_opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
-    
+
     updated_opportunity = opportunity_crud.move_to_stage(
         db=db,
         opportunity_id=opportunity_id,
         target_stage_template_id=stage_move.stage_template_id,
-        operator_id=current_user.feishu_open_id
+        operator_id=str(current_user.id)
     )
     
     procurement_stage_info = None
@@ -654,19 +547,20 @@ async def move_opportunity_stage(
 async def mark_opportunity_as_won(
     opportunity_id: int,
     win_data: OpportunityWin,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("opportunity:win")),
     db: Session = Depends(get_db)
 ):
-    db_opportunity = opportunity_crud.get_by_id(db, opportunity_id)
+    db_opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
     if not db_opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="商机不存在"
         )
-    
-    updated_opportunity = opportunity_crud.mark_as_won(db, db_opportunity, win_data, current_user.feishu_open_id)
-    
-    customer = customer_crud.get_by_id(db, db_opportunity.customer_id)
+
+    updated_opportunity = opportunity_crud.mark_as_won(db, db_opportunity, win_data, str(current_user.id))
+
+    customer = customer_crud.get_by_id(db, db_opportunity.customer_id, team_id)
     
     await feishu_service.notify_opportunity_won(
         db_opportunity.owner_id,
@@ -682,19 +576,20 @@ async def mark_opportunity_as_won(
 async def mark_opportunity_as_lost(
     opportunity_id: int,
     lose_data: OpportunityLose,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("opportunity:lose")),
     db: Session = Depends(get_db)
 ):
-    db_opportunity = opportunity_crud.get_by_id(db, opportunity_id)
+    db_opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
     if not db_opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="商机不存在"
         )
-    
-    updated_opportunity = opportunity_crud.mark_as_lost(db, db_opportunity, lose_data, current_user.feishu_open_id)
-    
-    customer = customer_crud.get_by_id(db, db_opportunity.customer_id)
+
+    updated_opportunity = opportunity_crud.mark_as_lost(db, db_opportunity, lose_data, str(current_user.id))
+
+    customer = customer_crud.get_by_id(db, db_opportunity.customer_id, team_id)
     
     await feishu_service.notify_opportunity_lost(
         db_opportunity.owner_id,
@@ -709,15 +604,17 @@ async def mark_opportunity_as_lost(
 @router.delete("/{opportunity_id}", response_model=MessageResponse, summary="删除商机", description="删除商机")
 def delete_opportunity(
     opportunity_id: int,
-    current_user = Depends(require_permission("opportunity:delete")),
+    db_opportunity = Depends(check_opportunity_delete_permission),
     db: Session = Depends(get_db)
 ):
-    if not opportunity_crud.delete(db, opportunity_id):
+    try:
+        opportunity_crud.delete(db, opportunity_id)
+        return MessageResponse(message="删除成功")
+    except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
-    return MessageResponse(message="删除成功")
 
 
 analytics_router = APIRouter(prefix="/api/v1/analytics", tags=["商机分析"])
@@ -728,16 +625,18 @@ def get_sales_funnel(
     owner_id: str = Query(None, description="负责人ID"),
     start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),
     end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from datetime import datetime
-    
+
     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else None
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
-    
+
     return opportunity_crud.get_sales_funnel(
         db=db,
+        team_id=team_id,
         owner_id=owner_id,
         start_date=start_date_obj,
         end_date=end_date_obj
@@ -749,16 +648,18 @@ def get_stage_duration(
     owner_id: str = Query(None, description="负责人ID"),
     start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),
     end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from datetime import datetime
-    
+
     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else None
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
-    
+
     return opportunity_crud.get_stage_duration(
         db=db,
+        team_id=team_id,
         owner_id=owner_id,
         start_date=start_date_obj,
         end_date=end_date_obj

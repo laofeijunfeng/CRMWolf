@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission
+from app.core.deps import get_current_active_user, require_permission, get_current_user_team
 from app.crud.permission import permission_crud
 from app.models.user import User
 from app.models.payment import PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus
@@ -32,18 +32,33 @@ router = APIRouter(prefix="/finance", tags=["财务管理"])
 def confirm_payment_record(
     record_id: int,
     confirm_data: PaymentRecordConfirm,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     permission_checker = require_permission("payment:confirm")
     permission_checker(current_user, db)
-    
+
     record = payment_record_crud.get_by_id(db, record_id)
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款记录不存在"
         )
+
+    # 验证回款记录所属合同属于当前团队
+    payment_plan = db.query(PaymentPlan).filter(
+        PaymentPlan.id == record.payment_plan_id
+    ).first()
+    if payment_plan:
+        contract = db.query(Contract).filter(
+            Contract.id == payment_plan.contract_id
+        ).first()
+        if contract and contract.team_id != team_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="回款记录不存在或不属于当前团队"
+            )
     
     if confirm_data.action not in ["confirm", "dispute"]:
         raise HTTPException(
@@ -84,7 +99,7 @@ def confirm_payment_record(
         confirmed_record = payment_record_crud.confirm_payment(
             db,
             record_id,
-            current_user.feishu_open_id,
+            str(current_user.id),
             current_user.name,
             confirm_data.action,
             confirm_data.notes,
@@ -163,24 +178,26 @@ def _populate_record_info(db: Session, record: PaymentRecord) -> dict:
 def get_receivables_aging_analysis(
     start_date: Optional[date] = Query(None, description="开始日期"),
     end_date: Optional[date] = Query(None, description="结束日期"),
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     permission_checker = require_permission("finance:receivables_view")
     permission_checker(current_user, db)
-    
+
     today = date.today()
-    
+
     aging_buckets = {
         "0-30天": {"days_start": 0, "days_end": 30, "amount": Decimal(0), "count": 0},
         "31-60天": {"days_start": 31, "days_end": 60, "amount": Decimal(0), "count": 0},
         "61-90天": {"days_start": 61, "days_end": 90, "amount": Decimal(0), "count": 0},
         "90天以上": {"days_start": 91, "days_end": 999999, "amount": Decimal(0), "count": 0}
     }
-    
+
     query = db.query(PaymentPlan).join(Contract).filter(
         PaymentPlan.status.in_([PaymentPlanStatus.PENDING, PaymentPlanStatus.PARTIAL, PaymentPlanStatus.OVERDUE]),
-        PaymentPlan.due_date < today
+        PaymentPlan.due_date < today,
+        Contract.team_id == team_id
     )
     
     if start_date:
@@ -260,17 +277,19 @@ def get_overdue_alerts(
     min_amount: Optional[float] = Query(None, description="最小欠款金额"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的记录数"),
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     permission_checker = require_permission("finance:receivables_view")
     permission_checker(current_user, db)
-    
+
     today = date.today()
-    
+
     query = db.query(PaymentPlan).join(Contract).filter(
         PaymentPlan.status.in_([PaymentPlanStatus.PENDING, PaymentPlanStatus.PARTIAL, PaymentPlanStatus.OVERDUE]),
-        PaymentPlan.due_date < today
+        PaymentPlan.due_date < today,
+        Contract.team_id == team_id
     )
     
     overdue_plans = query.order_by(PaymentPlan.due_date.asc()).all()
@@ -345,14 +364,16 @@ def get_contract_revenue_report(
     start_date: Optional[date] = Query(None, description="开始日期"),
     end_date: Optional[date] = Query(None, description="结束日期"),
     group_by: str = Query("month", description="分组方式: day(按天), week(按周), month(按月), customer(按客户)"),
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     permission_checker = require_permission("finance:reports_view")
     permission_checker(current_user, db)
-    
+
     query = db.query(Contract).filter(
-        Contract.status != "DRAFT"
+        Contract.status != "DRAFT",
+        Contract.team_id == team_id
     )
     
     if start_date:
@@ -459,14 +480,21 @@ def _group_by_customer(contracts: List[Contract], db: Session) -> dict:
 def get_pending_confirmations(
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的记录数"),
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     permission_checker = require_permission("payment:confirm")
     permission_checker(current_user, db)
-    
-    query = db.query(PaymentRecord).filter(
-        PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING
+
+    # 通过 PaymentPlan -> Contract 关联过滤 team_id
+    query = db.query(PaymentRecord).join(
+        PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id
+    ).join(
+        Contract, PaymentPlan.contract_id == Contract.id
+    ).filter(
+        PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING,
+        Contract.team_id == team_id
     ).order_by(PaymentRecord.created_time.desc())
     
     total = query.count()

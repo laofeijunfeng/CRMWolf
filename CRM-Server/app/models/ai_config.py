@@ -1,7 +1,7 @@
 """
 AI 配置模型
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, Integer, String, Float, DateTime, BigInteger, Index
 from sqlalchemy.sql import func
 from app.core.database import Base
 from cryptography.fernet import Fernet
@@ -31,6 +31,7 @@ class AIConfig(Base):
     __tablename__ = "crm_ai_config"
 
     id = Column(Integer, primary_key=True, default=1)  # 固定为1，只存储一条配置
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     api_host = Column(String(255), nullable=False, comment="AI接口基础地址（如 https://api.deepseek.com/v1）")
     api_key_encrypted = Column(String(255), nullable=False, comment="加密后的API密钥")
     model_name = Column(String(100), nullable=False, comment="模型名称（如 deepseek-chat）")
@@ -38,6 +39,11 @@ class AIConfig(Base):
     max_tokens = Column(Integer, nullable=False, default=1024, comment="最大tokens（固定1024）")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
     updated_by = Column(Integer, comment="更新人ID")
+
+    __table_args__ = (
+        Index('idx_crm_ai_config_team_id', 'team_id'),
+        {'comment': 'AI配置表'}
+    )
 
     def __repr__(self):
         return f"<AIConfig(id={self.id}, api_host={self.api_host}, model_name={self.model_name})>"

@@ -30,7 +30,7 @@ export interface ApprovalFlowDetail extends ApprovalFlow {
 
 const approvalFlowApi = {
   getApprovalFlows: (params?: { skip?: number; limit?: number; is_active?: boolean | null }) => {
-    return request.get('/api/v1/approvals/flows', { params })
+    return request.get('/v1/approvals/flows', { params })
   },
 
   getApprovalFlowDetail: (flowId: number) => {
@@ -38,7 +38,7 @@ const approvalFlowApi = {
   },
 
   createApprovalFlow: (data: ApprovalFlow) => {
-    return request.post('/api/v1/approvals/flows', data)
+    return request.post('/v1/approvals/flows', data)
   },
 
   updateApprovalFlow: (flowId: number, data: Partial<ApprovalFlow>) => {

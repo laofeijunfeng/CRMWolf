@@ -17,6 +17,7 @@ from app.services.skills.handlers.aggregate_handler import AggregateHandler
 from app.services.skills.handlers.stage_query_handler import StageQueryHandler
 from app.services.skills.handlers.stage_advance_handler import StageAdvanceHandler
 from app.services.skills.handlers.set_procurement_method_handler import SetProcurementMethodHandler
+from app.services.skills.handlers.set_next_follow_handler import SetNextFollowHandler
 
 
 class HandlerFactory:
@@ -34,6 +35,7 @@ class HandlerFactory:
         "StageQueryHandler": StageQueryHandler,
         "StageAdvanceHandler": StageAdvanceHandler,
         "SetProcurementMethodHandler": SetProcurementMethodHandler,
+        "SetNextFollowHandler": SetNextFollowHandler,
     }
 
     @classmethod
@@ -71,7 +73,8 @@ class HandlerFactory:
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行指定类型的 Handler
@@ -83,6 +86,7 @@ class HandlerFactory:
             params: 用户参数
             user_id: 用户 ID
             user_feishu_open_id: 用户飞书 Open ID
+            team_id: 团队 ID
 
         Returns:
             执行结果
@@ -96,7 +100,7 @@ class HandlerFactory:
             }
 
         return await handler.execute(
-            db, handler_config, params, user_id, user_feishu_open_id
+            db, handler_config, params, user_id, user_feishu_open_id, team_id
         )
 
     @classmethod

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission
+from app.core.deps import get_current_active_user, require_permission, get_current_user_team
 from app.models.user import User
 from app.schemas.procurement import (
     ProcurementStageTemplateCreate, ProcurementStageTemplateUpdate,
@@ -27,11 +27,12 @@ router = APIRouter(prefix="/api/v1/procurement-stage-templates", tags=["采购�
 """)
 def get_stage_templates(
     procurement_method_id: int = Query(..., description="采购方式ID（必填）"),
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     templates = procurement_stage_template_crud.get_by_method(
-        db, procurement_method_id
+        db, procurement_method_id, team_id
     )
     return templates
 
@@ -70,12 +71,13 @@ def get_stage_template(
 """)
 def create_stage_template(
     template_in: ProcurementStageTemplateCreate,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement_stage:create"))
 ):
     try:
         template = procurement_stage_template_crud.create(
-            db, template_in, creator_id=current_user.feishu_open_id
+            db, template_in, creator_id=str(current_user.id), team_id=team_id
         )
         return template
     except ValueError as e:
@@ -118,7 +120,7 @@ def update_stage_template(
     try:
         updated_template = procurement_stage_template_crud.update(
             db, template, template_in, 
-            updater_id=current_user.feishu_open_id,
+            updater_id=str(current_user.id),
             reason=reason
         )
         return updated_template

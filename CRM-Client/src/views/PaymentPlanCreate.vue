@@ -284,10 +284,9 @@ onMounted(() => {
 }
 
 .form-container {
+  max-width: 800px;
+  margin: 0 auto;
   padding: $wolf-page-padding;
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-card-gap;
 }
 
 .info-card,

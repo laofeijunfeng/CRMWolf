@@ -1,70 +1,30 @@
 <template>
   <div class="leads-page">
-    <!-- 快捷筛选标签 -->
-    <div class="filter-tabs">
-      <span
-        :class="['filter-tab', { active: quickFilter === 'all' }]"
-        @click="handleQuickFilter('all')"
-      >全部线索</span>
-      <span
-        :class="['filter-tab', { active: quickFilter === 'my' }]"
-        @click="handleQuickFilter('my')"
-      >我的线索</span>
-      <span
-        :class="['filter-tab', { active: quickFilter === 'public' }]"
-        @click="handleQuickFilter('public')"
-      >公海线索</span>
-      <span
-        :class="['filter-tab', { active: quickFilter === 'following' }]"
-        @click="handleQuickFilter('following')"
-      >待跟进</span>
-    </div>
-
-    <!-- 搜索筛选区 -->
-    <div class="filter-card">
-      <div class="filter-row">
-        <div class="filter-left">
-          <el-input
-            v-model="searchForm.keyword"
-            placeholder="搜索线索名称、联系人或手机号"
-            clearable
-            class="search-input"
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-        </div>
-        <div class="filter-center">
-          <el-select v-model="searchForm.source" placeholder="来源" clearable class="filter-item">
-            <el-option value="线上注册" label="线上注册" />
-            <el-option value="市场活动" label="市场活动" />
-            <el-option value="客户推荐" label="客户推荐" />
-            <el-option value="电话营销" label="电话营销" />
-            <el-option value="网站咨询" label="网站咨询" />
-            <el-option value="展会" label="展会" />
-            <el-option value="其他" label="其他" />
-          </el-select>
-          <el-input v-model="searchForm.city" placeholder="城市" clearable class="filter-item" />
-          <el-select v-model="searchForm.status" placeholder="状态" clearable class="filter-item">
-            <el-option :value="0" label="新建" />
-            <el-option :value="1" label="跟进中" />
-            <el-option :value="3" label="无效" />
-          </el-select>
-        </div>
-        <div class="filter-right">
-          <el-button @click="handleReset">重置</el-button>
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button v-if="canCreateLead" type="primary" @click="showCreateModal">
-            <el-icon><Plus /></el-icon>
-            新建
-          </el-button>
-          <el-button v-if="canImportLead" @click="showImportModal">
-            <el-icon><Upload /></el-icon>
-            导入
-          </el-button>
-        </div>
+    <!-- 快捷筛选标签 + 操作按钮 -->
+    <div class="filter-tabs-bar">
+      <div class="filter-tabs">
+        <span
+          :class="['filter-tab', { active: quickFilter === 'all' }]"
+          @click="handleQuickFilter('all')"
+        >全部线索</span>
+        <span
+          :class="['filter-tab', { active: quickFilter === 'my' }]"
+          @click="handleQuickFilter('my')"
+        >我的线索</span>
+        <span
+          :class="['filter-tab', { active: quickFilter === 'public' }]"
+          @click="handleQuickFilter('public')"
+        >公海线索</span>
+        <span
+          :class="['filter-tab', { active: quickFilter === 'following' }]"
+          @click="handleQuickFilter('following')"
+        >待跟进</span>
+      </div>
+      <div class="filter-actions">
+        <el-button v-if="canCreateLead" type="primary" @click="showAILeadCreate = true">
+          <el-icon><MagicStick /></el-icon>
+          AI 创建线索
+        </el-button>
       </div>
     </div>
 
@@ -76,9 +36,27 @@
         stripe
         :row-class-name="tableRowClassName"
       >
-        <el-table-column prop="lead_name" label="线索名称" min-width="200">
+        <el-table-column prop="lead_name" min-width="220">
+          <template #header>
+            <FilterTableHeader
+              label="线索名称"
+              field="lead_name"
+              :filter="{ type: 'search', placeholder: '搜索线索名称' }"
+              :sortable="true"
+              :filter-value="filterValues['lead_name']"
+              :sort-state="sortState.field === 'lead_name' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
-            <span class="link-text" @click="handleViewDetail(row)">{{ row.lead_name }}</span>
+            <div class="name-cell">
+              <el-icon class="magicwand-icon" @click="handleMagicWand(row)">
+                <MagicStick />
+              </el-icon>
+              <span class="link-text" @click="handleViewDetail(row)">{{ row.lead_name }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="contact_name" label="联系人" width="120">
@@ -91,12 +69,43 @@
             {{ row.contact_phone || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="source" label="来源" width="120">
+        <el-table-column prop="source" width="120">
+          <template #header>
+            <FilterTableHeader
+              label="来源"
+              field="source"
+              :filter="{ type: 'select', placeholder: '选择来源', options: [
+                { value: '线上注册', label: '线上注册' },
+                { value: '市场活动', label: '市场活动' },
+                { value: '客户推荐', label: '客户推荐' },
+                { value: '电话营销', label: '电话营销' },
+                { value: '网站咨询', label: '网站咨询' },
+                { value: '展会', label: '展会' },
+                { value: '其他', label: '其他' }
+              ] }"
+              :filter-value="filterValues['source']"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+            />
+          </template>
           <template #default="{ row }">
             {{ row.source }}
           </template>
         </el-table-column>
-        <el-table-column prop="city" label="城市" width="100">
+        <el-table-column prop="city" width="100">
+          <template #header>
+            <FilterTableHeader
+              label="城市"
+              field="city"
+              :filter="{ type: 'search', placeholder: '搜索城市' }"
+              :sortable="true"
+              :filter-value="filterValues['city']"
+              :sort-state="sortState.field === 'city' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             {{ row.city || '-' }}
           </template>
@@ -106,11 +115,54 @@
             {{ row.company_scale || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" width="100">
+          <template #header>
+            <FilterTableHeader
+              label="状态"
+              field="status"
+              :filter="{ type: 'select', placeholder: '选择状态', options: [
+                { value: 0, label: '新建' },
+                { value: 1, label: '跟进中' },
+                { value: 3, label: '无效' }
+              ] }"
+              :sortable="true"
+              :filter-value="filterValues['status']"
+              :sort-state="sortState.field === 'status' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             <span :class="['status-tag', getStatusClass(row.status)]">
               {{ getStatusText(row.status) }}
             </span>
+          </template>
+        </el-table-column>
+        <!-- 热力值列 -->
+        <el-table-column prop="score" width="100">
+          <template #header>
+            <FilterTableHeader
+              label="热力值"
+              field="score"
+              :filter="{ type: 'range', min: 0, max: 100, placeholder: '筛选热力值' }"
+              :sortable="true"
+              :filter-value="filterValues['score']"
+              :sort-state="sortState.field === 'score' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
+          <template #default="{ row }">
+            <el-tooltip placement="top" :content="getScoreTooltip(row)">
+              <div class="score-cell">
+                <span class="score-icon" :style="{ color: getScoreColor(row.score) }">
+                  {{ getScoreIcon(row.score) }}
+                </span>
+                <span class="score-number">{{ row.score ?? '--' }}</span>
+              </div>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="负责人" width="100">
@@ -118,7 +170,16 @@
             {{ row.owner_info?.name || '未分配' }}
           </template>
         </el-table-column>
-        <el-table-column prop="created_time" label="创建时间" width="160">
+        <el-table-column prop="created_time" width="160">
+          <template #header>
+            <FilterTableHeader
+              label="创建时间"
+              field="created_time"
+              :sortable="true"
+              :sort-state="sortState.field === 'created_time' ? sortState : null"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             {{ formatDateTime(row.created_time) }}
           </template>
@@ -126,14 +187,46 @@
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <div class="action-cell">
-              <span class="action-link" @click="router.push(`/leads/${row.id}`)">查看</span>
-              <span v-if="canEditLead" class="action-link" @click="router.push(`/leads/${row.id}/edit`)">编辑</span>
-              <span v-if="canClaimLead && row.status === 0 && !row.owner_id" class="action-link" @click="handleClaim(row.id)">领取</span>
-              <span v-if="canAssignLead" class="action-link" @click="selectedLead = row; assignForm.owner_id = ''; assignModalVisible = true">分配</span>
-              <span v-if="canReturnLead && row.status === 1" class="action-link" @click="handleReturn(row.id)">退回</span>
-              <span v-if="canConvertLead && row.status === 1" class="action-link" @click="router.push(`/leads/${row.id}/convert`)">转化</span>
-              <span v-if="canEditLead && row.status !== 2" class="action-link action-danger" @click="handleMarkInvalid(row.id)">无效</span>
-              <span v-if="canDeleteLead" class="action-link action-danger" @click="handleDelete(row)">删除</span>
+              <el-tooltip content="查看" placement="top">
+                <el-icon class="action-icon" @click="router.push(`/leads/${row.id}`)">
+                  <View />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canEditRow(row)" content="编辑" placement="top">
+                <el-icon class="action-icon" @click="router.push(`/leads/${row.id}/edit`)">
+                  <Edit />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canClaimLead && row.status === 0 && !row.owner_id" content="领取" placement="top">
+                <el-icon class="action-icon" @click="handleClaim(row.id)">
+                  <User />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canAssignLead" content="分配" placement="top">
+                <el-icon class="action-icon" @click="selectedLead = row; assignForm.owner_id = ''; assignModalVisible = true">
+                  <UserFilled />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canReturnRow(row)" content="退回公海" placement="top">
+                <el-icon class="action-icon" @click="handleReturn(row.id)">
+                  <RefreshRight />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canConvertRow(row)" content="转化为客户" placement="top">
+                <el-icon class="action-icon" @click="router.push(`/leads/${row.id}/convert`)">
+                  <CircleCheck />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canEditRow(row) && row.status !== 2" content="标记无效" placement="top">
+                <el-icon class="action-icon action-danger" @click="handleMarkInvalid(row.id)">
+                  <CircleClose />
+                </el-icon>
+              </el-tooltip>
+              <el-tooltip v-if="canDeleteRow(row)" content="删除" placement="top">
+                <el-icon class="action-icon action-danger" @click="handleDelete(row)">
+                  <Delete />
+                </el-icon>
+              </el-tooltip>
             </div>
           </template>
         </el-table-column>
@@ -163,7 +256,9 @@
     >
       <el-form :model="assignForm" :rules="assignFormRules" label-position="top" ref="assignFormRef">
         <el-form-item label="负责人" prop="owner_id" required>
-          <el-input v-model="assignForm.owner_id" placeholder="请输入负责人ID" />
+          <el-select v-model="assignForm.owner_id" placeholder="请选择负责人" style="width: 100%" filterable>
+            <el-option v-for="user in userOptions" :key="user.id" :value="String(user.id)" :label="user.name" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -172,41 +267,47 @@
       </template>
     </el-dialog>
 
-    <!-- 批量导入弹窗 -->
+    <!-- AI 智能创建弹窗 -->
+    <AILeadCreateDialog
+      v-model="showAILeadCreate"
+      @success="fetchLeadList"
+    />
+
+    <!-- Magic Wand 弹窗 -->
+    <MagicWandDialog
+      v-model="showMagicWand"
+      entity-type="lead"
+      :entity-id="magicWandEntityId"
+      :entity-name="magicWandEntityName"
+      @refresh="fetchLeadList"
+    />
+
+    <!-- 标记无效弹窗 -->
     <el-dialog
-      v-model="importModalVisible"
-      title="批量导入"
-      width="600px"
+      v-model="invalidModalVisible"
+      title="标记无效"
+      width="400px"
       :close-on-click-modal="false"
     >
-      <el-form :model="importForm" label-position="top">
-        <el-form-item label="JSON 数据（最多100条）">
+      <el-form :model="invalidForm" :rules="invalidFormRules" label-position="top" ref="invalidFormRef">
+        <el-form-item prop="reason" label="无效原因" required>
           <el-input
-            v-model="importForm.jsonData"
+            v-model="invalidForm.reason"
             type="textarea"
-            placeholder='请输入 JSON 格式的线索数据'
-            :maxlength="10000"
-            :rows="8"
+            placeholder="请输入无效原因说明"
+            :rows="4"
+            :maxlength="500"
+            show-word-limit
           />
         </el-form-item>
       </el-form>
-      <el-alert
-        v-if="importResult"
-        :type="importResult.failed_count > 0 ? 'warning' : 'success'"
-        :closable="false"
-        style="margin-top: 16px"
-      >
-        成功 {{ importResult.success_count }} 条，失败 {{ importResult.failed_count }} 条
-        <div v-if="importResult.errors && importResult.errors.length > 0" style="margin-top: 8px;">
-          <div v-for="(error, index) in importResult.errors" :key="index">{{ error }}</div>
-        </div>
-      </el-alert>
       <template #footer>
-        <el-button @click="importModalVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleImportModalOk">导入</el-button>
+        <el-button @click="invalidModalVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleInvalidModalOk">确定</el-button>
       </template>
     </el-dialog>
-  </div>
+
+      </div>
 </template>
 
 <script setup lang="ts">
@@ -214,22 +315,47 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Plus, Upload, User, UserFilled, RefreshRight,
-  CircleCheck, CircleClose, Edit, Search
+  Plus, Search, View, Edit, User, UserFilled, RefreshRight, CircleCheck, CircleClose, Delete, MagicStick
 } from '@element-plus/icons-vue'
-import { leadApi, type Lead, type LeadCreate, type LeadListParams, type LeadBatchImportResponse } from '@/api/lead'
+import AILeadCreateDialog from '@/components/AILeadCreateDialog.vue'
+import MagicWandDialog from '@/components/MagicWandDialog.vue'
+import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
+import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
+import { leadApi, type Lead, type LeadListParams } from '@/api/lead'
+import userApi, { type UserResponse } from '@/api/user'
 import { usePermissionStore } from '@/stores/permissions'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const tableData = ref<Lead[]>([])
+const userOptions = ref<UserResponse[]>([])
 const quickFilter = ref('all')
 const assignModalVisible = ref(false)
-const importModalVisible = ref(false)
 const selectedLead = ref<Lead | null>(null)
 const assignFormRef = ref()
+
+const filterValues = ref<Record<string, FilterValue>>({})
+const sortState = ref<SortState>({ field: '', order: null })
+
+// AI 创建弹窗
+const showAILeadCreate = ref(false)
+
+// Magic Wand 弹窗
+const showMagicWand = ref(false)
+const magicWandEntityId = ref(0)
+const magicWandEntityName = ref('')
+
+// 标记无效弹窗
+const invalidModalVisible = ref(false)
+const invalidFormRef = ref()
+const selectedLeadForInvalid = ref<Lead | null>(null)
+const invalidForm = reactive({
+  reason: ''
+})
 
 const searchForm = reactive({
   keyword: '',
@@ -244,21 +370,61 @@ const pagination = reactive({
   total: 0
 })
 
+// 权限计算属性
 const canCreateLead = computed(() => permissionStore.hasPermission('lead:create'))
-const canEditLead = computed(() => permissionStore.hasAnyPermission(['lead:update', 'lead:edit_own', 'lead:edit_all']))
-const canDeleteLead = computed(() => permissionStore.hasAnyPermission(['lead:delete', 'lead:delete_own', 'lead:delete_all']))
+const canEditAllLead = computed(() => permissionStore.hasPermission('lead:edit:all'))
+const canEditOwnLead = computed(() => permissionStore.hasPermission('lead:edit:own'))
+const canDeleteAllLead = computed(() => permissionStore.hasPermission('lead:delete:all'))
+const canDeleteOwnLead = computed(() => permissionStore.hasPermission('lead:delete:own'))
 const canClaimLead = computed(() => permissionStore.hasPermission('lead:claim'))
 const canAssignLead = computed(() => permissionStore.hasPermission('lead:assign'))
-const canReturnLead = computed(() => permissionStore.hasAnyPermission(['lead:return', 'lead:return_to_pool']))
+const canReturnLead = computed(() => permissionStore.hasPermission('lead:return'))
 const canConvertLead = computed(() => permissionStore.hasPermission('lead:convert'))
-const canImportLead = computed(() => permissionStore.hasPermission('lead:import'))
 
-const assignForm = reactive({ owner_id: '' })
-const importForm = reactive({ jsonData: '' })
-const importResult = ref<LeadBatchImportResponse | null>(null)
+// 行级权限检查函数
+const canEditRow = (row: Lead): boolean => {
+  if (canEditAllLead.value) return true
+  if (canEditOwnLead.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
+
+const canDeleteRow = (row: Lead): boolean => {
+  if (canDeleteAllLead.value) return true
+  if (canDeleteOwnLead.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
+
+const canReturnRow = (row: Lead): boolean => {
+  // 退回公海：必须有权限，且行状态为跟进中，且有负责人（不能退回未分配的线索）
+  if (!canReturnLead.value) return false
+  if (row.status !== 1) return false
+  if (!row.owner_id) return false
+  // 如果有 edit_all 权限，可以退回任何线索
+  if (canEditAllLead.value) return true
+  // 如果只有 edit_own 权限，只能退回自己负责的线索
+  if (canEditOwnLead.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
+
+const canConvertRow = (row: Lead): boolean => {
+  // 转化线索：必须有权限，且状态为跟进中
+  if (!canConvertLead.value) return false
+  if (row.status !== 1) return false
+  // 如果有 edit_all 权限，可以转化任何已分配的线索
+  if (canEditAllLead.value) return true
+  // 如果有 edit_own 权限，只能转化自己负责的线索
+  if (canEditOwnLead.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
+
+const assignForm = reactive({ owner_id: '' as string | number })
 
 const assignFormRules = {
-  owner_id: [{ required: true, message: '请输入负责人ID', trigger: 'blur' }]
+  owner_id: [{ required: true, message: '请选择负责人', trigger: 'change' }]
+}
+
+const invalidFormRules = {
+  reason: [{ required: true, message: '请输入无效原因', trigger: 'blur' }]
 }
 
 const getStatusText = (status: number) => {
@@ -285,6 +451,37 @@ const formatDateTime = (dateStr?: string) => {
   })
 }
 
+// 热力值相关函数
+const getScoreIcon = (score: number | null) => {
+  if (score === null) return '❓'
+  if (score >= 80) return '🔥'
+  if (score >= 60) return '⚡'
+  if (score >= 40) return '✅'
+  return '❄️'
+}
+
+const getScoreColor = (score: number | null) => {
+  if (score === null) return '#d9d9d9'
+  if (score >= 80) return '#ff4d4f'
+  if (score >= 60) return '#faad14'
+  if (score >= 40) return '#52c41a'
+  return '#d9d9d9'
+}
+
+const getScoreLevel = (score: number | null) => {
+  if (score === null) return '未知'
+  if (score >= 80) return '高'
+  if (score >= 60) return '中'
+  if (score >= 40) return '低'
+  return '危险'
+}
+
+const getScoreTooltip = (row: Lead) => {
+  if (row.score === null) return '暂未计算热力值'
+  const level = getScoreLevel(row.score)
+  return `热力值: ${row.score}分 (${level})`
+}
+
 const tableRowClassName = ({ row }: { row: Lead }) => {
   return !row.owner_id ? 'row-unassigned' : ''
 }
@@ -295,32 +492,79 @@ const handleQuickFilter = (filter: string) => {
   fetchLeadList()
 }
 
+const handleFilterChange = (field: string, value: FilterValue) => {
+  filterValues.value[field] = value
+  pagination.current = 1
+  fetchLeadList()
+}
+
+const handleFilterClear = (field: string) => {
+  delete filterValues.value[field]
+  pagination.current = 1
+  fetchLeadList()
+}
+
+const handleSortChange = (newSortState: SortState) => {
+  sortState.value = newSortState
+  pagination.current = 1
+  fetchLeadList()
+}
+
 const fetchLeadList = async () => {
   loading.value = true
   try {
+    // 从 filterValues 提取筛选值
+    const keyword = filterValues.value['lead_name']?.search || searchForm.keyword || undefined
+    const source = filterValues.value['source']?.select || searchForm.source || undefined
+    const city = filterValues.value['city']?.search || searchForm.city || undefined
+    const statusSelect = filterValues.value['status']?.select
+    const status = statusSelect !== undefined && statusSelect !== null ? statusSelect : searchForm.status
+
     let res: any
 
     if (quickFilter.value === 'my') {
-      res = await leadApi.getMyLeads({
+      const params: any = {
         skip: (pagination.current - 1) * pagination.pageSize,
-        limit: pagination.pageSize
-      })
+        limit: pagination.pageSize,
+        keyword,
+        source,
+        city,
+        status
+      }
+      if (sortState.value.order) {
+        params.order_by = sortState.value.field
+        params.order_dir = sortState.value.order
+      }
+      res = await leadApi.getMyLeads(params)
     } else if (quickFilter.value === 'public') {
-      res = await leadApi.getPublicLeads({
+      const params: any = {
         skip: (pagination.current - 1) * pagination.pageSize,
-        limit: pagination.pageSize
-      })
+        limit: pagination.pageSize,
+        keyword,
+        source,
+        city,
+        status
+      }
+      if (sortState.value.order) {
+        params.order_by = sortState.value.field
+        params.order_dir = sortState.value.order
+      }
+      res = await leadApi.getPublicLeads(params)
     } else {
       const params: LeadListParams = {
         skip: (pagination.current - 1) * pagination.pageSize,
         limit: pagination.pageSize,
-        keyword: searchForm.keyword || undefined,
-        source: searchForm.source || undefined,
-        city: searchForm.city || undefined,
-        status: searchForm.status
+        keyword,
+        source,
+        city,
+        status
       }
       if (quickFilter.value === 'following') {
         params.status = 1
+      }
+      if (sortState.value.order) {
+        params.order_by = sortState.value.field
+        params.order_dir = sortState.value.order
       }
       res = await leadApi.getLeadList(params) as any
     }
@@ -345,6 +589,8 @@ const handleReset = () => {
   searchForm.source = ''
   searchForm.city = ''
   searchForm.status = undefined
+  filterValues.value = {}
+  sortState.value = { field: '', order: null }
   quickFilter.value = 'all'
   handleSearch()
 }
@@ -401,16 +647,26 @@ const handleReturn = async (id: number) => {
   }
 }
 
-const handleMarkInvalid = async (id: number) => {
+const handleMarkInvalid = (id: number) => {
+  const lead = tableData.value.find(l => l.id === id)
+  if (!lead) return
+  selectedLeadForInvalid.value = lead
+  Object.assign(invalidForm, { reason: '' })
+  invalidModalVisible.value = true
+}
+
+const handleInvalidModalOk = async () => {
+  if (!selectedLeadForInvalid.value) return
   try {
-    await ElMessageBox.confirm('确定标记无效？', '确认', {
-      confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning'
-    })
-    await leadApi.markInvalid(id)
+    await invalidFormRef.value?.validate()
+  } catch { return }
+  try {
+    await leadApi.markInvalid(selectedLeadForInvalid.value.id, { reason: invalidForm.reason })
     ElMessage.success('已标记无效')
+    invalidModalVisible.value = false
     fetchLeadList()
   } catch (error: any) {
-    if (error !== 'cancel') ElMessage.error(error.message || '操作失败')
+    ElMessage.error(error.message || '操作失败')
   }
 }
 
@@ -429,28 +685,25 @@ const handleDelete = async (record: Lead) => {
   }
 }
 
-const showImportModal = () => {
-  importForm.jsonData = ''
-  importResult.value = null
-  importModalVisible.value = true
+const handleMagicWand = (record: Lead) => {
+  magicWandEntityId.value = record.id
+  magicWandEntityName.value = record.lead_name
+  showMagicWand.value = true
 }
 
-const handleImportModalOk = async () => {
+const fetchUserOptions = async () => {
   try {
-    const data = JSON.parse(importForm.jsonData) as LeadCreate[]
-    const res = await leadApi.batchImport({ leads: data }) as any
-    importResult.value = res
-    if (res.failed_count === 0) {
-      ElMessage.success('导入成功')
-      importModalVisible.value = false
-      fetchLeadList()
-    }
-  } catch (error: any) {
-    ElMessage.error(error.message?.includes('JSON') ? 'JSON 格式错误' : error.message || '导入失败')
+    const response = await userApi.getUsers({ status: 'active' }) as any
+    userOptions.value = Array.isArray(response) ? response : response?.data || []
+  } catch (error) {
+    console.error('获取用户列表失败', error)
   }
 }
 
-onMounted(() => fetchLeadList())
+onMounted(() => {
+  fetchLeadList()
+  fetchUserOptions()
+})
 </script>
 
 <style scoped lang="scss">
@@ -462,11 +715,22 @@ onMounted(() => fetchLeadList())
   min-height: calc(100vh - 48px);
 }
 
-// 快捷筛选标签
+// 快捷筛选标签 + 操作按钮栏
+.filter-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $wolf-space-md;
+}
+
 .filter-tabs {
   display: flex;
   gap: $wolf-space-xs;
-  margin-bottom: $wolf-space-md;
+}
+
+.filter-actions {
+  display: flex;
+  gap: $wolf-space-xs;
 }
 
 .filter-tab {
@@ -489,15 +753,6 @@ onMounted(() => fetchLeadList())
     color: $wolf-text-secondary;
     font-weight: $wolf-font-weight-medium;
   }
-}
-
-// 筛选区
-.filter-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
-  box-shadow: $wolf-shadow-card;
 }
 
 .filter-row {
@@ -558,6 +813,26 @@ onMounted(() => fetchLeadList())
   }
 }
 
+// 名称列布局
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.magicwand-icon {
+  font-size: 14px;
+  color: $wolf-primary;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    transform: scale(1.15);
+    color: $wolf-primary-hover;
+  }
+}
+
+
 // 状态标签（浅底色 + 同色系文字）
 .status-tag {
   display: inline-flex;
@@ -596,16 +871,19 @@ onMounted(() => fetchLeadList())
 .action-cell {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md;
-  flex-wrap: wrap;
+  gap: $wolf-space-sm;
 }
 
-.action-link {
+.action-icon {
+  font-size: 16px;
   color: $wolf-text-link;
-  font-size: $wolf-font-size-auxiliary;
   cursor: pointer;
-  white-space: nowrap;
-  &:hover { color: $wolf-text-link-hover; }
+  transition: all 0.2s;
+
+  &:hover {
+    color: $wolf-text-link-hover;
+    transform: scale(1.1);
+  }
 }
 
 .action-danger {
@@ -637,5 +915,22 @@ onMounted(() => fetchLeadList())
   .leads-page { padding: $wolf-space-md; }
   .filter-item { width: 100%; }
   .filter-tabs { flex-wrap: wrap; }
+}
+
+// 热力值单元格样式
+.score-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.score-icon {
+  font-size: 16px;
+}
+
+.score-number {
+  font-weight: $wolf-font-weight-medium;
+  font-size: $wolf-font-size-auxiliary;
 }
 </style>

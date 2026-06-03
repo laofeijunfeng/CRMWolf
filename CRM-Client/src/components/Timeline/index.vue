@@ -1,6 +1,7 @@
 <template>
   <div class="timeline-container">
     <TimelineFilter
+      v-if="showFilter"
       :event-types="filters.eventTypes"
       :date-range="filters.dateRange"
       :custom-start-date="filters.customStartDate"
@@ -21,7 +22,7 @@
     <div v-else class="timeline-wrapper" @scroll="handleScroll">
       <div class="timeline-list">
         <div
-          v-for="(log, index) in logs"
+          v-for="log in logs"
           :key="log.id"
           class="timeline-item"
           :class="{ 'is-system': isSystemEvent(log.event_type) }"
@@ -34,38 +35,59 @@
           </div>
           <div class="timeline-item-content">
             <div class="event-card">
-              <div class="event-header">
+              <!-- 非跟进记录：显示原有标题行 -->
+              <div v-if="!shouldShowContent(log)" class="event-header">
                 <span class="event-type-tag" :style="getEventTagStyle(log.event_type)">
                   {{ getEventLabel(log.event_type) }}
                 </span>
                 <span class="event-time">{{ formatTime(log.operated_at) }}</span>
               </div>
               <div class="event-body">
-                <div class="event-title">
+                <!-- 非跟进记录：显示原有描述 -->
+                <div v-if="!shouldShowContent(log)" class="event-title">
                   <strong>{{ log.operator_name || '系统' }}</strong>
                   {{ getEventDescription(log) }}
                 </div>
-                <div v-if="log.event_type === 'LEAD_CONVERTED' && log.content?.originalLeadName" class="event-relation-text">
-                  关联线索：{{ log.content.originalLeadName }}
+                <div v-if="log.event_type === 'LEAD_CONVERTED' && log.content?.['originalLeadName']" class="event-relation-text">
+                  关联线索：{{ log.content['originalLeadName'] }}
                 </div>
                 <div v-if="log.remark" class="event-remark">
                   {{ log.remark }}
                 </div>
+                <!-- 跟进记录：显示时间 -->
+                <div v-if="shouldShowContent(log)" class="follow-up-header">
+                  <span class="follow-up-time">{{ formatTime(log.operated_at) }}</span>
+                </div>
                 <div v-if="shouldShowContent(log)" class="event-content">
                   <div class="follow-up-details">
-                    <div v-if="log.content?.method" class="follow-up-method">
-                      <el-icon class="method-icon"><Phone /></el-icon>
-                      <span class="method-label">跟进方式：</span>
-                      <span class="method-value">{{ formatFollowUpMethod(log.content.method) }}</span>
+                    <!-- 标签区域：跟进类型、跟进人、跟进方式 -->
+                    <div class="follow-up-tags">
+                      <span class="meta-tag type-tag">
+                        {{ getEventLabel(log.event_type) }}
+                      </span>
+                      <span class="meta-tag operator-tag">
+                        <el-icon class="tag-icon"><User /></el-icon>
+                        <span>{{ log.operator_name || '系统' }}</span>
+                      </span>
+                      <span v-if="log.content?.['method']" class="meta-tag method-tag">
+                        <el-icon class="tag-icon"><Phone /></el-icon>
+                        <span>{{ formatFollowUpMethod(log.content['method']) }}</span>
+                      </span>
                     </div>
-                    <div v-if="log.content?.content" class="follow-up-content">
-                      <span class="content-label">跟进内容：</span>
-                      <span class="content-value">{{ log.content.content }}</span>
+                    <!-- 跟进内容（核心信息） -->
+                    <div v-if="log.content?.['content']" class="follow-up-main">
+                      <span class="content-value">{{ log.content?.['content'] }}</span>
                     </div>
-                    <div v-if="log.content?.next_follow_up_date" class="follow-up-next">
-                      <el-icon class="next-icon"><Calendar /></el-icon>
-                      <span class="next-label">下次跟进：</span>
-                      <span class="next-value">{{ log.content.next_follow_up_date }}</span>
+                    <!-- 后续安排区域 -->
+                    <div v-if="log.content?.['next_follow_up_date'] || log.content?.['next_action']" class="follow-up-plan">
+                      <div v-if="log.content?.['next_follow_up_date']" class="plan-item">
+                        <span class="plan-label">下次跟进</span>
+                        <span class="plan-value">{{ log.content?.['next_follow_up_date'] }}</span>
+                      </div>
+                      <div v-if="log.content?.['next_action']" class="plan-item plan-action">
+                        <span class="plan-label">下一步动作</span>
+                        <span class="plan-value">{{ log.content?.['next_action'] }}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -88,7 +110,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, markRaw } from 'vue'
+import { markRaw } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import {
   Plus,
@@ -99,8 +121,7 @@ import {
   Document,
   CircleCheckFilled,
   WarningFilled,
-  Phone,
-  Calendar
+  Phone
 } from '@element-plus/icons-vue'
 import { EVENT_TYPE_CONFIG } from './types'
 import type { EventType } from '@/api/operationLog'
@@ -123,6 +144,7 @@ interface Props {
   loading: boolean
   hasMore: boolean
   filters: any
+  showFilter?: boolean
 }
 
 interface Emits {
@@ -131,7 +153,9 @@ interface Emits {
   (e: 'reset'): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  showFilter: true
+})
 const emit = defineEmits<Emits>()
 
 const isSystemEvent = (eventType: EventType) => {
@@ -176,39 +200,6 @@ const formatTime = (dateStr: string) => {
   } else {
     return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   }
-}
-
-const formatContentKey = (key: string) => {
-  const keyMap: Record<string, string> = {
-    account_name: '客户名称',
-    amount: '金额',
-    stage: '阶段',
-    status: '状态',
-    contract_number: '合同编号',
-    expected_payment_date: '预计付款日期',
-    actual_payment_date: '实际付款日期'
-  }
-  return keyMap[key] || key
-}
-
-const formatContentValue = (value: any) => {
-  if (typeof value === 'object') {
-    return JSON.stringify(value)
-  }
-  return String(value)
-}
-
-const getResourceTypeLabel = (type: string) => {
-  const labelMap: Record<string, string> = {
-    LEAD: '线索',
-    CUSTOMER: '客户',
-    OPPORTUNITY: '商机',
-    CONTRACT: '合同',
-    INVOICE: '发票',
-    PAYMENT_PLAN: '回款计划',
-    PAYMENT_RECORD: '回款记录'
-  }
-  return labelMap[type] || type
 }
 
 const shouldShowContent = (log: OperationLog) => {
@@ -382,58 +373,134 @@ const handleReset = () => {
 }
 
 .event-content {
-  margin-top: 4px;
+  margin-top: 0;
 }
 
 .follow-up-details {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--wolf-bg-page, #F5F7FA);
-  border-radius: var(--wolf-radius-md, 8px);
-  border-left: 3px solid var(--wolf-info, #165DFF);
+  gap: 12px;
 }
 
-.follow-up-method,
-.follow-up-content,
-.follow-up-next {
+.follow-up-time {
+  font-size: 12px;
+  color: var(--wolf-text-tertiary, #909399);
+  margin-bottom: 8px;
+}
+
+.follow-up-tags {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  font-size: 13px;
+  flex-wrap: wrap;
 }
 
-.method-icon,
-.next-icon {
-  color: var(--wolf-info, #165DFF);
-  font-size: 14px;
-  margin-top: 2px;
-}
-
-.method-label,
-.content-label,
-.next-label {
-  color: var(--wolf-text-secondary, #4E5969);
-  font-weight: 500;
-  min-width: 70px;
-  flex-shrink: 0;
-}
-
-.method-value {
-  color: var(--wolf-text-primary, #1D2129);
-  font-weight: 600;
+.follow-up-main {
+  flex: 1;
 }
 
 .content-value {
   color: var(--wolf-text-primary, #1D2129);
+  font-size: 14px;
   line-height: 1.6;
+  font-weight: 500;
+}
+
+.follow-up-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.meta-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--wolf-radius-sm, 4px);
+  font-size: 12px;
+}
+
+.type-tag {
+  background: var(--wolf-primary-light, #E8F3FF);
+  color: var(--wolf-primary, #165DFF);
+  font-weight: 500;
+}
+
+.operator-tag {
+  background: var(--wolf-bg-elevated, #FFFFFF);
+  color: var(--wolf-text-secondary, #4E5969);
+  border: 1px solid var(--wolf-border-default, #E5E6EB);
+}
+
+.operator-tag .tag-icon {
+  color: var(--wolf-text-tertiary, #909399);
+}
+
+.method-tag {
+  background: var(--wolf-bg-elevated, #FFFFFF);
+  color: var(--wolf-text-secondary, #4E5969);
+  border: 1px solid var(--wolf-border-default, #E5E6EB);
+}
+
+.method-tag .tag-icon {
+  color: var(--wolf-primary, #165DFF);
+}
+
+.next-tag {
+  background: var(--wolf-warning-bg, #FFF7E8);
+  color: var(--wolf-warning-text, #FF7D00);
+}
+
+.next-tag .tag-icon {
+  color: var(--wolf-warning, #FF7D00);
+}
+
+.follow-up-plan {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--wolf-bg-hover, #F7F8FA);
+  border-radius: var(--wolf-radius-sm, 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.plan-label {
+  color: var(--wolf-text-tertiary, #909399);
+  min-width: 70px;
+}
+
+.plan-value {
+  color: var(--wolf-text-secondary, #4E5969);
   flex: 1;
 }
 
-.next-value {
-  color: var(--wolf-primary, #165DFF);
-  font-weight: 500;
+.plan-action .plan-value {
+  color: var(--wolf-text-primary, #1D2129);
+}
+
+.tag-icon {
+  font-size: 12px;
+}
+
+.follow-up-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.follow-up-header .follow-up-time {
+  margin-bottom: 0;
 }
 
 .timeline-loading,

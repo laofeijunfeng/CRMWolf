@@ -70,6 +70,9 @@ export interface LeadListParams {
   status?: number
   source?: string
   city?: string
+  owner_id?: string  // 新增：负责人ID筛选（用于「我的线索」）
+  order_by?: string
+  order_dir?: 'asc' | 'desc'
 }
 
 export interface LeadFollowUp {
@@ -78,6 +81,7 @@ export interface LeadFollowUp {
   content: string
   method: string
   next_follow_time?: string
+  next_action?: string
   creator_id: string
   creator_info?: OwnerInfo
   created_time: string
@@ -87,6 +91,7 @@ export interface LeadFollowUpCreate {
   content: string
   method: string
   next_follow_time?: string | null
+  next_action?: string | null
 }
 
 export interface LeadAssignRequest {
@@ -115,17 +120,21 @@ export interface LeadTrendItem {
   count: number
 }
 
+export interface LeadMarkInvalidRequest {
+  reason: string
+}
+
 export const leadApi = {
   createLead: (data: LeadCreate) => {
-    return request.post<Lead>('/api/v1/leads/', data)
+    return request.post<Lead>('/v1/leads/', data)
   },
 
   batchImport: (data: LeadBatchImportRequest) => {
-    return request.post<LeadBatchImportResponse>('/api/v1/leads/batch-import', data)
+    return request.post<LeadBatchImportResponse>('/v1/leads/batch-import', data)
   },
 
   getLeadList: (params: LeadListParams) => {
-    return request.get<Lead[]>('/api/v1/leads/', { params })
+    return request.get<Lead[]>('/v1/leads/', { params })
   },
 
   getLeadDetail: (id: number) => {
@@ -160,31 +169,35 @@ export const leadApi = {
     return request.post<LeadFollowUp>(`/api/v1/leads/${id}/follow-ups`, data)
   },
 
-  markInvalid: (id: number) => {
-    return request.post<Lead>(`/api/v1/leads/${id}/mark-invalid`)
+  deleteFollowUp: (leadId: number, followUpId: number) => {
+    return request.delete(`/api/v1/leads/${leadId}/follow-ups/${followUpId}`)
+  },
+
+  markInvalid: (id: number, data: LeadMarkInvalidRequest) => {
+    return request.post<Lead>(`/api/v1/leads/${id}/mark-invalid`, data)
   },
 
   getPublicLeads: (params?: { skip?: number; limit?: number }) => {
-    return request.get<Lead[]>('/api/v1/leads/public/list', { params })
+    return request.get<Lead[]>('/v1/leads/public/list', { params })
   },
 
   getMyLeads: (params?: { skip?: number; limit?: number }) => {
-    return request.get<Lead[]>('/api/v1/leads/my/list', { params })
+    return request.get<Lead[]>('/v1/leads/my/list', { params })
   },
 
   getFollowUpReminder: (days?: number) => {
-    return request.get<Lead[]>('/api/v1/leads/follow-up/reminder', { params: { days } })
+    return request.get<Lead[]>('/v1/leads/follow-up/reminder', { params: { days } })
   },
 
   getStatistics: () => {
-    return request.get('/api/v1/leads/statistics')
+    return request.get('/v1/leads/statistics')
   },
 
   getTrend: (days?: number) => {
-    return request.get<LeadTrendItem[]>('/api/v1/analytics/leads/trend', { params: { days } })
+    return request.get<LeadTrendItem[]>('/v1/analytics/leads/trend', { params: { days } })
   },
 
   getConversion: () => {
-    return request.get<LeadConversionItem[]>('/api/v1/analytics/leads/conversion')
+    return request.get<LeadConversionItem[]>('/v1/analytics/leads/conversion')
   }
 }

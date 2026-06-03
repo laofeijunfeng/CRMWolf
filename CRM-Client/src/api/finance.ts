@@ -62,19 +62,19 @@ export interface DashboardStats {
 
 const financeApi = {
   getAccountAgingAnalysis: async (params?: { start_date?: string; end_date?: string }) => {
-    return request.get<AccountAgingAnalysis>('/api/v1/finance/receivables/aging-analysis', { params })
+    return request.get<AccountAgingAnalysis>('/v1/finance/receivables/aging-analysis', { params })
   },
 
   getOverduePaymentAlerts: async (params?: { days_overdue_min?: number; days_overdue_max?: number; min_amount?: number; skip?: number; limit?: number }) => {
-    return request.get<OverduePaymentAlert[]>('/api/v1/finance/receivables/overdue-alerts', { params })
+    return request.get<OverduePaymentAlert[]>('/v1/finance/receivables/overdue-alerts', { params })
   },
 
   getContractRevenueStats: async (params?: { start_date?: string; end_date?: string; group_by?: string }) => {
-    return request.get<ContractRevenueStats[]>('/api/v1/finance/reports/contract-revenue', { params })
+    return request.get<ContractRevenueStats[]>('/v1/finance/reports/contract-revenue', { params })
   },
 
   getPendingPaymentConfirmations: async (params?: { skip?: number; limit?: number }) => {
-    return request.get<PendingPaymentConfirmation[]>('/api/v1/finance/pending-confirmations', { params })
+    return request.get<PendingPaymentConfirmation[]>('/v1/finance/pending-confirmations', { params })
   },
 
   confirmPayment: (recordId: number, data: PaymentConfirmationRequest) => {
@@ -82,7 +82,7 @@ const financeApi = {
   },
 
   getDashboardStats: async () => {
-    return request.get<DashboardStats>('/api/v1/finance/dashboard-stats')
+    return request.get<DashboardStats>('/v1/finance/dashboard-stats')
   }
 }
 

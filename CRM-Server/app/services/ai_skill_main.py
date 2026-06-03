@@ -2,12 +2,15 @@
 主 Skill 调度服务
 """
 import json
-from typing import Dict, Any, Optional, Tuple, AsyncGenerator
+from datetime import datetime
+from typing import Dict, Any, Optional, Tuple, AsyncGenerator, List
 from sqlalchemy.orm import Session
 from app.crud.user import user_crud
 from app.crud.conversation_log import conversation_log_crud
+from app.crud.ai_skill import ai_skill_crud, ai_skill_action_crud, ai_action_param_crud
 from app.services.ai_service import ai_service
 from app.services.permission_service import permission_service
+from app.services.follow_up_parser import follow_up_parser_service
 from app.schemas.ai_skill import AIParsedIntent, SkillExecutionResult
 from app.services.skills import dynamic_skill_service
 
@@ -22,6 +25,39 @@ class AISkillMainService:
     def _get_action_definition(self, db: Session, skill_name: str, action_name: str) -> Optional[Any]:
         """获取 Action 定义（数据库优先，代码兜底）"""
         return dynamic_skill_service.get_action_definition(db, skill_name, action_name)
+
+    def _get_action_db_record(self, db: Session, skill_name: str, action_name: str) -> Optional[Any]:
+        """获取 Action 数据库记录（用于获取 action_id）"""
+        # 先获取 Skill 数据库记录
+        skill_db = ai_skill_crud.get_by_name(db, skill_name)
+        if not skill_db:
+            return None
+        # 再获取 Action 数据库记录
+        action_db = ai_skill_action_crud.get_by_skill_and_action(db, skill_db.id, action_name)
+        return action_db
+
+    def _get_param_definitions(self, db: Session, action_id: int) -> Dict[str, Dict[str, Any]]:
+        """获取 Action 的参数定义"""
+        params = ai_action_param_crud.get_by_action_id(db, action_id)
+        param_defs = {}
+        for param in params:
+            param_defs[param.param_name] = {
+                "label": param.label,
+                "type": param.param_type,
+                "required": param.required == 1,
+                "placeholder": param.placeholder or "",
+                "default_value": param.default_value or "",
+                "options": param.options or []
+            }
+        return param_defs
+
+    def _get_missing_params(self, action_def: Any, params: Dict[str, Any]) -> List[str]:
+        """获取缺失的必填参数列表"""
+        missing = []
+        for required_param in action_def.required_params:
+            if required_param not in params or params[required_param] is None or params[required_param] == "":
+                missing.append(required_param)
+        return missing
 
     def _validate_params(self, action_def: Any, params: Dict[str, Any]) -> Tuple[bool, str]:
         """验证必填参数"""
@@ -46,7 +82,7 @@ class AISkillMainService:
     def _get_user_by_channel(self, db: Session, channel_user_id: str, channel_type: str) -> Optional[Any]:
         """根据渠道用户标识获取 CRM 用户"""
         if channel_type == "feishu":
-            return user_crud.get_by_feishu_open_id(db, channel_user_id)
+            return user_crud.get_by_id(db, int(channel_user_id))
         return None
 
     def _get_channel_name(self, channel_type: str) -> str:
@@ -63,7 +99,11 @@ class AISkillMainService:
         self,
         db: Session,
         user: Any,
-        content: str = ""
+        content: str = "",
+        confirmed_skill: Optional[str] = None,
+        confirmed_action: Optional[str] = None,
+        confirmed_params: Optional[Dict[str, Any]] = None,
+        team_id: Optional[int] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         处理 AI 助手聊天消息（SSE 流式响应，面向 Web 用户）
@@ -72,9 +112,13 @@ class AISkillMainService:
             db: 数据库 session
             user: 用户对象（直接传入，跳过渠道查找）
             content: 用户输入内容
+            confirmed_skill: 用户确认执行时指定的 Skill
+            confirmed_action: 用户确认执行时指定的 Action
+            confirmed_params: 用户确认执行时的参数
+            team_id: 团队 ID
 
         Yields:
-            SSE 事件字典: {"event": "status/content/result/error", ...}
+            SSE 事件字典: {"event": "status/content/parsed/result/error", ...}
         """
         user_id = user.id
         channel_type = "web_assistant"
@@ -89,7 +133,16 @@ class AISkillMainService:
             status="PENDING"
         )
 
-        # 发送状态事件
+        # 如果是确认执行请求（有 skill/action/params），直接执行
+        if confirmed_skill and confirmed_action and confirmed_params:
+            yield {"event": "status", "message": "正在执行操作..."}
+            async for event in self._execute_and_yield(
+                db, log, user_id, user, confirmed_skill, confirmed_action, confirmed_params
+            ):
+                yield event
+            return
+
+        # 否则进行解析流程
         yield {"event": "status", "message": "正在解析您的请求..."}
 
         # 获取 AI 配置
@@ -128,14 +181,47 @@ class AISkillMainService:
             yield {"event": "result", "message": reply_text}
             return
 
-        # 更新日志
+        # 更新日志状态
         conversation_log_crud.update_result(db, log.id, status="PARSED")
 
-        # 校验 skill/action 合法性
-        yield {"event": "status", "message": "正在校验参数和权限..."}
+        # 获取 Action 数据库记录，用于动态表单渲染
+        action_db = self._get_action_db_record(db, parsed_intent.skill, parsed_intent.action)
+        missing_params = []
+        param_definitions = {}
 
+        if action_db:
+            # 获取参数定义
+            param_definitions = self._get_param_definitions(db, action_db.id)
+            # 获取缺失的必填参数
+            action_def = self._get_action_definition(db, parsed_intent.skill, parsed_intent.action)
+            if action_def:
+                missing_params = self._get_missing_params(action_def, parsed_intent.params)
+
+        # 返回 parsed 事件，等待用户确认（不再直接执行）
+        yield {
+            "event": "parsed",
+            "skill": parsed_intent.skill,
+            "action": parsed_intent.action,
+            "params": parsed_intent.params,
+            "missing_params": missing_params,
+            "param_definitions": param_definitions,
+            "reply_text": parsed_intent.reply_text
+        }
+
+    async def _execute_and_yield(
+        self,
+        db: Session,
+        log: Any,
+        user_id: int,
+        user: Any,
+        skill: str,
+        action: str,
+        params: Dict[str, Any]
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """执行 Skill 并返回结果事件"""
+        # 校验 skill/action 合法性
         is_supported, error_msg = dynamic_skill_service.validate_action_supported(
-            db, parsed_intent.skill, parsed_intent.action
+            db, skill, action
         )
         if not is_supported:
             conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
@@ -143,14 +229,17 @@ class AISkillMainService:
             return
 
         # 获取 Action 定义并校验必填参数
-        action_def = self._get_action_definition(db, parsed_intent.skill, parsed_intent.action)
+        action_def = self._get_action_definition(db, skill, action)
         if not action_def:
-            error_msg = f"抱歉，系统不支持该操作：【{parsed_intent.skill}.{parsed_intent.action}】"
+            error_msg = f"抱歉，系统不支持该操作：【{skill}.{action}】"
             conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
             yield {"event": "error", "message": error_msg}
             return
 
-        params_valid, params_error = self._validate_params(action_def, parsed_intent.params)
+        # 处理日期字段（相对时间转换为具体日期）
+        processed_params = self._process_date_fields(params)
+
+        params_valid, params_error = self._validate_params(action_def, processed_params)
         if not params_valid:
             conversation_log_crud.update_result(db, log.id, execution_result=params_error, status="PARAM_MISSING")
             yield {"event": "result", "message": params_error}
@@ -164,17 +253,18 @@ class AISkillMainService:
             return
 
         # 执行 Skill
-        skill_def = self._get_skill_definition(db, parsed_intent.skill)
-        yield {"event": "status", "message": f"正在执行【{skill_def.description if skill_def else parsed_intent.skill}】的【{action_def.description}】操作..."}
+        skill_def = self._get_skill_definition(db, skill)
+        yield {"event": "status", "message": f"正在执行【{skill_def.description if skill_def else skill}】的【{action_def.description}】操作..."}
 
         try:
             result: SkillExecutionResult = await dynamic_skill_service.execute_action(
                 db=db,
-                skill_name=parsed_intent.skill,
-                action_name=parsed_intent.action,
-                params=parsed_intent.params,
+                skill_name=skill,
+                action_name=action,
+                params=processed_params,
                 user_id=user_id,
-                user_feishu_open_id=user.feishu_open_id
+                user_feishu_open_id=str(user.id),
+                team_id=team_id
             )
 
             reply_text = self._format_result(result)
@@ -186,12 +276,49 @@ class AISkillMainService:
                 status="SUCCESS" if result.success else "FAILED"
             )
 
-            yield {"event": "result", "message": reply_text, "success": result.success}
+            yield {"event": "result", "message": reply_text, "success": result.success, "reply_text": reply_text}
 
         except Exception as e:
             error_msg = f"执行失败：{str(e)}"
             conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED", error_message=str(e))
             yield {"event": "error", "message": error_msg}
+
+    def _process_date_fields(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """处理日期字段，将相对时间转换为具体日期"""
+        processed = params.copy()
+
+        # 需要处理的日期字段名列表
+        date_field_names = [
+            "next_follow_time",
+            "next_follow_up_time",
+            "next_follow_up_date",
+            "follow_up_time",
+            "follow_up_date"
+        ]
+
+        for field_name in date_field_names:
+            if field_name in processed and processed[field_name]:
+                time_text = processed[field_name]
+                # 如果是字符串且不是标准日期格式，尝试解析
+                if isinstance(time_text, str):
+                    # 检查是否已经是标准日期格式 YYYY-MM-DD
+                    if not self._is_standard_date(time_text):
+                        parsed_date = follow_up_parser_service.parse_relative_time(
+                            time_text,
+                            base_date=datetime.now()
+                        )
+                        if parsed_date:
+                            processed[field_name] = parsed_date.strftime("%Y-%m-%d")
+
+        return processed
+
+    def _is_standard_date(self, date_str: str) -> bool:
+        """检查是否是标准日期格式 YYYY-MM-DD"""
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+            return True
+        except ValueError:
+            return False
 
     async def handle_message(self, db: Session, channel_user_id: str, channel_type: str = "feishu", content: str = "") -> str:
         """
@@ -312,7 +439,8 @@ class AISkillMainService:
             action_name=parsed_intent.action,
             params=parsed_intent.params,
             user_id=user_id,
-            user_feishu_open_id=user.feishu_open_id
+            user_feishu_open_id=str(user.id),
+            team_id=team_id
         )
 
         # 8. 格式化结果
@@ -446,7 +574,8 @@ class AISkillMainService:
                 action_name=parsed_intent.action,
                 params=parsed_intent.params,
                 user_id=user_id,
-                user_feishu_open_id=user.feishu_open_id
+                user_feishu_open_id=str(user.id),
+                team_id=team_id
             )
 
             reply_text = self._format_result(result)

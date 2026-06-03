@@ -25,7 +25,8 @@ class StageQueryHandler(BaseHandler):
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行阶段查询

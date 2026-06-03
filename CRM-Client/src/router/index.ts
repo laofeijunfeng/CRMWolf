@@ -1,11 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useTeamStore } from '@/stores/team'
 
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/ai-assistant'
+    redirect: '/leads'
   },
   {
     path: '/login',
@@ -14,22 +15,28 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false }
   },
   {
-    path: '/login/callback',
-    name: 'LoginCallback',
-    component: () => import('@/views/LoginCallback.vue'),
-    meta: { requiresAuth: false }
+    path: '/onboarding',
+    name: 'Onboarding',
+    component: () => import('@/views/Onboarding.vue'),
+    meta: { requiresAuth: true, requiresTeam: false }
+  },
+  {
+    path: '/onboarding/create-team',
+    name: 'TeamCreate',
+    component: () => import('@/views/TeamCreate.vue'),
+    meta: { requiresAuth: true, requiresTeam: false }
+  },
+  {
+    path: '/onboarding/join-team',
+    name: 'TeamJoin',
+    component: () => import('@/views/TeamJoin.vue'),
+    meta: { requiresAuth: true, requiresTeam: false }
   },
   {
     path: '/',
     component: () => import('@/AppLayout.vue'),
     meta: { requiresAuth: true },
     children: [
-      {
-        path: 'ai-assistant',
-        name: 'AIAssistant',
-        component: () => import('@/views/AIAssistant.vue'),
-        meta: { requiresAuth: true }
-      },
       {
         path: 'leads',
         name: 'Leads',
@@ -281,6 +288,18 @@ const routes: RouteRecordRaw[] = [
         name: 'AISkills',
         component: () => import('@/views/AISkills.vue'),
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'team-members',
+        name: 'TeamMembers',
+        component: () => import('@/views/TeamMembers.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'calendar',
+        name: 'Calendar',
+        component: () => import('@/views/Calendar.vue'),
+        meta: { requiresAuth: true }
       }
       // TODO: 财务管理模块 - 等待后端接口实现后启用
       // {
@@ -316,14 +335,30 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
+  const teamStore = useTeamStore()
   const requiresAuth = to.meta.requiresAuth !== false
+  const requiresTeam = to.meta.requiresTeam !== false
 
   if (requiresAuth && !userStore.isLoggedIn()) {
     next('/login')
   } else if (to.path === '/login' && userStore.isLoggedIn()) {
-    next('/ai-assistant')
+    next('/leads')
+  } else if (requiresAuth && requiresTeam && userStore.isLoggedIn()) {
+    if (!teamStore.hasTeam()) {
+      try {
+        await teamStore.fetchUserTeams()
+        if (!teamStore.hasTeam()) {
+          next('/onboarding')
+          return
+        }
+      } catch {
+        next('/onboarding')
+        return
+      }
+    }
+    next()
   } else {
     next()
   }

@@ -15,8 +15,7 @@ class RoleInfo(BaseModel):
 
 class UserBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="用户姓名（必填）")
-    en_name: Optional[str] = Field(None, max_length=100, description="用户英文名")
-    email: Optional[EmailStr] = Field(None, description="用户邮箱（用于通知和登录）")
+    email: EmailStr = Field(..., description="用户邮箱（主登录标识）")
     mobile: Optional[str] = Field(None, max_length=20, description="用户手机号")
     avatar_url: Optional[str] = Field(None, max_length=500, description="用户头像URL")
     employee_no: Optional[str] = Field(None, max_length=50, description="用户工号（企业编号）")
@@ -24,15 +23,12 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    feishu_open_id: str = Field(..., max_length=100, description="飞书Open ID（用户唯一标识）")
-    feishu_union_id: Optional[str] = Field(None, max_length=100, description="飞书Union ID（跨应用统一标识）")
-    feishu_user_id: Optional[str] = Field(None, max_length=100, description="飞书User ID")
-    tenant_key: Optional[str] = Field(None, max_length=100, description="企业标识（多租户区分）")
+    """用户创建 Schema（内部使用）"""
+    password: Optional[str] = Field(None, min_length=6, max_length=50, description="密码（可选）")
 
 
 class UserUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="用户姓名")
-    en_name: Optional[str] = Field(None, max_length=100, description="用户英文名")
     email: Optional[EmailStr] = Field(None, description="用户邮箱")
     mobile: Optional[str] = Field(None, max_length=20, description="用户手机号")
     avatar_url: Optional[str] = Field(None, max_length=500, description="用户头像URL")
@@ -43,10 +39,6 @@ class UserUpdate(BaseModel):
 
 class UserResponse(UserBase):
     id: int = Field(..., description="用户ID（主键）")
-    feishu_open_id: str = Field(..., description="飞书Open ID（唯一标识）")
-    feishu_union_id: Optional[str] = Field(None, description="飞书Union ID（跨应用统一标识）")
-    feishu_user_id: Optional[str] = Field(None, description="飞书User ID")
-    tenant_key: Optional[str] = Field(None, description="企业标识")
     status: UserStatus = Field(..., description="用户状态：active:激活, inactive:未激活, suspended:已停用")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
@@ -62,7 +54,15 @@ class UserWithRolesResponse(UserResponse):
         from_attributes = True
 
 
+class LoginResponse(BaseModel):
+    access_token: str = Field(..., description="访问令牌")
+    token_type: str = Field(..., description="令牌类型")
+    user: UserResponse = Field(..., description="用户信息")
+
+
+# 废弃：飞书相关 Schema（仅用于通知服务兼容）
 class FeishuUserInfo(BaseModel):
+    """飞书用户信息（已废弃，仅用于通知服务）"""
     name: str = Field(..., description="用户姓名")
     en_name: str = Field(..., description="用户英文名")
     avatar_url: str = Field(..., description="用户头像URL")
@@ -80,6 +80,7 @@ class FeishuUserInfo(BaseModel):
 
 
 class FeishuTokenResponse(BaseModel):
+    """飞书令牌响应（已废弃）"""
     access_token: str = Field(..., description="访问令牌")
     token_type: str = Field(..., description="令牌类型")
     expires_in: int = Field(..., description="过期时间（秒）")
@@ -99,9 +100,3 @@ class FeishuTokenResponse(BaseModel):
     refresh_expires_in: int = Field(..., description="刷新令牌过期时间（秒）")
     refresh_token: str = Field(..., description="刷新令牌")
     sid: Optional[str] = Field(None, description="会话ID")
-
-
-class LoginResponse(BaseModel):
-    access_token: str = Field(..., description="访问令牌")
-    token_type: str = Field(..., description="令牌类型")
-    user: UserResponse = Field(..., description="用户信息")

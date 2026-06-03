@@ -10,39 +10,6 @@
       </div>
       <div class="page-header-right">
         <el-button type="primary" @click="handleEdit">编辑</el-button>
-        <el-dropdown @command="handleAction">
-          <el-button>
-            更多
-            <el-icon><ArrowDown /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item
-                v-if="leadData?.status === 0 && !leadData?.owner_id"
-                command="claim"
-              >
-                <el-icon><User /></el-icon>
-                领取线索
-              </el-dropdown-item>
-              <el-dropdown-item command="assign">
-                <el-icon><UserFilled /></el-icon>
-                分配线索
-              </el-dropdown-item>
-              <el-dropdown-item v-if="leadData?.status === 1" command="return">
-                <el-icon><RefreshRight /></el-icon>
-                退回公海
-              </el-dropdown-item>
-              <el-dropdown-item v-if="leadData?.status === 1" command="convert">
-                <el-icon><CircleCheck /></el-icon>
-                转化为客户
-              </el-dropdown-item>
-              <el-dropdown-item v-if="leadData?.status !== 2" command="invalid">
-                <el-icon><CircleClose /></el-icon>
-                标记无效
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
       </div>
     </div>
 
@@ -121,6 +88,33 @@
           </div>
         </div>
 
+        <!-- 热力值卡片（紧凑布局） -->
+        <div class="score-card-compact">
+          <div class="score-mini-circle">
+            <el-progress
+              type="circle"
+              :percentage="leadData.score || 0"
+              :color="getScoreColor(leadData.score)"
+              :width="60"
+              :stroke-width="4"
+            />
+          </div>
+          <div class="score-mini-info">
+            <div class="score-mini-header">
+              <span class="score-mini-icon">{{ getScoreIcon(leadData.score) }}</span>
+              <span class="score-mini-value">{{ leadData.score ?? '--' }}</span>
+              <span class="score-mini-level">{{ getScoreLevel(leadData.score) }}</span>
+            </div>
+            <div class="score-mini-details">
+              <span v-for="(detail, idx) in scoreDetails.slice(0, 2)" :key="detail.id" class="detail-mini-item">
+                {{ detail.factor_name }}: <span :class="detail.score_change >= 0 ? 'pos' : 'neg'">{{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}</span>
+                <span v-if="idx < 1 && scoreDetails.length > 1"> · </span>
+              </span>
+              <el-button link size="small" @click="showScoreDetails = true" v-if="scoreDetails.length > 0">详情</el-button>
+            </div>
+          </div>
+        </div>
+
         <!-- 跟进记录卡片 -->
         <div class="follow-up-card">
           <div class="card-header">
@@ -131,25 +125,12 @@
             </el-button>
           </div>
 
-          <div v-if="followUps.length === 0" class="empty-state">
-            <el-empty description="暂无跟进记录" :image-size="80" />
-          </div>
-
-          <div v-else class="follow-up-list">
-            <div v-for="followUp in followUps" :key="followUp.id" class="follow-up-item">
-              <div class="follow-up-header">
-                <span :class="['method-tag', getMethodClass(followUp.method)]">
-                  {{ followUp.method }}
-                </span>
-                <span class="follow-up-time">{{ formatDate(followUp.created_time) }}</span>
-              </div>
-              <div class="follow-up-content">{{ followUp.content }}</div>
-              <div v-if="followUp.next_follow_time" class="follow-up-next">
-                <el-icon><Clock /></el-icon>
-                下次跟进：{{ formatDate(followUp.next_follow_time) }}
-              </div>
-            </div>
-          </div>
+          <FollowUpList
+            :follow-ups="followUps"
+            :loading="loading"
+            :current-user-id="String(userStore.userInfo?.id)"
+            @delete="handleFollowUpDelete"
+          />
         </div>
       </template>
     </div>
@@ -162,15 +143,6 @@
       :close-on-click-modal="false"
     >
       <el-form :model="followUpForm" :rules="followUpFormRules" label-position="top" ref="followUpFormRef">
-        <el-form-item label="跟进内容" prop="content" required>
-          <el-input
-            v-model="followUpForm.content"
-            type="textarea"
-            placeholder="请输入跟进内容"
-            :maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
         <el-form-item label="跟进方式" prop="method" required>
           <el-radio-group v-model="followUpForm.method">
             <el-radio value="电话">电话</el-radio>
@@ -180,37 +152,40 @@
             <el-radio value="其他">其他</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="跟进内容" prop="content" required>
+          <el-input
+            v-model="followUpForm.content"
+            type="textarea"
+            placeholder="请输入跟进内容"
+            :maxlength="500"
+            :rows="4"
+            show-word-limit
+          />
+        </el-form-item>
         <el-form-item label="下次跟进时间" prop="next_follow_time">
           <el-date-picker
             v-model="followUpForm.next_follow_time"
             type="datetime"
             placeholder="请选择下次跟进时间"
             format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DD HH:mm:ss"
             style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="下一步动作" prop="next_action">
+          <el-input
+            v-model="followUpForm.next_action"
+            type="textarea"
+            placeholder="请输入下一步动作计划"
+            :maxlength="200"
+            :rows="2"
+            show-word-limit
           />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="followUpModalVisible = false">取消</el-button>
         <el-button type="primary" @click="handleFollowUpModalOk">确定</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 分配线索对话框 -->
-    <el-dialog
-      v-model="assignModalVisible"
-      title="分配线索"
-      width="400px"
-      :close-on-click-modal="false"
-    >
-      <el-form :model="assignForm" :rules="assignFormRules" label-position="top" ref="assignFormRef">
-        <el-form-item label="负责人" prop="owner_id" required>
-          <el-input v-model="assignForm.owner_id" placeholder="请输入负责人ID（飞书用户ID）" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="assignModalVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleAssignModalOk">确定</el-button>
       </template>
     </el-dialog>
 
@@ -260,50 +235,73 @@
         <el-button type="primary" @click="handleEditModalOk">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 热力值明细弹窗 -->
+    <el-dialog v-model="showScoreDetails" title="热力值计算明细" width="600px">
+      <el-table :data="scoreDetails" stripe>
+        <el-table-column prop="factor_name" label="因子" width="150" />
+        <el-table-column prop="actual_value" label="实际值" width="120">
+          <template #default="{ row }">
+            {{ row.actual_value || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="weight_value" label="权重" width="80" />
+        <el-table-column label="分数变化" width="100">
+          <template #default="{ row }">
+            <span :class="row.score_change >= 0 ? 'positive' : 'negative'">
+              {{ row.score_change >= 0 ? '+' : '' }}{{ row.score_change }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="reason" label="原因说明">
+          <template #default="{ row }">
+            {{ row.reason || '-' }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="scoreDetails.length === 0" class="score-details-empty">
+        <el-empty description="暂无计算明细" />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import {
   ArrowLeft,
-  ArrowDown,
-  User,
-  UserFilled,
-  RefreshRight,
-  CircleCheck,
-  CircleClose,
-  Clock,
   Plus
 } from '@element-plus/icons-vue'
 import { leadApi, type LeadDetail, type LeadUpdate, type LeadFollowUpCreate } from '@/api/lead'
-import customerApi from '@/api/customer'
+import { getLeadScore, getScoreIcon, getScoreColor, getScoreLevel, type ScoreDetail } from '@/api/score'
+import FollowUpList from '@/components/FollowUpList.vue'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const route = useRoute()
-const leadId = Number(route.params.id)
+const leadId = Number(route.params['id'])
+const userStore = useUserStore()
 
 const loading = ref(false)
 const leadData = ref<LeadDetail | null>(null)
 const followUps = ref<any[]>([])
 
+// 热力值相关
+const showScoreDetails = ref(false)
+const scoreDetails = ref<ScoreDetail[]>([])
+
 const followUpModalVisible = ref(false)
-const assignModalVisible = ref(false)
 const editModalVisible = ref(false)
 const followUpFormRef = ref()
-const assignFormRef = ref()
 const editFormRef = ref()
 
 const followUpForm = reactive({
-  content: '',
   method: '电话',
-  next_follow_time: ''
-})
-
-const assignForm = reactive({
-  owner_id: ''
+  content: '',
+  next_follow_time: '',
+  next_action: ''
 })
 
 const editForm = reactive({
@@ -318,10 +316,6 @@ const editForm = reactive({
 const followUpFormRules = {
   content: [{ required: true, message: '请输入跟进内容', trigger: 'blur' }],
   method: [{ required: true, message: '请选择跟进方式', trigger: 'change' }]
-}
-
-const assignFormRules = {
-  owner_id: [{ required: true, message: '请输入负责人ID', trigger: 'blur' }]
 }
 
 const editFormRules = {
@@ -352,17 +346,6 @@ const getStatusClass = (status: number) => {
   return classMap[status] || 'status-new'
 }
 
-const getMethodClass = (method: string) => {
-  const classMap: Record<string, string> = {
-    '电话': 'method-phone',
-    '微信': 'method-wechat',
-    '拜访': 'method-visit',
-    '邮件': 'method-email',
-    '其他': 'method-other'
-  }
-  return classMap[method] || 'method-other'
-}
-
 const formatDate = (dateStr: string) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
@@ -381,6 +364,17 @@ const fetchLeadDetail = async () => {
     const res = await leadApi.getLeadDetail(leadId) as any
     leadData.value = res
     followUps.value = res.follow_ups?.reverse() || []
+
+    // 获取热力值明细
+    if (res.score !== null) {
+      try {
+        const scoreRes = await getLeadScore(leadId)
+        scoreDetails.value = scoreRes.details || []
+      } catch {
+        // 热力值明细获取失败不影响主流程
+        scoreDetails.value = []
+      }
+    }
   } catch (error: any) {
     ElMessage.error(error.message || '获取线索详情失败')
   } finally {
@@ -417,78 +411,6 @@ const handleEditModalOk = async () => {
   }
 }
 
-const handleAction = (action: string) => {
-  if (action === 'claim') {
-    handleClaim()
-  } else if (action === 'assign') {
-    assignForm.owner_id = ''
-    assignModalVisible.value = true
-  } else if (action === 'return') {
-    handleReturn()
-  } else if (action === 'convert') {
-    router.push(`/leads/${leadId}/convert`)
-  } else if (action === 'invalid') {
-    handleMarkInvalid()
-  }
-}
-
-const handleClaim = async () => {
-  try {
-    await leadApi.claimLead(leadId)
-    ElMessage.success('领取成功')
-    await fetchLeadDetail()
-  } catch (error: any) {
-    ElMessage.error(error.message || '领取失败')
-  }
-}
-
-const handleAssignModalOk = async () => {
-  try {
-    await assignFormRef.value?.validate()
-  } catch {
-    return
-  }
-
-  try {
-    await leadApi.assignLead(leadId, { owner_id: assignForm.owner_id })
-    ElMessage.success('分配成功')
-    assignModalVisible.value = false
-    await fetchLeadDetail()
-  } catch (error: any) {
-    ElMessage.error(error.message || '分配失败')
-  }
-}
-
-const handleReturn = async () => {
-  try {
-    await leadApi.returnLead(leadId)
-    ElMessage.success('退回成功')
-    await fetchLeadDetail()
-  } catch (error: any) {
-    ElMessage.error(error.message || '退回失败')
-  }
-}
-
-const handleMarkInvalid = () => {
-  ElMessageBox.confirm(
-    '确定要将此线索标记为无效吗？',
-    '确认标记',
-    {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    }
-  ).then(async () => {
-    try {
-      await leadApi.markInvalid(leadId)
-      ElMessage.success('已标记为无效')
-      await fetchLeadDetail()
-    } catch (error: any) {
-      ElMessage.error(error.message || '操作失败')
-    }
-  })
-}
-
 const showFollowUpModal = () => {
   let nextFollowTime = ''
   if (followUps.value.length > 0 && followUps.value[0]?.next_follow_time) {
@@ -506,9 +428,10 @@ const showFollowUpModal = () => {
   }
 
   Object.assign(followUpForm, {
-    content: '',
     method: '电话',
-    next_follow_time: nextFollowTime
+    content: '',
+    next_follow_time: nextFollowTime,
+    next_action: ''
   })
   followUpModalVisible.value = true
 }
@@ -524,15 +447,27 @@ const handleFollowUpModalOk = async () => {
     const data: LeadFollowUpCreate = {
       content: followUpForm.content,
       method: followUpForm.method,
-      next_follow_time: followUpForm.next_follow_time ? new Date(followUpForm.next_follow_time).toISOString() : null
+      next_follow_time: followUpForm.next_follow_time ? new Date(followUpForm.next_follow_time).toISOString() : null,
+      next_action: followUpForm.next_action || null
     }
     await leadApi.addFollowUp(leadId, data)
     ElMessage.success('添加成功')
     followUpModalVisible.value = false
-    const res = await leadApi.getLeadDetail(leadId) as any
-    followUps.value = res.follow_ups?.reverse() || []
+    // 刷新跟进记录
+    await fetchLeadDetail()
   } catch (error: any) {
     ElMessage.error(error.message || '添加失败')
+  }
+}
+
+const handleFollowUpDelete = async (followUp: any) => {
+  try {
+    await leadApi.deleteFollowUp(leadId, followUp['id'])
+    ElMessage.success('删除成功')
+    // 刷新跟进记录
+    await fetchLeadDetail()
+  } catch (error: any) {
+    ElMessage.error(error.message || '删除失败')
   }
 }
 
@@ -579,6 +514,7 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+
 .back-btn {
   width: 32px !important;
   height: 32px !important;
@@ -603,8 +539,6 @@ onMounted(() => {
 }
 
 .detail-content {
-  max-width: 800px;
-  margin: 0 auto;
   padding: $wolf-page-padding;
 }
 
@@ -721,6 +655,11 @@ onMounted(() => {
   box-shadow: $wolf-shadow-card;
 }
 
+.follow-up-card :deep(.follow-up-list-container) {
+  padding: 0;
+  background: transparent;
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -732,45 +671,6 @@ onMounted(() => {
   font-size: $wolf-font-size-body;
   font-weight: $wolf-font-weight-semibold;
   color: $wolf-text-primary;
-}
-
-.follow-up-list {
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-sm;
-}
-
-.follow-up-item {
-  padding: $wolf-space-md;
-  background: $wolf-bg-page;
-  border-radius: $wolf-radius-md;
-}
-
-.follow-up-header {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-  margin-bottom: $wolf-space-sm;
-}
-
-.follow-up-time {
-  font-size: $wolf-font-size-caption;
-  color: $wolf-text-tertiary;
-}
-
-.follow-up-content {
-  font-size: $wolf-font-size-body;
-  color: $wolf-text-primary;
-  line-height: 1.6;
-  margin-bottom: $wolf-space-xs;
-}
-
-.follow-up-next {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-xs;
-  font-size: $wolf-font-size-caption;
-  color: $wolf-text-tertiary;
 }
 
 // 状态标签
@@ -801,15 +701,6 @@ onMounted(() => {
   color: $wolf-danger-text;
 }
 
-// 跟进方式标签（中性色）
-.method-tag {
-  padding: 4px 8px;
-  font-size: $wolf-font-size-caption;
-  border-radius: $wolf-radius-sm;
-  background: $wolf-bg-hover;
-  color: $wolf-text-tertiary;
-}
-
 // 响应式
 @media (max-width: 768px) {
   .detail-content {
@@ -817,7 +708,8 @@ onMounted(() => {
   }
 
   .info-card,
-  .follow-up-card {
+  .follow-up-card,
+  .score-card {
     padding: $wolf-space-md;
   }
 
@@ -833,5 +725,77 @@ onMounted(() => {
   .attributes-grid {
     grid-template-columns: 1fr;
   }
+}
+
+// 热力值卡片样式（紧凑布局）
+.score-card-compact {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+  padding: $wolf-space-md;
+  margin-bottom: $wolf-space-md;
+  box-shadow: $wolf-shadow-card;
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-md;
+}
+
+.score-mini-circle {
+  flex-shrink: 0;
+}
+
+.score-mini-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.score-mini-header {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  margin-bottom: $wolf-space-xs;
+}
+
+.score-mini-icon {
+  font-size: 18px;
+}
+
+.score-mini-value {
+  font-size: $wolf-font-size-title;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+}
+
+.score-mini-level {
+  font-size: $wolf-font-size-auxiliary;
+  color: $wolf-text-tertiary;
+  background: $wolf-bg-page;
+  padding: 2px $wolf-space-xs;
+  border-radius: $wolf-radius-sm;
+}
+
+.score-mini-details {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  font-size: $wolf-font-size-auxiliary;
+  color: $wolf-text-tertiary;
+}
+
+.detail-mini-item {
+  white-space: nowrap;
+}
+
+.pos {
+  color: $wolf-success-text;
+  font-weight: $wolf-font-weight-medium;
+}
+
+.neg {
+  color: $wolf-danger-text;
+  font-weight: $wolf-font-weight-medium;
+}
+
+.score-details-empty {
+  padding: $wolf-space-lg;
 }
 </style>

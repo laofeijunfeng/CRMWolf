@@ -22,11 +22,17 @@ class OpportunityStatus(PyEnum):
 
 
 class OpportunityStage(Base):
+    """
+    销售阶段配置表
+
+    支持团队隔离：不同团队可配置不同的销售阶段
+    """
     __tablename__ = "crm_opportunity_stages"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=True, index=True, comment="团队ID（NULL表示系统默认模板）")
     procurement_method_id = Column(BigInteger, nullable=True, comment="采购方式ID")
-    stage_code = Column(String(100), nullable=False, unique=True, comment="阶段编码")
+    stage_code = Column(String(100), nullable=False, comment="阶段编码")
     stage_name = Column(String(100), nullable=False, comment="阶段名称")
     win_probability = Column(Integer, nullable=False, default=0, comment="赢率（0-100）")
     sort_order = Column(Integer, nullable=False, default=0, comment="排序序号")
@@ -34,15 +40,16 @@ class OpportunityStage(Base):
     is_active = Column(Integer, nullable=False, default=1, comment="是否启用：0:否, 1:是")
     is_default_start = Column(Integer, nullable=False, default=0, comment="是否默认起始阶段：0:否, 1:是")
     can_skip = Column(Integer, nullable=False, default=0, comment="是否可跳过：0:否, 1:是")
-    
+
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
     last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
-    
+
     __table_args__ = (
         Index('idx_stage_code', 'stage_code'),
         Index('idx_sort_order', 'sort_order'),
         Index('idx_is_active', 'is_active'),
         Index('idx_procurement_method_id', 'procurement_method_id'),
+        Index('idx_crm_opportunity_stages_team_id', 'team_id'),
         {'comment': '销售阶段配置表'}
     )
 
@@ -51,6 +58,7 @@ class Opportunity(Base):
     __tablename__ = "crm_opportunities"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     opportunity_name = Column(String(255), nullable=False, comment="商机名称")
     customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
     procurement_method_id = Column(BigInteger, nullable=True, comment="采购方式ID")
@@ -73,14 +81,14 @@ class Opportunity(Base):
     loss_reason = Column(String(500), nullable=True, comment="输单原因")
     actual_amount = Column(Numeric(12, 2), nullable=True, comment="实际成交金额")
     actual_closing_date = Column(Date, nullable=True, comment="实际成交日期")
-    
+
     creator_id = Column(String(100), nullable=False, comment="创建人")
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
     last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
     version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
-    
+
     invoice_applications = relationship("InvoiceApplication", back_populates="opportunity", cascade="all, delete-orphan")
-    
+
     __table_args__ = (
         Index('idx_customer_id', 'customer_id'),
         Index('idx_procurement_stage_id', 'procurement_stage_id'),
@@ -90,5 +98,6 @@ class Opportunity(Base):
         Index('idx_license_type', 'license_type'),
         Index('idx_expected_closing_date', 'expected_closing_date'),
         Index('idx_created_time', 'created_time'),
+        Index('idx_team_id', 'team_id'),
         {'comment': '商机表'}
     )

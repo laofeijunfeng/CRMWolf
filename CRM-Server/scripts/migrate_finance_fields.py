@@ -7,7 +7,7 @@ settings = get_settings()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-engine = create_engine(str(settings.DATABASE_URL))
+engine = create_engine(settings.get_database_url())
 
 
 def check_column_exists(table_name: str, column_name: str) -> bool:

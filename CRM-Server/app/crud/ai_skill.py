@@ -3,7 +3,7 @@ AI Skill CRUD
 """
 from sqlalchemy.orm import Session
 from typing import Optional, List, Tuple
-from app.models.ai_skill import AISkill, AISkillAction
+from app.models.ai_skill import AISkill, AISkillAction, AIActionParam
 
 
 class AISkillCRUD:
@@ -147,3 +147,77 @@ class AISkillActionCRUD:
 
 ai_skill_crud = AISkillCRUD()
 ai_skill_action_crud = AISkillActionCRUD()
+
+
+class AIActionParamCRUD:
+    """Action 参数定义 CRUD"""
+
+    def get_by_id(self, db: Session, param_id: int) -> Optional[AIActionParam]:
+        return db.query(AIActionParam).filter(AIActionParam.id == param_id).first()
+
+    def get_by_action_and_param(
+        self,
+        db: Session,
+        action_id: int,
+        param_name: str
+    ) -> Optional[AIActionParam]:
+        return db.query(AIActionParam).filter(
+            AIActionParam.action_id == action_id,
+            AIActionParam.param_name == param_name
+        ).first()
+
+    def get_by_action_id(self, db: Session, action_id: int) -> List[AIActionParam]:
+        """获取某 Action 的所有参数定义"""
+        return db.query(AIActionParam).filter(
+            AIActionParam.action_id == action_id
+        ).order_by(AIActionParam.sort_order).all()
+
+    def get_required_params(self, db: Session, action_id: int) -> List[AIActionParam]:
+        """获取某 Action 的必填参数"""
+        return db.query(AIActionParam).filter(
+            AIActionParam.action_id == action_id,
+            AIActionParam.required == 1
+        ).order_by(AIActionParam.sort_order).all()
+
+    def get_all(self, db: Session) -> List[AIActionParam]:
+        return db.query(AIActionParam).order_by(AIActionParam.action_id, AIActionParam.sort_order).all()
+
+    def create(self, db: Session, param_data: dict) -> AIActionParam:
+        db_obj = AIActionParam(**param_data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def create_batch(self, db: Session, params_data: List[dict]) -> List[AIActionParam]:
+        """批量创建参数定义"""
+        db_objs = [AIActionParam(**data) for data in params_data]
+        db.add_all(db_objs)
+        db.commit()
+        return db_objs
+
+    def update(self, db: Session, param_id: int, update_data: dict) -> Optional[AIActionParam]:
+        param = db.query(AIActionParam).filter(AIActionParam.id == param_id).first()
+        if param:
+            for field, value in update_data.items():
+                setattr(param, field, value)
+            db.commit()
+            db.refresh(param)
+        return param
+
+    def delete(self, db: Session, param_id: int) -> Optional[AIActionParam]:
+        param = db.query(AIActionParam).filter(AIActionParam.id == param_id).first()
+        if param:
+            db.delete(param)
+            db.commit()
+        return param
+
+    def delete_by_action_id(self, db: Session, action_id: int) -> int:
+        """删除某 Action 的所有参数定义"""
+        count = db.query(AIActionParam).filter(AIActionParam.action_id == action_id).count()
+        db.query(AIActionParam).filter(AIActionParam.action_id == action_id).delete()
+        db.commit()
+        return count
+
+
+ai_action_param_crud = AIActionParamCRUD()

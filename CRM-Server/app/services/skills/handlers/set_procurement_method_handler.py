@@ -25,7 +25,8 @@ class SetProcurementMethodHandler(BaseHandler):
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行设置采购方式
@@ -99,7 +100,7 @@ class SetProcurementMethodHandler(BaseHandler):
         try:
             from app.crud.opportunity import opportunity_crud
             updated = opportunity_crud.set_procurement_method(
-                db, opportunity.id, method.id, user.feishu_open_id
+                db, opportunity.id, method.id, str(user.id)
             )
         except Exception as e:
             return self.build_result(False, f"设置采购方式失败：{str(e)}")

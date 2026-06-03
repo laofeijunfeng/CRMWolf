@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from app.models.customer import Customer, Contact
 from app.models.lead import Lead, LeadStatus
+from app.models.contract import Contract
 from app.schemas.customer import (
     CustomerCreate,
     CustomerUpdate,
@@ -16,28 +17,40 @@ from app.crud.operation_log import operation_log_crud
 
 
 class CustomerCRUD:
-    def get_by_id(self, db: Session, customer_id: int) -> Optional[Customer]:
-        return db.query(Customer).filter(Customer.id == customer_id).first()
+    def get_by_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[Customer]:
+        query = db.query(Customer).filter(Customer.id == customer_id)
+        if team_id is not None:
+            query = query.filter(Customer.team_id == team_id)
+        return query.first()
 
-    def get_by_name(self, db: Session, account_name: str) -> Optional[Customer]:
-        return db.query(Customer).filter(Customer.account_name == account_name).first()
+    def get_by_name(self, db: Session, account_name: str, team_id: Optional[int] = None) -> Optional[Customer]:
+        query = db.query(Customer).filter(Customer.account_name == account_name)
+        if team_id is not None:
+            query = query.filter(Customer.team_id == team_id)
+        return query.first()
 
-    def get_by_source_lead_id(self, db: Session, lead_id: int) -> Optional[Customer]:
-        return db.query(Customer).filter(Customer.source_lead_id == lead_id).first()
+    def get_by_source_lead_id(self, db: Session, lead_id: int, team_id: Optional[int] = None) -> Optional[Customer]:
+        query = db.query(Customer).filter(Customer.source_lead_id == lead_id)
+        if team_id is not None:
+            query = query.filter(Customer.team_id == team_id)
+        return query.first()
 
     def get_multi(
         self,
         db: Session,
+        team_id: int,
         skip: int = 0,
         limit: int = 100,
         status: Optional[int] = None,
         industry: Optional[str] = None,
         city: Optional[str] = None,
         owner_id: Optional[str] = None,
-        keyword: Optional[str] = None
+        keyword: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None
     ) -> Tuple[List[Customer], int]:
-        query = db.query(Customer)
-        
+        query = db.query(Customer).filter(Customer.team_id == team_id)
+
         if status is not None:
             query = query.filter(Customer.status == status)
         if industry:
@@ -53,22 +66,34 @@ class CustomerCRUD:
                     Customer.industry.like(f"%{keyword}%")
                 )
             )
-        
+
         total = query.count()
-        customers = query.order_by(Customer.created_time.desc()).offset(skip).limit(limit).all()
-        
+
+        allowed_sort_fields = ['created_time', 'account_name', 'city', 'status', 'industry']
+        if order_by and order_dir and order_by in allowed_sort_fields:
+            order_column = getattr(Customer, order_by)
+            if order_dir.lower() == 'desc':
+                query = query.order_by(order_column.desc())
+            else:
+                query = query.order_by(order_column.asc())
+        else:
+            query = query.order_by(Customer.created_time.desc())
+
+        customers = query.offset(skip).limit(limit).all()
+
         return customers, total
 
-    def create(self, db: Session, obj_in: CustomerCreate, creator_id: str, operator_name: Optional[str] = None) -> Customer:
+    def create(self, db: Session, obj_in: CustomerCreate, creator_id: str, team_id: int, operator_name: Optional[str] = None) -> Customer:
         from app.services.operation_log_service import operation_log_service
-        
+
         customer_data = obj_in.model_dump()
         customer_data['creator_id'] = creator_id
         customer_data['status'] = 0
-        
+        customer_data['team_id'] = team_id
+
         if not customer_data.get('owner_id'):
             customer_data['owner_id'] = creator_id
-        
+
         db_obj = Customer(**customer_data)
         db.add(db_obj)
         db.commit()
@@ -90,7 +115,11 @@ class CustomerCRUD:
                 "fromLead": False
             }
         )
-        
+
+        # 触发热力值初始计算
+        from app.triggers.score_triggers import score_trigger
+        score_trigger.on_customer_created(db, db_obj.id, team_id)
+
         return db_obj
 
     def update(self, db: Session, db_obj: Customer, obj_in: CustomerUpdate) -> Customer:
@@ -113,9 +142,76 @@ class CustomerCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def delete(self, db: Session, db_obj: Customer, operator_id: Optional[str] = None) -> Customer:
-        """删除客户，如果客户来源于线索，则恢复线索状态为 FOLLOWING"""
+    def update_industry(self, db: Session, customer_id: int, industry: str) -> Customer:
+        """更新客户行业字段"""
+        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        if not customer:
+            raise ValueError("客户不存在")
+        customer.industry = industry
+        customer.version += 1
+        db.commit()
+        db.refresh(customer)
+        return customer
+
+    def update_profile_status(
+        self,
+        db: Session,
+        customer_id: int,
+        status: str,
+        error_message: Optional[str] = None
+    ) -> Customer:
+        """更新档案生成状态"""
+        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        if not customer:
+            raise ValueError("客户不存在")
+
+        customer.profile_status = status
+        if status == "FAILED" and error_message:
+            customer.profile_error_message = error_message
+        if status == "COMPLETED":
+            customer.profile_generated_time = datetime.now()
+
+        customer.version += 1
+        db.commit()
+        db.refresh(customer)
+        return customer
+
+    def update_profile(
+        self,
+        db: Session,
+        customer_id: int,
+        profile_data: dict
+    ) -> Customer:
+        """更新客户档案信息"""
+        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        if not customer:
+            raise ValueError("客户不存在")
+
+        for field, value in profile_data.items():
+            if hasattr(customer, field):
+                setattr(customer, field, value)
+
+        customer.version += 1
+        db.commit()
+        db.refresh(customer)
+        return customer
+
+    def delete(self, db: Session, db_obj: Customer, operator_id: Optional[str] = None, team_id: Optional[int] = None) -> Customer:
+        """删除客户，如果客户来源于线索，则恢复线索状态为 FOLLOWING
+
+        注意：删除前会检查是否存在关联合同，如有则抛出异常
+        """
         from app.services.operation_log_service import operation_log_service
+        from app.crud.contract import contract_crud
+
+        # Use customer's team_id if not provided
+        if team_id is None:
+            team_id = db_obj.team_id
+
+        # 检查是否存在关联合同
+        contracts = db.query(Contract).filter(Contract.customer_id == db_obj.id).count()
+        if contracts > 0:
+            raise ValueError(f"该客户存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
 
         source_lead_id = db_obj.source_lead_id
 
@@ -132,6 +228,7 @@ class CustomerCRUD:
                     resource_type="LEAD",
                     resource_id=lead.id,
                     operator_id=operator_id or "system",
+                    team_id=team_id,
                     content={
                         "leadName": lead.lead_name,
                         "reason": "客户被删除，恢复线索状态",
@@ -155,6 +252,7 @@ class CustomerCRUD:
             resource_type="CUSTOMER",
             resource_id=customer_id,
             operator_id=operator_id or "system",
+            team_id=team_id,
             content={
                 "customerName": customer_name,
                 "sourceLeadId": source_lead_id,
@@ -169,26 +267,25 @@ class CustomerCRUD:
         db: Session,
         lead_id: int,
         account_name: Optional[str],
-        industry: Optional[str],
         address: Optional[str],
         creator_id: str,
+        team_id: int,
         default_procurement_method_id: Optional[int] = None,
         operator_name: Optional[str] = None
     ) -> Tuple[Customer, Contact]:
         from app.crud.customer_follow_up import customer_follow_up_crud
         from app.services.operation_log_service import operation_log_service
-        
+
         lead = db.query(Lead).filter(Lead.id == lead_id).first()
         if not lead:
             raise ValueError("线索不存在")
-        
+
         existing_customer = self.get_by_source_lead_id(db, lead_id)
         if existing_customer:
             raise ValueError("该线索已被转化")
-        
+
         customer = Customer(
             account_name=account_name or lead.lead_name,
-            industry=industry or None,
             city=lead.city,
             address=address or None,
             company_scale=lead.company_scale.value if lead.company_scale else None,
@@ -196,25 +293,28 @@ class CustomerCRUD:
             status=0,
             owner_id=lead.owner_id or creator_id,
             source_lead_id=lead_id,
+            team_id=team_id,
             default_procurement_method_id=default_procurement_method_id,
-            creator_id=creator_id
+            creator_id=creator_id,
+            profile_status="PENDING"
         )
-        
+
         db.add(customer)
         db.flush()
-        
+
         contact = Contact(
             customer_id=customer.id,
+            team_id=team_id,
             name=lead.contact_name,
-            mobile=lead.contact_phone,
+            mobile=lead.contact_phone or '',
             is_primary=True,
             is_decision_maker=True
         )
-        
+
         db.add(contact)
         db.flush()
         
-        customer_follow_up_crud.migrate_from_lead(db, lead_id, customer.id)
+        customer_follow_up_crud.migrate_from_lead(db, lead_id, customer.id, team_id)
         
         lead.status = LeadStatus.CONVERTED
         lead.version += 1
@@ -230,7 +330,8 @@ class CustomerCRUD:
             customer_id=customer.id,
             customer_name=customer.account_name,
             operator_id=creator_id,
-            operator_name=operator_name
+            operator_name=operator_name,
+            team_id=team_id
         )
         
         operation_log_crud.migrate_lead_logs_to_customer(
@@ -238,17 +339,21 @@ class CustomerCRUD:
             lead_id=lead_id,
             customer_id=customer.id
         )
-        
+
+        # 触发客户热力值初始计算
+        from app.triggers.score_triggers import score_trigger
+        score_trigger.on_customer_created(db, customer.id, team_id)
+
         return customer, contact
 
-    def get_statistics(self, db: Session, owner_id: Optional[str] = None) -> dict:
-        query = db.query(Customer)
-        
+    def get_statistics(self, db: Session, team_id: int, owner_id: Optional[str] = None) -> dict:
+        query = db.query(Customer).filter(Customer.team_id == team_id)
+
         if owner_id:
             query = query.filter(Customer.owner_id == owner_id)
-        
+
         customers = query.all()
-        
+
         return {
             "total": len(customers),
             "following": len([c for c in customers if c.status == 0]),
@@ -260,13 +365,17 @@ class CustomerCRUD:
     def get_trend(
         self,
         db: Session,
+        team_id: int,
         days: int = 30,
         owner_id: Optional[str] = None
     ) -> List[dict]:
         start_date = datetime.now() - timedelta(days=days)
-        
-        query = db.query(Customer).filter(Customer.created_time >= start_date)
-        
+
+        query = db.query(Customer).filter(
+            Customer.team_id == team_id,
+            Customer.created_time >= start_date
+        )
+
         if owner_id:
             query = query.filter(Customer.owner_id == owner_id)
         
@@ -292,6 +401,7 @@ class CustomerCRUD:
         db: Session,
         customer: Customer,
         return_reason: str,
+        team_id: int,
         detailed_reason: Optional[str] = None
     ) -> Customer:
         customer.owner_id = None
@@ -300,22 +410,33 @@ class CustomerCRUD:
             customer.return_reason = f"{return_reason}: {detailed_reason}"
         customer.returned_time = datetime.now()
         customer.version += 1
-        
+
         db.commit()
         db.refresh(customer)
+
+        # 触发客户热力值更新（公海操作）
+        from app.triggers.score_triggers import score_trigger
+        score_trigger.on_customer_pool_operation(db, customer.id, team_id)
+
         return customer
 
     def get_public_customers(
         self,
         db: Session,
+        team_id: int,
         skip: int = 0,
         limit: int = 100,
         status: Optional[int] = None,
         city: Optional[str] = None,
-        keyword: Optional[str] = None
+        keyword: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None
     ) -> Tuple[List[Customer], int]:
-        query = db.query(Customer).filter(Customer.owner_id.is_(None))
-        
+        query = db.query(Customer).filter(
+            Customer.team_id == team_id,
+            Customer.owner_id.is_(None)
+        )
+
         if status is not None:
             query = query.filter(Customer.status == status)
         if city:
@@ -327,28 +448,45 @@ class CustomerCRUD:
                     Customer.industry.like(f"%{keyword}%")
                 )
             )
-        
+
         total = query.count()
-        customers = query.order_by(Customer.returned_time.desc()).offset(skip).limit(limit).all()
-        
+
+        allowed_sort_fields = ['returned_time', 'account_name', 'city', 'status', 'created_time']
+        if order_by and order_dir and order_by in allowed_sort_fields:
+            order_column = getattr(Customer, order_by)
+            if order_dir.lower() == 'desc':
+                query = query.order_by(order_column.desc())
+            else:
+                query = query.order_by(order_column.asc())
+        else:
+            query = query.order_by(Customer.returned_time.desc())
+
+        customers = query.offset(skip).limit(limit).all()
+
         return customers, total
 
     def claim_customer(
         self,
         db: Session,
         customer: Customer,
-        owner_id: str
+        owner_id: str,
+        team_id: int
     ) -> Customer:
         if customer.owner_id is not None:
             raise ValueError("该客户已有负责人，无法领取")
-        
+
         customer.owner_id = owner_id
         customer.return_reason = None
         customer.returned_time = None
         customer.version += 1
-        
+
         db.commit()
         db.refresh(customer)
+
+        # 触发客户热力值更新（公海操作）
+        from app.triggers.score_triggers import score_trigger
+        score_trigger.on_customer_pool_operation(db, customer.id, team_id)
+
         return customer
     
     def assign_customer(
@@ -359,16 +497,50 @@ class CustomerCRUD:
     ) -> Customer:
         old_owner_id = customer.owner_id
         customer.owner_id = new_owner_id
-        
+
         if customer.status == 3:
             customer.status = 0
             customer.return_reason = None
             customer.returned_time = None
-        
+
         customer.version += 1
-        
+
         db.commit()
         db.refresh(customer)
+        return customer
+
+    def mark_as_lost(
+        self,
+        db: Session,
+        customer: Customer,
+        loss_reason: str,
+        operator_id: Optional[str] = None,
+        operator_name: Optional[str] = None
+    ) -> Customer:
+        """标记客户为输单，记录输单原因"""
+        from app.services.operation_log_service import operation_log_service
+
+        customer.status = 2
+        customer.loss_reason = loss_reason
+        customer.version += 1
+
+        db.commit()
+        db.refresh(customer)
+
+        operation_log_service.log(
+            db=db,
+            event_type="CUSTOMER_MARKED_LOST",
+            event_action="UPDATE",
+            resource_type="CUSTOMER",
+            resource_id=customer.id,
+            operator_id=operator_id or "system",
+            operator_name=operator_name,
+            content={
+                "customerName": customer.account_name,
+                "lossReason": loss_reason
+            }
+        )
+
         return customer
 
 

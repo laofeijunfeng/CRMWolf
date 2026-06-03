@@ -24,6 +24,7 @@ class CustomerFollowUpBase(BaseModel):
     content: str = Field(..., min_length=1, description="跟进内容")
     method: str = Field(..., min_length=1, max_length=50, description="跟进方式")
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
+    next_action: Optional[str] = Field(None, description="下一步动作内容")
     
     @field_validator('content')
     @classmethod
@@ -55,6 +56,7 @@ class CustomerFollowUpResponse(BaseModel):
     content: str = Field(..., description="跟进内容")
     method: str = Field(..., description="跟进方式")
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
+    next_action: Optional[str] = Field(None, description="下一步动作内容")
     creator_id: str = Field(..., description="创建人飞书用户ID")
     created_time: datetime = Field(..., description="创建时间")
     creator_info: Optional[OwnerInfo] = Field(None, description="跟进人信息")

@@ -1,151 +1,276 @@
 <template>
-  <div class="customer-detail-container">
+  <div class="customer-detail-page">
+    <!-- 页面标题 -->
     <div class="page-header">
-      <div class="page-header__left">
-        <el-button type="text" class="wolf-btn wolf-btn--back" @click="handleBack">
+      <div class="header-left">
+        <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-header__title">{{ customerDetail?.account_name }}</h1>
+        <h1 class="page-title">{{ customerDetail?.account_name || '客户详情' }}</h1>
       </div>
-      <div class="page-header__right">
-        <el-button type="primary" class="wolf-btn wolf-btn--primary" @click="handleEditCustomer">
+      <div class="header-right">
+        <el-button type="primary" size="small" @click="handleEditCustomer">
           编辑
         </el-button>
       </div>
     </div>
 
-    <div v-loading="loading" class="detail-content-container">
+    <div v-loading="loading" class="detail-content">
       <div v-if="!customerDetail" class="empty-state">
         <el-empty description="客户信息加载失败" />
       </div>
 
-      <div v-else class="detail-content">
-        <el-card shadow="never" class="info-card">
-          <div class="info-top">
-            <div class="info-left">
-              <div class="title-section">
-                <div class="customer-avatar">{{ customerDetail?.account_name?.charAt(0) || '客' }}</div>
-                <div class="title-content">
-                  <h2 class="entity-name">{{ customerDetail?.account_name }}</h2>
-                  <div class="status-tags">
-                    <el-tag v-if="customerDetail?.status === 0" :class="['wolf-tag', 'wolf-tag--info']" size="small">跟进中</el-tag>
-                    <el-tag v-else-if="customerDetail?.status === 1" :class="['wolf-tag', 'wolf-tag--success']" size="small">已赢单</el-tag>
-                    <el-tag v-else-if="customerDetail?.status === 2" :class="['wolf-tag', 'wolf-tag--danger']" size="small">已输单</el-tag>
-                    <el-tag v-else-if="customerDetail?.status === 3" :class="['wolf-tag', 'wolf-tag--gray']" size="small">已失效</el-tag>
-                    <el-tag v-if="customerDetail?.industry_info?.name" :class="['wolf-tag', 'wolf-tag--purple']" size="small">{{ customerDetail.industry_info.name }}</el-tag>
-                    <el-tag v-if="customerDetail?.company_scale" :class="['wolf-tag', 'wolf-tag--warning']" size="small">{{ customerDetail.company_scale }}</el-tag>
+      <div v-else>
+        <!-- 客户信息卡片 -->
+        <div class="info-card">
+          <div class="info-content">
+            <!-- 上部分：标题和统计 -->
+            <div class="info-top">
+              <div class="info-left">
+                <div class="title-section">
+                  <div class="title-avatar">{{ customerDetail?.account_name?.charAt(0) || '客' }}</div>
+                  <div class="title-content">
+                    <h2 class="title-name">{{ customerDetail?.account_name }}</h2>
+                    <div class="title-tags">
+                      <span :class="['status-tag', getStatusClass(customerDetail?.status)]">
+                        {{ getStatusText(customerDetail?.status) }}
+                      </span>
+                      <span v-if="customerDetail?.industry_info?.name" class="status-tag status-info">
+                        {{ customerDetail.industry_info.name }}
+                      </span>
+                      <span v-if="customerDetail?.company_scale" class="status-tag status-default">
+                        {{ customerDetail.company_scale }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="info-right">
+                <div class="stats-section">
+                  <div class="stat-item">
+                    <div class="stat-label">联系人数</div>
+                    <div class="stat-value">{{ customerDetail?.contacts?.length || 0 }} 人</div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="info-right">
-              <div class="stats-section">
-                <div class="stat-item">
-                  <div class="stat-label">联系人数</div>
-                  <div class="stat-value">{{ customerDetail?.contacts?.length || 0 }} 人</div>
+            <div class="info-divider"></div>
+
+            <!-- 下部分：属性网格 -->
+            <div class="info-bottom">
+              <div class="attributes-grid">
+                <div class="attribute-item">
+                  <div class="attribute-label">客户来源</div>
+                  <span class="attribute-value">{{ customerDetail?.source || '-' }}</span>
+                </div>
+
+                <div class="attribute-item">
+                  <div class="attribute-label">所在城市</div>
+                  <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.city }">
+                    {{ customerDetail?.city || '未填写' }}
+                  </span>
+                </div>
+
+                <div class="attribute-item">
+                  <div class="attribute-label">公司地址</div>
+                  <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.address }">
+                    {{ customerDetail?.address || '未填写' }}
+                  </span>
+                </div>
+
+                <div class="attribute-item">
+                  <div class="attribute-label">负责销售</div>
+                  <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.owner_info?.name }">
+                    {{ customerDetail?.owner_info?.name || '待分配' }}
+                  </span>
+                </div>
+
+                <div class="attribute-item">
+                  <div class="attribute-label">采购方式</div>
+                  <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.default_procurement_method_info }">
+                    {{ customerDetail?.default_procurement_method_info?.name || '未设置' }}
+                  </span>
+                </div>
+
+                <div class="attribute-item">
+                  <div class="attribute-label">创建人</div>
+                  <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.creator_info?.name }">
+                    {{ customerDetail?.creator_info?.name || '-' }}
+                  </span>
+                </div>
+
+                <div class="attribute-item">
+                  <div class="attribute-label">创建时间</div>
+                  <span class="attribute-value">{{ formatDateTime(customerDetail?.created_time) }}</span>
+                </div>
+
+                <div class="attribute-item">
+                  <div class="attribute-label">最后修改</div>
+                  <span class="attribute-value">{{ formatDateTime(customerDetail?.last_modified_time) }}</span>
                 </div>
               </div>
             </div>
           </div>
+        </div>
 
-          <div class="info-divider"></div>
+        <!-- 热力值卡片（紧凑布局） -->
+        <div class="score-card-compact">
+          <div class="score-mini-circle">
+            <el-progress
+              type="circle"
+              :percentage="customerDetail?.score || 0"
+              :color="getScoreColor(customerDetail?.score)"
+              :width="60"
+              :stroke-width="4"
+            />
+          </div>
+          <div class="score-mini-info">
+            <div class="score-mini-header">
+              <span class="score-mini-icon">{{ getScoreIcon(customerDetail?.score) }}</span>
+              <span class="score-mini-value">{{ customerDetail?.score ?? '--' }}</span>
+              <span class="score-mini-level">{{ getScoreLevel(customerDetail?.score) }}</span>
+            </div>
+            <div class="score-mini-details">
+              <span v-for="(detail, idx) in scoreDetails.slice(0, 2)" :key="detail.id" class="detail-mini-item">
+                {{ detail.factor_name }}: <span :class="detail.score_change >= 0 ? 'pos' : 'neg'">{{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}</span>
+                <span v-if="idx < 1 && scoreDetails.length > 1"> · </span>
+              </span>
+              <el-button link size="small" @click="showScoreDetails = true" v-if="scoreDetails.length > 0">详情</el-button>
+            </div>
+          </div>
+        </div>
 
-          <div class="info-bottom">
+        <!-- 客户档案卡片 -->
+        <div class="profile-card">
+          <div class="card-title">
+            <span>客户档案</span>
+            <div class="profile-status">
+              <template v-if="customerDetail?.profile_status === 'PENDING'">
+                <el-tag class="wolf-tag wolf-tag--gray" size="small">等待生成</el-tag>
+              </template>
+              <template v-else-if="customerDetail?.profile_status === 'GENERATING'">
+                <el-tag class="wolf-tag wolf-tag--warning" size="small">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  正在生成
+                </el-tag>
+              </template>
+              <template v-else-if="customerDetail?.profile_status === 'COMPLETED'">
+                <el-tag class="wolf-tag wolf-tag--success" size="small">生成完成</el-tag>
+              </template>
+              <template v-else-if="customerDetail?.profile_status === 'FAILED'">
+                <el-tag class="wolf-tag wolf-tag--danger" size="small">生成失败</el-tag>
+              </template>
+            </div>
+          </div>
+
+          <!-- 生成中动画 -->
+          <div v-if="customerDetail?.profile_status === 'GENERATING'" class="profile-generating">
+            <div class="generating-animation">
+              <div class="pulse-dot"></div>
+              <div class="pulse-dot"></div>
+              <div class="pulse-dot"></div>
+            </div>
+            <div class="generating-text">AI 正在分析客户信息，预计需要 10-30 秒</div>
+          </div>
+
+          <!-- 生成失败提示 -->
+          <div v-if="customerDetail?.profile_status === 'FAILED'" class="profile-error">
+            <div class="error-content">
+              <el-icon class="error-icon"><WarningFilled /></el-icon>
+              <span class="error-text">{{ customerDetail?.profile_error_message || '档案生成失败' }}</span>
+            </div>
+            <el-button type="primary" size="small" class="wolf-btn wolf-btn--primary-sm" @click="handleRegenerateProfile">
+              重新生成
+            </el-button>
+          </div>
+
+          <!-- 档案内容 -->
+          <div v-if="customerDetail?.profile_status === 'COMPLETED'" class="profile-content">
             <div class="attributes-grid">
               <div class="attribute-item">
-                <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Location /></el-icon>
-                  <span class="attribute-label">客户来源</span>
-                </div>
-                <span class="attribute-value">{{ customerDetail?.source || '-' }}</span>
-              </div>
-
-              <div class="attribute-item">
-                <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Location /></el-icon>
-                  <span class="attribute-label">所在城市</span>
-                </div>
-                <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.city || customerDetail?.city === '' }">
-                  {{ customerDetail?.city && customerDetail?.city !== '' ? customerDetail.city : '未填写' }}
+                <div class="attribute-label">所属行业</div>
+                <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.industry_info?.name }">
+                  {{ customerDetail?.industry_info?.name || customerDetail?.industry || '未识别' }}
                 </span>
               </div>
 
               <div class="attribute-item">
-                <div class="attribute-header">
-                  <el-icon class="attribute-icon"><OfficeBuilding /></el-icon>
-                  <span class="attribute-label">公司地址</span>
-                </div>
-                <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.address || customerDetail?.address === '' }">
-                  {{ customerDetail?.address && customerDetail?.address !== '' ? customerDetail.address : '未填写' }}
+                <div class="attribute-label">公司官网</div>
+                <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.company_website }">
+                  <template v-if="customerDetail?.company_website">
+                    <a :href="customerDetail.company_website" target="_blank" class="link-value">
+                      {{ customerDetail.company_website }}
+                    </a>
+                  </template>
+                  <template v-else>未找到</template>
                 </span>
               </div>
+            </div>
 
-              <div class="attribute-item">
-                <div class="attribute-header">
-                  <el-icon class="attribute-icon"><UserFilled /></el-icon>
-                  <span class="attribute-label">负责销售</span>
-                </div>
-                <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.owner_info?.name }">
-                  {{ customerDetail?.owner_info?.name || '待分配' }}
-                </span>
+            <div class="profile-section">
+              <div class="section-label">企业背景</div>
+              <div class="section-content" :class="{ 'not-filled': !customerDetail?.company_background }">
+                {{ customerDetail?.company_background || '暂无信息' }}
               </div>
+            </div>
 
-              <div class="attribute-item">
-                <div class="attribute-header">
-                  <el-icon class="attribute-icon"><ShoppingCart /></el-icon>
-                  <span class="attribute-label">采购方式</span>
-                </div>
-                <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.default_procurement_method_info }">
-                  {{ customerDetail?.default_procurement_method_info?.name || '未设置' }}
-                </span>
+            <div class="profile-section">
+              <div class="section-label">主营业务</div>
+              <div class="section-content" :class="{ 'not-filled': !customerDetail?.main_business }">
+                {{ customerDetail?.main_business || '暂无信息' }}
               </div>
+            </div>
 
-              <div class="attribute-item">
-                <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Edit /></el-icon>
-                  <span class="attribute-label">创建人</span>
-                </div>
-                <span class="attribute-value" :class="{ 'not-filled': !customerDetail?.creator_info?.name }">
-                  {{ customerDetail?.creator_info?.name || '-' }}
-                </span>
+            <div class="profile-section">
+              <div class="section-label">同行业客户</div>
+              <div class="section-content">
+                <template v-if="parsedSimilarCustomers.length > 0">
+                  <div class="similar-customers-list">
+                    <span v-for="name in parsedSimilarCustomers" :key="name" class="similar-customer-tag">
+                      {{ name }}
+                    </span>
+                  </div>
+                </template>
+                <template v-else>
+                  <span class="not-filled">暂无匹配</span>
+                </template>
               </div>
+            </div>
 
-              <div class="attribute-item">
-                <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Clock /></el-icon>
-                  <span class="attribute-label">创建时间</span>
-                </div>
-                <span class="attribute-value">{{ formatDate(customerDetail?.created_time) }}</span>
+            <div v-if="customerDetail?.project_background" class="profile-section">
+              <div class="section-label">项目需求背景</div>
+              <div class="section-content">
+                {{ customerDetail.project_background }}
               </div>
+            </div>
 
-              <div class="attribute-item">
-                <div class="attribute-header">
-                  <el-icon class="attribute-icon"><RefreshRight /></el-icon>
-                  <span class="attribute-label">最后修改</span>
-                </div>
-                <span class="attribute-value">{{ formatDate(customerDetail?.last_modified_time) }}</span>
-              </div>
+            <div class="profile-footer">
+              <span class="generated-time">生成时间：{{ formatDateTime(customerDetail?.profile_generated_time) }}</span>
+              <el-button type="primary" size="small" class="wolf-btn wolf-btn--primary-sm" @click="handleRegenerateProfile">
+                重新生成
+              </el-button>
             </div>
           </div>
-        </el-card>
+        </div>
 
-        <el-card shadow="never" class="tabs-card">
-          <div class="wolf-tabs">
-            <div class="wolf-tabs__header">
-              <div
-                v-for="tab in tabs"
-                :key="tab.key"
-                class="wolf-tabs__item"
-                :class="{ 'is-active': activeTab === tab.key }"
-                @click="activeTab = tab.key"
-              >
-                {{ tab.label }}
-              </div>
+        <!-- 标签页卡片 -->
+        <div class="tabs-card">
+          <div class="tabs-header">
+            <div
+              v-for="tab in tabs"
+              :key="tab.key"
+              class="tabs-item"
+              :class="{ 'is-active': activeTab === tab.key }"
+              @click="activeTab = tab.key"
+            >
+              {{ tab.label }}
             </div>
+          </div>
 
-            <div class="wolf-tabs__content">
-              <!-- 客户跟进（操作时间线） -->
+          <div class="tabs-content">
+            <!-- 客户跟进（操作时间线） -->
               <div v-show="activeTab === 'followup'" class="tab-panel">
                 <div class="follow-up-summary" v-if="followUps.length > 0 && lastFollowUp">
                   <div class="summary-item">
@@ -181,14 +306,11 @@
                   </el-button>
                 </div>
 
-                <Timeline
-                  :logs="timelineLogs"
-                  :loading="timelineLoading"
-                  :has-more="timelineHasMore"
-                  :filters="timelineFilters"
-                  @load-more="handleTimelineLoadMore"
-                  @filter-change="handleTimelineFilterChange"
-                  @reset="handleTimelineReset"
+                <FollowUpList
+                  :follow-ups="followUps"
+                  :loading="loading"
+                  :current-user-id="String(userStore.userInfo?.id)"
+                  @delete="handleFollowUpDelete"
                 />
               </div>
 
@@ -547,10 +669,9 @@
               </div>
             </div>
           </div>
-        </el-card>
+        </div>
       </div>
     </div>
-  </div>
 
   <el-dialog
       v-model="addContactModalVisible"
@@ -672,6 +793,16 @@
             style="width: 100%"
           />
         </el-form-item>
+        <el-form-item prop="next_action" label="下一步动作">
+          <el-input
+            v-model="followUpForm.next_action"
+            type="textarea"
+            placeholder="请输入下一步动作计划"
+            :maxlength="200"
+            :rows="2"
+            show-word-limit
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="addFollowUpModalVisible = false">取消</el-button>
@@ -739,6 +870,34 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 热力值明细弹窗 -->
+    <el-dialog v-model="showScoreDetails" title="热力值计算明细" width="600px">
+      <el-table :data="scoreDetails" stripe>
+        <el-table-column prop="factor_name" label="因子" width="150" />
+        <el-table-column prop="actual_value" label="实际值" width="120">
+          <template #default="{ row }">
+            {{ row.actual_value || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="weight_value" label="权重" width="80" />
+        <el-table-column label="分数变化" width="100">
+          <template #default="{ row }">
+            <span :class="row.score_change >= 0 ? 'positive' : 'negative'">
+              {{ row.score_change >= 0 ? '+' : '' }}{{ row.score_change }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="reason" label="原因说明">
+          <template #default="{ row }">
+            {{ row.reason || '-' }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="scoreDetails.length === 0" class="score-details-empty">
+        <el-empty description="暂无计算明细" />
+      </div>
+    </el-dialog>
   </template>
 
 <script setup lang="ts">
@@ -746,39 +905,41 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
-  Edit,
   Plus,
   CircleCheck,
   CircleClose,
-  CircleCheckFilled,
   Clock,
-  UserFilled,
   Calendar,
   PriceTag,
   Money,
   Coin,
-  Location,
-  OfficeBuilding,
   ShoppingCart,
-  RefreshRight,
-  Document
+  Document,
+  Loading,
+  WarningFilled
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import Timeline from '@/components/Timeline/index.vue'
+import FollowUpList from '@/components/FollowUpList.vue'
 import customerApi, { type CustomerDetailResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
 import customerFollowUpApi, { type CustomerFollowUpCreate, type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import invoiceApi from '@/api/invoice'
-import { useTimeline } from '@/composables/useTimeline'
+import { getCustomerScore, getScoreIcon, getScoreColor, getScoreLevel, type ScoreDetail } from '@/api/score'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
-const customerId = ref<number>(parseInt(route.params.id as string))
+const customerId = ref<number>(parseInt(route.params['id'] as string))
 const customerDetail = ref<CustomerDetailResponse | null>(null)
 const loading = ref(false)
 const followUps = ref<CustomerFollowUpResponse[]>([])
 const selectedContact = ref<any>(null)
+
+// 热力值相关
+const showScoreDetails = ref(false)
+const scoreDetails = ref<ScoreDetail[]>([])
 
 const activeTab = ref('followup')
 const tabs = [
@@ -790,32 +951,43 @@ const tabs = [
   { key: 'invoices', label: '发票' }
 ]
 
-const timeline = useTimeline({
-  resourceType: 'CUSTOMER',
-  resourceId: customerId.value,
-  pageSize: 20
-})
-
-const timelineLogs = computed(() => timeline.logs.value)
-const timelineLoading = computed(() => timeline.loading.value)
-const timelineHasMore = computed(() => timeline.hasMore.value)
-const timelineFilters = computed(() => timeline.filters.value)
-
-const handleTimelineLoadMore = () => {
-  timeline.loadMore()
-}
-
-const handleTimelineFilterChange = () => {
-  timeline.refresh()
-}
-
-const handleTimelineReset = () => {
-  timeline.resetFilters()
+const handleFollowUpDelete = async (followUp: any) => {
+  try {
+    await customerFollowUpApi.deleteFollowUp(followUp['id'])
+    ElMessage.success('删除成功')
+    await fetchFollowUps()
+  } catch (error: any) {
+    ElMessage.error(error.message || '删除失败')
+  }
 }
 
 const lastFollowUp = computed(() => {
   return followUps.value.length > 0 ? followUps.value[0] : null
 })
+
+const parsedSimilarCustomers = computed(() => {
+  if (!customerDetail.value?.similar_customers) return []
+  try {
+    const parsed = JSON.parse(customerDetail.value.similar_customers)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+})
+
+const handleRegenerateProfile = async () => {
+  try {
+    loading.value = true
+    await customerApi.regenerateProfile(customerId.value)
+    ElMessage.success('档案正在重新生成')
+    // Refresh customer detail to show GENERATING status
+    await fetchCustomerDetail()
+  } catch (error: any) {
+    ElMessage.error(error.message || '重新生成失败')
+  } finally {
+    loading.value = false
+  }
+}
 
 const getNextFollowUpClass = () => {
   if (!lastFollowUp.value?.next_follow_time) return ''
@@ -894,7 +1066,8 @@ const followUpFormRef = ref()
 const followUpForm = reactive<CustomerFollowUpCreate>({
   method: '电话',
   content: '',
-  next_follow_time: ''
+  next_follow_time: '',
+  next_action: ''
 })
 
 const followUpFormRules = {
@@ -948,6 +1121,17 @@ const fetchCustomerDetail = async () => {
   try {
     const data = await customerApi.getCustomerDetail(customerId.value) as any
     customerDetail.value = data
+
+    // 获取热力值明细
+    if (data?.score !== null) {
+      try {
+        const scoreRes = await getCustomerScore(customerId.value)
+        scoreDetails.value = scoreRes.details || []
+      } catch {
+        // 热力值明细获取失败不影响主流程
+        scoreDetails.value = []
+      }
+    }
   } catch (error: any) {
     console.error('获取客户详情失败', error)
     ElMessage.error('获取客户详情失败')
@@ -957,7 +1141,7 @@ const fetchCustomerDetail = async () => {
 const fetchFollowUps = async () => {
   try {
     const data = await customerFollowUpApi.getFollowUps(customerId.value) as any
-    followUps.value = data.data || []
+    followUps.value = Array.isArray(data) ? data : (data.data || [])
   } catch (error: any) {
     console.error('获取跟进记录失败', error)
   }
@@ -1177,14 +1361,6 @@ const handleDeleteInvoiceTitle = async () => {
   }
 }
 
-const handleInvoiceTitleUpdated = () => {
-  fetchInvoiceTitles()
-}
-
-const showInvoiceApplicationModal = () => {
-  ElMessage.info('发票申请功能开发中...')
-}
-
 const createInvoice = (title: any) => {
   router.push({
     name: 'InvoiceCreate',
@@ -1300,7 +1476,8 @@ const showAddFollowUpModal = () => {
   Object.assign(followUpForm, {
     method: '电话',
     content: '',
-    next_follow_time: ''
+    next_follow_time: '',
+    next_action: ''
   })
   addFollowUpModalVisible.value = true
 }
@@ -1312,7 +1489,6 @@ const handleAddFollowUpOk = async () => {
     ElMessage.success('添加跟进记录成功')
     addFollowUpModalVisible.value = false
     await fetchFollowUps()
-    timeline.refresh()
   } catch (error: any) {
     if (error?.message) {
       ElMessage.error(error.message)
@@ -1372,6 +1548,36 @@ const formatAmount = (amount: string | number) => {
   return `¥${numAmount.toLocaleString()}`
 }
 
+// 客户状态样式
+const getStatusClass = (status: any) => {
+  const statusMap: Record<number, string> = {
+    0: 'status-following',
+    1: 'status-success',
+    2: 'status-lost',
+    3: 'status-pool'
+  }
+  return statusMap[status] || 'status-default'
+}
+
+const getStatusText = (status: any) => {
+  const statusMap: Record<number, string> = {
+    0: '跟进中',
+    1: '成交',
+    2: '丢失',
+    3: '公海'
+  }
+  return statusMap[status] || '未知'
+}
+
+const formatDateTime = (dateStr: any) => {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 onMounted(async () => {
   await Promise.all([
     fetchCustomerDetail(),
@@ -1382,54 +1588,56 @@ onMounted(async () => {
     fetchInvoices(),
     fetchInvoiceTitles()
   ])
-  timeline.fetchLogs(1, false)  // 首次加载第 1 页，不追加
 })
 </script>
 
 <style scoped lang="scss">
 @use '@/styles/variables.scss' as *;
 
-.customer-detail-container {
-  padding: $wolf-page-padding;
+.customer-detail-page {
+  padding: 0;
   background: $wolf-bg-page;
   min-height: calc(100vh - 48px);
 }
 
-// 页面标题区
+// 页面标题区 - sticky 设计（与 LeadDetail.vue 一致）
 .page-header {
-  margin-bottom: $wolf-space-lg;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: $wolf-bg-card;
+  border-bottom: 1px solid $wolf-border-default;
+  height: $wolf-header-height;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 0 $wolf-page-padding;
 }
 
-.page-header__left {
+.header-left {
   display: flex;
   align-items: center;
   gap: $wolf-space-sm;
+  flex: 1;
+  min-width: 0;
 }
 
-.page-header__title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
-}
-
-.page-header__right {
+.header-right {
   display: flex;
   align-items: center;
   gap: $wolf-space-xs;
+  flex-shrink: 0;
 }
 
-// 返回按钮
-.wolf-btn--back {
+
+.back-btn {
   width: 32px !important;
   height: 32px !important;
   padding: 0 !important;
-  border-radius: $wolf-radius-sm !important;
+  border-radius: $wolf-radius-md !important;
+  background: transparent !important;
+  border: none !important;
   color: $wolf-text-tertiary;
-  background: transparent;
 
   &:hover {
     background: $wolf-bg-hover !important;
@@ -1437,18 +1645,207 @@ onMounted(async () => {
   }
 }
 
-// 详情内容容器
-.detail-content-container {
-  max-width: 1000px;
+.page-title {
+  font-size: $wolf-font-size-title;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-// 信息卡片
+// 详情内容容器 - 撑满页面宽度
+.detail-content {
+  padding: $wolf-page-padding;
+}
+
+.empty-state {
+  padding: $wolf-space-lg;
+}
+
+// 信息卡片（撑满页面宽度）
 .info-card {
   background: $wolf-bg-card;
   border-radius: $wolf-radius-md;
   padding: $wolf-space-md;
-  box-shadow: $wolf-shadow-card;
   margin-bottom: $wolf-space-md;
+  box-shadow: $wolf-shadow-card;
+}
+
+// 客户档案卡片
+.profile-card {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+  padding: $wolf-space-md;
+  margin-bottom: $wolf-space-md;
+  box-shadow: $wolf-shadow-card;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $wolf-space-md;
+  padding-bottom: $wolf-space-sm;
+  border-bottom: 1px solid $wolf-border-light;
+  font-size: $wolf-font-size-body;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+}
+
+.profile-status {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+}
+
+.profile-generating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $wolf-space-md;
+  padding: $wolf-space-lg 0;
+}
+
+.generating-animation {
+  display: flex;
+  gap: $wolf-space-sm;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  background: $wolf-primary;
+  border-radius: $wolf-radius-full;
+  animation: pulse 1.5s ease-in-out infinite;
+
+  &:nth-child(2) {
+    animation-delay: 0.3s;
+  }
+
+  &:nth-child(3) {
+    animation-delay: 0.6s;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+.generating-text {
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-tertiary;
+}
+
+.profile-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $wolf-space-md;
+  background: $wolf-danger-bg;
+  border-radius: $wolf-radius-md;
+}
+
+.error-content {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;
+}
+
+.error-icon {
+  font-size: 20px;
+  color: $wolf-danger-text;
+}
+
+.error-text {
+  font-size: $wolf-font-size-body;
+  color: $wolf-danger-text;
+}
+
+.profile-content {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-md;
+}
+
+.profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs;
+}
+
+.section-label {
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-tertiary;
+}
+
+.section-content {
+  font-size: $wolf-font-size-body;
+  color: $wolf-text-secondary;
+  line-height: 1.6;
+
+  &.not-filled {
+    color: $wolf-text-placeholder;
+    font-style: italic;
+  }
+}
+
+.similar-customers-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs;
+}
+
+.similar-customer-tag {
+  padding: 4px 12px;
+  background: $wolf-bg-hover;
+  border-radius: $wolf-radius-sm;
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-secondary;
+}
+
+.link-value {
+  color: $wolf-text-link;
+  text-decoration: none;
+
+  &:hover {
+    color: $wolf-text-link-hover;
+    text-decoration: underline;
+  }
+}
+
+.profile-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: $wolf-space-md;
+  border-top: 1px solid $wolf-border-light;
+}
+
+.generated-time {
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-tertiary;
+}
+
+// 标签页卡片（撑满页面宽度）
+.tabs-card {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+  padding: $wolf-space-md;
+  box-shadow: $wolf-shadow-card;
+}
+
+.info-content {
+  display: flex;
+  flex-direction: column;
 }
 
 .info-top {
@@ -1468,7 +1865,7 @@ onMounted(async () => {
   gap: $wolf-space-md;
 }
 
-.customer-avatar {
+.title-avatar {
   width: 48px;
   height: 48px;
   border-radius: $wolf-radius-full;
@@ -1487,14 +1884,14 @@ onMounted(async () => {
   gap: $wolf-space-xs;
 }
 
-.entity-name {
+.title-name {
   font-size: $wolf-font-size-title;
   font-weight: $wolf-font-weight-semibold;
   color: $wolf-text-primary;
   margin: 0;
 }
 
-.status-tags {
+.title-tags {
   display: flex;
   gap: $wolf-space-xs;
   flex-wrap: wrap;
@@ -1532,7 +1929,7 @@ onMounted(async () => {
 }
 
 .info-bottom {
-  padding-top: $wolf-space-md;
+  padding-top: $wolf-space-sm;
 }
 
 // 属性网格
@@ -1546,17 +1943,6 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: $wolf-space-xs;
-}
-
-.attribute-header {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-xs;
-}
-
-.attribute-icon {
-  font-size: 14px;
-  color: $wolf-text-tertiary;
 }
 
 .attribute-label {
@@ -1575,7 +1961,56 @@ onMounted(async () => {
   }
 }
 
-// 标签页卡片
+// 状态标签
+.status-tag {
+  display: inline-flex;
+  padding: 4px 8px;
+  font-size: $wolf-font-size-caption;
+  font-weight: $wolf-font-weight-normal;
+  border-radius: $wolf-radius-sm;
+}
+
+.status-following {
+  background: $wolf-warning-bg;
+  color: $wolf-warning-text;
+}
+
+.status-converted {
+  background: $wolf-success-bg;
+  color: $wolf-success-text;
+}
+
+.status-invalid {
+  background: $wolf-danger-bg;
+  color: $wolf-danger-text;
+}
+
+.status-success {
+  background: $wolf-success-bg;
+  color: $wolf-success-text;
+}
+
+.status-lost {
+  background: $wolf-danger-bg;
+  color: $wolf-danger-text;
+}
+
+.status-pool {
+  background: $wolf-bg-hover;
+  color: $wolf-text-tertiary;
+}
+
+.status-info {
+  background: $wolf-bg-hover;
+  color: $wolf-text-tertiary;
+}
+
+.status-default {
+  background: $wolf-bg-hover;
+  color: $wolf-text-tertiary;
+}
+
+// 标签页卡片（与 LeadDetail.vue 的 follow-up-card 一致）
 .tabs-card {
   background: $wolf-bg-card;
   border-radius: $wolf-radius-md;
@@ -1583,15 +2018,14 @@ onMounted(async () => {
   box-shadow: $wolf-shadow-card;
 }
 
-// 标签页样式
-.wolf-tabs__header {
+.tabs-header {
   display: flex;
   gap: $wolf-space-md;
   border-bottom: 1px solid $wolf-border-default;
   margin-bottom: $wolf-space-md;
 }
 
-.wolf-tabs__item {
+.tabs-item {
   padding: $wolf-space-sm 0;
   font-size: $wolf-font-size-auxiliary;
   color: $wolf-text-tertiary;
@@ -1619,8 +2053,13 @@ onMounted(async () => {
   }
 }
 
-.wolf-tabs__content {
+.tabs-content {
   min-height: 200px;
+}
+
+.tabs-content :deep(.follow-up-list-container) {
+  padding: 0;
+  background: transparent;
 }
 
 // 面板头部
@@ -1632,35 +2071,6 @@ onMounted(async () => {
   font-size: $wolf-font-size-auxiliary;
   font-weight: $wolf-font-weight-medium;
   color: $wolf-text-secondary;
-}
-
-// 状态标签
-.status-tag {
-  display: inline-flex;
-  padding: 4px 8px;
-  font-size: $wolf-font-size-caption;
-  font-weight: $wolf-font-weight-normal;
-  border-radius: $wolf-radius-sm;
-}
-
-.status-following {
-  background: $wolf-warning-bg;
-  color: $wolf-warning-text;
-}
-
-.status-converted {
-  background: $wolf-success-bg;
-  color: $wolf-success-text;
-}
-
-.status-invalid {
-  background: $wolf-danger-bg;
-  color: $wolf-danger-text;
-}
-
-.status-default {
-  background: $wolf-bg-hover;
-  color: $wolf-text-tertiary;
 }
 
 // 跟进摘要
@@ -2020,15 +2430,119 @@ onMounted(async () => {
 
 // 响应式
 @media (max-width: 768px) {
-  .customer-detail-container { padding: $wolf-space-md; }
+  .customer-detail-page { height: auto; }
+  .page-header { padding: $wolf-space-md; }
+  .detail-content { padding: $wolf-space-md; }
   .info-card { padding: $wolf-space-md; }
+  .score-card { padding: $wolf-space-md; }
   .tabs-card { padding: $wolf-space-md; }
   .info-top { flex-direction: column; gap: $wolf-space-md; }
   .info-right { width: 100%; }
   .stats-section { justify-content: flex-start; }
   .stat-item { text-align: left; }
   .attributes-grid { grid-template-columns: 1fr; }
-  .wolf-tabs__header { flex-wrap: wrap; gap: $wolf-space-xs; }
+  .tabs-header { flex-wrap: wrap; gap: $wolf-space-xs; }
   .contract-list, .payment-list, .invoice-list { gap: $wolf-space-xs; }
+}
+
+// 热力值卡片样式（紧凑布局）
+.score-card-compact {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+  padding: $wolf-space-md;
+  margin-bottom: $wolf-space-md;
+  box-shadow: $wolf-shadow-card;
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-md;
+}
+
+.score-mini-circle {
+  flex-shrink: 0;
+}
+
+.score-mini-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.score-mini-header {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  margin-bottom: $wolf-space-xs;
+}
+
+.score-mini-icon {
+  font-size: 18px;
+}
+
+.score-mini-value {
+  font-size: $wolf-font-size-title;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+}
+
+.score-mini-level {
+  font-size: $wolf-font-size-auxiliary;
+  color: $wolf-text-tertiary;
+  background: $wolf-bg-page;
+  padding: 2px $wolf-space-xs;
+  border-radius: $wolf-radius-sm;
+}
+
+.score-mini-details {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  font-size: $wolf-font-size-auxiliary;
+  color: $wolf-text-tertiary;
+}
+
+.detail-mini-item {
+  white-space: nowrap;
+}
+
+.pos {
+  color: $wolf-success-text;
+  font-weight: $wolf-font-weight-medium;
+}
+
+.neg {
+  color: $wolf-danger-text;
+  font-weight: $wolf-font-weight-medium;
+}
+
+.score-details-empty {
+  padding: $wolf-space-lg;
+}
+
+.factor-name {
+  color: $wolf-text-secondary;
+  font-size: $wolf-font-size-auxiliary;
+}
+
+.score-change {
+  font-weight: $wolf-font-weight-medium;
+  font-size: $wolf-font-size-auxiliary;
+
+  &.positive {
+    color: $wolf-success-text;
+  }
+
+  &.negative {
+    color: $wolf-danger-text;
+  }
+}
+
+.score-empty {
+  color: $wolf-text-tertiary;
+  font-size: $wolf-font-size-auxiliary;
+  text-align: center;
+  padding: $wolf-space-md;
+}
+
+.score-details-empty {
+  padding: $wolf-space-lg;
 }
 </style>

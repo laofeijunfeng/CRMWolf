@@ -2,10 +2,13 @@
 阶段推进/回退 Handler
 
 处理商机阶段推进和回退操作
+
+支持从名称中提取 ID（格式：名称（ID：xxx）或 名称(ID:xxx)）
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from datetime import datetime
+import re
 
 from app.services.skills.handlers.base_handler import BaseHandler
 from app.crud.user import user_crud
@@ -19,13 +22,17 @@ class StageAdvanceHandler(BaseHandler):
     # 默认排除的状态（已完成状态的商机不应再推进阶段）
     DEFAULT_EXCLUDE_STATUS = ["WON", "LOST"]
 
+    # 从名称中提取 ID 的正则表达式
+    ID_PATTERN = re.compile(r'[（(]\s*ID[：:]\s*(\d+)\s*[）)]')
+
     async def execute(
         self,
         db: Session,
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行阶段推进/回退
@@ -141,7 +148,7 @@ class StageAdvanceHandler(BaseHandler):
         try:
             from app.crud.opportunity import opportunity_crud
             updated = opportunity_crud.move_to_stage(
-                db, opportunity.id, target_stage.id, user.feishu_open_id
+                db, opportunity.id, target_stage.id, str(user.id)
             )
         except Exception as e:
             return self.build_result(False, f"阶段推进失败：{str(e)}")
@@ -225,6 +232,9 @@ class StageAdvanceHandler(BaseHandler):
 
         # 尝试通过 ID 获取
         opportunity = None
+        entity_id = None
+
+        # 先从 params 中直接获取 ID
         for key in ["opportunity_id", "id", "entity_id"]:
             if key in params:
                 entity_id = params.get(key)
@@ -235,28 +245,37 @@ class StageAdvanceHandler(BaseHandler):
         if not opportunity:
             name_value = params.get(name_lookup_field)
             if name_value:
-                name_attr = getattr(Opportunity, name_field)
-                opportunities = db.query(Opportunity).filter(
-                    name_attr.like(f"%{name_value}%")
-                ).all()
+                # 先尝试从名称中提取 ID
+                id_match = self.ID_PATTERN.search(name_value)
+                if id_match:
+                    entity_id = int(id_match.group(1))
+                    opportunity = opportunity_crud.get_by_id(db, entity_id)
+                    if not opportunity:
+                        return None, self.build_result(False, f"商机 ID {entity_id} 不存在")
+                else:
+                    # 没有 ID，使用名称模糊查找
+                    name_attr = getattr(Opportunity, name_field)
+                    opportunities = db.query(Opportunity).filter(
+                        name_attr.like(f"%{name_value}%")
+                    ).all()
 
-                if not opportunities:
-                    return None, self.build_result(False, f"未找到匹配的商机：{name_value}")
+                    if not opportunities:
+                        return None, self.build_result(False, f"未找到匹配的商机：{name_value}")
 
-                if len(opportunities) > 1:
-                    opp_list = []
-                    for opp in opportunities[:5]:
-                        status_text = self.get_status_text(opp.status)
-                        stage_text = opp.current_stage_name or "未设置阶段"
-                        opp_list.append(
-                            f"  - {opp.opportunity_name}（ID: {opp.id}，{status_text}，{stage_text}）"
+                    if len(opportunities) > 1:
+                        opp_list = []
+                        for opp in opportunities[:5]:
+                            status_text = self.get_status_text(opp.status)
+                            stage_text = opp.current_stage_name or "未设置阶段"
+                            opp_list.append(
+                                f"  - {opp.opportunity_name}（ID: {opp.id}，{status_text}，{stage_text}）"
+                            )
+                        return None, self.build_result(
+                            False,
+                            f"找到多个匹配的商机，请指定具体商机：\n" + "\n".join(opp_list)
                         )
-                    return None, self.build_result(
-                        False,
-                        f"找到多个匹配的商机，请指定具体商机：\n" + "\n".join(opp_list)
-                    )
 
-                opportunity = opportunities[0]
+                    opportunity = opportunities[0]
 
         # 尝试通过客户名称查找
         if not opportunity:

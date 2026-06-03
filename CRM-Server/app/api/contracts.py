@@ -4,7 +4,7 @@ from sqlalchemy import text
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user
+from app.core.deps import get_current_active_user, get_current_user_team, check_contract_edit_permission, check_contract_delete_permission
 from app.crud.contract import contract_crud
 from app.crud.customer import customer_crud, contact_crud
 from app.crud.opportunity import opportunity_crud
@@ -33,47 +33,49 @@ router = APIRouter(prefix="/api/v1/contracts", tags=["合同管理"])
 """)
 def create_contract(
     contract: ContractCreate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, contract.customer_id)
+    customer = customer_crud.get_by_id(db, contract.customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户不存在"
         )
-    
-    opportunity = opportunity_crud.get_by_id(db, contract.opportunity_id)
+
+    opportunity = opportunity_crud.get_by_id(db, contract.opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="商机不存在"
         )
-    
-    contact = contact_crud.get_by_id(db, contract.signing_contact_id)
+
+    contact = contact_crud.get_by_id(db, contract.signing_contact_id, team_id)
     if not contact:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="联系人不存在"
         )
-    
+
     if contact.customer_id != contract.customer_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="签约人不属于该客户"
         )
-    
+
     if opportunity.customer_id != contract.customer_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="商机关联的客户与合同客户不一致"
         )
-    
+
     try:
         db_contract = contract_crud.create(
             db=db,
             obj_in=contract,
-            creator_id=current_user.feishu_open_id
+            creator_id=str(current_user.id),
+            team_id=team_id
         )
         return db_contract
     except ValueError as e:
@@ -100,37 +102,38 @@ def create_contract_from_opportunity(
     opportunity_id: int,
     contract_name: str = Query(..., description="合同名称，如：XX公司软件采购合同"),
     signing_contact_id: int = Query(..., description="签约联系人ID，必须是该商机的客户下的联系人"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from app.models.opportunity import OpportunityStatus
-    
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id)
+
+    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="商机不存在"
         )
-    
+
     if opportunity.status != OpportunityStatus.WON.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="只能从赢单商机创建合同"
         )
-    
-    contact = contact_crud.get_by_id(db, signing_contact_id)
+
+    contact = contact_crud.get_by_id(db, signing_contact_id, team_id)
     if not contact:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="联系人不存在"
         )
-    
+
     if contact.customer_id != opportunity.customer_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="签约人不属于该商机关联的客户"
         )
-    
+
     try:
         db_contract = contract_crud.create_from_opportunity(
             db=db,
@@ -138,7 +141,8 @@ def create_contract_from_opportunity(
             customer_id=opportunity.customer_id,
             signing_contact_id=signing_contact_id,
             contract_name=contract_name,
-            creator_id=current_user.feishu_open_id
+            creator_id=str(current_user.id),
+            team_id=team_id
         )
         return db_contract
     except ValueError as e:
@@ -169,18 +173,26 @@ def get_contracts(
     license_type: Optional[LicenseTypeEnum] = Query(None, description="按授权模式筛选，可选值：SUBSCRIPTION(订阅制)、PERPETUAL(买断制)"),
     contract_number: Optional[str] = Query(None, description="按合同编号模糊搜索，支持部分匹配"),
     keyword: Optional[str] = Query(None, description="关键词搜索，可搜索合同名称、合同编号等字段"),
+    owner_id: Optional[str] = Query(None, description="按负责人ID筛选（基于creator_id）"),
+    order_by: Optional[str] = Query(None, description="排序字段"),
+    order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     contracts, total = contract_crud.get_multi(
         db=db,
+        team_id=team_id,
         skip=skip,
         limit=limit,
         customer_id=customer_id,
         status=status,
         license_type=license_type,
         contract_number=contract_number,
-        keyword=keyword
+        keyword=keyword,
+        owner_id=owner_id,
+        order_by=order_by,
+        order_dir=order_dir
     )
     
     result = []
@@ -216,9 +228,9 @@ def get_contracts(
         creator_info = None
         if contract.creator_id:
             creator_data = db.execute(text("""
-                SELECT feishu_open_id, name, email, mobile, avatar_url
+                SELECT id, name, email, mobile, avatar_url
                 FROM users
-                WHERE feishu_open_id = :creator_id
+                WHERE id = CAST(:creator_id AS SIGNED)
             """), {"creator_id": contract.creator_id}).first()
             
             if creator_data:
@@ -273,18 +285,19 @@ def get_contracts(
 """)
 def get_contract_by_opportunity(
     opportunity_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_opportunity_id(db, opportunity_id)
-    
+    contract = contract_crud.get_by_opportunity_id(db, opportunity_id, team_id)
+
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="该商机暂无合同"
         )
-    
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id)
+
+    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -351,10 +364,11 @@ def get_contract_by_opportunity(
 """)
 def get_contract(
     contract_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id)
+    contract = contract_crud.get_by_id(db, contract_id, team_id)
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -407,9 +421,9 @@ def get_contract(
     creator_info = None
     if contract.creator_id:
         creator_data = db.execute(text("""
-            SELECT feishu_open_id, name, email, mobile, avatar_url
+            SELECT id, name, email, mobile, avatar_url
             FROM users
-            WHERE feishu_open_id = :creator_id
+            WHERE id = CAST(:creator_id AS SIGNED)
         """), {"creator_id": contract.creator_id}).first()
         
         if creator_data:
@@ -467,10 +481,11 @@ def get_customer_contracts(
     skip: int = Query(0, ge=0, description="分页跳过记录数，从0开始"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数，默认100，最大100"),
     status: Optional[ContractStatusEnum] = Query(None, description="按合同状态筛选，可选值：DRAFT(草稿)、PENDING_REVIEW(待审核)、SIGNED(已签署)、EFFECTIVE(已生效)、EXPIRED(已到期)、TERMINATED(已终止)"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id)
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -480,6 +495,7 @@ def get_customer_contracts(
     contracts, total = contract_crud.get_by_customer_id(
         db=db,
         customer_id=customer_id,
+        team_id=team_id,
         skip=skip,
         limit=limit,
         status=status
@@ -558,15 +574,11 @@ def get_customer_contracts(
 def update_contract(
     contract_id: int,
     contract_update: ContractUpdate,
-    current_user = Depends(get_current_active_user),
+    contract = Depends(check_contract_edit_permission),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id)
-    if not contract:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="合同不存在"
-        )
+    # check_contract_edit_permission 已处理存在性和权限检查
+    # 这里只需检查状态
     
     from app.models.contract import ContractStatus
     if contract.status != ContractStatus.DRAFT:
@@ -606,10 +618,11 @@ def update_contract(
 def update_contract_status(
     contract_id: int,
     status_update: ContractStatusUpdate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id)
+    contract = contract_crud.get_by_id(db, contract_id, team_id)
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -646,10 +659,11 @@ def update_contract_status(
 """)
 def delete_contract(
     contract_id: int,
-    current_user = Depends(get_current_active_user),
+    contract = Depends(check_contract_delete_permission),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id)
+    # check_contract_delete_permission 已处理存在性和权限检查
+    # 这里只需检查状态
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

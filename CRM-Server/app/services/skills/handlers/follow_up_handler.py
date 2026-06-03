@@ -3,14 +3,22 @@
 
 处理添加跟进记录类型的 Action（如 LeadSkill.follow_up）
 
-注意：默认过滤已转化/无效的父实体，避免重复跟进
+注意：
+1. 默认过滤已转化/无效的父实体，避免重复跟进
+2. 支持从名称中提取 ID（格式：名称（ID：xxx）或 名称(ID:xxx)）
+3. 支持相对时间解析（如"后天"、"三天后"、"下周"）
+4. 默认下次跟进时间为 3 天后
+
+复用：
+- parse_relative_time 和 extract_id_from_name 方法已抽离到 follow_up_parser 服务
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.services.skills.handlers.base_handler import BaseHandler
 from app.crud.user import user_crud
+from app.services.follow_up_parser import follow_up_parser_service
 
 
 class FollowUpHandler(BaseHandler):
@@ -21,13 +29,38 @@ class FollowUpHandler(BaseHandler):
     # 默认排除的状态（已转化、无效的实体不应再跟进）
     DEFAULT_EXCLUDE_STATUS = ["CONVERTED", "INVALID"]
 
+    # 从名称中提取 ID 的正则表达式（复用共享服务）
+    ID_PATTERN = follow_up_parser_service.ID_PATTERN
+
+    # 默认下次跟进间隔（天数）
+    DEFAULT_NEXT_FOLLOW_DAYS = 3
+
+    def parse_relative_time(self, time_text: Optional[str], base_date: datetime = None) -> Optional[datetime]:
+        """
+        解析相对时间表达（复用共享服务）
+
+        支持：
+        - 具体日期：2024-05-25, 5月25日
+        - 相对天数：后天、三天后、3天后、一周后、下周三
+        - 今天/明天
+
+        Args:
+            time_text: 时间文本
+            base_date: 基准日期（默认今天）
+
+        Returns:
+            datetime 对象或 None
+        """
+        return follow_up_parser_service.parse_relative_time(time_text, base_date)
+
     async def execute(
         self,
         db: Session,
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行跟进记录添加
@@ -76,8 +109,14 @@ class FollowUpHandler(BaseHandler):
         parent_name_field = handler_config.get("parent_name_field", "name")
         parent_lookup_value = params.get(parent_lookup_field)
 
-        if not parent_lookup_value:
-            return self.build_result(False, f"缺少参数: {parent_lookup_field}")
+        # 尝试从参数中直接获取 ID（如 lead_id, customer_id）
+        parent_type_prefix = parent_crud_mapping_name.split("_")[0]  # lead, customer, opportunity
+        direct_id_field = f"{parent_type_prefix}_id"
+        direct_id = params.get(direct_id_field)
+
+        # 如果没有 lookup_value 也没有 direct_id，报错
+        if not parent_lookup_value and not direct_id:
+            return self.build_result(False, f"缺少参数: {parent_lookup_field} 或 {direct_id_field}")
 
         # 获取父实体 CRUD 和 Model
         parent_crud = self.get_crud_instance(
@@ -101,31 +140,96 @@ class FollowUpHandler(BaseHandler):
             exclude_status_values = []
 
         # 根据名称模糊查找（过滤已转化/无效状态）
-        try:
-            name_field_attr, parents = self.search_active_entities(
-                db,
-                parent_model,
-                parent_name_field,
-                parent_lookup_value,
-                exclude_status=exclude_status_values,
-                status_field=parent_crud_mapping.status_field
-            )
-        except Exception as e:
-            return self.build_result(False, f"查询父实体失败: {str(e)}")
+        parent_entity = None
+        parent_id = None
 
-        if not parents:
-            return self.build_result(False, f"未找到匹配的{parent_crud_mapping_name}: {parent_lookup_value}")
+        # 优先使用直接传入的 ID
+        if direct_id:
+            parent_id = int(direct_id)
+            # 先检查实体是否存在（不过滤状态）
+            raw_entity = self.get_crud_instance(
+                parent_crud_mapping.crud_module,
+                parent_crud_mapping.crud_instance_name
+            ).get_by_id(db, parent_id)
 
-        if len(parents) > 1:
-            parent_names = [getattr(p, parent_name_field) for p in parents[:5]]
-            return self.build_result(
-                False,
-                f"找到多个匹配的{parent_crud_mapping_name}，请提供更精确的名称。匹配结果: {', '.join(parent_names)}"
-            )
+            if not raw_entity:
+                return self.build_result(False, f"{parent_crud_mapping_name} ID {parent_id} 不存在")
 
-        parent_entity = parents[0]
+            # 检查实体状态是否被排除
+            if exclude_status_values and parent_crud_mapping.status_field:
+                current_status = getattr(raw_entity, parent_crud_mapping.status_field)
+                if current_status in exclude_status_values:
+                    # 获取状态显示名称
+                    status_display = self._get_status_display_name(db, parent_type_prefix, current_status)
+                    return self.build_result(
+                        False,
+                        f"{parent_crud_mapping_name}「{getattr(raw_entity, parent_name_field)}」当前状态为「{status_display}」，无法添加跟进记录"
+                    )
+
+            parent_entity = raw_entity
+        # 尝试从名称中提取 ID 或使用名称查找
+        elif parent_lookup_value:
+            id_match = self.ID_PATTERN.search(parent_lookup_value)
+            if id_match:
+                parent_id = int(id_match.group(1))
+                # 先检查实体是否存在（不过滤状态）
+                raw_entity = self.get_crud_instance(
+                    parent_crud_mapping.crud_module,
+                    parent_crud_mapping.crud_instance_name
+                ).get_by_id(db, parent_id)
+
+                if not raw_entity:
+                    return self.build_result(False, f"{parent_crud_mapping_name} ID {parent_id} 不存在")
+
+                # 检查实体状态是否被排除
+                if exclude_status_values and parent_crud_mapping.status_field:
+                    current_status = getattr(raw_entity, parent_crud_mapping.status_field)
+                    if current_status in exclude_status_values:
+                        status_display = self._get_status_display_name(db, parent_type_prefix, current_status)
+                        return self.build_result(
+                            False,
+                            f"{parent_crud_mapping_name}「{getattr(raw_entity, parent_name_field)}」当前状态为「{status_display}」，无法添加跟进记录"
+                        )
+
+                parent_entity = raw_entity
+            else:
+                # 没有 ID，使用名称模糊查找
+                try:
+                    name_field_attr, parents = self.search_active_entities(
+                        db,
+                        parent_model,
+                        parent_name_field,
+                        parent_lookup_value,
+                        exclude_status=exclude_status_values,
+                        status_field=parent_crud_mapping.status_field
+                    )
+                except Exception as e:
+                    return self.build_result(False, f"查询父实体失败: {str(e)}")
+
+                if not parents:
+                    return self.build_result(False, f"未找到匹配的{parent_crud_mapping_name}: {parent_lookup_value}")
+
+                if len(parents) > 1:
+                    parent_names = [getattr(p, parent_name_field) for p in parents[:5]]
+                    return self.build_result(
+                        False,
+                        f"找到多个匹配的{parent_crud_mapping_name}，请提供更精确的名称。匹配结果: {', '.join(parent_names)}"
+                    )
+
+                parent_entity = parents[0]
+            parent_id = parent_entity.id
+
         parent_name = getattr(parent_entity, parent_name_field)
-        parent_id = parent_entity.id
+
+        # 获取 team_id（从父实体）
+        team_id = getattr(parent_entity, 'team_id', None)
+        if team_id is None:
+            # 尝试从关联实体获取（如 Contract 通过 Opportunity 获取）
+            if hasattr(parent_entity, 'opportunity_id') and parent_entity.opportunity_id:
+                from app.crud.opportunity import opportunity_crud
+                opp = opportunity_crud.get_by_id(db, parent_entity.opportunity_id)
+                if opp:
+                    team_id = opp.team_id
 
         # 处理跟进方式 enum
         method = params.get("method")
@@ -150,13 +254,22 @@ class FollowUpHandler(BaseHandler):
 
         # 处理下次跟进时间
         next_follow_time = params.get("next_follow_time")
-        next_follow_time_dt = self.parse_date(next_follow_time)
+        if next_follow_time:
+            # 用户提供了时间，解析相对时间表达
+            next_follow_time_dt = self.parse_relative_time(next_follow_time)
+        else:
+            # 用户未提供时间，使用默认值（3天后）
+            next_follow_time_dt = datetime.now() + timedelta(days=self.DEFAULT_NEXT_FOLLOW_DAYS)
+
+        # 获取下一步动作
+        next_action = params.get("next_action")
 
         # 构建跟进记录数据
         follow_up_data = {
             "content": params.get("content"),
             "method": method_enum or method,
-            "next_follow_time": next_follow_time_dt
+            "next_follow_time": next_follow_time_dt,
+            "next_action": next_action
         }
 
         # 获取 Schema 类（使用 crud_mapping_name 推断 schema_module）
@@ -178,11 +291,13 @@ class FollowUpHandler(BaseHandler):
         try:
             if crud_mapping.schema_create_class:
                 follow_up = follow_up_crud.create(
-                    db, schema_obj, parent_id, user.feishu_open_id
+                    db, schema_obj, parent_id, str(user.id), team_id,
+                    operator_name=user.name
                 )
             else:
                 follow_up = follow_up_crud.create(
-                    db, follow_up_data, parent_id, user.feishu_open_id
+                    db, follow_up_data, parent_id, str(user.id), team_id,
+                    operator_name=user.name
                 )
         except Exception as e:
             return self.build_result(False, f"跟进记录添加失败: {str(e)}")
@@ -227,4 +342,11 @@ class FollowUpHandler(BaseHandler):
         if next_follow_time:
             message += f"\n下次跟进时间: {next_follow_time}"
 
-        return self.build_result(True, message, {"follow_up": follow_up, "parent": parent_entity})
+        if next_action:
+            message += f"\n下一步动作: {next_action}"
+
+        return self.build_result(True, message, {
+            "follow_up_id": follow_up.id,
+            "parent_id": parent_id,
+            "parent_name": parent_name
+        })

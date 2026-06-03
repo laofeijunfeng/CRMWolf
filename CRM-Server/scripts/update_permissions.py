@@ -151,7 +151,7 @@ def update_opportunity_permissions():
                         permission_crud.assign_to_role(db, member_role.id, permission.id)
                         print(f"为销售成员分配权限: {permission.name}")
         
-        admin_role = db.query(Role).filter(Role.code == "SYSTEM_ADMIN").first()
+        admin_role = db.query(Role).filter(Role.code == "TEAM_ADMIN").first()
         if admin_role:
             for perm_code in opportunity_permissions:
                 permission = created_permissions.get(perm_code)

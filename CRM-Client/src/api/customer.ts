@@ -8,7 +8,6 @@ export interface CustomerIndustryOption {
 export interface ConvertLeadToCustomer {
   lead_id: number
   account_name?: string | null
-  industry?: string | null
   address?: string | null
   default_procurement_method_id?: number | null
 }
@@ -21,7 +20,6 @@ export interface ConvertResponse {
 
 export interface CustomerCreate {
   account_name: string
-  industry?: string | null
   city: string
   address?: string | null
   company_scale?: string | null
@@ -31,12 +29,16 @@ export interface CustomerCreate {
 
 export interface CustomerUpdate {
   account_name?: string | null
-  industry?: string | null
   city?: string | null
   address?: string | null
   company_scale?: string | null
   source?: string | null
   default_procurement_method_id?: number | null
+  // 档案字段（支持手动编辑）
+  company_background?: string | null
+  company_website?: string | null
+  main_business?: string | null
+  project_background?: string | null
 }
 
 export type CustomerStatus = 0 | 1 | 2 | 3
@@ -60,9 +62,10 @@ export interface ProcurementMethodInfo {
 
 export interface CustomerIndustryInfo {
   code: string
-  name: string
-  sort_order: number
-  is_active: number
+  name: string  // 完整路径名称，如 "金融/证券"
+  primary_code?: string | null  // 一级行业编码
+  primary_name?: string | null  // 一级行业名称
+  secondary_name?: string | null  // 二级行业名称（如果是二级行业）
 }
 
 export interface CustomerResponse {
@@ -79,6 +82,7 @@ export interface CustomerResponse {
   source_lead_id: number | null
   default_procurement_method_id: number | null
   default_procurement_method_info?: ProcurementMethodInfo | null
+  loss_reason: string | null
   return_reason: string | null
   returned_time: string | null
   creator_id: string
@@ -126,6 +130,15 @@ export interface CustomerDetailResponse {
   contacts: ContactResponse[]
   owner_info?: UserBasicInfo
   creator_info?: UserBasicInfo
+  // 档案字段
+  company_background: string | null
+  company_website: string | null
+  main_business: string | null
+  similar_customers: string | null  // JSON string
+  project_background: string | null
+  profile_status: string | null  // PENDING | GENERATING | COMPLETED | FAILED
+  profile_generated_time: string | null
+  profile_error_message: string | null
 }
 
 export interface ContactCreate {
@@ -181,6 +194,8 @@ export interface CustomerQueryParams {
   city?: string
   owner_id?: string
   keyword?: string
+  order_by?: string
+  order_dir?: 'asc' | 'desc'
 }
 
 export type ReturnReasonEnum = '丢单' | '无意向' | '信息错误' | '长期未跟进' | '预算不足' | '其他'
@@ -202,6 +217,10 @@ export interface CustomerClaimRequest {
   owner_id: string
 }
 
+export interface CustomerLoseRequest {
+  loss_reason: string
+}
+
 export interface OwnerFilterOption {
   owner_id: string
   owner_name: string
@@ -214,6 +233,8 @@ export interface PublicCustomerQueryParams {
   status?: CustomerStatus
   city?: string
   keyword?: string
+  order_by?: string
+  order_dir?: 'asc' | 'desc'
 }
 
 export interface ContractListResponse {
@@ -286,15 +307,15 @@ export interface InvoiceApplicationResponse {
 
 const customerApi = {
   convertLeadToCustomer: (data: ConvertLeadToCustomer) => {
-    return request.post<ConvertResponse>('/api/v1/customers/convert-from-lead', data)
+    return request.post<ConvertResponse>('/v1/customers/convert-from-lead', data)
   },
 
   createCustomer: (data: CustomerCreate) => {
-    return request.post<CustomerResponse>('/api/v1/customers/', data)
+    return request.post<CustomerResponse>('/v1/customers/', data)
   },
 
   getCustomers: (params?: CustomerQueryParams) => {
-    return request.get<CustomerResponse[]>('/api/v1/customers/', { params })
+    return request.get<CustomerResponse[]>('/v1/customers/', { params })
   },
 
   getCustomerDetail: (customerId: number) => {
@@ -307,6 +328,10 @@ const customerApi = {
 
   updateCustomerStatus: (customerId: number, data: CustomerStatusUpdate) => {
     return request.patch<CustomerResponse>(`/api/v1/customers/${customerId}/status`, data)
+  },
+
+  markAsLost: (customerId: number, data: CustomerLoseRequest) => {
+    return request.patch<CustomerResponse>(`/api/v1/customers/${customerId}/lose`, data)
   },
 
   deleteCustomer: (customerId: number) => {
@@ -322,15 +347,15 @@ const customerApi = {
   },
 
   getPublicCustomers: (params?: PublicCustomerQueryParams) => {
-    return request.get<CustomerResponse[]>('/api/v1/customers/public/list', { params })
+    return request.get<CustomerResponse[]>('/v1/customers/public/list', { params })
   },
 
   getOwnerFilterOptions: () => {
-    return request.get<OwnerFilterOption[]>('/api/v1/filter-options/owners')
+    return request.get<OwnerFilterOption[]>('/v1/filter-options/owners')
   },
 
   getIndustryOptions: () => {
-    return request.get<CustomerIndustryOption[]>('/api/v1/customers/industries')
+    return request.get<CustomerIndustryOption[]>('/v1/customers/industries')
   },
 
   createContact: (customerId: number, data: ContactCreate) => {
@@ -354,11 +379,11 @@ const customerApi = {
   },
 
   getStatistics: () => {
-    return request.get<CustomerStatistics>('/api/v1/customers/statistics/summary')
+    return request.get<CustomerStatistics>('/v1/customers/statistics/summary')
   },
 
   getTrend: (days: number = 30) => {
-    return request.get<CustomerTrend[]>('/api/v1/customers/statistics/trend', {
+    return request.get<CustomerTrend[]>('/v1/customers/statistics/trend', {
       params: { days }
     })
   },
@@ -373,6 +398,10 @@ const customerApi = {
 
   getInvoices: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }) => {
     return request.get<InvoiceApplicationResponse[]>(`/api/v1/customers/${customerId}/invoices`, { params })
+  },
+
+  regenerateProfile: (customerId: number) => {
+    return request.post<{ message: string }>(`/api/v1/customers/${customerId}/regenerate-profile`)
   }
 }
 

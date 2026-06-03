@@ -96,12 +96,15 @@ class LeadResponse(LeadBase):
     id: int = Field(..., description="线索ID（主键）")
     owner_id: Optional[str] = Field(None, description="负责人飞书用户ID")
     status: LeadStatus = Field(..., description="线索状态：NEW:新线索, CONTACTED:已联系, QUALIFIED:已确认, CONVERTED:已转化, INVALID:无效")
+    invalid_reason: Optional[str] = Field(None, description="无效原因")
     pool_id: Optional[int] = Field(None, description="线索池ID（公海池）")
     creator_id: str = Field(..., description="创建人飞书用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
-    
+    score: Optional[int] = Field(None, description="热力值分数（0-100）")
+    score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
+
     class Config:
         from_attributes = True
 
@@ -126,7 +129,8 @@ class LeadFollowUpBase(BaseModel):
     content: str = Field(..., min_length=1, description="跟进内容")
     method: FollowUpMethod = Field(..., description="跟进方式")
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
-    
+    next_action: Optional[str] = Field(None, max_length=200, description="下一步动作")
+
     @field_validator('content')
     @classmethod
     def content_must_not_be_empty(cls, v):
@@ -145,7 +149,7 @@ class LeadFollowUpResponse(LeadFollowUpBase):
     creator_id: str = Field(..., description="创建人飞书用户ID")
     created_time: datetime = Field(..., description="创建时间")
     creator_info: Optional[OwnerInfo] = Field(None, description="跟进人信息")
-    
+
     class Config:
         from_attributes = True
 
@@ -204,6 +208,17 @@ class LeadConversionResponse(BaseModel):
     total: int = Field(..., description="总数")
     converted: int = Field(..., description="转化数")
     conversion_rate: float = Field(..., description="转化率（%）")
+
+
+class LeadMarkInvalidRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500, description="无效原因（必填）")
+
+    @field_validator('reason')
+    @classmethod
+    def reason_must_not_be_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('无效原因不能为空')
+        return v.strip()
 
 
 LeadDetailResponse.model_rebuild()

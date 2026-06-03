@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
-engine = create_engine(str(settings.DATABASE_URL))
+engine = create_engine(settings.get_database_url())
 
 
 # 权限代码映射表
@@ -224,7 +224,7 @@ def assign_system_admin_permissions():
     
     success_count = 0
     for perm_code in permissions:
-        if assign_permission_to_role("SYSTEM_ADMIN", perm_code):
+        if assign_permission_to_role("TEAM_ADMIN", perm_code):
             success_count += 1
     
     logger.info(f"\n系统管理员权限分配完成: {success_count}/{len(permissions)}")

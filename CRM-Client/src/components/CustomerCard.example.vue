@@ -71,12 +71,12 @@ const statusText = computed<string>(() => {
 
 /** 是否有编辑权限 */
 const canEdit = computed<boolean>(() => {
-  return permissionsStore.hasPermission('customer:update')
+  return permissionsStore.hasPermission('customer:edit:own') || permissionsStore.hasPermission('customer:edit:all')
 })
 
 /** 是否可以删除 */
 const canDelete = computed<boolean>(() => {
-  return permissionsStore.hasPermission('customer:delete')
+  return permissionsStore.hasPermission('customer:delete:own') || permissionsStore.hasPermission('customer:delete:all')
 })
 
 // ===== 9. 方法（必须参数和返回类型） =====

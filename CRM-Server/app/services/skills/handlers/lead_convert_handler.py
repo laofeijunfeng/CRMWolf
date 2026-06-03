@@ -28,7 +28,8 @@ class LeadConvertHandler(StatusChangeHandler):
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行线索转化操作
@@ -117,7 +118,7 @@ class LeadConvertHandler(StatusChangeHandler):
         # 获取用户信息
         from app.crud.user import user_crud
         user = user_crud.get_by_id(db, user_id)
-        operator_id = user.feishu_open_id if user else user_feishu_open_id or "system"
+        operator_id = str(user.id) if user else user_feishu_open_id or "system"
         operator_name = user.name if user else None
 
         # 执行转化业务逻辑

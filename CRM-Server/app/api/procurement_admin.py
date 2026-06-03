@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission
+from app.core.deps import get_current_active_user, require_permission, get_current_user_team
 from app.models.user import User
 from app.schemas.procurement import (
     BatchMigrateProcurementMethodRequest,
@@ -33,12 +33,13 @@ router = APIRouter(prefix="/api/v1/procurement-admin", tags=["采购管理工具
 """)
 def assess_template_change_impact(
     template_id: int,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement:admin:assess"))
 ):
     try:
         impact = procurement_management_tool_crud.assess_template_change_impact(
-            db, template_id
+            db, template_id, team_id
         )
         return ImpactAssessmentResponse(**impact)
     except ValueError as e:
@@ -67,6 +68,7 @@ def assess_template_change_impact(
 """)
 def batch_migrate_opportunities(
     request: BatchMigrateProcurementMethodRequest,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement:admin:migrate"))
 ):
@@ -76,7 +78,8 @@ def batch_migrate_opportunities(
             request.source_method_id,
             request.target_method_id,
             request.opportunity_ids,
-            current_user.feishu_open_id
+            str(current_user.id),
+            team_id
         )
         
         return MessageResponse(
@@ -115,6 +118,7 @@ def rollback_template_version(
     template_id: int,
     target_version: int = Query(..., ge=1, description="目标版本号"),
     reason: Optional[str] = Query(None, description="回滚原因"),
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement:admin:rollback"))
 ):
@@ -123,8 +127,9 @@ def rollback_template_version(
             db,
             template_id,
             target_version,
-            current_user.feishu_open_id,
-            reason
+            str(current_user.id),
+            reason,
+            team_id
         )
         
         return MessageResponse(
@@ -155,11 +160,12 @@ def rollback_template_version(
 """)
 def get_active_opportunities_by_stage(
     stage_template_id: int,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement:admin:assess"))
 ):
     opportunities = procurement_management_tool_crud.get_active_opportunities_by_stage(
-        db, stage_template_id
+        db, stage_template_id, team_id
     )
     
     return {

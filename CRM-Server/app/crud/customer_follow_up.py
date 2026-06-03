@@ -6,35 +6,46 @@ from app.schemas.customer_follow_up import CustomerFollowUpCreate, CustomerFollo
 
 
 class CustomerFollowUpCRUD:
-    def get_by_id(self, db: Session, follow_up_id: int) -> CustomerFollowUp:
-        return db.query(CustomerFollowUp).filter(CustomerFollowUp.id == follow_up_id).first()
+    def get_by_id(self, db: Session, follow_up_id: int, team_id: Optional[int] = None) -> CustomerFollowUp:
+        query = db.query(CustomerFollowUp).filter(CustomerFollowUp.id == follow_up_id)
+        if team_id is not None:
+            query = query.filter(CustomerFollowUp.team_id == team_id)
+        return query.first()
 
     def get_by_customer_id(
         self,
         db: Session,
         customer_id: int,
+        team_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100
     ) -> Tuple[List[CustomerFollowUp], int]:
         query = db.query(CustomerFollowUp).filter(
             CustomerFollowUp.customer_id == customer_id
         )
-        
+
+        if team_id is not None:
+            query = query.filter(CustomerFollowUp.team_id == team_id)
+
         total = query.count()
         follow_ups = query.order_by(
             CustomerFollowUp.created_time.desc()
         ).offset(skip).limit(limit).all()
-        
+
         return follow_ups, total
 
     def get_by_original_lead_id(
         self,
         db: Session,
-        lead_id: int
+        lead_id: int,
+        team_id: Optional[int] = None
     ) -> List[CustomerFollowUp]:
-        return db.query(LeadFollowUp).filter(
+        query = db.query(LeadFollowUp).filter(
             LeadFollowUp.lead_id == lead_id
-        ).all()
+        )
+        if team_id is not None:
+            query = query.filter(LeadFollowUp.team_id == team_id)
+        return query.all()
 
     def create(
         self,
@@ -42,17 +53,19 @@ class CustomerFollowUpCRUD:
         obj_in: CustomerFollowUpCreate,
         customer_id: int,
         creator_id: str,
+        team_id: int,
         operator_name: Optional[str] = None,
         original_lead_id: Optional[int] = None
     ) -> CustomerFollowUp:
         from app.services.operation_log_service import operation_log_service
-        
+
         follow_up_data = obj_in.model_dump()
         follow_up_data['customer_id'] = customer_id
         follow_up_data['creator_id'] = creator_id
+        follow_up_data['team_id'] = team_id
         if original_lead_id:
             follow_up_data['original_lead_id'] = original_lead_id
-        
+
         db_obj = CustomerFollowUp(**follow_up_data)
         db.add(db_obj)
         db.commit()
@@ -65,7 +78,10 @@ class CustomerFollowUpCRUD:
             method=db_obj.method,
             operator_id=creator_id,
             operator_name=operator_name,
-            next_follow_time=db_obj.next_follow_time.strftime("%Y-%m-%d") if db_obj.next_follow_time else None
+            next_follow_time=db_obj.next_follow_time.strftime("%Y-%m-%d") if db_obj.next_follow_time else None,
+            next_action=db_obj.next_action,
+            team_id=team_id,
+            follow_up_id=db_obj.id
         )
         
         return db_obj
@@ -74,26 +90,29 @@ class CustomerFollowUpCRUD:
         self,
         db: Session,
         lead_id: int,
-        new_customer_id: int
+        new_customer_id: int,
+        team_id: int
     ) -> List[CustomerFollowUp]:
         lead_follow_ups = db.query(LeadFollowUp).filter(
             LeadFollowUp.lead_id == lead_id
         ).all()
-        
+
         migrated_follow_ups = []
         for lead_follow_up in lead_follow_ups:
             new_follow_up = CustomerFollowUp(
                 customer_id=new_customer_id,
+                team_id=team_id,
                 original_lead_id=lead_id,
                 content=lead_follow_up.content,
-                method=lead_follow_up.method,
+                method=lead_follow_up.method.value if hasattr(lead_follow_up.method, 'value') else lead_follow_up.method,
                 next_follow_time=lead_follow_up.next_follow_time,
+                next_action=lead_follow_up.next_action,
                 creator_id=lead_follow_up.creator_id,
                 created_time=lead_follow_up.created_time
             )
             db.add(new_follow_up)
             migrated_follow_ups.append(new_follow_up)
-        
+
         db.commit()
         return migrated_follow_ups
 

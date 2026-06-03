@@ -190,19 +190,19 @@ const paymentApi = {
 
   getUpcomingPayments: (days?: number) => {
     const params = days ? { days } : {}
-    return request.get<UpcomingPayment[]>('/api/v1/payments/reminders/upcoming', { params })
+    return request.get<UpcomingPayment[]>('/v1/payments/reminders/upcoming', { params })
   },
 
   getOverduePayments: () => {
-    return request.get<OverduePayment[]>('/api/v1/payments/reminders/overdue')
+    return request.get<OverduePayment[]>('/v1/payments/reminders/overdue')
   },
 
   listPaymentPlans: (params: PaymentPlanListParams) => {
-    return request.get<PaginatedResponse<PaymentPlanWithDetails>>('/api/v1/payments/payment-plans', { params })
+    return request.get<PaginatedResponse<PaymentPlanWithDetails>>('/v1/payments/payment-plans', { params })
   },
 
   listPaymentRecords: (params: PaymentRecordListParams) => {
-    return request.get<PaginatedResponse<PaymentRecordWithDetails>>('/api/v1/payments/payment-records', { params })
+    return request.get<PaginatedResponse<PaymentRecordWithDetails>>('/v1/payments/payment-records', { params })
   }
 }
 

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user
+from app.core.deps import get_current_active_user, get_current_user_team
 from app.models.user import User
 from app.schemas.operation_log import (
     OperationLogCreate,
@@ -18,10 +18,11 @@ router = APIRouter(prefix="/operation-logs", tags=["操作记录"])
 @router.post("", response_model=OperationLogResponse, status_code=status.HTTP_201_CREATED, summary="记录操作事件", description="内部接口，记录操作事件到审计日志")
 def create_operation_log(
     log_data: OperationLogCreate,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
 ):
     try:
-        log = operation_log_crud.create(db, log_data)
+        log = operation_log_crud.create(db, log_data, team_id)
         return log
     except Exception as e:
         raise HTTPException(
@@ -90,20 +91,22 @@ def get_operation_logs(
     event_types: Optional[str] = Query(None, description="事件类型过滤，多个用逗号分隔（如：MANUAL_FOLLOW_UP,OPPORTUNITY_CREATED）"),
     page_no: int = Query(1, ge=1, description="页码，从1开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量，默认20条，最大100条"),
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     event_type_list = None
     if event_types:
         event_type_list = [t.strip() for t in event_types.split(",")]
-    
+
     skip = (page_no - 1) * page_size
-    
+
     try:
         logs, total = operation_log_crud.get_by_resource(
             db=db,
             primary_resource_type=primary_resource_type,
             primary_resource_id=primary_resource_id,
+            team_id=team_id,
             skip=skip,
             limit=page_size,
             event_types=event_type_list
@@ -158,15 +161,17 @@ GET /api/v1/operation-logs/my-logs?page_no=1&page_size=10
 def get_my_operation_logs(
     page_no: int = Query(1, ge=1, description="页码，从1开始"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量，默认20条，最大100条"),
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     skip = (page_no - 1) * page_size
-    
+
     try:
         logs, total = operation_log_crud.get_by_operator(
             db=db,
-            operator_id=current_user.feishu_open_id,
+            operator_id=str(current_user.id),
+            team_id=team_id,
             skip=skip,
             limit=page_size
         )

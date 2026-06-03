@@ -51,7 +51,7 @@ class ApprovalService:
             from app.crud.user import user_crud
             
             submitter_id = contract.creator_id
-            submitter = user_crud.get_by_feishu_open_id(db, submitter_id)
+            submitter = user_crud.get_by_id(db, int(submitter_id))
             submitter_name = submitter.name if submitter else "系统"
             
             approval = approval_crud.create_approval(
@@ -80,74 +80,107 @@ class ApprovalService:
 
 
 class ContractCRUD:
-    def get_by_id(self, db: Session, contract_id: int) -> Optional[Contract]:
-        return db.query(Contract).filter(Contract.id == contract_id).first()
-    
-    def get_by_number(self, db: Session, contract_number: str) -> Optional[Contract]:
-        return db.query(Contract).filter(Contract.contract_number == contract_number).first()
-    
+    def get_by_id(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> Optional[Contract]:
+        query = db.query(Contract).filter(Contract.id == contract_id)
+        if team_id is not None:
+            query = query.filter(Contract.team_id == team_id)
+        return query.first()
+
+    def get_by_number(self, db: Session, contract_number: str, team_id: Optional[int] = None) -> Optional[Contract]:
+        query = db.query(Contract).filter(Contract.contract_number == contract_number)
+        if team_id is not None:
+            query = query.filter(Contract.team_id == team_id)
+        return query.first()
+
     def get_by_customer_id(
         self,
         db: Session,
         customer_id: int,
+        team_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100,
         status: Optional[str] = None
     ) -> Tuple[List[Contract], int]:
         query = db.query(Contract).filter(Contract.customer_id == customer_id)
-        
+        if team_id is not None:
+            query = query.filter(Contract.team_id == team_id)
+
         if status:
             query = query.filter(Contract.status == status)
-        
+
         total = query.count()
         contracts = query.order_by(Contract.created_time.desc()).offset(skip).limit(limit).all()
         return contracts, total
-    
+
     def get_by_opportunity_id(
         self,
         db: Session,
-        opportunity_id: int
+        opportunity_id: int,
+        team_id: Optional[int] = None
     ) -> Optional[Contract]:
-        return db.query(Contract).filter(Contract.opportunity_id == opportunity_id).first()
-    
+        query = db.query(Contract).filter(Contract.opportunity_id == opportunity_id)
+        if team_id is not None:
+            query = query.filter(Contract.team_id == team_id)
+        return query.first()
+
     def get_multi(
         self,
         db: Session,
+        team_id: int,
         skip: int = 0,
         limit: int = 100,
         customer_id: Optional[int] = None,
         status: Optional[str] = None,
         contract_number: Optional[str] = None,
         license_type: Optional[str] = None,
-        keyword: Optional[str] = None
+        keyword: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None
     ) -> Tuple[List[Contract], int]:
-        query = db.query(Contract)
-        
+        query = db.query(Contract).filter(Contract.team_id == team_id)
+
         if customer_id:
             query = query.filter(Contract.customer_id == customer_id)
-        
+
         if status:
             query = query.filter(Contract.status == status)
-        
+
         if contract_number:
             query = query.filter(Contract.contract_number.like(f"%{contract_number}%"))
-        
+
         if license_type:
             query = query.filter(Contract.license_type == license_type)
-        
+
         if keyword:
             query = query.filter(Contract.contract_name.like(f"%{keyword}%"))
-        
+
+        if owner_id:
+            # Contract 使用 creator_id 作为负责人字段
+            query = query.filter(Contract.creator_id == owner_id)
+
         total = query.count()
-        contracts = query.order_by(Contract.created_time.desc()).offset(skip).limit(limit).all()
-        
+
+        allowed_sort_fields = ['created_time', 'contract_name', 'total_amount', 'status', 'effective_date', 'expiry_date']
+        if order_by and order_dir and order_by in allowed_sort_fields:
+            order_column = getattr(Contract, order_by)
+            if order_dir.lower() == 'desc':
+                query = query.order_by(order_column.desc())
+            else:
+                query = query.order_by(order_column.asc())
+        else:
+            query = query.order_by(Contract.created_time.desc())
+
+        contracts = query.offset(skip).limit(limit).all()
+
         return contracts, total
-    
+
     def create(
         self,
         db: Session,
         obj_in: ContractCreate,
-        creator_id: str
+        creator_id: str,
+        team_id: int
     ) -> Contract:
         from app.crud.user import user_crud
         from app.crud.customer import customer_crud
@@ -176,14 +209,15 @@ class ContractCRUD:
             expiry_date=expiry_date,
             status=ContractStatus.DRAFT,
             creator_id=creator_id,
+            team_id=team_id,
             **contract_data
         )
         
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
-        
-        operator = user_crud.get_by_feishu_open_id(db, creator_id)
+
+        operator = user_crud.get_by_id(db, int(creator_id))
         operator_name = operator.name if operator else None
         
         customer = customer_crud.get_by_id(db, db_obj.customer_id)

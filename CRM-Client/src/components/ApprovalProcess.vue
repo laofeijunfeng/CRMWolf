@@ -56,7 +56,7 @@ const props = defineProps<Props>()
 const emit = defineEmits(['status-updated'])
 
 const userStore = useUserStore()
-const currentUserId = userStore.userInfo?.feishu_open_id || ''
+const currentUserId = userStore.userInfo?.id ? String(userStore.userInfo.id) : ''
 
 const loading = ref(false)
 const submitting = ref(false)

@@ -14,31 +14,38 @@ from app.schemas.payment import (
 
 
 class PaymentPlanCRUD:
-    def get_by_id(self, db: Session, plan_id: int) -> Optional[PaymentPlan]:
-        return db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
-    
-    def get_by_contract_id(self, db: Session, contract_id: int, status: Optional[str] = None) -> List[PaymentPlan]:
+    def get_by_id(self, db: Session, plan_id: int, team_id: Optional[int] = None) -> Optional[PaymentPlan]:
+        query = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id)
+        if team_id is not None:
+            query = query.filter(PaymentPlan.team_id == team_id)
+        return query.first()
+
+    def get_by_contract_id(self, db: Session, contract_id: int, team_id: Optional[int] = None, status: Optional[str] = None) -> List[PaymentPlan]:
         query = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id)
-        
+
+        if team_id is not None:
+            query = query.filter(PaymentPlan.team_id == team_id)
+
         if status:
             query = query.filter(PaymentPlan.status == status)
-        
+
         return query.order_by(PaymentPlan.due_date.asc()).all()
-    
-    def get_multi(self, db: Session, skip: int = 0, limit: int = 100, status: Optional[str] = None) -> Tuple[List[PaymentPlan], int]:
-        query = db.query(PaymentPlan)
-        
+
+    def get_multi(self, db: Session, team_id: int, skip: int = 0, limit: int = 100, status: Optional[str] = None) -> Tuple[List[PaymentPlan], int]:
+        query = db.query(PaymentPlan).filter(PaymentPlan.team_id == team_id)
+
         if status:
             query = query.filter(PaymentPlan.status == status)
-        
+
         total = query.count()
         plans = query.order_by(PaymentPlan.due_date.asc()).offset(skip).limit(limit).all()
-        
+
         return plans, total
-    
+
     def list_plans(
         self,
         db: Session,
+        team_id: int,
         skip: int = 0,
         limit: int = 100,
         status: Optional[str] = None,
@@ -50,8 +57,9 @@ class PaymentPlanCRUD:
         from app.models.contract import Contract
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
-        
+
         plans_query = db.query(PaymentPlan).join(Contract, PaymentPlan.contract_id == Contract.id)
+        plans_query = plans_query.filter(PaymentPlan.team_id == team_id)
         
         if status:
             plans_query = plans_query.filter(PaymentPlan.status == status)
@@ -87,17 +95,18 @@ class PaymentPlanCRUD:
         
         return plans, total
     
-    def create(self, db: Session, contract_id: int, obj_in: PaymentPlanCreate) -> PaymentPlan:
+    def create(self, db: Session, contract_id: int, obj_in: PaymentPlanCreate, team_id: int) -> PaymentPlan:
         db_plan = PaymentPlan(
             contract_id=contract_id,
+            team_id=team_id,
             **obj_in.model_dump()
         )
         db.add(db_plan)
         db.commit()
         db.refresh(db_plan)
         return db_plan
-    
-    def batch_create(self, db: Session, contract_id: int, plans_data: List[PaymentPlanCreate], creator_id: str) -> List[PaymentPlan]:
+
+    def batch_create(self, db: Session, contract_id: int, plans_data: List[PaymentPlanCreate], creator_id: str, team_id: int) -> List[PaymentPlan]:
         from app.crud.user import user_crud
         from app.crud.customer import customer_crud
         from app.models.payment import PaymentPlan
@@ -116,6 +125,7 @@ class PaymentPlanCRUD:
         for plan_data in plans_data:
             db_plan = PaymentPlan(
                 contract_id=contract_id,
+                team_id=team_id,
                 **plan_data.model_dump()
             )
             db.add(db_plan)
@@ -125,7 +135,7 @@ class PaymentPlanCRUD:
         for plan in plans:
             db.refresh(plan)
         
-        operator = user_crud.get_by_feishu_open_id(db, creator_id)
+        operator = user_crud.get_by_id(db, int(creator_id))
         operator_name = operator.name if operator else None
         
         customer = customer_crud.get_by_id(db, contract.customer_id)
@@ -198,15 +208,16 @@ class PaymentPlanCRUD:
         db.refresh(plan)
         return plan
     
-    def get_upcoming_payments(self, db: Session, days: int = 7) -> List[PaymentPlan]:
+    def get_upcoming_payments(self, db: Session, team_id: int, days: int = 7) -> List[PaymentPlan]:
         from app.models.contract import Contract
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
-        
+
         target_date = date.today() + timedelta(days=days)
-        
+
         plans = db.query(PaymentPlan).filter(
             and_(
+                PaymentPlan.team_id == team_id,
                 PaymentPlan.status == PaymentPlanStatus.PENDING,
                 PaymentPlan.due_date <= target_date,
                 PaymentPlan.due_date >= date.today()
@@ -228,13 +239,14 @@ class PaymentPlanCRUD:
         
         return plans
     
-    def get_overdue_payments(self, db: Session) -> List[PaymentPlan]:
+    def get_overdue_payments(self, db: Session, team_id: int) -> List[PaymentPlan]:
         from app.models.contract import Contract
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
-        
+
         plans = db.query(PaymentPlan).filter(
             and_(
+                PaymentPlan.team_id == team_id,
                 PaymentPlan.due_date < date.today(),
                 PaymentPlan.status != PaymentPlanStatus.COMPLETED
             )
@@ -257,17 +269,24 @@ class PaymentPlanCRUD:
 
 
 class PaymentRecordCRUD:
-    def get_by_id(self, db: Session, record_id: int) -> Optional[PaymentRecord]:
-        return db.query(PaymentRecord).filter(PaymentRecord.id == record_id).first()
-    
-    def get_by_plan_id(self, db: Session, plan_id: int) -> List[PaymentRecord]:
-        return db.query(PaymentRecord).filter(
+    def get_by_id(self, db: Session, record_id: int, team_id: Optional[int] = None) -> Optional[PaymentRecord]:
+        query = db.query(PaymentRecord).filter(PaymentRecord.id == record_id)
+        if team_id is not None:
+            query = query.filter(PaymentRecord.team_id == team_id)
+        return query.first()
+
+    def get_by_plan_id(self, db: Session, plan_id: int, team_id: Optional[int] = None) -> List[PaymentRecord]:
+        query = db.query(PaymentRecord).filter(
             PaymentRecord.payment_plan_id == plan_id
-        ).order_by(PaymentRecord.payment_date.desc()).all()
-    
+        )
+        if team_id is not None:
+            query = query.filter(PaymentRecord.team_id == team_id)
+        return query.order_by(PaymentRecord.payment_date.desc()).all()
+
     def list_records(
         self,
         db: Session,
+        team_id: int,
         skip: int = 0,
         limit: int = 100,
         contract_id: Optional[int] = None,
@@ -281,12 +300,13 @@ class PaymentRecordCRUD:
         from app.models.contract import Contract
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
-        
+
         records_query = db.query(PaymentRecord).join(
             PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id
         ).join(
             Contract, PaymentPlan.contract_id == Contract.id
         )
+        records_query = records_query.filter(PaymentRecord.team_id == team_id)
         
         if contract_id:
             records_query = records_query.filter(PaymentPlan.contract_id == contract_id)
@@ -341,23 +361,24 @@ class PaymentRecordCRUD:
         
         return records, total
     
-    def create(self, db: Session, plan_id: int, obj_in: PaymentRecordCreate, creator_id: str, creator_name: str) -> PaymentRecord:
+    def create(self, db: Session, plan_id: int, obj_in: PaymentRecordCreate, creator_id: str, creator_name: str, team_id: int) -> PaymentRecord:
         from app.crud.user import user_crud
         from app.crud.customer import customer_crud
         from app.services.operation_log_service import operation_log_service
-        
+
         plan = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
         if not plan:
             raise ValueError("回款计划不存在")
-        
+
         total_paid = sum(float(r.actual_amount) for r in plan.payment_records)
         planned = float(plan.planned_amount)
-        
+
         if total_paid + obj_in.actual_amount > planned:
             raise ValueError(f"回款金额超出计划，计划金额: {planned}，已回款: {total_paid}，本次: {obj_in.actual_amount}")
-        
+
         db_record = PaymentRecord(
             payment_plan_id=plan_id,
+            team_id=team_id,
             **obj_in.model_dump(),
             creator_id=creator_id,
             creator_name=creator_name
@@ -374,7 +395,7 @@ class PaymentRecordCRUD:
         
         contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
         if contract:
-            operator = user_crud.get_by_feishu_open_id(db, creator_id)
+            operator = user_crud.get_by_id(db, int(creator_id))
             operator_name_display = operator.name if operator else creator_name
             
             customer = customer_crud.get_by_id(db, contract.customer_id)

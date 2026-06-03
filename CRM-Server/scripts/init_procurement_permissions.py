@@ -232,7 +232,7 @@ def assign_default_permissions():
     ]
     
     role_permission_map = {
-        "SYSTEM_ADMIN": admin_permissions,
+        "TEAM_ADMIN": admin_permissions,
         "SALES_DIRECTOR": sales_director_permissions,
         "SALES_MEMBER": sales_member_permissions
     }

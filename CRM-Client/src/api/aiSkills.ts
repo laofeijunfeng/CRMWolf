@@ -87,13 +87,13 @@ export interface SkillActionCreate {
 export const aiSkillsApi = {
   // Skill 管理
   getSkills: (params?: { module_type?: string; is_active?: number }) =>
-    request.get('/api/v1/ai/skills', { params }),
+    request.get('/v1/ai/skills', { params }),
 
   getSkill: (skillId: number) =>
     request.get(`/api/v1/ai/skills/${skillId}`),
 
   createSkill: (data: SkillCreate) =>
-    request.post('/api/v1/ai/skills', data),
+    request.post('/v1/ai/skills', data),
 
   updateSkill: (skillId: number, data: Partial<SkillCreate>) =>
     request.put(`/api/v1/ai/skills/${skillId}`, data),
@@ -116,21 +116,21 @@ export const aiSkillsApi = {
 
   // CRUD 映射管理
   getCRUDMappings: () =>
-    request.get('/api/v1/ai/skills/crud-mappings'),
+    request.get('/v1/ai/skills/crud-mappings'),
 
   createCRUDMapping: (data: Partial<CRUDMapping>) =>
-    request.post('/api/v1/ai/skills/crud-mappings', data),
+    request.post('/v1/ai/skills/crud-mappings', data),
 
   // Enum 映射管理
   getEnumMappings: () =>
-    request.get('/api/v1/ai/skills/enum-mappings'),
+    request.get('/v1/ai/skills/enum-mappings'),
 
   createEnumMapping: (data: Partial<EnumMapping>) =>
-    request.post('/api/v1/ai/skills/enum-mappings', data),
+    request.post('/v1/ai/skills/enum-mappings', data),
 
   // Handler 类型列表
   getHandlerTypes: () =>
-    request.get('/api/v1/ai/skills/handler-types'),
+    request.get('/v1/ai/skills/handler-types'),
 
   // AI 辅助生成 - 分析需求（POST SSE 流式）
   analyzeSkill: async (

@@ -175,6 +175,8 @@ export interface OpportunityListParams {
   owner_id?: string | null
   customer_id?: number | null
   keyword?: string | null
+  order_by?: string
+  order_dir?: 'asc' | 'desc'
 }
 
 export interface SalesFunnelData {

@@ -110,13 +110,10 @@
       :close-on-click-modal="false"
     >
       <el-form :model="createForm" :rules="createFormRules" label-width="140px" ref="createFormRef">
-        <el-form-item prop="feishu_open_id" label="飞书Open ID" required>
-          <el-input v-model="createForm.feishu_open_id" placeholder="请输入飞书Open ID" />
-        </el-form-item>
         <el-form-item prop="name" label="姓名" required>
           <el-input v-model="createForm.name" placeholder="请输入姓名" />
         </el-form-item>
-        <el-form-item prop="email" label="邮箱">
+        <el-form-item prop="email" label="邮箱" required>
           <el-input v-model="createForm.email" placeholder="请输入邮箱" />
         </el-form-item>
         <el-form-item prop="mobile" label="手机">
@@ -174,9 +171,11 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import userApi, { type UserResponse, type UserCreate, type UserUpdate, UserStatus } from '@/api/user'
 import roleApi, { type RoleResponse } from '@/api/role'
 import { usePermissionStore } from '@/stores/permissions'
+import { useTeamStore } from '@/stores/team'
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
+const teamStore = useTeamStore()
 const loading = ref(false)
 const tableData = ref<UserResponse[]>([])
 const selectedUser = ref<UserResponse | null>(null)
@@ -211,7 +210,6 @@ const roleModalVisible = ref(false)
 const allRoles = ref<RoleResponse[]>([])
 const selectedRoles = ref<number[]>([])
 const createForm = reactive<UserCreate & { status?: UserStatus }>({
-  feishu_open_id: '',
   name: '',
   email: '',
   mobile: '',
@@ -221,8 +219,8 @@ const createForm = reactive<UserCreate & { status?: UserStatus }>({
 })
 
 const createFormRules: FormRules = {
-  feishu_open_id: [{ required: true, message: '请输入飞书Open ID' }],
-  name: [{ required: true, message: '请输入姓名' }]
+  name: [{ required: true, message: '请输入姓名' }],
+  email: [{ required: true, message: '请输入邮箱' }, { type: 'email', message: '请输入正确的邮箱格式' }]
 }
 
 const formatDate = (dateStr: string) => {
@@ -289,7 +287,6 @@ const handlePageSizeChange = (pageSize: number) => {
 const showCreateModal = () => {
   isEditMode.value = false
   Object.assign(createForm, {
-    feishu_open_id: '',
     name: '',
     email: '',
     mobile: '',
@@ -304,7 +301,6 @@ const handleEdit = (record: UserResponse) => {
   selectedUser.value = record
   isEditMode.value = true
   Object.assign(createForm, {
-    feishu_open_id: record.feishu_open_id,
     name: record.name,
     email: record.email || '',
     mobile: record.mobile || '',
@@ -397,22 +393,28 @@ const handleAssignRoles = async (record: UserResponse) => {
 
 const handleRoleModalOk = async () => {
   if (!selectedUser.value) return
-  
+
+  const teamId = teamStore.currentTeam?.id
+  if (!teamId) {
+    ElMessage.error('请先选择团队')
+    return
+  }
+
   try {
     const userId = selectedUser.value.id
     const userRoleCodes = selectedUser.value.roles.map(role => role.code)
-    
+
     for (const role of allRoles.value) {
       const hasRole = selectedRoles.value.includes(role.id)
       const userHadRole = userRoleCodes.includes(role.code)
-      
+
       if (hasRole && !userHadRole) {
-        await roleApi.assignRoleToUser(role.id, userId)
+        await roleApi.assignRoleToUser(role.id, userId, teamId)
       } else if (!hasRole && userHadRole) {
-        await roleApi.removeRoleFromUser(role.id, userId)
+        await roleApi.removeRoleFromUser(role.id, userId, teamId)
       }
     }
-    
+
     ElMessage.success('角色分配成功')
     roleModalVisible.value = false
     fetchUsers()

@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import date
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user
+from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.payment import payment_plan_crud, payment_record_crud
 from app.crud.contract import contract_crud
 from app.models.payment import PaymentPlanStatus
@@ -22,10 +22,11 @@ router = APIRouter(prefix="/api/v1/payments", tags=["回款管理"])
 def create_payment_plans(
     contract_id: int,
     plans_data: PaymentPlanBatchCreate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id)
+    contract = contract_crud.get_by_id(db, contract_id, team_id)
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -40,7 +41,7 @@ def create_payment_plans(
         )
     
     try:
-        plans = payment_plan_crud.batch_create(db, contract_id, plans_data.plans, current_user.feishu_open_id)
+        plans = payment_plan_crud.batch_create(db, contract_id, plans_data.plans, str(current_user.id))
         return plans
     except ValueError as e:
         raise HTTPException(
@@ -58,10 +59,11 @@ def create_payment_plans(
 def get_payment_plans(
     contract_id: int,
     status: Optional[str] = Query(None, description="回款状态筛选"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id)
+    contract = contract_crud.get_by_id(db, contract_id, team_id)
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -87,16 +89,18 @@ def list_payment_plans(
     due_date_end: Optional[date] = Query(None, description="计划回款日期结束（YYYY-MM-DD）"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     skip = (page - 1) * page_size
-    
-    current_user_id = current_user.feishu_open_id if me else None
-    
+
+    current_user_id = str(current_user.id) if me else None
+
     try:
         plans, total = payment_plan_crud.list_plans(
             db,
+            team_id=team_id,
             skip=skip,
             limit=page_size,
             status=status,
@@ -139,14 +143,15 @@ def list_payment_plans(
 @router.get("/contracts/{contract_id}/payment-summary", response_model=ContractPaymentSummary, summary="查询合同回款汇总", description="获取指定合同的回款汇总信息，包括合同金额、已回款金额、回款状态、计划完成情况等")
 def get_payment_summary(
     contract_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from app.models.contract import Contract
     from app.models.customer import Customer
     from app.models.opportunity import Opportunity
-    
-    contract = db.query(Contract).filter(Contract.id == contract_id).first()
+
+    contract = db.query(Contract).filter(Contract.id == contract_id, Contract.team_id == team_id).first()
     
     if not contract:
         raise HTTPException(
@@ -198,10 +203,11 @@ def get_payment_summary(
 def update_payment_plan(
     plan_id: int,
     plan_data: PaymentPlanUpdate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    plan = payment_plan_crud.get_by_id(db, plan_id)
+    plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -236,11 +242,12 @@ def update_payment_plan(
 @router.delete("/payment-plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除回款计划", description="删除指定的回款计划。存在关联回款记录的计划不能删除，删除后无法恢复。")
 def delete_payment_plan(
     plan_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     try:
-        success = payment_plan_crud.delete(db, plan_id)
+        success = payment_plan_crud.delete(db, plan_id, team_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -257,10 +264,11 @@ def delete_payment_plan(
 def create_payment_record(
     plan_id: int,
     record_data: PaymentRecordCreate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    plan = payment_plan_crud.get_by_id(db, plan_id)
+    plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -278,7 +286,7 @@ def create_payment_record(
             db,
             plan_id,
             record_data,
-            current_user.feishu_open_id,
+            str(current_user.id),
             current_user.name
         )
         return record
@@ -297,10 +305,11 @@ def create_payment_record(
 @router.get("/payment-plans/{plan_id}/records", response_model=List[PaymentRecordResponse], summary="查询回款记录", description="获取指定回款计划下的所有回款记录，按回款日期倒序排列。包含每笔回款的详细信息，如回款金额、回款日期、登记人等。")
 def get_payment_records(
     plan_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    plan = payment_plan_crud.get_by_id(db, plan_id)
+    plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -314,10 +323,11 @@ def get_payment_records(
 def update_payment_record(
     record_id: int,
     record_data: PaymentRecordUpdate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    record = payment_record_crud.get_by_id(db, record_id)
+    record = payment_record_crud.get_by_id(db, record_id, team_id)
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -337,11 +347,12 @@ def update_payment_record(
 @router.delete("/payment-records/{record_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除回款记录", description="删除指定的回款记录。删除后会自动重新计算相关金额、计划状态和合同回款状态。删除后无法恢复，请谨慎操作。")
 def delete_payment_record(
     record_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     try:
-        success = payment_record_crud.delete(db, record_id)
+        success = payment_record_crud.delete(db, record_id, team_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -365,16 +376,18 @@ def list_payment_records(
     me: bool = Query(False, description="是否只查询当前用户登记的记录"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     skip = (page - 1) * page_size
-    
-    current_user_id = current_user.feishu_open_id if me else None
-    
+
+    current_user_id = str(current_user.id) if me else None
+
     try:
         records, total = payment_record_crud.list_records(
             db,
+            team_id=team_id,
             skip=skip,
             limit=page_size,
             contract_id=contract_id,
@@ -418,10 +431,11 @@ def list_payment_records(
 @router.get("/reminders/upcoming", response_model=List[PaymentReminder], summary="查询即将到期的回款", description="获取指定天数内即将到期的回款计划，用于提醒。支持查询未来1-30天内的回款计划")
 def get_upcoming_payments(
     days: int = Query(7, ge=1, le=30, description="查询天数范围，默认7天，可设置1-30天"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    plans = payment_plan_crud.get_upcoming_payments(db, days)
+    plans = payment_plan_crud.get_upcoming_payments(db, team_id, days)
     
     reminders = []
     for plan in plans:
@@ -453,10 +467,11 @@ def get_upcoming_payments(
 
 @router.get("/reminders/overdue", response_model=List[PaymentReminder], summary="查询逾期回款", description="获取所有逾期的回款计划，用于催收提醒")
 def get_overdue_payments(
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    plans = payment_plan_crud.get_overdue_payments(db)
+    plans = payment_plan_crud.get_overdue_payments(db, team_id)
     
     reminders = []
     for plan in plans:

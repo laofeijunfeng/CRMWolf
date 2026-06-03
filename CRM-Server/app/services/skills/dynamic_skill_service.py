@@ -97,7 +97,8 @@ class DynamicSkillService:
         action_name: str,
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> SkillExecutionResult:
         """
         执行 Action（纯数据库模式）
@@ -109,10 +110,14 @@ class DynamicSkillService:
             params: 参数
             user_id: 用户 ID
             user_feishu_open_id: 用户飞书 Open ID
-
-        Returns:
-            SkillExecutionResult
         """
+        # 写入调试日志文件
+        with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
+            f.write(f"\n=== DynamicSkillService execute_action ===\n")
+            f.write(f"skill_name: {skill_name}, action_name: {action_name}\n")
+            f.write(f"params: {params}\n")
+            f.write("=" * 50 + "\n")
+
         db_skill = ai_skill_crud.get_by_name(db, skill_name)
 
         if not db_skill:
@@ -137,7 +142,8 @@ class DynamicSkillService:
             db_action.handler_config,
             params,
             user_id,
-            user_feishu_open_id
+            user_feishu_open_id,
+            team_id
         )
 
     async def _execute_via_handler(
@@ -147,7 +153,8 @@ class DynamicSkillService:
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str]
+        user_feishu_open_id: Optional[str],
+        team_id: Optional[int] = None
     ) -> SkillExecutionResult:
         """通过 HandlerFactory 执行"""
         result = await HandlerFactory.execute_handler(
@@ -156,7 +163,8 @@ class DynamicSkillService:
             handler_config,
             params,
             user_id,
-            user_feishu_open_id
+            user_feishu_open_id,
+            team_id
         )
 
         return SkillExecutionResult(
@@ -236,6 +244,49 @@ class DynamicSkillService:
             return False, f"{skill_def.description}暂不支持【{operation_type}】操作。支持的操作有：{', '.join(all_actions)}。如需新增该操作，请联系技术团队评估开发需求。"
 
         return True, f"系统支持【{module_type}】模块的【{operation_type}】操作。"
+
+    async def execute_actions(
+        self,
+        db: Session,
+        actions: List[Dict[str, Any]],
+        user_id: int,
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
+    ) -> List[SkillExecutionResult]:
+        """
+        批量执行多个 Action
+
+        Args:
+            db: 数据库 Session
+            actions: Action 列表，每个包含 skill, action, params
+            user_id: 用户 ID
+            user_feishu_open_id: 用户飞书 Open ID
+            team_id: 团队 ID
+
+        Returns:
+            执行结果列表（按顺序）
+        """
+        results = []
+
+        for action_item in actions:
+            skill_name = action_item.get("skill")
+            action_name = action_item.get("action")
+            params = action_item.get("params", {})
+
+            if not skill_name or not action_name:
+                results.append(SkillExecutionResult(
+                    success=False,
+                    message="Action 配置缺少 skill 或 action"
+                ))
+                continue
+
+            result = await self.execute_action(
+                db, skill_name, action_name, params,
+                user_id, user_feishu_open_id, team_id
+            )
+            results.append(result)
+
+        return results
 
 
 dynamic_skill_service = DynamicSkillService()

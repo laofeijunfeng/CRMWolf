@@ -35,6 +35,8 @@
 | **写二级页面** | **DESIGN-PAGE-LAYOUT.md** | **必须有 sticky 头部** |
 | **复用逻辑** | **先搜索现有实现** | **禁止重复编写** |
 | **改数据库表** | **Alembic migrations/** | **禁止独立脚本** |
+| **新增业务表** | **必须添加 team_id** | **禁止遗漏隔离** |
+| **打包部署** | **standards/DOCKER-PACKAGING.md** | **禁止遗漏 buildx** |
 | **🤖 AI OpenAPI 开发** | **standards/AI-API-STANDARD.md** | **禁止绕过规范** |
 | **🤖 AI OpenAPI 迭代** | **plans/AI-OPENAPI-IMPLEMENTATION-PLAN.md** | **禁止跳过检查清单** |
 
@@ -68,6 +70,51 @@
 - ✅ 新增 AI 功能复用 `follow_up_parser_service.parse_relative_time`
 - ✅ FollowUpHandler 导入共享服务的正则和方法
 - ✅ 多处调用统一抽离为独立服务文件
+
+---
+
+## 团队隔离规则
+
+**核心要求**：所有新增业务表必须添加 `team_id` 字段，确保多租户数据隔离。
+
+### 必须添加 team_id 的表类型
+
+| 表类型 | 示例 | 说明 |
+|--------|------|------|
+| 业务实体表 | customers, leads, opportunities, contracts | 核心业务数据，必须隔离 |
+| 配置表 | opportunity_stages, approval_flows, procurement_methods | 团队级配置，需要隔离 |
+| 日志表 | operation_logs, conversation_logs, approval_records | 统计分析需要按团队 |
+| 团队资源表 | ai_config, api_keys | 团队独立管理 |
+
+### 不需要 team_id 的表类型
+
+| 表类型 | 示例 | 说明 |
+|--------|------|------|
+| 系统级配置 | roles, permissions, ai_skills | 全局共享定义 |
+| 团队关系表 | teams, user_teams | 团队定义本身 |
+| 用户表 | users | 用户跨团队存在 |
+
+### 新增表检查流程
+
+```
+1. 判断表类型 → 是否需要 team_id
+2. 模型定义 → 添加 team_id 字段
+   team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
+3. Alembic 迁移 → 添加列 + 索引
+4. CRUD 层 → 方法添加 team_id 参数
+5. API 层 → 注入 get_current_user_team
+6. 运行检查脚本 → scripts/check_team_isolation.py
+```
+
+### 检查脚本
+
+```bash
+# 验证所有表的 team_id 配置
+python scripts/check_team_isolation.py
+
+# 生成修复建议
+python scripts/check_team_isolation.py --fix
+```
 
 ---
 
@@ -204,8 +251,9 @@ CRMWolf/
 | **调整间距/圆角** | **DESIGN-SPACING.md → 间距 token → 圆角速查** |
 | **写表单/管理页** | **DESIGN-PAGE-LAYOUT.md → 选择布局类型 → 模板复用** |
 | **改数据库表** | **alembic revision → 编写 migrations/versions/*.py** |
+| **打包部署** | **standards/DOCKER-PACKAGING.md → buildx 构建 → docker save 导出** |
 | **🤖 AI OpenAPI 开发** | **standards/AI-API-STANDARD.md → 查协议规范 → plans/ 查进度** |
 
 ---
 
-**版本：1.1 | 最后更新：2026-05-25 | 修改需人工审批**
+**版本：1.2 | 最后更新：2026-05-28 | 修改需人工审批**

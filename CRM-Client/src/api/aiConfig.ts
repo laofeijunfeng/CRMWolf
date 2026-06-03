@@ -42,14 +42,14 @@ export const aiConfigApi = {
    * 获取 AI 配置
    */
   getConfig: () => {
-    return request.get<any, { code: number; message: string; data: AIConfigResponse | null }>('/api/v1/ai/config')
+    return request.get<any, { code: number; message: string; data: AIConfigResponse | null }>('/v1/ai/config')
   },
 
   /**
    * 保存 AI 配置
    */
   saveConfig: (data: AIConfigCreate) => {
-    return request.post<AIConfigCreate, { code: number; message: string; data: AIConfigResponse }>('/api/v1/ai/config', data)
+    return request.post<AIConfigCreate, { code: number; message: string; data: AIConfigResponse }>('/v1/ai/config', data)
   },
 
   /**

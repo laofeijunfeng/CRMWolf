@@ -139,7 +139,7 @@
             </div>
           </div>
         </div>
-      </el-card>
+      </div>
 
       <div class="core-section">
         <div class="invoice-title-section-card section-card">
@@ -345,7 +345,7 @@ const route = useRoute()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 
-const currentUserId = computed(() => userStore.userInfo?.feishu_open_id || '')
+const currentUserId = computed(() => userStore.userInfo?.id ? String(userStore.userInfo.id) : '')
 
 const invoiceInfo = ref<InvoiceApplicationResponse | null>(null)
 const loading = ref(false)

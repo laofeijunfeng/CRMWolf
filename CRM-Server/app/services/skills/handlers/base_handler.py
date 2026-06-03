@@ -21,7 +21,8 @@ class BaseHandler(ABC):
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行 Handler 操作
@@ -32,6 +33,7 @@ class BaseHandler(ABC):
             params: 用户传入参数
             user_id: 用户 ID
             user_feishu_open_id: 用户飞书 Open ID
+            team_id: 团队 ID
 
         Returns:
             {"success": bool, "message": str, "data": dict}
@@ -251,3 +253,36 @@ class BaseHandler(ABC):
             except AttributeError:
                 continue
         return values
+
+    def _get_status_display_name(
+        self,
+        db: Session,
+        entity_type: str,
+        status_value: Any
+    ) -> str:
+        """
+        获取状态的中文显示名称
+
+        Args:
+            db: 数据库 Session
+            entity_type: 实体类型（如 lead, customer, opportunity）
+            status_value: 状态值（整数）
+
+        Returns:
+            状态的中文显示名称
+        """
+        from app.crud.ai_enum_mapping import ai_enum_mapping_crud
+
+        enum_mapping_name = f"{entity_type}_status"
+        enum_mapping = ai_enum_mapping_crud.get_by_name(db, enum_mapping_name)
+
+        if not enum_mapping or not enum_mapping.values:
+            return str(status_value)
+
+        # enum_mapping.values 是一个 JSON 字典，key 是中文，value 是数值
+        # 我们需要反向查找：找到 value 对应的 key
+        for display_name, value in enum_mapping.values.items():
+            if value == status_value:
+                return display_name
+
+        return str(status_value)

@@ -119,13 +119,13 @@ export interface FinanceApprovalRequest {
 
 const invoiceApi = {
   createInvoiceTitle: (customerId: number, data: InvoiceTitleCreate) => {
-    return request.post<InvoiceTitleResponse>('/api/v1/invoice-titles', data, {
+    return request.post<InvoiceTitleResponse>('/v1/invoice-titles', data, {
       params: { customer_id: customerId }
     })
   },
 
   getInvoiceTitles: (customerId: number) => {
-    return request.get<InvoiceTitleListResponse>('/api/v1/invoice-titles', {
+    return request.get<InvoiceTitleListResponse>('/v1/invoice-titles', {
       params: { customer_id: customerId }
     })
   },
@@ -147,11 +147,11 @@ const invoiceApi = {
   },
 
   createInvoiceApplication: (data: InvoiceApplicationCreate) => {
-    return request.post<InvoiceApplicationResponse>('/api/v1/invoice-applications', data)
+    return request.post<InvoiceApplicationResponse>('/v1/invoice-applications', data)
   },
 
   getInvoiceApplications: (params?: InvoiceApplicationQueryParams) => {
-    return request.get<InvoiceApplicationListResponse>('/api/v1/invoice-applications', { params })
+    return request.get<InvoiceApplicationListResponse>('/v1/invoice-applications', { params })
   },
 
   getInvoiceApplication: (applicationId: number) => {

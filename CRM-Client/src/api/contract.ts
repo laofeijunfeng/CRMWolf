@@ -120,6 +120,9 @@ export interface ContractQueryParams {
   license_type?: LicenseType | null
   contract_number?: string | null
   keyword?: string | null
+  owner_id?: string | null  // 新增：负责人ID筛选（用于「我的合同」）
+  order_by?: string
+  order_dir?: 'asc' | 'desc'
 }
 
 export interface ContractFromOpportunityParams {
@@ -131,11 +134,11 @@ type ApiResponse<T> = Promise<T>
 
 const contractApi = {
   createContract: (data: ContractCreate): ApiResponse<ContractResponse> => {
-    return request.post<ContractResponse>('/api/v1/contracts/', data) as any
+    return request.post<ContractResponse>('/v1/contracts/', data) as any
   },
 
   getContracts: (params?: ContractQueryParams): ApiResponse<ContractListResponse[]> => {
-    return request.get<ContractListResponse[]>('/api/v1/contracts/', { params }) as any
+    return request.get<ContractListResponse[]>('/v1/contracts/', { params }) as any
   },
 
   getContract: (contractId: number): ApiResponse<ContractResponse> => {

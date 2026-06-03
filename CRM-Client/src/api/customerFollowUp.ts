@@ -15,12 +15,14 @@ export interface CustomerFollowUpCreate {
   method: string
   content: string
   next_follow_time?: string | null
+  next_action?: string | null
 }
 
 export interface CustomerFollowUpUpdate {
   method?: string | null
   content?: string | null
   next_follow_time?: string | null
+  next_action?: string | null
 }
 
 export interface CustomerFollowUpResponse {
@@ -30,6 +32,7 @@ export interface CustomerFollowUpResponse {
   content: string
   method: string
   next_follow_time: string | null
+  next_action: string | null
   creator_id: string
   creator_info?: OwnerInfo
   customer_info?: CustomerBasicInfo

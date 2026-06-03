@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Date, Numeric, ForeignKey, func
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, Date, Numeric, ForeignKey, func, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -20,6 +20,7 @@ class PaymentPlan(Base):
     __tablename__ = "crm_contract_payment_plans"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='CASCADE'), nullable=False, comment="关联的合同ID")
     stage_name = Column(String(100), nullable=False, comment="回款阶段名，如：首付款、中期款、尾款")
     planned_amount = Column(Numeric(12, 2), nullable=False, comment="计划回款金额")
@@ -33,6 +34,10 @@ class PaymentPlan(Base):
     payment_records = relationship("PaymentRecord", back_populates="payment_plan", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="payment_plan", cascade="all, delete-orphan")
 
+    __table_args__ = (
+        Index('idx_payment_plan_team_id', 'team_id'),
+    )
+
     def __repr__(self):
         return f"<PaymentPlan(id={self.id}, contract_id={self.contract_id}, stage_name={self.stage_name}, planned_amount={self.planned_amount})>"
 
@@ -41,6 +46,7 @@ class PaymentRecord(Base):
     __tablename__ = "crm_payment_records"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     payment_plan_id = Column(BigInteger, ForeignKey('crm_contract_payment_plans.id', ondelete='CASCADE'), nullable=False, comment="关联的回款计划ID")
     actual_amount = Column(Numeric(12, 2), nullable=False, comment="实际回款金额")
     payment_date = Column(Date, nullable=False, comment="实际回款日期")
@@ -57,6 +63,10 @@ class PaymentRecord(Base):
 
     payment_plan = relationship("PaymentPlan", back_populates="payment_records")
     invoice_applications = relationship("InvoiceApplication", back_populates="payment_record", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('idx_payment_record_team_id', 'team_id'),
+    )
 
     def __repr__(self):
         return f"<PaymentRecord(id={self.id}, payment_plan_id={self.payment_plan_id}, actual_amount={self.actual_amount}, payment_date={self.payment_date})>"

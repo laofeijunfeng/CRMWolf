@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission
+from app.core.deps import get_current_active_user, require_permission, get_current_user_team
 from app.models.user import User
 from app.models.invoice import InvoiceApplicationStatus
 from app.models.customer import Customer
@@ -25,44 +25,47 @@ router = APIRouter(prefix="/invoice-titles", tags=["开票抬头管理"])
 def create_invoice_title(
     customer_id: int = Query(..., description="客户ID"),
     title_data: InvoiceTitleCreate = None,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = db.query(Customer).filter(Customer.id == customer_id, Customer.team_id == team_id).first()
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户不存在"
         )
     
-    existing_title = invoice_title_crud.get_by_taxpayer_id(db, customer_id, title_data.taxpayer_id)
+    existing_title = invoice_title_crud.get_by_taxpayer_id(db, customer_id, title_data.taxpayer_id, team_id)
     if existing_title:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该纳税人识别号已存在"
         )
     
-    title = invoice_title_crud.create(db, customer_id, title_data)
+    title = invoice_title_crud.create(db, customer_id, title_data, team_id)
     return title
 
 
 @router.get("", response_model=InvoiceTitleListResponse, summary="查询开票抬头列表", description="获取指定客户的所有开票抬头")
 def list_invoice_titles(
     customer_id: int = Query(..., description="客户ID"),
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    titles = invoice_title_crud.get_by_customer_id(db, customer_id)
+    titles = invoice_title_crud.get_by_customer_id(db, customer_id, team_id)
     return {"invoice_titles": titles}
 
 
 @router.get("/{title_id}", response_model=InvoiceTitleResponse, summary="获取开票抬头详情", description="获取指定开票抬头的详细信息")
 def get_invoice_title(
     title_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    title = invoice_title_crud.get_by_id(db, title_id)
+    title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -75,10 +78,11 @@ def get_invoice_title(
 def update_invoice_title(
     title_id: int,
     title_data: InvoiceTitleUpdate,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    title = invoice_title_crud.get_by_id(db, title_id)
+    title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -92,17 +96,18 @@ def update_invoice_title(
 @router.patch("/{title_id}/set-default", response_model=InvoiceTitleResponse, summary="设置默认抬头", description="设置指定的开票抬头为默认抬头，自动取消原默认抬头")
 def set_default_invoice_title(
     title_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    title = invoice_title_crud.get_by_id(db, title_id)
+    title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="开票抬头不存在"
         )
-    
-    updated_title = invoice_title_crud.set_default(db, title.customer_id, title_id)
+
+    updated_title = invoice_title_crud.set_default(db, title.customer_id, title_id, team_id)
     if not updated_title:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -114,10 +119,11 @@ def set_default_invoice_title(
 @router.delete("/{title_id}", response_model=MessageResponse, summary="删除开票抬头", description="删除指定的开票抬头")
 def delete_invoice_title(
     title_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    success = invoice_title_crud.delete(db, title_id)
+    success = invoice_title_crud.delete(db, title_id, team_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -132,6 +138,7 @@ invoice_router = APIRouter(prefix="/invoice-applications", tags=["发票申请�
 @invoice_router.post("", response_model=InvoiceApplicationResponse, summary="创建发票申请", description="创建新的发票申请，自动关联业务上下文（客户、合同、商机、回款计划）")
 def create_invoice_application(
     application_data: InvoiceApplicationCreate,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -139,9 +146,10 @@ def create_invoice_application(
         application = invoice_application_crud.create(
             db,
             application_data,
-            current_user.feishu_open_id
+            str(current_user.id),
+            team_id
         )
-        return _populate_application_info(db, application)
+        return _populate_application_info(db, application, team_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -158,13 +166,15 @@ def list_invoice_applications(
     me: bool = Query(False, description="是否只查询当前用户负责的客户的数据"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    current_user_id = current_user.feishu_open_id if me else None
-    
+    current_user_id = str(current_user.id) if me else None
+
     applications, total = invoice_application_crud.list_applications(
         db,
+        team_id=team_id,
         skip=skip,
         limit=limit,
         customer_id=customer_id,
@@ -173,8 +183,8 @@ def list_invoice_applications(
         applicant_id=applicant_id,
         current_user_id=current_user_id
     )
-    
-    populated_applications = [_populate_application_info(db, app) for app in applications]
+
+    populated_applications = [_populate_application_info(db, app, team_id) for app in applications]
     
     return {"invoice_applications": populated_applications}
 
@@ -182,36 +192,38 @@ def list_invoice_applications(
 @invoice_router.get("/{application_id}", response_model=InvoiceApplicationResponse, summary="获取发票申请详情", description="获取指定发票申请的完整信息及关联业务数据")
 def get_invoice_application(
     application_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    application = invoice_application_crud.get_by_id(db, application_id)
+    application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="发票申请不存在"
         )
-    
-    return _populate_application_info(db, application)
+
+    return _populate_application_info(db, application, team_id)
 
 
 @invoice_router.put("/{application_id}", response_model=InvoiceApplicationResponse, summary="修改发票申请", description="修改指定的发票申请信息（仅草稿状态可编辑）")
 def update_invoice_application(
     application_id: int,
     application_data: InvoiceApplicationUpdate,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    application = invoice_application_crud.get_by_id(db, application_id)
+    application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="发票申请不存在"
         )
-    
+
     try:
         updated_application = invoice_application_crud.update(db, application, application_data)
-        return _populate_application_info(db, updated_application)
+        return _populate_application_info(db, updated_application, team_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -223,19 +235,20 @@ def update_invoice_application(
 def submit_invoice_application(
     application_id: int,
     submit_data: InvoiceApplicationSubmit = None,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    application = invoice_application_crud.get_by_id(db, application_id)
+    application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="发票申请不存在"
         )
-    
+
     try:
         submitted_application = invoice_application_crud.submit(db, application_id)
-        return _populate_application_info(db, submitted_application)
+        return _populate_application_info(db, submitted_application, team_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -247,28 +260,29 @@ def submit_invoice_application(
 def review_invoice_application(
     application_id: int,
     review_data: InvoiceApplicationReview,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     permission_checker = require_permission("invoice:approve")
     permission_checker(current_user, db)
-    
-    application = invoice_application_crud.get_by_id(db, application_id)
+
+    application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="发票申请不存在"
         )
-    
+
     try:
         reviewed_application = invoice_application_crud.review(
             db,
             application_id,
-            current_user.feishu_open_id,
+            str(current_user.id),
             review_data.action,
             review_data.comment
         )
-        return _populate_application_info(db, reviewed_application)
+        return _populate_application_info(db, reviewed_application, team_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -279,25 +293,26 @@ def review_invoice_application(
 @invoice_router.post("/{application_id}/withdraw", response_model=InvoiceApplicationResponse, summary="撤回发票申请", description="撤回已提交的发票申请，状态变为草稿")
 def withdraw_invoice_application(
     application_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    application = invoice_application_crud.get_by_id(db, application_id)
+    application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="发票申请不存在"
         )
-    
-    if application.applicant_id != current_user.feishu_open_id:
+
+    if application.applicant_id != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只能撤回自己提交的发票申请"
         )
-    
+
     try:
         withdrawn_application = invoice_application_crud.withdraw(db, application_id)
-        return _populate_application_info(db, withdrawn_application)
+        return _populate_application_info(db, withdrawn_application, team_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -308,22 +323,23 @@ def withdraw_invoice_application(
 @invoice_router.post("/{application_id}/mark-issued", response_model=InvoiceApplicationResponse, summary="标记为已开票", description="将已批准的发票申请标记为已开票状态")
 def mark_invoice_issued(
     application_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     permission_checker = require_permission("invoice:mark_issued")
     permission_checker(current_user, db)
-    
-    application = invoice_application_crud.get_by_id(db, application_id)
+
+    application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="发票申请不存在"
         )
-    
+
     try:
         issued_application = invoice_application_crud.mark_issued(db, application_id)
-        return _populate_application_info(db, issued_application)
+        return _populate_application_info(db, issued_application, team_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -334,11 +350,12 @@ def mark_invoice_issued(
 @invoice_router.delete("/{application_id}", response_model=MessageResponse, summary="删除发票申请", description="删除指定的发票申请（仅草稿状态可删除）")
 def delete_invoice_application(
     application_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     try:
-        success = invoice_application_crud.delete(db, application_id)
+        success = invoice_application_crud.delete(db, application_id, team_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -355,17 +372,18 @@ def delete_invoice_application(
 @invoice_router.get("/payment-plans/{payment_plan_id}/invoices", response_model=PaymentPlanInvoiceSummary, summary="获取回款计划关联发票", description="查询指定回款计划关联的所有发票申请及状态")
 def get_payment_plan_invoices(
     payment_plan_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    summary = invoice_application_crud.get_payment_plan_invoice_summary(db, payment_plan_id)
+    summary = invoice_application_crud.get_payment_plan_invoice_summary(db, payment_plan_id, team_id)
     if not summary:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款计划不存在"
         )
-    
-    populated_invoices = [_populate_application_info(db, app) for app in summary["invoices"]]
+
+    populated_invoices = [_populate_application_info(db, app, team_id) for app in summary["invoices"]]
     
     return PaymentPlanInvoiceSummary(
         payment_plan_id=summary["payment_plan_id"],
@@ -377,11 +395,26 @@ def get_payment_plan_invoices(
     )
 
 
-def _populate_application_info(db: Session, application) -> dict:
-    customer = db.query(Customer).filter(Customer.id == application.customer_id).first()
-    contract = db.query(Contract).filter(Contract.id == application.contract_id).first()
-    opportunity = db.query(Opportunity).filter(Opportunity.id == application.opportunity_id).first()
-    payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == application.payment_plan_id).first()
+def _populate_application_info(db: Session, application, team_id: Optional[int] = None) -> dict:
+    customer_query = db.query(Customer).filter(Customer.id == application.customer_id)
+    if team_id is not None:
+        customer_query = customer_query.filter(Customer.team_id == team_id)
+    customer = customer_query.first()
+
+    contract_query = db.query(Contract).filter(Contract.id == application.contract_id)
+    if team_id is not None:
+        contract_query = contract_query.filter(Contract.team_id == team_id)
+    contract = contract_query.first()
+
+    opportunity_query = db.query(Opportunity).filter(Opportunity.id == application.opportunity_id)
+    if team_id is not None:
+        opportunity_query = opportunity_query.filter(Opportunity.team_id == team_id)
+    opportunity = opportunity_query.first()
+
+    payment_plan_query = db.query(PaymentPlan).filter(PaymentPlan.id == application.payment_plan_id)
+    if team_id is not None:
+        payment_plan_query = payment_plan_query.filter(PaymentPlan.team_id == team_id)
+    payment_plan = payment_plan_query.first()
     
     result = {
         "id": application.id,
@@ -418,12 +451,12 @@ def _populate_application_info(db: Session, application) -> dict:
     }
     
     if application.applicant_id:
-        applicant = db.query(User).filter(User.feishu_open_id == application.applicant_id).first()
+        applicant = db.query(User).filter(User.id == int(application.applicant_id)).first()
         if applicant:
             result["applicant_name"] = applicant.name
-    
+
     if application.reviewer_id:
-        reviewer = db.query(User).filter(User.feishu_open_id == application.reviewer_id).first()
+        reviewer = db.query(User).filter(User.id == int(application.reviewer_id)).first()
         if reviewer:
             result["reviewer_name"] = reviewer.name
     

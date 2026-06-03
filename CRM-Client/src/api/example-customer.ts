@@ -39,7 +39,7 @@ export const customerApi = {
     const validatedParams = PaginationParamsSchema.parse(params)
 
     // 2. 发起请求
-    const raw = await request.get('/api/v1/customers', {
+    const raw = await request.get('/v1/customers', {
       params: validatedParams
     })
 
@@ -72,7 +72,7 @@ export const customerApi = {
     // Zod 校验请求数据
     const validatedData = CustomerCreateSchema.parse(data)
 
-    const raw = await request.post('/api/v1/customers', validatedData)
+    const raw = await request.post('/v1/customers', validatedData)
     return CustomerResponseSchema.parse(raw)
   },
 
@@ -106,10 +106,10 @@ export const customerApi = {
  * ❌ 禁止示例 1：使用 as any
  *
  * // 错误
- * const result = await request.get('/api/v1/customers') as any
+ * const result = await request.get('/v1/customers') as any
  *
  * // 正确：使用 Zod 校验
- * const result = CustomerListResponseSchema.parse(await request.get('/api/v1/customers'))
+ * const result = CustomerListResponseSchema.parse(await request.get('/v1/customers'))
  */
 
 /**

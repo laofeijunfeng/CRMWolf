@@ -4,7 +4,7 @@ from sqlalchemy import text
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user
+from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.contract import contract_crud
 from app.crud.approval import approval_flow_crud, approval_crud
 from app.crud.role import role_crud
@@ -44,10 +44,11 @@ def get_approval_flows(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
     is_active: Optional[bool] = Query(None, description="是否启用"),
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    flows, total = approval_flow_crud.get_multi(db, skip, limit, is_active)
+    flows, total = approval_flow_crud.get_multi(db, team_id, skip, limit, is_active)
     return flows
 
 
@@ -122,23 +123,24 @@ def get_approval_flow(
 """)
 def create_approval_flow(
     flow_data: ApprovalFlowCreate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from app.core.deps import require_permission
-    
+
     permission_checker = require_permission("approval:flow:create")
     permission_checker(current_user, db)
-    
-    existing_flow = approval_flow_crud.get_by_code(db, flow_data.flow_code)
+
+    existing_flow = approval_flow_crud.get_by_code(db, flow_data.flow_code, team_id)
     if existing_flow:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"审批流程编码 {flow_data.flow_code} 已存在"
         )
-    
+
     try:
-        flow = approval_flow_crud.create(db, flow_data)
+        flow = approval_flow_crud.create(db, flow_data, team_id)
         return flow
     except Exception as e:
         raise HTTPException(
@@ -262,7 +264,7 @@ async def submit_contract_approval(
             detail="该合同已有审批流程，请等待审批完成"
         )
     
-    flow = approval_flow_crud.match_flow(db, contract)
+    flow = approval_flow_crud.match_flow(db, contract, contract.team_id)
     if not flow:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -274,7 +276,7 @@ async def submit_contract_approval(
             db,
             contract,
             flow,
-            current_user.feishu_open_id,
+            str(current_user.id),
             current_user.name
         )
         
@@ -342,6 +344,7 @@ async def submit_contract_approval(
 async def approve_contract(
     contract_id: int,
     action_request: ApprovalActionRequest,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -351,14 +354,14 @@ async def approve_contract(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="审批流程不存在"
         )
-    
+
     if not approval.current_node:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="当前审批节点不存在"
         )
-    
-    user_roles = role_crud.get_user_roles(db, current_user.id)
+
+    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
     
     if approval.current_node.approve_role not in role_codes:
@@ -368,8 +371,9 @@ async def approve_contract(
         )
     
     contract = contract_crud.get_by_id(db, contract_id)
-    if contract and contract.creator_id == current_user.feishu_open_id:
-        user_permissions = permission_crud.get_user_permissions(db, current_user.id)
+    if contract and contract.creator_id == str(current_user.id):
+        from app.crud.permission import permission_crud
+        user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
         permission_codes = {p.code for p in user_permissions}
         
         if "contract:approve_own" not in permission_codes:
@@ -383,7 +387,7 @@ async def approve_contract(
             db,
             approval,
             action_request,
-            current_user.feishu_open_id,
+            str(current_user.id),
             current_user.name
         )
         
@@ -464,7 +468,7 @@ def cancel_approval(
         )
     
     try:
-        approval = approval_crud.cancel(db, approval, current_user.feishu_open_id)
+        approval = approval_crud.cancel(db, approval, str(current_user.id))
         return MessageResponse(message="审批已撤回")
     except ValueError as e:
         raise HTTPException(

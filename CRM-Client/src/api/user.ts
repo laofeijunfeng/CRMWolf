@@ -12,10 +12,8 @@ export interface RoleInfo {
 
 export interface UserResponse {
   id: number
-  feishu_open_id: string
   name: string
-  en_name: string
-  email: string | null
+  email: string
   mobile: string | null
   avatar_url: string | null
   employee_no: string | null
@@ -27,9 +25,8 @@ export interface UserResponse {
 }
 
 export interface UserCreate {
-  feishu_open_id: string
   name: string
-  email?: string | null
+  email: string
   mobile?: string | null
   avatar_url?: string | null
   region?: string | null
@@ -50,6 +47,16 @@ export interface UserQueryParams {
   limit?: number
   status?: UserStatus | null
   region?: string | null
+}
+
+export interface UserSearchResult {
+  id: number
+  name: string
+  email: string
+  mobile: string | null
+  avatar_url: string | null
+  region: string | null
+  status: string
 }
 
 const userApi = {
@@ -75,6 +82,15 @@ const userApi = {
 
   deleteUser: async (userId: number) => {
     const response = await request.delete<UserResponse>(`/users/${userId}`)
+    return response
+  },
+
+  searchUsers: async (email: string, excludeTeamId?: number) => {
+    const params: Record<string, unknown> = { email, limit: 10 }
+    if (excludeTeamId) {
+      params.exclude_team_id = excludeTeamId
+    }
+    const response = await request.get<UserSearchResult[]>('/users/search', { params })
     return response
   }
 }

@@ -179,7 +179,7 @@ const props = defineProps<Props>()
 const emit = defineEmits(['approve', 'reject'])
 
 const userStore = useUserStore()
-const currentUserId = userStore.userInfo?.feishu_open_id || ''
+const currentUserId = userStore.userInfo?.id ? String(userStore.userInfo.id) : ''
 
 const rejectModalVisible = ref(false)
 const rejectForm = ref({

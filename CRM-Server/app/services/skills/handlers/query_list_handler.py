@@ -22,7 +22,8 @@ class QueryListHandler(BaseHandler):
         handler_config: Dict[str, Any],
         params: Dict[str, Any],
         user_id: int,
-        user_feishu_open_id: Optional[str] = None
+        user_feishu_open_id: Optional[str] = None,
+        team_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         执行列表查询
@@ -66,7 +67,7 @@ class QueryListHandler(BaseHandler):
 
         # 应用 owner 过滤
         if handler_config.get("owner_filter"):
-            query_params["owner_id"] = user.feishu_open_id
+            query_params["owner_id"] = str(user.id)
 
         # 应用状态排除
         if handler_config.get("status_exclude"):

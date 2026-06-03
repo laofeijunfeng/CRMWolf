@@ -1,65 +1,26 @@
 <template>
   <div class="customers-page">
-    <!-- 快捷筛选标签 -->
-    <div class="filter-tabs">
-      <span
-        :class="['filter-tab', { active: activeTab === 'all' }]"
-        @click="handleTabChange('all')"
-      >所有客户</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'my' }]"
-        @click="handleTabChange('my')"
-      >我的客户</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'public' }]"
-        @click="handleTabChange('public')"
-      >公海客户</span>
-    </div>
-
-    <!-- 搜索筛选区 -->
-    <div class="filter-card">
-      <div class="filter-row">
-        <div class="filter-left">
-          <el-input
-            v-model="searchForm.keyword"
-            placeholder="搜索客户名称"
-            clearable
-            class="search-input"
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-        </div>
-        <div class="filter-center">
-          <el-select v-model="searchForm.industry" placeholder="行业" clearable class="filter-item" v-if="activeTab !== 'public'">
-            <el-option
-              v-for="option in industryOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
-          <el-input v-model="searchForm.city" placeholder="城市" clearable class="filter-item" />
-          <el-select v-model="searchForm.status" placeholder="状态" clearable class="filter-item">
-            <el-option :value="0" label="跟进中" />
-            <el-option :value="1" label="已赢单" />
-            <el-option :value="2" label="已输单" />
-            <el-option :value="3" label="已失效" />
-          </el-select>
-          <el-select v-model="searchForm.owner_id" placeholder="负责人" clearable class="filter-item" v-if="activeTab === 'all' && ownerOptions.length > 1">
-            <el-option v-for="owner in ownerOptions" :key="owner.owner_id" :value="owner.owner_id" :label="owner.is_me ? `我（${owner.owner_name}）` : owner.owner_name" />
-          </el-select>
-        </div>
-        <div class="filter-right">
-          <el-button @click="handleReset">重置</el-button>
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button v-if="canCreateCustomer" type="primary" @click="router.push('/customers/create')">
-            <el-icon><Plus /></el-icon>
-            新建
-          </el-button>
-        </div>
+    <!-- 快捷筛选标签 + 操作按钮 -->
+    <div class="filter-tabs-bar">
+      <div class="filter-tabs">
+        <span
+          :class="['filter-tab', { active: activeTab === 'all' }]"
+          @click="handleTabChange('all')"
+        >所有客户</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'my' }]"
+          @click="handleTabChange('my')"
+        >我的客户</span>
+        <span
+          :class="['filter-tab', { active: activeTab === 'public' }]"
+          @click="handleTabChange('public')"
+        >公海客户</span>
+      </div>
+      <div class="filter-actions">
+        <el-button v-if="canCreateCustomer" type="primary" @click="router.push('/customers/create')">
+          <el-icon><Plus /></el-icon>
+          新建客户
+        </el-button>
       </div>
     </div>
 
@@ -70,12 +31,39 @@
         v-loading="loading"
         stripe
       >
-        <el-table-column prop="account_name" label="客户名称" min-width="200">
+        <el-table-column prop="account_name" min-width="220">
+          <template #header>
+            <FilterTableHeader
+              label="客户名称"
+              field="account_name"
+              :filter="{ type: 'search', placeholder: '搜索客户名称' }"
+              :sortable="true"
+              :filter-value="filterValues['account_name']"
+              :sort-state="sortState.field === 'account_name' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
-            <span class="link-text" @click="handleViewDetail(row)">{{ row.account_name }}</span>
+            <div class="name-cell">
+              <el-icon class="magicwand-icon" @click="handleMagicWand(row)">
+                <MagicStick />
+              </el-icon>
+              <span class="link-text" @click="handleViewDetail(row)">{{ row.account_name }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="行业" width="120">
+        <el-table-column width="120">
+          <template #header>
+            <FilterTableHeader
+              label="行业"
+              field="industry"
+              :sortable="true"
+              :sort-state="sortState.field === 'industry' ? sortState : null"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             {{ row.industry_info?.name || '-' }}
           </template>
@@ -86,7 +74,20 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="city" label="城市" width="100">
+        <el-table-column prop="city" width="100">
+          <template #header>
+            <FilterTableHeader
+              label="城市"
+              field="city"
+              :filter="{ type: 'search', placeholder: '搜索城市' }"
+              :sortable="true"
+              :filter-value="filterValues['city']"
+              :sort-state="sortState.field === 'city' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             {{ row.city || '-' }}
           </template>
@@ -96,11 +97,55 @@
             {{ row.company_scale || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" width="100">
+          <template #header>
+            <FilterTableHeader
+              label="状态"
+              field="status"
+              :filter="{ type: 'select', placeholder: '选择状态', options: [
+                { value: 0, label: '跟进中' },
+                { value: 1, label: '已赢单' },
+                { value: 2, label: '已输单' },
+                { value: 3, label: '已失效' }
+              ] }"
+              :sortable="true"
+              :filter-value="filterValues['status']"
+              :sort-state="sortState.field === 'status' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             <span :class="['status-tag', getStatusClass(row.status)]">
               {{ getStatusText(row.status) }}
             </span>
+          </template>
+        </el-table-column>
+        <!-- 热力值列 -->
+        <el-table-column prop="score" width="100">
+          <template #header>
+            <FilterTableHeader
+              label="热力值"
+              field="score"
+              :filter="{ type: 'range', min: 0, max: 100, placeholder: '筛选热力值' }"
+              :sortable="true"
+              :filter-value="filterValues['score']"
+              :sort-state="sortState.field === 'score' ? sortState : null"
+              @filter-change="handleFilterChange"
+              @filter-clear="handleFilterClear"
+              @sort-change="handleSortChange"
+            />
+          </template>
+          <template #default="{ row }">
+            <el-tooltip placement="top" :content="getScoreTooltip(row)">
+              <div class="score-cell">
+                <span class="score-icon" :style="{ color: getScoreColor(row.score) }">
+                  {{ getScoreIcon(row.score) }}
+                </span>
+                <span class="score-number">{{ row.score ?? '--' }}</span>
+              </div>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="默认采购方式" width="140">
@@ -118,25 +163,71 @@
             {{ row.creator_info?.name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="created_time" label="创建时间" width="160">
+        <el-table-column prop="created_time" width="160">
+          <template #header>
+            <FilterTableHeader
+              label="创建时间"
+              field="created_time"
+              :sortable="true"
+              :sort-state="sortState.field === 'created_time' ? sortState : null"
+              @sort-change="handleSortChange"
+            />
+          </template>
           <template #default="{ row }">
             {{ formatDateTime(row.created_time) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <div class="action-cell">
-              <template v-if="activeTab === 'public' && canClaimCustomer">
-                <span class="action-link" @click="handleClaim(row)">领取</span>
+              <template v-if="activeTab === 'public' && canAccessPublic">
+                <el-tooltip content="领取" placement="top">
+                  <el-icon class="action-icon" @click="handleClaim(row)">
+                    <User />
+                  </el-icon>
+                </el-tooltip>
               </template>
               <template v-else>
-                <span v-if="canCreateOpportunity" class="action-link" @click="handleCreateOpportunity(row)">商机</span>
-                <span v-if="canEditCustomer" class="action-link" @click="handleEdit(row)">编辑</span>
-                <span v-if="canReturnCustomer" class="action-link" @click="handleReturn(row)">退回公海</span>
-                <span v-if="canEditCustomer" class="action-link" @click="handleWin(row)">赢单</span>
-                <span v-if="canEditCustomer" class="action-link" @click="handleLose(row)">输单</span>
-                <span v-if="canEditCustomer" class="action-link" @click="handleInvalid(row)">失效</span>
-                <span v-if="canDeleteCustomer" class="action-link action-danger" @click="handleDelete(row)">删除</span>
+                <el-tooltip content="查看" placement="top">
+                  <el-icon class="action-icon" @click="handleViewDetail(row)">
+                    <View />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip v-if="canCreateOpportunity" content="新建商机" placement="top">
+                  <el-icon class="action-icon" @click="handleCreateOpportunity(row)">
+                    <Opportunity />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip v-if="canEditRow(row)" content="编辑" placement="top">
+                  <el-icon class="action-icon" @click="handleEdit(row)">
+                    <Edit />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip v-if="canReturnRow(row)" content="退回公海" placement="top">
+                  <el-icon class="action-icon" @click="handleReturn(row)">
+                    <RefreshRight />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip v-if="canEditRow(row)" content="赢单" placement="top">
+                  <el-icon class="action-icon" @click="handleWin(row)">
+                    <Trophy />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip v-if="canEditRow(row)" content="输单" placement="top">
+                  <el-icon class="action-icon action-danger" @click="handleLose(row)">
+                    <CircleClose />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip v-if="canEditRow(row)" content="失效" placement="top">
+                  <el-icon class="action-icon action-danger" @click="handleInvalid(row)">
+                    <CircleClose />
+                  </el-icon>
+                </el-tooltip>
+                <el-tooltip v-if="canDeleteRow(row)" content="删除" placement="top">
+                  <el-icon class="action-icon action-danger" @click="handleDelete(row)">
+                    <Delete />
+                  </el-icon>
+                </el-tooltip>
               </template>
             </div>
           </template>
@@ -192,6 +283,40 @@
         <el-button type="primary" @click="handleReturnModalOk">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 标记输单弹窗 -->
+    <el-dialog
+      v-model="loseModalVisible"
+      title="标记输单"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="loseForm" :rules="loseFormRules" label-position="top" ref="loseFormRef">
+        <el-form-item prop="loss_reason" label="输单原因" required>
+          <el-input
+            v-model="loseForm.loss_reason"
+            type="textarea"
+            placeholder="请输入输单原因说明"
+            :rows="4"
+            :maxlength="500"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="loseModalVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleLoseModalOk">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- AI 魔术棒弹窗 -->
+    <MagicWandDialog
+      v-model="showMagicWand"
+      entity-type="customer"
+      :entity-id="magicWandEntityId"
+      :entity-name="magicWandEntityName"
+      @refresh="fetchCustomerList"
+    />
   </div>
 </template>
 
@@ -201,7 +326,15 @@ import { useRouter } from 'vue-router'
 import {
   Plus,
   Search,
-  Delete
+  MagicStick,
+  View,
+  Edit,
+  User,
+  RefreshRight,
+  Trophy,
+  CircleClose,
+  Delete,
+  Opportunity
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import customerApi, {
@@ -209,10 +342,14 @@ import customerApi, {
   type CustomerStatus,
   type CustomerReturnRequest,
   type ReturnReasonEnum,
-  type OwnerFilterOption
+  type OwnerFilterOption,
+  type CustomerLoseRequest
 } from '@/api/customer'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
+import MagicWandDialog from '@/components/MagicWandDialog.vue'
+import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
+import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -230,6 +367,9 @@ const searchForm = reactive({
   owner_id: undefined as string | undefined
 })
 
+const filterValues = ref<Record<string, FilterValue>>({})
+const sortState = ref<SortState>({ field: '', order: null })
+
 const ownerOptions = ref<OwnerFilterOption[]>([])
 const activeTab = ref('all')
 
@@ -239,12 +379,40 @@ const pagination = reactive({
   total: 0
 })
 
+// 权限计算属性
 const canCreateCustomer = computed(() => permissionStore.hasPermission('customer:create'))
-const canEditCustomer = computed(() => permissionStore.hasAnyPermission(['customer:update', 'customer:edit_own', 'customer:edit_all']))
-const canDeleteCustomer = computed(() => permissionStore.hasAnyPermission(['customer:delete', 'customer:delete_own', 'customer:delete_all']))
-const canClaimCustomer = computed(() => permissionStore.hasPermission('customer:claim'))
-const canReturnCustomer = computed(() => permissionStore.hasAnyPermission(['customer:return', 'customer:return_to_pool']))
+const canEditAllCustomer = computed(() => permissionStore.hasPermission('customer:edit:all'))
+const canEditOwnCustomer = computed(() => permissionStore.hasPermission('customer:edit:own'))
+const canDeleteAllCustomer = computed(() => permissionStore.hasPermission('customer:delete:all'))
+const canDeleteOwnCustomer = computed(() => permissionStore.hasPermission('customer:delete:own'))
+const canReturnCustomer = computed(() => permissionStore.hasPermission('customer:return'))
 const canCreateOpportunity = computed(() => permissionStore.hasPermission('opportunity:create'))
+// 公海领取：不需要特殊权限，只要有访问公海的能力即可
+const canAccessPublic = computed(() => permissionStore.hasAnyPermission(['customer:view:own', 'customer:view:all']))
+
+// 行级权限检查函数
+const canEditRow = (row: CustomerResponse): boolean => {
+  if (canEditAllCustomer.value) return true
+  if (canEditOwnCustomer.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
+
+const canDeleteRow = (row: CustomerResponse): boolean => {
+  if (canDeleteAllCustomer.value) return true
+  if (canDeleteOwnCustomer.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
+
+const canReturnRow = (row: CustomerResponse): boolean => {
+  if (!canReturnCustomer.value) return false
+  // 必须有负责人才能退回
+  if (!row.owner_id) return false
+  // 如果有 edit_all 权限，可以退回任何客户
+  if (canEditAllCustomer.value) return true
+  // 如果只有 edit_own 权限，只能退回自己负责的客户
+  if (canEditOwnCustomer.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  return false
+}
 
 const industryOptions = ref<any[]>([])
 
@@ -259,6 +427,22 @@ const returnFormRules = {
   return_reason: [{ required: true, message: '请选择退回原因', trigger: 'change' }],
   detailed_reason: [{ required: true, message: '请输入详细原因说明', trigger: 'blur' }]
 }
+
+// 标记输单弹窗
+const loseModalVisible = ref(false)
+const loseFormRef = ref()
+const loseForm = reactive<CustomerLoseRequest>({
+  loss_reason: ''
+})
+
+const loseFormRules = {
+  loss_reason: [{ required: true, message: '请输入输单原因', trigger: 'blur' }]
+}
+
+// MagicWand 状态
+const showMagicWand = ref(false)
+const magicWandEntityId = ref(0)
+const magicWandEntityName = ref('')
 
 const getStatusText = (status: number) => {
   const map: Record<number, string> = { 0: '跟进中', 1: '已赢单', 2: '已输单', 3: '已失效' }
@@ -284,6 +468,37 @@ const formatDateTime = (dateStr?: string) => {
   })
 }
 
+// 热力值相关函数
+const getScoreIcon = (score: number | null) => {
+  if (score === null) return '❓'
+  if (score >= 80) return '🔥'
+  if (score >= 60) return '⚡'
+  if (score >= 40) return '✅'
+  return '❄️'
+}
+
+const getScoreColor = (score: number | null) => {
+  if (score === null) return '#d9d9d9'
+  if (score >= 80) return '#ff4d4f'
+  if (score >= 60) return '#faad14'
+  if (score >= 40) return '#52c41a'
+  return '#d9d9d9'
+}
+
+const getScoreLevel = (score: number | null) => {
+  if (score === null) return '未知'
+  if (score >= 80) return '高'
+  if (score >= 60) return '中'
+  if (score >= 40) return '低'
+  return '危险'
+}
+
+const getScoreTooltip = (row: Customer) => {
+  if (row.score === null) return '暂未计算热力值'
+  const level = getScoreLevel(row.score)
+  return `热力值: ${row.score}分 (${level})`
+}
+
 const handleSearch = () => {
   pagination.current = 1
   fetchCustomerList()
@@ -295,6 +510,8 @@ const handleReset = () => {
   searchForm.city = ''
   searchForm.status = undefined
   searchForm.owner_id = undefined
+  filterValues.value = {}
+  sortState.value = { field: '', order: null }
   handleSearch()
 }
 
@@ -304,32 +521,53 @@ const handleTabChange = (key: string) => {
   fetchCustomerList()
 }
 
+const handleFilterChange = (field: string, value: FilterValue) => {
+  filterValues.value[field] = value
+  pagination.current = 1
+  fetchCustomerList()
+}
+
+const handleFilterClear = (field: string) => {
+  delete filterValues.value[field]
+  pagination.current = 1
+  fetchCustomerList()
+}
+
+const handleSortChange = (newSortState: SortState) => {
+  sortState.value = newSortState
+  pagination.current = 1
+  fetchCustomerList()
+}
+
 const fetchCustomerList = async () => {
   try {
     loading.value = true
 
-    if (activeTab.value === 'public') {
-      const params: any = {
-        skip: (pagination.current - 1) * pagination.pageSize,
-        limit: pagination.pageSize,
-        keyword: searchForm.keyword || undefined,
-        city: searchForm.city || undefined,
-        status: searchForm.status
-      }
+    // 从 filterValues 提取筛选值
+    const keyword = filterValues.value['account_name']?.search || searchForm.keyword || undefined
+    const city = filterValues.value['city']?.search || searchForm.city || undefined
+    const statusSelect = filterValues.value['status']?.select
+    const status = statusSelect !== undefined && statusSelect !== null ? statusSelect : searchForm.status
 
+    const params: any = {
+      skip: (pagination.current - 1) * pagination.pageSize,
+      limit: pagination.pageSize,
+      keyword,
+      industry: searchForm.industry || undefined,
+      city,
+      status
+    }
+
+    if (sortState.value.order) {
+      params.order_by = sortState.value.field
+      params.order_dir = sortState.value.order
+    }
+
+    if (activeTab.value === 'public') {
       const response = await customerApi.getPublicCustomers(params) as any
       tableData.value = Array.isArray(response) ? response : []
       pagination.total = Array.isArray(response) ? response.length : 0
     } else {
-      const params: any = {
-        page: pagination.current,
-        page_size: pagination.pageSize,
-        keyword: searchForm.keyword || undefined,
-        industry: searchForm.industry || undefined,
-        city: searchForm.city || undefined,
-        status: searchForm.status
-      }
-
       if (activeTab.value === 'my') {
         params.owner_id = 'me'
       } else if (searchForm.owner_id) {
@@ -366,6 +604,12 @@ const handleViewDetail = (record: CustomerResponse) => {
   router.push(`/customers/${record.id}`)
 }
 
+const handleMagicWand = (record: CustomerResponse) => {
+  magicWandEntityId.value = record.id
+  magicWandEntityName.value = record.account_name
+  showMagicWand.value = true
+}
+
 const handleCreateOpportunity = (record: CustomerResponse) => {
   router.push(`/customers/${record.id}/opportunities/create`)
 }
@@ -393,8 +637,25 @@ const handleWin = async (record: CustomerResponse) => {
   await handleUpdateStatus(record, 1)
 }
 
-const handleLose = async (record: CustomerResponse) => {
-  await handleUpdateStatus(record, 2)
+const handleLose = (record: CustomerResponse) => {
+  selectedCustomer.value = record
+  Object.assign(loseForm, { loss_reason: '' })
+  loseModalVisible.value = true
+}
+
+const handleLoseModalOk = async () => {
+  if (!selectedCustomer.value) return
+  try {
+    await loseFormRef.value?.validate()
+  } catch { return }
+  try {
+    await customerApi.markAsLost(selectedCustomer.value.id, loseForm)
+    ElMessage.success('已标记输单')
+    loseModalVisible.value = false
+    fetchCustomerList()
+  } catch (error: any) {
+    if (error?.message) ElMessage.error(error.message)
+  }
 }
 
 const handleInvalid = async (record: CustomerResponse) => {
@@ -433,6 +694,7 @@ const handleDelete = async (record: CustomerResponse) => {
 }
 
 const handleShowReturnModal = (record: CustomerResponse) => {
+  selectedCustomer.value = record
   Object.assign(returnForm, { return_reason: '', detailed_reason: '' })
   returnModalVisible.value = true
 }
@@ -483,11 +745,22 @@ onMounted(() => {
   min-height: calc(100vh - 48px);
 }
 
-// 快捷筛选标签
+// 快捷筛选标签 + 操作按钮栏
+.filter-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $wolf-space-md;
+}
+
 .filter-tabs {
   display: flex;
   gap: $wolf-space-xs;
-  margin-bottom: $wolf-space-md;
+}
+
+.filter-actions {
+  display: flex;
+  gap: $wolf-space-xs;
 }
 
 .filter-tab {
@@ -512,48 +785,11 @@ onMounted(() => {
   }
 }
 
-// 筛选区
-.filter-card {
+// 表格区 - 卡片容器样式
+.table-card {
   background: $wolf-bg-card;
   border-radius: $wolf-radius-md;
-  padding: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
   box-shadow: $wolf-shadow-card;
-}
-
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-lg;
-}
-
-.filter-left {
-  flex-shrink: 0;
-}
-
-.search-input {
-  width: 280px;
-}
-
-.filter-center {
-  display: flex;
-  gap: $wolf-space-xs;
-  flex: 1;
-}
-
-.filter-item {
-  width: 120px;
-}
-
-.filter-right {
-  display: flex;
-  gap: $wolf-space-xs;
-  flex-shrink: 0;
-}
-
-// 表格区
-.table-card {
-  background: transparent;
   overflow: visible;
 }
 
@@ -570,6 +806,26 @@ onMounted(() => {
   font-weight: $wolf-font-weight-medium;
   &:hover { color: $wolf-text-link-hover; }
 }
+
+// 名称列布局
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.magicwand-icon {
+  font-size: 14px;
+  color: $wolf-primary;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    transform: scale(1.15);
+    color: $wolf-primary-hover;
+  }
+}
+
 
 // 状态标签（浅底色 + 同色系文字）
 .status-tag {
@@ -604,22 +860,19 @@ onMounted(() => {
 .action-cell {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md;
+  gap: $wolf-space-sm;
 }
 
-.action-cell {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-md;
-  flex-wrap: wrap;
-}
-
-.action-link {
+.action-icon {
+  font-size: 16px;
   color: $wolf-text-link;
-  font-size: $wolf-font-size-auxiliary;
   cursor: pointer;
-  white-space: nowrap;
-  &:hover { color: $wolf-text-link-hover; }
+  transition: all 0.2s;
+
+  &:hover {
+    color: $wolf-text-link-hover;
+    transform: scale(1.1);
+  }
 }
 
 .action-danger {
@@ -651,5 +904,22 @@ onMounted(() => {
   .customers-page { padding: $wolf-space-md; }
   .filter-item { width: 100%; }
   .filter-tabs { flex-wrap: wrap; }
+}
+
+// 热力值单元格样式
+.score-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.score-icon {
+  font-size: 16px;
+}
+
+.score-number {
+  font-weight: $wolf-font-weight-medium;
+  font-size: $wolf-font-size-auxiliary;
 }
 </style>

@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
-engine = create_engine(str(settings.DATABASE_URL))
+engine = create_engine(settings.get_database_url())
 
 
 def check_permissions():

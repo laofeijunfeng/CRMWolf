@@ -1,11 +1,10 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import operationLogApi, { 
-  type ResourceType, 
-  type EventType, 
+import operationLogApi, {
+  type ResourceType,
+  type EventType,
   type OperationLog,
-  type GetResourceLogsParams,
-  type GetMyLogsParams 
+  type GetResourceLogsParams
 } from '@/api/operationLog'
 
 export interface TimelineFilters {
