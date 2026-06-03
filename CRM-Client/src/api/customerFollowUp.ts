@@ -45,23 +45,23 @@ export interface NextFollowUpTimeUpdate {
 
 const customerFollowUpApi = {
   createFollowUp: (customerId: number, data: CustomerFollowUpCreate) => {
-    return request.post<CustomerFollowUpResponse>(`/api/v1/customer-follow-ups/${customerId}`, data)
+    return request.post<CustomerFollowUpResponse>(`/v1/customer-follow-ups/${customerId}`, data)
   },
 
   getFollowUps: (customerId: number) => {
-    return request.get<CustomerFollowUpResponse[]>(`/api/v1/customer-follow-ups/${customerId}`)
+    return request.get<CustomerFollowUpResponse[]>(`/v1/customer-follow-ups/${customerId}`)
   },
 
   updateFollowUp: (followUpId: number, data: CustomerFollowUpUpdate) => {
-    return request.put<CustomerFollowUpResponse>(`/api/v1/customer-follow-ups/${followUpId}`, data)
+    return request.put<CustomerFollowUpResponse>(`/v1/customer-follow-ups/${followUpId}`, data)
   },
 
   updateNextFollowUpTime: (followUpId: number, data: NextFollowUpTimeUpdate) => {
-    return request.patch<CustomerFollowUpResponse>(`/api/v1/customer-follow-ups/${followUpId}/next-time`, data)
+    return request.patch<CustomerFollowUpResponse>(`/v1/customer-follow-ups/${followUpId}/next-time`, data)
   },
 
   deleteFollowUp: (followUpId: number) => {
-    return request.delete<{ message: string }>(`/api/v1/customer-follow-ups/${followUpId}`)
+    return request.delete<{ message: string }>(`/v1/customer-follow-ups/${followUpId}`)
   }
 }
 

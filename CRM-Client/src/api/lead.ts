@@ -138,43 +138,43 @@ export const leadApi = {
   },
 
   getLeadDetail: (id: number) => {
-    return request.get<LeadDetail>(`/api/v1/leads/${id}`)
+    return request.get<LeadDetail>(`/v1/leads/${id}`)
   },
 
   updateLead: (id: number, data: LeadUpdate) => {
-    return request.put<Lead>(`/api/v1/leads/${id}`, data)
+    return request.put<Lead>(`/v1/leads/${id}`, data)
   },
 
   deleteLead: (id: number) => {
-    return request.delete<Lead>(`/api/v1/leads/${id}`)
+    return request.delete<Lead>(`/v1/leads/${id}`)
   },
 
   claimLead: (id: number) => {
-    return request.post<Lead>(`/api/v1/leads/${id}/claim`)
+    return request.post<Lead>(`/v1/leads/${id}/claim`)
   },
 
   assignLead: (id: number, data: LeadAssignRequest) => {
-    return request.post<Lead>(`/api/v1/leads/${id}/assign`, data)
+    return request.post<Lead>(`/v1/leads/${id}/assign`, data)
   },
 
   returnLead: (id: number) => {
-    return request.post<Lead>(`/api/v1/leads/${id}/return`)
+    return request.post<Lead>(`/v1/leads/${id}/return`)
   },
 
   getFollowUps: (id: number, params?: { skip?: number; limit?: number }) => {
-    return request.get<LeadFollowUp[]>(`/api/v1/leads/${id}/follow-ups`, { params })
+    return request.get<LeadFollowUp[]>(`/v1/leads/${id}/follow-ups`, { params })
   },
 
   addFollowUp: (id: number, data: LeadFollowUpCreate) => {
-    return request.post<LeadFollowUp>(`/api/v1/leads/${id}/follow-ups`, data)
+    return request.post<LeadFollowUp>(`/v1/leads/${id}/follow-ups`, data)
   },
 
   deleteFollowUp: (leadId: number, followUpId: number) => {
-    return request.delete(`/api/v1/leads/${leadId}/follow-ups/${followUpId}`)
+    return request.delete(`/v1/leads/${leadId}/follow-ups/${followUpId}`)
   },
 
   markInvalid: (id: number, data: LeadMarkInvalidRequest) => {
-    return request.post<Lead>(`/api/v1/leads/${id}/mark-invalid`, data)
+    return request.post<Lead>(`/v1/leads/${id}/mark-invalid`, data)
   },
 
   getPublicLeads: (params?: { skip?: number; limit?: number }) => {

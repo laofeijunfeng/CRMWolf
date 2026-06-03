@@ -235,51 +235,51 @@ export interface OpportunityListResponse {
 
 export const opportunityApi = {
   getOpportunities: (params?: OpportunityListParams) => {
-    return request.get<Opportunity[]>(`/api/v1/opportunities/`, { params })
+    return request.get<Opportunity[]>(`/v1/opportunities/`, { params })
   },
 
   getOpportunity: (opportunityId: number) => {
-    return request.get<Opportunity>(`/api/v1/opportunities/${opportunityId}`)
+    return request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
   },
 
   getOpportunityDetail: (opportunityId: number) => {
-    return request.get<Opportunity>(`/api/v1/opportunities/${opportunityId}`)
+    return request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
   },
 
   createOpportunity: (data: OpportunityCreate) => {
-    return request.post<Opportunity>(`/api/v1/opportunities/`, data)
+    return request.post<Opportunity>(`/v1/opportunities/`, data)
   },
 
   updateOpportunity: (opportunityId: number, data: OpportunityUpdate) => {
-    return request.put<Opportunity>(`/api/v1/opportunities/${opportunityId}`, data)
+    return request.put<Opportunity>(`/v1/opportunities/${opportunityId}`, data)
   },
 
   moveOpportunityStage: (opportunityId: number, data: OpportunityMoveStageRequest) => {
-    return request.post<void>(`/api/v1/opportunities/${opportunityId}/move-stage`, data)
+    return request.post<void>(`/v1/opportunities/${opportunityId}/move-stage`, data)
   },
 
   markAsWon: (opportunityId: number, data: OpportunityWinRequest) => {
-    return request.patch<void>(`/api/v1/opportunities/${opportunityId}/win`, data)
+    return request.patch<void>(`/v1/opportunities/${opportunityId}/win`, data)
   },
 
   markAsLost: (opportunityId: number, data: OpportunityLossRequest) => {
-    return request.patch<void>(`/api/v1/opportunities/${opportunityId}/lose`, data)
+    return request.patch<void>(`/v1/opportunities/${opportunityId}/lose`, data)
   },
 
   deleteOpportunity: (opportunityId: number) => {
-    return request.delete<void>(`/api/v1/opportunities/${opportunityId}`)
+    return request.delete<void>(`/v1/opportunities/${opportunityId}`)
   },
 
   getSalesFunnel: () => {
-    return request.get<SalesFunnelData[]>(`/api/v1/opportunities/sales-funnel`)
+    return request.get<SalesFunnelData[]>(`/v1/opportunities/sales-funnel`)
   },
 
   getStageDuration: () => {
-    return request.get<StageDurationData[]>(`/api/v1/opportunities/stage-duration`)
+    return request.get<StageDurationData[]>(`/v1/opportunities/stage-duration`)
   },
 
   getAvailableForContract: (customerId: number) => {
-    return request.get<OpportunityListResponse[]>(`/api/v1/opportunities/available-for-contract`, {
+    return request.get<OpportunityListResponse[]>(`/v1/opportunities/available-for-contract`, {
       params: { customer_id: customerId }
     })
   }

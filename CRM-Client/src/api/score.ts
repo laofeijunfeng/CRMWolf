@@ -45,28 +45,28 @@ export interface ScoreLevelInfo {
  * 获取线索热力值
  */
 export function getLeadScore(leadId: number): Promise<ScoreResponse> {
-  return request.get(`/api/v1/scores/lead/${leadId}`)
+  return request.get(`/v1/scores/lead/${leadId}`)
 }
 
 /**
  * 获取客户热力值
  */
 export function getCustomerScore(customerId: number): Promise<ScoreResponse> {
-  return request.get(`/api/v1/scores/customer/${customerId}`)
+  return request.get(`/v1/scores/customer/${customerId}`)
 }
 
 /**
  * 刷新线索热力值
  */
 export function refreshLeadScore(leadId: number): Promise<ScoreResponse> {
-  return request.post(`/api/v1/scores/lead/${leadId}/refresh`)
+  return request.post(`/v1/scores/lead/${leadId}/refresh`)
 }
 
 /**
  * 刷新客户热力值
  */
 export function refreshCustomerScore(customerId: number): Promise<ScoreResponse> {
-  return request.post(`/api/v1/scores/customer/${customerId}/refresh`)
+  return request.post(`/v1/scores/customer/${customerId}/refresh`)
 }
 
 /**
@@ -123,7 +123,7 @@ export interface WeightConfigUpdateRequest {
  * 获取权重配置列表
  */
 export function getWeightConfigs(moduleType: 'LEAD' | 'CUSTOMER'): Promise<WeightConfigListResponse> {
-  return request.get(`/api/v1/score-weights/${moduleType}`)
+  return request.get(`/v1/score-weights/${moduleType}`)
 }
 
 /**
@@ -133,7 +133,7 @@ export function updateWeightConfig(
   weightId: number,
   data: WeightConfigUpdateRequest
 ): Promise<WeightConfig> {
-  return request.put(`/api/v1/score-weights/${weightId}`, data)
+  return request.put(`/v1/score-weights/${weightId}`, data)
 }
 
 /**
@@ -159,7 +159,7 @@ export function deleteTeamWeights(
   message: string
   deleted_count: number
 }> {
-  return request.delete(`/api/v1/score-weights/${moduleType}`)
+  return request.delete(`/v1/score-weights/${moduleType}`)
 }
 
 // ============== 工具函数 ==============

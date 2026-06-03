@@ -142,35 +142,35 @@ const contractApi = {
   },
 
   getContract: (contractId: number): ApiResponse<ContractResponse> => {
-    return request.get<ContractResponse>(`/api/v1/contracts/${contractId}`) as any
+    return request.get<ContractResponse>(`/v1/contracts/${contractId}`) as any
   },
 
   updateContract: (contractId: number, data: ContractUpdate): ApiResponse<ContractResponse> => {
-    return request.put<ContractResponse>(`/api/v1/contracts/${contractId}`, data) as any
+    return request.put<ContractResponse>(`/v1/contracts/${contractId}`, data) as any
   },
 
   updateContractStatus: (contractId: number, data: ContractStatusUpdate): ApiResponse<ContractResponse> => {
-    return request.patch<ContractResponse>(`/api/v1/contracts/${contractId}/status`, data) as any
+    return request.patch<ContractResponse>(`/v1/contracts/${contractId}/status`, data) as any
   },
 
   deleteContract: (contractId: number): ApiResponse<{ message: string }> => {
-    return request.delete<{ message: string }>(`/api/v1/contracts/${contractId}`) as any
+    return request.delete<{ message: string }>(`/v1/contracts/${contractId}`) as any
   },
 
   createContractFromOpportunity: (opportunityId: number, params: ContractFromOpportunityParams): ApiResponse<ContractResponse> => {
-    return request.post<ContractResponse>(`/api/v1/contracts/from-opportunity/${opportunityId}`, null, {
+    return request.post<ContractResponse>(`/v1/contracts/from-opportunity/${opportunityId}`, null, {
       params
     }) as any
   },
 
   getContractByOpportunity: (opportunityId: number): ApiResponse<ContractListResponse> => {
-    return request.get<ContractListResponse>(`/api/v1/contracts/opportunity/${opportunityId}`, {
+    return request.get<ContractListResponse>(`/v1/contracts/opportunity/${opportunityId}`, {
       skipErrorNotification: true
     } as any) as any
   },
 
   getCustomerContracts: (customerId: number, params?: { skip?: number; limit?: number }): ApiResponse<ContractListResponse[]> => {
-    return request.get<ContractListResponse[]>(`/api/v1/customers/${customerId}/contracts`, { params }) as any
+    return request.get<ContractListResponse[]>(`/v1/customers/${customerId}/contracts`, { params }) as any
   }
 }
 

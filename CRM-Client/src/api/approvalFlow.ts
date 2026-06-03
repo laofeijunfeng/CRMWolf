@@ -34,7 +34,7 @@ const approvalFlowApi = {
   },
 
   getApprovalFlowDetail: (flowId: number) => {
-    return request.get(`/api/v1/approvals/flows/${flowId}`)
+    return request.get(`/v1/approvals/flows/${flowId}`)
   },
 
   createApprovalFlow: (data: ApprovalFlow) => {
@@ -42,11 +42,11 @@ const approvalFlowApi = {
   },
 
   updateApprovalFlow: (flowId: number, data: Partial<ApprovalFlow>) => {
-    return request.put(`/api/v1/approvals/flows/${flowId}`, data)
+    return request.put(`/v1/approvals/flows/${flowId}`, data)
   },
 
   deleteApprovalFlow: (flowId: number) => {
-    return request.delete(`/api/v1/approvals/flows/${flowId}`)
+    return request.delete(`/v1/approvals/flows/${flowId}`)
   }
 }
 

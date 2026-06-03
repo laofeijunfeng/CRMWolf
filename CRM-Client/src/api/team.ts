@@ -77,23 +77,23 @@ export const teamApi = {
   },
 
   getTeamMembers: (teamId: number) => {
-    return request.get<TeamMemberResponse[]>(`/api/v1/teams/${teamId}/members`)
+    return request.get<TeamMemberResponse[]>(`/v1/teams/${teamId}/members`)
   },
 
   inviteMember: (teamId: number, data: TeamInviteRequest) => {
-    return request.post<{ message: string }>(`/api/v1/teams/${teamId}/invite`, data)
+    return request.post<{ message: string }>(`/v1/teams/${teamId}/invite`, data)
   },
 
   addMemberDirect: (teamId: number, userId: number) => {
-    return request.post<{ message: string; user_id: number }>(`/api/v1/teams/${teamId}/members`, { user_id: userId })
+    return request.post<{ message: string; user_id: number }>(`/v1/teams/${teamId}/members`, { user_id: userId })
   },
 
   removeMember: (teamId: number, userId: string) => {
-    return request.delete<{ message: string }>(`/api/v1/teams/${teamId}/members/${userId}`)
+    return request.delete<{ message: string }>(`/v1/teams/${teamId}/members/${userId}`)
   },
 
   regenerateInviteCode: (teamId: number) => {
-    return request.post<{ code: string }>(`/api/v1/teams/${teamId}/regenerate-code`)
+    return request.post<{ code: string }>(`/v1/teams/${teamId}/regenerate-code`)
   },
 
   updateTeam: (teamId: number, data: { name?: string }) => {
@@ -102,12 +102,12 @@ export const teamApi = {
 
   assignMemberRoles: (teamId: number, userId: string, roleIds: number[]) => {
     return request.post<{ message: string; user_id: number; role_ids: number[] }>(
-      `/api/v1/teams/${teamId}/members/${userId}/roles`,
+      `/v1/teams/${teamId}/members/${userId}/roles`,
       { role_ids: roleIds }
     )
   },
 
   getMemberRoles: (teamId: number, userId: string) => {
-    return request.get<RoleSimpleResponse[]>(`/api/v1/teams/${teamId}/members/${userId}/roles`)
+    return request.get<RoleSimpleResponse[]>(`/v1/teams/${teamId}/members/${userId}/roles`)
   }
 }

@@ -78,7 +78,7 @@ const financeApi = {
   },
 
   confirmPayment: (recordId: number, data: PaymentConfirmationRequest) => {
-    return request.post(`/api/v1/finance/payment-records/${recordId}/confirm`, data)
+    return request.post(`/v1/finance/payment-records/${recordId}/confirm`, data)
   },
 
   getDashboardStats: async () => {

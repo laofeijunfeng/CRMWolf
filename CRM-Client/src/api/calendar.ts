@@ -123,7 +123,7 @@ export const calendarApi = {
   },
 
   getTodoContext: (todoType: string, todoId: number) => {
-    return request.get<TodoContextResponse>(`/api/v1/calendar/todos/${todoType}/${todoId}/context`)
+    return request.get<TodoContextResponse>(`/v1/calendar/todos/${todoType}/${todoId}/context`)
   },
 
   parseFollowUp: (data: FollowUpParseRequest) => {

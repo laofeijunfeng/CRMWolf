@@ -33,7 +33,7 @@ export const aiAssistantApi = {
     token: string
   ): Promise<void> => {
     const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    const url = `${baseURL}/api/v1/assistant/chat`
+    const url = `${baseURL}/v1/assistant/chat`
     console.log('[AIAssistant] SSE request URL:', url)
     console.log('[AIAssistant] SSE request data:', data)
     console.log('[AIAssistant] SSE request token:', token ? 'exists' : 'empty')

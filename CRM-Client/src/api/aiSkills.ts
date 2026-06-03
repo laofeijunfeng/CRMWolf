@@ -90,29 +90,29 @@ export const aiSkillsApi = {
     request.get('/v1/ai/skills', { params }),
 
   getSkill: (skillId: number) =>
-    request.get(`/api/v1/ai/skills/${skillId}`),
+    request.get(`/v1/ai/skills/${skillId}`),
 
   createSkill: (data: SkillCreate) =>
     request.post('/v1/ai/skills', data),
 
   updateSkill: (skillId: number, data: Partial<SkillCreate>) =>
-    request.put(`/api/v1/ai/skills/${skillId}`, data),
+    request.put(`/v1/ai/skills/${skillId}`, data),
 
   deleteSkill: (skillId: number) =>
-    request.delete(`/api/v1/ai/skills/${skillId}`),
+    request.delete(`/v1/ai/skills/${skillId}`),
 
   // Action 管理
   getActions: (skillId: number) =>
-    request.get(`/api/v1/ai/skills/${skillId}/actions`),
+    request.get(`/v1/ai/skills/${skillId}/actions`),
 
   createAction: (skillId: number, data: SkillActionCreate) =>
-    request.post(`/api/v1/ai/skills/${skillId}/actions`, data),
+    request.post(`/v1/ai/skills/${skillId}/actions`, data),
 
   updateAction: (skillId: number, actionId: number, data: Partial<SkillActionCreate>) =>
-    request.put(`/api/v1/ai/skills/${skillId}/actions/${actionId}`, data),
+    request.put(`/v1/ai/skills/${skillId}/actions/${actionId}`, data),
 
   deleteAction: (skillId: number, actionId: number) =>
-    request.delete(`/api/v1/ai/skills/${skillId}/actions/${actionId}`),
+    request.delete(`/v1/ai/skills/${skillId}/actions/${actionId}`),
 
   // CRUD 映射管理
   getCRUDMappings: () =>
@@ -139,7 +139,7 @@ export const aiSkillsApi = {
   ): Promise<void> => {
     const token = localStorage.getItem('token')
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/ai/skills/analyze`,
+      `${import.meta.env.VITE_API_BASE_URL || ''}/v1/ai/skills/analyze`,
       {
         method: 'POST',
         headers: {
@@ -196,7 +196,7 @@ export const aiSkillsApi = {
   ): Promise<void> => {
     const token = localStorage.getItem('token')
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/ai/skills/generate`,
+      `${import.meta.env.VITE_API_BASE_URL || ''}/v1/ai/skills/generate`,
       {
         method: 'POST',
         headers: {

@@ -319,31 +319,31 @@ const customerApi = {
   },
 
   getCustomerDetail: (customerId: number) => {
-    return request.get<CustomerDetailResponse>(`/api/v1/customers/${customerId}`)
+    return request.get<CustomerDetailResponse>(`/v1/customers/${customerId}`)
   },
 
   updateCustomer: (customerId: number, data: CustomerUpdate) => {
-    return request.put<CustomerResponse>(`/api/v1/customers/${customerId}`, data)
+    return request.put<CustomerResponse>(`/v1/customers/${customerId}`, data)
   },
 
   updateCustomerStatus: (customerId: number, data: CustomerStatusUpdate) => {
-    return request.patch<CustomerResponse>(`/api/v1/customers/${customerId}/status`, data)
+    return request.patch<CustomerResponse>(`/v1/customers/${customerId}/status`, data)
   },
 
   markAsLost: (customerId: number, data: CustomerLoseRequest) => {
-    return request.patch<CustomerResponse>(`/api/v1/customers/${customerId}/lose`, data)
+    return request.patch<CustomerResponse>(`/v1/customers/${customerId}/lose`, data)
   },
 
   deleteCustomer: (customerId: number) => {
-    return request.delete<{ message: string }>(`/api/v1/customers/${customerId}`)
+    return request.delete<{ message: string }>(`/v1/customers/${customerId}`)
   },
 
   returnToPool: (customerId: number, data: CustomerReturnRequest) => {
-    return request.post<CustomerReturnResponse>(`/api/v1/customers/${customerId}/return-to-pool`, data)
+    return request.post<CustomerReturnResponse>(`/v1/customers/${customerId}/return-to-pool`, data)
   },
 
   claimCustomer: (customerId: number, data: CustomerClaimRequest) => {
-    return request.post<CustomerResponse>(`/api/v1/customers/${customerId}/claim`, data)
+    return request.post<CustomerResponse>(`/v1/customers/${customerId}/claim`, data)
   },
 
   getPublicCustomers: (params?: PublicCustomerQueryParams) => {
@@ -359,23 +359,23 @@ const customerApi = {
   },
 
   createContact: (customerId: number, data: ContactCreate) => {
-    return request.post<ContactResponse>(`/api/v1/customers/${customerId}/contacts`, data)
+    return request.post<ContactResponse>(`/v1/customers/${customerId}/contacts`, data)
   },
 
   getContacts: (customerId: number) => {
-    return request.get<ContactResponse[]>(`/api/v1/customers/${customerId}/contacts`)
+    return request.get<ContactResponse[]>(`/v1/customers/${customerId}/contacts`)
   },
 
   updateContact: (contactId: number, data: ContactUpdate) => {
-    return request.put<ContactResponse>(`/api/v1/customers/contacts/${contactId}`, data)
+    return request.put<ContactResponse>(`/v1/customers/contacts/${contactId}`, data)
   },
 
   setPrimaryContact: (contactId: number) => {
-    return request.patch<ContactResponse>(`/api/v1/customers/contacts/${contactId}/set-primary`)
+    return request.patch<ContactResponse>(`/v1/customers/contacts/${contactId}/set-primary`)
   },
 
   deleteContact: (contactId: number) => {
-    return request.delete<{ message: string }>(`/api/v1/customers/contacts/${contactId}`)
+    return request.delete<{ message: string }>(`/v1/customers/contacts/${contactId}`)
   },
 
   getStatistics: () => {
@@ -389,19 +389,19 @@ const customerApi = {
   },
 
   getContracts: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }) => {
-    return request.get<ContractListResponse[]>(`/api/v1/customers/${customerId}/contracts`, { params })
+    return request.get<ContractListResponse[]>(`/v1/customers/${customerId}/contracts`, { params })
   },
 
   getPaymentPlans: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }) => {
-    return request.get<PaymentPlanResponse[]>(`/api/v1/customers/${customerId}/payment-plans`, { params })
+    return request.get<PaymentPlanResponse[]>(`/v1/customers/${customerId}/payment-plans`, { params })
   },
 
   getInvoices: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }) => {
-    return request.get<InvoiceApplicationResponse[]>(`/api/v1/customers/${customerId}/invoices`, { params })
+    return request.get<InvoiceApplicationResponse[]>(`/v1/customers/${customerId}/invoices`, { params })
   },
 
   regenerateProfile: (customerId: number) => {
-    return request.post<{ message: string }>(`/api/v1/customers/${customerId}/regenerate-profile`)
+    return request.post<{ message: string }>(`/v1/customers/${customerId}/regenerate-profile`)
   }
 }
 

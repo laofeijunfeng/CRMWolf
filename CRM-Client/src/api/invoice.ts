@@ -131,19 +131,19 @@ const invoiceApi = {
   },
 
   getInvoiceTitle: (titleId: number) => {
-    return request.get<InvoiceTitleResponse>(`/api/v1/invoice-titles/${titleId}`)
+    return request.get<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}`)
   },
 
   updateInvoiceTitle: (titleId: number, data: InvoiceTitleUpdate) => {
-    return request.put<InvoiceTitleResponse>(`/api/v1/invoice-titles/${titleId}`, data)
+    return request.put<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}`, data)
   },
 
   deleteInvoiceTitle: (titleId: number) => {
-    return request.delete<{ message: string }>(`/api/v1/invoice-titles/${titleId}`)
+    return request.delete<{ message: string }>(`/v1/invoice-titles/${titleId}`)
   },
 
   setDefaultInvoiceTitle: (titleId: number) => {
-    return request.patch<InvoiceTitleResponse>(`/api/v1/invoice-titles/${titleId}/set-default`)
+    return request.patch<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}/set-default`)
   },
 
   createInvoiceApplication: (data: InvoiceApplicationCreate) => {
@@ -155,37 +155,37 @@ const invoiceApi = {
   },
 
   getInvoiceApplication: (applicationId: number) => {
-    return request.get<InvoiceApplicationResponse>(`/api/v1/invoice-applications/${applicationId}`)
+    return request.get<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}`)
   },
 
   updateInvoiceApplication: (applicationId: number, data: InvoiceApplicationUpdate) => {
-    return request.put<InvoiceApplicationResponse>(`/api/v1/invoice-applications/${applicationId}`, data)
+    return request.put<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}`, data)
   },
 
   deleteInvoiceApplication: (applicationId: number) => {
-    return request.delete<{ message: string }>(`/api/v1/invoice-applications/${applicationId}`)
+    return request.delete<{ message: string }>(`/v1/invoice-applications/${applicationId}`)
   },
 
   submitInvoiceApplication: (applicationId: number) => {
-    return request.post<InvoiceApplicationResponse>(`/api/v1/invoice-applications/${applicationId}/submit`)
+    return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/submit`)
   },
 
   withdrawInvoiceApplication: (applicationId: number) => {
-    return request.post<InvoiceApplicationResponse>(`/api/v1/invoice-applications/${applicationId}/withdraw`)
+    return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/withdraw`)
   },
 
   financeApprovalInvoiceApplication: (applicationId: number, data: FinanceApprovalRequest) => {
-    return request.post<InvoiceApplicationResponse>(`/api/v1/invoice-applications/${applicationId}/finance-approval`, data)
+    return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/finance-approval`, data)
   },
 
   markAsInvoiced: (applicationId: number, invoiceNumber: string) => {
-    return request.post<InvoiceApplicationResponse>(`/api/v1/invoice-applications/${applicationId}/mark-invoiced`, {
+    return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/mark-invoiced`, {
       invoice_number: invoiceNumber
     })
   },
 
   getPaymentPlanInvoices: (paymentPlanId: number) => {
-    return request.get<InvoiceApplicationResponse[]>(`/api/v1/payment-plans/${paymentPlanId}/invoices`)
+    return request.get<InvoiceApplicationResponse[]>(`/v1/payment-plans/${paymentPlanId}/invoices`)
   }
 }
 

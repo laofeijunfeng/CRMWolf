@@ -152,40 +152,40 @@ export interface PaymentRecordWithDetails extends PaymentRecordResponse {
 
 const paymentApi = {
   getPaymentSummary: (contractId: number) => {
-    return request.get<ContractPaymentSummary>(`/api/v1/payments/contracts/${contractId}/payment-summary`)
+    return request.get<ContractPaymentSummary>(`/v1/payments/contracts/${contractId}/payment-summary`)
   },
 
   getPaymentPlans: (contractId: number, status?: PaymentPlanStatus) => {
     const params = status ? { status } : {}
-    return request.get<PaymentPlanResponse[]>(`/api/v1/payments/contracts/${contractId}/payment-plans`, { params })
+    return request.get<PaymentPlanResponse[]>(`/v1/payments/contracts/${contractId}/payment-plans`, { params })
   },
 
   createPaymentPlans: (contractId: number, data: PaymentPlanBatchCreate) => {
-    return request.post<PaymentPlanResponse[]>(`/api/v1/payments/contracts/${contractId}/payment-plans`, data)
+    return request.post<PaymentPlanResponse[]>(`/v1/payments/contracts/${contractId}/payment-plans`, data)
   },
 
   updatePaymentPlan: (planId: number, data: PaymentPlanUpdate) => {
-    return request.put<PaymentPlanResponse>(`/api/v1/payments/payment-plans/${planId}`, data)
+    return request.put<PaymentPlanResponse>(`/v1/payments/payment-plans/${planId}`, data)
   },
 
   deletePaymentPlan: (planId: number) => {
-    return request.delete(`/api/v1/payments/payment-plans/${planId}`)
+    return request.delete(`/v1/payments/payment-plans/${planId}`)
   },
 
   getPaymentRecords: (planId: number) => {
-    return request.get<PaymentRecordInfo[]>(`/api/v1/payments/payment-plans/${planId}/records`)
+    return request.get<PaymentRecordInfo[]>(`/v1/payments/payment-plans/${planId}/records`)
   },
 
   createPaymentRecord: (planId: number, data: PaymentRecordCreate) => {
-    return request.post<PaymentRecordResponse>(`/api/v1/payments/payment-plans/${planId}/records`, data)
+    return request.post<PaymentRecordResponse>(`/v1/payments/payment-plans/${planId}/records`, data)
   },
 
   updatePaymentRecord: (recordId: number, data: PaymentRecordUpdate) => {
-    return request.put<PaymentRecordResponse>(`/api/v1/payments/payment-records/${recordId}`, data)
+    return request.put<PaymentRecordResponse>(`/v1/payments/payment-records/${recordId}`, data)
   },
 
   deletePaymentRecord: (recordId: number) => {
-    return request.delete(`/api/v1/payments/payment-records/${recordId}`)
+    return request.delete(`/v1/payments/payment-records/${recordId}`)
   },
 
   getUpcomingPayments: (days?: number) => {

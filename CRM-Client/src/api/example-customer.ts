@@ -58,7 +58,7 @@ export const customerApi = {
       throw new Error('Invalid customer ID')
     }
 
-    const raw = await request.get(`/api/v1/customers/${id}`)
+    const raw = await request.get(`/v1/customers/${id}`)
     return CustomerDetailResponseSchema.parse(raw)
   },
 
@@ -86,7 +86,7 @@ export const customerApi = {
   async update(id: number, data: CustomerUpdate): Promise<CustomerResponse> {
     const validatedData = CustomerUpdateSchema.parse(data)
 
-    const raw = await request.put(`/api/v1/customers/${id}`, validatedData)
+    const raw = await request.put(`/v1/customers/${id}`, validatedData)
     return CustomerResponseSchema.parse(raw)
   },
 
@@ -96,7 +96,7 @@ export const customerApi = {
    * @param id - 客户 ID
    */
   async delete(id: number): Promise<void> {
-    await request.delete(`/api/v1/customers/${id}`)
+    await request.delete(`/v1/customers/${id}`)
   }
 }
 

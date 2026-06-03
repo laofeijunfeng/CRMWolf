@@ -112,7 +112,7 @@ const procurementApi = {
   },
 
   getProcurementMethod: (methodId: number) => {
-    return request.get<ProcurementMethodWithStages>(`/api/v1/procurement-methods/${methodId}`)
+    return request.get<ProcurementMethodWithStages>(`/v1/procurement-methods/${methodId}`)
   },
 
   createProcurementMethod: (data: ProcurementMethodCreate) => {
@@ -120,19 +120,19 @@ const procurementApi = {
   },
 
   updateProcurementMethod: (methodId: number, data: ProcurementMethodUpdate) => {
-    return request.put<ProcurementMethodResponse>(`/api/v1/procurement-methods/${methodId}`, data)
+    return request.put<ProcurementMethodResponse>(`/v1/procurement-methods/${methodId}`, data)
   },
 
   fullUpdateProcurementMethod: (methodId: number, data: ProcurementMethodWithStagesUpdate) => {
-    return request.put<ProcurementMethodWithStages>(`/api/v1/procurement-methods/${methodId}/full`, data)
+    return request.put<ProcurementMethodWithStages>(`/v1/procurement-methods/${methodId}/full`, data)
   },
 
   batchUpdateStages: (methodId: number, data: BatchUpdateStagesRequest) => {
-    return request.put<ProcurementStageTemplateResponse[]>(`/api/v1/procurement-methods/${methodId}/stages`, data)
+    return request.put<ProcurementStageTemplateResponse[]>(`/v1/procurement-methods/${methodId}/stages`, data)
   },
 
   deleteProcurementMethod: (methodId: number) => {
-    return request.delete<{ message: string }>(`/api/v1/procurement-methods/${methodId}`)
+    return request.delete<{ message: string }>(`/v1/procurement-methods/${methodId}`)
   },
 
   getStageTemplates: (params: StageTemplateListParams) => {
@@ -140,7 +140,7 @@ const procurementApi = {
   },
 
   getStageTemplate: (templateId: number) => {
-    return request.get<ProcurementStageTemplateResponse>(`/api/v1/procurement-stage-templates/${templateId}`)
+    return request.get<ProcurementStageTemplateResponse>(`/v1/procurement-stage-templates/${templateId}`)
   },
 
   createStageTemplate: (data: ProcurementStageTemplateCreate) => {
@@ -148,35 +148,35 @@ const procurementApi = {
   },
 
   updateStageTemplate: (templateId: number, data: ProcurementStageTemplateUpdate) => {
-    return request.put<ProcurementStageTemplateResponse>(`/api/v1/procurement-stage-templates/${templateId}`, data)
+    return request.put<ProcurementStageTemplateResponse>(`/v1/procurement-stage-templates/${templateId}`, data)
   },
 
   deleteStageTemplate: (templateId: number) => {
-    return request.delete<{ message: string }>(`/api/v1/procurement-stage-templates/${templateId}`)
+    return request.delete<{ message: string }>(`/v1/procurement-stage-templates/${templateId}`)
   },
 
   setOpportunityProcurementMethod: (opportunityId: number, procurementMethodId: number) => {
-    return request.post<{ message: string }>(`/api/v1/opportunities/${opportunityId}/set-procurement-method`, {
+    return request.post<{ message: string }>(`/v1/opportunities/${opportunityId}/set-procurement-method`, {
       procurement_method_id: procurementMethodId
     })
   },
 
   getStageTemplateChangeLogs: (templateId: number) => {
-    return request.get<any[]>(`/api/v1/procurement-stage-templates/${templateId}/change-logs`)
+    return request.get<any[]>(`/v1/procurement-stage-templates/${templateId}/change-logs`)
   },
 
   setCustomerDefaultProcurementMethod: (customerId: number, procurementMethodId: number | null) => {
-    return request.post<{ message: string }>(`/api/v1/customers/${customerId}/set-default-procurement-method`, {
+    return request.post<{ message: string }>(`/v1/customers/${customerId}/set-default-procurement-method`, {
       procurement_method_id: procurementMethodId
     })
   },
 
   getCustomerDefaultProcurementMethod: (customerId: number) => {
-    return request.get<ProcurementMethodResponse | null>(`/api/v1/customers/${customerId}/default-procurement-method`)
+    return request.get<ProcurementMethodResponse | null>(`/v1/customers/${customerId}/default-procurement-method`)
   },
 
   assessTemplateChange: (templateId: number) => {
-    return request.get<{ opportunity_count: number; active_opportunity_count: number }>(`/api/v1/procurement-admin/assess-template-change/${templateId}`)
+    return request.get<{ opportunity_count: number; active_opportunity_count: number }>(`/v1/procurement-admin/assess-template-change/${templateId}`)
   },
 
   batchMigrateOpportunities: (sourceMethodId: number, targetMethodId: number, opportunityIds?: number[]) => {
@@ -188,37 +188,37 @@ const procurementApi = {
   },
 
   rollbackTemplate: (templateId: number, logId: number) => {
-    return request.post<{ message: string }>(`/api/v1/procurement-admin/rollback-template/${templateId}`, {
+    return request.post<{ message: string }>(`/v1/procurement-admin/rollback-template/${templateId}`, {
       log_id: logId
     })
   },
 
   getActiveOpportunities: (stageTemplateId: number) => {
-    return request.get<any[]>(`/api/v1/procurement-admin/active-opportunities/${stageTemplateId}`)
+    return request.get<any[]>(`/v1/procurement-admin/active-opportunities/${stageTemplateId}`)
   },
 
   getOpportunityCurrentStage: (opportunityId: number) => {
-    return request.get<OpportunityStageSnapshot>(`/api/v1/opportunities/${opportunityId}/current-stage`)
+    return request.get<OpportunityStageSnapshot>(`/v1/opportunities/${opportunityId}/current-stage`)
   },
 
   getOpportunityStageHistory: (opportunityId: number) => {
-    return request.get<OpportunityStageSnapshot[]>(`/api/v1/opportunities/${opportunityId}/stage-history`)
+    return request.get<OpportunityStageSnapshot[]>(`/v1/opportunities/${opportunityId}/stage-history`)
   },
 
   getAvailableStages: (opportunityId: number) => {
-    return request.get<ProcurementStageTemplate[]>(`/api/v1/opportunities/${opportunityId}/available-stages`)
+    return request.get<ProcurementStageTemplate[]>(`/v1/opportunities/${opportunityId}/available-stages`)
   },
 
   advanceStage: (opportunityId: number, data: AdvanceStageRequest) => {
-    return request.post<OpportunityStageSnapshot>(`/api/v1/opportunities/${opportunityId}/advance-stage`, data)
+    return request.post<OpportunityStageSnapshot>(`/v1/opportunities/${opportunityId}/advance-stage`, data)
   },
 
   getOpportunityProcurementStages: (opportunityId: number) => {
-    return request.get<OpportunityProcurementStageInfo[]>(`/api/v1/opportunities/${opportunityId}/procurement-stages`)
+    return request.get<OpportunityProcurementStageInfo[]>(`/v1/opportunities/${opportunityId}/procurement-stages`)
   },
 
   moveOpportunityStage: (opportunityId: number, data: OpportunityMoveStageRequest) => {
-    return request.post<any>(`/api/v1/opportunities/${opportunityId}/move-stage`, data)
+    return request.post<any>(`/v1/opportunities/${opportunityId}/move-stage`, data)
   },
 
   getProcurementMethodOptions: () => {
