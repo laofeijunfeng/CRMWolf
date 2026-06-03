@@ -20,7 +20,7 @@ from app.crud.customer import customer_crud
 from app.crud.score_detail import score_detail_crud
 from app.schemas.score_weight import ScoreResponse, ScoreDetailResponse, get_score_level_info
 
-router = APIRouter(prefix="/api/v1/scores", tags=["热力值查询"])
+router = APIRouter(prefix="/v1/scores", tags=["热力值查询"])
 
 
 def check_lead_access(db: Session, lead_id: int, team_id: int, user_id: str) -> Lead:

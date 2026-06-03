@@ -8,7 +8,7 @@ from app.models.user import User
 from app.schemas.customer import OwnerOption, OwnerListResponse
 
 
-router = APIRouter(prefix="/api/v1/filter-options", tags=["筛选选项"])
+router = APIRouter(prefix="/v1/filter-options", tags=["筛选选项"])
 
 
 @router.get("/owners", response_model=OwnerListResponse, summary="获取可筛选的负责人列表", description="获取当前登录用户有权限查看的客户负责人列表")

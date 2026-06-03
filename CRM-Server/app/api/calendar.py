@@ -16,7 +16,7 @@ from app.schemas.calendar import (
 )
 
 
-router = APIRouter(prefix="/api/v1/calendar", tags=["日历"])
+router = APIRouter(prefix="/v1/calendar", tags=["日历"])
 
 
 @router.get("/todos", response_model=CalendarMonthResponse, summary="获取月度待办统计")

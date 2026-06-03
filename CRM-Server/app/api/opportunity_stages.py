@@ -16,7 +16,7 @@ from app.crud.procurement import procurement_stage_template_crud
 from app.models.procurement import ProcurementMethod
 
 
-router = APIRouter(prefix="/api/v1/opportunities", tags=["商机阶段管理"])
+router = APIRouter(prefix="/v1/opportunities", tags=["商机阶段管理"])
 
 
 @router.get("/{opportunity_id}/current-stage", response_model=OpportunityStageSnapshotResponse, summary="获取商机当前阶段", description="""

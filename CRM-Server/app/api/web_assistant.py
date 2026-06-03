@@ -15,7 +15,7 @@ from app.schemas.web_assistant import WebAssistantRequest
 from app.services.ai_skill_main import ai_skill_main_service
 
 
-router = APIRouter(prefix="/api/v1/assistant", tags=["Web AI 助手"])
+router = APIRouter(prefix="/v1/assistant", tags=["Web AI 助手"])
 
 
 @router.post("/chat")

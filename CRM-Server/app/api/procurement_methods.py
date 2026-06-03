@@ -18,7 +18,7 @@ from app.schemas.procurement import (
 from app.crud.procurement import procurement_method_crud, procurement_stage_template_crud
 
 
-router = APIRouter(prefix="/api/v1/procurement-methods", tags=["采购方式管理"])
+router = APIRouter(prefix="/v1/procurement-methods", tags=["采购方式管理"])
 
 
 @router.get("/options", response_model=list[ProcurementMethodOption], summary="获取采购方式选项", description="""

@@ -9,7 +9,7 @@ from app.core.database import SessionLocal
 from app.schemas.chat_message import ChatMessageRequest
 from app.services.ai_skill_main import ai_skill_main_service
 
-router = APIRouter(prefix="/api/v1/chat", tags=["聊天机器人"])
+router = APIRouter(prefix="/v1/chat", tags=["聊天机器人"])
 
 
 @router.post("/receive")

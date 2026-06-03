@@ -15,7 +15,7 @@ from app.schemas.lead import (
 )
 from app.models.lead import LeadStatus, LeadSource
 
-router = APIRouter(prefix="/api/v1/leads", tags=["线索管理"])
+router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
 
 
 @router.post("/", response_model=LeadResponse, status_code=status.HTTP_201_CREATED, summary="创建线索", description="创建新的线索")
@@ -497,7 +497,7 @@ def get_leads_need_follow_up(
     return lead_crud.get_leads_need_follow_up(db, team_id, str(current_user.id), days)
 
 
-analytics_router = APIRouter(prefix="/api/v1/analytics/leads", tags=["线索分析"])
+analytics_router = APIRouter(prefix="/v1/analytics/leads", tags=["线索分析"])
 
 
 @analytics_router.get("/trend", response_model=List[LeadTrendResponse], summary="新增线索趋势", description="按时间统计新增线索数量")

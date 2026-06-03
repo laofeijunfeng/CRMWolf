@@ -15,7 +15,7 @@ from app.schemas.payment import (
 )
 
 
-router = APIRouter(prefix="/api/v1/payments", tags=["回款管理"])
+router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
 
 
 @router.post("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], status_code=status.HTTP_201_CREATED, summary="创建回款计划", description="为指定合同创建回款计划，支持批量创建多个阶段。只有已签署或已生效的合同可以创建回款计划，所有阶段的计划金额之和不能超过合同总金额。返回创建成功的回款计划列表。")

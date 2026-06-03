@@ -24,7 +24,7 @@ from app.schemas.ai_skill_config import (
 T = TypeVar("T")
 
 
-router = APIRouter(prefix="/api/v1/ai/skills", tags=["AI Skill 配置管理"])
+router = APIRouter(prefix="/v1/ai/skills", tags=["AI Skill 配置管理"])
 
 
 # ============================================================================

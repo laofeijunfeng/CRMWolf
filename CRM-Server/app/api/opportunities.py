@@ -28,7 +28,7 @@ from app.schemas.opportunity import (
 from app.services.feishu import feishu_service
 
 
-router = APIRouter(prefix="/api/v1/opportunities", tags=["商机管理"])
+router = APIRouter(prefix="/v1/opportunities", tags=["商机管理"])
 
 
 
@@ -617,7 +617,7 @@ def delete_opportunity(
         )
 
 
-analytics_router = APIRouter(prefix="/api/v1/analytics", tags=["商机分析"])
+analytics_router = APIRouter(prefix="/v1/analytics", tags=["商机分析"])
 
 
 @analytics_router.get("/sales-funnel", response_model=List[SalesFunnelResponse], summary="获取销售漏斗", description="返回各阶段的商机数量、金额汇总、平均赢率，用于可视化漏斗图")

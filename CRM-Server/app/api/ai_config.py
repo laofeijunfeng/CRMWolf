@@ -30,7 +30,7 @@ class APIResponse(Generic[T]):
         self.data = data
 
 
-router = APIRouter(prefix="/api/v1/ai", tags=["AI 配置管理"])
+router = APIRouter(prefix="/v1/ai", tags=["AI 配置管理"])
 
 
 @router.get("/config")

@@ -22,7 +22,7 @@ from app.schemas.lead import LeadFollowUpCreate
 from app.models.lead import FollowUpMethod
 
 
-router = APIRouter(prefix="/api/v1/leads/ai", tags=["AI 线索解析"])
+router = APIRouter(prefix="/v1/leads/ai", tags=["AI 线索解析"])
 
 
 # 枚举值映射

@@ -16,7 +16,7 @@ from app.services.skills.skill_generator_service import skill_generator_service
 from app.services.permission_service import permission_service
 
 
-router = APIRouter(prefix="/api/v1/ai/skills", tags=["AI Skill Generator"])
+router = APIRouter(prefix="/v1/ai/skills", tags=["AI Skill Generator"])
 
 
 @router.post("/analyze")

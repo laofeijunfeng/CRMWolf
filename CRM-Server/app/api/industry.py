@@ -12,7 +12,7 @@ from app.core.deps import get_current_active_user
 from app.crud.industry import industry_crud
 
 
-router = APIRouter(prefix="/api/v1/industries", tags=["行业管理"])
+router = APIRouter(prefix="/v1/industries", tags=["行业管理"])
 
 
 @router.get("/hierarchy", response_model=Dict[str, Any], summary="获取行业层级结构", description="""

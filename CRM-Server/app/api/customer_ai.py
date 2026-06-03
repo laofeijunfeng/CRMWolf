@@ -18,7 +18,7 @@ from app.services.follow_up_parser import follow_up_parser_service
 from app.models.lead import FollowUpMethod  # 跟进方式枚举在 lead.py 中定义
 
 
-router = APIRouter(prefix="/api/v1/customers/ai", tags=["AI 客户跟进"])
+router = APIRouter(prefix="/v1/customers/ai", tags=["AI 客户跟进"])
 
 
 @router.post("/parse")

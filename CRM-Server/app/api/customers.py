@@ -25,7 +25,7 @@ from app.schemas.payment import PaymentPlanResponse
 from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
 
 
-router = APIRouter(prefix="/api/v1/customers", tags=["客户管理"])
+router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
 
 
 @router.get("/industries", response_model=List[CustomerIndustryOption], summary="获取客户所属行业选项", description="""

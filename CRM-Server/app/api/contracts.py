@@ -15,7 +15,7 @@ from app.schemas.contract import (
 )
 
 
-router = APIRouter(prefix="/api/v1/contracts", tags=["合同管理"])
+router = APIRouter(prefix="/v1/contracts", tags=["合同管理"])
 
 
 @router.post("/", response_model=ContractResponse, status_code=status.HTTP_201_CREATED, summary="创建合同", description="""

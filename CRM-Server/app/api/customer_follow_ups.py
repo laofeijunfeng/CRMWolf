@@ -14,7 +14,7 @@ from app.schemas.customer_follow_up import (
 )
 
 
-router = APIRouter(prefix="/api/v1/customer-follow-ups", tags=["客户跟进"])
+router = APIRouter(prefix="/v1/customer-follow-ups", tags=["客户跟进"])
 
 
 @router.post("/{customer_id}", response_model=CustomerFollowUpResponse, status_code=status.HTTP_201_CREATED, summary="创建跟进记录", description="为指定客户创建新的跟进记录")

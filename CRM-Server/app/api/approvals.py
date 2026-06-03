@@ -17,7 +17,7 @@ from app.schemas.approval import (
 )
 
 
-router = APIRouter(prefix="/api/v1/approvals", tags=["审批管理"])
+router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
 
 
 @router.get("/flows", response_model=List[ApprovalFlowResponse], summary="获取审批流程列表", description="""

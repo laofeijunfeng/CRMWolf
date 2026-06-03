@@ -19,7 +19,7 @@ from app.schemas.score_weight import (
     WeightConfigList
 )
 
-router = APIRouter(prefix="/api/v1/score-weights", tags=["热力值权重配置"])
+router = APIRouter(prefix="/v1/score-weights", tags=["热力值权重配置"])
 
 
 @router.get("/{module_type}", response_model=WeightConfigList, summary="获取权重配置列表")

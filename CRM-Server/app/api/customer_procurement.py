@@ -10,7 +10,7 @@ from app.crud.procurement import procurement_method_crud
 
 
 router = APIRouter(
-    prefix="/api/v1/customers",
+    prefix="/v1/customers",
     tags=["客户管理"]
 )
 

@@ -13,7 +13,7 @@ from app.schemas.procurement import (
 from app.crud.procurement import procurement_management_tool_crud
 
 
-router = APIRouter(prefix="/api/v1/procurement-admin", tags=["采购管理工具"])
+router = APIRouter(prefix="/v1/procurement-admin", tags=["采购管理工具"])
 
 
 @router.get("/assess-template-change/{template_id}", response_model=ImpactAssessmentResponse, summary="评估阶段模板变更影响", description="""

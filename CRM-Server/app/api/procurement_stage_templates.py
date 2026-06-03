@@ -12,7 +12,7 @@ from app.schemas.procurement import (
 from app.crud.procurement import procurement_stage_template_crud
 
 
-router = APIRouter(prefix="/api/v1/procurement-stage-templates", tags=["采购阶段管理"])
+router = APIRouter(prefix="/v1/procurement-stage-templates", tags=["采购阶段管理"])
 
 
 @router.get("/", response_model=List[ProcurementStageTemplateResponse], summary="获取阶段模板列表", description="""
