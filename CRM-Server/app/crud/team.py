@@ -1,3 +1,4 @@
+import json
 import random
 import string
 from sqlalchemy.orm import Session
@@ -86,11 +87,17 @@ class TeamCRUD:
     def get_member_info(self, db: Session, team_id: int) -> List[dict]:
         """获取团队成员详细信息（包含角色）"""
         from sqlalchemy import text
+        # MySQL 兼容语法（不支持 PostgreSQL 的 FILTER 和 ::json）
         result = db.execute(text("""
             SELECT u.id, u.name, u.email, u.avatar_url, ut.current_team, ut.joined_at,
-                   COALESCE(
-                       json_agg(json_build_object('id', r.id, 'name', r.name, 'code', r.code))
-                       FILTER (WHERE r.id IS NOT NULL), '[]'::json
+                   IFNULL(
+                       JSON_ARRAYAGG(
+                           CASE WHEN r.id IS NOT NULL
+                               THEN JSON_OBJECT('id', r.id, 'name', r.name, 'code', r.code)
+                               ELSE NULL
+                           END
+                       ),
+                       JSON_ARRAY()
                    ) as roles
             FROM users u
             JOIN user_teams ut ON u.id = ut.user_id
@@ -100,7 +107,21 @@ class TeamCRUD:
             GROUP BY u.id, u.name, u.email, u.avatar_url, ut.current_team, ut.joined_at
             ORDER BY ut.joined_at
         """), {"team_id": team_id})
-        return [dict(row._mapping) for row in result]
+        # 处理 roles 数组中的 NULL 值
+        members = []
+        for row in result:
+            m = dict(row._mapping)
+            # 移除 roles 数组中的 NULL 元素
+            if m['roles']:
+                try:
+                    roles_list = json.loads(m['roles']) if isinstance(m['roles'], str) else m['roles']
+                    m['roles'] = [r for r in roles_list if r is not None]
+                except:
+                    m['roles'] = []
+            else:
+                m['roles'] = []
+            members.append(m)
+        return members
 
     def add_member(self, db: Session, team_id: int, user_id: int, set_current: bool = True) -> UserTeam:
         """添加成员到团队"""
