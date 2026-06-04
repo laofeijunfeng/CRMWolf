@@ -203,7 +203,7 @@
                 </el-icon>
               </el-tooltip>
               <el-tooltip v-if="canAssignLead" content="分配" placement="top">
-                <el-icon class="action-icon" @click="selectedLead = row; assignForm.owner_id = ''; assignModalVisible = true">
+                <el-icon class="action-icon" @click="handleOpenAssignModal(row)">
                   <UserFilled />
                 </el-icon>
               </el-tooltip>
@@ -619,6 +619,17 @@ const handleClaim = async (id: number) => {
   }
 }
 
+// 打开分配弹窗（懒加载用户列表）
+const handleOpenAssignModal = async (row: Lead) => {
+  selectedLead.value = row
+  assignForm.owner_id = ''
+  // 如果还没加载用户列表，现在加载
+  if (!userOptions.value.length) {
+    await fetchUserOptions()
+  }
+  assignModalVisible.value = true
+}
+
 const handleAssignModalOk = async () => {
   if (!selectedLead.value) return
   try {
@@ -702,7 +713,6 @@ const fetchUserOptions = async () => {
 
 onMounted(() => {
   fetchLeadList()
-  fetchUserOptions()
 })
 </script>
 
