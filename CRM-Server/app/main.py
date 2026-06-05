@@ -15,8 +15,6 @@ from app.api import auth, users, roles, permissions, leads, customers, customer_
 from app.api.customer_ai import router as customer_ai_router
 from app.api.web_assistant import router as web_assistant_router
 from app.api.ai_config import router as ai_config_router
-from app.api.ai_skills import router as ai_skills_router
-from app.api.ai_skill_generator import router as ai_skill_generator_router
 from app.api.chat import router as chat_router
 from app.api.ai import router as ai_openapi_router
 from app.core.exceptions import (
@@ -84,12 +82,6 @@ app.include_router(calendar.router)
 
 # AI 配置管理路由
 app.include_router(ai_config_router)
-
-# AI Skill 配置管理路由
-app.include_router(ai_skills_router)
-
-# AI Skill Generator 路由
-app.include_router(ai_skill_generator_router)
 
 # 聊天机器人路由（通用接口，支持飞书/钉钉/企业微信等）
 app.include_router(chat_router)

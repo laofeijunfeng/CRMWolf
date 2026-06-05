@@ -284,12 +284,6 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
-        path: 'ai-skills',
-        name: 'AISkills',
-        component: () => import('@/views/AISkills.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
         path: 'team-members',
         name: 'TeamMembers',
         component: () => import('@/views/TeamMembers.vue'),
