@@ -8,6 +8,17 @@
         </el-button>
         <h1 class="page-title">{{ isEdit ? '编辑采购方式' : '新增采购方式' }}</h1>
       </div>
+      <div class="page-header-right">
+        <el-button
+          v-if="!isEdit"
+          type="primary"
+          plain
+          @click="showAIDialog = true"
+        >
+          <el-icon><MagicStick /></el-icon>
+          AI 快速创建
+        </el-button>
+      </div>
     </div>
 
     <!-- 表单内容 -->
@@ -284,6 +295,12 @@
         </el-button>
       </div>
     </div>
+
+    <!-- AI 快速创建对话框 -->
+    <ProcurementMethodAIDialog
+      v-model="showAIDialog"
+      @created="handleAICreated"
+    />
   </div>
 </template>
 
@@ -291,8 +308,9 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Plus, ArrowUp, ArrowDown, Delete, RefreshLeft } from '@element-plus/icons-vue'
+import { ArrowLeft, Plus, ArrowUp, ArrowDown, Delete, RefreshLeft, MagicStick } from '@element-plus/icons-vue'
 import procurementApi from '../api/procurement'
+import ProcurementMethodAIDialog from '../components/ProcurementMethodAIDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -300,6 +318,7 @@ const router = useRouter()
 const formRef = ref()
 const submitting = ref(false)
 const isEdit = computed(() => !!route.params.id)
+const showAIDialog = ref(false)
 
 const isActiveSwitch = computed({
   get: () => form.value.is_active === 1,
@@ -482,6 +501,12 @@ const handleBack = () => {
   router.push('/procurement-methods')
 }
 
+const handleAICreated = (data: any) => {
+  // AI 创建成功后，跳转到列表页
+  ElMessage.success('采购方式创建成功')
+  router.push('/procurement-methods')
+}
+
 onMounted(() => {
   if (isEdit.value) {
     fetchMethodDetail(route.params.id as string)
@@ -513,6 +538,12 @@ onMounted(() => {
 }
 
 .page-header-left {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;
+}
+
+.page-header-right {
   display: flex;
   align-items: center;
   gap: $wolf-space-sm;

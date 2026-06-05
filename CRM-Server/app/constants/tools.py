@@ -554,6 +554,35 @@ TOOLS: List[Dict[str, Any]] = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_procurement_method",
+            "description": "为商机设置采购方式（如公开招标、竞争性谈判、单一来源采购等），自动进入对应的起始阶段。适用于未设置采购方式的跟进中商机",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "opportunity_id": {
+                        "type": "integer",
+                        "description": "商机ID（优先使用）"
+                    },
+                    "opportunity_name": {
+                        "type": "string",
+                        "description": "商机名称（用于模糊查找ID）"
+                    },
+                    "customer_name": {
+                        "type": "string",
+                        "description": "客户名称（用于查找该客户下的商机）"
+                    },
+                    "procurement_method_name": {
+                        "type": "string",
+                        "description": "采购方式名称（如：公开招标、竞争性谈判、单一来源采购、询价采购等。不填则列出可选采购方式）"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
 
     # ==================== 通用操作 ====================
     {
@@ -763,6 +792,22 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
         "config": {
             "crud_mapping": "opportunity",
             "action_type": "lose",
+            "permission_code": "opportunity:edit:own"
+        }
+    },
+    "set_procurement_method": {
+        "handler": "SetProcurementMethodHandler",
+        "config": {
+            "crud_mapping": "opportunity",
+            "name_lookup_field": "opportunity_name",
+            "name_field": "opportunity_name",
+            "method_lookup_field": "procurement_method_name",
+            "exclude_status": ["WON", "LOST"],
+            "require_no_method": True,
+            "customer_lookup": {
+                "customer_lookup_field": "customer_name",
+                "customer_name_field": "account_name"
+            },
             "permission_code": "opportunity:edit:own"
         }
     },

@@ -29,6 +29,13 @@ class ProcurementMethodCRUD:
             query = query.filter(ProcurementMethod.team_id == team_id)
         return query.first()
 
+    def get_by_name(self, db: Session, name: str, team_id: Optional[int] = None) -> Optional[ProcurementMethod]:
+        """根据名称获取采购方式"""
+        query = db.query(ProcurementMethod).filter(ProcurementMethod.name == name)
+        if team_id is not None:
+            query = query.filter(ProcurementMethod.team_id == team_id)
+        return query.first()
+
     def get_multi(
         self,
         db: Session,
