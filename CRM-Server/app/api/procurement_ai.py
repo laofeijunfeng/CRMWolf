@@ -7,10 +7,12 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import SessionLocal
 from app.core.deps import get_current_active_user, get_current_user_team, get_db
 from app.models.user import User
+from app.models.procurement import ProcurementMethod, ProcurementStageTemplate
 from app.schemas.procurement_ai import ProcurementAIParseRequest, ProcurementAICreateRequest
 from app.schemas.procurement import ProcurementMethodCreate, ProcurementStageTemplateCreate
 from app.services.procurement_ai_parser import procurement_ai_parser_service
@@ -68,8 +70,15 @@ async def create_procurement_method_from_ai(
     """
     从 AI 解析结果创建采购方式（用户确认后提交）
 
-    创建采购方式及其所有阶段模板配置
+    创建采购方式及其所有阶段模板配置（事务保护）
     """
+    # 检查 team_id 是否有效
+    if team_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="无法获取用户团队信息，请重新登录"
+        )
+
     # 检查编码是否已存在
     existing = procurement_method_crud.get_by_code(db, request.code, team_id)
     if existing:
@@ -120,65 +129,80 @@ async def create_procurement_method_from_ai(
             detail="阶段编码不能重复"
         )
 
-    # 创建采购方式
-    method_create = ProcurementMethodCreate(
-        name=request.name,
-        code=request.code,
-        description=request.description,
-        is_active=1,
-        sort_order=0  # 默认排序，可后续调整
-    )
-
-    method = procurement_method_crud.create(
-        db=db,
-        obj_in=method_create,
-        creator_id=str(current_user.id),
-        team_id=team_id
-    )
-
-    # 创建阶段模板
-    created_stages = []
-    for stage in request.stages:
-        stage_create = ProcurementStageTemplateCreate(
-            procurement_method_id=method.id,
-            template_code=stage.template_code,
-            stage_name=stage.stage_name,
-            win_probability=stage.win_probability,
-            sort_order=stage.sort_order,
-            is_default_start=stage.is_default_start,
-            can_skip=stage.can_skip,
-            description=stage.description,
-            version=1
+    # 使用事务创建采购方式和阶段模板
+    try:
+        # 创建采购方式
+        method = ProcurementMethod(
+            name=request.name,
+            code=request.code,
+            description=request.description,
+            is_active=1,
+            sort_order=0,
+            team_id=team_id,
+            created_by=str(current_user.id)
         )
+        db.add(method)
+        db.flush()  # 获取 method.id 但不提交
 
-        stage_obj = procurement_stage_template_crud.create(
-            db=db,
-            obj_in=stage_create,
-            creator_id=str(current_user.id),
-            team_id=team_id
-        )
-        created_stages.append(stage_obj)
+        # 创建阶段模板
+        created_stages = []
+        for stage in request.stages:
+            stage_obj = ProcurementStageTemplate(
+                procurement_method_id=method.id,
+                template_code=stage.template_code,
+                stage_name=stage.stage_name,
+                win_probability=stage.win_probability,
+                sort_order=stage.sort_order,
+                is_default_start=1 if stage.is_default_start else 0,
+                can_skip=1 if stage.can_skip else 0,
+                description=stage.description,
+                version=1,
+                version_lock=0,
+                team_id=team_id,
+                created_by=str(current_user.id)
+            )
+            db.add(stage_obj)
+            created_stages.append(stage_obj)
 
-    return {
-        "success": True,
-        "message": f"采购方式「{method.name}」创建成功，包含 {len(created_stages)} 个阶段",
-        "data": {
-            "method": {
-                "id": method.id,
-                "name": method.name,
-                "code": method.code,
-                "description": method.description
-            },
-            "stages": [
-                {
-                    "id": s.id,
-                    "stage_name": s.stage_name,
-                    "template_code": s.template_code,
-                    "win_probability": s.win_probability,
-                    "sort_order": s.sort_order,
-                    "is_default_start": s.is_default_start
-                }
-                for s in created_stages
-            ]
+        # 提交事务
+        db.commit()
+        db.refresh(method)
+        for s in created_stages:
+            db.refresh(s)
+
+        return {
+            "success": True,
+            "message": f"采购方式「{method.name}」创建成功，包含 {len(created_stages)} 个阶段",
+            "data": {
+                "method": {
+                    "id": method.id,
+                    "name": method.name,
+                    "code": method.code,
+                    "description": method.description
+                },
+                "stages": [
+                    {
+                        "id": s.id,
+                        "stage_name": s.stage_name,
+                        "template_code": s.template_code,
+                        "win_probability": s.win_probability,
+                        "sort_order": s.sort_order,
+                        "is_default_start": s.is_default_start
+                    }
+                    for s in created_stages
+                ]
+            }
         }
-    }
+
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"数据库约束错误：{str(e)}"
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建失败：{str(e)}"
+        )
