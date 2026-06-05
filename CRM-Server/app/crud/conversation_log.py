@@ -24,10 +24,12 @@ class ConversationLogCRUD:
         status: str = "PENDING",
         error_message: Optional[str] = None,
         session_id: Optional[str] = None,
-        context_data: Optional[Dict[str, Any]] = None
+        context_data: Optional[Dict[str, Any]] = None,
+        team_id: Optional[int] = None
     ) -> ConversationLog:
         """创建会话日志"""
         db_obj = ConversationLog(
+            team_id=team_id or 1,
             user_id=user_id,
             channel_user_id=channel_user_id,
             channel_type=channel_type,

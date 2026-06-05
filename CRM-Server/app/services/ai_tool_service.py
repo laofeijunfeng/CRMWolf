@@ -69,7 +69,8 @@ class AIToolService:
             channel_user_id=str(user_id),
             channel_type="web_assistant",
             request_text=content,
-            status="PENDING"
+            status="PENDING",
+            team_id=team_id
         )
 
         # 调用 AI（使用 Function Calling）
