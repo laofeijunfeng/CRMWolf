@@ -132,7 +132,7 @@ async def create_procurement_method_from_ai(
     method = procurement_method_crud.create(
         db=db,
         obj_in=method_create,
-        created_by=str(current_user.id),
+        creator_id=str(current_user.id),
         team_id=team_id
     )
 
@@ -154,7 +154,7 @@ async def create_procurement_method_from_ai(
         stage_obj = procurement_stage_template_crud.create(
             db=db,
             obj_in=stage_create,
-            created_by=str(current_user.id),
+            creator_id=str(current_user.id),
             team_id=team_id
         )
         created_stages.append(stage_obj)
