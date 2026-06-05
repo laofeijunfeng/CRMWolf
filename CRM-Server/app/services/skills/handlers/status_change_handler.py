@@ -8,6 +8,8 @@
 2. 支持前置状态校验，确保状态变更符合业务流程
 3. 支持名称查找实体（类似于 FollowUpHandler）
 4. 支持从名称中提取 ID（格式：名称（ID：xxx）或 名称(ID:xxx)）
+
+硬编码版：不再依赖数据库获取 CRUD/Enum 映射配置
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -64,12 +66,9 @@ class StatusChangeHandler(BaseHandler):
         if not crud_mapping_name:
             return self.build_result(False, "Handler 配置缺少 crud_mapping")
 
-        # 从数据库获取映射配置
-        from app.crud.ai_crud_mapping import ai_crud_mapping_crud
-        from app.crud.ai_enum_mapping import ai_enum_mapping_crud
-
-        crud_mapping = ai_crud_mapping_crud.get_by_name(db, crud_mapping_name)
-        if not crud_mapping:
+        # 从硬编码配置获取映射
+        crud_config = self.get_crud_mapping(crud_mapping_name)
+        if not crud_config:
             return self.build_result(False, f"CRUD 映射不存在: {crud_mapping_name}")
 
         # 获取用户信息
@@ -77,45 +76,33 @@ class StatusChangeHandler(BaseHandler):
         if not user:
             return self.build_result(False, "用户不存在")
 
-        # 获取 CRUD 实例
-        crud_instance = self.get_crud_instance(
-            crud_mapping.crud_module,
-            crud_mapping.crud_instance_name
-        )
-
-        # 获取 Model 类
-        model_class = self.get_model_class(
-            f"app.models.{crud_mapping_name.split('_')[0]}",
-            crud_mapping.model_class
-        )
+        # 从配置直接获取 CRUD 和 Model
+        crud_instance = crud_config["crud"]
+        model_class = crud_config["model"]
 
         # 获取排除状态配置
         exclude_status_keys = handler_config.get("exclude_status", self.DEFAULT_EXCLUDE_STATUS)
         pre_check_status_keys = handler_config.get("pre_check_status", [])
 
-        # 获取状态枚举值
+        # 获取状态枚举值（硬编码版，不需要 db）
         module_type = crud_mapping_name.split("_")[0]
         status_enum_name = f"{module_type}_status"
-        exclude_status_values = self.get_status_enum_values(db, status_enum_name, exclude_status_keys) if exclude_status_keys else []
-        pre_check_status_values = self.get_status_enum_values(db, status_enum_name, pre_check_status_keys) if pre_check_status_keys else []
+        exclude_status_values = self.get_status_enum_values(status_enum_name, exclude_status_keys) if exclude_status_keys else []
+        pre_check_status_values = self.get_status_enum_values(status_enum_name, pre_check_status_keys) if pre_check_status_keys else []
 
         # 尝试获取实体
         entity = None
         entity_id = None
         name_lookup_field = handler_config.get("name_lookup_field")
-        name_field = handler_config.get("name_field", crud_mapping.name_field)
+        name_field = handler_config.get("name_field", crud_config.get("name_field"))
         # 提前定义 status_field，用于多条匹配时的状态显示
-        status_field = handler_config.get("status_field", crud_mapping.status_field)
+        status_field = handler_config.get("status_field", crud_config.get("status_field"))
 
         # === 第一步：优先使用 AI 提取的 ID 参数 ===
         module_prefix = crud_mapping_name.split("_")[0]
         expected_id_key = f"{module_prefix}_id"
         if expected_id_key in params:
             entity_id = params.get(expected_id_key)
-            with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
-                f.write(f"=== 从 params 获取 ID ===\n")
-                f.write(f"expected_id_key: {expected_id_key}\n")
-                f.write(f"entity_id: {entity_id}\n")
             # 立刻通过 ID 获取实体
             try:
                 entity = self.get_active_entity_by_id(
@@ -123,7 +110,7 @@ class StatusChangeHandler(BaseHandler):
                     model_class,
                     entity_id,
                     exclude_status=exclude_status_values,
-                    status_field=crud_mapping.status_field
+                    status_field=crud_config.get("status_field")
                 )
             except Exception as e:
                 return self.build_result(False, f"查询失败: {str(e)}")
@@ -135,21 +122,9 @@ class StatusChangeHandler(BaseHandler):
         if not entity_id and name_lookup_field and name_field:
             name_lookup_value = params.get(name_lookup_field)
 
-            # 写入调试日志文件
-            with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
-                f.write(f"\n=== StatusChangeHandler 调试 ===\n")
-                f.write(f"params: {params}\n")
-                f.write(f"name_lookup_field: {name_lookup_field}\n")
-                f.write(f"name_lookup_value: {name_lookup_value}\n")
-
             if name_lookup_value:
                 # 先尝试从名称中提取 ID
                 id_match = self.ID_PATTERN.search(name_lookup_value)
-                with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
-                    f.write(f"ID_PATTERN: {self.ID_PATTERN.pattern}\n")
-                    f.write(f"ID匹配结果: {id_match}\n")
-                    if id_match:
-                        f.write(f"提取的ID: {id_match.group(1)}\n")
                 if id_match:
                     entity_id = int(id_match.group(1))
                     # 直接通过 ID 获取实体
@@ -159,7 +134,7 @@ class StatusChangeHandler(BaseHandler):
                             model_class,
                             entity_id,
                             exclude_status=exclude_status_values,
-                            status_field=crud_mapping.status_field
+                            status_field=crud_config.get("status_field")
                         )
                     except Exception as e:
                         return self.build_result(False, f"查询失败: {str(e)}")
@@ -175,7 +150,7 @@ class StatusChangeHandler(BaseHandler):
                             name_field,
                             name_lookup_value,
                             exclude_status=exclude_status_values,
-                            status_field=crud_mapping.status_field
+                            status_field=crud_config.get("status_field")
                         )
                     except Exception as e:
                         return self.build_result(False, f"查询失败: {str(e)}")
@@ -228,7 +203,7 @@ class StatusChangeHandler(BaseHandler):
                     model_class,
                     entity_id,
                     exclude_status=exclude_status_values,
-                    status_field=crud_mapping.status_field
+                    status_field=crud_config.get("status_field")
                 )
             except Exception as e:
                 return self.build_result(False, f"查询失败: {str(e)}")
@@ -258,32 +233,23 @@ class StatusChangeHandler(BaseHandler):
         if not target_status:
             return self.build_result(False, "Handler 配置缺少 target_status")
 
-        # 获取状态 enum
-        status_enum_name = crud_mapping_name + "_status"
-        status_enum_mapping = ai_enum_mapping_crud.get_by_name(db, status_enum_name)
+        # 获取状态 enum（硬编码版）
+        status_enum_config = self.get_enum_mapping(status_enum_name)
 
-        with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
-            f.write(f"\n=== 状态枚举处理 ===\n")
-            f.write(f"status_enum_name: {status_enum_name}\n")
-            f.write(f"status_enum_mapping: {status_enum_mapping}\n")
-            f.write(f"target_status: {target_status}\n")
-            if status_enum_mapping:
-                f.write(f"values: {status_enum_mapping.values}\n")
-                f.write(f"values.values(): {list(status_enum_mapping.values.values())}\n")
+        if status_enum_config:
+            enum_class = status_enum_config["enum_class"]
+            values = status_enum_config.get("values", {})
 
-        if status_enum_mapping:
-            enum_class = self.get_model_class(status_enum_mapping.enum_class)
-
-            # values 结构为 {中文: 英文枚举名}，如 {'已转化': 'CONVERTED'}
+            # values 结构为 {中文: 枚举名}，如 {'已转化': 'CONVERTED'}
             # target_status 可能是英文枚举名（如 'CONVERTED'）或中文（如 '已转化'）
 
             # 先检查 target_status 是否是枚举名（values 的值）
-            if target_status in status_enum_mapping.values.values():
+            if target_status in values.values():
                 # target_status 就是枚举名，如 'CONVERTED'
                 target_status_enum = getattr(enum_class, target_status)
-            elif target_status in status_enum_mapping.values:
+            elif target_status in values:
                 # target_status 是中文键，如 '已转化'
-                enum_name = status_enum_mapping.values.get(target_status)
+                enum_name = values.get(target_status)
                 target_status_enum = getattr(enum_class, enum_name)
             else:
                 # 尝试直接作为枚举属性名
@@ -293,10 +259,6 @@ class StatusChangeHandler(BaseHandler):
                     return self.build_result(False, f"无效的目标状态: {target_status}")
         else:
             target_status_enum = target_status
-
-        with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
-            f.write(f"target_status_enum: {target_status_enum}\n")
-            f.write(f"type: {type(target_status_enum)}\n")
 
         # 更新状态 - 根据字段类型决定使用枚举对象还是整数值
         status_attr = getattr(model_class, status_field, None)
@@ -313,10 +275,6 @@ class StatusChangeHandler(BaseHandler):
                     final_status_value = target_status_enum
 
         setattr(entity, status_field, final_status_value)
-
-        with open('/Users/eddie/Code/CRMWolf/CRM-Server/skill_debug.log', 'a') as f:
-            f.write(f"final_status_value: {final_status_value}\n")
-            f.write(f"status_attr.type: {status_attr.type if status_attr else None}\n")
 
         # 更新其他字段
         update_fields = handler_config.get("update_fields", [])

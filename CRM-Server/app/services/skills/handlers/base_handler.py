@@ -2,11 +2,22 @@
 Handler 基类
 
 所有 Handler 继承此基类，提供统一接口
+
+硬编码版：不再依赖数据库获取 CRUD/Enum 映射配置
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 from abc import ABC, abstractmethod
 from datetime import datetime
+
+from app.constants.handler_configs import (
+    CRUD_MAPPINGS,
+    ENUM_MAPPINGS,
+    get_crud_config,
+    get_enum_config,
+    get_status_enum_values,
+    get_status_display_name,
+)
 
 
 class BaseHandler(ABC):
@@ -60,6 +71,30 @@ class BaseHandler(ABC):
             return datetime.strptime(date_str, "%Y-%m-%d")
         except ValueError:
             return None
+
+    def get_crud_mapping(self, mapping_name: str) -> Optional[Dict[str, Any]]:
+        """
+        从硬编码配置获取 CRUD 映射
+
+        Args:
+            mapping_name: 映射名称（如 "lead", "lead_follow_up"）
+
+        Returns:
+            CRUD 映射配置字典，包含 crud、model、schema_create 等
+        """
+        return CRUD_MAPPINGS.get(mapping_name)
+
+    def get_enum_mapping(self, enum_name: str) -> Optional[Dict[str, Any]]:
+        """
+        从硬编码配置获取枚举映射
+
+        Args:
+            enum_name: 枚举名称（如 "lead_status", "follow_up_method"）
+
+        Returns:
+            枚举映射配置字典，包含 enum_class、values 等
+        """
+        return ENUM_MAPPINGS.get(enum_name)
 
     def get_crud_instance(self, crud_module: str, crud_instance_name: str) -> Any:
         """
@@ -211,78 +246,45 @@ class BaseHandler(ABC):
 
     def get_status_enum_values(
         self,
-        db: Session,
         enum_mapping_name: str,
         status_keys: List[str]
     ) -> List[Any]:
         """
-        获取状态枚举值列表
+        获取状态枚举值列表（硬编码版）
 
         Args:
-            db: 数据库 Session
-            enum_mapping_name: Enum 映射名称
-            status_keys: 状态键列表（如 ["CONVERTED", "INVALID"]）
+            enum_mapping_name: Enum 映射名称（如 "lead_status"）
+            status_keys: 状态键列表（如 ["NEW", "FOLLOWING"]）
 
         Returns:
             Enum 值列表（返回 .value 属性，兼容数据库 INTEGER 类型）
         """
-        from app.crud.ai_enum_mapping import ai_enum_mapping_crud
-
-        enum_mapping = ai_enum_mapping_crud.get_by_name(db, enum_mapping_name)
-        if not enum_mapping:
+        enum_config = self.get_enum_mapping(enum_mapping_name)
+        if not enum_config:
             return []
 
-        # 处理 enum_class 格式（如 app.models.lead:LeadStatus）
-        enum_class_path = enum_mapping.enum_class
-        if ":" in enum_class_path:
-            module_path, class_name = enum_class_path.split(":")
-            enum_class = self.get_model_class(module_path, class_name)
-        else:
-            # 如果没有冒号，尝试从路径中提取类名
-            parts = enum_class_path.split(".")
-            class_name = parts[-1]
-            module_path = ".".join(parts[:-1])
-            enum_class = self.get_model_class(module_path, class_name)
-
-        values = []
-        for key in status_keys:
-            try:
-                enum_value = getattr(enum_class, key)
-                # 返回 .value 属性，兼容数据库 INTEGER 类型存储
-                values.append(enum_value.value if hasattr(enum_value, 'value') else enum_value)
-            except AttributeError:
-                continue
-        return values
+        enum_class = enum_config.get("enum_class")
+        return get_status_enum_values(enum_class, status_keys)
 
     def _get_status_display_name(
         self,
-        db: Session,
         entity_type: str,
         status_value: Any
     ) -> str:
         """
-        获取状态的中文显示名称
+        获取状态的中文显示名称（硬编码版）
 
         Args:
-            db: 数据库 Session
             entity_type: 实体类型（如 lead, customer, opportunity）
             status_value: 状态值（整数）
 
         Returns:
             状态的中文显示名称
         """
-        from app.crud.ai_enum_mapping import ai_enum_mapping_crud
-
         enum_mapping_name = f"{entity_type}_status"
-        enum_mapping = ai_enum_mapping_crud.get_by_name(db, enum_mapping_name)
+        enum_config = self.get_enum_mapping(enum_mapping_name)
 
-        if not enum_mapping or not enum_mapping.values:
+        if not enum_config:
             return str(status_value)
 
-        # enum_mapping.values 是一个 JSON 字典，key 是中文，value 是数值
-        # 我们需要反向查找：找到 value 对应的 key
-        for display_name, value in enum_mapping.values.items():
-            if value == status_value:
-                return display_name
-
-        return str(status_value)
+        return get_status_display_name(enum_config, status_value)

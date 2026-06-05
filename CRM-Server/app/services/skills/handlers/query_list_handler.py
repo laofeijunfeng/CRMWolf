@@ -2,6 +2,8 @@
 查询列表 Handler
 
 处理列表查询类型的 Action（如 LeadSkill.list）
+
+硬编码版：不再依赖数据库获取 CRUD/Enum 映射配置
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -42,10 +44,9 @@ class QueryListHandler(BaseHandler):
         if not crud_mapping_name:
             return self.build_result(False, "Handler 配置缺少 crud_mapping")
 
-        # 从数据库获取 CRUD 映射配置
-        from app.crud.ai_crud_mapping import ai_crud_mapping_crud
-        crud_mapping = ai_crud_mapping_crud.get_by_name(db, crud_mapping_name)
-        if not crud_mapping:
+        # 从硬编码配置获取 CRUD 映射配置
+        crud_config = self.get_crud_mapping(crud_mapping_name)
+        if not crud_config:
             return self.build_result(False, f"CRUD 映射不存在: {crud_mapping_name}")
 
         # 获取用户信息
@@ -53,11 +54,9 @@ class QueryListHandler(BaseHandler):
         if not user:
             return self.build_result(False, "用户不存在")
 
-        # 获取 CRUD 实例
-        crud_instance = self.get_crud_instance(
-            crud_mapping.crud_module,
-            crud_mapping.crud_instance_name
-        )
+        # 从配置直接获取 CRUD 实例和 Model
+        crud_instance = crud_config["crud"]
+        model_class = crud_config["model"]
 
         # 构建查询参数
         query_params = {
@@ -69,24 +68,26 @@ class QueryListHandler(BaseHandler):
         if handler_config.get("owner_filter"):
             query_params["owner_id"] = str(user.id)
 
-        # 应用状态排除
-        if handler_config.get("status_exclude"):
-            from app.models.ai_skill import AIEnumMapping
-            from app.crud.ai_enum_mapping import ai_enum_mapping_crud
-
-            # 获取 status enum 映射
+        # 应用状态排除（硬编码版）
+        if handler_config.get("status_exclude") and crud_config["status_field"]:
+            # 获取 status enum 映射（硬编码版）
             enum_name = crud_mapping_name.replace("_follow_up", "") + "_status"
-            status_enum_mapping = ai_enum_mapping_crud.get_by_name(db, enum_name)
+            status_enum_config = self.get_enum_mapping(enum_name)
 
-            if status_enum_mapping:
-                model_class = self.get_model_class(crud_mapping.model_class.split(":")[0] if ":" in crud_mapping.model_class else f"app.models.{crud_mapping_name.split('_')[0]}", crud_mapping.model_class.split(":")[-1] if ":" in crud_mapping.model_class else crud_mapping.model_class)
-                status_field = getattr(model_class, crud_mapping.status_field or "status", None)
+            if status_enum_config:
+                status_field = getattr(model_class, crud_config["status_field"], None)
 
                 exclude_values = []
                 for exclude_key in handler_config["status_exclude"]:
-                    enum_key = status_enum_mapping.values.get(exclude_key)
+                    # exclude_key 可能是中文或英文枚举名
+                    values = status_enum_config.get("values", {})
+                    enum_key = values.get(exclude_key)
+                    if not enum_key:
+                        # 尝试用英文枚举名
+                        enum_key = exclude_key
+
                     if enum_key:
-                        enum_class = self.get_model_class(status_enum_mapping.enum_class)
+                        enum_class = status_enum_config["enum_class"]
                         exclude_values.append(getattr(enum_class, enum_key))
 
                 if exclude_values and status_field:
@@ -113,7 +114,7 @@ class QueryListHandler(BaseHandler):
                 value = getattr(item, field, None)
 
                 # 应用状态映射
-                if field == "status" or field == crud_mapping.status_field:
+                if field == "status" or field == crud_config["status_field"]:
                     if status_mapping:
                         str_value = str(value.value) if hasattr(value, 'value') else str(value)
                         value = status_mapping.get(str_value, str(value))

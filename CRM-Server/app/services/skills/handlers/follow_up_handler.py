@@ -9,8 +9,7 @@
 3. 支持相对时间解析（如"后天"、"三天后"、"下周"）
 4. 默认下次跟进时间为 3 天后
 
-复用：
-- parse_relative_time 和 extract_id_from_name 方法已抽离到 follow_up_parser 服务
+硬编码版：不再依赖数据库获取 CRUD/Enum 映射配置
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -19,6 +18,11 @@ from datetime import datetime, timedelta
 from app.services.skills.handlers.base_handler import BaseHandler
 from app.crud.user import user_crud
 from app.services.follow_up_parser import follow_up_parser_service
+from app.constants.handler_configs import (
+    CRUD_MAPPINGS,
+    ENUM_MAPPINGS,
+    get_enum_value,
+)
 
 
 class FollowUpHandler(BaseHandler):
@@ -89,20 +93,21 @@ class FollowUpHandler(BaseHandler):
         if not crud_mapping_name or not parent_crud_mapping_name:
             return self.build_result(False, "Handler 配置缺少 crud_mapping 或 parent_crud_mapping")
 
-        # 从数据库获取映射配置
-        from app.crud.ai_crud_mapping import ai_crud_mapping_crud
-        from app.crud.ai_enum_mapping import ai_enum_mapping_crud
+        # 从硬编码配置获取映射
+        crud_config = self.get_crud_mapping(crud_mapping_name)
+        parent_crud_config = self.get_crud_mapping(parent_crud_mapping_name)
 
-        crud_mapping = ai_crud_mapping_crud.get_by_name(db, crud_mapping_name)
-        parent_crud_mapping = ai_crud_mapping_crud.get_by_name(db, parent_crud_mapping_name)
-
-        if not crud_mapping or not parent_crud_mapping:
+        if not crud_config or not parent_crud_config:
             return self.build_result(False, "CRUD 映射不存在")
 
         # 获取用户信息
         user = user_crud.get_by_id(db, user_id)
         if not user:
             return self.build_result(False, "用户不存在")
+
+        # 从配置直接获取 CRUD 和 Model
+        parent_crud = parent_crud_config["crud"]
+        parent_model = parent_crud_config["model"]
 
         # 查找父实体
         parent_lookup_field = handler_config.get("parent_lookup_field", "name")
@@ -118,24 +123,14 @@ class FollowUpHandler(BaseHandler):
         if not parent_lookup_value and not direct_id:
             return self.build_result(False, f"缺少参数: {parent_lookup_field} 或 {direct_id_field}")
 
-        # 获取父实体 CRUD 和 Model
-        parent_crud = self.get_crud_instance(
-            parent_crud_mapping.crud_module,
-            parent_crud_mapping.crud_instance_name
-        )
-        parent_model = self.get_model_class(
-            f"app.models.{parent_crud_mapping_name.split('_')[0]}",
-            parent_crud_mapping.model_class
-        )
-
         # 获取排除状态配置（默认过滤已转化/无效）
         exclude_status_keys = handler_config.get("exclude_status", self.DEFAULT_EXCLUDE_STATUS)
 
-        # 获取状态枚举值
-        if exclude_status_keys and parent_crud_mapping.status_field:
+        # 获取状态枚举值（硬编码版，不需要 db）
+        if exclude_status_keys and parent_crud_config["status_field"]:
             parent_type = parent_crud_mapping_name.split("_")[0]
             status_enum_name = f"{parent_type}_status"
-            exclude_status_values = self.get_status_enum_values(db, status_enum_name, exclude_status_keys)
+            exclude_status_values = self.get_status_enum_values(status_enum_name, exclude_status_keys)
         else:
             exclude_status_values = []
 
@@ -147,20 +142,17 @@ class FollowUpHandler(BaseHandler):
         if direct_id:
             parent_id = int(direct_id)
             # 先检查实体是否存在（不过滤状态）
-            raw_entity = self.get_crud_instance(
-                parent_crud_mapping.crud_module,
-                parent_crud_mapping.crud_instance_name
-            ).get_by_id(db, parent_id)
+            raw_entity = parent_crud.get_by_id(db, parent_id)
 
             if not raw_entity:
                 return self.build_result(False, f"{parent_crud_mapping_name} ID {parent_id} 不存在")
 
             # 检查实体状态是否被排除
-            if exclude_status_values and parent_crud_mapping.status_field:
-                current_status = getattr(raw_entity, parent_crud_mapping.status_field)
+            if exclude_status_values and parent_crud_config["status_field"]:
+                current_status = getattr(raw_entity, parent_crud_config["status_field"])
                 if current_status in exclude_status_values:
-                    # 获取状态显示名称
-                    status_display = self._get_status_display_name(db, parent_type_prefix, current_status)
+                    # 获取状态显示名称（硬编码版，不需要 db）
+                    status_display = self._get_status_display_name(parent_type_prefix, current_status)
                     return self.build_result(
                         False,
                         f"{parent_crud_mapping_name}「{getattr(raw_entity, parent_name_field)}」当前状态为「{status_display}」，无法添加跟进记录"
@@ -173,19 +165,16 @@ class FollowUpHandler(BaseHandler):
             if id_match:
                 parent_id = int(id_match.group(1))
                 # 先检查实体是否存在（不过滤状态）
-                raw_entity = self.get_crud_instance(
-                    parent_crud_mapping.crud_module,
-                    parent_crud_mapping.crud_instance_name
-                ).get_by_id(db, parent_id)
+                raw_entity = parent_crud.get_by_id(db, parent_id)
 
                 if not raw_entity:
                     return self.build_result(False, f"{parent_crud_mapping_name} ID {parent_id} 不存在")
 
                 # 检查实体状态是否被排除
-                if exclude_status_values and parent_crud_mapping.status_field:
-                    current_status = getattr(raw_entity, parent_crud_mapping.status_field)
+                if exclude_status_values and parent_crud_config["status_field"]:
+                    current_status = getattr(raw_entity, parent_crud_config["status_field"])
                     if current_status in exclude_status_values:
-                        status_display = self._get_status_display_name(db, parent_type_prefix, current_status)
+                        status_display = self._get_status_display_name(parent_type_prefix, current_status)
                         return self.build_result(
                             False,
                             f"{parent_crud_mapping_name}「{getattr(raw_entity, parent_name_field)}」当前状态为「{status_display}」，无法添加跟进记录"
@@ -201,7 +190,7 @@ class FollowUpHandler(BaseHandler):
                         parent_name_field,
                         parent_lookup_value,
                         exclude_status=exclude_status_values,
-                        status_field=parent_crud_mapping.status_field
+                        status_field=parent_crud_config["status_field"]
                     )
                 except Exception as e:
                     return self.build_result(False, f"查询父实体失败: {str(e)}")
@@ -231,22 +220,20 @@ class FollowUpHandler(BaseHandler):
                 if opp:
                     team_id = opp.team_id
 
-        # 处理跟进方式 enum
+        # 处理跟进方式 enum（硬编码版）
         method = params.get("method")
         method_enum = None
 
         enum_mappings = handler_config.get("enum_mappings", {})
         if "method" in enum_mappings and method:
             enum_name = enum_mappings["method"]
-            enum_mapping = ai_enum_mapping_crud.get_by_name(db, enum_name)
+            enum_config = self.get_enum_mapping(enum_name)
 
-            if enum_mapping:
-                enum_key = enum_mapping.values.get(method)
-                if enum_key:
-                    enum_class = self.get_model_class(enum_mapping.enum_class)
-                    method_enum = getattr(enum_class, enum_key)
-                else:
-                    valid_values = list(enum_mapping.values.keys())
+            if enum_config:
+                enum_class = enum_config["enum_class"]
+                method_enum = get_enum_value(enum_class, method, enum_config)
+                if not method_enum:
+                    valid_values = list(enum_config.get("values", {}).keys())
                     return self.build_result(
                         False,
                         f"无效的跟进方式: {method}，请使用: {', '.join(valid_values)}"
@@ -276,24 +263,20 @@ class FollowUpHandler(BaseHandler):
             "next_action": next_action
         }
 
-        # 获取 Schema 类（使用 crud_mapping_name 推断 schema_module）
-        if crud_mapping.schema_create_class:
-            schema_module = f"app.schemas.{crud_mapping_name}"
+        # 获取 Schema 类（从硬编码配置）
+        schema_create = crud_config.get("schema_create")
+        if schema_create:
             try:
-                SchemaClass = self.get_schema_class(schema_module, crud_mapping.schema_create_class)
-                schema_obj = SchemaClass(**follow_up_data)
+                schema_obj = schema_create(**follow_up_data)
             except Exception as e:
                 return self.build_result(False, f"数据校验失败: {str(e)}")
 
-        # 获取跟进 CRUD 实例
-        follow_up_crud = self.get_crud_instance(
-            crud_mapping.crud_module,
-            crud_mapping.crud_instance_name
-        )
+        # 获取跟进 CRUD 实例（从硬编码配置）
+        follow_up_crud = crud_config["crud"]
 
         # 执行创建
         try:
-            if crud_mapping.schema_create_class:
+            if schema_create:
                 follow_up = follow_up_crud.create(
                     db, schema_obj, parent_id, str(user.id), team_id,
                     operator_name=user.name
@@ -306,27 +289,27 @@ class FollowUpHandler(BaseHandler):
         except Exception as e:
             return self.build_result(False, f"跟进记录添加失败: {str(e)}")
 
-        # 更新父实体状态
+        # 更新父实体状态（硬编码版）
         update_parent_status = handler_config.get("update_parent_status")
-        if update_parent_status and parent_crud_mapping.status_field:
+        if update_parent_status and parent_crud_config["status_field"]:
             from_status = update_parent_status.get("from_status")
             to_status = update_parent_status.get("to_status")
 
             # 检查当前状态
-            current_status = getattr(parent_entity, parent_crud_mapping.status_field)
+            current_status = getattr(parent_entity, parent_crud_config["status_field"])
             current_status_str = current_status.value if hasattr(current_status, 'value') else str(current_status)
 
             if from_status and current_status_str == from_status:
-                # 获取目标状态 enum
+                # 获取目标状态 enum（硬编码版）
                 status_enum_name = parent_crud_mapping_name + "_status"
-                status_enum_mapping = ai_enum_mapping_crud.get_by_name(db, status_enum_name)
+                status_enum_config = self.get_enum_mapping(status_enum_name)
 
-                if status_enum_mapping:
-                    to_enum_key = status_enum_mapping.values.get(to_status)
+                if status_enum_config:
+                    enum_class = status_enum_config["enum_class"]
+                    to_enum_key = status_enum_config.get("values", {}).get(to_status)
                     if to_enum_key:
-                        status_enum_class = self.get_model_class(status_enum_mapping.enum_class)
-                        new_status = getattr(status_enum_class, to_enum_key)
-                        setattr(parent_entity, parent_crud_mapping.status_field, new_status)
+                        new_status = getattr(enum_class, to_enum_key)
+                        setattr(parent_entity, parent_crud_config["status_field"], new_status)
                         db.commit()
 
         # 构建结果

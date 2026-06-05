@@ -6,6 +6,8 @@
 注意：
 1. 默认过滤已转化/无效状态的实体，避免查询已完成业务的数据
 2. 支持名称查找（用户输入名称即可查询，无需 ID）
+
+硬编码版：不再依赖数据库获取 CRUD/Enum 映射配置
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -54,32 +56,23 @@ class QueryDetailHandler(BaseHandler):
         if not crud_mapping_name:
             return self.build_result(False, "Handler 配置缺少 crud_mapping")
 
-        # 从数据库获取 CRUD 映射配置
-        from app.crud.ai_crud_mapping import ai_crud_mapping_crud
-        crud_mapping = ai_crud_mapping_crud.get_by_name(db, crud_mapping_name)
-        if not crud_mapping:
+        # 从硬编码配置获取 CRUD 映射配置
+        crud_config = self.get_crud_mapping(crud_mapping_name)
+        if not crud_config:
             return self.build_result(False, f"CRUD 映射不存在: {crud_mapping_name}")
 
-        # 获取 CRUD 实例
-        crud_instance = self.get_crud_instance(
-            crud_mapping.crud_module,
-            crud_mapping.crud_instance_name
-        )
-
-        # 获取 Model 类
-        model_class = self.get_model_class(
-            f"app.models.{crud_mapping_name.split('_')[0]}",
-            crud_mapping.model_class
-        )
+        # 从配置直接获取 CRUD 实例和 Model
+        crud_instance = crud_config["crud"]
+        model_class = crud_config["model"]
 
         # 获取排除状态配置
         exclude_status_keys = handler_config.get("exclude_status", self.DEFAULT_EXCLUDE_STATUS)
 
-        # 获取状态枚举值进行过滤
-        if exclude_status_keys and crud_mapping.status_field:
+        # 获取状态枚举值进行过滤（硬编码版）
+        if exclude_status_keys and crud_config["status_field"]:
             module_type = crud_mapping_name.split("_")[0]
             status_enum_name = f"{module_type}_status"
-            exclude_status_values = self.get_status_enum_values(db, status_enum_name, exclude_status_keys)
+            exclude_status_values = self.get_status_enum_values(status_enum_name, exclude_status_keys)
         else:
             exclude_status_values = []
 
@@ -87,7 +80,7 @@ class QueryDetailHandler(BaseHandler):
         entity = None
         entity_id = None
         name_lookup_field = handler_config.get("name_lookup_field")
-        name_field = handler_config.get("name_field", crud_mapping.name_field)
+        name_field = handler_config.get("name_field", crud_config.get("name_field"))
 
         if name_lookup_field and name_field:
             name_lookup_value = params.get(name_lookup_field)
@@ -100,7 +93,7 @@ class QueryDetailHandler(BaseHandler):
                         name_field,
                         name_lookup_value,
                         exclude_status=exclude_status_values,
-                        status_field=crud_mapping.status_field
+                        status_field=crud_config.get("status_field")
                     )
                 except Exception as e:
                     return self.build_result(False, f"查询失败: {str(e)}")
@@ -114,7 +107,7 @@ class QueryDetailHandler(BaseHandler):
                     entity_list = []
                     for e in entities[:5]:
                         entity_name = getattr(e, name_field)
-                        entity_status = getattr(e, crud_mapping.status_field, None)
+                        entity_status = getattr(e, crud_config.get("status_field"), None)
                         status_str = entity_status.name if hasattr(entity_status, 'name') else str(entity_status)
                         created_time = getattr(e, 'created_time', None)
                         time_str = created_time.strftime('%Y-%m-%d') if created_time else '未知'
@@ -150,7 +143,7 @@ class QueryDetailHandler(BaseHandler):
                     model_class,
                     entity_id,
                     exclude_status=exclude_status_values,
-                    status_field=crud_mapping.status_field
+                    status_field=crud_config.get("status_field")
                 )
             except Exception as e:
                 return self.build_result(False, f"查询失败: {str(e)}")
@@ -173,7 +166,7 @@ class QueryDetailHandler(BaseHandler):
             value = getattr(entity, field, None)
 
             # 应用状态映射
-            if field == "status" or field == crud_mapping.status_field:
+            if field == "status" or field == crud_config.get("status_field"):
                 if status_mapping:
                     str_value = str(value.value) if hasattr(value, 'value') else str(value)
                     field_values[f"{field}_text"] = status_mapping.get(str_value, str(value))
