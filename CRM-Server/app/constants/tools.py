@@ -306,7 +306,7 @@ TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "status": {
                         "type": "string",
-                        "enum": ["赢单", "输单", "跟进中", "暂停跟进"],
+                        "enum": ["跟进中", "已成交", "已流失", "非激活"],
                         "description": "客户状态筛选"
                     },
                     "owner_name": {
@@ -391,29 +391,29 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "create_opportunity",
-            "description": "创建新商机",
+            "description": "创建新商机。根据用户描述的客户需求，智能生成商机名称、预估金额和预期成交日期",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "opportunity_name": {
                         "type": "string",
-                        "description": "商机名称"
+                        "description": "商机名称（根据客户+需求自动生成，如「某某公司-采购系统项目」）"
                     },
                     "customer_name": {
                         "type": "string",
-                        "description": "关联客户名称（必填）"
+                        "description": "关联客户名称（必填，用于查找客户ID）"
                     },
                     "expected_amount": {
                         "type": "number",
-                        "description": "预期金额"
+                        "description": "预期金额（从用户描述中提取，如「预算50万」则填500000）"
                     },
                     "expected_closing_date": {
                         "type": "string",
-                        "description": "预期成交日期（YYYY-MM-DD格式）"
+                        "description": "预期成交日期（YYYY-MM-DD格式，从描述中解析，如「下季度」或「年底」）"
                     },
                     "remarks": {
                         "type": "string",
-                        "description": "备注"
+                        "description": "备注（记录客户的核心需求、决策人信息等关键信息）"
                     }
                 },
                 "required": ["customer_name"]
@@ -424,30 +424,30 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "query_opportunities",
-            "description": "查询商机列表",
+            "description": "查询商机列表。支持按状态、阶段、负责人、关键词组合筛选，返回商机概览信息",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "status": {
                         "type": "string",
                         "enum": ["跟进中", "赢单", "输单"],
-                        "description": "商机状态"
+                        "description": "商机状态筛选（跟进中=正在推进，赢单=已成交，输单=已失败）"
                     },
                     "stage": {
                         "type": "string",
-                        "description": "商机阶段"
+                        "description": "商机阶段筛选（如「初步接洽」「需求确认」「方案报价」「商务谈判」）"
                     },
                     "owner_name": {
                         "type": "string",
-                        "description": "负责人姓名"
+                        "description": "负责人姓名（模糊匹配）"
                     },
                     "keyword": {
                         "type": "string",
-                        "description": "搜索关键词"
+                        "description": "搜索关键词（商机名称、客户名称）"
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回数量限制"
+                        "description": "返回数量限制（默认10，最大50）"
                     }
                 },
                 "required": []
@@ -458,17 +458,17 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_opportunity_detail",
-            "description": "获取商机详细信息",
+            "description": "获取商机详细信息，包括当前阶段、赢率、预期金额、负责人、创建时间等",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "opportunity_id": {
                         "type": "integer",
-                        "description": "商机ID"
+                        "description": "商机ID（优先使用）"
                     },
                     "opportunity_name": {
                         "type": "string",
-                        "description": "商机名称（用于查找ID）"
+                        "description": "商机名称（用于模糊查找ID，如果提供ID则优先使用ID）"
                     }
                 },
                 "required": []
@@ -479,21 +479,21 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "advance_opportunity_stage",
-            "description": "推进商机到下一阶段",
+            "description": "推进商机到下一阶段。每次推进会更新赢率，推进到最后阶段（100%赢率）会自动标记为赢单",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "opportunity_id": {
                         "type": "integer",
-                        "description": "商机ID"
+                        "description": "商机ID（优先使用）"
                     },
                     "opportunity_name": {
                         "type": "string",
-                        "description": "商机名称"
+                        "description": "商机名称（用于查找ID）"
                     },
                     "remarks": {
                         "type": "string",
-                        "description": "备注说明"
+                        "description": "备注说明（记录推进原因、关键进展、客户反馈等信息）"
                     }
                 },
                 "required": []
@@ -504,25 +504,25 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "win_opportunity",
-            "description": "标记商机为成交（赢得）",
+            "description": "标记商机为赢单（成交）。记录实际成交金额和日期，从用户描述中智能提取金额信息",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "opportunity_id": {
                         "type": "integer",
-                        "description": "商机ID"
+                        "description": "商机ID（优先使用）"
                     },
                     "opportunity_name": {
                         "type": "string",
-                        "description": "商机名称"
+                        "description": "商机名称（用于查找ID）"
                     },
                     "actual_amount": {
                         "type": "number",
-                        "description": "实际成交金额"
+                        "description": "实际成交金额（从描述提取，如「签了30万」填300000，如未提及可填预期金额）"
                     },
                     "actual_closing_date": {
                         "type": "string",
-                        "description": "实际成交日期（YYYY-MM-DD格式）"
+                        "description": "实际成交日期（YYYY-MM-DD格式，如未提及则默认今天）"
                     }
                 },
                 "required": []
@@ -533,21 +533,21 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lose_opportunity",
-            "description": "标记商机为失败（失去）",
+            "description": "标记商机为输单（失败）。记录失败原因，便于后续分析和改进",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "opportunity_id": {
                         "type": "integer",
-                        "description": "商机ID"
+                        "description": "商机ID（优先使用）"
                     },
                     "opportunity_name": {
                         "type": "string",
-                        "description": "商机名称"
+                        "description": "商机名称（用于查找ID）"
                     },
                     "reason": {
                         "type": "string",
-                        "description": "失败原因"
+                        "description": "失败原因（从用户描述中分析，常见原因：价格竞争、客户预算不足、选择了竞品、需求变更、决策人变更等）"
                     }
                 },
                 "required": []
