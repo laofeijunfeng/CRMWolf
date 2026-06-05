@@ -214,6 +214,11 @@ TOOLS: List[Dict[str, Any]] = [
                         "type": "string",
                         "description": "跟进内容（必填）"
                     },
+                    "method": {
+                        "type": "string",
+                        "enum": ["电话", "微信", "邮件", "拜访", "其他"],
+                        "description": "跟进方式（默认：其他）"
+                    },
                     "next_follow_time": {
                         "type": "string",
                         "description": "下次跟进时间（YYYY-MM-DD格式，可选）"
@@ -357,6 +362,11 @@ TOOLS: List[Dict[str, Any]] = [
                     "content": {
                         "type": "string",
                         "description": "跟进内容（必填）"
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["电话", "微信", "邮件", "拜访", "其他"],
+                        "description": "跟进方式（默认：其他）"
                     },
                     "next_follow_time": {
                         "type": "string",
