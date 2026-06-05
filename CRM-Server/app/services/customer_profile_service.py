@@ -6,6 +6,7 @@
 """
 import json
 import asyncio
+import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -17,6 +18,8 @@ from app.crud.customer_follow_up import customer_follow_up_crud
 from app.crud.industry import industry_crud
 from app.crud.ai_config import ai_config_crud
 from app.services.ai_service import ai_service
+
+logger = logging.getLogger(__name__)
 
 
 class CustomerProfileService:
@@ -41,10 +44,13 @@ class CustomerProfileService:
         Returns:
             生成结果字典
         """
+        logger.info(f"开始生成客户档案: customer_id={customer_id}, team_id={team_id}")
+
         db = SessionLocal()
         try:
             # 1. 更新状态为 GENERATING
             customer_crud.update_profile_status(db, customer_id, "GENERATING")
+            logger.info(f"状态已更新为 GENERATING: customer_id={customer_id}")
 
             # 2. 获取 AI 配置
             config = ai_config_crud.get_config(db, team_id or 1)
@@ -55,18 +61,24 @@ class CustomerProfileService:
             if not api_key:
                 raise ValueError("无法获取 API Key")
 
+            logger.info(f"AI 配置获取成功: api_host={config.api_host}, model={config.model_name}")
+
             # 3. 获取行业层级结构
             industry_hierarchy = industry_crud.get_industry_hierarchy(db)
+            logger.info(f"行业层级结构获取成功，一级行业数量: {len(industry_hierarchy)}")
 
             # 4. 获取跟进记录（如果有线索来源）
             lead_follow_ups = None
             if source_lead_id:
                 lead_follow_ups = customer_follow_up_crud.get_by_original_lead_id(db, source_lead_id)
+                logger.info(f"跟进记录数量: {len(lead_follow_ups) if lead_follow_ups else 0}")
 
             # 5. 构建提示词（第一阶段：判断行业）
             prompt = self._build_prompt_for_industry(account_name, industry_hierarchy, lead_follow_ups)
+            logger.info(f"第一阶段提示词构建完成，长度: {len(prompt)}")
 
-            # 6. 第一次调用 AI：判断行业
+            # 6. 第一次调用 AI：判断行业（增加超时时间到 120秒）
+            logger.info("开始第一次 AI 调用：判断行业")
             full_content = await ai_service._stream_chat_collect(
                 api_host=config.api_host,
                 api_key=api_key,
@@ -79,18 +91,22 @@ class CustomerProfileService:
                 max_tokens=1024,
                 response_format={"type": "json_object"}
             )
+            logger.info(f"第一次 AI 调用完成，响应长度: {len(full_content)}")
 
             # 7. 解析行业结果
             industry_data = self._parse_industry_response(full_content, industry_hierarchy)
             industry_code = industry_data.get("industry_code", "other")
+            logger.info(f"行业解析结果: {industry_code}")
 
             # 8. 更新行业字段
             customer_crud.update_industry(db, customer_id, industry_code)
+            logger.info(f"行业字段已更新: {industry_code}")
 
             # 9. 获取同行业客户候选列表（限制在当前团队）
             similar_customer_candidates = industry_crud.get_customers_by_industry(
                 db, industry_code, customer_id, team_id, limit=50
             )
+            logger.info(f"同行业客户候选数量: {len(similar_customer_candidates) if similar_customer_candidates else 0}")
 
             # 10. 第二次调用 AI：生成完整档案（包含同行业客户选择）
             prompt2 = self._build_prompt_for_profile(
@@ -100,7 +116,9 @@ class CustomerProfileService:
                 similar_customer_candidates,
                 lead_follow_ups
             )
+            logger.info(f"第二阶段提示词构建完成，长度: {len(prompt2)}")
 
+            logger.info("开始第二次 AI 调用：生成完整档案")
             full_content2 = await ai_service._stream_chat_collect(
                 api_host=config.api_host,
                 api_key=api_key,
@@ -113,9 +131,11 @@ class CustomerProfileService:
                 max_tokens=2048,
                 response_format={"type": "json_object"}
             )
+            logger.info(f"第二次 AI 调用完成，响应长度: {len(full_content2)}")
 
             # 11. 解析档案结果
             profile_data = self._parse_profile_response(full_content2, similar_customer_candidates)
+            logger.info(f"档案解析完成")
 
             # 12. 更新客户档案
             customer_crud.update_profile(
@@ -131,6 +151,7 @@ class CustomerProfileService:
                     "profile_generated_time": datetime.now()
                 }
             )
+            logger.info(f"客户档案更新完成: customer_id={customer_id}, status=COMPLETED")
 
             return {
                 "success": True,
@@ -140,6 +161,7 @@ class CustomerProfileService:
             }
 
         except Exception as e:
+            logger.error(f"客户档案生成失败: customer_id={customer_id}, error={str(e)}")
             # 更新状态为 FAILED
             customer_crud.update_profile_status(
                 db,

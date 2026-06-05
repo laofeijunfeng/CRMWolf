@@ -3,11 +3,14 @@ AI 调用服务（SSE 流式请求）
 """
 import httpx
 import json
+import logging
 from typing import Optional, AsyncGenerator, Dict, Any
 from sqlalchemy.orm import Session
 from app.crud.ai_config import ai_config_crud
 from app.schemas.ai_skill import AIParsedIntent
 from app.services.skills.dynamic_prompt_service import dynamic_prompt_service
+
+logger = logging.getLogger(__name__)
 
 
 class AIService:
@@ -21,7 +24,8 @@ class AIService:
         messages: list,
         temperature: float = 0.1,
         max_tokens: int = 1024,
-        response_format: Optional[dict] = None
+        response_format: Optional[dict] = None,
+        timeout: float = 120.0  # 增加默认超时时间
     ) -> str:
         """
         使用 SSE 流式请求调用 AI API，收集完整响应
@@ -34,6 +38,7 @@ class AIService:
             temperature: 温度参数
             max_tokens: 最大 tokens
             response_format: 响应格式（可选）
+            timeout: 超时时间（秒），默认120秒
 
         Returns:
             完整的响应内容字符串
@@ -50,7 +55,9 @@ class AIService:
 
         full_content = ""
 
-        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+        logger.info(f"AI 调用开始: model={model}, timeout={timeout}s")
+
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             async with client.stream(
                 "POST",
                 f"{api_host}/chat/completions",
@@ -91,6 +98,7 @@ class AIService:
                             except json.JSONDecodeError:
                                 continue
 
+        logger.info(f"AI 调用完成: 响应长度={len(full_content)}")
         return full_content
 
     async def _stream_chat_generator(
@@ -101,7 +109,8 @@ class AIService:
         messages: list,
         temperature: float = 0.1,
         max_tokens: int = 1024,
-        response_format: Optional[dict] = None
+        response_format: Optional[dict] = None,
+        timeout: float = 60.0
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         使用 SSE 流式请求调用 AI API，生成 SSE 事件
@@ -122,7 +131,7 @@ class AIService:
         full_content = ""
 
         try:
-            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
                 async with client.stream(
                     "POST",
                     f"{api_host}/chat/completions",
