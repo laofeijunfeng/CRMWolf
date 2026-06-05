@@ -278,6 +278,12 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- AI 快速创建对话框 -->
+    <ProcurementMethodAIDialog
+      v-model="showAIDialog"
+      @created="handleAICreated"
+    />
   </div>
 </template>
 
@@ -293,6 +299,7 @@ import procurementApi, {
   type ProcurementStageTemplate,
   type ProcurementStageTemplateCreate
 } from '@/api/procurement'
+import ProcurementMethodAIDialog from '@/components/ProcurementMethodAIDialog.vue'
 
 const router = useRouter()
 
@@ -307,6 +314,7 @@ const isEditMethod = ref(false)
 const isEditStage = ref(false)
 const formRef = ref()
 const stageFormRef = ref()
+const showAIDialog = ref(false)
 
 const procurementMethods = ref<ProcurementMethod[]>([])
 const currentMethodStages = ref<ProcurementStageTemplate[]>([])
@@ -423,7 +431,11 @@ const handleBack = () => {
 }
 
 const handleCreate = () => {
-  router.push('/procurement-methods/create')
+  showAIDialog.value = true
+}
+
+const handleAICreated = () => {
+  fetchProcurementMethods()
 }
 
 const handleEdit = (method: ProcurementMethod) => {
