@@ -2,6 +2,8 @@
 设置下次跟进 Handler
 
 处理更新跟进记录的 next_follow_time 和 next_action
+
+硬编码版：不再依赖数据库获取 CRUD 映射配置
 """
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
@@ -44,18 +46,13 @@ class SetNextFollowHandler(BaseHandler):
         if not crud_mapping_name:
             return self.build_result(False, "Handler 配置缺少 crud_mapping")
 
-        # 从数据库获取 CRUD 映射配置
-        from app.crud.ai_crud_mapping import ai_crud_mapping_crud
-
-        crud_mapping = ai_crud_mapping_crud.get_by_name(db, crud_mapping_name)
-        if not crud_mapping:
+        # 从硬编码配置获取 CRUD 映射配置
+        crud_config = self.get_crud_mapping(crud_mapping_name)
+        if not crud_config:
             return self.build_result(False, f"CRUD 映射不存在: {crud_mapping_name}")
 
-        # 获取 CRUD 实例
-        follow_up_crud = self.get_crud_instance(
-            crud_mapping.crud_module,
-            crud_mapping.crud_instance_name
-        )
+        # 从配置直接获取 CRUD 实例
+        follow_up_crud = crud_config["crud"]
 
         # 解析下次跟进时间
         next_follow_time_str = params.get("next_follow_time")

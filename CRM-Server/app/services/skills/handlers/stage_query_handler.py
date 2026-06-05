@@ -5,6 +5,8 @@
 - 当前阶段 + 可推进阶段列表
 - 阶段推进历史
 - 可用采购方式列表
+
+硬编码版：不再依赖数据库获取 CRUD/Enum 映射配置
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -228,25 +230,23 @@ class StageQueryHandler(BaseHandler):
         """
         查找商机（支持 ID、商机名称、客户名称查找）
 
+        硬编码版：不再依赖数据库获取 CRUD 映射
+
         Returns:
             (opportunity, error_result) - 成功时 error_result 为 None
         """
-        from app.crud.ai_crud_mapping import ai_crud_mapping_crud
         from app.crud.opportunity import opportunity_crud
 
         crud_mapping_name = handler_config.get("crud_mapping", "opportunity")
-        crud_mapping = ai_crud_mapping_crud.get_by_name(db, crud_mapping_name)
-        if not crud_mapping:
+        crud_config = self.get_crud_mapping(crud_mapping_name)
+        if not crud_config:
             return None, self.build_result(False, f"CRUD 映射不存在: {crud_mapping_name}")
 
-        name_field = handler_config.get("name_field", crud_mapping.name_field)
+        name_field = handler_config.get("name_field", crud_config.get("name_field"))
         name_lookup_field = handler_config.get("name_lookup_field", "opportunity_name")
 
-        # 获取 Model 类
-        model_class = self.get_model_class(
-            f"app.models.{crud_mapping_name.split('_')[0]}",
-            crud_mapping.model_class
-        )
+        # 从配置直接获取 Model 类
+        model_class = crud_config["model"]
 
         # 尝试通过 ID 获取
         opportunity = None

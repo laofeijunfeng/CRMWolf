@@ -6,6 +6,8 @@
 注意：
 1. 支持名称查找（用户输入名称即可查询，无需 ID）
 2. 自动关联父实体信息用于结果展示
+
+硬编码版：不再依赖数据库获取 CRUD/Enum 映射配置
 """
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -57,11 +59,9 @@ class AggregateHandler(BaseHandler):
         if not crud_mapping_name:
             return self.build_result(False, "Handler 配置缺少 crud_mapping")
 
-        # 从数据库获取映射配置
-        from app.crud.ai_crud_mapping import ai_crud_mapping_crud
-
-        crud_mapping = ai_crud_mapping_crud.get_by_name(db, crud_mapping_name)
-        if not crud_mapping:
+        # 从硬编码配置获取 CRUD 映射配置
+        crud_config = self.get_crud_mapping(crud_mapping_name)
+        if not crud_config:
             return self.build_result(False, f"CRUD 映射不存在: {crud_mapping_name}")
 
         # 获取用户信息
@@ -73,32 +73,29 @@ class AggregateHandler(BaseHandler):
         if not parent_crud_mapping_name:
             return self.build_result(False, "Handler 配置缺少 parent_crud_mapping")
 
-        parent_crud_mapping = ai_crud_mapping_crud.get_by_name(db, parent_crud_mapping_name)
-        if not parent_crud_mapping:
+        parent_crud_config = self.get_crud_mapping(parent_crud_mapping_name)
+        if not parent_crud_config:
             return self.build_result(False, f"父实体 CRUD 映射不存在: {parent_crud_mapping_name}")
 
         # 尝试通过名称查找父实体
         parent_entity = None
         parent_id = None
         name_lookup_field = handler_config.get("name_lookup_field")
-        name_field = handler_config.get("name_field", parent_crud_mapping.name_field)
+        name_field = handler_config.get("name_field", parent_crud_config.get("name_field"))
 
         if name_lookup_field and name_field:
             name_lookup_value = params.get(name_lookup_field)
             if name_lookup_value:
-                # 获取父实体 Model
-                parent_model = self.get_model_class(
-                    f"app.models.{parent_crud_mapping_name.split('_')[0]}",
-                    parent_crud_mapping.model_class
-                )
+                # 从配置直接获取父实体 Model
+                parent_model = parent_crud_config["model"]
 
-                # 获取排除状态配置
+                # 获取排除状态配置（硬编码版）
                 exclude_status_keys = handler_config.get("exclude_status", self.DEFAULT_EXCLUDE_STATUS)
                 exclude_status_values = []
-                if exclude_status_keys and parent_crud_mapping.status_field:
+                if exclude_status_keys and parent_crud_config["status_field"]:
                     parent_type = parent_crud_mapping_name.split("_")[0]
                     status_enum_name = f"{parent_type}_status"
-                    exclude_status_values = self.get_status_enum_values(db, status_enum_name, exclude_status_keys)
+                    exclude_status_values = self.get_status_enum_values(status_enum_name, exclude_status_keys)
 
                 # 搜索父实体
                 try:
@@ -108,7 +105,7 @@ class AggregateHandler(BaseHandler):
                         name_field,
                         name_lookup_value,
                         exclude_status=exclude_status_values,
-                        status_field=parent_crud_mapping.status_field
+                        status_field=parent_crud_config["status_field"]
                     )
                 except Exception as e:
                     return self.build_result(False, f"查询父实体失败: {str(e)}")
@@ -142,20 +139,14 @@ class AggregateHandler(BaseHandler):
 
         # 如果通过 ID 获取父实体（名称查找已获取则跳过）
         if not parent_entity:
-            parent_crud = self.get_crud_instance(
-                parent_crud_mapping.crud_module,
-                parent_crud_mapping.crud_instance_name
-            )
+            parent_crud = parent_crud_config["crud"]
             parent_entity = parent_crud.get_by_id(db, parent_id)
 
             if not parent_entity:
                 return self.build_result(False, f"{parent_crud_mapping_name} ID {parent_id} 不存在")
 
-        # 获取 Model 类
-        model_class = self.get_model_class(
-            f"app.models.{crud_mapping_name.split('_')[0]}",
-            crud_mapping.model_class
-        )
+        # 从配置直接获取 Model 类
+        model_class = crud_config["model"]
 
         # 执行聚合查询
         try:
@@ -183,7 +174,7 @@ class AggregateHandler(BaseHandler):
 
         # 构建父实体信息
         parent_info = {}
-        parent_info["name"] = getattr(parent_entity, parent_crud_mapping.name_field or "name", "")
+        parent_info["name"] = getattr(parent_entity, parent_crud_config.get("name_field") or "name", "")
         if hasattr(parent_entity, "contract_amount"):
             aggregate_data["contract_amount"] = parent_entity.contract_amount
             aggregate_data["remaining_amount"] = parent_entity.contract_amount - aggregate_data["total_amount"]

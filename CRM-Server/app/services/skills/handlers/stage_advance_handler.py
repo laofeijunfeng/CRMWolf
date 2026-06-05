@@ -71,7 +71,7 @@ class StageAdvanceHandler(BaseHandler):
 
         # 检查商机状态
         exclude_status_keys = handler_config.get("exclude_status", self.DEFAULT_EXCLUDE_STATUS)
-        exclude_status_values = self.get_opportunity_status_values(db, exclude_status_keys)
+        exclude_status_values = self.get_opportunity_status_values(exclude_status_keys)
 
         if opportunity.status in exclude_status_values:
             status_text = self.get_status_text(opportunity.status)
@@ -217,17 +217,20 @@ class StageAdvanceHandler(BaseHandler):
         params: Dict[str, Any],
         handler_config: Dict[str, Any]
     ) -> tuple[Any, Optional[Dict[str, Any]]]:
-        """查找商机（支持 ID、商机名称、客户名称）"""
-        from app.crud.ai_crud_mapping import ai_crud_mapping_crud
+        """
+        查找商机（支持 ID、商机名称、客户名称）
+
+        硬编码版：不再依赖数据库获取 CRUD 映射
+        """
         from app.crud.opportunity import opportunity_crud
         from app.models.opportunity import Opportunity
 
         crud_mapping_name = handler_config.get("crud_mapping", "opportunity")
-        crud_mapping = ai_crud_mapping_crud.get_by_name(db, crud_mapping_name)
-        if not crud_mapping:
+        crud_config = self.get_crud_mapping(crud_mapping_name)
+        if not crud_config:
             return None, self.build_result(False, f"CRUD 映射不存在: {crud_mapping_name}")
 
-        name_field = handler_config.get("name_field", crud_mapping.name_field)
+        name_field = handler_config.get("name_field", crud_config.get("name_field"))
         name_lookup_field = handler_config.get("name_lookup_field", "opportunity_name")
 
         # 尝试通过 ID 获取
@@ -433,20 +436,9 @@ class StageAdvanceHandler(BaseHandler):
 
         return None
 
-    def get_opportunity_status_values(self, db: Session, status_keys: List[str]) -> List[int]:
-        """获取商机状态枚举值"""
-        from app.crud.ai_enum_mapping import ai_enum_mapping_crud
-        from app.models.opportunity import OpportunityStatus
-
-        values = []
-        for key in status_keys:
-            try:
-                enum_value = getattr(OpportunityStatus, key)
-                values.append(enum_value.value if hasattr(enum_value, 'value') else enum_value)
-            except AttributeError:
-                continue
-
-        return values
+    def get_opportunity_status_values(self, status_keys: List[str]) -> List[int]:
+        """获取商机状态枚举值（硬编码版）"""
+        return self.get_status_enum_values("opportunity_status", status_keys)
 
     def get_status_text(self, status: int) -> str:
         """获取状态文本"""
