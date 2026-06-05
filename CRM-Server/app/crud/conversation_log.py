@@ -55,7 +55,8 @@ class ConversationLogCRUD:
         log_id: int,
         execution_result: Optional[str] = None,
         status: str = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        ai_skill: Optional[str] = None
     ) -> Optional[ConversationLog]:
         """更新执行结果"""
         db_obj = db.query(ConversationLog).filter(ConversationLog.id == log_id).first()
@@ -66,6 +67,8 @@ class ConversationLogCRUD:
                 db_obj.status = status
             if error_message:
                 db_obj.error_message = error_message
+            if ai_skill:
+                db_obj.ai_skill = ai_skill
             db.commit()
             db.refresh(db_obj)
         return db_obj
