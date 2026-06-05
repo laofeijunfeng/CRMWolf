@@ -656,6 +656,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
             "parent_crud_mapping": "lead",
             "parent_lookup_field": "lead_name",
             "parent_name_field": "lead_name",
+            "enum_mappings": {"method": "follow_up_method"},
             "update_parent_status": {"from_status": "NEW", "to_status": "FOLLOWING"},
             "permission_code": "lead:follow_up:create"
         }
@@ -700,6 +701,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
             "parent_crud_mapping": "customer",
             "parent_lookup_field": "customer_name",
             "parent_name_field": "customer_name",
+            "enum_mappings": {"method": "follow_up_method"},
             "permission_code": "customer:follow_up:create"
         }
     },
