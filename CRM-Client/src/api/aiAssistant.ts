@@ -5,8 +5,7 @@
 
 export interface AIAssistantRequest {
   content: string
-  skill?: string
-  action?: string
+  tool?: string
   params?: Record<string, unknown>
 }
 
@@ -14,13 +13,11 @@ export interface AIAssistantSSEEvent {
   event: 'status' | 'content' | 'parsed' | 'result' | 'error'
   message?: string
   content?: string
-  skill?: string
-  action?: string
+  tool?: string
   params?: Record<string, unknown>
-  missing_params?: string[]
-  param_definitions?: Record<string, unknown>
   reply_text?: string
   success?: boolean
+  data?: unknown
 }
 
 export const aiAssistantApi = {
@@ -32,8 +29,7 @@ export const aiAssistantApi = {
     onEvent: (event: AIAssistantSSEEvent) => void,
     token: string
   ): Promise<void> => {
-    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    const url = `${baseURL}/v1/assistant/chat`
+    const url = '/api/v1/assistant/chat'
     console.log('[AIAssistant] SSE request URL:', url)
     console.log('[AIAssistant] SSE request data:', data)
     console.log('[AIAssistant] SSE request token:', token ? 'exists' : 'empty')

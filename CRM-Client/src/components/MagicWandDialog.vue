@@ -63,12 +63,8 @@
       <div class="action-preview">
         <div class="preview-header">即将执行的操作：</div>
         <div class="preview-item">
-          <span class="preview-label">Skill:</span>
-          <span class="preview-value">{{ previewAction?.skill }}</span>
-        </div>
-        <div class="preview-item">
-          <span class="preview-label">Action:</span>
-          <span class="preview-value">{{ previewAction?.action }}</span>
+          <span class="preview-label">工具:</span>
+          <span class="preview-value">{{ previewAction?.tool }}</span>
         </div>
         <div v-if="previewAction?.params" class="preview-params">
           <div class="preview-label">参数:</div>
@@ -198,7 +194,7 @@ const userInput = ref('')
 const isLoading = ref(false)
 const isExecuting = ref(false)
 const replyText = ref('')
-const previewAction = ref<{ skill: string; action: string; params: Record<string, unknown> } | null>(null)
+const previewAction = ref<{ tool: string; params: Record<string, unknown> } | null>(null)
 const success = ref(false)
 const resultMessage = ref('')
 const sessionId = ref('')
@@ -333,25 +329,16 @@ function handleSSEEvent(event: AIAssistantSSEEvent) {
 
     case 'parsed':
       lastParsedEvent.value = event
-      if (event.skill && event.action) {
-        // Store param definitions and missing params
-        paramDefinitions.value = (event.param_definitions as Record<string, ParamDefinition>) || {}
-        missingParams.value = event.missing_params || []
-
-        // Has matched skill/action
+      if (event.tool) {
+        // Has matched tool
         previewAction.value = {
-          skill: event.skill,
-          action: event.action,
+          tool: event.tool,
           params: event.params || {}
         }
         replyText.value = event.reply_text || ''
 
-        // If missing params exist, show form for user to fill
-        if (missingParams.value.length > 0 && Object.keys(paramDefinitions.value).length > 0) {
-          stage.value = 'preview-form'
-        } else {
-          stage.value = 'preview'
-        }
+        // Check if need user confirmation
+        stage.value = 'preview'
       } else if (event.reply_text) {
         // Need clarification
         replyText.value = event.reply_text
@@ -401,8 +388,7 @@ async function handleExecute() {
     await aiAssistantApi.chatSSE(
       {
         content: '确认执行',
-        skill: previewAction.value.skill,
-        action: previewAction.value.action,
+        tool: previewAction.value.tool,
         params: previewAction.value.params
       },
       (event: AIAssistantSSEEvent) => {
@@ -471,8 +457,7 @@ async function handleFormSubmit(values: Record<string, unknown>) {
     await aiAssistantApi.chatSSE(
       {
         content: '确认执行',
-        skill: previewAction.value.skill,
-        action: previewAction.value.action,
+        tool: previewAction.value.tool,
         params: mergedParams
       },
       (event: AIAssistantSSEEvent) => {
