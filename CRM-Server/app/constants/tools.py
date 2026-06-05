@@ -643,7 +643,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
         "handler": "FollowUpHandler",
         "config": {
             "crud_mapping": "lead",
-            "permission_code": "lead:edit"
+            "permission_code": "lead:follow_up:create"
         }
     },
     "mark_lead_invalid": {
@@ -651,7 +651,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
         "config": {
             "crud_mapping": "lead",
             "action_type": "mark_invalid",
-            "permission_code": "lead:edit"
+            "permission_code": "lead:edit:own"
         }
     },
 
@@ -683,7 +683,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
         "handler": "FollowUpHandler",
         "config": {
             "crud_mapping": "customer",
-            "permission_code": "customer:edit"
+            "permission_code": "customer:follow_up:create"
         }
     },
 
@@ -720,7 +720,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
         "handler": "StageAdvanceHandler",
         "config": {
             "crud_mapping": "opportunity",
-            "permission_code": "opportunity:edit"
+            "permission_code": "opportunity:edit:own"
         }
     },
     "win_opportunity": {
@@ -728,7 +728,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
         "config": {
             "crud_mapping": "opportunity",
             "action_type": "win",
-            "permission_code": "opportunity:edit"
+            "permission_code": "opportunity:edit:own"
         }
     },
     "lose_opportunity": {
@@ -736,7 +736,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
         "config": {
             "crud_mapping": "opportunity",
             "action_type": "lose",
-            "permission_code": "opportunity:edit"
+            "permission_code": "opportunity:edit:own"
         }
     },
 
@@ -744,7 +744,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
     "set_next_follow_time": {
         "handler": "SetNextFollowHandler",
         "config": {
-            "permission_code": "lead:edit"
+            "permission_code": "lead:follow_up:create"
         }
     },
     "get_sales_funnel": {
