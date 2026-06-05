@@ -198,7 +198,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "follow_up_lead",
-            "description": "添加线索跟进记录",
+            "description": "添加线索跟进记录。根据用户描述的跟进情况，智能分析并填写跟进内容、跟进方式、下一步动作等",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -212,16 +212,20 @@ TOOLS: List[Dict[str, Any]] = [
                     },
                     "content": {
                         "type": "string",
-                        "description": "跟进内容（必填）"
+                        "description": "跟进内容（必填，总结用户的跟进描述）"
                     },
                     "method": {
                         "type": "string",
                         "enum": ["电话", "微信", "邮件", "拜访", "其他"],
-                        "description": "跟进方式（默认：其他）"
+                        "description": "跟进方式（根据描述判断，如'微信联系'则填'微信'，默认'其他'）"
                     },
                     "next_follow_time": {
                         "type": "string",
-                        "description": "下次跟进时间（YYYY-MM-DD格式，可选）"
+                        "description": "下次跟进时间（YYYY-MM-DD格式，如用户说'明天再联系'则填明天日期）"
+                    },
+                    "next_action": {
+                        "type": "string",
+                        "description": "下一步动作（根据用户描述分析下一步应该做什么，如：明天再联系客户、准备报价方案、发送产品资料等）"
                     }
                 },
                 "required": ["content"]
@@ -347,7 +351,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "follow_up_customer",
-            "description": "添加客户跟进记录",
+            "description": "添加客户跟进记录。根据用户描述的跟进情况，智能分析并填写跟进内容、跟进方式、下一步动作等",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -361,16 +365,20 @@ TOOLS: List[Dict[str, Any]] = [
                     },
                     "content": {
                         "type": "string",
-                        "description": "跟进内容（必填）"
+                        "description": "跟进内容（必填，总结用户的跟进描述）"
                     },
                     "method": {
                         "type": "string",
                         "enum": ["电话", "微信", "邮件", "拜访", "其他"],
-                        "description": "跟进方式（默认：其他）"
+                        "description": "跟进方式（根据描述判断，如'微信联系'则填'微信'，默认'其他'）"
                     },
                     "next_follow_time": {
                         "type": "string",
-                        "description": "下次跟进时间（YYYY-MM-DD格式）"
+                        "description": "下次跟进时间（YYYY-MM-DD格式，如用户说'明天再联系'则填明天日期）"
+                    },
+                    "next_action": {
+                        "type": "string",
+                        "description": "下一步动作（根据用户描述分析下一步应该做什么，如：明天再联系客户、准备报价方案、发送产品资料等）"
                     }
                 },
                 "required": ["content"]
