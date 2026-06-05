@@ -2,7 +2,7 @@
   <el-dialog
     v-model="visible"
     title="AI 快速创建采购方式"
-    width="700px"
+    width="850px"
     :close-on-click-modal="false"
     class="procurement-ai-dialog"
     @close="handleClose"
@@ -100,19 +100,19 @@
           border
           class="stages-table"
         >
-          <el-table-column prop="stage_name" label="阶段名称" width="150">
+          <el-table-column prop="stage_name" label="阶段名称" min-width="120">
             <template #default="{ row }">
               <el-input v-model="row.stage_name" size="small" />
             </template>
           </el-table-column>
 
-          <el-table-column prop="template_code" label="编码" width="140">
+          <el-table-column prop="template_code" label="编码" min-width="130">
             <template #default="{ row }">
               <el-input v-model="row.template_code" size="small" />
             </template>
           </el-table-column>
 
-          <el-table-column prop="win_probability" label="赢率" width="80">
+          <el-table-column prop="win_probability" label="赢率" width="100">
             <template #default="{ row }">
               <el-input-number
                 v-model="row.win_probability"
@@ -120,11 +120,12 @@
                 :max="100"
                 size="small"
                 controls-position="right"
+                style="width: 80px"
               />
             </template>
           </el-table-column>
 
-          <el-table-column prop="sort_order" label="顺序" width="80">
+          <el-table-column prop="sort_order" label="顺序" width="90">
             <template #default="{ row, $index }">
               <div class="order-buttons">
                 <el-button
@@ -145,7 +146,7 @@
             </template>
           </el-table-column>
 
-          <el-table-column prop="is_default_start" label="默认起始" width="80">
+          <el-table-column prop="is_default_start" label="默认起始" width="80" align="center">
             <template #default="{ row, $index }">
               <el-checkbox
                 v-model="row.is_default_start"
@@ -154,19 +155,19 @@
             </template>
           </el-table-column>
 
-          <el-table-column prop="can_skip" label="可跳过" width="70">
+          <el-table-column prop="can_skip" label="可跳过" width="70" align="center">
             <template #default="{ row }">
               <el-checkbox v-model="row.can_skip" />
             </template>
           </el-table-column>
 
-          <el-table-column prop="description" label="描述">
+          <el-table-column prop="description" label="描述" min-width="150">
             <template #default="{ row }">
-              <el-input v-model="row.description" size="small" />
+              <el-input v-model="row.description" size="small" placeholder="阶段描述" />
             </template>
           </el-table-column>
 
-          <el-table-column label="操作" width="70">
+          <el-table-column label="操作" width="60" align="center">
             <template #default="{ $index }">
               <el-button
                 size="small"
