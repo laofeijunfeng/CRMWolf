@@ -139,7 +139,7 @@ export const aiSkillsApi = {
   ): Promise<void> => {
     const token = localStorage.getItem('token')
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL || ''}/v1/ai/skills/analyze`,
+      '/api/v1/ai/skills/analyze',
       {
         method: 'POST',
         headers: {
@@ -196,7 +196,7 @@ export const aiSkillsApi = {
   ): Promise<void> => {
     const token = localStorage.getItem('token')
     const response = await fetch(
-      `${import.meta.env.VITE_API_BASE_URL || ''}/v1/ai/skills/generate`,
+      '/api/v1/ai/skills/generate',
       {
         method: 'POST',
         headers: {

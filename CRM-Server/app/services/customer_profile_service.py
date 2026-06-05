@@ -47,11 +47,11 @@ class CustomerProfileService:
             customer_crud.update_profile_status(db, customer_id, "GENERATING")
 
             # 2. 获取 AI 配置
-            config = ai_config_crud.get_config(db)
+            config = ai_config_crud.get_config(db, team_id or 1)
             if not config:
                 raise ValueError("AI 配置未设置")
 
-            api_key = ai_config_crud.get_decrypted_api_key(db)
+            api_key = ai_config_crud.get_decrypted_api_key(db, team_id or 1)
             if not api_key:
                 raise ValueError("无法获取 API Key")
 

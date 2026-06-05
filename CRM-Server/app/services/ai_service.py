@@ -195,11 +195,11 @@ class AIService:
         """
         return dynamic_prompt_service.generate_system_prompt(db)
 
-    async def parse_intent(self, db: Session, user_message: str) -> AIParsedIntent:
+    async def parse_intent(self, db: Session, user_message: str, team_id: int = 1) -> AIParsedIntent:
         """
         调用 AI 解析用户意图（收集完整响应）
         """
-        config = ai_config_crud.get_config(db)
+        config = ai_config_crud.get_config(db, team_id)
         if not config:
             return AIParsedIntent(
                 skill=None,
@@ -208,7 +208,7 @@ class AIService:
                 reply_text="AI 配置未设置，请联系管理员先配置 AI 服务"
             )
 
-        api_key = ai_config_crud.get_decrypted_api_key(db)
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
             return AIParsedIntent(
                 skill=None,
@@ -283,12 +283,12 @@ class AIService:
                 reply_text=f"AI 服务异常：{str(e)}"
             )
 
-    def get_config_and_key(self, db: Session) -> tuple[Optional[Any], Optional[str]]:
+    def get_config_and_key(self, db: Session, team_id: int = 1) -> tuple[Optional[Any], Optional[str]]:
         """获取 AI 配置和 API Key"""
-        config = ai_config_crud.get_config(db)
+        config = ai_config_crud.get_config(db, team_id)
         if not config:
             return None, None
-        api_key = ai_config_crud.get_decrypted_api_key(db)
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         return config, api_key
 
     async def stream_intent_parse(
@@ -396,15 +396,15 @@ class AIService:
         except Exception as e:
             yield {"event": "error", "message": f"AI 服务异常：{str(e)}"}
 
-    async def test_connection(self, db: Session, test_message: str) -> tuple[bool, str, Optional[str]]:
+    async def test_connection(self, db: Session, test_message: str, team_id: int = 1) -> tuple[bool, str, Optional[str]]:
         """
         测试 AI 连接（使用 SSE 流式请求）
         """
-        config = ai_config_crud.get_config(db)
+        config = ai_config_crud.get_config(db, team_id)
         if not config:
             return False, "AI 配置未设置", None
 
-        api_key = ai_config_crud.get_decrypted_api_key(db)
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
             return False, "无法获取 API Key", None
 

@@ -63,8 +63,7 @@ export const aiConfigApi = {
     onEvent: (event: SSEEvent) => void,
     token: string
   ): Promise<void> => {
-    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-    const url = `${baseURL}/v1/ai/test`
+    const url = '/api/v1/ai/test'
 
     const response = await fetch(url, {
       method: 'POST',

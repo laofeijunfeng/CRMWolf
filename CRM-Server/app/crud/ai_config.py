@@ -10,16 +10,16 @@ from app.schemas.ai_config import AIConfigCreate
 class AIConfigCRUD:
     """AI 配置 CRUD 操作"""
 
-    def get_config(self, db: Session) -> Optional[AIConfig]:
-        """获取 AI 配置（ID 固定为 1）"""
-        return db.query(AIConfig).filter(AIConfig.id == 1).first()
+    def get_config(self, db: Session, team_id: int) -> Optional[AIConfig]:
+        """获取 AI 配置（按团队 ID）"""
+        return db.query(AIConfig).filter(AIConfig.team_id == team_id).first()
 
-    def create_config(self, db: Session, obj_in: AIConfigCreate, updated_by: Optional[int] = None) -> AIConfig:
+    def create_config(self, db: Session, obj_in: AIConfigCreate, updated_by: Optional[int] = None, team_id: int = 1) -> AIConfig:
         """创建 AI 配置"""
         encrypted_key = AIConfig.encrypt_api_key(obj_in.api_key)
 
         db_obj = AIConfig(
-            id=1,
+            team_id=team_id,
             api_host=obj_in.api_host,
             api_key_encrypted=encrypted_key,
             model_name=obj_in.model_name,
@@ -44,19 +44,19 @@ class AIConfigCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def get_decrypted_api_key(self, db: Session) -> Optional[str]:
+    def get_decrypted_api_key(self, db: Session, team_id: int) -> Optional[str]:
         """获取解密后的 API Key"""
-        config = self.get_config(db)
+        config = self.get_config(db, team_id)
         if config:
             return AIConfig.decrypt_api_key(config.api_key_encrypted)
         return None
 
-    def save_or_update(self, db: Session, obj_in: AIConfigCreate, updated_by: Optional[int] = None) -> AIConfig:
+    def save_or_update(self, db: Session, obj_in: AIConfigCreate, updated_by: Optional[int] = None, team_id: int = 1) -> AIConfig:
         """保存或更新配置（如果存在则更新，不存在则创建）"""
-        existing = self.get_config(db)
+        existing = self.get_config(db, team_id)
         if existing:
             return self.update_config(db, existing, obj_in, updated_by)
-        return self.create_config(db, obj_in, updated_by)
+        return self.create_config(db, obj_in, updated_by, team_id)
 
 
 ai_config_crud = AIConfigCRUD()

@@ -279,7 +279,7 @@ class IntentDetector:
             MultiIntentResult: 多意图解析结果
         """
         # 1. 获取 AI 配置
-        config, api_key = ai_service.get_config_and_key(self.db)
+        config, api_key = ai_service.get_config_and_key(self.db, self.tenant_id)
         if not config or not api_key:
             logger.warning("AI 配置不可用")
             return MultiIntentResult(
@@ -407,7 +407,7 @@ class IntentDetector:
             _LLMIntentResult: 解析结果，error 字段表示 AI 服务不可用
         """
         # 1. 获取 AI 配置
-        config, api_key = ai_service.get_config_and_key(self.db)
+        config, api_key = ai_service.get_config_and_key(self.db, self.tenant_id)
         if not config or not api_key:
             logger.warning("AI 配置不可用")
             return self._LLMIntentResult(

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, Generic, TypeVar
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_current_user_team
 from app.models.user import User
 from app.crud.ai_config import ai_config_crud
 from app.schemas.ai_config import AIConfigCreate, AIConfigResponse, AITestRequest, AITestResponse
@@ -35,6 +35,7 @@ router = APIRouter(prefix="/v1/ai", tags=["AI 配置管理"])
 
 @router.get("/config")
 async def get_ai_config(
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -45,7 +46,7 @@ async def get_ai_config(
     if not any(p.code in ["system:config", "ai:manage", "ai:read"] for p in permissions):
         raise HTTPException(status_code=403, detail="无权限访问 AI 配置")
 
-    config = ai_config_crud.get_config(db)
+    config = ai_config_crud.get_config(db, team_id)
     if not config:
         return {
             "code": 0,
@@ -54,7 +55,7 @@ async def get_ai_config(
             "timestamp": int(time.time())
         }
 
-    masked_key = config.mask_api_key(ai_config_crud.get_decrypted_api_key(db) or "")
+    masked_key = config.mask_api_key(ai_config_crud.get_decrypted_api_key(db, team_id) or "")
 
     return {
         "code": 0,
@@ -75,6 +76,7 @@ async def get_ai_config(
 @router.post("/config")
 async def save_ai_config(
     config_in: AIConfigCreate,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -85,7 +87,7 @@ async def save_ai_config(
     if not any(p.code in ["system:config", "ai:manage"] for p in permissions):
         raise HTTPException(status_code=403, detail="无权限修改 AI 配置")
 
-    config = ai_config_crud.save_or_update(db, config_in, current_user.id)
+    config = ai_config_crud.save_or_update(db, config_in, current_user.id, team_id)
 
     masked_key = config.mask_api_key(config_in.api_key)
 
@@ -108,6 +110,7 @@ async def save_ai_config(
 @router.post("/test")
 async def test_ai_connection(
     test_in: AITestRequest,
+    team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -118,11 +121,11 @@ async def test_ai_connection(
     if not any(p.code in ["system:config", "ai:manage"] for p in permissions):
         raise HTTPException(status_code=403, detail="无权限测试 AI 连接")
 
-    config = ai_config_crud.get_config(db)
+    config = ai_config_crud.get_config(db, team_id)
     if not config:
         raise HTTPException(status_code=400, detail="AI 配置未设置")
 
-    api_key = ai_config_crud.get_decrypted_api_key(db)
+    api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
     if not api_key:
         raise HTTPException(status_code=400, detail="无法获取 API Key")
 

@@ -158,7 +158,8 @@ class LeadAIParserService:
     async def parse_lead_info_stream(
         self,
         db: Session,
-        user_message: str
+        user_message: str,
+        team_id: int = 1
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式解析线索信息，生成 SSE 事件
@@ -166,17 +167,18 @@ class LeadAIParserService:
         Args:
             db: 数据库 session
             user_message: 用户输入的自然语言描述
+            team_id: 团队 ID
 
         Yields:
             SSE 事件字典
         """
         # 获取 AI 配置
-        config = ai_config_crud.get_config(db)
+        config = ai_config_crud.get_config(db, team_id)
         if not config:
             yield {"event": "error", "message": "AI 配置未设置，请联系管理员先配置 AI 服务"}
             return
 
-        api_key = ai_config_crud.get_decrypted_api_key(db)
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
             yield {"event": "error", "message": "AI 配置异常，无法获取 API Key"}
             return
@@ -283,7 +285,8 @@ class LeadAIParserService:
     async def parse_lead_info(
         self,
         db: Session,
-        user_message: str
+        user_message: str,
+        team_id: int = 1
     ) -> LeadAIParseResponse:
         """
         解析线索信息（收集完整响应）
@@ -291,12 +294,13 @@ class LeadAIParserService:
         Args:
             db: 数据库 session
             user_message: 用户输入的自然语言描述
+            team_id: 团队 ID
 
         Returns:
             解析结果
         """
         # 获取 AI 配置
-        config = ai_config_crud.get_config(db)
+        config = ai_config_crud.get_config(db, team_id)
         if not config:
             return LeadAIParseResponse(
                 lead_info=LeadAIParsedInfo(missing_fields=["all"]),
@@ -304,7 +308,7 @@ class LeadAIParserService:
                 thinking_process="AI 配置未设置"
             )
 
-        api_key = ai_config_crud.get_decrypted_api_key(db)
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
             return LeadAIParseResponse(
                 lead_info=LeadAIParsedInfo(missing_fields=["all"]),

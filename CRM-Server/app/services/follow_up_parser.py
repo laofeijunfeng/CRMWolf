@@ -259,7 +259,8 @@ class FollowUpParserService:
     async def parse_follow_up_info_stream(
         self,
         db: Session,
-        user_message: str
+        user_message: str,
+        team_id: int = 1
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式解析跟进信息，生成 SSE 事件
@@ -267,17 +268,18 @@ class FollowUpParserService:
         Args:
             db: 数据库 session
             user_message: 用户输入的描述文本
+            team_id: 团队 ID
 
         Yields:
             SSE 事件字典
         """
         # 获取 AI 配置
-        config = ai_config_crud.get_config(db)
+        config = ai_config_crud.get_config(db, team_id)
         if not config:
             yield {"event": "error", "message": "AI 配置未设置"}
             return
 
-        api_key = ai_config_crud.get_decrypted_api_key(db)
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
             yield {"event": "error", "message": "无法获取 API Key"}
             return
@@ -384,7 +386,8 @@ class FollowUpParserService:
     async def parse_follow_up_info(
         self,
         db: Session,
-        user_message: str
+        user_message: str,
+        team_id: int = 1
     ) -> LeadAIFollowUpInfo:
         """
         解析跟进信息（收集完整响应）
@@ -392,16 +395,17 @@ class FollowUpParserService:
         Args:
             db: 数据库 session
             user_message: 用户输入的描述文本
+            team_id: 团队 ID
 
         Returns:
             解析结果
         """
         # 获取 AI 配置
-        config = ai_config_crud.get_config(db)
+        config = ai_config_crud.get_config(db, team_id)
         if not config:
             return LeadAIFollowUpInfo()
 
-        api_key = ai_config_crud.get_decrypted_api_key(db)
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
             return LeadAIFollowUpInfo()
 

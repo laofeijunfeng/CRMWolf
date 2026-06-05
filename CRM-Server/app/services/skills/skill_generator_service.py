@@ -227,7 +227,8 @@ class SkillGeneratorService:
     async def analyze_requirement(
         self,
         db: Session,
-        requirement: str
+        requirement: str,
+        team_id: int = 1
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         分析用户需求，生成 SSE 事件
@@ -235,7 +236,7 @@ class SkillGeneratorService:
         Yields:
             SSE 事件字典
         """
-        config, api_key = ai_service.get_config_and_key(db)
+        config, api_key = ai_service.get_config_and_key(db, team_id)
         if not config or not api_key:
             yield {"event": "error", "message": "AI 配置未设置或异常"}
             return
@@ -298,7 +299,8 @@ class SkillGeneratorService:
         self,
         db: Session,
         config_prompt: str,
-        user_id: int
+        user_id: int,
+        team_id: int = 1
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         根据配置 Prompt 生成并保存 Skill/Action 配置
@@ -306,7 +308,7 @@ class SkillGeneratorService:
         Yields:
             SSE 事件字典
         """
-        config, api_key = ai_service.get_config_and_key(db)
+        config, api_key = ai_service.get_config_and_key(db, team_id)
         if not config or not api_key:
             yield {"event": "error", "message": "AI 配置未设置或异常"}
             return

@@ -20,6 +20,7 @@
 
 | 场景 | 必查文档 | 违规后果 |
 |------|----------|----------|
+| **写代码前** | **best-practices/README.md** | **禁止凭直觉选择方案** |
 | 定义类型 | TYPESCRIPT.md | 禁止创建新类型 |
 | 放置文件 | system/ARCHITECTURE.md | 禁止跨模块 |
 | 写 Vue 组件 | COMPONENTS.md | 禁止内联类型 |
@@ -196,6 +197,14 @@ CRMWolf/
 │   │   ├── AI-API-STANDARD.md    ← 🤖 AI OpenAPI 接口规范（必读）
 │   │   └── QUICK-START.md        ← 快速上手指南
 │   │
+│   ├── best-practices/           ← 🎯 最佳实践知识库（开发前必查）
+│   │   ├── README.md             ← 场景导航 + 决策流程
+│   │   ├── decisions.md          ← 决策框架 + 成本评估
+│   │   ├── frontend/             ← 前端成熟方案
+│   │   ├── backend/              ← 后端成熟方案
+│   │   ├── deployment/           ← 部署成熟方案
+│   │   └── lessons-learned/      ← 复盘教训（避免踩坑）
+│   │
 │   ├── plans/                    ← 实施计划
 │   │   └── AI-OPENAPI-IMPLEMENTATION-PLAN.md ← 🤖 AI OpenAPI 实施计划
 │   │
@@ -237,6 +246,7 @@ CRMWolf/
 
 | 任务 | 起点 |
 |------|------|
+| **写代码前先查成熟方案** | **best-practices/README.md → 按场景找 → 复用方案** |
 | 新增 API 端点 | system/ARCHITECTURE.md → api/层 → TYPESCRIPT.md 取类型 |
 | 创建 Vue 页面 | COMPONENTS.md → 模板 → system/GLOSSARY.md 查状态码 |
 | 新增 Pinia Store | STATE-MANAGEMENT.md → 模板 → TYPESCRIPT.md 取类型 |
@@ -256,4 +266,4 @@ CRMWolf/
 
 ---
 
-**版本：1.2 | 最后更新：2026-05-28 | 修改需人工审批**
+**版本：1.3 | 最后更新：2026-06-04 | 修改需人工审批**

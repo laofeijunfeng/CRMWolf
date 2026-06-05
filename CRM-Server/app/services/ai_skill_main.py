@@ -146,7 +146,7 @@ class AISkillMainService:
         yield {"event": "status", "message": "正在解析您的请求..."}
 
         # 获取 AI 配置
-        config, api_key = ai_service.get_config_and_key(db)
+        config, api_key = ai_service.get_config_and_key(db, team_id or 1)
         if not config or not api_key:
             error_msg = "AI 配置未设置，请联系管理员先配置 AI 服务"
             conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
@@ -324,12 +324,18 @@ class AISkillMainService:
         """
         处理聊天消息（同步返回完整结果）
         """
+        from app.crud.user_team import user_team_crud
+
         # 1. 用户身份验证
         user = self._get_user_by_channel(db, channel_user_id, channel_type)
         if not user:
             return f"抱歉，您的{self._get_channel_name(channel_type)}账号未绑定 CRMWolf 系统用户，请联系管理员进行绑定"
 
         user_id = user.id
+
+        # 获取用户团队
+        user_team = user_team_crud.get_user_current_team(db, user_id)
+        team_id = user_team.team_id if user_team else 1
 
         # 创建会话日志
         log = conversation_log_crud.create_log(
@@ -343,7 +349,7 @@ class AISkillMainService:
 
         try:
             # 2. AI 解析意图
-            parsed_intent: AIParsedIntent = await ai_service.parse_intent(db, content)
+            parsed_intent: AIParsedIntent = await ai_service.parse_intent(db, content, team_id)
 
             conversation_log_crud.update_result(
                 db,
@@ -468,6 +474,8 @@ class AISkillMainService:
         Yields:
             SSE 事件字典: {"event": "status/content/result/error", ...}
         """
+        from app.crud.user_team import user_team_crud
+
         # 1. 用户身份验证
         user = self._get_user_by_channel(db, channel_user_id, channel_type)
         if not user:
@@ -475,6 +483,10 @@ class AISkillMainService:
             return
 
         user_id = user.id
+
+        # 获取用户团队
+        user_team = user_team_crud.get_user_current_team(db, user_id)
+        team_id = user_team.team_id if user_team else 1
 
         # 创建会话日志
         log = conversation_log_crud.create_log(
@@ -490,7 +502,7 @@ class AISkillMainService:
         yield {"event": "status", "message": "正在解析您的请求..."}
 
         # 2. 获取 AI 配置
-        config, api_key = ai_service.get_config_and_key(db)
+        config, api_key = ai_service.get_config_and_key(db, team_id)
         if not config or not api_key:
             error_msg = "AI 配置未设置，请联系管理员先配置 AI 服务"
             conversation_log_crud.update_result(db, log.id, execution_result=error_msg, status="FAILED")
