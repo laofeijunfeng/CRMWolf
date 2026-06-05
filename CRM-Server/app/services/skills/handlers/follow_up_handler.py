@@ -236,7 +236,7 @@ class FollowUpHandler(BaseHandler):
         method_enum = None
 
         enum_mappings = handler_config.get("enum_mappings", {})
-        if "method" in enum_mappings:
+        if "method" in enum_mappings and method:
             enum_name = enum_mappings["method"]
             enum_mapping = ai_enum_mapping_crud.get_by_name(db, enum_name)
 
@@ -251,6 +251,10 @@ class FollowUpHandler(BaseHandler):
                         False,
                         f"无效的跟进方式: {method}，请使用: {', '.join(valid_values)}"
                     )
+
+        # 如果没有传入 method，使用默认值 "其他"
+        if not method and not method_enum:
+            method = "其他"
 
         # 处理下次跟进时间
         next_follow_time = params.get("next_follow_time")
