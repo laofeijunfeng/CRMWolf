@@ -642,7 +642,11 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
     "follow_up_lead": {
         "handler": "FollowUpHandler",
         "config": {
-            "crud_mapping": "lead",
+            "crud_mapping": "lead_follow_up",
+            "parent_crud_mapping": "lead",
+            "parent_lookup_field": "lead_name",
+            "parent_name_field": "lead_name",
+            "update_parent_status": {"from_status": "NEW", "to_status": "FOLLOWING"},
             "permission_code": "lead:follow_up:create"
         }
     },
@@ -682,7 +686,10 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
     "follow_up_customer": {
         "handler": "FollowUpHandler",
         "config": {
-            "crud_mapping": "customer",
+            "crud_mapping": "customer_follow_up",
+            "parent_crud_mapping": "customer",
+            "parent_lookup_field": "customer_name",
+            "parent_name_field": "customer_name",
             "permission_code": "customer:follow_up:create"
         }
     },
