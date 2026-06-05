@@ -26,7 +26,7 @@ TOOLS: List[Dict[str, Any]] = [
                     },
                     "source": {
                         "type": "string",
-                        "enum": ["电话", "微信", "网站", "展会", "朋友介绍", "其他"],
+                        "enum": ["其他", "展会", "客户推荐", "市场活动", "电话营销", "线上注册", "网站咨询"],
                         "description": "线索来源"
                     },
                     "city": {
@@ -39,7 +39,7 @@ TOOLS: List[Dict[str, Any]] = [
                     },
                     "company_scale": {
                         "type": "string",
-                        "enum": ["小型企业", "中型企业", "大型企业", "初创公司", "个人"],
+                        "enum": ["1-50人", "51-200人", "201-500人", "501-1000人", "1000人以上"],
                         "description": "公司规模"
                     }
                 },
@@ -302,7 +302,7 @@ TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "status": {
                         "type": "string",
-                        "enum": ["潜在客户", "意向客户", "成交客户", "流失客户"],
+                        "enum": ["赢单", "输单", "跟进中", "暂停跟进"],
                         "description": "客户状态筛选"
                     },
                     "owner_name": {
@@ -422,7 +422,7 @@ TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "status": {
                         "type": "string",
-                        "enum": ["跟进中", "已成交", "已失败"],
+                        "enum": ["跟进中", "赢单", "输单"],
                         "description": "商机状态"
                     },
                     "stage": {
