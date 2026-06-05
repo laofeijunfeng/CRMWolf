@@ -97,7 +97,7 @@ class Customer(Base):
     project_background = Column(Text, nullable=True, comment="项目需求背景（从线索跟进记录分析生成）")
     profile_status = Column(String(20), nullable=True, default="PENDING", comment="档案生成状态：PENDING/GENERATING/COMPLETED/FAILED")
     profile_generated_time = Column(DateTime, nullable=True, comment="档案生成完成时间")
-    profile_error_message = Column(String(500), nullable=True, comment="档案生成失败原因")
+    profile_error_message = Column(Text, nullable=True, comment="档案生成失败原因")
 
     contacts = relationship("Contact", back_populates="customer", cascade="all, delete-orphan")
     invoice_titles = relationship("InvoiceTitle", back_populates="customer", cascade="all, delete-orphan")
