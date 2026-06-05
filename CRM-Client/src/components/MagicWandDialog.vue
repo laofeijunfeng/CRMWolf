@@ -347,15 +347,22 @@ function handleSSEEvent(event: AIAssistantSSEEvent) {
       break
 
     case 'result':
-      if (event.success) {
+      // 后端返回 message 字段表示成功
+      if (event.message) {
         success.value = true
-        resultMessage.value = event.reply_text || '操作已完成'
+        resultMessage.value = event.message
         stage.value = 'result'
         emit('refresh')
-      } else {
+      } else if (event.success === false) {
         success.value = false
-        resultMessage.value = event.reply_text || '操作失败'
+        resultMessage.value = event.message || event.reply_text || '操作失败'
         stage.value = 'result'
+      } else {
+        // 有 message 或 data 就视为成功
+        success.value = true
+        resultMessage.value = event.message || '操作已完成'
+        stage.value = 'result'
+        emit('refresh')
       }
       break
 
