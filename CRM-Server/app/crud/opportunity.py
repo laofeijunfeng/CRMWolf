@@ -212,6 +212,7 @@ class OpportunityCRUD:
         
         # 6. 创建初始阶段快照
         snapshot = OpportunityStageSnapshot(
+            team_id=team_id,
             opportunity_id=db_obj.id,
             procurement_stage_template_id=stage.id,
             stage_name=stage.stage_name,
