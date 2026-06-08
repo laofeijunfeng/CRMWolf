@@ -172,20 +172,27 @@ class CreateHandler(BaseHandler):
 
                 # 处理 inherit_fields（从父实体继承字段值）
                 inherit_fields = parent_lookup.get("inherit_fields", {})
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"[inherit] inherit_fields={inherit_fields}")
                 for child_field, parent_field in inherit_fields.items():
                     # 检查相关的参数字段是否存在
                     # 例如：procurement_method_id 对应的参数是 procurement_method_name
                     related_param_field = child_field.replace("_id", "_name") if child_field.endswith("_id") else child_field
 
+                    logger.info(f"[inherit] child={child_field}, parent={parent_field}, related={related_param_field}, in_params={related_param_field in params}")
+
                     # 只有当用户没有提供相关参数时才继承
                     if related_param_field not in params or params[related_param_field] is None:
                         parent_value = getattr(parent_entity, parent_field, None)
+                        logger.info(f"[inherit] parent_value from {parent_field} = {parent_value}")
                         if parent_value is not None:
                             # 如果是枚举类型，获取枚举值
                             if hasattr(parent_value, 'value'):
                                 params[child_field] = parent_value.value
                             else:
                                 params[child_field] = parent_value
+                            logger.info(f"[inherit] set params[{child_field}] = {params.get(child_field)}")
 
         # 处理 name_auto_generate（自动生成标准化名称）
         name_auto_generate = handler_config.get("name_auto_generate")

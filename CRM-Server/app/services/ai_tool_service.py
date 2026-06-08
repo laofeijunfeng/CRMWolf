@@ -154,6 +154,9 @@ class AIToolService:
             tool_name = first_call["name"]
             params = json.loads(first_call["arguments"])
 
+            # 在 parsed 阶段就继承父实体的字段默认值（如采购方式）
+            params = self._inherit_parent_fields_in_parsed(tool_name, params, db, team_id)
+
             # 获取参数定义（传入 db 和 team_id 以获取动态选项）
             param_definitions = self._get_tool_param_definitions(tool_name, db, team_id)
             # 检测缺失的必填参数
@@ -601,6 +604,146 @@ class AIToolService:
             return [{"value": row[0], "label": row[0]} for row in rows]
         except Exception:
             return []
+
+    def _inherit_parent_fields_in_parsed(self, tool_name: str, params: Dict[str, Any], db: Session, team_id: int) -> Dict[str, Any]:
+        """
+        在 parsed 阶段继承父实体的字段默认值
+
+        例如：创建商机时，如果用户没有指定采购方式，从客户的默认采购方式继承
+
+        Args:
+            tool_name: 工具名称
+            params: AI 返回的参数
+            db: 数据库 session
+            team_id: 团队 ID
+
+        Returns:
+            处理后的参数（包含继承的默认值）
+        """
+        from app.constants.tools import get_tool_handler_config
+
+        handler_config = get_tool_handler_config(tool_name)
+        if not handler_config:
+            return params
+
+        config = handler_config.get("config", {})
+        parent_lookup = config.get("parent_lookup")
+        if not parent_lookup:
+            return params
+
+        # 获取继承字段配置
+        inherit_fields = parent_lookup.get("inherit_fields", {})
+        if not inherit_fields:
+            return params
+
+        # 获取父实体名称（如 customer_name）
+        parent_lookup_field = parent_lookup.get("parent_lookup_field")
+        if not parent_lookup_field:
+            return params
+
+        parent_name = params.get(parent_lookup_field)
+        if not parent_name:
+            return params
+
+        # 查找父实体
+        parent_crud_mapping = parent_lookup.get("parent_crud_mapping")
+        if not parent_crud_mapping:
+            return params
+
+        parent_entity = self._find_parent_entity(db, parent_crud_mapping, parent_name, team_id)
+        if not parent_entity:
+            return params
+
+        # 继承字段值
+        result_params = params.copy()
+        for child_field, parent_field in inherit_fields.items():
+            # 检查相关的参数字段（如 procurement_method_name）是否存在
+            related_param_field = child_field.replace("_id", "_name") if child_field.endswith("_id") else child_field
+
+            # 只有当用户没有提供相关参数时才继承
+            if related_param_field not in result_params or result_params[related_param_field] is None:
+                parent_value = getattr(parent_entity, parent_field, None)
+                if parent_value is not None:
+                    # 如果是 ID 字段，需要转换为名称显示给用户
+                    if child_field.endswith("_id") and parent_field.endswith("_id"):
+                        # 查询对应的名称
+                        name_value = self._get_entity_name_by_id(db, child_field, parent_value, team_id)
+                        if name_value:
+                            result_params[related_param_field] = name_value
+                    else:
+                        if hasattr(parent_value, 'value'):
+                            result_params[child_field] = parent_value.value
+                        else:
+                            result_params[child_field] = parent_value
+
+        return result_params
+
+    def _find_parent_entity(self, db: Session, crud_mapping: str, name: str, team_id: int) -> Any:
+        """
+        根据名称查找父实体
+
+        Args:
+            db: 数据库 session
+            crud_mapping: CRUD 映射名称（如 "customer"）
+            name: 实体名称
+            team_id: 团队 ID
+
+        Returns:
+            父实体对象或 None
+        """
+        from sqlalchemy import text
+
+        table_field_map = {
+            "customer": ("crm_customers", "account_name"),
+            "lead": ("crm_leads", "name"),
+            "opportunity": ("crm_opportunities", "name"),
+        }
+
+        table_info = table_field_map.get(crud_mapping)
+        if not table_info:
+            return None
+
+        table, name_field = table_info
+
+        result = db.execute(
+            text(f"SELECT * FROM {table} WHERE {name_field} LIKE :name AND team_id = :team_id LIMIT 1"),
+            {"name": f"%{name}%", "team_id": team_id}
+        ).fetchone()
+
+        return result
+
+    def _get_entity_name_by_id(self, db: Session, id_field: str, entity_id: int, team_id: int) -> Optional[str]:
+        """
+        根据 ID 获取实体的名称
+
+        Args:
+            db: 数据库 session
+            id_field: ID 字段名（如 "procurement_method_id"）
+            entity_id: 实体 ID
+            team_id: 团队 ID
+
+        Returns:
+            实体名称或 None
+        """
+        from sqlalchemy import text
+
+        # 映射 ID 字段到表和名称字段
+        id_to_table_map = {
+            "procurement_method_id": ("crm_procurement_methods", "name"),
+        }
+
+        table_info = id_to_table_map.get(id_field)
+        if not table_info:
+            return None
+
+        table, name_field = table_info
+
+        result = db.execute(
+            text(f"SELECT {name_field} FROM {table} WHERE id = :id"),
+            {"id": entity_id}
+        ).fetchone()
+
+        return result[0] if result else None
 
     def _get_missing_params(self, tool_name: str, params: Dict[str, Any]) -> List[str]:
         """
