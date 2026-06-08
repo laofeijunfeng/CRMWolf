@@ -38,6 +38,11 @@ class AIToolService:
         # 商机相关
         "opportunity_name": "商机名称",
         "opportunity_id": "商机ID",
+        "total_amount": "预计总金额",
+        "user_count": "采购用户数",
+        "license_type": "授权模式",
+        "subscription_years": "订阅年限",
+        "purchase_type": "采购类型",
         "expected_amount": "预期金额",
         "expected_closing_date": "预期成交日期",
         "actual_amount": "实际成交金额",

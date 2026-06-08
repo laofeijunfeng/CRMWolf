@@ -312,7 +312,9 @@ ENUM_MAPPINGS: Dict[str, Dict[str, Any]] = {
         "display_name": "授权模式",
         "values": {
             "订阅": "SUBSCRIPTION",
+            "订阅制": "SUBSCRIPTION",
             "买断": "PERPETUAL",
+            "买断制": "PERPETUAL",
         },
     },
 }

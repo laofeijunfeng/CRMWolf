@@ -391,25 +391,43 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "create_opportunity",
-            "description": "创建新商机。根据用户描述的客户需求，智能生成商机名称、预估金额和预期成交日期。采购方式默认继承客户的采购方式，除非用户指定",
+            "description": "创建新商机。商机名称格式：{客户名称}-{用户数}人{订阅年限}年订阅。采购方式默认继承客户的采购方式，除非用户指定",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "opportunity_name": {
-                        "type": "string",
-                        "description": "商机名称（根据客户+需求自动生成，如「某某公司-采购系统项目」）"
-                    },
                     "customer_name": {
                         "type": "string",
                         "description": "关联客户名称（必填，用于查找客户ID）"
                     },
-                    "expected_amount": {
+                    "opportunity_name": {
+                        "type": "string",
+                        "description": "商机名称（格式：{客户名称}-{用户数}人{订阅年限}年订阅，如：某某公司-50人1年订阅）"
+                    },
+                    "total_amount": {
                         "type": "number",
-                        "description": "预期金额（从用户描述中提取，如「预算50万」则填500000）"
+                        "description": "预计总金额（从用户描述中提取，如「29000元」或「总价50万」）"
+                    },
+                    "user_count": {
+                        "type": "integer",
+                        "description": "采购用户数（人数，如「50人」则填50）"
+                    },
+                    "license_type": {
+                        "type": "string",
+                        "enum": ["订阅制", "买断制"],
+                        "description": "授权模式（订阅制或买断制，默认订阅制）"
+                    },
+                    "subscription_years": {
+                        "type": "integer",
+                        "description": "订阅年限（订阅制时必填，如「1年」则填1，默认1年）"
+                    },
+                    "purchase_type": {
+                        "type": "string",
+                        "enum": ["新购", "续购", "增购"],
+                        "description": "采购类型（新购、续购或增购，默认新购）"
                     },
                     "expected_closing_date": {
                         "type": "string",
-                        "description": "预期成交日期（YYYY-MM-DD格式，从描述中解析，如「下季度」或「年底」）"
+                        "description": "预期成交日期（YYYY-MM-DD格式，从描述中解析，如「下季度」或「月底」）"
                     },
                     "procurement_method_name": {
                         "type": "string",
@@ -761,8 +779,22 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
                     "procurement_method": "procurement_method"
                 }
             },
+            "name_auto_generate": {
+                "name_field": "opportunity_name",
+                "template": "{customer_name}-{user_count}人{subscription_years}年订阅",
+                "field_mappings": {
+                    "customer_name": "customer_name",
+                    "user_count": "user_count",
+                    "subscription_years": "subscription_years"
+                },
+                "default_values": {
+                    "subscription_years": 1
+                }
+            },
             "enum_mappings": {
-                "procurement_method": "procurement_method"
+                "procurement_method": "procurement_method",
+                "license_type": "license_type",
+                "purchase_type": "purchase_type"
             },
             "permission_code": "opportunity:create"
         }
