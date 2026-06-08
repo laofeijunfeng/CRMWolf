@@ -338,7 +338,7 @@ class CreateHandler(BaseHandler):
             if source == "user_feishu_open_id":
                 schema_data[field_name] = str(user.id)
             elif source == "user_id":
-                schema_data[field_name] = user_id
+                schema_data[field_name] = str(user_id)  # owner_id 需要是字符串
             elif source in params:
                 schema_data[field_name] = params[source]
 
