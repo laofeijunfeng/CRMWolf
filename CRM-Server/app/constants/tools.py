@@ -774,6 +774,7 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
             "parent_lookup": {
                 "parent_crud_mapping": "customer",
                 "parent_lookup_field": "customer_name",
+                "parent_name_field": "account_name",
                 "parent_result_field": "customer_id",
                 "inherit_fields": {
                     "procurement_method_id": "default_procurement_method_id"
