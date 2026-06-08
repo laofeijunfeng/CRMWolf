@@ -170,6 +170,19 @@ class CreateHandler(BaseHandler):
                 # 获取 team_id（从父实体）
                 team_id = getattr(parent_entity, 'team_id', None)
 
+                # 处理 inherit_fields（从父实体继承字段值）
+                inherit_fields = parent_lookup.get("inherit_fields", {})
+                for child_field, parent_field in inherit_fields.items():
+                    # 只有当用户没有提供该字段时才继承
+                    if child_field not in params or params[child_field] is None:
+                        parent_value = getattr(parent_entity, parent_field, None)
+                        if parent_value is not None:
+                            # 如果是枚举类型，获取枚举值
+                            if hasattr(parent_value, 'value'):
+                                params[child_field] = parent_value.value
+                            else:
+                                params[child_field] = parent_value
+
         # 处理 name_auto_generate（自动生成标准化名称）
         name_auto_generate = handler_config.get("name_auto_generate")
         enum_mappings = handler_config.get("enum_mappings", {})  # 获取 enum_mappings 配置

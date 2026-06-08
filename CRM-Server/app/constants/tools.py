@@ -391,7 +391,7 @@ TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "create_opportunity",
-            "description": "创建新商机。根据用户描述的客户需求，智能生成商机名称、预估金额和预期成交日期",
+            "description": "创建新商机。根据用户描述的客户需求，智能生成商机名称、预估金额和预期成交日期。采购方式默认继承客户的采购方式，除非用户指定",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -410,6 +410,10 @@ TOOLS: List[Dict[str, Any]] = [
                     "expected_closing_date": {
                         "type": "string",
                         "description": "预期成交日期（YYYY-MM-DD格式，从描述中解析，如「下季度」或「年底」）"
+                    },
+                    "procurement_method_name": {
+                        "type": "string",
+                        "description": "采购方式（如：公开招标、竞争性谈判、单一来源采购等。不填则默认继承客户的采购方式）"
                     },
                     "remarks": {
                         "type": "string",
@@ -752,7 +756,13 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
             "parent_lookup": {
                 "parent_crud_mapping": "customer",
                 "parent_lookup_field": "customer_name",
-                "parent_result_field": "customer_id"
+                "parent_result_field": "customer_id",
+                "inherit_fields": {
+                    "procurement_method": "procurement_method"
+                }
+            },
+            "enum_mappings": {
+                "procurement_method": "procurement_method"
             },
             "permission_code": "opportunity:create"
         }
