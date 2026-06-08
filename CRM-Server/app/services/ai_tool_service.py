@@ -299,9 +299,9 @@ class AIToolService:
 
         # 模糊搜索名称（不同表用不同的名称字段）
         table_map = {
-            "lead": ("leads", "name"),
-            "customer": ("customers", "account_name"),
-            "opportunity": ("opportunities", "name")
+            "lead": ("crm_leads", "name"),
+            "customer": ("crm_customers", "account_name"),
+            "opportunity": ("crm_opportunities", "name")
         }
         table_info = table_map.get(entity_type)
         if not table_info:
