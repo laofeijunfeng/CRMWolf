@@ -304,7 +304,7 @@ class AIToolService:
         table_map = {
             "lead": ("crm_leads", "name"),
             "customer": ("crm_customers", "account_name"),
-            "opportunity": ("crm_opportunities", "name")
+            "opportunity": ("crm_opportunities", "opportunity_name")
         }
         table_info = table_map.get(entity_type)
         if not table_info:
@@ -696,7 +696,7 @@ class AIToolService:
         table_field_map = {
             "customer": ("crm_customers", "account_name"),
             "lead": ("crm_leads", "name"),
-            "opportunity": ("crm_opportunities", "name"),
+            "opportunity": ("crm_opportunities", "opportunity_name"),
         }
 
         table_info = table_field_map.get(crud_mapping)
