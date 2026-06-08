@@ -662,7 +662,12 @@ class AIToolService:
 
             # 只有当用户没有提供相关参数时才继承
             if related_param_field not in result_params or result_params[related_param_field] is None:
-                parent_value = getattr(parent_entity, parent_field, None)
+                # Row 对象需要用 _mapping 来获取字段值
+                if hasattr(parent_entity, '_mapping'):
+                    parent_value = parent_entity._mapping.get(parent_field)
+                else:
+                    parent_value = getattr(parent_entity, parent_field, None)
+
                 if parent_value is not None:
                     # 如果是 ID 字段，需要转换为名称显示给用户
                     if child_field.endswith("_id") and parent_field.endswith("_id"):
