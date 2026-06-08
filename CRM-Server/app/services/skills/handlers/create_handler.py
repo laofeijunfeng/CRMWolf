@@ -173,8 +173,12 @@ class CreateHandler(BaseHandler):
                 # 处理 inherit_fields（从父实体继承字段值）
                 inherit_fields = parent_lookup.get("inherit_fields", {})
                 for child_field, parent_field in inherit_fields.items():
-                    # 只有当用户没有提供该字段时才继承
-                    if child_field not in params or params[child_field] is None:
+                    # 检查相关的参数字段是否存在
+                    # 例如：procurement_method_id 对应的参数是 procurement_method_name
+                    related_param_field = child_field.replace("_id", "_name") if child_field.endswith("_id") else child_field
+
+                    # 只有当用户没有提供相关参数时才继承
+                    if related_param_field not in params or params[related_param_field] is None:
                         parent_value = getattr(parent_entity, parent_field, None)
                         if parent_value is not None:
                             # 如果是枚举类型，获取枚举值
