@@ -399,4 +399,5 @@ class CreateHandler(BaseHandler):
 
         message = result_template.format(**template_data)
 
-        return self.build_result(True, message, {"entity": entity})
+        # 返回结果，entity 只返回 ID（避免 JSON 序列化问题）
+        return self.build_result(True, message, {"entity_id": entity.id})
