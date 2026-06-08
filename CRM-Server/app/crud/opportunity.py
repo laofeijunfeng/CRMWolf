@@ -320,8 +320,9 @@ class OpportunityCRUD:
         
         if current_snapshot:
             current_snapshot.exited_at = datetime.now()
-        
+
         new_snapshot = OpportunityStageSnapshot(
+            team_id=opportunity.team_id,
             opportunity_id=opportunity.id,
             procurement_stage_template_id=target_stage.id,
             stage_name=target_stage.stage_name,
