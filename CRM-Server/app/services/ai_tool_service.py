@@ -560,7 +560,10 @@ class AIToolService:
 
     def _get_missing_params(self, tool_name: str, params: Dict[str, Any]) -> List[str]:
         """
-        检测必填但缺失的字段
+        检测所有缺失的字段（包括必填和可选）
+
+        只要字段在参数定义中存在但在 params 中为空，就视为缺失，
+        让用户可以在表单中补充。
 
         Args:
             tool_name: 工具名称
@@ -573,9 +576,9 @@ class AIToolService:
 
         for tool in TOOLS:
             if tool["function"]["name"] == tool_name:
-                required = tool["function"].get("parameters", {}).get("required", [])
+                properties = tool["function"].get("parameters", {}).get("properties", {})
                 missing = []
-                for field in required:
+                for field in properties.keys():
                     value = params.get(field)
                     if value is None or value == "" or value == []:
                         missing.append(field)
