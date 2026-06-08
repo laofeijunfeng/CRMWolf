@@ -292,18 +292,20 @@ class AIToolService:
         if match:
             return int(match.group(1))
 
-        # 模糊搜索名称
+        # 模糊搜索名称（不同表用不同的名称字段）
         table_map = {
-            "lead": "leads",
-            "customer": "customers",
-            "opportunity": "opportunities"
+            "lead": ("leads", "name"),
+            "customer": ("customers", "account_name"),
+            "opportunity": ("opportunities", "name")
         }
-        table = table_map.get(entity_type)
-        if not table:
+        table_info = table_map.get(entity_type)
+        if not table_info:
             return None
 
+        table, name_field = table_info
+
         result = db.execute(
-            text(f"SELECT id FROM {table} WHERE name LIKE :name AND team_id = :team_id LIMIT 1"),
+            text(f"SELECT id FROM {table} WHERE {name_field} LIKE :name AND team_id = :team_id LIMIT 1"),
             {"name": f"%{name}%", "team_id": team_id}
         ).fetchone()
 
