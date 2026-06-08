@@ -780,6 +780,9 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
                     "procurement_method_id": "default_procurement_method_id"
                 }
             },
+            "auto_fields": {
+                "owner_id": "user_id"
+            },
             "name_auto_generate": {
                 "name_field": "opportunity_name",
                 "template": "{customer_name}-{user_count}人{subscription_years}年订阅",
