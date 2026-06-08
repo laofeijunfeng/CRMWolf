@@ -19,6 +19,48 @@ from app.services.permission_service import permission_service
 class AIToolService:
     """AI 工具服务 - 使用 Function Calling"""
 
+    # 参数字段中文标签映射
+    PARAM_LABEL_MAP: Dict[str, str] = {
+        # 线索相关
+        "lead_name": "线索名称",
+        "lead_id": "线索ID",
+        "contact_name": "联系人姓名",
+        "contact_phone": "联系电话",
+        "source": "线索来源",
+        "city": "所在城市",
+        "company_scale": "公司规模",
+        # 客户相关
+        "customer_name": "客户名称",
+        "customer_id": "客户ID",
+        "industry": "所属行业",
+        "address": "地址",
+        "remarks": "备注",
+        # 商机相关
+        "opportunity_name": "商机名称",
+        "opportunity_id": "商机ID",
+        "expected_amount": "预期金额",
+        "expected_closing_date": "预期成交日期",
+        "actual_amount": "实际成交金额",
+        "actual_closing_date": "实际成交日期",
+        "reason": "原因",
+        # 跟进相关
+        "content": "跟进内容",
+        "method": "跟进方式",
+        "next_action": "下一步动作",
+        "next_follow_time": "下次跟进时间",
+        # 通用
+        "owner_name": "负责人",
+        "owner_id": "负责人ID",
+        "keyword": "搜索关键词",
+        "status": "状态",
+        "stage": "阶段",
+        "limit": "数量限制",
+        "entity_type": "实体类型",
+        "entity_id": "实体ID",
+        "entity_name": "实体名称",
+        "procurement_method_name": "采购方式",
+    }
+
     async def handle_message_stream(
         self,
         db: Session,
@@ -107,10 +149,17 @@ class AIToolService:
             tool_name = first_call["name"]
             params = json.loads(first_call["arguments"])
 
+            # 获取参数定义
+            param_definitions = self._get_tool_param_definitions(tool_name)
+            # 检测缺失的必填参数
+            missing_params = self._get_missing_params(tool_name, params)
+
             yield {
                 "event": "parsed",
                 "tool": tool_name,
                 "params": params,
+                "param_definitions": param_definitions,
+                "missing_params": missing_params,
                 "reply_text": self._get_tool_description(tool_name, params)
             }
 
@@ -422,6 +471,117 @@ class AIToolService:
         weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
         weekday = weekday_names[now.weekday()]
         return f"{now.strftime('%Y-%m-%d')}（{weekday}）"
+
+    def _map_param_type(self, json_type: str, has_enum: bool, param_name: str) -> str:
+        """
+        将 JSON Schema 类型映射为前端表单类型
+
+        Args:
+            json_type: JSON Schema 类型 (string, integer, number)
+            has_enum: 是否有枚举值
+            param_name: 参数名（用于特殊字段判断）
+
+        Returns:
+            前端表单类型: text, number, date, select, textarea
+        """
+        # 有枚举值 -> 下拉选择
+        if has_enum:
+            return "select"
+
+        # 特殊字段：日期类型
+        date_fields = [
+            "next_follow_time", "expected_closing_date", "actual_closing_date",
+            "next_follow_up_time", "expected_amount_date"
+        ]
+        if param_name in date_fields:
+            return "date"
+
+        # 特殊字段：多行文本
+        textarea_fields = ["content", "remarks", "reason", "description", "note"]
+        if param_name in textarea_fields:
+            return "textarea"
+
+        # 默认映射
+        TYPE_MAP = {
+            "string": "text",
+            "integer": "number",
+            "number": "number",
+        }
+        return TYPE_MAP.get(json_type, "text")
+
+    def _get_tool_param_definitions(self, tool_name: str) -> Dict[str, Any]:
+        """
+        从 TOOLS 定义中提取参数定义，转换为前端表单格式
+
+        返回格式:
+        {
+            "param_name": {
+                "label": "中文标签",
+                "type": "text|number|date|select|textarea",
+                "required": true/false,
+                "placeholder": "提示文本",
+                "options": [{"value": "x", "label": "x"}]  # 仅 select 类型
+            }
+        }
+        """
+        from app.constants.tools import TOOLS
+
+        for tool in TOOLS:
+            if tool["function"]["name"] == tool_name:
+                params_schema = tool["function"].get("parameters", {})
+                properties = params_schema.get("properties", {})
+                required = params_schema.get("required", [])
+
+                param_definitions = {}
+                for param_name, param_def in properties.items():
+                    has_enum = "enum" in param_def
+                    json_type = param_def.get("type", "string")
+                    param_type = self._map_param_type(json_type, has_enum, param_name)
+
+                    definition = {
+                        "label": self.PARAM_LABEL_MAP.get(param_name, param_name),
+                        "type": param_type,
+                        "required": param_name in required,
+                        "placeholder": param_def.get("description", "")
+                    }
+
+                    # 添加枚举选项
+                    if has_enum:
+                        enum_values = param_def.get("enum", [])
+                        definition["options"] = [
+                            {"value": v, "label": v} for v in enum_values
+                        ]
+
+                    param_definitions[param_name] = definition
+
+                return param_definitions
+
+        return {}
+
+    def _get_missing_params(self, tool_name: str, params: Dict[str, Any]) -> List[str]:
+        """
+        检测必填但缺失的字段
+
+        Args:
+            tool_name: 工具名称
+            params: AI 返回的参数
+
+        Returns:
+            缺失的参数名列表
+        """
+        from app.constants.tools import TOOLS
+
+        for tool in TOOLS:
+            if tool["function"]["name"] == tool_name:
+                required = tool["function"].get("parameters", {}).get("required", [])
+                missing = []
+                for field in required:
+                    value = params.get(field)
+                    if value is None or value == "" or value == []:
+                        missing.append(field)
+                return missing
+
+        return []
 
 
 ai_tool_service = AIToolService()

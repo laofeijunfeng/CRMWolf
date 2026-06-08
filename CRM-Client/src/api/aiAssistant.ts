@@ -9,12 +9,26 @@ export interface AIAssistantRequest {
   params?: Record<string, unknown>
 }
 
+/**
+ * 参数定义（用于动态表单渲染）
+ */
+export interface ParamDefinition {
+  label: string
+  type: 'text' | 'number' | 'date' | 'select' | 'textarea'
+  required: boolean
+  placeholder: string
+  default_value?: string
+  options?: Array<{ value: string; label: string }>
+}
+
 export interface AIAssistantSSEEvent {
   event: 'status' | 'content' | 'parsed' | 'result' | 'error'
   message?: string
   content?: string
   tool?: string
   params?: Record<string, unknown>
+  param_definitions?: Record<string, ParamDefinition>  // 参数定义
+  missing_params?: string[]                             // 缺失的必填字段
   reply_text?: string
   success?: boolean
   data?: unknown

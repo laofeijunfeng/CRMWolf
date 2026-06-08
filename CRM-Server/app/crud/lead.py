@@ -179,7 +179,7 @@ class LeadCRUD:
             db.refresh(lead)
         return lead
 
-    def mark_invalid(self, db: Session, lead_id: int, reason: str, operator_id: Optional[str] = None, operator_name: Optional[str] = None) -> Optional[Lead]:
+    def mark_invalid(self, db: Session, lead_id: int, reason: str, operator_id: Optional[str] = None, operator_name: Optional[str] = None, team_id: Optional[int] = None) -> Optional[Lead]:
         """标记线索为无效，记录无效原因"""
         from app.services.operation_log_service import operation_log_service
 
@@ -199,6 +199,7 @@ class LeadCRUD:
                 resource_id=lead.id,
                 operator_id=operator_id or "system",
                 operator_name=operator_name,
+                team_id=team_id or lead.team_id,
                 content={
                     "leadName": lead.lead_name,
                     "invalidReason": reason

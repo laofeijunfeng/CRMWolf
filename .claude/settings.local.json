@@ -111,7 +111,8 @@
       "Bash(xargs -I{} sh -c 'grep -l \"TeamMembers\" \"{}\" 2>/dev/null')",
       "Bash(git status *)",
       "Bash(git check-ignore *)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(lsof -ti:8080)"
     ]
   }
 }

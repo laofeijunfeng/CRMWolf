@@ -337,8 +337,18 @@ function handleSSEEvent(event: AIAssistantSSEEvent) {
         }
         replyText.value = event.reply_text || ''
 
-        // Check if need user confirmation
-        stage.value = 'preview'
+        // 接收参数定义
+        if (event.param_definitions) {
+          paramDefinitions.value = event.param_definitions
+        }
+
+        // 判断是否有缺失必填字段
+        if (event.missing_params && event.missing_params.length > 0) {
+          missingParams.value = event.missing_params
+          stage.value = 'preview-form'  // 进入表单填充阶段
+        } else {
+          stage.value = 'preview'  // 参数完整，简单预览
+        }
       } else if (event.reply_text) {
         // Need clarification
         replyText.value = event.reply_text

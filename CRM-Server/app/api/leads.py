@@ -462,7 +462,7 @@ def mark_lead_invalid(
             detail="该线索已标记为无效"
         )
 
-    return lead_crud.mark_invalid(db, lead_id, request_data.reason, str(current_user.id), current_user.name)
+    return lead_crud.mark_invalid(db, lead_id, request_data.reason, str(current_user.id), current_user.name, team_id)
 
 
 @router.get("/public/list", response_model=List[LeadResponse], summary="公海线索", description="获取公海中的线索列表（团队公海池）")
