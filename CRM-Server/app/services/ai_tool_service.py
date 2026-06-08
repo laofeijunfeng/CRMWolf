@@ -149,8 +149,8 @@ class AIToolService:
             tool_name = first_call["name"]
             params = json.loads(first_call["arguments"])
 
-            # 获取参数定义
-            param_definitions = self._get_tool_param_definitions(tool_name)
+            # 获取参数定义（传入 db 和 team_id 以获取动态选项）
+            param_definitions = self._get_tool_param_definitions(tool_name, db, team_id)
             # 检测缺失的必填参数
             missing_params = self._get_missing_params(tool_name, params)
 
@@ -511,9 +511,11 @@ class AIToolService:
         }
         return TYPE_MAP.get(json_type, "text")
 
-    def _get_tool_param_definitions(self, tool_name: str) -> Dict[str, Any]:
+    def _get_tool_param_definitions(self, tool_name: str, db: Session = None, team_id: int = None) -> Dict[str, Any]:
         """
         从 TOOLS 定义中提取参数定义，转换为前端表单格式
+
+        对于需要动态选项的字段（如采购方式），从数据库获取
 
         返回格式:
         {
@@ -547,18 +549,53 @@ class AIToolService:
                         "placeholder": param_def.get("description", "")
                     }
 
-                    # 添加枚举选项
+                    # 添加选项
                     if has_enum:
+                        # 使用工具定义中的枚举值
                         enum_values = param_def.get("enum", [])
                         definition["options"] = [
                             {"value": v, "label": v} for v in enum_values
                         ]
+                    elif param_name == "procurement_method_name" and db and team_id:
+                        # 动态获取采购方式列表
+                        options = self._get_procurement_method_options(db, team_id)
+                        if options:
+                            definition["type"] = "select"
+                            definition["options"] = options
 
                     param_definitions[param_name] = definition
 
                 return param_definitions
 
         return {}
+
+    def _get_procurement_method_options(self, db: Session, team_id: int) -> List[Dict[str, str]]:
+        """
+        从数据库获取采购方式选项列表
+
+        Args:
+            db: 数据库 session
+            team_id: 团队 ID
+
+        Returns:
+            [{"value": "采购方式名称", "label": "采购方式名称"}, ...]
+        """
+        from sqlalchemy import text
+
+        try:
+            result = db.execute(
+                text("""
+                    SELECT name FROM crm_procurement_methods
+                    WHERE (team_id = :team_id OR team_id IS NULL)
+                    AND is_active = 1
+                    ORDER BY sort_order
+                """),
+                {"team_id": team_id}
+            )
+            rows = result.fetchall()
+            return [{"value": row[0], "label": row[0]} for row in rows]
+        except Exception:
+            return []
 
     def _get_missing_params(self, tool_name: str, params: Dict[str, Any]) -> List[str]:
         """
