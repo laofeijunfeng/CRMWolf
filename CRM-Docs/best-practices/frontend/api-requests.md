@@ -67,24 +67,55 @@ const response = await fetch(url, {
   },
   body: JSON.stringify(data)
 })
+
+// 解析 SSE 流（使用统一解析器）
+import { parseSSEStream } from '@/utils/sseParser'
+
+const reader = response.body?.getReader()
+if (!reader) {
+  throw new Error('No response body')
+}
+
+await parseSSEStream(reader, {
+  onEvent: (event) => {
+    // 处理事件
+    console.log(event)
+  },
+  onError: (error) => {
+    console.error('SSE error:', error)
+  }
+})
 ```
 
-**路径处理过程**：
+**SSE 标准格式**：
 ```
-fetch('/api/v1/ai/test')
-    ↓
-Vite/Nginx 代理去掉 '/api': → 后端 '/v1/ai/test'
+data: {"event": "status", "message": "..."}\n\n
+data: {"event": "result", ...}\n\n
 ```
+- 每个事件格式：`data: {JSON}`
+- 事件之间用双换行 `\n\n` 分隔
+- **禁止用 `\n` 单换行分隔**（会截断 JSON）
 
 ### 🔴 禁止做法
 
 ```typescript
-// ❌ 禁止动态拼接 baseURL（baseURL 为空时路径错误）
+// ❌ 禁止用单换行分隔（JSON 截断）
+const lines = buffer.split('\n')
+
+// ❌ 禁止动态拼接 baseURL
 const baseURL = import.meta.env.VITE_API_BASE_URL || ''
-const url = `${baseURL}/v1/ai/test`  // → '/v1/ai/test'，缺少 /api 前缀
+const url = `${baseURL}/v1/ai/test`
 
 // ❌ 禁止直连后端
 const url = 'http://localhost:8000/v1/ai/test'
+
+// ❌ 禁止重复编写 SSE 解析逻辑（应复用 sseParser.ts）
+const decoder = new TextDecoder()
+let buffer = ''
+while (true) {
+  const { done, value } = await reader.read()
+  // ... 自己写解析逻辑
+}
 ```
 
 ---

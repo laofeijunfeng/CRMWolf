@@ -2,6 +2,7 @@
  * AI Skill 配置管理 API
  */
 import request from '@/utils/request'
+import { parseSSEStream } from '@/utils/sseParser'
 
 // Skill 类型
 export interface Skill {
@@ -165,28 +166,13 @@ export const aiSkillsApi = {
       return
     }
 
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            onEvent(data)
-          } catch {
-            continue
-          }
-        }
+    // 使用统一 SSE 解析器
+    await parseSSEStream(reader, {
+      onEvent: (event) => onEvent(event as unknown as AnalyzeEvent),
+      onError: (error) => {
+        onEvent({ event: 'error', message: error.message })
       }
-    }
+    })
   },
 
   // AI 辅助生成 - 生成配置（使用 fetch POST SSE）
@@ -218,28 +204,13 @@ export const aiSkillsApi = {
       return
     }
 
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            onEvent(data)
-          } catch {
-            continue
-          }
-        }
+    // 使用统一 SSE 解析器
+    await parseSSEStream(reader, {
+      onEvent: (event) => onEvent(event as unknown as GenerateEvent),
+      onError: (error) => {
+        onEvent({ event: 'error', message: error.message })
       }
-    }
+    })
   }
 }
 

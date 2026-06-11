@@ -198,6 +198,104 @@ interface ApiErrorResponse {
 }
 ```
 
+### 2.6 SSE 流式事件类型
+
+```typescript
+// SSE (Server-Sent Events) 流式响应类型
+// 定义位置：src/utils/sseParser.ts
+
+/**
+ * SSE 事件类型枚举
+ */
+type SSEEventType =
+  | 'status'              // 状态消息
+  | 'content'             // 内容增量
+  | 'context_summary'     // 上下文汇总
+  | 'react_start'         // ReAct 循环开始
+  | 'round_start'         // 轮次开始
+  | 'tool_call'           // 工具调用
+  | 'tool_result'         // 工具执行结果
+  | 'waiting_for_user'    // 等待用户回复（关键：Human-in-the-Loop）
+  | 'parsed'              // 解析完成
+  | 'parsed_multi'        // 多工具解析
+  | 'result'              // 最终结果
+  | 'error'               // 错误
+  | 'react_complete'      // ReAct 循环完成
+  | 'round_completed'     // 单轮完成
+  | 'max_rounds_reached'  // 达到最大轮数
+
+/**
+ * SSE 事件结构
+ * 注：后端可能直接在顶层返回字段，而不是嵌套在 data 中
+ */
+interface SSEEvent {
+  event: SSEEventType
+
+  // 顶层字段（后端可能直接返回）
+  session_id?: string
+  question?: string
+  options?: string[] | null
+  missing_fields?: string[]
+  field_options?: Record<string, FieldOptionConfig>
+  context_hint?: string
+
+  // ReAct 循环相关
+  round?: number
+  max_rounds?: number
+  tool?: string
+  params?: Record<string, unknown>
+  result?: ToolResult
+  previous_results?: ToolResult[]
+
+  // Workflow 相关
+  data?: WorkflowEventData
+
+  // 结果相关
+  success?: boolean
+  message?: string
+  reply_text?: string
+  content?: string
+}
+
+/**
+ * 字段选项配置（用于动态表单渲染）
+ */
+interface FieldOptionConfig {
+  type: 'select' | 'text' | 'number' | 'date' | 'textarea'
+  options?: string[]
+  default?: string
+  placeholder?: string
+}
+
+/**
+ * 工具执行结果
+ */
+interface ToolResult {
+  tool: string
+  success: boolean
+  message?: string
+  data?: unknown
+}
+
+/**
+ * Workflow 事件数据
+ */
+interface WorkflowEventData {
+  session_id?: string
+  step_id?: string
+  workflow_name?: string
+  description?: string
+  success?: boolean
+  message?: string
+  error?: string
+  result?: Record<string, unknown>
+  question?: string
+  options?: string[]
+  missing_fields?: string[]
+  field_options?: Record<string, FieldOptionConfig>
+}
+```
+
 ---
 
 ## 三、类型创建规则
@@ -251,4 +349,4 @@ interface ApiErrorResponse {
 
 ---
 
-**版本：1.0 | 最后更新：2026-04-21 | 修改需人工审批**
+**版本：1.1 | 最后更新：2026-06-11 | 修改需人工审批**
