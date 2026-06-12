@@ -1,6 +1,15 @@
+---
+status: completed
+created: 2026-05-26
+updated: 2026-05-26
+related_requirements: ../requirements/AI-GLUE-ROUTING-ALIGNMENT-RFC.md
+related_pr: -
+---
+
 # AI GLUE 架构深度整改计划（v0.2 对齐）
 
-> 版本：1.0 | 创建日期：2026-05-26 | 状态：**待审批**
+> **状态：✅ 已完成** | 完成日期：2026-05-26
+> 版本：1.0 | 创建日期：2026-05-26
 > 关联需求：用户提供的《优化需求 & 原则（v0.2 对齐版）》
 > 核心问题：ActionExecutor 是 CRUD 包装而非入口函数，双份 Preview 违反 Single Source of Truth
 

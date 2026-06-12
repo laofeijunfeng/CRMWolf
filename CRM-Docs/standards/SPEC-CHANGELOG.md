@@ -4,6 +4,85 @@
 
 ---
 
+## Version 1.2 (2026-06-12)
+
+### 新增文档
+- 创建 `DOC-LIFECYCLE.md` 定义文档生命周期管理规范
+  - 状态管理规则（draft → review → active → completed → archived）
+  - 自动归档机制（CI 检测 + 迁移 + 导航更新）
+  - 结果沉淀机制（changelog 目录结构 + 模板）
+  - 文档与代码同步规则（扩展 GIT-STANDARD.md）
+  - CI 自动化脚本清单
+
+### 目录结构新增
+- 创建 `archive/` 目录
+  - `archive/requirements/` - 已实现需求（CI 自动归档）
+  - `archive/plans/` - 已完成计划（CI 自动归档）
+  - `archive/standards/` - 已废弃规范（人工迁移）
+  - `archive/README.md` - 归档导航
+- 创建 `changelog/` 目录
+  - `changelog/enhancements/` - 功能优化实施总结
+  - `changelog/issues/` - 重大缺陷修复总结
+  - `changelog/technical/` - 技术重构总结
+  - `changelog/README.md` - 变更日志导航
+- 创建 `scripts/` 目录
+  - `scripts/check-doc-status.sh` - 状态标签检查
+  - `scripts/archive_docs.sh` - 自动归档
+  - `scripts/update-doc-nav.sh` - 导航更新
+
+### 导航文档新增
+- 创建 `requirements/README.md` - 需求文档导航 + 状态汇总表
+- 创建 `plans/README.md` - 计划文档导航 + 状态汇总表
+
+### 文档更新
+- 更新 `README.md` 添加归档和 changelog 目录导航
+- 更新 `GIT-STANDARD.md` 新增文档同步规则章节
+  - 文档状态同步规则
+  - Commit Type 扩展（文档相关）
+  - 同步检查清单
+  - 文档变更分组策略
+
+### 变更原因
+- 建立自动化文档生命周期管理体系
+- 解决需求/计划文档状态追踪混乱问题
+- 提供结果沉淀机制，避免历史经验流失
+- 与开发规范联动，确保文档与代码同步
+
+### 影响分析
+- **Affected docs**: README.md, GIT-STANDARD.md
+- **New docs**: DOC-LIFECYCLE.md, archive/README.md, changelog/README.md, requirements/README.md, plans/README.md, scripts/README.md
+- **New dirs**: archive/, changelog/, scripts/
+- **Migration needed**: Yes（需为现有文档补全状态标签）
+- **Breaking change**: No（现有文档不受影响）
+
+---
+
+## Version 1.1 (2026-06-12)
+
+### 文档更新
+- 更新 `SYSTEM-DESCRIPTION.md` 版本 1.1 → 1.2
+  - 新增 2.3 AI Agent 模块详解章节（核心能力、架构层级、Workflow 流程、置信度护栏、配置开关）
+  - 更新核心价值表格（添加 AI 智能助手、撤销保护、置信度护栏）
+  - 更新技术栈表格（Redis 用途细化、AI 服务）
+  - 更新功能模块架构图（添加 AI Agent 层）
+  - 更新后端目录结构（补充 services/workflow/ 目录）
+- 更新 `ARCHITECTURE.md` 版本 1.0 → 1.1
+  - 更新后端目录结构（补充 AI 相关路由和 services/workflow/ 目录）
+  - 更新后端分层表格（补充 ai_tool_service、handlers、workflow 层职责）
+  - 更新后端通信规则（补充 AI 通信规则）
+
+### 变更原因
+- AI Agent 功能已完成全部实施（ReAct 循环 + Workflow 编排 + Control Plane）
+- 系统文档需同步反映新增的核心功能模块
+- 符合 DOCS-STANDARD.md "修改目录结构需更新 ARCHITECTURE.md" 规则
+
+### 影响分析
+- **Affected docs**: SYSTEM-DESCRIPTION.md, ARCHITECTURE.md
+- **Migration needed**: No
+- **Breaking change**: No
+
+---
+
 ## Version 1.0 (2026-04-21)
 
 ### 新增
@@ -92,4 +171,4 @@
 
 ---
 
-**版本：1.0 | 最后更新：2026-04-21**
+**版本：1.2 | 最后更新：2026-06-12**

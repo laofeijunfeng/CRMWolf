@@ -1,3 +1,11 @@
+---
+status: completed
+created: 2026-05-26
+updated: 2026-05-26
+related_requirements: ../requirements/AI-GLUE-ROUTING-ALIGNMENT-RFC.md
+related_pr: -
+---
+
 # AI GLUE 路由对齐整改计划
 
 > 版本：2.0 | 创建日期：2026-05-26 | 状态：**已完成 ✅**

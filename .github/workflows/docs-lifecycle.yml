@@ -1,0 +1,226 @@
+name: Docs Lifecycle Management
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'CRM-Docs/**'
+  pull_request:
+    paths:
+      - 'CRM-Docs/**'
+  schedule:
+    - cron: '0 2 * * *'  # 每天 2:00 AM 执行归档检查
+
+jobs:
+  # Job 1: PR 状态检查
+  check-status:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    name: 检查文档状态标签
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Check document status
+        run: |
+          chmod +x CRM-Docs/scripts/*.sh
+          bash CRM-Docs/scripts/check-doc-status.sh
+
+      - name: Comment on PR (if failed)
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ❌ 文档状态检查失败
+
+            请检查以下问题：
+
+            1. **状态标签缺失**：文档必须包含 \`status\` 标签
+            2. **状态值无效**：状态必须是 draft/review/active/completed/archived
+            3. **日期标签缺失**：文档必须包含 created 和 updated 标签
+
+            **修复方法**：
+
+            在文档开头添加以下标签：
+
+            \`\`\`markdown
+            ---
+            status: draft | review | active | completed | archived
+            created: YYYY-MM-DD
+            updated: YYYY-MM-DD
+            related_plan: ../plans/[关联计划].md  ← 计划文档填写
+            related_requirements: ../requirements/[关联需求].md  ← 需求文档填写
+            ---
+            \`\`\`
+
+            **详细规范**：CRM-Docs/standards/DOC-LIFECYCLE.md`
+            })
+
+  # Job 2: 自动归档
+  archive-docs:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    name: 自动归档已完成文档
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Archive completed documents
+        id: archive
+        run: |
+          chmod +x CRM-Docs/scripts/*.sh
+
+          # 执行归档（不检查 changelog，自动继续）
+          export CONTINUE_ARCHIVE="y"
+          bash CRM-Docs/scripts/archive_docs.sh || true
+
+          # 检查是否有归档变更
+          if [ -n "$(git status --porcelain CRM-Docs/archive/)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update navigation
+        if: steps.archive.outputs.has_changes == 'true'
+        run: |
+          python3 CRM-Docs/scripts/update_doc_nav.py
+
+      - name: Commit changes
+        if: steps.archive.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "ci-bot@crmwolf.com"
+          git config --local user.name "CI Bot"
+
+          git add CRM-Docs/archive/
+          git add CRM-Docs/requirements/README.md
+          git add CRM-Docs/plans/README.md
+          git add CRM-Docs/archive/README.md
+
+          # 获取归档文档数量
+          archived_count=$(git diff --cached --name-only CRM-Docs/archive/ | wc -l)
+
+          git commit -m "docs(archive): 自动归档 $archived_count 个已完成文档" || echo "No changes to commit"
+
+      - name: Push changes
+        if: steps.archive.outputs.has_changes == 'true'
+        run: |
+          git push origin main
+
+      - name: Create summary
+        if: steps.archive.outputs.has_changes == 'true'
+        run: |
+          echo "## 📦 自动归档完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**归档文档数**：$(git diff --cached --name-only CRM-Docs/archive/ | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**归档需求数**：$(ls -1 CRM-Docs/archive/requirements/*.md 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "**归档计划数**：$(ls -1 CRM-Docs/archive/plans/*.md 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Git 提交**：docs(archive): 自动归档已完成文档" >> $GITHUB_STEP_SUMMARY
+
+  # Job 3: 定期状态检查
+  periodic-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    name: 定期状态检查
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Check completed docs without changelog
+        id: check
+        run: |
+          # 检查 completed 文档是否有 changelog
+          completed_docs=$(bash CRM-Docs/scripts/check-doc-status.sh 2>&1 | grep "completed 文档" | wc -l)
+          changelog_count=$(find CRM-Docs/changelog -name "*.md" -type f ! -name "README.md" | wc -l)
+
+          echo "completed_docs=$completed_docs" >> $GITHUB_OUTPUT
+          echo "changelog_count=$changelog_count" >> $GITHUB_OUTPUT
+
+      - name: Create issue if changelog missing
+        if: steps.check.outputs.completed_docs > steps.check.outputs.changelog_count
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const completed_docs = '${{ steps.check.outputs.completed_docs }}';
+            const changelog_count = '${{ steps.check.outputs.changelog_count }}';
+
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `⚠️ Completed 文档缺少 Changelog`,
+              body: `## 文档状态检查报告
+
+            **检查日期**：${new Date().toISOString().split('T')[0]}
+
+            **发现问题**：
+
+            - **Completed 文档数**：${completed_docs} 个
+            - **Changelog 文档数**：${changelog_count} 个
+            - **缺失数量**：${completed_docs - changelog_count} 个
+
+            **建议处理**：
+
+            1. 为 completed 文档创建 changelog
+            2. 参阅规范：CRM-Docs/standards/DOC-LIFECYCLE.md#五、结果沉淀机制
+            3. 创建位置：CRM-Docs/changelog/enhancements/
+
+            **Changelog 模板**：
+
+            \`\`\`markdown
+            # [功能名称] 实施总结
+
+            **实施日期**：YYYY-MM-DD
+            **关联需求**：[需求文档链接]
+            **关联计划**：[计划文档链接]
+            **关联 PR**：#XXX
+
+            ---
+
+            ## 一、实施结果
+
+            ### 功能完成情况
+
+            | 功能项 | 完成状态 | 备注 |
+            |--------|----------|------|
+            | 功能 1 | ✅ 完成 | 正常上线 |
+
+            ---
+
+            ## 二、技术实现要点
+
+            ...
+            \`\`\`
+
+            **优先创建以下 Changelog**：
+
+            - AI-GLUE 系列实施总结
+            - AI-Agent 系列实施总结
+            - AI-OpenAPI 系列实施总结`,
+              labels: ['documentation', 'changelog', 'automated']
+            })

@@ -1,3 +1,11 @@
+---
+status: active
+created: 2026-04-23
+updated: 2026-04-23
+related_plan: -
+related_pr: -
+---
+
 # CRM 业务链路开放接口需求规格说明书
 
 ## 文档信息

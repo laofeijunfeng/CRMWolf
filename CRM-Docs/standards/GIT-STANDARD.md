@@ -172,4 +172,53 @@ git commit -m "fix(follow-up): 修复客户跟进 schema 路径错误
 
 ---
 
-**版本：1.0 | 最后更新：2026-04-28**
+## 文档同步规则
+
+### 需求/计划文档状态同步
+
+| 代码变更 | 文档同步要求 | Commit 分组 |
+|----------|--------------|-------------|
+| 需求评审通过 | `requirements/*.md` 状态更新为 `active` | 单独提交 |
+| 计划评审通过 | `plans/*.md` 状态更新为 `active` | 单独提交 |
+| 功能上线 | 需求/计划状态更新为 `completed` + 创建 changelog | 同 PR 提交 |
+| 文档归档 | CI 自动执行，无需手动提交 | - |
+
+### Commit Type 扩展（文档相关）
+
+| Type | 说明 | 示例 |
+|------|------|------|
+| `docs(requirements)` | 需求文档变更 | `docs(requirements): 新增 AI-TOOL-ENHANCEMENT 需求` |
+| `docs(plans)` | 计划文档变更 | `docs(plans): 更新 AI-OPENAPI 计划状态为 active` |
+| `docs(archive)` | 归档操作 | `docs(archive): 彘档 AI-GLUE 需求和计划` |
+| `docs(changelog)` | 结果沉淀 | `docs(changelog): 创建 AI-GLUE 实施总结` |
+| `docs(system)` | 系统文档更新 | `docs(system): 更新 ARCHITECTURE.md` |
+
+### 同步检查清单
+
+每个 PR 必须包含以下检查项：
+
+```markdown
+## 文档同步检查
+
+- [ ] 需求文档状态：已更新为 `completed`（如适用）
+- [ ] 计划文档状态：已更新为 `completed`（如适用）
+- [ ] Changelog 文档：已创建（功能上线）
+- [ ] API 文档：已同步（如适用）
+- [ ] 类型文档：已同步（如适用）
+- [ ] 权限文档：已同步（如适用）
+- [ ] 架构文档：已同步（如适用）
+```
+
+### 文档变更分组策略
+
+| 分组 | 文件类型 | 提交时机 |
+|------|----------|----------|
+| 需求组 | requirements/*.md + requirements/README.md | 需求评审通过 |
+| 计划组 | plans/*.md + plans/README.md | 计划评审通过 |
+| 完成组 | requirements/*.md + plans/*.md + changelog/*.md | 功能上线 |
+| 归档组 | archive/*.md + README.md 更新 | CI 自动归档 |
+| 同步组 | system/*.md + CRM-Client/docs/*.md | 代码变更同步 |
+
+---
+
+**版本：1.1 | 最后更新：2026-06-12**

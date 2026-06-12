@@ -44,4 +44,4 @@ logs/
 .cache/
 
 # ===== 上传文件 =====
-CRM-Server/uploads/*
+CRM-Server/uploads/**.tar
