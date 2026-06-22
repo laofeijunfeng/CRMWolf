@@ -139,13 +139,26 @@ class AgentMemory:
         Args:
             tool_name: 工具名称
             tool_params: 工具参数
-            tool_result: 工具结果
+            tool_result: 工具结果（可能是 ToolResult dataclass）
             reasoning: 推理过程
         """
+        # 如果 tool_result 是 ToolResult dataclass，转换为字典
+        if hasattr(tool_result, 'success'):
+            result_dict = {
+                'success': tool_result.success,
+                'error': tool_result.error,
+                'message': tool_result.message,
+                'data': tool_result.data if hasattr(tool_result, 'data') else None,
+                'waiting_for_user': tool_result.waiting_for_user if hasattr(tool_result, 'waiting_for_user') else False,
+                'preview_data': tool_result.preview_data if hasattr(tool_result, 'preview_data') else None,
+            }
+        else:
+            result_dict = tool_result
+
         self.tool_history.append({
             "tool_name": tool_name,
             "tool_params": tool_params,
-            "tool_result": tool_result,
+            "tool_result": result_dict,  # ← 使用转换后的字典
             "reasoning": reasoning,
             "timestamp": datetime.now().isoformat(),
         })
