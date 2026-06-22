@@ -80,14 +80,18 @@ class AgentSSEStreamer:
 
                     # Tool Result（修正格式：匹配前端期望）
                     # 前端期望：event.result.success, event.result.message
+                    # 注意：tool_result 是 ToolResult dataclass，需要提取字段
+                    result_obj = tool_call['tool_result']
+                    result_dict = {
+                        'success': result_obj.success,
+                        'message': result_obj.message or str(result_obj.data or '执行完成'),
+                        'data': result_obj.data if hasattr(result_obj, 'data') else None,
+                    }
+
                     tool_result_data = json.dumps({
                         'round': i,
                         'tool': tool_call['tool_name'],  # 前端期望字段
-                        'result': {
-                            'success': True,  # 默认成功（实际应该从 tool_result 解析）
-                            'message': str(tool_call['tool_result']),
-                            'data': tool_call['tool_result'],
-                        },
+                        'result': result_dict,
                     })
                     yield f"event: tool_result\ndata: {tool_result_data}\n\n"
 
