@@ -194,6 +194,92 @@ class CreateHandler(BaseHandler):
                                 params[child_field] = parent_value
                             logger.info(f"[inherit] set params[{child_field}] = {params.get(child_field)}")
 
+        # 处理 secondary_parent_lookup（第二个父实体查找，如创建合同时查找商机）
+        secondary_parent_lookup = handler_config.get("secondary_parent_lookup")
+        if secondary_parent_lookup:
+            secondary_crud_mapping_name = secondary_parent_lookup.get("parent_crud_mapping")
+            secondary_lookup_field = secondary_parent_lookup.get("parent_lookup_field", "name")
+            secondary_name_field = secondary_parent_lookup.get("parent_name_field", "name")
+            secondary_result_field = secondary_parent_lookup.get("parent_result_field", "parent_id")
+            secondary_exclude_status_keys = secondary_parent_lookup.get("exclude_status", self.DEFAULT_EXCLUDE_STATUS)
+            secondary_filter_status = secondary_parent_lookup.get("parent_filter_status")  # 新增：按特定状态过滤
+
+            if secondary_crud_mapping_name:
+                secondary_crud_config = self.get_crud_mapping(secondary_crud_mapping_name)
+                if not secondary_crud_config:
+                    return self.build_result(False, f"第二个父实体 CRUD 映射不存在: {secondary_crud_mapping_name}")
+
+                # 获取用户传入的第二个父实体名称
+                secondary_lookup_value = params.get(secondary_lookup_field)
+                if not secondary_lookup_value:
+                    return self.build_result(False, f"缺少参数: {secondary_lookup_field}")
+
+                # 从配置直接获取第二个父实体 Model
+                secondary_model = secondary_crud_config["model"]
+
+                # 获取排除状态枚举值
+                if secondary_exclude_status_keys and secondary_crud_config["status_field"]:
+                    secondary_type = secondary_crud_mapping_name.split("_")[0]
+                    status_enum_name = f"{secondary_type}_status"
+                    secondary_exclude_status_values = self.get_status_enum_values(status_enum_name, secondary_exclude_status_keys)
+                else:
+                    secondary_exclude_status_values = []
+
+                secondary_entity = None
+                secondary_id = None
+
+                # 先尝试从名称中提取 ID
+                id_match = self.ID_PATTERN.search(secondary_lookup_value)
+                if id_match:
+                    secondary_id = int(id_match.group(1))
+                    secondary_entity = self.get_active_entity_by_id(
+                        db,
+                        secondary_model,
+                        secondary_id,
+                        exclude_status=secondary_exclude_status_values,
+                        status_field=secondary_crud_config["status_field"]
+                    )
+                    if not secondary_entity:
+                        return self.build_result(False, f"{secondary_crud_mapping_name} ID {secondary_id} 不存在或状态无效")
+                else:
+                    # 没有 ID，使用名称模糊搜索
+                    try:
+                        name_field_attr, secondary_entities = self.search_active_entities(
+                            db,
+                            secondary_model,
+                            secondary_name_field,
+                            secondary_lookup_value,
+                            exclude_status=secondary_exclude_status_values,
+                            status_field=secondary_crud_config["status_field"],
+                            filter_status=secondary_filter_status  # 传入特定状态过滤
+                        )
+                    except Exception as e:
+                        return self.build_result(False, f"查询第二个父实体失败: {str(e)}")
+
+                    if not secondary_entities:
+                        status_hint = f"（状态需为 {secondary_filter_status}）" if secondary_filter_status else ""
+                        return self.build_result(False, f"未找到匹配的{secondary_crud_mapping_name}: {secondary_lookup_value}{status_hint}")
+
+                    if len(secondary_entities) > 1:
+                        secondary_names = [getattr(p, secondary_name_field) for p in secondary_entities[:5]]
+                        return self.build_result(
+                            False,
+                            f"找到多个匹配的{secondary_crud_mapping_name}，请提供更精确的名称。匹配结果: {', '.join(secondary_names)}"
+                        )
+
+                    secondary_entity = secondary_entities[0]
+                    secondary_id = secondary_entity.id
+
+                secondary_name = getattr(secondary_entity, secondary_name_field)
+
+                # 将 secondary_id 填充到 params
+                params[secondary_result_field] = secondary_id
+                params[secondary_lookup_field] = secondary_name  # 保存名称用于结果模板
+
+                # 如果 team_id 还未设置，从第二个父实体获取
+                if team_id is None:
+                    team_id = getattr(secondary_entity, 'team_id', None)
+
         # 处理 name_auto_generate（自动生成标准化名称）
         name_auto_generate = handler_config.get("name_auto_generate")
         enum_mappings = handler_config.get("enum_mappings", {})  # 获取 enum_mappings 配置
@@ -401,3 +487,102 @@ class CreateHandler(BaseHandler):
 
         # 返回结果，entity 只返回 ID（避免 JSON 序列化问题）
         return self.build_result(True, message, {"entity_id": entity.id})
+
+    async def preview(
+        self,
+        db: Session,
+        team_id: int,
+        user_id: int,
+        params: Dict[str, Any],
+        handler_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Preview：创建实体（中风险操作）
+
+        Args:
+            db: 数据库 Session
+            team_id: 团队 ID
+            user_id: 用户 ID
+            params: 用户传入参数
+            handler_config: Handler 配置（可选）
+
+        Returns:
+            Preview 变更计划
+        """
+        # 如果没有 handler_config，无法生成 Preview
+        if not handler_config:
+            return {
+                "description": "创建实体（缺少配置信息）",
+                "changes": [{"field": k, "from": None, "to": v} for k, v in params.items()],
+                "risk_level": "medium"
+            }
+
+        # 从配置获取关键信息
+        crud_mapping_name = handler_config.get("crud_mapping")
+        parent_lookup = handler_config.get("parent_lookup")
+
+        # 构建变更计划
+        changes = []
+
+        # 处理 parent_lookup（父实体关联）
+        if parent_lookup:
+            parent_lookup_field = parent_lookup.get("parent_lookup_field")
+            parent_result_field = parent_lookup.get("parent_result_field")
+            parent_lookup_value = params.get(parent_lookup_field)
+
+            # 尝试从名称中提取 ID
+            id_match = self.ID_PATTERN.search(parent_lookup_value) if parent_lookup_value else None
+            if id_match:
+                parent_id = int(id_match.group(1))
+                changes.append({
+                    "field": parent_result_field,
+                    "from": None,
+                    "to": parent_id
+                })
+            else:
+                # 模糊搜索，无法确定 ID
+                changes.append({
+                    "field": parent_result_field,
+                    "from": None,
+                    "to": f"搜索: {parent_lookup_value}"
+                })
+
+        # 处理枚举字段
+        enum_mappings = handler_config.get("enum_mappings", {})
+        for param_key, enum_name in enum_mappings.items():
+            if param_key in params:
+                user_value = params.get(param_key)
+                changes.append({
+                    "field": param_key,
+                    "from": None,
+                    "to": user_value
+                })
+
+        # 处理普通字段
+        for key, value in params.items():
+            if key not in enum_mappings and key not in (parent_lookup.get("parent_lookup_field") if parent_lookup else ""):
+                changes.append({
+                    "field": key,
+                    "from": None,
+                    "to": value
+                })
+
+        # 构建描述
+        entity_type = crud_mapping_name.replace("_", " ").title() if crud_mapping_name else "实体"
+        name_field = handler_config.get("name_auto_generate", {}).get("name_field", "name")
+        entity_name = params.get(name_field, "新实体")
+        description = f"创建{entity_type}：{entity_name}"
+
+        # 确定风险级别
+        # 创建合同、商机等为中风险
+        risk_level = "medium"
+        if crud_mapping_name in ["contract", "opportunity"]:
+            risk_level = "high"
+
+        return {
+            "description": description,
+            "changes": changes,
+            "risk_level": risk_level,
+            "entity_type": entity_type,
+            "entity_name": entity_name
+        }

@@ -260,46 +260,93 @@ class StatusChangeHandler(BaseHandler):
         else:
             target_status_enum = target_status
 
-        # 更新状态 - 根据字段类型决定使用枚举对象还是整数值
-        status_attr = getattr(model_class, status_field, None)
-        final_status_value = target_status_enum
+        # 特殊处理：商机赢单需要推进到最终阶段
+        if crud_mapping_name == "opportunity" and target_status == "WON":
+            from app.crud.opportunity import opportunity_crud
+            from app.crud.procurement import procurement_stage_template_crud
 
-        if status_attr is not None:
-            from sqlalchemy import Integer
-            # 如果字段是 Integer 类型，使用枚举的 value（整数）
-            if hasattr(status_attr, 'type') and isinstance(status_attr.type, Integer):
-                if hasattr(target_status_enum, 'value'):
-                    final_status_value = target_status_enum.value
-                else:
-                    # 没有枚举映射，直接使用传入的值
-                    final_status_value = target_status_enum
+            # 获取商机的采购方式
+            procurement_method_id = getattr(entity, 'procurement_method_id', None)
+            if not procurement_method_id:
+                return self.build_result(False, "商机缺少采购方式信息，无法标记为赢单。请先设置采购方式。")
 
-        setattr(entity, status_field, final_status_value)
+            # 获取最终阶段（win_probability=100）
+            try:
+                final_stage = procurement_stage_template_crud.get_final_stage(db, procurement_method_id)
+            except Exception as e:
+                return self.build_result(False, f"查询最终阶段模板失败: {str(e)}")
 
-        # 更新其他字段
-        update_fields = handler_config.get("update_fields", [])
-        for field in update_fields:
-            if field in params:
-                value = params.get(field)
+            if not final_stage:
+                # 获取采购方式名称用于提示
+                from app.crud.procurement import procurement_method_crud
+                method = procurement_method_crud.get(db, procurement_method_id)
+                method_name = method.name if method else f"ID {procurement_method_id}"
+                return self.build_result(
+                    False,
+                    f"采购方式「{method_name}」缺少最终阶段模板（赢率100%），无法标记为赢单。请联系管理员配置采购方式的阶段模板。"
+                )
 
-                # 处理日期字段
-                if "date" in field:
-                    value = self.parse_date(value)
-                elif "amount" in field:
-                    try:
-                        value = float(value)
-                    except ValueError:
-                        return self.build_result(False, f"无效的金额: {value}")
+            # 调用 move_to_stage 推进阶段（会自动设置 status=WON）
+            try:
+                opportunity_crud.move_to_stage(
+                    db=db,
+                    opportunity_id=entity_id,
+                    target_stage_template_id=final_stage.id,
+                    operator_id=str(user_id)
+                )
+                # 获取更新后的实体
+                db.refresh(entity)
+            except ValueError as e:
+                # 捕获 ValueError（如阶段不存在、不属于该采购方式等）
+                return self.build_result(False, f"阶段推进失败: {str(e)}")
+            except IndexError as e:
+                # 捕获 IndexError（如 list index out of range）
+                return self.build_result(False, f"阶段数据处理失败: {str(e)}。可能采购方式配置不完整。")
+            except Exception as e:
+                db.rollback()
+                return self.build_result(False, f"阶段推进失败: {str(e)}")
+        else:
+            # 普通状态变更：直接更新 status 字段
+            # 更新状态 - 根据字段类型决定使用枚举对象还是整数值
+            status_attr = getattr(model_class, status_field, None)
+            final_status_value = target_status_enum
 
-                setattr(entity, field, value)
+            if status_attr is not None:
+                from sqlalchemy import Integer
+                # 如果字段是 Integer 类型，使用枚举的 value（整数）
+                if hasattr(status_attr, 'type') and isinstance(status_attr.type, Integer):
+                    if hasattr(target_status_enum, 'value'):
+                        final_status_value = target_status_enum.value
+                    else:
+                        # 没有枚举映射，直接使用传入的值
+                        final_status_value = target_status_enum
 
-        # 执行更新
-        try:
-            db.commit()
-            db.refresh(entity)
-        except Exception as e:
-            db.rollback()
-            return self.build_result(False, f"更新失败: {str(e)}")
+            setattr(entity, status_field, final_status_value)
+
+            # 更新其他字段
+            update_fields = handler_config.get("update_fields", [])
+            for field in update_fields:
+                if field in params:
+                    value = params.get(field)
+
+                    # 处理日期字段
+                    if "date" in field:
+                        value = self.parse_date(value)
+                    elif "amount" in field:
+                        try:
+                            value = float(value)
+                        except ValueError:
+                            return self.build_result(False, f"无效的金额: {value}")
+
+                    setattr(entity, field, value)
+
+            # 执行更新
+            try:
+                db.commit()
+                db.refresh(entity)
+            except Exception as e:
+                db.rollback()
+                return self.build_result(False, f"更新失败: {str(e)}")
 
         # 构建结果
         result_template = handler_config.get(
@@ -322,4 +369,127 @@ class StatusChangeHandler(BaseHandler):
 
         message = result_template.format(**template_data)
 
-        return self.build_result(True, message, {"entity": entity})
+        # 返回可序列化的数据（不包含 ORM 对象）
+        return self.build_result(True, message, {
+            "entity_id": entity_id,
+            expected_id_key: entity_id,
+            "status": target_status,
+            "name": getattr(entity, name_field, "") if name_field else None
+        })
+
+    async def preview(
+        self,
+        db: Session,
+        team_id: int,
+        user_id: int,
+        params: Dict[str, Any],
+        handler_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Preview：状态变更（高风险操作）
+
+        Args:
+            db: 数据库 Session
+            team_id: 团队 ID
+            user_id: 用户 ID
+            params: 用户传入参数
+            handler_config: Handler 配置（可选）
+
+        Returns:
+            Preview 变更计划
+        """
+        # 如果没有 handler_config，无法生成 Preview
+        if not handler_config:
+            return {
+                "description": "状态变更操作（缺少配置信息）",
+                "changes": [{"field": k, "from": None, "to": v} for k, v in params.items()],
+                "risk_level": "high"
+            }
+
+        # 从配置获取关键信息
+        crud_mapping_name = handler_config.get("crud_mapping")
+        target_status = handler_config.get("target_status")
+        name_lookup_field = handler_config.get("name_lookup_field")
+        name_field = handler_config.get("name_field")
+
+        # 获取实体名称（从 params）
+        entity_name = params.get(name_lookup_field, "未知实体")
+
+        # 获取实体 ID（从 params）
+        module_prefix = crud_mapping_name.split("_")[0] if crud_mapping_name else "entity"
+        expected_id_key = f"{module_prefix}_id"
+        entity_id = params.get(expected_id_key) or params.get("entity_id") or params.get("id")
+
+        # 构建变更计划
+        changes = []
+
+        # 状态变更
+        if target_status:
+            # 尝试获取当前状态（如果能找到实体）
+            if entity_id:
+                crud_config = self.get_crud_mapping(crud_mapping_name)
+                if crud_config:
+                    model_class = crud_config["model"]
+                    status_field = handler_config.get("status_field", crud_config.get("status_field"))
+                    try:
+                        entity = db.query(model_class).filter(model_class.id == entity_id).first()
+                        if entity:
+                            current_status = getattr(entity, status_field, None)
+                            # 获取当前状态值
+                            if hasattr(current_status, 'name'):
+                                current_status_str = current_status.name
+                            elif hasattr(current_status, 'value'):
+                                current_status_str = str(current_status.value)
+                            else:
+                                current_status_str = str(current_status)
+                            changes.append({
+                                "field": status_field,
+                                "from": current_status_str,
+                                "to": target_status
+                            })
+                        else:
+                            changes.append({
+                                "field": "status",
+                                "from": "未知",
+                                "to": target_status
+                            })
+                    except Exception:
+                        changes.append({
+                            "field": "status",
+                            "from": "未知",
+                            "to": target_status
+                        })
+            else:
+                changes.append({
+                    "field": "status",
+                    "from": "未知",
+                    "to": target_status
+                })
+
+        # 其他字段变更
+        update_fields = handler_config.get("update_fields", [])
+        for field in update_fields:
+            if field in params:
+                changes.append({
+                    "field": field,
+                    "from": None,
+                    "to": params.get(field)
+                })
+
+        # 构建描述
+        entity_type = crud_mapping_name.replace("_", " ").title() if crud_mapping_name else "实体"
+        description = f"{entity_type}状态变更：{entity_name} → {target_status}"
+
+        # 确定风险级别
+        # 赢单、输单、删除等操作为高风险
+        risk_level = "high"
+        if target_status in ["WON", "LOST", "DELETED", "INVALID"]:
+            risk_level = "critical"
+
+        return {
+            "description": description,
+            "changes": changes,
+            "risk_level": risk_level,
+            "entity_id": entity_id,
+            "entity_name": entity_name
+        }

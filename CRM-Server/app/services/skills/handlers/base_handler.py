@@ -51,6 +51,40 @@ class BaseHandler(ABC):
         """
         pass
 
+    async def preview(
+        self,
+        db: Session,
+        team_id: int,
+        user_id: int,
+        params: Dict[str, Any],
+        handler_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Preview 方法（生成变更计划）
+
+        Args:
+            db: 数据库 Session
+            team_id: 团队 ID
+            user_id: 用户 ID
+            params: 用户传入参数
+            handler_config: Handler 配置（可选，某些 Handler 需要）
+
+        Returns:
+            {
+                "description": "操作描述",
+                "changes": [
+                    {"field": "字段名", "from": "旧值", "to": "新值"}
+                ],
+                "risk_level": "low|medium|high"
+            }
+        """
+        # 默认实现：返回参数本身
+        return {
+            "description": f"执行 {self.handler_type}",
+            "changes": [{"field": k, "from": None, "to": v} for k, v in params.items()],
+            "risk_level": "medium"
+        }
+
     def format_datetime(self, dt: Optional[datetime]) -> str:
         """格式化日期时间"""
         if not dt:
@@ -188,7 +222,8 @@ class BaseHandler(ABC):
         name_field: str,
         search_value: str,
         exclude_status: Optional[List[str]] = None,
-        status_field: Optional[str] = None
+        status_field: Optional[str] = None,
+        filter_status: Optional[str] = None
     ) -> tuple[Any, List[Any]]:
         """
         搜索有效状态的实体（过滤已转化/无效等状态）
@@ -200,6 +235,7 @@ class BaseHandler(ABC):
             search_value: 搜索值
             exclude_status: 需排除的状态值列表（如 ["CONVERTED", "INVALID"]）
             status_field: 状态字段名
+            filter_status: 只保留特定状态（如 "WON"，用于创建合同时只查找赢单商机）
 
         Returns:
             (name_field_attr, matching_entities)
@@ -209,7 +245,24 @@ class BaseHandler(ABC):
             name_field_attr.like(f"%{search_value}%")
         )
 
-        if exclude_status and status_field:
+        if filter_status and status_field:
+            # 按特定状态筛选（优先级高于 exclude_status）
+            status_attr = getattr(model_class, status_field)
+            # 获取 filter_status 的枚举值
+            enum_config = self.get_enum_mapping(f"{model_class.__tablename__.replace('crm_', '').split('_')[0]}_status")
+            if enum_config:
+                enum_class = enum_config.get("enum_class")
+                # 尝试通过名称查找枚举值
+                for attr_name in dir(enum_class):
+                    if not attr_name.startswith('_'):
+                        attr_value = getattr(enum_class, attr_name)
+                        if hasattr(attr_value, 'value') and attr_value.value == filter_status:
+                            query = query.filter(status_attr == attr_value.value)
+                            break
+                        elif attr_name == filter_status:
+                            query = query.filter(status_attr == attr_value.value)
+                            break
+        elif exclude_status and status_field:
             status_attr = getattr(model_class, status_field)
             query = query.filter(status_attr.notin_(exclude_status))
 
