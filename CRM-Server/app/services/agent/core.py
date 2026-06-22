@@ -66,9 +66,9 @@ class ReasoningResult:
 class ObservationResult:
     """观察结果"""
     success: bool
-    error: Optional[str]
-    data: Optional[Any]
-    extracted_info: Optional[Dict[str, Any]]
+    error: Optional[str] = None
+    data: Optional[Any] = None
+    extracted_info: Optional[Dict[str, Any]] = None
 
 
 @dataclass
