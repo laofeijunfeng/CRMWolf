@@ -20,12 +20,12 @@ export interface WorkflowContinueRequest {
 }
 
 /**
- * 启动 Workflow（通过 AI 助手聊天接口）
+ * 启动 Workflow（通过 Agent API）
  *
  * 使用方式：
  * 1. 用户输入触发关键词（如"确认采购"）
- * 2. 后端检测到 Workflow 触发
- * 3. 返回 workflow_start 事件
+ * 2. Agent 检测到 Workflow 触发
+ * 3. 返回 workflow_start 事件（或 react_start 事件）
  * 4. 后续步骤依次执行
  *
  * @param content 用户输入内容
@@ -36,7 +36,7 @@ export function startWorkflow(
   onEvent: (event: WorkflowEvent) => void,
   onError?: (error: Error) => void
 ): EventSource {
-  const url = `/api/v1/assistant/chat`
+  const url = `/api/v1/agent/chat`  // ✅ 新 Agent API 端点
 
   const eventSource = new EventSource(url, {
     // POST 方法需要通过 fetch 发送，这里简化处理
@@ -55,13 +55,15 @@ export function startWorkflow(
  * @param onEvent SSE 事件回调
  * @param onError 错误回调
  * @returns Closeable（可关闭的连接）
+ *
+ * 注意：新 Agent API 统一处理 Workflow 和 ReAct 循环
  */
 export function continueWorkflow(
   request: WorkflowContinueRequest,
   onEvent: (event: WorkflowEvent) => void,
   onError?: (error: Error) => void
 ): { close: () => void } {
-  const url = `/api/v1/assistant/workflow/continue`
+  const url = `/api/v1/agent/chat`  // ✅ 新 Agent API 端点
 
   // 使用 fetch + ReadableStream 实现 POST + SSE
   fetch(url, {
@@ -106,13 +108,15 @@ export function continueWorkflow(
 /**
  * 继续 Workflow SSE（带 token）
  * 用于 MagicWand 对话框
+ *
+ * 注意：新 Agent API 统一处理 Workflow 和 ReAct 循环
  */
 export function continueWorkflowSSE(
   request: WorkflowContinueRequest,
   onEvent: (event: WorkflowEvent) => void,
   token: string
 ): Promise<void> {
-  const url = `/api/v1/assistant/workflow/continue`
+  const url = `/api/v1/agent/chat`  // ✅ 新 Agent API 端点
 
   return fetch(url, {
     method: 'POST',
@@ -120,7 +124,10 @@ export function continueWorkflowSSE(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
     },
-    body: JSON.stringify(request),
+    body: JSON.stringify({
+      content: request.user_response,  // Agent API 使用 content 字段
+      session_id: request.session_id,  // 恢复会话
+    }),
   }).then((response) => {
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)

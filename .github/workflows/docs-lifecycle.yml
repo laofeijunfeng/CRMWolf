@@ -12,11 +12,49 @@ on:
     - cron: '0 2 * * *'  # 每天 2:00 AM 执行归档检查
 
 jobs:
+  # Job 0: 文档位置检查（新增 - 防止 AI 创建散落文档）
+  check-location:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    name: 检查文档位置规范
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Check document location
+        run: |
+          chmod +x CRM-Docs/scripts/*.sh
+          bash CRM-Docs/scripts/check-doc-location.sh
+
+      - name: Comment on PR (if failed)
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ❌ 文档位置检查失败
+
+            CRM-Docs 根目录只允许 \`README.md\`，其他文档必须在子目录。
+
+            **检测到根目录散落文档**，请移动到正确位置：
+            - 实施总结 → \`changelog/technical/\`
+            - 计划文档 → \`plans/\` 或 \`archive/plans/\`
+            - 需求文档 → \`requirements/\`
+
+            > 此检查由 CI Pipeline 自动执行，不可绕过
+            `
+            })
+
   # Job 1: PR 状态检查
   check-status:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     name: 检查文档状态标签
+    needs: check-location  # 依赖文档位置检查通过
 
     steps:
       - name: Checkout code

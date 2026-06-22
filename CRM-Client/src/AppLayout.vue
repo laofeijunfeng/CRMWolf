@@ -23,7 +23,13 @@
       </el-dialog>
 
       <nav class="nav">
-        
+        <!-- AI 助手 -->
+        <div class="menu-item" :class="{ active: currentPath === '/ai-assistant' }" @click="handleMenuClick('/ai-assistant')">
+          <el-icon class="item-icon"><ChatDotRound /></el-icon>
+          <span class="item-text">AI 助手</span>
+          <el-icon class="item-arrow"><ArrowRight /></el-icon>
+        </div>
+
         <div class="menu-item" :class="{ active: currentPath === '/calendar' }" @click="handleMenuClick('/calendar')">
           <el-icon class="item-icon"><Calendar /></el-icon>
           <span class="item-text">我的日历</span>
@@ -85,7 +91,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
 import { ElMessage } from 'element-plus'
-import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar } from '@element-plus/icons-vue'
+import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()

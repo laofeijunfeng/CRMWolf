@@ -1,6 +1,13 @@
+---
+priority: high
+status: active
+---
+
 # TypeScript 类型系统规范 - CRMWolf
 
 **适用范围**：CRM-Client/src 所有 .ts 和 .vue 文件
+
+**权威说明**：本文档是 TypeScript 类型定义的单一事实来源，其他文档仅允许引用，禁止重新定义类型。
 
 ---
 

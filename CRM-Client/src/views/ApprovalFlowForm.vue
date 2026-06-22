@@ -5,7 +5,8 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ isEdit ? '编辑审批流程' : '新建审批流程' }}</h1>
+        <!-- ✅ P1: Typography - 页面标题使用性格化字体 -->
+        <h1 class="wolf-page-title">{{ isEdit ? '编辑审批流程' : '新建审批流程' }}</h1>
       </div>
     </div>
 
@@ -110,7 +111,8 @@
             </template>
 
             <div v-if="form.nodes.length === 0" class="empty-nodes">
-              <el-empty description="暂无审批节点，请点击上方按钮添加">
+              <!-- ✅ P0: Copywriting - Invitation to act（已有按钮，保持） -->
+              <el-empty description="设置审批节点，定义审批顺序">
                 <el-button type="primary" class="wolf-btn wolf-btn--primary" @click="handleAddNode">
                   添加第一个节点
                 </el-button>
@@ -255,7 +257,15 @@
               </el-step>
             </el-steps>
 
-            <el-empty v-if="form.nodes.length === 0" description="暂无审批节点" />
+            <!-- ✅ P0: Copywriting - Invitation to act（改为明确的 invitation） -->
+            <el-empty v-if="form.nodes.length === 0">
+              <template #description>
+                <div class="wolf-empty-content">
+                  <span class="wolf-empty-title">设置审批节点</span>
+                  <span class="wolf-empty-desc">点击添加节点，定义审批顺序和权限</span>
+                </div>
+              </template>
+            </el-empty>
           </el-card>
         </el-col>
       </el-row>

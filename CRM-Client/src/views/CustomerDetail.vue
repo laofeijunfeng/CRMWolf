@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ customerDetail?.account_name || '客户详情' }}</h1>
+        <h1 class="wolf-page-title">{{ customerDetail?.account_name || '客户详情' }}</h1>
       </div>
       <div class="header-right">
         <el-button type="primary" size="small" @click="handleEditCustomer">
@@ -17,7 +17,7 @@
 
     <div v-loading="loading" class="detail-content">
       <div v-if="!customerDetail" class="empty-state">
-        <el-empty description="客户信息加载失败" />
+        <el-empty description="客户信息加载失败，请刷新页面或稍后重试" />
       </div>
 
       <div v-else>
@@ -391,9 +391,9 @@
                     新建商机
                   </el-button>
                 </div>
-                <el-spin :loading="opportunitiesLoading" style="width: 100%">
+                <div v-loading="opportunitiesLoading" class="loading-container">
                   <div v-if="opportunities.length === 0" class="empty-opportunities">
-                    <el-empty description="暂无商机" />
+                    <el-empty description="创建商机，追踪销售进展" />
                   </div>
                   <div v-else class="opportunities-list">
                     <div
@@ -424,7 +424,7 @@
                       </div>
                     </div>
                   </div>
-                </el-spin>
+                </div>
               </div>
 
               <!-- 合同 -->
@@ -436,9 +436,9 @@
                     新建合同
                   </el-button>
                 </div>
-                <el-spin :loading="contractsLoading" style="width: 100%">
+                <div v-loading="contractsLoading" class="loading-container">
                   <div v-if="contracts.length === 0" class="empty-placeholder">
-                    <el-empty description="暂无合同" />
+                    <el-empty description="创建合同，管理签约流程" />
                   </div>
                   <div v-else class="contract-list">
                     <div
@@ -480,7 +480,7 @@
                       </div>
                     </div>
                   </div>
-                </el-spin>
+                </div>
               </div>
 
               <!-- 回款 -->
@@ -492,9 +492,9 @@
                     新建回款计划
                   </el-button>
                 </div>
-                <el-spin :loading="paymentPlansLoading" style="width: 100%">
+                <div v-loading="paymentPlansLoading" class="loading-container">
                   <div v-if="paymentPlans.length === 0" class="empty-placeholder">
-                    <el-empty description="暂无回款计划" />
+                    <el-empty description="创建回款计划，追踪回款进度" />
                   </div>
                   <div v-else class="payment-list">
                     <div v-for="item in paymentPlans" :key="item.id" class="payment-item">
@@ -545,7 +545,7 @@
                       </div>
                     </div>
                   </div>
-                </el-spin>
+                </div>
               </div>
 
               <!-- 发票 -->
@@ -559,9 +559,9 @@
                       添加抬头
                     </el-button>
                   </div>
-                  <el-spin :loading="invoiceTitlesLoading" style="width: 100%">
+                  <div v-loading="invoiceTitlesLoading" class="loading-container">
                     <div v-if="invoiceTitles.length === 0" class="empty-placeholder">
-                      <el-empty description="暂无发票抬头，点击上方按钮添加" />
+                      <el-empty description="添加发票抬头，便于开票申请" />
                     </div>
                     <div v-else class="invoice-tiles-list">
                       <div
@@ -610,7 +610,7 @@
                         </div>
                       </div>
                     </div>
-                  </el-spin>
+                  </div>
                 </div>
 
                 <!-- 发票列表 -->
@@ -618,9 +618,9 @@
                   <div class="section-title">
                     <span>发票列表</span>
                   </div>
-                  <el-spin :loading="invoicesLoading" style="width: 100%">
+                  <div v-loading="invoicesLoading" class="loading-container">
                     <div v-if="invoices.length === 0" class="empty-placeholder">
-                      <el-empty description="暂无发票" />
+                      <el-empty description="申请发票，管理开票流程" />
                     </div>
                     <div v-else class="invoice-list">
                       <div v-for="item in invoices" :key="item.id" class="invoice-item" @click="goToInvoiceDetail(item.id)">
@@ -664,7 +664,7 @@
                         </div>
                       </div>
                     </div>
-                  </el-spin>
+                  </div>
                 </div>
               </div>
             </div>
@@ -895,7 +895,7 @@
         </el-table-column>
       </el-table>
       <div v-if="scoreDetails.length === 0" class="score-details-empty">
-        <el-empty description="暂无计算明细" />
+        <el-empty description="计算热力值，评估客户活跃度" />
       </div>
     </el-dialog>
   </template>
@@ -919,6 +919,7 @@ import {
   WarningFilled
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import FollowUpList from '@/components/FollowUpList.vue'
 import customerApi, { type CustomerDetailResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
 import customerFollowUpApi, { type CustomerFollowUpCreate, type CustomerFollowUpResponse } from '@/api/customerFollowUp'
@@ -954,10 +955,10 @@ const tabs = [
 const handleFollowUpDelete = async (followUp: any) => {
   try {
     await customerFollowUpApi.deleteFollowUp(followUp['id'])
-    ElMessage.success('删除成功')
+    showSuccess('删除', '跟进记录')
     await fetchFollowUps()
   } catch (error: any) {
-    ElMessage.error(error.message || '删除失败')
+    showError(error, '删除跟进记录')
   }
 }
 
@@ -979,11 +980,11 @@ const handleRegenerateProfile = async () => {
   try {
     loading.value = true
     await customerApi.regenerateProfile(customerId.value)
-    ElMessage.success('档案正在重新生成')
+    showSuccess('重新生成', '客户档案')
     // Refresh customer detail to show GENERATING status
     await fetchCustomerDetail()
   } catch (error: any) {
-    ElMessage.error(error.message || '重新生成失败')
+    showError(error, '重新生成客户档案')
   } finally {
     loading.value = false
   }
@@ -1134,7 +1135,7 @@ const fetchCustomerDetail = async () => {
     }
   } catch (error: any) {
     console.error('获取客户详情失败', error)
-    ElMessage.error('获取客户详情失败')
+    showError(error, '获取客户详情')
   }
 }
 
@@ -1154,7 +1155,7 @@ const fetchContracts = async () => {
     contracts.value = data || []
   } catch (error: any) {
     console.error('获取合同列表失败', error)
-    ElMessage.error('获取合同列表失败')
+    showError(error, '获取合同列表')
   } finally {
     contractsLoading.value = false
   }
@@ -1167,7 +1168,7 @@ const fetchPaymentPlans = async () => {
     paymentPlans.value = data || []
   } catch (error: any) {
     console.error('获取回款计划失败', error)
-    ElMessage.error('获取回款计划失败')
+    showError(error, '获取回款计划')
   } finally {
     paymentPlansLoading.value = false
   }
@@ -1180,7 +1181,7 @@ const fetchInvoices = async () => {
     invoices.value = data || []
   } catch (error: any) {
     console.error('获取发票列表失败', error)
-    ElMessage.error('获取发票列表失败')
+    showError(error, '获取发票列表')
   } finally {
     invoicesLoading.value = false
   }
@@ -1193,7 +1194,7 @@ const fetchInvoiceTitles = async () => {
     invoiceTitles.value = data?.invoice_titles || []
   } catch (error: any) {
     console.error('获取发票抬头列表失败', error)
-    ElMessage.error('获取发票抬头列表失败')
+    showError(error, '获取发票抬头列表')
   } finally {
     invoiceTitlesLoading.value = false
   }
@@ -1310,7 +1311,7 @@ const handleSaveInvoiceTitle = async () => {
         phone: invoiceTitleForm.phone || null,
         is_default: invoiceTitleForm.is_default
       })
-      ElMessage.success('更新成功')
+      showSuccess('更新', '发票抬头')
     } else {
       const { is_default, ...createData } = invoiceTitleForm
       const result = await invoiceApi.createInvoiceTitle(customerId.value, createData) as any
@@ -1319,19 +1320,19 @@ const handleSaveInvoiceTitle = async () => {
         await invoiceApi.setDefaultInvoiceTitle(result.id)
       }
       
-      ElMessage.success('添加成功')
+      showSuccess('添加', '发票抬头')
     }
     
     invoiceTitleFormVisible.value = false
     await fetchInvoiceTitles()
   } catch (error: any) {
     if (error?.response?.data?.detail) {
-      ElMessage.error(error.response.data.detail)
+      showError(error, '保存发票抬头')
     } else if (error?.message) {
-      ElMessage.error(error.message)
+      showError(error, '保存发票抬头')
     } else {
       console.error('保存失败', error)
-      ElMessage.error('保存失败')
+      showError(new Error('保存失败'), '发票抬头')
     }
   }
 }
@@ -1351,13 +1352,15 @@ const handleDeleteInvoiceTitle = async () => {
     )
     
     await invoiceApi.deleteInvoiceTitle(currentEditTitleId.value)
-    ElMessage.success('删除成功')
+    showSuccess('删除', '跟进记录')
     invoiceTitleFormVisible.value = false
     await fetchInvoiceTitles()
-  } catch (error: any) {
-    if (error === 'cancel') return
-    console.error('删除失败', error)
-    ElMessage.error('删除失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message === 'cancel') return
+    console.error('删除发票抬头失败', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '删除发票抬头')
   }
 }
 
@@ -1398,12 +1401,16 @@ const handleAddContactOk = async () => {
   try {
     await contactFormRef.value?.validate()
     await customerApi.createContact(customerId.value, contactForm)
-    ElMessage.success('添加联系人成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('添加', '联系人')
     addContactModalVisible.value = false
     await fetchCustomerDetail()
-  } catch (error: any) {
-    if (error?.message) {
-      ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message) {
+      console.error('[CustomerDetail] handleAddContactOk error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '添加联系人')
     }
   }
 }
@@ -1421,12 +1428,16 @@ const handleEditContactOk = async () => {
   try {
     await editContactFormRef.value?.validate()
     await customerApi.updateContact(selectedContact.value.id, editContactForm)
-    ElMessage.success('更新联系人成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('更新', '联系人')
     editContactModalVisible.value = false
     await fetchCustomerDetail()
-  } catch (error: any) {
-    if (error?.message) {
-      ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message) {
+      console.error('[CustomerDetail] handleEditContactOk error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '更新联系人')
     }
   }
 }
@@ -1434,11 +1445,15 @@ const handleEditContactOk = async () => {
 const handleSetPrimary = async (record: any) => {
   try {
     await customerApi.setPrimaryContact(record.id)
-    ElMessage.success('设置主联系人成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('设置主联系人', '联系人')
     await fetchCustomerDetail()
-  } catch (error: any) {
-    if (error?.message) {
-      ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message) {
+      console.error('[CustomerDetail] handleSetPrimary error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '设置主联系人')
     }
   }
 }
@@ -1455,11 +1470,15 @@ const handleDeleteContact = async (record: any) => {
       }
     )
     await customerApi.deleteContact(record.id)
-    ElMessage.success('删除联系人成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('删除', '联系人')
     await fetchCustomerDetail()
-  } catch (error: any) {
-    if (error !== 'cancel' && error?.message) {
-      ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('[CustomerDetail] handleDeleteContact error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '删除联系人')
     }
   }
 }
@@ -1486,12 +1505,16 @@ const handleAddFollowUpOk = async () => {
   try {
     await followUpFormRef.value?.validate()
     await customerFollowUpApi.createFollowUp(customerId.value, followUpForm)
-    ElMessage.success('添加跟进记录成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('添加', '跟进记录')
     addFollowUpModalVisible.value = false
     await fetchFollowUps()
-  } catch (error: any) {
-    if (error?.message) {
-      ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message) {
+      console.error('[CustomerDetail] handleAddFollowUpOk error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '添加跟进记录')
     }
   }
 }
@@ -1593,6 +1616,12 @@ onMounted(async () => {
 
 <style scoped lang="scss">
 @use '@/styles/variables.scss' as *;
+
+// 加载容器 - 为 v-loading 指令提供最小高度
+.loading-container {
+  min-height: 120px;
+  position: relative;
+}
 
 .customer-detail-page {
   padding: 0;

@@ -118,6 +118,8 @@ ACTION_RISK_MAPPING: Dict[str, RiskLevel] = {
     "update_amount": RiskLevel.MEDIUM,
     "update_stage": RiskLevel.MEDIUM,
     "link_opportunity": RiskLevel.MEDIUM,
+    "create_customer": RiskLevel.LOW,  # 创建客户属于低风险操作
+    "query_customer": RiskLevel.LOW,   # 查询客户属于低风险操作（只读）
     "win_opportunity": RiskLevel.HIGH,
     "lose_opportunity": RiskLevel.HIGH,
     "convert_lead": RiskLevel.HIGH,

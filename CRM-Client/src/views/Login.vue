@@ -63,7 +63,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
 import { authApi } from '@/api/auth'
@@ -138,7 +138,7 @@ const handleLogin = async () => {
       userStore.setUserInfo(user)
     }
 
-    ElMessage.success('登录成功')
+    showSuccess('登录', '账户')
 
     try {
       await teamStore.fetchUserTeams()
@@ -151,7 +151,7 @@ const handleLogin = async () => {
       router.push('/onboarding')
     }
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || '登录失败')
+    showError(error, '登录')
   } finally {
     loading.value = false
   }
@@ -184,10 +184,10 @@ const handleRegister = async () => {
       userStore.setUserInfo(user)
     }
 
-    ElMessage.success('注册成功')
+    showSuccess('注册', '账户')
     router.push('/onboarding')
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || '注册失败')
+    showError(error, '注册')
   } finally {
     registering.value = false
   }

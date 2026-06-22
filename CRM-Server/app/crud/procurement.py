@@ -152,7 +152,22 @@ class ProcurementStageTemplateCRUD:
         if team_id is not None:
             query = query.filter(ProcurementStageTemplate.team_id == team_id)
         return query.first()
-    
+
+    def get_final_stage(
+        self,
+        db: Session,
+        method_id: int,
+        team_id: Optional[int] = None
+    ) -> Optional[ProcurementStageTemplate]:
+        """获取采购方式的最终阶段（赢单阶段，win_probability=100）"""
+        query = db.query(ProcurementStageTemplate).filter(
+            ProcurementStageTemplate.procurement_method_id == method_id,
+            ProcurementStageTemplate.win_probability == 100
+        )
+        if team_id is not None:
+            query = query.filter(ProcurementStageTemplate.team_id == team_id)
+        return query.first()
+
     def create(
         self,
         db: Session,

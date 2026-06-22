@@ -1,6 +1,13 @@
+---
+priority: high
+status: active
+---
+
 # Vue 组件开发规范 - CRMWolf
 
 **适用范围**：CRM-Client/src/components 和 views
+
+**权威说明**：本文档是 Vue 组件模板的单一事实来源，其他文档仅允许引用，禁止重新定义组件模板。
 
 ---
 

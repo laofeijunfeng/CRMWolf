@@ -473,7 +473,7 @@
       <!-- 当前工具预览 -->
       <div class="action-preview">
         <div class="preview-header">
-          {{ getToolDisplayName(currentToolCall?.tool || '') }}
+          {{ getBusinessTitle(currentToolCall?.tool || '') }}
         </div>
         <div v-if="currentToolCall?.params" class="preview-params">
           <div class="preview-label">参数:</div>
@@ -489,7 +489,7 @@
           :key="result.tool"
           class="result-item"
         >
-          <span class="result-tool">{{ getToolDisplayName(result.tool) }}</span>
+          <span class="result-tool">{{ getBusinessTitle(result.tool) }}</span>
           <el-tag :type="result.success ? 'success' : 'info'" size="small">
             {{ result.success ? '成功' : '跳过' }}
           </el-tag>
@@ -596,7 +596,7 @@
     <!-- Stage 8: Pending Confirmation (Phase F 显式确认) -->
     <div v-if="stage === 'pending-confirmation'" class="stage-pending-confirmation">
       <ConfirmationCard
-        :title="getToolDisplayName(confirmationData.toolName)"
+        :title="getBusinessTitle(confirmationData.toolName)"
         :risk-level="confirmationData.riskLevel"
         :entity-info="confirmationData.display?.entity_info"
         :params="confirmationData.params"
@@ -684,6 +684,7 @@ import InputBox from '@/components/sidebar/InputBox.vue'
 import AgentExecutionLog from '@/components/AgentExecutionLog.vue'
 import { useAgentExecutionLog } from '@/composables/useAgentExecutionLog'
 import { transformToolResult } from '@/utils/errorTransformer'
+import { getBusinessTitle } from '@/types/agentExecution'
 
 // ========== Phase 1: 状态驱动 UI - 引入 SidebarState ==========
 const sidebarStateManager = useSidebarState()
@@ -1250,7 +1251,7 @@ function handleSSEEvent(event: AIAssistantSSEEvent) {
       // 工具调用
       console.log('[MagicWand] tool_call:', event)
       // 可用于实时显示当前正在执行的工具
-      replyText.value = `正在执行: ${getToolDisplayName(event.tool || '')}`
+      replyText.value = `正在执行: ${getBusinessTitle(event.tool || '')}`
       break
 
     case 'tool_result':
@@ -1836,7 +1837,7 @@ function handlePendingConfirmation(event: AIAssistantSSEEvent) {
     if (event.inline_pill) {
       inlinePillData.value = {
         actionType: event.inline_pill.action_type || event.tool_name,
-        actionDisplayName: event.inline_pill.action_display_name || getToolDisplayName(event.tool_name),
+        actionDisplayName: event.inline_pill.action_display_name || getBusinessTitle(event.tool_name),
         params: event.inline_pill.params || event.params || {},
         riskLevel: event.inline_pill.risk_level || event.risk_level || 'medium',
         summaryText: event.inline_pill.summary_text || buildSummaryText(event.tool_name, event.params),
@@ -2181,31 +2182,6 @@ function handleEntitySelectCancel() {
 // ========== 依次确认处理函数 ==========
 
 /**
- * 获取工具显示名称
- */
-function getToolDisplayName(toolName: string): string {
-  const toolNames: Record<string, string> = {
-    follow_up_customer: '创建跟进记录',
-    win_opportunity: '标记商机赢单',
-    lose_opportunity: '标记商机输单',
-    create_opportunity: '创建商机',
-    update_opportunity_stage: '推进商机阶段',
-    create_contract: '创建合同',
-    query_contracts: '查询合同',
-    get_contract_detail: '获取合同详情',
-    update_contract_status: '更新合同状态',
-    create_payment_plan: '创建回款计划',
-    create_payment_record: '登记回款',
-    query_payment_records: '查询回款记录',
-    confirm_payment: '确认回款',
-    create_invoice_application: '申请开票',
-    query_invoice_applications: '查询开票申请',
-    get_invoice_application_detail: '获取开票申请详情'
-  }
-  return toolNames[toolName] || toolName
-}
-
-/**
  * 确认当前工具（多工具依次确认）
  */
 async function handleConfirmCurrentTool() {
@@ -2220,7 +2196,7 @@ async function handleConfirmCurrentTool() {
     )
 
     // 显示成功提示
-    ElMessage.success(`${getToolDisplayName(currentToolCall.value.tool)} 执行成功`)
+    ElMessage.success(`${getBusinessTitle(currentToolCall.value.tool)} 执行成功`)
 
     // 处理下一个工具或进入下一轮
     moveToNextToolOrRound()
@@ -2233,7 +2209,7 @@ async function handleConfirmCurrentTool() {
       message: err.message
     })
 
-    ElMessage.error(`${getToolDisplayName(currentToolCall.value.tool)} 执行失败：${err.message}`)
+    ElMessage.error(`${getBusinessTitle(currentToolCall.value.tool)} 执行失败：${err.message}`)
 
     // 继续处理下一个工具（不中断）
     moveToNextToolOrRound()
@@ -2262,7 +2238,7 @@ async function handleMultiFormSubmit(values: Record<string, unknown>) {
       mergedParams
     )
 
-    ElMessage.success(`${getToolDisplayName(currentToolCall.value.tool)} 执行成功`)
+    ElMessage.success(`${getBusinessTitle(currentToolCall.value.tool)} 执行成功`)
     moveToNextToolOrRound()
   } catch (error: unknown) {
     const err = error as Error
@@ -2271,7 +2247,7 @@ async function handleMultiFormSubmit(values: Record<string, unknown>) {
       success: false,
       message: err.message
     })
-    ElMessage.error(`${getToolDisplayName(currentToolCall.value.tool)} 执行失败：${err.message}`)
+    ElMessage.error(`${getBusinessTitle(currentToolCall.value.tool)} 执行失败：${err.message}`)
     moveToNextToolOrRound()
   } finally {
     isExecuting.value = false
@@ -2291,7 +2267,7 @@ function handleSkipCurrentTool() {
     message: '用户跳过'
   })
 
-  ElMessage.info(`已跳过 ${getToolDisplayName(currentToolCall.value.tool)}`)
+  ElMessage.info(`已跳过 ${getBusinessTitle(currentToolCall.value.tool)}`)
   moveToNextToolOrRound()
 }
 

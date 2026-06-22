@@ -278,5 +278,112 @@ class ActionExecutor:
 
         return opportunity
 
+    # ==================== 创建客户 ====================
+
+    def create_customer(
+        self,
+        account_name: str,
+        contact_phone: Optional[str] = None,
+        contact_name: Optional[str] = None,
+        customer_source: Optional[str] = None,
+        address: Optional[str] = None,
+        remark: Optional[str] = None,
+        city: Optional[str] = None,  # 必填字段，提供默认值
+    ) -> Any:  # Returns Customer
+        """创建客户（纯 CRUD 调用）
+
+        Args:
+            account_name: 客户名称（必填）
+            contact_phone: 联系电话
+            contact_name: 联系人姓名
+            customer_source: 客户来源
+            address: 地址
+            remark: 备注
+            city: 城市（必填字段，默认为"未知"）
+
+        Returns:
+            Customer 实例
+        """
+        from app.schemas.customer import CustomerCreate
+
+        customer_data = CustomerCreate(
+            account_name=account_name,
+            city=city or "未知",  # 必填字段，默认值
+            contact_phone=contact_phone,
+            contact_name=contact_name,
+            customer_source=customer_source or "其他",
+            address=address,
+            remark=remark,
+        )
+
+        customer = customer_crud.create(
+            self.db,
+            obj_in=customer_data,
+            creator_id=self.operator_id,
+            team_id=self.team_id,
+            operator_name=self.operator_name,
+        )
+
+        return customer
+
+    # ==================== 查询客户列表 ====================
+
+    def query_customer_list(
+        self,
+        keyword: Optional[str] = None,
+        status: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """查询客户列表（纯 CRUD 调用）
+
+        Args:
+            keyword: 搜索关键词
+            status: 客户状态筛选
+            page: 页码
+            page_size: 每页数量
+
+        Returns:
+            包含 items 和 total 的字典
+        """
+        # Convert page/page_size to skip/limit
+        skip = (page - 1) * page_size
+        limit = page_size
+
+        # Map status string to int if needed
+        status_int = None
+        if status:
+            # Map status names to int values (based on CustomerStatus enum)
+            status_map = {
+                "active": 0,
+                "inactive": 1,
+                "converted": 2,
+                "invalid": 3,
+            }
+            status_int = status_map.get(status.lower())
+
+        customers, total = customer_crud.get_multi(
+            self.db,
+            team_id=self.team_id,
+            keyword=keyword,
+            status=status_int,
+            skip=skip,
+            limit=limit,
+        )
+
+        # Convert Customer objects to dict for JSON serialization
+        from app.schemas.customer import CustomerResponse
+        customer_dicts = [
+            CustomerResponse.model_validate(c).model_dump(mode='json')
+            for c in customers
+        ]
+
+        return {
+            "items": customer_dicts,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
 
 __all__ = ["ActionExecutor"]

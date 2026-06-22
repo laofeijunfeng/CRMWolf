@@ -3,6 +3,24 @@
 
 echo "🔍 Running pre-commit checks..."
 
+# ===== 文档位置检查（新增 - 防止 AI 创建散落文档）=====
+echo "📄 Checking document location..."
+
+CRM_DOCS_DIR="CRM-Docs"
+SCRIPT_PATH="$CRM_DOCS_DIR/scripts/check-doc-location.sh"
+
+if [ -f "$SCRIPT_PATH" ]; then
+  # 检查 CRM-Docs 目录是否有变更
+  if git diff --cached --name-only | grep -q "^CRM-Docs/"; then
+    chmod +x "$SCRIPT_PATH"
+    "$SCRIPT_PATH" || {
+      echo "::error::Document location check failed."
+      echo "CRM-Docs 根目录只允许 README.md，其他文档必须在子目录"
+      exit 1
+    }
+  fi
+fi
+
 # ===== 配置锁定检查 =====
 echo "🔒 Checking config locks..."
 

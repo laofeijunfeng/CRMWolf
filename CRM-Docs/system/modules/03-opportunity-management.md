@@ -1,6 +1,44 @@
+---
+priority: high
+status: active
+module_type: business
+---
+
 # 商机管理模块
 
-版本：2.0 | 更新日期：2026-06-12
+版本：2.1 | 更新日期：2026-06-12
+
+---
+
+## AI 交互意图
+
+### AI 在此模块的核心任务
+
+| 任务场景 | AI 操作意图 | 约束条件 | 风险等级 |
+|----------|-------------|----------|----------|
+| 创建商机 | 调用 `create_opportunity` 工具 | 必须关联 customer_id、total_amount 必填 | P0 |
+| 推进阶段 | 调用 `move_to_stage` 工具 | 阶段必须按顺序推进、不可跳过中间阶段 | P0 |
+| 标记赢单 | 调用 `win_opportunity` 工具 | **必须有商机存在**（业务不变式）、推进到最终阶段 | P0 |
+| 标记输单 | 调用 `lose_opportunity` 工具 | 需填写输单原因、状态不可逆 | P0 |
+| 查询商机 | 调用 `query_opportunities` 工具 | 默认 team_id 过滤、禁止跨团队 | P0 |
+
+### AI 禁止行为
+
+| 禁止行为 | 原因 | 替代方案 |
+|----------|------|----------|
+| ❌ 赢单前没有商机 | 违反业务不变式 `win_requires_opportunity` | 必须先创建或确认商机存在 |
+| ❌ 跳过中间阶段直接到最终阶段 | 违反状态机规则 | 必须按阶段顺序推进 |
+| ❌ 臆测商机阶段名称 | 违反禁止臆测红线 | 阶段名称查阅 GLOSSARY.md 或数据库 |
+| ❌ 跨 team_id 操作商机 | 违反团队隔离红线 | 必须注入当前用户 team_id |
+
+### AI 必查文档
+
+| 场景 | 必查文档 | 查阅时机 |
+|------|----------|----------|
+| 定义类型 | `CRM-Client/docs/TYPESCRIPT.md` | 写代码前 |
+| 查阶段枚举 | `CRM-Docs/system/GLOSSARY.md` | 处理阶段字段前 |
+| 查业务不变式 | `CRM-Server/app/services/workflow/business_invariants.py` | 赢单/创建合同前 |
+| 查 CRUD 模式 | `CRM-Docs/best-practices/backend/crud-patterns.md` | 写 CRUD 前 |
 
 ---
 

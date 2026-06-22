@@ -82,7 +82,7 @@ import {
 import ThinkingBubble from './ThinkingBubble.vue'
 import StatusCard from './StatusCard.vue'
 import type { ExecutionStep } from '@/types/agentExecution'
-import { ExecutionStepType } from '@/types/agentExecution'
+import { ExecutionStepType, formatBusinessParams } from '@/types/agentExecution'
 
 interface Props {
   steps: ExecutionStep[]
@@ -176,46 +176,6 @@ const getStatusCardType = (
 const getStatusCardSummary = (step: ExecutionStep): string => {
   if (step.error) return step.error
   if (step.description) return step.description
-  return ''
-}
-
-/**
- * 格式化业务参数
- */
-const formatBusinessParams = (
-  params: Record<string, unknown>,
-  title: string
-): string => {
-  // 根据不同的业务场景格式化参数
-  if (title.includes('查找') || title.includes('搜索')) {
-    const keyword = params['keyword'] ?? params['name'] ?? params['query']
-    if (keyword !== undefined && keyword !== null) {
-      return `正在搜索："${String(keyword)}"`
-    }
-  }
-
-  if (title.includes('创建')) {
-    const name = params['name'] ?? params['customer_name'] ?? params['title']
-    if (name !== undefined && name !== null) {
-      return `正在创建："${String(name)}"`
-    }
-  }
-
-  if (title.includes('更新') || title.includes('修改')) {
-    const targetName = params['name'] ?? params['customer_name'] ?? params['title']
-    if (targetName !== undefined && targetName !== null) {
-      return `正在更新："${String(targetName)}"`
-    }
-  }
-
-  if (title.includes('删除')) {
-    const targetName = params['name'] ?? params['customer_name'] ?? params['title']
-    if (targetName !== undefined && targetName !== null) {
-      return `正在删除："${String(targetName)}"`
-    }
-  }
-
-  // 默认：返回空字符串
   return ''
 }
 

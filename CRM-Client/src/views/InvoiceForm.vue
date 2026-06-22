@@ -5,7 +5,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ isEditing ? '编辑发票申请' : '创建发票申请' }}</h1>
+        <h1 class="wolf-page-title">{{ isEditing ? '编辑发票申请' : '创建发票申请' }}</h1>
       </div>
     </div>
 
@@ -192,7 +192,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import invoiceApi, {
   type InvoiceApplicationCreate,
@@ -395,10 +395,10 @@ const handleSubmit = async () => {
             address: selectedInvoiceTitle.value.address || null,
             phone: selectedInvoiceTitle.value.phone || null
           })
-          ElMessage.success('抬头信息已更新')
+          showSuccess('更新', '抬头信息')
         } catch (error) {
           console.error('更新抬头信息失败', error)
-          ElMessage.warning('抬头信息更新失败，继续创建申请')
+          // 继续创建申请，不阻断流程
         }
       }
     }
@@ -412,20 +412,15 @@ const handleSubmit = async () => {
 
     if (isEditing.value) {
       await invoiceApi.updateInvoiceApplication(Number(invoiceId.value), submitData)
-      ElMessage.success('更新成功')
+      showSuccess('更新', '发票申请')
     } else {
       await invoiceApi.createInvoiceApplication(submitData)
-      ElMessage.success('创建成功')
+      showSuccess('创建', '发票申请')
     }
 
     router.push('/invoices')
   } catch (error: any) {
-    if (error.response?.data?.detail) {
-      ElMessage.error(error.response.data.detail)
-    } else {
-      console.error('提交失败', error)
-      ElMessage.error('提交失败')
-    }
+    showError(error, isEditing.value ? '更新发票申请' : '创建发票申请')
   } finally {
     submitting.value = false
   }
@@ -476,7 +471,7 @@ const loadInvoiceData = async () => {
     }
   } catch (error) {
     console.error('获取发票申请详情失败', error)
-    ElMessage.error('获取发票申请详情失败')
+    showError(error, '获取发票申请详情')
   }
 }
 

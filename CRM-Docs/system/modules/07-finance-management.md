@@ -1,6 +1,50 @@
+---
+priority: high
+status: active
+module_type: business
+---
+
 # 财务管理模块
 
-**版本：2.0 | 更新日期：2026-06-12**
+**版本：2.1 | 更新日期：2026-06-12**
+
+---
+
+## AI 交互意图
+
+### AI 在此模块的核心任务
+
+| 任务场景 | AI 操作意图 | 约束条件 | 风险等级 |
+|----------|-------------|----------|----------|
+| 审批回款 | 调用 `confirm_payment` 工具 | **需 FINANCE 角色**、更新回款状态 | P0 |
+| 审批发票 | 调用 `review_invoice` 工具 | **需 FINANCE 角色**、审批结果记录 | P0 |
+| 开票确认 | 调用 `mark_invoice_issued` 工具 | **需 FINANCE 角色**、状态更新 | P0 |
+| 财务查询 | 调用 `query_xxx` 工具 | FINANCE 角色可查看**全部数据**（跨 team_id） | P1 |
+
+### AI 禁止行为
+
+| 禁止行为 | 原因 | 替代方案 |
+|----------|------|----------|
+| ❌ 非 FINANCE 角色执行财务审批 | 违反权限红线 | 必须检查用户角色 |
+| ❌ 非 FINANCE 角色跨 team_id 查询 | 违反数据权限规则 | 仅 FINANCE 可查看全部数据 |
+| ❌ 臆测审批结果枚举 | 违反禁止臆测红线 | 状态查阅 GLOSSARY.md |
+| ❌ 绕过审批直接开票 | 违反业务流程规则 | 必须先审批通过 |
+
+### AI 特殊权限说明
+
+| 角色 | 数据范围 | 特殊操作 |
+|------|----------|----------|
+| **FINANCE** | ✅ 全公司数据（跨 team_id） | ✅ 回款确认、发票审批、开票确认 |
+| 其他角色 | 仅本 team_id 数据 | ❌ 无财务审批权限 |
+
+### AI 必查文档
+
+| 场景 | 必查文档 | 查阅时机 |
+|------|----------|----------|
+| 检查角色权限 | `CRM-Docs/system/GLOSSARY.md` | 执行财务操作前 |
+| 查权限码 | `CRM-Docs/system/GLOSSARY.md` | 权限检查前 |
+| 查 API 参数 | `CRM-Docs/system/BUSINESS-CHAIN-API.md` | 调用接口前 |
+| 查 CRUD 模式 | `CRM-Docs/best-practices/backend/crud-patterns.md` | 写 CRUD 前 |
 
 ---
 

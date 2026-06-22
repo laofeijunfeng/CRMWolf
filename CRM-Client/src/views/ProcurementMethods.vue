@@ -153,7 +153,7 @@
               </el-card>
             </el-timeline-item>
           </el-timeline>
-          <el-empty v-else description="暂无阶段模板" />
+          <el-empty v-else description="配置阶段模板，定义采购流程" />
         </div>
       </div>
     </el-dialog>

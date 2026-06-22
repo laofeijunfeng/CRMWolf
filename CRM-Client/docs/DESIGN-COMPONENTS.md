@@ -1,6 +1,8 @@
 # CRMWolf 组件规范
 
-**适用范围**：前端组件开发必读
+⚠️ **品牌色唯一来源**：`src/styles/variables.scss`
+
+**所有颜色必须引用 Sass 变量，禁止硬编码。**
 
 ---
 
@@ -10,10 +12,10 @@
 
 | 类型 | 样式 | 用途 |
 |------|------|------|
-| 主按钮 | 品牌色填充 | 页面核心操作 |
-| 次按钮 | 浅灰背景 | 辅助操作 |
+| 主按钮 | `$wolf-primary` 品牌色填充 | 页面核心操作 |
+| 次按钮 | `$wolf-bg-hover` 浅灰背景 | 辅助操作 |
 | 文本按钮 | 无背景 | 弱操作、取消 |
-| 危险按钮 | 红色文字 | 删除、危险操作 |
+| 危险按钮 | `$wolf-danger-text` 红色文字 | 删除、危险操作 |
 
 ### 1.2 按钮尺寸
 
@@ -22,35 +24,34 @@
 | 默认 | 32px | 8px 24px | 页面操作 |
 | 小 | 24px | 4px 8px | 表格操作 |
 
-### 1.3 按钮样式
+### 1.3 按钮结构规范
 
 ```css
-/* 主按钮 */
-.wolf-btn-primary {
-  background: #165DFF;
-  color: #FFFFFF;
-  border-radius: 8px;
+/* 按钮基础结构（颜色引用 variables.scss） */
+.wolf-btn {
   height: 32px;
-}
-
-/* 次按钮 */
-.wolf-btn-default {
-  background: #F7F7F5;
-  color: #3A3A3A;
   border-radius: 8px;
+  font-size: 14px;
+  font-weight: 400;
 }
 
-/* 文本按钮 */
+.wolf-btn-primary {
+  background: $wolf-primary;
+  color: $wolf-text-inverse;
+}
+
+.wolf-btn-default {
+  background: $wolf-bg-hover;
+  color: $wolf-text-secondary;
+}
+
 .wolf-btn-text {
   background: transparent;
-  color: #636363;
-  &:hover { background: #F5F5F3; }
+  color: $wolf-text-tertiary;
 }
 
-/* 危险按钮 */
 .wolf-btn-danger {
-  color: #A83232;
-  &:hover { background: #FCECEC; }
+  color: $wolf-danger-text;
 }
 ```
 
@@ -62,15 +63,15 @@
 
 **红线：禁止纯色填充，必须用浅底色+同色系文字**
 
-### 2.2 状态标签颜色
+### 2.2 状态标签颜色引用
 
-| 状态 | 背景色 | 文字色 | 示例 |
-|------|--------|--------|------|
-| 成功 | #EDF7EF | #2B633C | 已完成、赢单 |
-| 警告 | #FFF6E8 | #7A4F1E | 待处理、跟进中 |
-| 错误 | #FCECEC | #7A2828 | 已拒绝、输单 |
-| 信息 | #E8F3FF | #165DFF | 进行中 |
-| 默认 | #F5F5F3 | #636363 | 无状态 |
+| 状态 | Sass 变量组合 |
+|------|---------------|
+| 成功 | `background: $wolf-success-bg; color: $wolf-success-text` |
+| 警告 | `background: $wolf-warning-bg; color: $wolf-warning-text` |
+| 错误 | `background: $wolf-danger-bg; color: $wolf-danger-text` |
+| 信息 | `background: $wolf-primary-light; color: $wolf-primary` |
+| 默认 | `background: $wolf-bg-hover; color: $wolf-text-tertiary` |
 
 ### 2.3 标签尺寸
 
@@ -91,9 +92,9 @@
 
 ```css
 .wolf-card {
-  background: #FFFFFF;
+  background: $wolf-bg-card;       /* #FFFFFF */
   border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: $wolf-shadow-card;   /* 0 1px 2px rgba(0,0,0,0.04) */
   padding: 20px;
 }
 ```
@@ -111,7 +112,7 @@
 .wolf-card__title {
   font-size: 16px;
   font-weight: 600;
-  color: #1D2129;
+  color: $wolf-text-primary;
 }
 ```
 
@@ -125,10 +126,8 @@
 .el-input__wrapper {
   height: 28px;
   border-radius: 6px;
-  background: #F5F5F3;
+  background: $wolf-bg-hover;
   border: none;
-  &:hover { background: #F0F0ED; }
-  &:focus { background: #EFEFED; }
 }
 ```
 
@@ -153,7 +152,7 @@
 ```css
 .el-dialog {
   border-radius: 16px;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.16);
+  box-shadow: $wolf-shadow-modal;  /* 0 16px 48px rgba(0,0,0,0.16) */
 }
 ```
 
@@ -188,8 +187,19 @@
 ```css
 .el-tabs__item {
   font-size: 14px;
-  color: #86909C;
-  &:hover { color: #4E5969; }
-  &.is-active { color: #1D2129; font-weight: 500; }
+  color: $wolf-text-tertiary;
+}
+
+.el-tabs__item:hover {
+  color: $wolf-text-secondary;
+}
+
+.el-tabs__item.is-active {
+  color: $wolf-text-primary;
+  font-weight: 500;
 }
 ```
+
+---
+
+**颜色详细定义**：`src/styles/variables.scss`

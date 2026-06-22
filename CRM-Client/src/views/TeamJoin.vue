@@ -64,7 +64,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft, SwitchButton } from '@element-plus/icons-vue'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
@@ -98,11 +98,11 @@ const handleSubmit = async () => {
   loading.value = true
   try {
     await teamStore.joinTeam(form.code)
-    ElMessage.success('已成功加入团队')
+    showSuccess('加入', '团队')
     router.push('/leads')
   } catch (error: any) {
     console.error('加入团队失败', error)
-    ElMessage.error(error.response?.data?.detail || error.message || '加入团队失败，请检查邀请码是否正确')
+    showError(error, '加入团队')
   } finally {
     loading.value = false
   }

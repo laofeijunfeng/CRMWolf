@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ opportunity?.opportunity_name || '商机详情' }}</h1>
+        <h1 class="wolf-page-title">{{ opportunity?.opportunity_name || '商机详情' }}</h1>
       </div>
       <div class="header-right">
         <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="success" size="small" @click="handleShowWinModal">
@@ -148,7 +148,7 @@
         <span class="card-title">关联合同</span>
       </div>
       <div v-loading="contractLoading" class="card-body">
-        <el-empty v-if="!relatedContract" description="暂无合同">
+        <el-empty v-if="!relatedContract" description="创建合同，锁定商机">
           <template v-if="opportunity?.status === 1">
             <p class="empty-tip">商机已赢单，请及时创建合同以锁定交易</p>
             <el-button type="primary" size="small" @click="handleCreateContract">
@@ -271,7 +271,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { opportunityApi, type Opportunity, type OpportunityWinRequest, type OpportunityLossRequest } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
@@ -319,7 +319,7 @@ const fetchOpportunityDetail = async () => {
     await fetchRelatedContract()
   } catch (error: any) {
     console.error('获取商机详情失败', error)
-    ElMessage.error('获取商机详情失败')
+    showError(error, '获取商机详情')
   } finally {
     loading.value = false
   }
@@ -470,11 +470,11 @@ const handleWinModalOk = async () => {
   }
   try {
     await opportunityApi.markAsWon(opportunity.value.id, winForm)
-    ElMessage.success('已标记赢单')
+    showSuccess('标记赢单', '商机')
     winModalVisible.value = false
     fetchOpportunityDetail()
   } catch (error: any) {
-    ElMessage.error(error.message || '操作失败')
+    showError(error, '标记赢单')
   }
 }
 
@@ -487,11 +487,11 @@ const handleLoseModalOk = async () => {
   }
   try {
     await opportunityApi.markAsLost(opportunity.value.id, loseForm)
-    ElMessage.success('已标记输单')
+    showSuccess('标记输单', '商机')
     loseModalVisible.value = false
     fetchOpportunityDetail()
   } catch (error: any) {
-    ElMessage.error(error.message || '操作失败')
+    showError(error, '标记输单')
   }
 }
 

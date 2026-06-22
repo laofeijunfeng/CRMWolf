@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ isEdit ? '编辑线索' : '新建线索' }}</h1>
+        <h1 class="wolf-page-title">{{ isEdit ? '编辑线索' : '新建线索' }}</h1>
       </div>
     </div>
 
@@ -124,7 +124,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { leadApi } from '@/api/lead'
 
@@ -187,7 +187,7 @@ const fetchLeadDetail = async () => {
     })
   } catch (error) {
     console.error('获取线索详情失败', error)
-    ElMessage.error('获取线索详情失败')
+    showError(error, '获取线索详情')
   }
 }
 
@@ -206,15 +206,15 @@ const handleSubmit = async () => {
 
       if (isEdit.value) {
         await leadApi.updateLead(parseInt(leadId.value), submitData)
-        ElMessage.success('更新成功')
+        showSuccess('更新', '线索')
       } else {
         await leadApi.createLead(submitData)
-        ElMessage.success('创建成功')
+        showSuccess('创建', '线索')
       }
       router.push('/leads')
     } catch (error) {
       console.error('提交失败', error)
-      ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
+      showError(error, isEdit.value ? '更新线索' : '创建线索')
     } finally {
       submitting.value = false
     }

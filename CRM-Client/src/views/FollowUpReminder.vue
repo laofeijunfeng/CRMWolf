@@ -13,7 +13,7 @@
     </div>
 
     <el-card class="table-card">
-      <el-empty v-if="!loading && tableData.length === 0" description="暂无需跟进的线索" />
+      <el-empty v-if="!loading && tableData.length === 0" description="跟进线索，推动销售进展" />
       <el-table
         v-else
         :data="tableData"

@@ -1,0 +1,110 @@
+// ==================== CRMWolf Typography 统一样式 ====================
+// Signature: IBM Plex Sans（性格化字体）+ IBM Plex Mono（技术 vernacular）
+//
+// 设计原则（符合 frontend-design skill）：
+// - Display face 仅用于关键位置（≤5% 的文字）
+// - 其他位置保持系统字体栈（功能性、性能优先）
+// - Mono face 用于数据、时间、代码、AI 消息（技术 vernacular）
+
+// ==================== 页面标题样式 ====================
+
+.wolf-page-title {
+  // ← Signature: IBM Plex Sans（页面主标题的唯一性格化字体）
+  font-family: $wolf-font-display;
+  font-size: 20px;  // ← 统一为 20px（符合设计规范）
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+  line-height: $wolf-line-height-title;
+  margin: 0;
+}
+
+.wolf-page-title--lg {
+  font-size: 24px;  // 大页面标题（仅首页/Dashboard 使用）
+}
+
+// ==================== 卡片标题样式 ====================
+
+.wolf-card-title {
+  // ← 使用系统字体栈（符合 ≤5% 原则，卡片标题不应使用 Display font）
+  font-family: $wolf-font-family;
+  font-size: 16px;  // 卡片标题
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+  line-height: $wolf-line-height-title;
+}
+
+// ==================== AI 消息样式 ====================
+// ← Signature: AI 对话的独特视觉标识（让用户一眼识别 AI 区域）
+
+.wolf-ai-message {
+  // ← Signature: IBM Plex Mono（AI 消息的技术 vernacular）
+  // AI 用技术字体，暗示"计算"本质，与用户消息形成视觉差异
+  font-family: $wolf-font-mono;
+  font-size: $wolf-font-size-body;  // 14px
+  font-weight: $wolf-font-weight-normal;
+  color: $wolf-text-primary;
+  line-height: $wolf-line-height-body;
+}
+
+.wolf-ai-message--streaming {
+  // 流式响应时：稍大字号（更醒目）
+  font-size: 15px;
+}
+
+// ==================== 数据标签样式 ====================
+
+.wolf-data-label {
+  // ← Signature: IBM Plex Mono（技术 vernacular）
+  font-family: $wolf-font-mono;
+  font-size: $wolf-font-size-caption;  // 12px
+  font-weight: $wolf-font-weight-normal;
+  color: $wolf-text-tertiary;
+}
+
+.wolf-data-label--primary {
+  font-size: $wolf-font-size-body;  // 14px（主要数据）
+  color: $wolf-text-secondary;
+}
+
+// ==================== 时间戳样式 ====================
+
+.wolf-time-label {
+  // ← Signature: IBM Plex Mono（时间的技术 vernacular）
+  font-family: $wolf-font-mono;
+  font-size: $wolf-font-size-caption;
+  font-weight: $wolf-font-weight-normal;
+  color: $wolf-text-placeholder;
+}
+
+// ==================== 代码/技术文本样式 ====================
+
+.wolf-code-text {
+  // ← Signature: IBM Plex Mono（代码的技术 vernacular）
+  font-family: $wolf-font-mono;
+  font-size: $wolf-font-size-auxiliary;  // 13px
+  font-weight: $wolf-font-weight-normal;
+  color: $wolf-text-secondary;
+  background-color: $wolf-bg-hover;
+  padding: 2px 6px;
+  border-radius: $wolf-radius-sm;
+}
+
+// ==================== 正文样式（功能性） ====================
+
+.wolf-body-text {
+  // 继承系统字体栈（不显式设置 font-family）
+  font-size: $wolf-font-size-body;
+  font-weight: $wolf-font-weight-normal;
+  color: $wolf-text-secondary;
+  line-height: $wolf-line-height-body;
+}
+
+// ==================== 辅助文本样式 ====================
+
+.wolf-auxiliary-text {
+  // 继承系统字体栈（功能性）
+  font-size: $wolf-font-size-auxiliary;
+  font-weight: $wolf-font-weight-normal;
+  color: $wolf-text-tertiary;
+  line-height: $wolf-line-height-auxiliary;
+}

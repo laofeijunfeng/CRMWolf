@@ -1,8 +1,58 @@
+---
+priority: high
+status: active
+module_type: ai
+---
+
 # AI 功能模块文档
 
-> 版本：2.0 | 更新日期：2026-06-12 | 状态：已实现
-> 关联需求：`CRM-Docs/requirements/AI-GLUE-REQUIREMENTS.md`
-> 关联实现：`CRM-Docs/system/AI-GLUE-IMPLEMENTED-FEATURES.md`
+> 版本：2.1 | 更新日期：2026-06-12 | 状态：已实现
+> 关联需求：`CRM-Docs/archive/requirements/AI-GLUE-REQUIREMENTS.md`
+> 关联实现：`CRM-Docs/changelog/enhancements/2026-06-12-ai-agent-feature-summary.md`
+
+---
+
+## AI 交互意图
+
+### AI 在此模块的核心任务
+
+| 任务场景 | AI 操作意图 | 约束条件 | 风险等级 |
+|----------|-------------|----------|----------|
+| 意图识别 | 解析用户自然语言输入 | 关键词匹配 + Function Calling | P1 |
+| 工具调用 | 执行业务工具（17+ 个） | Handler 映射、参数校验 | P0 |
+| ReAct 循环 | 多轮对话、自主判断继续 | 最大轮数限制（10轮）、超时保护（120s） | P0 |
+| Workflow 编排 | 关键业务流程（赢单、转化） | 状态机校验、业务不变式检查 | P0 |
+| 人机协同 | 关键决策前询问确认 | ask_user 工具、用户响应处理 | P0 |
+| 撤销保护 | 关键操作可撤销 | TTL 窗口（10-60秒）、撤销处理器 | P0 |
+
+### AI 禁止行为
+
+| 禁止行为 | 原因 | 替代方案 |
+|----------|------|----------|
+| ❌ 臆测工具参数 | 违反禁止臆测红线 | 必须通过 get_entity_context 获取上下文 |
+| ❌ 赢单前没有商机 | 违反业务不变式 | 必须先确认商机存在 |
+| ❌ 跨 team_id 操作 | 违反团队隔离红线 | 必须注入 team_id |
+| ❌ 跳过用户确认执行高风险操作 | 违反人机协同规则 | 必须调用 ask_user |
+| ❌ 低置信度直接执行 | 违反 Guardrails 规则 | 置信度 < 0.70 必须拒绝 |
+
+### AI 配置开关
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `AGENT_ENABLED` | False | Agent 模式总开关 |
+| `REACT_ENABLED` | False | ReAct 循环开关 |
+| `WORKFLOW_ENABLED` | True | Workflow 编排开关 |
+| `REACT_MAX_ROUNDS` | 10 | ReAct 最大轮数 |
+| `AGENT_TIMEOUT` | 120 | 执行超时（秒） |
+
+### AI 必查文档
+
+| 场景 | 必查文档 | 查阅时机 |
+|------|----------|----------|
+| AI 接口开发 | `CRM-Docs/standards/AI-API-STANDARD.md` | 开发 AI 功能前 |
+| 工具定义 | `CRM-Server/app/constants/tools.py` | 新增工具前 |
+| Handler 实现 | `CRM-Server/app/services/skills/handlers/` | 实现 Handler 前 |
+| 业务不变式 | `CRM-Server/app/services/workflow/business_invariants.py` | 赢单/转化前 |
 
 ---
 

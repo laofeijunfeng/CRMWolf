@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">AI Skill 配置</h1>
+        <h1 class="wolf-page-title">AI Skill 配置</h1>
       </div>
       <div class="page-header-right">
         <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="showGeneratorDialog">
@@ -85,13 +85,13 @@
                 </div>
 
                 <div v-else class="actions-empty">
-                  <el-empty description="暂无 Action" :image-size="60" />
+                  <el-empty description="添加 Action，定义 Skill 能力" :image-size="60" />
                 </div>
               </div>
             </el-card>
 
             <!-- 空状态 -->
-            <el-empty v-if="!loading && skills.length === 0" description="暂无 Skill 配置" />
+            <el-empty v-if="!loading && skills.length === 0" description="创建 Skill，扩展 AI 能力" />
           </div>
         </el-tab-pane>
 
@@ -209,7 +209,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ArrowLeft, Plus, Edit, Delete, ArrowDown } from '@element-plus/icons-vue'
 import { aiSkillsApi, type Skill, type SkillAction } from '@/api/aiSkills'
@@ -287,7 +288,7 @@ const toggleExpand = async (skill: Skill) => {
         const response = await aiSkillsApi.getSkill(skill.id)
         skill.actions = response.data?.actions || []
       } catch (error: any) {
-        ElMessage.error(error.message || '获取 Actions 失败')
+        showError(error, '获取 Actions')
       }
     }
   }
@@ -300,7 +301,7 @@ const fetchSkills = async () => {
     const response = await aiSkillsApi.getSkills()
     skills.value = response.data?.items || []
   } catch (error: any) {
-    ElMessage.error(error.message || '获取 Skills 失败')
+    showError(error, '获取 Skills')
   } finally {
     loading.value = false
   }
@@ -311,7 +312,7 @@ const fetchCRUDMappings = async () => {
     const response = await aiSkillsApi.getCRUDMappings()
     crudMappings.value = response.data?.items || []
   } catch (error: any) {
-    ElMessage.error(error.message || '获取 CRUD 映射失败')
+    showError(error, '获取 CRUD 映射')
   }
 }
 
@@ -320,7 +321,7 @@ const fetchEnumMappings = async () => {
     const response = await aiSkillsApi.getEnumMappings()
     enumMappings.value = response.data?.items || []
   } catch (error: any) {
-    ElMessage.error(error.message || '获取 Enum 映射失败')
+    showError(error, '获取 Enum 映射')
   }
 }
 
@@ -329,7 +330,7 @@ const fetchHandlerTypes = async () => {
     const response = await aiSkillsApi.getHandlerTypes()
     handlerTypes.value = response.data?.handler_types || []
   } catch (error: any) {
-    ElMessage.error(error.message || '获取 Handler 类型失败')
+    showError(error, '获取 Handler 类型')
   }
 }
 
@@ -347,12 +348,12 @@ const handleDeleteSkill = async (skill: Skill) => {
       { type: 'warning' }
     )
     await aiSkillsApi.deleteSkill(skill.id)
-    ElMessage.success('删除成功')
+    showSuccess('删除', 'Skill')
     expandedSkills.value.delete(skill.id)
     await fetchSkills()
   } catch (error: any) {
     if (error !== 'cancel') {
-      ElMessage.error(error.message || '删除失败')
+      showError(error, '删除 Skill')
     }
   }
 }
@@ -391,14 +392,14 @@ const handleSaveAction = async () => {
   try {
     actionForm.handler_config = JSON.parse(handlerConfigJson.value || '{}')
   } catch {
-    ElMessage.error('Handler 配置 JSON 格式错误')
+    showError(new Error('Handler 配置 JSON 格式错误'), '保存 Action')
     return
   }
 
   saving.value = true
   try {
     await aiSkillsApi.updateAction(selectedSkill.value!.id, editingAction.value.id, actionForm)
-    ElMessage.success('Action 更新成功')
+    showSuccess('更新', 'Action')
     actionModalVisible.value = false
     // 刷新当前 Skill 的 Actions
     if (selectedSkill.value && expandedSkills.value.has(selectedSkill.value.id)) {
@@ -407,7 +408,7 @@ const handleSaveAction = async () => {
     }
     await fetchSkills()
   } catch (error: any) {
-    ElMessage.error(error.message || '保存失败')
+    showError(error, '保存 Action')
   } finally {
     saving.value = false
   }
@@ -421,7 +422,7 @@ const handleDeleteAction = async (skill: Skill, action: SkillAction) => {
       { type: 'warning' }
     )
     await aiSkillsApi.deleteAction(skill.id, action.id)
-    ElMessage.success('删除成功')
+    showSuccess('删除', 'Action')
     // 刷新当前 Skill 的 Actions
     if (expandedSkills.value.has(skill.id)) {
       const response = await aiSkillsApi.getSkill(skill.id)
@@ -430,7 +431,7 @@ const handleDeleteAction = async (skill: Skill, action: SkillAction) => {
     await fetchSkills()
   } catch (error: any) {
     if (error !== 'cancel') {
-      ElMessage.error(error.message || '删除失败')
+      showError(error, '删除 Action')
     }
   }
 }

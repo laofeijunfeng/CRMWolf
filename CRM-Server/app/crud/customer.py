@@ -113,7 +113,8 @@ class CustomerCRUD:
                 "city": db_obj.city,
                 "source": db_obj.source,
                 "fromLead": False
-            }
+            },
+            team_id=team_id  # ✅ 必须传递 team_id（团队隔离）
         )
 
         # 触发热力值初始计算

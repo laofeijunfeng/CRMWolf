@@ -1,5 +1,8 @@
 <template>
   <div class="roles-container">
+    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
+    <h1 class="wolf-page-title">角色管理</h1>
+
     <!-- 搜索/操作区 -->
     <div class="wolf-card search-card">
       <el-form :inline="true">
@@ -139,7 +142,7 @@
               </div>
             </div>
           </div>
-          <el-empty v-else description="暂无权限" />
+          <el-empty v-else description="添加权限，配置角色权限范围" />
         </div>
 
         <div class="drawer-footer">
@@ -157,7 +160,8 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, ArrowLeft } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import roleApi, { type RoleResponse, type RoleCreate, type RoleUpdate, type RoleWithPermissions, type PermissionResponse } from '@/api/role'
 import permissionApi from '@/api/permissions'
 
@@ -226,7 +230,7 @@ const fetchRoles = async () => {
     pagination.total = data.length
   } catch (error: any) {
     console.error('获取角色列表失败', error)
-    ElMessage.error('获取角色列表失败')
+    showError(error, '获取角色列表')
   } finally {
     loading.value = false
   }
@@ -280,7 +284,7 @@ const handleConfigPermissions = async (record: RoleResponse) => {
     permissionsModalVisible.value = true
   } catch (error: any) {
     console.error('获取角色权限失败', error)
-    ElMessage.error('获取角色权限失败')
+    showError(error, '获取角色权限')
   }
 }
 
@@ -365,11 +369,11 @@ const handleSavePermissions = async () => {
   savingPermissions.value = true
   try {
     await roleApi.updateRolePermissions(currentRole.value.id, selectedPermissionIds.value)
-    ElMessage.success('权限配置保存成功')
+    showSuccess('保存', '权限配置')
     permissionsModalVisible.value = false
   } catch (error: any) {
     console.error('保存权限失败', error)
-    ElMessage.error(error.response?.data?.detail || '保存权限失败')
+    showError(error, '保存权限配置')
   } finally {
     savingPermissions.value = false
   }
@@ -385,17 +389,17 @@ const handleCreateModalOk = async () => {
         description: createForm.description || null
       }
       await roleApi.updateRole(selectedRole.value.id, updateData)
-      ElMessage.success('更新成功')
+      showSuccess('更新', '角色')
     } else {
       await roleApi.createRole(createForm)
-      ElMessage.success('创建成功')
+      showSuccess('创建', '角色')
     }
-    
+
     createModalVisible.value = false
     fetchRoles()
   } catch (error: any) {
     console.error('操作失败', error)
-    ElMessage.error(error.response?.data?.detail || error.message || '操作失败')
+    showError(error, isEditMode.value ? '更新角色' : '创建角色')
   }
 }
 
@@ -411,11 +415,11 @@ const handleDelete = (record: RoleResponse) => {
   ).then(async () => {
     try {
       await roleApi.deleteRole(record.id)
-      ElMessage.success('删除成功')
+      showSuccess('删除', '角色')
       fetchRoles()
     } catch (error: any) {
       console.error('删除失败', error)
-      ElMessage.error(error.response?.data?.detail || error.message || '删除失败')
+      showError(error, '删除角色')
     }
   })
 }

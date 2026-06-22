@@ -195,7 +195,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { Search } from '@element-plus/icons-vue'
 import paymentApi, {
   type PaymentPlanWithDetails,
@@ -292,7 +292,7 @@ const fetchPaymentPlans = async () => {
     pagination.value.total = data.total || 0
   } catch (error) {
     console.error('获取回款计划失败', error)
-    ElMessage.error('获取回款计划失败')
+    showError(error, '获取回款计划')
   } finally {
     loading.value = false
   }
@@ -313,7 +313,7 @@ const fetchPaymentRecords = async () => {
     recordsPagination.value.total = data.total || 0
   } catch (error) {
     console.error('获取回款记录失败', error)
-    ElMessage.error('获取回款记录失败')
+    showError(error, '获取回款记录')
   } finally {
     recordsLoading.value = false
   }
@@ -438,12 +438,12 @@ const handleCreatePayment = async () => {
   if (currentPlan.value) {
     try {
       await paymentApi.createPaymentRecord(currentPlan.value.id, paymentForm.value)
-      ElMessage.success('登记成功')
+      showSuccess('登记', '回款')
       paymentModalVisible.value = false
       fetchPaymentPlans()
     } catch (error: any) {
       console.error('登记回款失败', error)
-      ElMessage.error(error.response?.data?.detail || '登记失败')
+      showError(error, '登记回款')
     }
   }
 }

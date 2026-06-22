@@ -1,6 +1,44 @@
+---
+priority: high
+status: active
+module_type: business
+---
+
 # 合同管理模块
 
-版本：2.0 | 更新日期：2026-06-12
+版本：2.1 | 更新日期：2026-06-12
+
+---
+
+## AI 交互意图
+
+### AI 在此模块的核心任务
+
+| 任务场景 | AI 操作意图 | 约束条件 | 风险等级 |
+|----------|-------------|----------|----------|
+| 创建合同 | 调用 `create_contract` 工具 | **必须关联已赢单商机**（业务不变式）、合同金额 ≤ 商机金额 | P0 |
+| 提交审批 | 调用 `submit_contract_review` 工具 | 合同状态必须为 DRAFT、触发审批流程 | P0 |
+| 审批合同 | 调用 `review_contract` 工具 | 需审批权限（SALES_DIRECTOR）、审批结果记录 | P0 |
+| 查询合同 | 调用 `query_contracts` 工具 | 默认 team_id 过滤、禁止跨团队 | P0 |
+| 状态变更 | 调用 `change_contract_status` 工具 | 状态机校验（DRAFT→PENDING_REVIEW→SIGNED→EFFECTIVE） | P0 |
+
+### AI 禁止行为
+
+| 禁止行为 | 原因 | 替代方案 |
+|----------|------|----------|
+| ❌ 创建合同前没有已赢单商机 | 违反业务不变式 `contract_requires_won_opportunity` | 必须先标记商机赢单 |
+| ❌ 合同金额 > 商机金额 | 违反业务不变式 `contract_amount_le_opportunity_amount` | 合同金额必须 ≤ 商机金额 |
+| ❌ 臆测合同状态枚举 | 违反禁止臆测红线 | 状态值查阅 GLOSSARY.md |
+| ❌ 跨 team_id 操作合同 | 违反团队隔离红线 | 必须注入当前用户 team_id |
+
+### AI 必查文档
+
+| 场景 | 必查文档 | 查阅时机 |
+|------|----------|----------|
+| 定义类型 | `CRM-Client/docs/TYPESCRIPT.md` | 写代码前 |
+| 查状态枚举 | `CRM-Docs/system/GLOSSARY.md` | 处理状态字段前 |
+| 查业务不变式 | `CRM-Server/app/services/workflow/business_invariants.py` | 创建合同前 |
+| 查 API 参数 | `CRM-Docs/system/BUSINESS-CHAIN-API.md` | 调用接口前 |
 
 ---
 

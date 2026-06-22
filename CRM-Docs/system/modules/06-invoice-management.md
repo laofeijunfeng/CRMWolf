@@ -1,6 +1,44 @@
+---
+priority: high
+status: active
+module_type: business
+---
+
 # 发票管理模块
 
-**版本：2.0 | 更新日期：2026-06-12**
+**版本：2.1 | 更新日期：2026-06-12**
+
+---
+
+## AI 交互意图
+
+### AI 在此模块的核心任务
+
+| 任务场景 | AI 操作意图 | 约束条件 | 风险等级 |
+|----------|-------------|----------|----------|
+| 创建发票申请 | 调用 `create_invoice_application` 工具 | 必须关联合同、发票金额校验 | P0 |
+| 提交审批 | 调用 `submit_invoice_review` 工具 | 申请状态必须为 DRAFT、触发审批流程 | P0 |
+| 审批发票 | 调用 `review_invoice` 工具 | 需财务权限（FINANCE）、审批结果记录 | P0 |
+| 开票确认 | 调用 `mark_invoice_issued` 工具 | 需财务权限、状态更新为 ISSUED | P0 |
+| 查询发票 | 调用 `query_invoices` 工具 | 默认 team_id 过滤、禁止跨团队 | P0 |
+
+### AI 禁止行为
+
+| 禁止行为 | 原因 | 替代方案 |
+|----------|------|----------|
+| ❌ 发票金额超过合同未开票金额 | 违反业务约束 | 发票金额必须 ≤ 合同剩余可开票金额 |
+| ❌ 跨 team_id 查询发票 | 违反团队隔离红线 | 必须注入当前用户 team_id |
+| ❌ 臆测发票申请状态 | 违反禁止臆测红线 | 状态查阅 GLOSSARY.md |
+| ❌ 非财务人员审批发票 | 违反权限规则 | 需 FINANCE 角色权限 |
+
+### AI 必查文档
+
+| 场景 | 必查文档 | 查阅时机 |
+|------|----------|----------|
+| 定义类型 | `CRM-Client/docs/TYPESCRIPT.md` | 写代码前 |
+| 查权限码 | `CRM-Docs/system/GLOSSARY.md` | 处理权限检查前 |
+| 查 API 参数 | `CRM-Docs/system/BUSINESS-CHAIN-API.md` | 调用接口前 |
+| 查 CRUD 模式 | `CRM-Docs/best-practices/backend/crud-patterns.md` | 写 CRUD 前 |
 
 ---
 

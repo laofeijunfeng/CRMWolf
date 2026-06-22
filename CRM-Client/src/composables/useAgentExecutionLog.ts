@@ -107,6 +107,9 @@ export function useAgentExecutionLog() {
    * 处理 react_start 事件
    */
   function handleReactStart(event: AIAssistantSSEEvent): void {
+    // 清除旧的执行步骤，避免跨会话数据混淆
+    clear()
+
     sessionId.value = event.session_id
     maxRounds.value = event.max_rounds ?? 5
     isExecuting.value = true

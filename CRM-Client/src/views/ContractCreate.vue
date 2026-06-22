@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ pageTitle }}</h1>
+        <h1 class="wolf-page-title">{{ pageTitle }}</h1>
       </div>
     </div>
 
@@ -170,7 +170,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
+import { type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue'
 import contractApi, { type ContractCreate } from '@/api/contract'
 import customerApi from '@/api/customer'
@@ -295,7 +296,7 @@ const fetchOpportunityInfo = async (opportunityId: string) => {
     await fetchContacts(data.customer_id)
   } catch (error) {
     console.error('获取商机信息失败', error)
-    ElMessage.error('获取商机信息失败')
+    showError(error, '获取商机信息')
   }
 }
 
@@ -349,15 +350,15 @@ const handleSubmit = async () => {
     } else {
       await contractApi.createContract(submitData)
     }
-    
-    ElMessage.success('创建成功')
+
+    showSuccess('创建', '合同')
     router.push('/contracts')
   } catch (error: any) {
     console.error('创建合同失败', error)
     if (error.errors) {
       return
     }
-    ElMessage.error(error.response?.data?.detail || error.message || '创建失败')
+    showError(error, '创建合同')
   } finally {
     submitting.value = false
   }

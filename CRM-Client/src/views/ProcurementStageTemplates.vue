@@ -7,7 +7,7 @@
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
         <div class="page-title-group">
-          <h1 class="page-title">{{ methodName }} - 阶段模板管理</h1>
+          <h1 class="wolf-page-title">{{ methodName }} - 阶段模板管理</h1>
           <p class="page-desc">配置采购流程的各个阶段</p>
         </div>
       </div>
@@ -246,7 +246,7 @@ const fetchStageTemplates = async () => {
     )
   } catch (error: any) {
     console.error('获取阶段模板失败', error)
-    ElMessage.error('获取阶段模板失败')
+    ElMessage.error('获取阶段模板失败，请刷新页面或稍后重试')
   } finally {
     loading.value = false
   }
@@ -313,7 +313,7 @@ const handleSubmit = async () => {
         is_active: formData.is_active
       }
       await procurementApi.updateStageTemplate(selectedTemplate.value.id, updateData)
-      ElMessage.success('更新成功')
+      ElMessage.success('已更新，可以继续下一步操作')
     } else {
       const createData: ProcurementStageTemplateCreate = {
         procurement_method_id: formData.procurement_method_id,
@@ -326,7 +326,7 @@ const handleSubmit = async () => {
         description: formData.description
       }
       await procurementApi.createStageTemplate(createData)
-      ElMessage.success('创建成功')
+      ElMessage.success('已创建，可以继续下一步操作')
     }
 
     drawerVisible.value = false
@@ -336,7 +336,7 @@ const handleSubmit = async () => {
     if (error?.response?.data?.detail) {
       ElMessage.error(error.response.data.detail)
     } else {
-      ElMessage.error(isEdit.value ? '更新失败' : '创建失败')
+      ElMessage.error('更新失败，请确认数据状态或联系管理员')
     }
   } finally {
     submitting.value = false
@@ -356,7 +356,7 @@ const handleDelete = async (row: ProcurementStageTemplate) => {
     )
 
     await procurementApi.deleteStageTemplate(row.id)
-    ElMessage.success('删除成功')
+    ElMessage.success('已删除，可以继续下一步操作')
     await fetchStageTemplates()
   } catch (error: any) {
     if (error !== 'cancel') {
@@ -364,7 +364,7 @@ const handleDelete = async (row: ProcurementStageTemplate) => {
       if (error?.response?.data?.detail) {
         ElMessage.error(error.response.data.detail)
       } else {
-        ElMessage.error('删除失败')
+        ElMessage.error('删除失败，请确认数据状态或联系管理员')
       }
     }
   }
