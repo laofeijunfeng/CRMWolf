@@ -179,13 +179,16 @@ export function useAgentExecutionLog() {
    */
   function handleToolResult(event: AIAssistantSSEEvent): void {
     const toolName = event.tool ?? 'unknown'
-    const success = event.success ?? false
+    // 后端返回嵌套的 result 字段，需要提取
+    const resultData = event.result ?? {}
+    const success = resultData.success ?? event.success ?? false
+    const message = resultData.message ?? event.message ?? ''
 
     const step: ExecutionStep = {
       id: generateStepId(),
       type: ExecutionStepType.TOOL_RESULT,
       title: success ? '执行成功' : '执行失败',
-      description: success ? `${getBusinessTitle(toolName)} 完成` : `${getBusinessTitle(toolName)} 失败`,
+      description: message || (success ? `${getBusinessTitle(toolName)} 完成` : `${getBusinessTitle(toolName)} 失败`),
       timestamp: new Date()
     }
 
@@ -195,7 +198,7 @@ export function useAgentExecutionLog() {
 
     step.tool = toolName
     step.success = success
-    step.result = event.data
+    step.result = resultData.data ?? event.data
 
     steps.value.push(step)
   }
