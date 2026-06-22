@@ -14,22 +14,12 @@ Agent Handlers
 """
 
 from typing import Dict, Any, Optional
-from dataclasses import dataclass
 import logging
 
-logger = logging.getLogger(__name__)
+# 导入统一的 ToolResult（避免重复定义）
+from app.services.agent.tools import ToolResult
 
-
-@dataclass
-class ToolResult:
-    """工具执行结果（支持 Preview）"""
-    success: bool
-    error: Optional[str]
-    data: Optional[Any]
-    message: Optional[str]
-    # ===== 新增：Preview 支持 =====
-    waiting_for_user: bool = False  # 是否等待用户确认
-    preview_data: Optional[Dict[str, Any]] = None  # Preview 变更计划
+logger = logging.getLogger(__name)
 
 
 class SearchCustomerHandler:
@@ -89,7 +79,7 @@ class SearchCustomerHandler:
 
         except Exception as e:
             logger.error(f"Search customer failed: {str(e)}")
-            return ToolResult(success=False, error=str(e))
+            return ToolResult(success=False, error=str(e), message=f"搜索失败：{str(e)}")
 
     async def preview(
         self,
@@ -165,7 +155,7 @@ class SearchOpportunityHandler:
 
         except Exception as e:
             logger.error(f"Search opportunity failed: {str(e)}")
-            return ToolResult(success=False, error=str(e))
+            return ToolResult(success=False, error=str(e), message=f"搜索失败：{str(e)}")
 
     async def preview(
         self,
@@ -244,7 +234,7 @@ class SetReminderHandler:
 
         except Exception as e:
             logger.error(f"Set reminder failed: {str(e)}")
-            return ToolResult(success=False, error=str(e))
+            return ToolResult(success=False, error=str(e), message=f"设置提醒失败：{str(e)}")
 
     async def preview(
         self,
