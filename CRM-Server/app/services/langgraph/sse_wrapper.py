@@ -325,7 +325,16 @@ async def stream_sse_events(
                 # Tool completed
                 tool_name = event_name
                 tool_output = event_data.get("output", {})
-                yield build_tool_result_event(tool_name, tool_output)
+                # 如果 tool_output 是 ToolResult dataclass，转换为字典
+                if hasattr(tool_output, 'success'):
+                    tool_output_dict = {
+                        'success': tool_output.success,
+                        'message': tool_output.message or str(tool_output.data or '执行完成'),
+                        'data': tool_output.data if hasattr(tool_output, 'data') else None,
+                    }
+                else:
+                    tool_output_dict = tool_output
+                yield build_tool_result_event(tool_name, tool_output_dict)
 
             elif event_type == "on_chat_model_stream":
                 # LLM streaming content
