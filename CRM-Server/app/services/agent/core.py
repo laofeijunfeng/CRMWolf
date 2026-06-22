@@ -49,10 +49,10 @@ class ReasoningResult:
     """推理结果（新增安全机制字段）"""
     is_complete: bool
     needs_tool: bool
-    tool_name: Optional[str]
-    tool_params: Optional[Dict[str, Any]]
-    thinking: str
-    final_answer: Optional[str]
+    tool_name: Optional[str] = None
+    tool_params: Optional[Dict[str, Any]] = None
+    thinking: str = ""  # 默认空字符串（必需字段）
+    final_answer: Optional[str] = None
     # ===== 新增：安全机制字段 =====
     confidence: float = 1.0  # LLM 输出的置信度
     waiting_for_user: bool = False  # 是否需要等待用户

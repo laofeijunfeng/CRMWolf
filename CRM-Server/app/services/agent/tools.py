@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 class ToolResult:
     """工具执行结果（支持 Preview）"""
     success: bool
-    error: Optional[str]
-    data: Optional[Any]
-    message: Optional[str]
+    error: Optional[str] = None
+    data: Optional[Any] = None
+    message: Optional[str] = None
     # ===== 新增：Preview 支持 =====
     waiting_for_user: bool = False  # 是否等待用户确认
     preview_data: Optional[Dict[str, Any]] = None  # Preview 变更计划
