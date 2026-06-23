@@ -113,7 +113,8 @@
       "Bash(git check-ignore *)",
       "Bash(git config *)",
       "Bash(lsof -ti:8080)",
-      "Bash(git merge *)"
+      "Bash(git merge *)",
+      "Bash(git branch *)"
     ]
   }
 }
