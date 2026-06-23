@@ -41,6 +41,9 @@
 | [CLAUDE-CODE-RULES-REFACTOR-PLAN.md](plans/CLAUDE-CODE-RULES-REFACTOR-PLAN.md) | plans/ | 2026-06-12 | - | [changelog](../changelog/enhancements/claude-code-rules-refactor-plan.md) |
 | [PHASE-6-FRONTEND-TECH-SPEC.md](plans/PHASE-6-FRONTEND-TECH-SPEC.md) | plans/ | 2026-06-09 | - | [changelog](../changelog/enhancements/phase-6-frontend-tech-spec.md) |
 | [PROCUREMENT-METHOD-UNIFIED-PLAN.md](plans/PROCUREMENT-METHOD-UNIFIED-PLAN.md) | plans/ | 2026-06-11 | - | [changelog](../changelog/enhancements/procurement-method-unified-plan.md) |
+| [AI-ASSISTANT-SIDEBAR-UI-OPTIMIZATION-PLAN.md](plans/AI-ASSISTANT-SIDEBAR-UI-OPTIMIZATION-PLAN.md) | plans/ | 2026-06-23 | - | [changelog](../changelog/technical/) |
+| [2026-06-22-2230-agent-safety-mechanism-plan.md](plans/2026-06-22-2230-agent-safety-mechanism-plan.md) | plans/ | 2026-06-23 | - | - |
+| [SYSTEM-WIDE-DESIGN-OPTIMIZATION-PROGRESS.md](plans/SYSTEM-WIDE-DESIGN-OPTIMIZATION-PROGRESS.md) | plans/ | 2026-06-23 | - | - |
 
 
 ---

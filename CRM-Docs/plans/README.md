@@ -22,7 +22,7 @@
 
 | 文档 | 状态 | 创建日期 | 更新日期 | 关联需求 |
 |------|------|----------|----------|----------|
-| [AI-ASSISTANT-SIDEBAR-UI-OPTIMIZATION-PLAN.md](AI-ASSISTANT-SIDEBAR-UI-OPTIMIZATION-PLAN.md) | draft | 2026-06-12 | 2026-06-12 | [需求](../requirements/AI-ASSISTANT-SIDEBAR-UI-OPTIMIZATION-REQUIREMENTS.md) |
+| [AI-ASSISTANT-PAGE-IMPLEMENTATION-PLAN.md](AI-ASSISTANT-PAGE-IMPLEMENTATION-PLAN.md) | active | 2026-06-17 | 2026-06-23 | [需求](../requirements/AI-ASSISTANT-PAGE-REQUIREMENTS.md) |
 
 
 ---
@@ -31,9 +31,7 @@
 
 > status: completed，等待 CI 自动归档
 
-| 文档 | 状态 | 完成日期 | 关联 PR | 待创建 Changelog |
-|------|------|----------|---------|------------------|
-| _暂无待归档计划_ | - | - | - | - |
+_暂无待归档计划_
 
 
 ---
@@ -42,7 +40,8 @@
 
 > 自动迁移至 `../archive/plans/`，详见 [归档导航](../archive/README.md)
 
-_暂无已归档计划_
+- [AI-ASSISTANT-SIDEBAR-UI-OPTIMIZATION-PLAN.md](../archive/plans/AI-ASSISTANT-SIDEBAR-UI-OPTIMIZATION-PLAN.md) - 归档日期：2026-06-23
+- [2026-06-22-2230-agent-safety-mechanism-plan.md](../archive/plans/2026-06-22-2230-agent-safety-mechanism-plan.md) - 归档日期：2026-06-23
 
 ---
 
