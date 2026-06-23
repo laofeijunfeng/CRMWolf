@@ -1,7 +1,8 @@
 ---
-status: completed
+status: archived
 created: 2026-06-12
-updated: 2026-06-14
+updated: 2026-06-23
+archived_date: 2026-06-23
 related_requirements: ../requirements/AI-ASSISTANT-SIDEBAR-UI-OPTIMIZATION-REQUIREMENTS.md
 related_pr: -
 ---

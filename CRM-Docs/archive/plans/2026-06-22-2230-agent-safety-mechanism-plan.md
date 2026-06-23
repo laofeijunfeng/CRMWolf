@@ -1,9 +1,12 @@
 ---
-status: completed
+status: archived
 created: 2026-06-22
-updated: 2026-06-22
+updated: 2026-06-23
+archived_date: 2026-06-23
 priority: critical
 completion_date: 2026-06-22
+related_requirements: -
+related_pr: -
 ---
 
 # Agent 安全机制补全实施计划
