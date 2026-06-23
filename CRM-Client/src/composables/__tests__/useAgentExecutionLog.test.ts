@@ -245,11 +245,11 @@ describe('useAgentExecutionLog', () => {
       events.forEach(event => executionLog.handleSSEEvent(event))
 
       const round1Steps = executionLog.getStepsByRound(1)
-      expect(round1Steps.length).toBe(2) // round_start + tool_call
+      expect(round1Steps.length).toBe(3) // round_start + tool_call + round_completed
       expect(round1Steps.every(step => step.round === 1)).toBe(true)
 
       const round2Steps = executionLog.getStepsByRound(2)
-      expect(round2Steps.length).toBe(1) // tool_call
+      expect(round2Steps.length).toBe(2) // round_start + tool_call (no round_completed yet)
       expect(round2Steps.every(step => step.round === 2)).toBe(true)
     })
 

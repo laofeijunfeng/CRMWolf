@@ -11,8 +11,14 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        singleThread: true
+      }
+    },
     coverage: {
-      provider: 'v8',
+      provider: 'istanbul',
       reporter: ['text', 'html', 'lcov'],
       exclude: [
         'node_modules/**',
@@ -34,5 +40,9 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
+  },
+  // Fix: Optimize ESM deps that jsdom requires
+  optimizeDeps: {
+    include: ['@exodus/bytes', 'html-encoding-sniffer']
   }
 })

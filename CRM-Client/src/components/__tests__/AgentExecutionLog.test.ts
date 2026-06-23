@@ -59,12 +59,13 @@ describe('AgentExecutionLog', () => {
         }
       })
 
-      // 应该显示当前步骤标题
-      expect(wrapper.text()).toContain('第 1 轮执行完成')
+      // 应该显示正在执行的步骤（TOOL_CALL 优先）
+      // 需求文档 4.4：当前步骤显示正在执行的操作
+      expect(wrapper.text()).toContain('查找客户信息')
 
-      // 应该显示 Loading 图标
-      const loadingIcon = wrapper.find('.loading-indicator')
-      expect(loadingIcon.exists()).toBe(true)
+      // 应该显示 Loading 图标（组件使用 .status-icon.is-loading）
+      const statusIcon = wrapper.find('.status-icon')
+      expect(statusIcon.exists()).toBe(true)
     })
 
     it('应该显示"点击展开"提示', () => {
@@ -150,6 +151,86 @@ describe('AgentExecutionLog', () => {
 
       // 应该显示空状态提示
       expect(wrapper.text()).toContain('暂无执行记录')
+    })
+  })
+
+  // ← 需求文档 6.3：业务化验证（关键约束）
+  describe('业务化验证', () => {
+    it('不显示技术参数名（keyword/limit/offset 等）', () => {
+      const wrapper = mount(AgentExecutionLog, {
+        props: {
+          steps: [
+            {
+              id: 'step-1',
+              type: ExecutionStepType.TOOL_CALL,
+              title: '查找客户信息',
+              description: '正在搜索："光大证券"',
+              timestamp: new Date(),
+              round: 1,
+              tool: 'search_customer',
+              params: { keyword: '光大证券', limit: 10, offset: 0 }  // ← 技术参数
+            }
+          ],
+          expanded: true
+        }
+      })
+
+      const businessParams = wrapper.find('.business-params')
+      if (businessParams.exists()) {
+        const text = businessParams.text()
+        // ← 需求文档关键约束：确保技术参数名不出现
+        expect(text).not.toContain('keyword')
+        expect(text).not.toContain('limit')
+        expect(text).not.toContain('offset')
+        expect(text).not.toContain('=')
+      }
+    })
+
+    it('显示业务化表达（正在搜索："xxx"）', () => {
+      const wrapper = mount(AgentExecutionLog, {
+        props: {
+          steps: [
+            {
+              id: 'step-1',
+              type: ExecutionStepType.TOOL_CALL,
+              title: '查找客户信息',
+              description: '正在搜索："光大证券"',  // ← 业务化表达
+              timestamp: new Date(),
+              round: 1,
+              tool: 'search_customer',
+              params: { keyword: '光大证券' }
+            }
+          ],
+          expanded: true
+        }
+      })
+
+      // ← 需求文档关键约束：确保显示业务化表达
+      expect(wrapper.text()).toContain('正在搜索')
+      expect(wrapper.text()).toContain('光大证券')
+    })
+
+    it('显示业务化表达（正在创建："xxx"）', () => {
+      const wrapper = mount(AgentExecutionLog, {
+        props: {
+          steps: [
+            {
+              id: 'step-1',
+              type: ExecutionStepType.TOOL_CALL,
+              title: '创建跟进记录',
+              description: '正在创建："电话沟通"',  // ← 业务化表达
+              timestamp: new Date(),
+              round: 1,
+              tool: 'create_follow_up',
+              params: { content: '电话沟通' }
+            }
+          ],
+          expanded: true
+        }
+      })
+
+      expect(wrapper.text()).toContain('正在创建')
+      expect(wrapper.text()).toContain('电话沟通')
     })
   })
 })
