@@ -8,6 +8,22 @@ import request from '@/utils/request'
 
 // ========== Types ==========
 
+/** 执行步骤（与 schema ExecutionStep 对齐） */
+export interface ExecutionStep {
+  id: string
+  type: string
+  title: string
+  description?: string
+  timestamp: string
+  round?: number
+  tool?: string
+  params?: Record<string, unknown>
+  result?: Record<string, unknown>
+  success?: boolean
+  error?: string
+  businessParams?: string
+}
+
 /** 对话历史项 */
 export interface ConversationHistory {
   id: number
@@ -30,6 +46,7 @@ export interface ConversationDetail {
     role: 'user' | 'assistant'
     content: string
     timestamp: string
+    execution_steps?: ExecutionStep[]
   }>
   createdAt: string
   updatedAt: string
@@ -61,6 +78,7 @@ export interface ConversationCreateParams {
     role: 'user' | 'assistant'
     content: string
     timestamp: string
+    execution_steps?: ExecutionStep[]
   }>
   action_type?: string | undefined
   entity_type?: string | undefined

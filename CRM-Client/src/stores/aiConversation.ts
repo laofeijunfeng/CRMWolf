@@ -11,10 +11,27 @@ import { aiConversationApi, type ConversationDetail, type ConversationGroup } fr
 
 // ========== Types ==========
 
+/** 执行步骤（与 API ExecutionStep 对齐） */
+interface ExecutionStep {
+  id: string
+  type: string
+  title: string
+  description?: string
+  timestamp: string
+  round?: number
+  tool?: string
+  params?: Record<string, unknown>
+  result?: Record<string, unknown>
+  success?: boolean
+  error?: string
+  businessParams?: string
+}
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: string
+  executionSteps?: ExecutionStep[]
 }
 
 export const useAIConversationStore = defineStore('aiConversation', () => {
@@ -102,7 +119,22 @@ export const useAIConversationStore = defineStore('aiConversation', () => {
     currentId.value = id
     try {
       const response = await aiConversationApi.getDetail(id)
-      currentConversation.value = response
+
+      // ← Task 12: 恢复 execution_steps 到本地状态
+      // 将蛇形字段 execution_steps 转换为驼峰 executionSteps
+      currentConversation.value = {
+        ...response,
+        messages: response.messages.map(msg => ({
+          ...msg,
+          executionSteps: msg.execution_steps || []
+        }))
+      }
+
+      console.log('[AIConversationStore] Loaded conversation with execution steps:', {
+        id,
+        messagesCount: currentConversation.value.messages.length,
+        hasExecutionSteps: currentConversation.value.messages.some(m => m.executionSteps && m.executionSteps.length > 0)
+      })
     } catch (error) {
       console.error('[AIConversationStore] loadConversation error:', error)
       currentConversation.value = null
@@ -220,6 +252,47 @@ export const useAIConversationStore = defineStore('aiConversation', () => {
   }
 
   /**
+   * 设置当前 AI 消息的执行步骤
+   * 用于 SSE 流结束时保存 execution steps
+   */
+  function setAIMessageExecutionSteps(steps: ExecutionStep[]): void {
+    if (!currentConversation.value) {
+      console.error('[AIConversationStore] No current conversation')
+      return
+    }
+
+    // 找到最后一条 AI 消息
+    const lastAIMessage = currentConversation.value.messages
+      .filter(m => m.role === 'assistant')
+      .pop()
+
+    if (lastAIMessage) {
+      lastAIMessage.executionSteps = steps
+      console.log('[AIConversationStore] Set execution steps for AI message:', {
+        stepsCount: steps.length
+      })
+    }
+  }
+
+  /**
+   * 获取最后一条 AI 消息的执行步骤
+   * 用于页面刷新恢复 execution steps
+   *
+   * @returns 执行步骤数组（可能为空）
+   */
+  function getLastAIMessageExecutionSteps(): ExecutionStep[] {
+    if (!currentConversation.value) {
+      return []
+    }
+
+    const lastAIMessage = currentConversation.value.messages
+      .filter(m => m.role === 'assistant')
+      .pop()
+
+    return lastAIMessage?.executionSteps || []
+  }
+
+  /**
    * 更新对话标题
    * ChatGPT 模式：AI 自动生成标题，或用户手动修改
    */
@@ -260,7 +333,8 @@ export const useAIConversationStore = defineStore('aiConversation', () => {
         messages: currentConversation.value.messages.map(m => ({
           role: m.role,
           content: m.content,
-          timestamp: m.timestamp
+          timestamp: m.timestamp,
+          execution_steps: m.executionSteps || undefined // ← 传递 execution_steps
         })),
         action_type: currentConversation.value.actionType,
         entity_type: currentConversation.value.entityType,
@@ -375,6 +449,8 @@ export const useAIConversationStore = defineStore('aiConversation', () => {
     startAIMessage,  // ✅ 新增：开始 AI 消息
     appendAIMessageContent,  // ✅ 新增：流式追加内容
     finishAIMessage,  // ✅ 新增：完成 AI 消息
+    setAIMessageExecutionSteps,  // ✅ 新增：设置 AI 消息执行步骤
+    getLastAIMessageExecutionSteps,  // ✅ 新增：获取最后一条 AI 消息的执行步骤
     updateConversationTitle,  // ✅ 新增：更新标题
     saveCurrentConversation,  // ✅ 新增：实时保存
     deleteConversation,

@@ -7,81 +7,23 @@ from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
 
 from app.core.database import SessionLocal
 from app.core.deps import get_current_active_user, get_current_user_team
 from app.models.user import User
 from app.crud.ai_conversation_history_crud import ai_conversation_history_crud
+from app.schemas.ai_conversation import (
+    MessageItemSchema,
+    ConversationHistoryItemSchema,
+    ConversationDetailSchema,
+    ConversationGroupSchema,
+    HistoryListResponseSchema,
+    ConversationCreateParamsSchema,
+    ExecutionStepSchema
+)
 
 
 router = APIRouter(prefix="/v1/assistant/conversations", tags=["AI 对话历史"])
-
-
-# ========== Pydantic Schemas ==========
-
-class MessageItem(BaseModel):
-    """消息项"""
-    role: str = Field(..., description="角色：user 或 assistant")
-    content: str = Field(..., description="消息内容")
-    timestamp: str = Field(..., description="时间戳")
-
-
-class ConversationHistoryItem(BaseModel):
-    """对话历史项"""
-    id: int
-    title: str
-    action_type: Optional[str] = None
-    entity_type: Optional[str] = None
-    entity_id: Optional[int] = None
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class ConversationDetail(BaseModel):
-    """对话详情"""
-    id: int
-    title: str
-    summary: Optional[str] = None
-    action_type: Optional[str] = None
-    entity_type: Optional[str] = None
-    entity_id: Optional[int] = None
-    messages: List[MessageItem]
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class ConversationGroup(BaseModel):
-    """按日期分组的对话列表"""
-    today: List[ConversationHistoryItem]
-    yesterday: List[ConversationHistoryItem]
-    earlier: List[ConversationHistoryItem]
-
-
-class HistoryListResponse(BaseModel):
-    """历史列表响应"""
-    groups: ConversationGroup
-    total: int
-
-
-class HistoryListParams(BaseModel):
-    """历史列表请求参数"""
-    page: int = Field(default=1, ge=1, description="页码")
-    pageSize: int = Field(default=20, ge=1, le=100, description="每页数量")
-
-
-class ConversationCreateParams(BaseModel):
-    """创建对话请求参数"""
-    title: str = Field(..., max_length=200, description="对话标题")
-    messages: List[MessageItem] = Field(..., description="对话消息列表")
-    action_type: Optional[str] = Field(default=None, description="操作类型")
-    entity_type: Optional[str] = Field(default=None, description="实体类型")
-    entity_id: Optional[int] = Field(default=None, description="实体ID")
 
 
 # ========== Helper Functions ==========
@@ -124,7 +66,7 @@ def format_conversation_detail(conv) -> dict:
 
 # ========== API Endpoints ==========
 
-@router.get("", response_model=HistoryListResponse)
+@router.get("", response_model=HistoryListResponseSchema)
 def get_conversation_history(
     page: int = Query(default=1, ge=1),
     pageSize: int = Query(default=20, ge=1, le=100),
@@ -165,9 +107,9 @@ def get_conversation_history(
     }
 
 
-@router.post("", response_model=ConversationDetail)
+@router.post("", response_model=ConversationDetailSchema)
 def create_conversation(
-    params: ConversationCreateParams,
+    params: ConversationCreateParamsSchema,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user)
@@ -182,7 +124,8 @@ def create_conversation(
         {
             "role": m.role,
             "content": m.content,
-            "timestamp": m.timestamp
+            "timestamp": m.timestamp,
+            "execution_steps": m.execution_steps if m.execution_steps else None
         }
         for m in params.messages
     ]
@@ -202,10 +145,10 @@ def create_conversation(
     return format_conversation_detail(conv)
 
 
-@router.put("/{id}", response_model=ConversationDetail)
+@router.put("/{id}", response_model=ConversationDetailSchema)
 def update_conversation(
     id: int,
-    params: ConversationCreateParams,
+    params: ConversationCreateParamsSchema,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user)
@@ -229,7 +172,8 @@ def update_conversation(
         {
             "role": m.role,
             "content": m.content,
-            "timestamp": m.timestamp
+            "timestamp": m.timestamp,
+            "execution_steps": m.execution_steps if m.execution_steps else None
         }
         for m in params.messages
     ]
@@ -252,7 +196,7 @@ def update_conversation(
     return format_conversation_detail(conv)
 
 
-@router.get("/{id}", response_model=ConversationDetail)
+@router.get("/{id}", response_model=ConversationDetailSchema)
 def get_conversation_detail(
     id: int,
     db: Session = Depends(get_db),
