@@ -57,6 +57,7 @@
           <ChatBubble
             v-for="(msg, index) in messages"
             :key="index"
+            :id="`message-${msg.id}`"
             :role="msg.role"
             :content="msg.content"
             :timestamp="msg.timestamp"
@@ -82,7 +83,12 @@
             v-if="executionSteps.length > 0"
             :steps="executionSteps"
             :expanded="executionLogExpanded"
-            @toggle-expand="handleToggleExecutionLog"
+            :is-execution-complete="isExecutionComplete"
+            :auto-collapse-countdown="autoCollapseCountdown"
+            :step-to-message-map="stepToMessageMap"
+            @toggle-expand="handleToggleExpand"
+            @cancel-auto-collapse="cancelAutoCollapse"
+            @navigate-to-message="handleNavigateToMessage"
           />
 
           <!-- 加载指示器（仅在无执行步骤时显示） -->
@@ -139,16 +145,37 @@ const { historyGroups, currentId, loading, messages } = storeToRefs(store)
 // ========== Agent Execution Log Composable ==========
 
 const agentLog = useAgentExecutionLog()
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const { steps: executionSteps } = agentLog
+const {
+  steps: executionSteps,
+  expanded: executionLogExpanded,
+  isExecutionComplete,
+  autoCollapseCountdown,
+  handleToggleExpand,
+  cancelAutoCollapse
+} = agentLog
+
+// ========== Task 17: 步骤 ID 与消息 ID 映射 ==========
+
+const stepToMessageMap = computed(() => {
+  const map: Record<string, number> = {}
+
+  // 遍历所有消息，建立映射关系
+  for (const message of messages.value) {
+    if (message.role === 'assistant' && message.executionSteps) {
+      for (const step of message.executionSteps) {
+        // 每个 step 关联到对应的 message
+        map[step.id] = message.id
+      }
+    }
+  }
+
+  return map
+})
 
 // ========== State ==========
 
 /** 侧边栏折叠状态 */
 const sidebarCollapsed = ref(false)
-
-/** 执行日志展开状态（默认收起） */
-const executionLogExpanded = ref(false)
 
 /** 消息容器 ref */
 const messagesContainer = ref<HTMLDivElement | null>(null)
@@ -239,9 +266,8 @@ async function handleNewConversation(): Promise<void> {
   currentPreviewData.value = null
   sessionId.value = null
   isStreamingAIMessage.value = false
-  executionLogExpanded.value = false
 
-  // ✅ 清空执行步骤
+  // ✅ 清空执行步骤（composable 会自动重置 expanded 状态）
   agentLog.clear()
 
   // ✅ Copywriting: 具体化的成功提示（不是 generic）
@@ -257,7 +283,6 @@ async function handleSelectConversation(id: number): Promise<void> {
   currentPreviewData.value = null
   sessionId.value = null
   isStreamingAIMessage.value = false
-  executionLogExpanded.value = false
 
   // ✅ 清空执行步骤（历史对话不需要显示执行过程）
   agentLog.clear()
@@ -324,7 +349,6 @@ async function handleSendMessage(message: string): Promise<void> {
   sending.value = true
   currentPreviewData.value = null
   isStreamingAIMessage.value = false
-  executionLogExpanded.value = false
 
   // ✅ 清空旧的执行步骤（每次发送新消息重新开始）
   agentLog.clear()
@@ -504,11 +528,6 @@ function getConfirmErrorMessage(error: unknown): string {
   return '操作执行失败，请重新尝试或描述问题继续对话。'
 }
 
-/** 切换执行日志展开状态 */
-function handleToggleExecutionLog(): void {
-  executionLogExpanded.value = !executionLogExpanded.value
-}
-
 /** 取消预览卡片 */
 async function handleCancelPreview(): Promise<void> {
   console.log('[AIAssistant] Cancel preview')
@@ -525,6 +544,27 @@ async function handleCancelPreview(): Promise<void> {
 function scrollToBottom(): void {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
+
+/** Task 17: 跳转到消息并高亮 */
+function handleNavigateToMessage(messageId: number): void {
+  const messageElement = document.getElementById(`message-${messageId}`)
+
+  if (messageElement) {
+    // 滚动到对应消息位置
+    messageElement.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center'
+    })
+
+    // 高亮消息（2秒）
+    messageElement.classList.add('highlighted')
+    setTimeout(() => {
+      messageElement.classList.remove('highlighted')
+    }, 2000)
+
+    console.log('[Navigation] Scrolled to message:', messageId)
   }
 }
 
@@ -842,6 +882,23 @@ function getSpecificErrorMessage(error: unknown): string {
     .ai-assistant-page__input {
       padding: $wolf-space-sm $wolf-space-md;
     }
+  }
+
+  // ========== Task 17: 高亮消息样式 ==========
+
+  .ai-assistant-page__messages [id^="message-"].highlighted {
+    background: rgba($wolf-primary, 0.1);
+    border-left: 3px solid $wolf-primary;
+    transition: background 0.3s ease, border-left 0.3s ease;
+    padding-left: $wolf-space-sm;
+    margin-left: -$wolf-space-sm;
+    border-radius: $wolf-radius-sm;
+  }
+
+  .ai-assistant-page__messages [id^="message-"]:not(.highlighted) {
+    background: transparent;
+    border-left: none;
+    transition: background 0.3s ease, border-left 0.3s ease;
   }
 }
 </style>

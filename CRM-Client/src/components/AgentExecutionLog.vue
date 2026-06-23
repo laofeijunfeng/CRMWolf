@@ -3,7 +3,12 @@
   <CompactExecutionLog
     :steps="steps"
     :expanded="expanded"
+    :is-execution-complete="isExecutionComplete"
+    :auto-collapse-countdown="autoCollapseCountdown"
+    :step-to-message-map="stepToMessageMap"
     @toggle-expand="handleToggleExpand"
+    @cancel-auto-collapse="handleCancelAutoCollapse"
+    @navigate-to-message="handleNavigateToMessage"
   />
 </template>
 
@@ -15,16 +20,29 @@ import type { DeepReadonly } from 'vue'
 interface Props {
   steps: DeepReadonly<ExecutionStep[]> | ExecutionStep[]
   expanded: boolean
+  isExecutionComplete?: boolean
+  autoCollapseCountdown?: number
+  stepToMessageMap?: Record<string, number>
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'toggle-expand'): void
+  (e: 'cancel-auto-collapse'): void
+  (e: 'navigate-to-message', messageId: number): void
 }>()
 
 const handleToggleExpand = () => {
   emit('toggle-expand')
+}
+
+const handleCancelAutoCollapse = () => {
+  emit('cancel-auto-collapse')
+}
+
+const handleNavigateToMessage = (messageId: number) => {
+  emit('navigate-to-message', messageId)
 }
 </script>
 

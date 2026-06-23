@@ -8,6 +8,8 @@
     tabindex="0"
     @click="handleToggleExpand"
     @keydown="handleKeydown"
+    @mouseenter="showHoverPreview"
+    @mouseleave="hideHoverPreview"
   >
     <!-- 状态图标 -->
     <el-icon :class="statusIconClass" class="status-icon">
@@ -24,11 +26,26 @@
 
     <!-- 展开提示 -->
     <span class="expand-hint">点击展开</span>
+
+    <!-- Task 16: 悬停预览 Tooltip -->
+    <div v-if="hoverPreviewVisible" class="hover-preview-tooltip">
+      <div class="tooltip-header">
+        <span class="progress-label">{{ hoverPreviewContent.progress }}</span>
+        <span class="status-label">{{ hoverPreviewContent.status }}</span>
+      </div>
+      <div class="tooltip-body">
+        <p class="current-step">{{ hoverPreviewContent.currentStep }}</p>
+        <p class="time-elapsed">执行时长: {{ hoverPreviewContent.timeElapsed }}</p>
+      </div>
+      <div class="tooltip-footer">
+        <span class="hint">点击查看完整轨迹</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import {
   Loading,
   CircleCheckFilled,
@@ -47,6 +64,19 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'toggle-expand'): void
 }>()
+
+// Task 16: 悬停预览状态
+const hoverPreviewVisible = ref(false)
+
+const showHoverPreview = () => {
+  if (props.steps.length > 0) {
+    hoverPreviewVisible.value = true
+  }
+}
+
+const hideHoverPreview = () => {
+  hoverPreviewVisible.value = false
+}
 
 // ← 计算总轮次
 const totalRounds = computed(() => {
@@ -99,6 +129,35 @@ const statusIconClass = computed(() => {
   return 'is-thinking'
 })
 
+// Task 16: 计算执行时长
+const calculateElapsedTime = (steps: ExecutionStep[]): string => {
+  if (steps.length === 0) return '0s'
+
+  const startTime = steps[0].timestamp
+  const endTime = steps[steps.length - 1].timestamp
+
+  const elapsedMs = new Date(endTime).getTime() - new Date(startTime).getTime()
+  const elapsedSeconds = Math.floor(elapsedMs / 1000)
+
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`
+  } else {
+    const minutes = Math.floor(elapsedSeconds / 60)
+    const seconds = elapsedSeconds % 60
+    return `${minutes}m ${seconds}s`
+  }
+}
+
+// Task 16: 悬停预览内容
+const hoverPreviewContent = computed(() => {
+  return {
+    progress: progressText.value.trim(),
+    currentStep: currentStep.value?.title || '正在处理...',
+    status: isRunning.value ? '执行中' : isSuccess.value ? '已完成' : isError.value ? '失败' : '处理中',
+    timeElapsed: calculateElapsedTime(props.steps)
+  }
+})
+
 const handleToggleExpand = () => {
   emit('toggle-expand')
 }
@@ -124,6 +183,7 @@ const handleKeydown = (event: KeyboardEvent) => {
   border-radius: $wolf-radius-sm;
   cursor: pointer;
   transition: background 0.2s;
+  position: relative; // ← Task 16: 相对定位，用于 tooltip 定位
 
   &:hover {
     background: $wolf-bg-hover;
@@ -159,6 +219,61 @@ const handleKeydown = (event: KeyboardEvent) => {
   .expand-hint {
     font-size: $wolf-font-size-caption;
     color: $wolf-text-tertiary;
+  }
+}
+
+// Task 16: 悬停预览 Tooltip 样式
+.hover-preview-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+  box-shadow: $wolf-shadow-dropdown;
+  padding: $wolf-space-md;
+  margin-top: $wolf-space-sm;
+  border: 1px solid $wolf-border-light;
+
+  .tooltip-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: $wolf-space-sm;
+
+    .progress-label {
+      font-size: $wolf-font-size-body;
+      font-weight: $wolf-font-weight-medium;
+      color: $wolf-primary;
+    }
+
+    .status-label {
+      font-size: $wolf-font-size-caption;
+      color: $wolf-text-secondary;
+    }
+  }
+
+  .tooltip-body {
+    margin-bottom: $wolf-space-sm;
+
+    .current-step {
+      font-size: $wolf-font-size-body;
+      color: $wolf-text-primary;
+      margin: 0;
+    }
+
+    .time-elapsed {
+      font-size: $wolf-font-size-caption;
+      color: $wolf-text-tertiary;
+      margin: $wolf-space-xs 0 0;
+    }
+  }
+
+  .tooltip-footer {
+    .hint {
+      font-size: $wolf-font-size-caption;
+      color: $wolf-primary;
+    }
   }
 }
 

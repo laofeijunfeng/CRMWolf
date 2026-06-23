@@ -20,6 +20,7 @@
         role="listitem"
         :aria-label="`Round ${step.round || 1} - ${step.title}`"
         tabindex="0"
+        @click="handleStepClick(step)"
       >
         <!-- 轮次分隔线 -->
         <div
@@ -66,12 +67,14 @@ import { ExecutionStepType } from '@/types/agentExecution'
 
 interface Props {
   steps: ExecutionStep[]
+  stepToMessageMap?: Record<string, number>
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'toggle-expand'): void
+  (e: 'navigate-to-message', messageId: number): void
 }>()
 
 // ← 是否应该显示轮次分隔线
@@ -118,6 +121,16 @@ const formatTimestamp = (timestamp: Date): string => {
   const minutes = String(date.getMinutes()).padStart(2, '0')
   const seconds = String(date.getSeconds()).padStart(2, '0')
   return `${hours}:${minutes}:${seconds}`
+}
+
+// Task 17: 点击步骤卡片触发跳转
+const handleStepClick = (step: ExecutionStep) => {
+  const messageId = props.stepToMessageMap?.[step.id]
+
+  if (messageId) {
+    emit('navigate-to-message', messageId)
+    console.log('[Navigation] Navigate to message:', messageId, 'from step:', step.id)
+  }
 }
 
 const handleToggleExpand = () => {

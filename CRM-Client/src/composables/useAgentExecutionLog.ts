@@ -44,6 +44,20 @@ export function useAgentExecutionLog() {
   // 是否应该自动展开（需求文档 5.3：Human-in-the-Loop 场景）
   const shouldAutoExpand = ref<boolean>(false)
 
+  // ========== Task 15: 自动收起逻辑 ==========
+
+  // 展开状态（默认展开，执行中）
+  const expanded = ref<boolean>(true)
+
+  // 自动收起计时器
+  const autoCollapseTimer = ref<number | null>(null)
+
+  // 自动收起倒计时（显示给用户）
+  const autoCollapseCountdown = ref<number>(0)
+
+  // 用户是否手动操作（取消自动收起）
+  const userCancelledAutoCollapse = ref<boolean>(false)
+
   /**
    * 生成步骤唯一标识
    */
@@ -394,6 +408,15 @@ export function useAgentExecutionLog() {
     isCompleted.value = false
     hasError.value = false
     shouldAutoExpand.value = false
+
+    // Task 15: 清空自动收起相关状态
+    expanded.value = true
+    if (autoCollapseTimer.value) {
+      clearTimeout(autoCollapseTimer.value)
+      autoCollapseTimer.value = null
+    }
+    autoCollapseCountdown.value = 0
+    userCancelledAutoCollapse.value = false
   }
 
   /**
@@ -423,6 +446,85 @@ export function useAgentExecutionLog() {
   function getLastStep(): ExecutionStep | undefined {
     return steps.value[steps.value.length - 1]
   }
+
+  // ========== Task 15: 自动收起逻辑 ==========
+
+  /**
+   * 是否执行完成（REACT_COMPLETE 或 ERROR）
+   */
+  const isExecutionComplete = computed(() => {
+    const lastStep = steps.value[steps.value.length - 1]
+    return lastStep?.type === ExecutionStepType.REACT_COMPLETE || lastStep?.type === ExecutionStepType.ERROR
+  })
+
+  /**
+   * 启动自动收起倒计时
+   */
+  function startAutoCollapseCountdown(): void {
+    // 清除之前的计时器
+    if (autoCollapseTimer.value) {
+      clearTimeout(autoCollapseTimer.value)
+      autoCollapseTimer.value = null
+    }
+
+    // 初始化倒计时
+    autoCollapseCountdown.value = 3
+
+    // 倒计时定时器（每秒更新）
+    const countdownInterval = setInterval(() => {
+      autoCollapseCountdown.value--
+      if (autoCollapseCountdown.value <= 0) {
+        clearInterval(countdownInterval)
+      }
+    }, 1000)
+
+    // 3秒后自动收起
+    autoCollapseTimer.value = window.setTimeout(() => {
+      if (!userCancelledAutoCollapse.value && expanded.value) {
+        expanded.value = false
+        console.log('[Auto Collapse] Execution completed, collapsed after 3s')
+      }
+      clearInterval(countdownInterval)
+      autoCollapseCountdown.value = 0
+      autoCollapseTimer.value = null
+    }, 3000)
+  }
+
+  /**
+   * 取消自动收起（用户手动操作）
+   */
+  function cancelAutoCollapse(): void {
+    userCancelledAutoCollapse.value = true
+
+    if (autoCollapseTimer.value) {
+      clearTimeout(autoCollapseTimer.value)
+      autoCollapseTimer.value = null
+    }
+
+    autoCollapseCountdown.value = 0
+    console.log('[Auto Collapse] User cancelled auto-collapse')
+  }
+
+  /**
+   * 切换展开状态
+   */
+  function handleToggleExpand(): void {
+    expanded.value = !expanded.value
+
+    // 用户手动展开后，不再触发自动收起
+    if (expanded.value) {
+      cancelAutoCollapse()
+    }
+  }
+
+  /**
+   * 监听执行完成状态，触发自动收起
+   */
+  watch(isExecutionComplete, (isComplete) => {
+    if (isComplete && expanded.value && !userCancelledAutoCollapse.value) {
+      startAutoCollapseCountdown()
+    }
+  })
 
   // ========== Persistence Logic (Task 12) ==========
 
@@ -538,6 +640,11 @@ export function useAgentExecutionLog() {
     sessionId: readonly(sessionId),
     shouldAutoExpand: readonly(shouldAutoExpand),  // ← 新增
 
+    // Task 15: 自动收起逻辑（新增）
+    expanded: readonly(expanded),
+    isExecutionComplete: readonly(isExecutionComplete),
+    autoCollapseCountdown: readonly(autoCollapseCountdown),
+
     // SSE 事件处理
     handleSSEEvent,
 
@@ -546,6 +653,10 @@ export function useAgentExecutionLog() {
     getStepsByRound,
     getLastStep,
     resetAutoExpand,  // ← 新增
+
+    // Task 15: 自动收起逻辑（新增）
+    handleToggleExpand,
+    cancelAutoCollapse,
 
     // 持久化方法（Task 12 新增）
     saveExecutionStepsToCurrentMessage,
