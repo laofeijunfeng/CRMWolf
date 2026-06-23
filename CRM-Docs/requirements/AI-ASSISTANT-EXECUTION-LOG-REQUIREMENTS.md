@@ -1,7 +1,7 @@
 ---
-status: approved
+status: active
 created: 2026-06-22
-updated: 2026-06-22
+updated: 2026-06-23
 priority: high
 type: feature
 ---
