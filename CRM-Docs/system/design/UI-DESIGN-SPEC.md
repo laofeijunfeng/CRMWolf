@@ -1,3 +1,9 @@
+---
+status: active
+created: 2026-04-24
+updated: 2026-06-23
+---
+
 # CRMWolf 极简中性风 UI 设计规范
 
 > 本规范是 CRMWolf 系统的 UI 设计唯一标准，所有页面必须严格遵循。

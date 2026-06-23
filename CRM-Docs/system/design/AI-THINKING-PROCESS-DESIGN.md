@@ -1,3 +1,10 @@
+---
+status: active
+created: 2026-06-23
+updated: 2026-06-23
+related_plan: -
+---
+
 # AI 思考过程展示优化设计
 
 **创建时间**: 2026-06-23

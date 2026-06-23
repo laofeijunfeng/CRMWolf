@@ -1,3 +1,11 @@
+---
+status: active
+created: 2026-06-17
+updated: 2026-06-23
+related_requirements: ../requirements/AI-ASSISTANT-PAGE-REQUIREMENTS.md
+related_pr: -
+---
+
 # AI 助手独立页面实施计划
 
 **文档类型**：实施计划

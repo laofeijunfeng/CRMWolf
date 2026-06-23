@@ -1,3 +1,10 @@
+---
+status: active
+created: 2026-06-17
+updated: 2026-06-23
+related_plan: ../plans/AI-ASSISTANT-PAGE-IMPLEMENTATION-PLAN.md
+---
+
 # AI 助手独立页面设计方案
 
 **文档类型**：设计方案

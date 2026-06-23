@@ -1,3 +1,10 @@
+---
+status: active
+created: 2026-06-17
+updated: 2026-06-23
+related_plan: -
+---
+
 # CRMWolf 全系统设计优化指南
 
 **实施日期**: 2026-06-17  
