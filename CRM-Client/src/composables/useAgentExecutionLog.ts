@@ -4,7 +4,7 @@
  * 将 SSE 事件流映射为业务化的执行步骤展示
  */
 
-import { ref, readonly, watch } from 'vue'
+import { ref, readonly, watch, computed } from 'vue'
 import { useAIConversationStore } from '@/stores/aiConversation'
 import {
   ExecutionStep,
