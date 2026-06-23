@@ -86,7 +86,57 @@
 
 ---
 
-## 四、设计红线
+## 四、交互规范
+
+### 4.1 Cursor 规范
+
+| 元素类型 | Cursor | Sass 变量 |
+|----------|--------|-----------|
+| 可点击按钮 | `pointer` | `$wolf-cursor-clickable` |
+| 可点击卡片 | `pointer` | `$wolf-cursor-clickable` |
+| 禁用状态 | `not-allowed` | `$wolf-cursor-disabled` |
+
+### 4.2 Hover 状态规范
+
+| 规则 | 推荐 | 禁止 |
+|------|------|------|
+| 视觉反馈 | color/opacity/shadow 变化 | transform: scale() |
+| 过渡时长 | 150-300ms | >500ms 或 0ms |
+| 布局影响 | 无位移 | 任何导致布局重排的变化 |
+
+### 4.3 Focus 状态规范
+
+| 元素 | Focus 样式 | Sass 变量 |
+|------|-----------|-----------|
+| 所有可交互元素 | `box-shadow: 0 0 0 2px rgba($wolf-primary, 0.3)` | `$wolf-focus-ring-color` |
+
+**应用方式**：使用 `*:focus-visible` 全局选择器
+
+---
+
+## 五、无障碍规范
+
+### 5.1 Reduced Motion
+
+```scss
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; }
+}
+```
+
+**必须遵守**：所有动画/过渡需尊重用户偏好
+
+### 5.2 对比度要求（WCAG）
+
+| 颜色角色 | 最小对比度 | 验证状态 |
+|----------|-----------|----------|
+| 正文文字 | 4.5:1 (AA) | ✅ 已合规 |
+| Placeholder | 4.5:1 (AA) | ✅ 已合规 (#7A7A7A) |
+| 禁用态 | 不要求 | ✅ 允许低于标准 |
+
+---
+
+## 六、设计红线
 
 | 红线 | 说明 |
 |------|------|
@@ -97,10 +147,12 @@
 | 禁止多层阴影 | 卡片仅用一级阴影 |
 | 禁止魔数间距 | 向 4px 基准网格对齐 |
 | **禁止卡片用 Display font** | 卡片标题使用系统字体栈 |
+| **禁止缺少 focus 状态** | 可交互元素必须有可见 focus |
+| **禁止忽略 reduced motion** | 动画必须尊重用户偏好 |
 
 ---
 
-## 五、间距命名规范
+## 七、间距命名规范
 
 **仅使用语义化命名**，废弃数字命名：
 

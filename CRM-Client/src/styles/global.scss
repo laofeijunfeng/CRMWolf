@@ -1,5 +1,6 @@
 // ==================== CRMWolf 全局样式 ====================
 // 基于 CRMWolf 设计系统的全局样式
+// 符合 UI/UX Pro Max 专业标准
 
 @use './variables.scss' as *;
 
@@ -9,6 +10,39 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+// ==================== Focus 状态规范 ====================
+// UI/UX Pro Max: 键盘导航需要可见 focus states
+
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 $wolf-focus-ring-width $wolf-focus-ring-color;
+  outline-offset: $wolf-focus-ring-offset;
+}
+
+// Element Plus 组件 focus 状态覆盖
+.el-button:focus-visible,
+.el-input:focus-visible,
+.el-select:focus-visible,
+.el-checkbox:focus-visible,
+.el-radio:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 $wolf-focus-ring-width $wolf-focus-ring-color;
+}
+
+// ==================== Reduced Motion ====================
+// UI/UX Pro Max: 尊重用户减少动画偏好
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: $wolf-reduced-motion-duration !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: $wolf-reduced-motion-duration !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 html, body {
