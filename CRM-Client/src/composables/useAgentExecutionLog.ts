@@ -40,6 +40,9 @@ export function useAgentExecutionLog() {
   // ReAct 会话 ID
   const sessionId = ref<string | undefined>(undefined)
 
+  // 是否应该自动展开（需求文档 5.3：Human-in-the-Loop 场景）
+  const shouldAutoExpand = ref<boolean>(false)
+
   /**
    * 生成步骤唯一标识
    */
@@ -149,18 +152,26 @@ export function useAgentExecutionLog() {
 
   /**
    * 处理 tool_call 事件
+   *
+   * 需求文档 4.4：
+   * - ThinkingBubble 显示 AI 推理过程（thinking）
+   * - 业务参数显示格式化的工具参数（businessParams）
    */
   function handleToolCall(event: AIAssistantSSEEvent): void {
     const toolName = event.tool ?? 'unknown'
     const businessTitle = getBusinessTitle(toolName)
     const params = event.params ?? {}
-    const businessDescription = formatBusinessParams(params, businessTitle)
+    const businessParams = formatBusinessParams(params, businessTitle)
+
+    // thinking: AI 推理过程（需求文档 ThinkingBubble 显示内容）
+    // 如果后端未发送 thinking，使用业务参数作为兜底
+    const thinking = event.thinking ?? event.reasoning ?? businessParams
 
     const step: ExecutionStep = {
       id: generateStepId(),
       type: ExecutionStepType.TOOL_CALL,
       title: businessTitle,
-      description: businessDescription,
+      description: thinking,  // ← AI 推理过程（ThinkingBubble 显示）
       timestamp: new Date()
     }
 
@@ -170,6 +181,7 @@ export function useAgentExecutionLog() {
 
     step.tool = toolName
     step.params = params
+    step.businessParams = businessParams  // ← 业务化参数（单独显示）
 
     steps.value.push(step)
   }
@@ -228,6 +240,9 @@ export function useAgentExecutionLog() {
     }
 
     steps.value.push(step)
+
+    // ← 需求文档 5.3：自动展开（需要用户关注）
+    shouldAutoExpand.value = true
   }
 
   /**
@@ -371,6 +386,16 @@ export function useAgentExecutionLog() {
     isExecuting.value = false
     isCompleted.value = false
     hasError.value = false
+    shouldAutoExpand.value = false
+  }
+
+  /**
+   * 重置自动展开提示
+   *
+   * 父组件在展开后调用，避免重复触发
+   */
+  function resetAutoExpand(): void {
+    shouldAutoExpand.value = false
   }
 
   /**
@@ -401,6 +426,7 @@ export function useAgentExecutionLog() {
     isCompleted: readonly(isCompleted),
     hasError: readonly(hasError),
     sessionId: readonly(sessionId),
+    shouldAutoExpand: readonly(shouldAutoExpand),  // ← 新增
 
     // SSE 事件处理
     handleSSEEvent,
@@ -408,7 +434,8 @@ export function useAgentExecutionLog() {
     // 辅助方法
     clear,
     getStepsByRound,
-    getLastStep
+    getLastStep,
+    resetAutoExpand  // ← 新增
   }
 }
 

@@ -64,6 +64,7 @@ export interface ExecutedResult {
  */
 export type SSEEventType =
   | 'status'
+  | 'start'            // 会话启动
   | 'content'
   | 'context_summary'  // 上下文汇总展示
   | 'react_start'      // ReAct 循环开始
@@ -79,6 +80,7 @@ export type SSEEventType =
   | 'round_completed'
   | 'max_rounds_reached'
   | 'result'
+  | 'complete'         // Agent 完成
   | 'error'
 
 /**
@@ -107,6 +109,7 @@ export interface AIAssistantSSEEvent {
   event: SSEEventType
   message?: string
   content?: string
+  answer?: string       // Agent 最终回答（complete 事件）
   tool?: string
   params?: Record<string, unknown>
   param_definitions?: Record<string, ParamDefinition>
@@ -114,6 +117,7 @@ export interface AIAssistantSSEEvent {
   reply_text?: string
   success?: boolean
   data?: unknown
+  is_partial?: boolean  // 是否部分结果
 
   // 上下文汇总
   summary?: ContextSummary

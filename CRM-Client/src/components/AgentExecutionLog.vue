@@ -47,12 +47,12 @@
             :content="step.description"
           />
 
-          <!-- 业务参数（如果有） -->
+          <!-- 业务参数（如果有且不重复，显示格式化的工具参数） -->
           <div
-            v-if="step.params && step.type === ExecutionStepType.TOOL_CALL"
+            v-if="step.businessParams && step.type === ExecutionStepType.TOOL_CALL && step.businessParams !== step.description"
             class="business-params"
           >
-            {{ formatBusinessParams(step.params, step.title) }}
+            {{ step.businessParams }}
           </div>
 
           <!-- 结果摘要卡片 -->
@@ -83,9 +83,10 @@ import ThinkingBubble from './ThinkingBubble.vue'
 import StatusCard from './StatusCard.vue'
 import type { ExecutionStep } from '@/types/agentExecution'
 import { ExecutionStepType, formatBusinessParams } from '@/types/agentExecution'
+import type { DeepReadonly } from 'vue'
 
 interface Props {
-  steps: ExecutionStep[]
+  steps: DeepReadonly<ExecutionStep[]> | ExecutionStep[]
   expanded: boolean
 }
 
@@ -310,6 +311,22 @@ const handleToggleExpand = () => {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+// ← frontend-design skill：尊重用户减少动画偏好
+@media (prefers-reduced-motion: reduce) {
+  .collapsed-view .status-icon.is-loading {
+    // 禁用旋转动画，使用静态图标
+    animation: none;
+  }
+
+  .agent-execution-log {
+    // 禁用所有过渡动画
+    * {
+      transition: none !important;
+      animation: none !important;
+    }
   }
 }
 </style>

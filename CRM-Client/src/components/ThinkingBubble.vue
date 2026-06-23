@@ -41,4 +41,12 @@ defineProps<Props>()
     line-height: $wolf-line-height-body;
   }
 }
+
+// ← frontend-design skill：尊重用户减少动画偏好
+@media (prefers-reduced-motion: reduce) {
+  .thinking-bubble {
+    // 静态显示，无动画依赖
+    transition: none;
+  }
+}
 </style>

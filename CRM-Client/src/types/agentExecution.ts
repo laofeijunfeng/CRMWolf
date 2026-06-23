@@ -57,7 +57,12 @@ export interface ExecutionStep {
   /** 业务化标题 */
   title: string
 
-  /** 业务化描述 */
+  /**
+   * 步骤描述
+   *
+   * TOOL_CALL: AI 推理过程（如"用户想跟进光大证券，需要先找到客户..."）
+   * TOOL_RESULT: 执行结果摘要（如"找到 5 个客户"）
+   */
   description: string
 
   /** 时间戳 */
@@ -71,6 +76,16 @@ export interface ExecutionStep {
 
   /** 工具参数（可选） */
   params?: Record<string, unknown>
+
+  /**
+   * 业务化参数描述（可选）
+   *
+   * 需求文档 4.4：业务参数显示格式化的工具参数
+   * 如："正在搜索："光大证券""
+   *
+   * 仅 TOOL_CALL 步骤使用，与 description（AI 推理过程）分离
+   */
+  businessParams?: string
 
   /** 执行结果（可选） */
   result?: unknown
@@ -138,12 +153,21 @@ export const ToolTitleMap: Record<string, string> = {
   create_contract: '创建合同',
   update_contract: '更新合同',
   delete_contract: '删除合同',
+  // ===== 新增：匹配后端工具名称（follow_up_customer/follow_up_lead） =====
+  follow_up_customer: '创建跟进记录',
+  follow_up_lead: '创建线索跟进',
+  // ===== 保留旧映射（兼容性） =====
   create_follow_up: '创建跟进记录',
   update_follow_up: '更新跟进记录',
   delete_follow_up: '删除跟进记录',
   send_email: '发送邮件',
   schedule_meeting: '安排会议',
-  generate_report: '生成报告'
+  generate_report: '生成报告',
+  // ===== 新增：其他可能使用的工具名称 =====
+  set_reminder: '设置提醒',
+  win_opportunity: '标记商机赢单',
+  lose_opportunity: '标记商机输单',
+  update_stage: '更新商机阶段'
 }
 
 /**
@@ -202,4 +226,42 @@ export function formatBusinessParams(
 
   // 默认：返回通用描述
   return businessTitle
+}
+
+/**
+ * 获取错误解决建议
+ *
+ * 将错误信息映射为业务友好的解决建议（需求文档 5.2）
+ *
+ * @param tool - 工具名称
+ * @param errorMessage - 错误信息
+ * @returns 业务化的解决建议
+ */
+export function getSuggestion(tool: string, errorMessage: string): string {
+  // 未找到/不存在场景
+  if (errorMessage.includes('未找到') || errorMessage.includes('不存在')) {
+    if (tool.includes('customer')) return '建议：请提供更精确的客户名称'
+    if (tool.includes('opportunity')) return '建议：请先创建商机'
+    if (tool.includes('lead')) return '建议：请先创建线索'
+    if (tool.includes('contract')) return '建议：请先创建合同'
+    return '建议：请确认目标是否存在'
+  }
+
+  // 权限场景
+  if (errorMessage.includes('权限') || errorMessage.includes('无权限')) {
+    return '建议：请联系管理员获取权限'
+  }
+
+  // 重复/已存在场景
+  if (errorMessage.includes('已存在') || errorMessage.includes('重复')) {
+    return '建议：请使用不同的名称或标识'
+  }
+
+  // 格式错误场景
+  if (errorMessage.includes('格式') || errorMessage.includes('无效')) {
+    return '建议：请检查输入格式是否正确'
+  }
+
+  // 默认建议
+  return '建议：请检查输入信息是否正确'
 }

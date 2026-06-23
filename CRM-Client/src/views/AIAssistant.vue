@@ -77,9 +77,17 @@
             </template>
           </ChatBubble>
 
-          <!-- 加载指示器 -->
+          <!-- Agent 执行过程（执行中和执行完成后都可见，支持展开查看详细过程） -->
+          <AgentExecutionLog
+            v-if="executionSteps.length > 0"
+            :steps="executionSteps"
+            :expanded="executionLogExpanded"
+            @toggle-expand="handleToggleExecutionLog"
+          />
+
+          <!-- 加载指示器（仅在无执行步骤时显示） -->
           <div
-            v-if="sending"
+            v-if="sending && executionSteps.length === 0"
             class="ai-assistant-page__loading"
           >
             <span class="ai-assistant-page__loading-text">AI 正在思考...</span>
@@ -111,6 +119,8 @@ import { ElMessageBox, ElMessage } from 'element-plus'
 import { useAIConversationStore } from '@/stores/aiConversation'
 import { useUserStore } from '@/stores/user'
 import { aiAssistantApi, type AIAssistantSSEEvent } from '@/api/aiAssistant'
+import { useAgentExecutionLog } from '@/composables/useAgentExecutionLog'
+import AgentExecutionLog from '@/components/AgentExecutionLog.vue'
 import { Operation } from '@element-plus/icons-vue'
 import HistoryList from '@/components/ai-assistant/HistoryList.vue'
 import WelcomeScreen from '@/components/ai-assistant/WelcomeScreen.vue'
@@ -126,10 +136,19 @@ const userStore = useUserStore()
 // ✅ 使用统一状态源（Store 的 messages computed）
 const { historyGroups, currentId, loading, messages } = storeToRefs(store)
 
+// ========== Agent Execution Log Composable ==========
+
+const agentLog = useAgentExecutionLog()
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const { steps: executionSteps } = agentLog
+
 // ========== State ==========
 
 /** 侧边栏折叠状态 */
 const sidebarCollapsed = ref(false)
+
+/** 执行日志展开状态（默认收起） */
+const executionLogExpanded = ref(false)
 
 /** 消息容器 ref */
 const messagesContainer = ref<HTMLDivElement | null>(null)
@@ -200,10 +219,14 @@ async function handleNewConversation(): Promise<void> {
   // ✅ ChatGPT 模式：立即创建空会话，获取 ID
   await store.createEmptyConversation()
 
-  // 清空预览卡片状态
+  // 清空所有状态
   currentPreviewData.value = null
   sessionId.value = null
   isStreamingAIMessage.value = false
+  executionLogExpanded.value = false
+
+  // ✅ 清空执行步骤
+  agentLog.clear()
 
   // ✅ Copywriting: 具体化的成功提示（不是 generic）
   ElMessage.success('已创建新对话，可以开始输入')
@@ -214,10 +237,14 @@ async function handleSelectConversation(id: number): Promise<void> {
   // ✅ ChatGPT 模式：立即加载历史对话内容
   await store.loadConversation(id)
 
-  // 清空预览卡片状态
+  // 清空所有状态
   currentPreviewData.value = null
   sessionId.value = null
   isStreamingAIMessage.value = false
+  executionLogExpanded.value = false
+
+  // ✅ 清空执行步骤（历史对话不需要显示执行过程）
+  agentLog.clear()
 
   console.log('[AIAssistant] Selected conversation:', id)
 }
@@ -281,6 +308,10 @@ async function handleSendMessage(message: string): Promise<void> {
   sending.value = true
   currentPreviewData.value = null
   isStreamingAIMessage.value = false
+  executionLogExpanded.value = false
+
+  // ✅ 清空旧的执行步骤（每次发送新消息重新开始）
+  agentLog.clear()
 
   // ✅ 开始新的 AI 消息（用于流式输出）
   store.startAIMessage()
@@ -334,6 +365,14 @@ function handleSSEEvent(event: AIAssistantSSEEvent): void {
     sessionId.value = event.session_id
   }
 
+  // ✅ 使用 Agent Execution Log composable 处理 Agent 执行事件
+  // 这些事件类型：react_start, round_start, tool_call, tool_result, round_completed, react_complete
+  if (['react_start', 'round_start', 'tool_call', 'tool_result', 'round_completed',
+       'react_complete', 'waiting_for_user', 'disambiguation_required',
+       'awaiting_confirmation', 'max_rounds_reached', 'error'].includes(event.event ?? '')) {
+    agentLog.handleSSEEvent(event)
+  }
+
   switch (event.event) {
     case 'status':
       // 状态事件 - 不追加内容（已通过 startAIMessage 创建空消息）
@@ -358,8 +397,16 @@ function handleSSEEvent(event: AIAssistantSSEEvent): void {
       break
 
     case 'result':
-      // 执行结果 - 清空预览卡片
+      // 执行结果 - 清空预览卡片，追加最终答案
       currentPreviewData.value = null
+      if (event.content && isStreamingAIMessage.value) {
+        store.appendAIMessageContent(event.content)
+      }
+      break
+
+    case 'complete':
+      // Agent 完成 - 不追加内容（避免重复）
+      // 'result' 事件已包含完整内容，'complete' 事件仅作为流结束信号
       break
 
     case 'error':
@@ -439,6 +486,11 @@ function getConfirmErrorMessage(error: unknown): string {
 
   // 默认：具体化但不是 generic
   return '操作执行失败，请重新尝试或描述问题继续对话。'
+}
+
+/** 切换执行日志展开状态 */
+function handleToggleExecutionLog(): void {
+  executionLogExpanded.value = !executionLogExpanded.value
 }
 
 /** 取消预览卡片 */

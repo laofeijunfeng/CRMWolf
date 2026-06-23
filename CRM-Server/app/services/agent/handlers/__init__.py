@@ -19,7 +19,7 @@ import logging
 # 导入统一的 ToolResult（避免重复定义）
 from app.services.agent.tools import ToolResult
 
-logger = logging.getLogger(__name)
+logger = logging.getLogger(__name__)
 
 
 class SearchCustomerHandler:

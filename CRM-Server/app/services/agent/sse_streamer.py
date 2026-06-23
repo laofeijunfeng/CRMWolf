@@ -68,13 +68,16 @@ class AgentSSEStreamer:
                     # Round Start
                     yield f"event: round_start\ndata: {json.dumps({'round': i, 'max_rounds': agent.MAX_ROUNDS})}\n\n"
 
-                    # Tool Call（扩展字段：reply_text）
+                    # Tool Call（扩展字段：thinking + reply_text）
+                    # thinking: AI 推理过程（需求文档 ThinkingBubble 显示内容）
+                    # reply_text: 兼容字段（前端可能需要）
                     tool_call_data = json.dumps({
                         'round': i,
                         'tool': tool_call['tool_name'],  # 前端期望字段名：tool
                         'tool_name': tool_call['tool_name'],  # 兼容新字段名
                         'params': tool_call['tool_params'],
-                        'reply_text': f"准备执行：{tool_call['tool_name']}",  # 前端期望字段
+                        'thinking': tool_call.get('reasoning', ''),  # ← AI 推理过程
+                        'reply_text': tool_call.get('reasoning', f'准备执行：{tool_call["tool_name"]}'),  # 兼容
                     })
                     yield f"event: tool_call\ndata: {tool_call_data}\n\n"
 

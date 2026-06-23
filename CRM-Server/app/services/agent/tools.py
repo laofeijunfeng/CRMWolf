@@ -88,23 +88,23 @@ class ToolRegistry:
 
         return definition
 
-    def get_handler(self, tool_name: str):
+    def get_handler(self, tool_name: str) -> tuple[Any, Dict[str, Any]]:
         """
-        获取工具 Handler
+        获取工具 Handler + config
 
         Args:
             tool_name: 工具名称
 
         Returns:
-            ToolHandler: 工具处理器
+            tuple[Any, Dict]: (Handler实例, handler_config)
         """
-        handler = self.handlers.get(tool_name)
+        entry = self.handlers.get(tool_name)
 
-        if not handler:
+        if not entry:
             logger.warning(f"Tool handler not found: {tool_name}")
-            return None
+            return None, {}
 
-        return handler
+        return entry.get("handler"), entry.get("config", {})
 
     def _register_tools(self) -> List[Dict[str, Any]]:
         """
@@ -404,16 +404,14 @@ class ToolRegistry:
             # create_contract, create_invoice, approve_contract 等
         ]
 
-    def _register_handlers(self) -> Dict[str, Any]:
+    def _register_handlers(self) -> Dict[str, Dict[str, Any]]:
         """
-        注册工具 Handler
+        注册工具 Handler（包含 handler 实例 + config）
 
         Returns:
-            Dict[str, Handler]: Handler 映射
+            Dict[str, Dict]: {"handler": Handler实例, "config": handler_config}
         """
         # 复用现有的 skills handlers
-        # 这些 Handler 已经遵循规范：CRUD 统一入口、team_id 必传
-
         from app.services.skills.handlers.follow_up_handler import FollowUpHandler
         from app.services.skills.handlers.create_handler import CreateHandler
         from app.services.skills.handlers.status_change_handler import StatusChangeHandler
@@ -426,16 +424,27 @@ class ToolRegistry:
             SetReminderHandler,
         )
 
+        # 从 app/constants/tools.py 导入 handler config 映射
+        from app.constants.tools import TOOL_HANDLER_MAP
+
+        def _build_handler_entry(tool_name: str, handler_instance: Any) -> Dict[str, Any]:
+            """构建 handler entry（包含 handler + config）"""
+            config = TOOL_HANDLER_MAP.get(tool_name, {}).get("config", {})
+            return {
+                "handler": handler_instance,
+                "config": config,
+            }
+
         return {
-            "search_customer": SearchCustomerHandler(),
-            "search_opportunity": SearchOpportunityHandler(),
-            "follow_up_customer": FollowUpHandler(),
-            "follow_up_lead": FollowUpHandler(),
-            "create_opportunity": CreateHandler(),  # 使用现有的 CreateHandler
-            "update_stage": StageAdvanceHandler(),  # 使用现有的 StageAdvanceHandler
-            "win_opportunity": StatusChangeHandler(),  # 使用现有的 StatusChangeHandler
-            "lose_opportunity": StatusChangeHandler(),
-            "set_reminder": SetReminderHandler(),
+            "search_customer": _build_handler_entry("search_customer", SearchCustomerHandler()),
+            "search_opportunity": _build_handler_entry("search_opportunity", SearchOpportunityHandler()),
+            "follow_up_customer": _build_handler_entry("follow_up_customer", FollowUpHandler()),
+            "follow_up_lead": _build_handler_entry("follow_up_lead", FollowUpHandler()),
+            "create_opportunity": _build_handler_entry("create_opportunity", CreateHandler()),
+            "update_stage": _build_handler_entry("update_stage", StageAdvanceHandler()),
+            "win_opportunity": _build_handler_entry("win_opportunity", StatusChangeHandler()),
+            "lose_opportunity": _build_handler_entry("lose_opportunity", StatusChangeHandler()),
+            "set_reminder": _build_handler_entry("set_reminder", SetReminderHandler()),
         }
 
 

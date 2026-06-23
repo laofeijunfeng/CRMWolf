@@ -982,12 +982,25 @@ const missingFieldsFormRef = ref()                 // 缺失字段表单 ref
 const workflowFieldOptions = ref<Record<string, any>>({}) // 字段选项配置（下拉选项等）
 
 // ========== Agent Execution Log ==========
-const { steps: executionLogSteps, handleSSEEvent: handleExecutionLogEvent } = useAgentExecutionLog()
+const {
+  steps: executionLogSteps,
+  handleSSEEvent: handleExecutionLogEvent,
+  shouldAutoExpand,
+  resetAutoExpand
+} = useAgentExecutionLog()
 const logExpanded = ref(false)
 
 const toggleLogExpand = () => {
   logExpanded.value = !logExpanded.value
 }
+
+// ← 需求文档 5.3：Human-in-the-Loop 自动展开
+watch(shouldAutoExpand, (should) => {
+  if (should) {
+    logExpanded.value = true
+    resetAutoExpand()
+  }
+})
 
 // ========== 计算属性 ==========
 const formInitialValues = computed(() => previewAction.value?.params)

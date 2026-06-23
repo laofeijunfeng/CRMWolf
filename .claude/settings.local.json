@@ -190,7 +190,19 @@
       "Bash(claude tasks *)",
       "Bash(git pull *)",
       "Bash(git merge *)",
-      "Bash(awk '{print $1}')"
+      "Bash(awk '{print $1}')",
+      "Bash(grep *)",
+      "Bash(node *)",
+      "WebFetch(domain:skillhub.club)",
+      "WebFetch(domain:github.com)",
+      "Bash(brew install *)",
+      "Bash(bun --version)",
+      "Bash(mkdir -p ~/.claude/skills/_gstack-command)",
+      "Bash(ln -snf ~/.claude/skills/gstack/SKILL.md ~/.claude/skills/_gstack-command/SKILL.md)",
+      "Skill(plan-eng-review)",
+      "WebFetch(domain:www.skillhub.club)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Skill(plan-design-review)"
     ]
   }
 }
