@@ -196,6 +196,22 @@ onMounted(async () => {
     if (recentConversation) {
       await store.loadConversation(recentConversation.id)
       console.log('[AIAssistant] Restored recent conversation:', recentConversation.id)
+
+      // ← Task 13: 恢复最后一条 AI 消息的 executionSteps
+      const executionSteps = store.getLastAIMessageExecutionSteps()
+      if (executionSteps.length > 0) {
+        // 将 executionSteps 恢复到 agentLog composable 的内部状态
+        // 注意：agentLog.steps 是 readonly，需要访问内部 steps（通过 restoreFromLocalStorage 或直接设置）
+        // 这里使用 restoreFromLocalStorage 的方式：先缓存到 localStorage，再恢复
+        const cacheKey = `execution_steps_${recentConversation.id}`
+        localStorage.setItem(cacheKey, JSON.stringify(executionSteps))
+        agentLog.restoreFromLocalStorage()
+
+        console.log('[AIAssistant] Restored execution steps from last AI message:', {
+          stepsCount: executionSteps.length,
+          lastStep: executionSteps[executionSteps.length - 1]?.title
+        })
+      }
     }
   }
 })

@@ -4,7 +4,8 @@
  * 将 SSE 事件流映射为业务化的执行步骤展示
  */
 
-import { ref, readonly } from 'vue'
+import { ref, readonly, watch } from 'vue'
+import { useAIConversationStore } from '@/stores/aiConversation'
 import {
   ExecutionStep,
   ExecutionStepType,
@@ -330,6 +331,9 @@ export function useAgentExecutionLog() {
     }
 
     steps.value.push(step)
+
+    // ← Task 12: SSE 流结束，保存 executionSteps 到当前 AI 消息
+    saveExecutionStepsToCurrentMessage()
   }
 
   /**
@@ -374,6 +378,9 @@ export function useAgentExecutionLog() {
     }
 
     steps.value.push(step)
+
+    // ← Task 12: SSE 流结束（错误），保存 executionSteps 到当前 AI 消息
+    saveExecutionStepsToCurrentMessage()
   }
 
   /**
@@ -417,6 +424,109 @@ export function useAgentExecutionLog() {
     return steps.value[steps.value.length - 1]
   }
 
+  // ========== Persistence Logic (Task 12) ==========
+
+  /**
+   * 获取 localStorage 缓存键
+   *
+   * @returns 缓存键名
+   */
+  function getLocalStorageKey(): string {
+    const store = useAIConversationStore()
+    const conversationId = store.currentId.value // ← 修复：访问 .value
+    return `execution_steps_${conversationId ?? 'temp'}`
+  }
+
+  /**
+   * 将 executionSteps 缓存到 localStorage
+   * 防止 SSE 中断导致数据丢失
+   */
+  function cacheToLocalStorage(): void {
+    if (steps.value.length > 0) {
+      const key = getLocalStorageKey()
+      try {
+        localStorage.setItem(key, JSON.stringify(steps.value))
+        console.log('[AgentExecutionLog] Cached steps to localStorage:', {
+          key,
+          stepsCount: steps.value.length
+        })
+      } catch (error) {
+        console.error('[AgentExecutionLog] Failed to cache steps:', error)
+      }
+    }
+  }
+
+  /**
+   * 从 localStorage 恢复 executionSteps
+   *
+   * @returns 是否成功恢复
+   */
+  function restoreFromLocalStorage(): boolean {
+    const key = getLocalStorageKey()
+    try {
+      const cached = localStorage.getItem(key)
+      if (cached) {
+        const parsedSteps = JSON.parse(cached) as ExecutionStep[]
+        steps.value = parsedSteps
+        console.log('[AgentExecutionLog] Restored steps from localStorage:', {
+          key,
+          stepsCount: parsedSteps.length
+        })
+        return true
+      }
+    } catch (error) {
+      console.error('[AgentExecutionLog] Failed to parse cached steps:', error)
+    }
+    return false
+  }
+
+  /**
+   * 清理 localStorage 缓存
+   */
+  function clearLocalStorageCache(): void {
+    const key = getLocalStorageKey()
+    localStorage.removeItem(key)
+    console.log('[AgentExecutionLog] Cleared localStorage cache:', key)
+  }
+
+  /**
+   * 将 executionSteps 保存到当前 AI 消息
+   * SSE 流结束时触发
+   */
+  async function saveExecutionStepsToCurrentMessage(): Promise<void> {
+    const store = useAIConversationStore()
+
+    if (!store.hasCurrentConversation) {
+      console.warn('[AgentExecutionLog] No current conversation')
+      return
+    }
+
+    // 设置当前 AI 消息的执行步骤
+    store.setAIMessageExecutionSteps(steps.value)
+
+    // 保存对话到数据库
+    await store.saveCurrentConversation()
+
+    // 清理 localStorage 缓存（已保存到数据库）
+    clearLocalStorageCache()
+
+    console.log('[AgentExecutionLog] Saved execution steps to message:', {
+      stepsCount: steps.value.length
+    })
+  }
+
+  // ========== localStorage 自动缓存（watch） ==========
+
+  /**
+   * 自动缓存 executionSteps 到 localStorage
+   * 每次 steps 变化时触发
+   */
+  watch(steps, (newSteps) => {
+    if (newSteps.length > 0) {
+      cacheToLocalStorage()
+    }
+  }, { deep: true })
+
   return {
     // 状态（只读）
     steps: readonly(steps),
@@ -435,7 +545,12 @@ export function useAgentExecutionLog() {
     clear,
     getStepsByRound,
     getLastStep,
-    resetAutoExpand  // ← 新增
+    resetAutoExpand,  // ← 新增
+
+    // 持久化方法（Task 12 新增）
+    saveExecutionStepsToCurrentMessage,
+    restoreFromLocalStorage,
+    clearLocalStorageCache
   }
 }
 

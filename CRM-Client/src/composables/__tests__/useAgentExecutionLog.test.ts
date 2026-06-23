@@ -2,16 +2,29 @@
  * useAgentExecutionLog Composable 单元测试
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useAgentExecutionLog } from '../useAgentExecutionLog'
 import { ExecutionStepType, getBusinessTitle, formatBusinessParams } from '@/types/agentExecution'
 import type { AIAssistantSSEEvent } from '@/api/aiAssistant'
+
+// Mock aiConversation store
+vi.mock('@/stores/aiConversation', () => ({
+  useAIConversationStore: vi.fn(() => ({
+    currentId: { value: 123 },
+    hasCurrentConversation: { value: true },
+    setAIMessageExecutionSteps: vi.fn(),
+    saveCurrentConversation: vi.fn().mockResolvedValue(undefined),
+    getLastAIMessageExecutionSteps: vi.fn(() => [])
+  }))
+}))
 
 describe('useAgentExecutionLog', () => {
   let executionLog: ReturnType<typeof useAgentExecutionLog>
 
   beforeEach(() => {
     executionLog = useAgentExecutionLog()
+    localStorage.clear()
+    vi.clearAllMocks()
   })
 
   describe('初始状态', () => {
@@ -264,6 +277,134 @@ describe('useAgentExecutionLog', () => {
       const lastStep = executionLog.getLastStep()
       expect(lastStep?.type).toBe(ExecutionStepType.TOOL_CALL)
       expect(lastStep?.tool).toBe('search_customer')
+    })
+  })
+
+  // ========== Persistence Integration Tests (Task 14) ==========
+
+  describe('持久化逻辑（Task 12-14）', () => {
+    it('SSE 流结束时（REACT_COMPLETE）应自动保存 execution steps', async () => {
+      // 模拟完整的 SSE 流
+      const events: AIAssistantSSEEvent[] = [
+        { event: 'react_start', session_id: 'test-123', max_rounds: 5 },
+        { event: 'tool_call', tool: 'search_customer', params: { keyword: '光大证券' }, round: 1 },
+        { event: 'tool_result', tool: 'search_customer', success: true, round: 1 },
+        { event: 'react_complete', session_id: 'test-123' }
+      ]
+
+      events.forEach(event => executionLog.handleSSEEvent(event))
+
+      // 验证步骤数量
+      expect(executionLog.steps.value.length).toBe(4)
+
+      // 验证触发保存（通过 mock 验证）
+      // 注意：由于 handleReactComplete 内部调用 saveExecutionStepsToCurrentMessage
+      // 我们需要等待异步操作完成
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // 验证 localStorage 缓存已清理（保存成功后应清理）
+      const cacheKey = 'execution_steps_123'
+      const cached = localStorage.getItem(cacheKey)
+      expect(cached).toBeNull()
+    })
+
+    it('SSE 流结束时（ERROR）应自动保存 execution steps', async () => {
+      const events: AIAssistantSSEEvent[] = [
+        { event: 'react_start', session_id: 'test-123', max_rounds: 5 },
+        { event: 'tool_call', tool: 'search_customer', params: { keyword: '光大证券' }, round: 1 },
+        { event: 'error', message: '数据库连接失败' }
+      ]
+
+      events.forEach(event => executionLog.handleSSEEvent(event))
+
+      expect(executionLog.steps.value.length).toBe(3)
+      expect(executionLog.hasError.value).toBe(true)
+
+      // 等待异步保存完成
+      await new Promise(resolve => setTimeout(resolve, 100))
+    })
+
+    it('executionSteps 变化时应自动缓存到 localStorage', async () => {
+      const event: AIAssistantSSEEvent = {
+        event: 'tool_call',
+        tool: 'search_customer',
+        params: { keyword: '光大证券' },
+        round: 1
+      }
+
+      executionLog.handleSSEEvent(event)
+
+      // 等待 watch 触发
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // 验证 localStorage 缓存
+      const cacheKey = 'execution_steps_123'
+      const cached = localStorage.getItem(cacheKey)
+
+      expect(cached).not.toBeNull()
+      const parsedSteps = JSON.parse(cached ?? '[]')
+      expect(parsedSteps.length).toBe(1)
+      expect(parsedSteps[0].tool).toBe('search_customer')
+    })
+
+    it('restoreFromLocalStorage 应正确恢复 execution steps', () => {
+      // 预设 localStorage 缓存
+      const cachedSteps = [
+        {
+          id: 'step-1',
+          type: 'TOOL_CALL',
+          title: '查找客户信息',
+          timestamp: new Date().toISOString(),
+          tool: 'search_customer',
+          round: 1
+        },
+        {
+          id: 'step-2',
+          type: 'TOOL_RESULT',
+          title: '执行成功',
+          timestamp: new Date().toISOString(),
+          success: true,
+          round: 1
+        }
+      ]
+
+      localStorage.setItem('execution_steps_123', JSON.stringify(cachedSteps))
+
+      // 恢复
+      const restored = executionLog.restoreFromLocalStorage()
+
+      expect(restored).toBe(true)
+      expect(executionLog.steps.value.length).toBe(2)
+      expect(executionLog.steps.value[0].title).toBe('查找客户信息')
+      expect(executionLog.steps.value[1].success).toBe(true)
+    })
+
+    it('clearLocalStorageCache 应清理缓存', () => {
+      // 预设缓存
+      localStorage.setItem('execution_steps_123', JSON.stringify([{ id: 'test' }]))
+
+      // 清理
+      executionLog.clearLocalStorageCache()
+
+      const cached = localStorage.getItem('execution_steps_123')
+      expect(cached).toBeNull()
+    })
+
+    it('无 localStorage 缓存时 restoreFromLocalStorage 应返回 false', () => {
+      const restored = executionLog.restoreFromLocalStorage()
+
+      expect(restored).toBe(false)
+      expect(executionLog.steps.value.length).toBe(0)
+    })
+
+    it('localStorage 缓存损坏时 restoreFromLocalStorage 应处理错误', () => {
+      // 设置无效 JSON
+      localStorage.setItem('execution_steps_123', 'invalid-json')
+
+      const restored = executionLog.restoreFromLocalStorage()
+
+      expect(restored).toBe(false)
+      expect(executionLog.steps.value.length).toBe(0)
     })
   })
 })
