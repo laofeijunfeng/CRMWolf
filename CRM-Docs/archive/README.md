@@ -12,18 +12,23 @@
 
 | 文档 | 原位置 | 归档日期 | 关联 PR | 结果文档 |
 |------|--------|----------|---------|----------|
+| [AI-AGENT-ENHANCEMENT-REQUIREMENTS.md](requirements/AI-AGENT-ENHANCEMENT-REQUIREMENTS.md) | requirements/ | 2026-06-09 | - | [changelog](../changelog/enhancements/ai-agent-enhancement-requirements.md) |
 | [AI-AGENT-INLINE-INTERACTION-REQUIREMENTS.md](requirements/AI-AGENT-INLINE-INTERACTION-REQUIREMENTS.md) | requirements/ | 2026-06-10 | - | [changelog](../changelog/enhancements/ai-agent-inline-interaction-requirements.md) |
 | [AI-AGENT-SAFETY-ENHANCEMENT-REQUIREMENTS.md](requirements/AI-AGENT-SAFETY-ENHANCEMENT-REQUIREMENTS.md) | requirements/ | 2026-06-10 | - | [changelog](../changelog/enhancements/ai-agent-safety-enhancement-requirements.md) |
 | [AI-GLUE-REQUIREMENTS.md](requirements/AI-GLUE-REQUIREMENTS.md) | requirements/ | 2026-05-26 | - | [changelog](../changelog/enhancements/ai-glue-requirements.md) |
 | [AI-GLUE-ROUTING-ALIGNMENT-RFC.md](requirements/AI-GLUE-ROUTING-ALIGNMENT-RFC.md) | requirements/ | 2026-05-26 | - | [changelog](../changelog/enhancements/ai-glue-routing-alignment-rfc.md) |
+| [AI-INTENT-RECOGNITION-OPTIMIZATION.md](requirements/AI-INTENT-RECOGNITION-OPTIMIZATION.md) | requirements/ | 2026-06-09 | - | [changelog](../changelog/enhancements/ai-intent-recognition-optimization.md) |
 | [AI-OPENAPI-REQUIREMENTS.md](requirements/AI-OPENAPI-REQUIREMENTS.md) | requirements/ | 2026-05-25 | - | [changelog](../changelog/enhancements/ai-openapi-requirements.md) |
 | [AI-TOOL-ENHANCEMENT-REQUIREMENTS.md](requirements/AI-TOOL-ENHANCEMENT-REQUIREMENTS.md) | requirements/ | 2026-06-08 | - | [changelog](../changelog/enhancements/ai-tool-enhancement-requirements.md) |
+| [CRM-AGENT-CONTROL-PLANE-REQUIREMENTS.md](requirements/CRM-AGENT-CONTROL-PLANE-REQUIREMENTS.md) | requirements/ | 2026-06-10 | - | [changelog](../changelog/enhancements/crm-agent-control-plane-requirements.md) |
+| [CRM-AGENT-WORKFLOW-REQUIREMENTS.md](requirements/CRM-AGENT-WORKFLOW-REQUIREMENTS.md) | requirements/ | 2026-06-10 | - | [changelog](../changelog/enhancements/crm-agent-workflow-requirements.md) |
 
 
 ### 归档计划 (archive/plans/)
 
 | 文档 | 原位置 | 归档日期 | 关联 PR | 结果文档 |
 |------|--------|----------|---------|----------|
+| [2026-06-12-1801-workflow-win-exception-fix-PLAN.md](plans/2026-06-12-1801-workflow-win-exception-fix-PLAN.md) | plans/ | 2026-06-12 | - | [changelog](../changelog/enhancements/2026-06-12-1801-workflow-win-exception-fix-plan.md) |
 | [AI-AGENT-FEATURE-SUMMARY.md](plans/AI-AGENT-FEATURE-SUMMARY.md) | plans/ | 2026-06-10 | - | [changelog](../changelog/enhancements/ai-agent-feature-summary.md) |
 | [AI-AGENT-INLINE-INTERACTION-PLAN.md](plans/AI-AGENT-INLINE-INTERACTION-PLAN.md) | plans/ | 2026-06-10 | - | [changelog](../changelog/enhancements/ai-agent-inline-interaction-plan.md) |
 | [AI-AGENT-SAFETY-ENHANCEMENT-PLAN.md](plans/AI-AGENT-SAFETY-ENHANCEMENT-PLAN.md) | plans/ | 2026-06-10 | - | [changelog](../changelog/enhancements/ai-agent-safety-enhancement-plan.md) |
@@ -33,6 +38,9 @@
 | [AI-INTENT-RECOGNITION-IMPLEMENTATION-PLAN.md](plans/AI-INTENT-RECOGNITION-IMPLEMENTATION-PLAN.md) | plans/ | 2026-06-09 | - | [changelog](../changelog/enhancements/ai-intent-recognition-implementation-plan.md) |
 | [AI-OPENAPI-IMPLEMENTATION-PLAN.md](plans/AI-OPENAPI-IMPLEMENTATION-PLAN.md) | plans/ | 2026-05-25 | - | [changelog](../changelog/enhancements/ai-openapi-implementation-plan.md) |
 | [AI-TOOL-ENHANCEMENT-PLAN.md](plans/AI-TOOL-ENHANCEMENT-PLAN.md) | plans/ | 2026-06-08 | - | [changelog](../changelog/enhancements/ai-tool-enhancement-plan.md) |
+| [CLAUDE-CODE-RULES-REFACTOR-PLAN.md](plans/CLAUDE-CODE-RULES-REFACTOR-PLAN.md) | plans/ | 2026-06-12 | - | [changelog](../changelog/enhancements/claude-code-rules-refactor-plan.md) |
+| [PHASE-6-FRONTEND-TECH-SPEC.md](plans/PHASE-6-FRONTEND-TECH-SPEC.md) | plans/ | 2026-06-09 | - | [changelog](../changelog/enhancements/phase-6-frontend-tech-spec.md) |
+| [PROCUREMENT-METHOD-UNIFIED-PLAN.md](plans/PROCUREMENT-METHOD-UNIFIED-PLAN.md) | plans/ | 2026-06-11 | - | [changelog](../changelog/enhancements/procurement-method-unified-plan.md) |
 
 
 ---

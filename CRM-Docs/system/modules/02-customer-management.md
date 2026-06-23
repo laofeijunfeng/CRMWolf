@@ -1,6 +1,44 @@
+---
+priority: high
+status: active
+module_type: business
+---
+
 # 客户管理模块 - 完整文档
 
-> **版本：2.0** | **更新日期：2026-06-12**
+> **版本：2.1** | **更新日期：2026-06-12**
+
+---
+
+## AI 交互意图
+
+### AI 在此模块的核心任务
+
+| 任务场景 | AI 操作意图 | 约束条件 | 风险等级 |
+|----------|-------------|----------|----------|
+| 创建客户 | 调用 `create_customer` 工具 | account_name 必填、team_id 隔离 | P0 |
+| 编辑客户 | 调用 `update_customer` 工具 | **禁止修改 account_name**（业务约束） | P1 |
+| 跟进客户 | 调用 `create_follow_up` 工具 | 自动注入 customer_id、跟进方式识别 | P1 |
+| 查询客户 | 调用 `query_customers` 工具 | 默认 team_id 过滤、禁止跨团队 | P0 |
+| 状态变更 | 调用 `change_customer_status` 工具 | 状态机校验（0→1/2/3）、已成交客户不可退回公海 | P0 |
+
+### AI 禁止行为
+
+| 禁止行为 | 原因 | 替代方案 |
+|----------|------|----------|
+| ❌ 跨 team_id 查询客户 | 违反团队隔离红线 | 必须注入当前用户 team_id |
+| ❌ 臆测客户状态枚举 | 违反禁止臆测红线 | 状态值是数字（0/1/2/3），查阅 GLOSSARY.md |
+| ❌ 修改已成交客户的 account_name | 违反业务约束 | 已成交客户信息锁定 |
+| ❌ 将已成交客户退回公海 | 违反业务规则 | 已成交客户不可退回公海池 |
+
+### AI 必查文档
+
+| 场景 | 必查文档 | 查阅时机 |
+|------|----------|----------|
+| 定义类型 | `CRM-Client/docs/TYPESCRIPT.md` | 写代码前 |
+| 查状态枚举 | `CRM-Docs/system/GLOSSARY.md` | 处理状态字段前 |
+| 查 API 参数 | `CRM-Docs/system/BUSINESS-CHAIN-API.md` | 调用接口前 |
+| 查 CRUD 模式 | `CRM-Docs/best-practices/backend/crud-patterns.md` | 写 CRUD 前 |
 
 ---
 

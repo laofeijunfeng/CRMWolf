@@ -18,6 +18,8 @@ from app.services.skills.handlers.stage_query_handler import StageQueryHandler
 from app.services.skills.handlers.stage_advance_handler import StageAdvanceHandler
 from app.services.skills.handlers.set_procurement_method_handler import SetProcurementMethodHandler
 from app.services.skills.handlers.set_next_follow_handler import SetNextFollowHandler
+from app.services.skills.handlers.ask_user_handler import AskUserHandler
+from app.services.skills.handlers.get_context_handler import GetContextHandler
 
 
 class HandlerFactory:
@@ -36,6 +38,8 @@ class HandlerFactory:
         "StageAdvanceHandler": StageAdvanceHandler,
         "SetProcurementMethodHandler": SetProcurementMethodHandler,
         "SetNextFollowHandler": SetNextFollowHandler,
+        "AskUserHandler": AskUserHandler,
+        "GetContextHandler": GetContextHandler,
     }
 
     @classmethod

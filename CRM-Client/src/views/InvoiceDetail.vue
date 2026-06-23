@@ -5,7 +5,7 @@
         <el-button class="wolf-btn wolf-btn--back" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ invoiceInfo?.application_number || '发票申请详情' }}</h1>
+        <h1 class="wolf-page-title">{{ invoiceInfo?.application_number || '发票申请详情' }}</h1>
       </div>
       <div class="page-header__right">
         <el-button v-if="canEdit" type="primary" class="wolf-btn wolf-btn--primary" @click="handleEdit">
@@ -314,7 +314,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import {
   ArrowLeft,
   ArrowDown,
@@ -444,7 +445,7 @@ const fetchInvoiceDetail = async () => {
     invoiceInfo.value = data
   } catch (error) {
     console.error('获取发票申请详情失败', error)
-    ElMessage.error('获取发票申请详情失败')
+    showError(error, '获取发票申请详情')
   } finally {
     loading.value = false
   }
@@ -480,12 +481,12 @@ const handleDelete = async () => {
       }
     )
     await invoiceApi.deleteInvoiceApplication(invoiceInfo.value.id)
-    ElMessage.success('删除成功')
+    showSuccess('删除', '发票申请')
     router.push('/invoices')
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('删除失败', error)
-      ElMessage.error(error.response?.data?.detail || '删除失败')
+      showError(error, '删除发票申请')
     }
   }
 }
@@ -505,12 +506,12 @@ const handleSubmit = async () => {
     )
     submitting.value = true
     await invoiceApi.submitInvoiceApplication(invoiceInfo.value.id)
-    ElMessage.success('提交成功')
+    showSuccess('提交审批', '发票申请')
     fetchInvoiceDetail()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('提交失败', error)
-      ElMessage.error(error.response?.data?.detail || '提交失败')
+      showError(error, '提交审批')
     }
   } finally {
     submitting.value = false
@@ -532,12 +533,12 @@ const handleWithdraw = async () => {
     )
     withdrawing.value = true
     await invoiceApi.withdrawInvoiceApplication(invoiceInfo.value.id)
-    ElMessage.success('撤回成功')
+    showSuccess('撤回审批', '发票申请')
     fetchInvoiceDetail()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('撤回失败', error)
-      ElMessage.error(error.response?.data?.detail || '撤回失败')
+      showError(error, '撤回审批')
     }
   } finally {
     withdrawing.value = false
@@ -561,12 +562,12 @@ const handleApprove = async () => {
     await invoiceApi.financeApprovalInvoiceApplication(invoiceInfo.value.id, {
       approved: true
     })
-    ElMessage.success('审批通过')
+    showSuccess('审批通过', '发票申请')
     fetchInvoiceDetail()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('审批失败', error)
-      ElMessage.error(error.response?.data?.detail || '审批失败')
+      showError(error, '审批发票申请')
     }
   } finally {
     approving.value = false
@@ -591,13 +592,13 @@ const confirmReject = async () => {
       approved: false,
       remark: rejectForm.value.reason
     })
-    ElMessage.success('已拒绝')
+    showSuccess('拒绝审批', '发票申请')
     rejectModalVisible.value = false
     rejectForm.value.reason = ''
     fetchInvoiceDetail()
   } catch (error) {
     console.error('拒绝失败', error)
-    ElMessage.error('拒绝失败')
+    showError(error, '拒绝审批')
   } finally {
     rejecting.value = false
   }
@@ -618,13 +619,13 @@ const handleConfirmInvoiced = async () => {
   try {
     marking.value = true
     await invoiceApi.markAsInvoiced(invoiceInfo.value.id, invoicedForm.value.invoice_number)
-    ElMessage.success('标记成功')
+    showSuccess('标记开票', '发票申请')
     invoicedModalVisible.value = false
     invoicedForm.value.invoice_number = ''
     fetchInvoiceDetail()
   } catch (error) {
     console.error('标记开票失败', error)
-    ElMessage.error('标记开票失败')
+    showError(error, '标记开票')
   } finally {
     marking.value = false
   }

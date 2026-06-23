@@ -143,7 +143,7 @@
           </el-table>
         </div>
 
-        <el-empty v-else description="暂无数据" />
+        <el-empty v-else description="添加商机，构建销售漏斗" />
       </div>
     </el-card>
 

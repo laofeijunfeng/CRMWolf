@@ -1,5 +1,8 @@
 <template>
   <div class="customers-page">
+    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
+    <h1 class="wolf-page-title">客户管理</h1>
+
     <!-- 快捷筛选标签 + 操作按钮 -->
     <div class="filter-tabs-bar">
       <div class="filter-tabs">
@@ -47,9 +50,6 @@
           </template>
           <template #default="{ row }">
             <div class="name-cell">
-              <el-icon class="magicwand-icon" @click="handleMagicWand(row)">
-                <MagicStick />
-              </el-icon>
               <span class="link-text" @click="handleViewDetail(row)">{{ row.account_name }}</span>
             </div>
           </template>
@@ -310,14 +310,7 @@
     </el-dialog>
 
     <!-- AI 魔术棒弹窗 -->
-    <MagicWandDialog
-      v-model="showMagicWand"
-      entity-type="customer"
-      :entity-id="magicWandEntityId"
-      :entity-name="magicWandEntityName"
-      @refresh="fetchCustomerList"
-    />
-  </div>
+    </div>
 </template>
 
 <script setup lang="ts">
@@ -326,7 +319,6 @@ import { useRouter } from 'vue-router'
 import {
   Plus,
   Search,
-  MagicStick,
   View,
   Edit,
   User,
@@ -337,6 +329,7 @@ import {
   Opportunity
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import customerApi, {
   type CustomerResponse,
   type CustomerStatus,
@@ -347,7 +340,6 @@ import customerApi, {
 } from '@/api/customer'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
-import MagicWandDialog from '@/components/MagicWandDialog.vue'
 import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
 import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
 
@@ -438,11 +430,6 @@ const loseForm = reactive<CustomerLoseRequest>({
 const loseFormRules = {
   loss_reason: [{ required: true, message: '请输入输单原因', trigger: 'blur' }]
 }
-
-// MagicWand 状态
-const showMagicWand = ref(false)
-const magicWandEntityId = ref(0)
-const magicWandEntityName = ref('')
 
 const getStatusText = (status: number) => {
   const map: Record<number, string> = { 0: '跟进中', 1: '已赢单', 2: '已输单', 3: '已失效' }
@@ -578,8 +565,11 @@ const fetchCustomerList = async () => {
       tableData.value = response.data?.items || response || []
       pagination.total = response.data?.total || response.length || 0
     }
-  } catch (error) {
-    ElMessage.error('获取客户列表失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Customers] fetchCustomerList error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '获取客户列表')
   } finally {
     loading.value = false
   }
@@ -604,12 +594,6 @@ const handleViewDetail = (record: CustomerResponse) => {
   router.push(`/customers/${record.id}`)
 }
 
-const handleMagicWand = (record: CustomerResponse) => {
-  magicWandEntityId.value = record.id
-  magicWandEntityName.value = record.account_name
-  showMagicWand.value = true
-}
-
 const handleCreateOpportunity = (record: CustomerResponse) => {
   router.push(`/customers/${record.id}/opportunities/create`)
 }
@@ -622,10 +606,16 @@ const handleClaim = async (record: CustomerResponse) => {
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
     await customerApi.claimCustomer(record.id, { owner_id: userStore.userInfo?.id || '' })
-    ElMessage.success('领取成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('领取', '客户')
     fetchCustomerList()
-  } catch (error: any) {
-    if (error !== 'cancel' && error?.message) ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('[Customers] handleClaim error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '领取客户')
+    }
   }
 }
 
@@ -650,11 +640,15 @@ const handleLoseModalOk = async () => {
   } catch { return }
   try {
     await customerApi.markAsLost(selectedCustomer.value.id, loseForm)
-    ElMessage.success('已标记输单')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('标记输单', '客户')
     loseModalVisible.value = false
     fetchCustomerList()
-  } catch (error: any) {
-    if (error?.message) ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Customers] handleLoseModalOk error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '标记输单')
   }
 }
 
@@ -671,10 +665,16 @@ const handleUpdateStatus = async (record: CustomerResponse, status: CustomerStat
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
     await customerApi.updateCustomerStatus(record.id, { status })
-    ElMessage.success('更新成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('更新状态', '客户')
     fetchCustomerList()
-  } catch (error: any) {
-    if (error !== 'cancel' && error?.message) ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('[Customers] handleUpdateStatus error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '更新客户状态')
+    }
   }
 }
 
@@ -686,10 +686,16 @@ const handleDelete = async (record: CustomerResponse) => {
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
     await customerApi.deleteCustomer(record.id)
-    ElMessage.success('删除成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('删除', '客户')
     fetchCustomerList()
-  } catch (error: any) {
-    if (error !== 'cancel' && error?.message) ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('[Customers] handleDelete error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '删除客户')
+    }
   }
 }
 
@@ -703,11 +709,15 @@ const handleReturnModalOk = async () => {
   try {
     await returnFormRef.value?.validate()
     await customerApi.returnToPool(selectedCustomer.value!.id, returnForm)
-    ElMessage.success('已退回公海')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('退回公海', '客户')
     returnModalVisible.value = false
     fetchCustomerList()
-  } catch (error: any) {
-    if (error?.message) ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Customers] handleReturnModalOk error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '退回公海')
   }
 }
 

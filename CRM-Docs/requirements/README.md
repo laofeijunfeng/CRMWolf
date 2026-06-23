@@ -29,11 +29,11 @@
 
 ## 待归档需求
 
-> status: completed，等待 CI 自动归档
+> status: completed/approved，等待 CI 自动归档
 
 | 文档 | 状态 | 完成日期 | 关联 PR | 待创建 Changelog |
 |------|------|----------|---------|------------------|
-| _暂无待归档需求_ | - | - | - | - |
+| [AI-ASSISTANT-EXECUTION-LOG-REQUIREMENTS.md](AI-ASSISTANT-EXECUTION-LOG-REQUIREMENTS.md) | approved | 2026-06-22 | feat/thinking-bubble-component | 待创建 |
 
 
 ---

@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ isEdit ? '编辑采购方式' : '新增采购方式' }}</h1>
+        <h1 class="wolf-page-title">{{ isEdit ? '编辑采购方式' : '新增采购方式' }}</h1>
       </div>
     </div>
 
@@ -96,7 +96,7 @@
             </div>
 
             <div v-if="form.stages.length === 0" class="empty-stages">
-              <el-empty description="暂无采购阶段，请点击上方按钮添加">
+              <el-empty description="设置采购阶段，点击添加按钮定义流程">
                 <el-button type="primary" @click="handleAddStage">
                   添加第一阶段
                 </el-button>
@@ -271,7 +271,7 @@
                 </div>
               </el-timeline-item>
             </el-timeline>
-            <el-empty v-else description="暂无阶段数据" />
+            <el-empty v-else description="添加采购阶段，定义采购流程" />
           </div>
         </el-col>
       </el-row>
@@ -354,7 +354,7 @@ const fetchMethodDetail = async (id: string) => {
     }
   } catch (error: any) {
     console.error('获取采购方式详情失败', error)
-    ElMessage.error('获取采购方式详情失败')
+    ElMessage.error('获取采购方式详情失败，请刷新页面或稍后重试')
   }
 }
 
@@ -468,7 +468,7 @@ const handleSubmit = async () => {
       })
     }
 
-    ElMessage.success(isEdit.value ? '保存成功' : '创建成功')
+    ElMessage.success(isEdit.value ? '已保存，可以继续下一步操作' : '已创建，可以继续下一步操作')
     router.push('/procurement-methods')
   } catch (error: any) {
     console.error('提交失败', error)

@@ -48,7 +48,8 @@ COMPANY_SCALE_ENUM_MAP = {
 @router.post("/parse")
 async def parse_lead_info(
     request: LeadAIParseRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    team_id: int = Depends(get_current_user_team)
 ):
     """
     AI 解析线索信息（SSE 流式响应）
@@ -64,7 +65,8 @@ async def parse_lead_info(
         try:
             async for event in lead_ai_parser_service.parse_lead_info_stream(
                 db=db,
-                user_message=request.content
+                user_message=request.content,
+                team_id=team_id
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         finally:

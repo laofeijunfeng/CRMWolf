@@ -220,4 +220,126 @@ describe('useSidebarState', () => {
       expect(sidebarState.history.value.length).toBe(0)
     })
   })
+
+  // ========== Phase 5: 性能测试 ==========
+
+  describe('性能验收', () => {
+    it('状态转换响应时间应 < 100ms', () => {
+      const startTime = performance.now()
+
+      // 执行完整的状态转换流程
+      sidebarState.userSubmit('创建客户张三')
+      sidebarState.aiCollectingDone({ intent: 'create_customer' })
+      sidebarState.aiPreviewGenerated({ action: 'create_customer', params: {} })
+      sidebarState.userConfirm()
+      sidebarState.aiExecutionDone({ customerId: 123 })
+
+      const endTime = performance.now()
+      const duration = endTime - startTime
+
+      // 状态转换应该在 100ms 内完成
+      expect(duration).toBeLessThan(100)
+    })
+
+    it('批量状态转换应高效', () => {
+      const startTime = performance.now()
+
+      // 执行 100 次状态转换
+      for (let i = 0; i < 100; i++) {
+        sidebarState.userSubmit(`测试${i}`)
+        sidebarState.resetToIdle()
+      }
+
+      const endTime = performance.now()
+      const duration = endTime - startTime
+
+      // 100 次转换应该在 50ms 内完成
+      expect(duration).toBeLessThan(50)
+    })
+
+    it('uiConfig 计算属性应快速响应', () => {
+      // 先转换状态
+      sidebarState.userSubmit('创建客户张三')
+
+      const startTime = performance.now()
+      const config = sidebarState.uiConfig.value
+      const endTime = performance.now()
+
+      // 计算属性访问应该是即时响应
+      expect(endTime - startTime).toBeLessThan(1)
+      expect(config.showSidebar).toBe(true)
+    })
+  })
+
+  // ========== Phase 5: UI 配置验收 ==========
+
+  describe('UI 配置验收', () => {
+    it('IDLE 状态：主输入框显示，Sidebar 隐藏', () => {
+      expect(sidebarState.state.value).toBe(SidebarState.IDLE)
+      expect(sidebarState.uiConfig.value.showInputBox).toBe(true)
+      expect(sidebarState.uiConfig.value.showSidebar).toBe(false)
+      expect(sidebarState.uiConfig.value.showStopButton).toBe(false)
+      expect(sidebarState.uiConfig.value.showNewChatButton).toBe(false)
+    })
+
+    it('EXECUTING 状态：Sidebar 显示，停止按钮显示', () => {
+      sidebarState.userSubmit('创建客户张三')
+      sidebarState.aiCollectingDone({ intent: 'create_customer' })
+      sidebarState.aiPreviewGenerated({ action: 'create_customer', params: {} })
+      sidebarState.userConfirm()
+
+      expect(sidebarState.state.value).toBe(SidebarState.EXECUTING)
+      expect(sidebarState.uiConfig.value.showInputBox).toBe(false)
+      expect(sidebarState.uiConfig.value.showSidebar).toBe(true)
+      expect(sidebarState.uiConfig.value.showStopButton).toBe(true)
+      expect(sidebarState.uiConfig.value.showNewChatButton).toBe(false)
+    })
+
+    it('COMPLETED 状态：Sidebar 显示，新对话按钮显示', () => {
+      sidebarState.userSubmit('创建客户张三')
+      sidebarState.aiCollectingDone({ intent: 'create_customer' })
+      sidebarState.aiPreviewGenerated({ action: 'create_customer', params: {} })
+      sidebarState.userConfirm()
+      sidebarState.aiExecutionDone({ customerId: 123 })
+
+      expect(sidebarState.state.value).toBe(SidebarState.COMPLETED)
+      expect(sidebarState.uiConfig.value.showInputBox).toBe(false)
+      expect(sidebarState.uiConfig.value.showSidebar).toBe(true)
+      expect(sidebarState.uiConfig.value.showStopButton).toBe(false)
+      expect(sidebarState.uiConfig.value.showNewChatButton).toBe(true)
+    })
+
+    it('点击新对话按钮返回 IDLE 状态', () => {
+      // 先到达 COMPLETED 状态
+      sidebarState.userSubmit('创建客户张三')
+      sidebarState.aiCollectingDone({ intent: 'create_customer' })
+      sidebarState.aiPreviewGenerated({ action: 'create_customer', params: {} })
+      sidebarState.userConfirm()
+      sidebarState.aiExecutionDone({ customerId: 123 })
+
+      // 点击新对话
+      sidebarState.userNewChat()
+
+      // 应返回 IDLE
+      expect(sidebarState.state.value).toBe(SidebarState.IDLE)
+      expect(sidebarState.uiConfig.value.showInputBox).toBe(true)
+      expect(sidebarState.uiConfig.value.showSidebar).toBe(false)
+    })
+
+    it('点击停止按钮返回 IDLE 状态', () => {
+      // 先到达 EXECUTING 状态
+      sidebarState.userSubmit('创建客户张三')
+      sidebarState.aiCollectingDone({ intent: 'create_customer' })
+      sidebarState.aiPreviewGenerated({ action: 'create_customer', params: {} })
+      sidebarState.userConfirm()
+
+      // 点击停止
+      sidebarState.userStop()
+
+      // 应返回 IDLE
+      expect(sidebarState.state.value).toBe(SidebarState.IDLE)
+      expect(sidebarState.uiConfig.value.showInputBox).toBe(true)
+      expect(sidebarState.uiConfig.value.showSidebar).toBe(false)
+    })
+  })
 })

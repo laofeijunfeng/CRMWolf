@@ -100,6 +100,46 @@ class OpportunityCRUD:
         opportunities = query.order_by(Opportunity.created_time.desc()).offset(skip).limit(limit).all()
         return opportunities, total
 
+    def search_by_name(
+        self,
+        db: Session,
+        keyword: str,
+        team_id: int,
+        limit: int = 5,
+    ) -> List[Opportunity]:
+        """
+        按名称关键词搜索商机（Agent 专用）
+
+        Args:
+            db: 数据库会话
+            keyword: 搜索关键词
+            team_id: 团队 ID（必传，遵循规范）
+            limit: 返回数量限制
+
+        Returns:
+            List[Opportunity]: 商机列表
+
+        遵循规范：
+        - CRUD 统一入口
+        - team_id 必传
+        - 不直接 query
+        """
+        from sqlalchemy import or_
+
+        query = db.query(Opportunity).filter(
+            and_(
+                Opportunity.team_id == team_id,
+                or_(
+                    Opportunity.opportunity_name.like(f"%{keyword}%"),
+                    Opportunity.customer.has(Customer.account_name.like(f"%{keyword}%")),
+                )
+            )
+        )
+
+        opportunities = query.order_by(Opportunity.created_time.desc()).limit(limit).all()
+
+        return opportunities
+
     def get_multi(
         self,
         db: Session,

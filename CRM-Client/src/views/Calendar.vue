@@ -1,8 +1,8 @@
 <template>
   <div class="calendar-container">
-    <!-- 页面标题 -->
-    <div class="page-title">
-      <h1 class="title">我的日历</h1>
+    <!-- ✅ P1: Typography - 页面标题使用性格化字体 -->
+    <div class="page-title-wrapper">
+      <h1 class="wolf-page-title">我的日历</h1>
     </div>
 
     <!-- 日历控制头部 -->
@@ -102,6 +102,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { showError } from '@/utils/errorMessages'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { Solar } from 'lunar-javascript'
 import { calendarApi, type TodoCount, type CalendarDateDetailResponse } from '@/api/calendar'
@@ -197,8 +198,11 @@ const loadMonthTodos = async () => {
     const month = currentDate.value.getMonth() + 1
     const response = await calendarApi.getMonthTodos(year, month)
     todos.value = response.todos || {}
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || '加载日历数据失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Calendar] loadMonthTodos error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '加载日历数据')
   } finally {
     loading.value = false
   }
@@ -232,8 +236,11 @@ const handleCellClick = async (dateStr: string) => {
     const response = await calendarApi.getDateTodos(dateStr)
     dateTodos.value = response
     drawerVisible.value = true
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || '加载待办详情失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Calendar] handleCellClick error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '加载待办详情')
   }
 }
 
@@ -244,8 +251,11 @@ const handleDrawerRefresh = async () => {
     try {
       const response = await calendarApi.getDateTodos(selectedDate.value)
       dateTodos.value = response
-    } catch (error: any) {
-      ElMessage.error('刷新待办失败')
+    } catch (error: unknown) {
+      const err = error as Error
+      console.error('[Calendar] handleDrawerRefresh error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '刷新待办')
     }
   }
   // 刷新月度统计

@@ -13,10 +13,13 @@ logger = get_logger(__name__)
 
 from app.api import auth, users, roles, permissions, leads, customers, customer_follow_ups, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, calendar, teams, industry, lead_ai, procurement_ai
 from app.api.customer_ai import router as customer_ai_router
-from app.api.web_assistant import router as web_assistant_router
+# from app.api.web_assistant import router as web_assistant_router  # 暂时禁用（依赖旧的 LangGraph）
+from app.api.agent_assistant import router as agent_assistant_router
 from app.api.ai_config import router as ai_config_router
-from app.api.chat import router as chat_router
+# from app.api.chat import router as chat_router  # 暂时禁用（依赖旧的 LangGraph）
 from app.api.ai import router as ai_openapi_router
+from app.api.workflow_undo import router as workflow_undo_router
+from app.api.ai_conversation_history import router as ai_conversation_history_router
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
@@ -84,14 +87,23 @@ app.include_router(calendar.router)
 # AI 配置管理路由
 app.include_router(ai_config_router)
 
-# 聊天机器人路由（通用接口，支持飞书/钉钉/企业微信等）
-app.include_router(chat_router)
+# 聊天机器人路由（通用接口 - 暂时禁用，依赖旧的 LangGraph）
+# app.include_router(chat_router)
 
-# Web AI 助手路由
-app.include_router(web_assistant_router)
+# Web AI 助手路由（LangGraph 架构 - 暂时禁用）
+# app.include_router(web_assistant_router)
+
+# Agent AI 助手路由（ReAct 循环架构 - 唯一入口）
+app.include_router(agent_assistant_router)
 
 # AI OpenAPI 路由（面向 AI Agent 的标准化接口）
 app.include_router(ai_openapi_router)
+
+# Workflow Undo 路由（撤销机制）
+app.include_router(workflow_undo_router)
+
+# AI 对话历史路由
+app.include_router(ai_conversation_history_router)
 
 # AI 对话胶水层路由
 from app.glue.router import router as glue_router

@@ -180,7 +180,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError } from '@/utils/errorMessages'
 import { Download, Search } from '@element-plus/icons-vue'
 import financeApi, { type AccountAgingAnalysis, type ContractRevenueStats, type OverduePaymentAlert } from '@/api/finance'
 
@@ -222,7 +222,7 @@ const fetchAgingAnalysis = async () => {
     agingAnalysis.value = response || { aging_data: [], total_overdue: '0', analysis_date: '' }
   } catch (error) {
     console.error('获取账龄分析失败', error)
-    ElMessage.error('获取数据失败')
+    showError(error, '获取账龄分析')
   } finally {
     loading.value = false
   }
@@ -236,7 +236,7 @@ const fetchRevenueStats = async () => {
     revenuePagination.total = response?.length || 0
   } catch (error) {
     console.error('获取收入统计失败', error)
-    ElMessage.error('获取数据失败')
+    showError(error, '获取收入统计')
   } finally {
     loading.value = false
   }
@@ -250,7 +250,7 @@ const fetchOverdueAlerts = async () => {
     overduePagination.total = response?.length || 0
   } catch (error) {
     console.error('获取逾期预警失败', error)
-    ElMessage.error('获取数据失败')
+    showError(error, '获取逾期预警')
   } finally {
     loading.value = false
   }
@@ -283,8 +283,9 @@ const handleOverduePageChange = (page: number) => {
   overduePagination.current = page
 }
 
+// TODO: 导出功能待实现
 const handleExportExcel = () => {
-  ElMessage.info('导出功能开发中...')
+  // 导出功能开发中...
 }
 
 const goToContract = (contractId: number) => {

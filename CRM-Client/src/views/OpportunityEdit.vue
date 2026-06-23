@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ isEdit ? '编辑商机' : '新建商机' }}</h1>
+        <h1 class="wolf-page-title">{{ isEdit ? '编辑商机' : '新建商机' }}</h1>
       </div>
     </div>
 
@@ -144,7 +144,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { opportunityApi, PurchaseType, LicenseType, type Opportunity } from '@/api/opportunity'
 import customerApi from '@/api/customer'
@@ -252,7 +252,7 @@ const fetchCustomerInfo = async (id: string, setDefaults: boolean = false) => {
     }
   } catch (error) {
     console.error('获取客户信息失败', error)
-    ElMessage.error('获取客户信息失败')
+    showError(error, '获取客户信息')
   } finally {
     loading.value = false
   }
@@ -283,7 +283,7 @@ const fetchOpportunityDetail = async (id: string) => {
     }
   } catch (error) {
     console.error('获取商机详情失败', error)
-    ElMessage.error('获取商机详情失败')
+    showError(error, '获取商机详情')
     router.back()
   } finally {
     loading.value = false
@@ -325,10 +325,10 @@ const handleSubmit = async () => {
     let result
     if (isEdit.value && opportunityId.value) {
       result = await opportunityApi.updateOpportunity(Number(opportunityId.value), data) as any
-      ElMessage.success('更新成功')
+      showSuccess('更新', '商机')
     } else {
       result = await opportunityApi.createOpportunity(data) as any
-      ElMessage.success('创建成功')
+      showSuccess('创建', '商机')
     }
 
     router.push(`/opportunities/${result.id}`)
@@ -340,7 +340,7 @@ const handleSubmit = async () => {
       return
     }
 
-    ElMessage.error(error.response?.data?.detail || error.message || (isEdit.value ? '更新失败' : '创建失败'))
+    showError(error, isEdit.value ? '更新商机' : '创建商机')
   } finally {
     submitting.value = false
   }

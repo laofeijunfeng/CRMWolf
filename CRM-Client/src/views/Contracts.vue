@@ -1,5 +1,8 @@
 <template>
   <div class="contracts-page">
+    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
+    <h1 class="wolf-page-title">合同管理</h1>
+
     <!-- 快捷筛选标签 + 操作按钮 -->
     <div class="filter-tabs-bar">
       <div class="filter-tabs">
@@ -64,9 +67,6 @@
           </template>
           <template #default="{ row }">
             <div class="name-cell">
-              <el-icon class="magicwand-icon" @click="handleMagicWand(row)">
-                <MagicStick />
-              </el-icon>
               <span class="link-text" @click="handleViewDetail(row)">{{ row.contract_name }}</span>
             </div>
           </template>
@@ -187,24 +187,17 @@
     </div>
 
     <!-- Magic Wand 弹窗 -->
-    <MagicWandDialog
-      v-model="showMagicWand"
-      entity-type="contract"
-      :entity-id="magicWandEntityId"
-      :entity-name="magicWandEntityName"
-      @refresh="fetchContractList"
-    />
-  </div>
+    </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, View, Edit, Delete, MagicStick } from '@element-plus/icons-vue'
+import { showError, showSuccess } from '@/utils/errorMessages'
+import { Plus, Search, View, Edit, Delete } from '@element-plus/icons-vue'
 import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
 import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
-import MagicWandDialog from '@/components/MagicWandDialog.vue'
 import contractApi, { type ContractListResponse, type ContractQueryParams } from '@/api/contract'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
@@ -219,11 +212,6 @@ const activeTab = ref<string>('all')
 
 const filterValues = ref<Record<string, FilterValue>>({})
 const sortState = ref<SortState>({ field: '', order: null })
-
-// MagicWand 弹窗
-const showMagicWand = ref(false)
-const magicWandEntityId = ref(0)
-const magicWandEntityName = ref('')
 
 // 权限计算属性
 const canCreateContract = computed(() => permissionStore.hasPermission('contract:create'))
@@ -333,9 +321,11 @@ const fetchContractList = async () => {
     const data = await contractApi.getContracts(params) as unknown as ContractListResponse[]
     tableData.value = data
     pagination.total = data.length
-  } catch (error: any) {
-    console.error('获取合同列表失败', error)
-    ElMessage.error('获取合同列表失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('获取合同列表失败', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '获取合同列表')
   } finally {
     loading.value = false
   }
@@ -383,12 +373,6 @@ const handleEdit = (record: ContractListResponse) => {
   router.push(`/contracts/edit/${record.id}`)
 }
 
-const handleMagicWand = (record: ContractListResponse) => {
-  magicWandEntityId.value = record.id
-  magicWandEntityName.value = record.contract_name
-  showMagicWand.value = true
-}
-
 const handleDelete = async (record: ContractListResponse) => {
   try {
     await ElMessageBox.confirm(
@@ -401,11 +385,15 @@ const handleDelete = async (record: ContractListResponse) => {
       }
     )
     await contractApi.deleteContract(record.id)
-    ElMessage.success('删除成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('删除', '合同')
     fetchContractList()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.message || '删除失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('[Contracts] handleDelete error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '删除合同')
     }
   }
 }

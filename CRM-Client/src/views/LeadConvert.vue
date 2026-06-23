@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleGoBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">线索转化为客户</h1>
+        <h1 class="wolf-page-title">线索转化为客户</h1>
       </div>
       <div class="page-header-right">
         <el-button @click="handleGoBack">取消</el-button>
@@ -146,7 +146,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import {
   ArrowLeft,
   CircleCheck
@@ -198,7 +198,7 @@ const fetchLeadDetail = async () => {
     convertForm.account_name = res.lead_name || ''
     convertForm.city = res.city || ''
   } catch (error: any) {
-    ElMessage.error(error.message || '获取线索详情失败')
+    showError(error, '获取线索详情')
     router.back()
   } finally {
     loading.value = false
@@ -230,10 +230,10 @@ const handleSubmit = async () => {
       default_procurement_method_id: convertForm.default_procurement_method_id || undefined
     }
     const result = await customerApi.convertLeadToCustomer(data) as any
-    ElMessage.success(result.message || `转化成功！客户ID：${result.customer_id}`)
+    showSuccess('转化', '线索')
     router.push(`/customers/${result.customer_id}`)
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || error.message || '转化失败')
+    showError(error, '转化线索')
   } finally {
     loading.value = false
   }
@@ -249,7 +249,7 @@ const handleGoBack = () => {
 
 onMounted(async () => {
   if (!leadId) {
-    ElMessage.error('缺少线索ID参数')
+    showError(new Error('缺少线索ID参数'), '转化线索')
     router.push('/leads')
     return
   }

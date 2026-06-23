@@ -49,10 +49,10 @@ class ReasoningResult:
     """推理结果（新增安全机制字段）"""
     is_complete: bool
     needs_tool: bool
-    tool_name: Optional[str]
-    tool_params: Optional[Dict[str, Any]]
-    thinking: str
-    final_answer: Optional[str]
+    tool_name: Optional[str] = None
+    tool_params: Optional[Dict[str, Any]] = None
+    thinking: str = ""  # 默认空字符串（必需字段）
+    final_answer: Optional[str] = None
     # ===== 新增：安全机制字段 =====
     confidence: float = 1.0  # LLM 输出的置信度
     waiting_for_user: bool = False  # 是否需要等待用户
@@ -66,9 +66,9 @@ class ReasoningResult:
 class ObservationResult:
     """观察结果"""
     success: bool
-    error: Optional[str]
-    data: Optional[Any]
-    extracted_info: Optional[Dict[str, Any]]
+    error: Optional[str] = None
+    data: Optional[Any] = None
+    extracted_info: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -391,8 +391,8 @@ class CRMWolfAgent:
         """
         logger.info(f"Act: tool_name={tool_name}, params={tool_params}")
 
-        # 获取工具 Handler
-        handler = self.tool_registry.get_handler(tool_name)
+        # 获取工具 Handler + config
+        handler, handler_config = self.tool_registry.get_handler(tool_name)
 
         if not handler:
             logger.error(f"Tool handler not found: {tool_name}")
@@ -409,13 +409,26 @@ class CRMWolfAgent:
             logger.info(f"Preview required for dangerous tool: {tool_name}")
 
             try:
-                # 调用 Handler 的 preview 方法
-                preview_result = await handler.preview(
-                    db=self.db,
-                    team_id=self.team_id,
-                    user_id=self.user_id,
-                    params=tool_params,
-                )
+                # 调用 Handler 的 preview 方法（兼容两种签名）
+                # agent handlers: preview(db, team_id, user_id, params)
+                # skills handlers: preview(db, handler_config, params, user_id, ...)
+                if hasattr(handler, 'handler_type'):
+                    # skills handlers: 使用 handler_config 签名
+                    preview_result = await handler.preview(
+                        db=self.db,
+                        handler_config=handler_config,
+                        params=tool_params,
+                        user_id=self.user_id,
+                        team_id=self.team_id,
+                    )
+                else:
+                    # agent handlers: 使用 team_id 签名
+                    preview_result = await handler.preview(
+                        db=self.db,
+                        team_id=self.team_id,
+                        user_id=self.user_id,
+                        params=tool_params,
+                    )
 
                 # 返回等待状态（不执行）
                 logger.info(f"Preview generated for {tool_name}, waiting for user confirmation")
@@ -432,29 +445,66 @@ class CRMWolfAgent:
                 logger.error(f"Preview failed for {tool_name}: {str(e)}")
                 # Preview 失败，降级策略：直接执行
                 logger.warning(f"Fallback: executing {tool_name} directly due to Preview failure")
-                return await self._execute_tool(handler, tool_params)
+                return await self._execute_tool(handler, handler_config, tool_params)
 
         # 正常工具：直接执行
-        return await self._execute_tool(handler, tool_params)
+        return await self._execute_tool(handler, handler_config, tool_params)
 
-    async def _execute_tool(self, handler: Any, tool_params: Dict[str, Any]) -> ToolResult:
+    async def _execute_tool(
+        self,
+        handler: Any,
+        handler_config: Dict[str, Any],
+        tool_params: Dict[str, Any]
+    ) -> ToolResult:
         """
         执行工具（抽取为独立方法，支持复用）
 
+        兼容两种 Handler 签名：
+        - agent handlers: execute(db, team_id, user_id, params)
+        - skills handlers: execute(db, handler_config, params, user_id, ...)
+
         Args:
             handler: 工具 Handler
+            handler_config: Handler 配置（来自 TOOL_HANDLER_MAP）
             tool_params: 工具参数
 
         Returns:
             ToolResult: 工具执行结果
         """
         try:
-            result = await handler.execute(
-                db=self.db,
-                team_id=self.team_id,
-                user_id=self.user_id,
-                params=tool_params,
-            )
+            # 根据 handler 类型判断签名
+            if hasattr(handler, 'handler_type'):
+                # skills handlers（如 FollowUpHandler, CreateHandler）
+                # 签名: execute(db, handler_config, params, user_id, ...)
+                result = await handler.execute(
+                    db=self.db,
+                    handler_config=handler_config,
+                    params=tool_params,
+                    user_id=self.user_id,
+                    team_id=self.team_id,
+                )
+
+                # skills handlers 返回 Dict，需要转换为 ToolResult
+                if isinstance(result, dict):
+                    success = result.get("success", False)
+                    message = result.get("message", "")
+                    data = result.get("data")
+                    error = result.get("error")
+                    result = ToolResult(
+                        success=success,
+                        message=message,
+                        data=data,
+                        error=error,
+                    )
+            else:
+                # agent handlers（如 SearchCustomerHandler）
+                # 签名: execute(db, team_id, user_id, params)
+                result = await handler.execute(
+                    db=self.db,
+                    team_id=self.team_id,
+                    user_id=self.user_id,
+                    params=tool_params,
+                )
 
             logger.info(f"Tool result: success={result.success}, message={result.message}")
             return result

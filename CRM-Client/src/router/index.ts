@@ -294,7 +294,7 @@ const routes: RouteRecordRaw[] = [
         name: 'Calendar',
         component: () => import('@/views/Calendar.vue'),
         meta: { requiresAuth: true }
-      }
+      },
       // TODO: 财务管理模块 - 等待后端接口实现后启用
       // {
       //   path: 'finance/dashboard',
@@ -319,7 +319,13 @@ const routes: RouteRecordRaw[] = [
       //   name: 'FinanceReports',
       //   component: () => import('@/views/FinanceReports.vue'),
       //   meta: { requiresAuth: true }
-      // }
+      // },
+      {
+        path: 'ai-assistant',
+        name: 'AIAssistant',
+        component: () => import('@/views/AIAssistant.vue'),
+        meta: { requiresAuth: true }
+      }
     ]
   }
 ]

@@ -24,7 +24,8 @@ router = APIRouter(prefix="/v1/customers/ai", tags=["AI 客户跟进"])
 @router.post("/parse")
 async def parse_customer_follow_up(
     request: CustomerAIParseRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    team_id: int = Depends(get_current_user_team)
 ):
     """
     AI 解析客户跟进信息（SSE 流式响应）
@@ -43,7 +44,8 @@ async def parse_customer_follow_up(
 
             async for event in follow_up_parser_service.parse_follow_up_info_stream(
                 db=db,
-                user_message=context_message
+                user_message=context_message,
+                team_id=team_id
             ):
                 # 添加客户信息到 parsed 事件
                 if event["event"] == "parsed":
@@ -131,4 +133,50 @@ async def create_customer_follow_up(
         "method": request.method,
         "next_action": request.next_action,
         "next_follow_time": next_follow_time_dt.isoformat() if next_follow_time_dt else None
+    }
+
+
+# ==================== ReAct Agent 接口（已迁移到 LangGraph） ====================
+
+from pydantic import BaseModel
+
+# 注意：ai_tool_service 已删除，ReAct 接口已迁移到 web_assistant.py
+# 使用 POST /v1/assistant/chat 和 /v1/assistant/workflow/continue 替代
+
+
+class ReactContinueRequest(BaseModel):
+    """继续 ReAct 循环请求（已废弃）"""
+    session_id: str
+    user_response: str
+
+
+# 此接口已废弃，请使用 /v1/assistant/workflow/continue
+# @router.post("/react/continue")  # 已移除
+
+
+@router.get("/react/session/{session_id}")
+async def get_react_session_status(
+    session_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    获取 ReAct 会话状态
+
+    Returns:
+        - session_id
+        - round_num
+        - execution_history
+        - status
+    """
+    session = ai_tool_service._load_react_session(session_id)
+
+    if not session:
+        return {"status": "expired", "message": "会话已过期"}
+
+    return {
+        "status": "active",
+        "session_id": session_id,
+        "round_num": session.get("round_num", 0),
+        "execution_history": session.get("execution_history", []),
+        "entity_context": session.get("entity_context")
     }

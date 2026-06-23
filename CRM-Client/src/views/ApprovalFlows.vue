@@ -186,7 +186,12 @@
               </div>
             </el-timeline-item>
           </el-timeline>
-          <el-empty v-else description="暂无审批节点" />
+          <!-- ✅ P0: Copywriting - Invitation to act（不是 mood） -->
+          <WolfEmpty
+            v-else
+            title="设置审批流程"
+            description="点击上方按钮添加审批节点"
+          />
         </el-descriptions-item>
       </el-descriptions>
     </el-dialog>
@@ -197,6 +202,8 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showError, showSuccess, getEmptyStateMessage } from '@/utils/errorMessages'
+import WolfEmpty from '@/components/WolfEmpty.vue'
 import { Plus, Search, ArrowLeft } from '@element-plus/icons-vue'
 import approvalFlowApi, { type ApprovalFlow, type ApprovalFlowDetail } from '@/api/approvalFlow'
 
@@ -250,9 +257,11 @@ const fetchApprovalFlows = async () => {
 
     approvalFlows.value = flows
     pagination.value.total = flows.length
-  } catch (error: any) {
-    console.error('获取审批流程失败', error)
-    ElMessage.error('获取审批流程失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('获取审批流程失败', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '获取审批流程')
   } finally {
     loading.value = false
   }
@@ -283,8 +292,11 @@ const handleView = async (flow: ApprovalFlowDetail) => {
     const data = await approvalFlowApi.getApprovalFlowDetail(flow.id!) as any
     currentFlow.value = data
     detailVisible.value = true
-  } catch (error: any) {
-    ElMessage.error('获取流程详情失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[ApprovalFlows] handleView error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '获取流程详情')
   }
 }
 
@@ -305,13 +317,17 @@ const handleToggleStatus = (flow: ApprovalFlowDetail) => {
   ).then(async () => {
     try {
       await approvalFlowApi.updateApprovalFlow(flow.id!, { is_active: flow.is_active ? 0 : 1 })
-      ElMessage.success(`${action}成功`)
+      // ✅ P0: Copywriting - 具体化的成功提示
+      showSuccess(action, '审批流程')
       fetchApprovalFlows()
-    } catch (error: any) {
-      ElMessage.error(`${action}失败`)
+    } catch (error: unknown) {
+      const err = error as Error
+      console.error('[ApprovalFlows] handleToggleStatus error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, `${action}审批流程`)
     }
   }).catch(() => {
-    
+    // 用户取消操作
   })
 }
 

@@ -6,7 +6,7 @@
         <el-button type="text" class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="header-title">{{ contractInfo?.contract_name || '合同详情' }}</h1>
+        <h1 class="wolf-page-title">{{ contractInfo?.contract_name || '合同详情' }}</h1>
       </div>
       <div class="header-right">
         <el-button v-if="canEditContract" type="primary" class="primary-btn" @click="handleEdit">
@@ -185,7 +185,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import {
   ArrowLeft,
   Ticket,
@@ -326,7 +327,7 @@ const fetchContractInfo = async () => {
     console.log('合同详情数据:', data)
   } catch (error: any) {
     console.error('获取合同详情失败', error)
-    ElMessage.error('获取合同详情失败')
+    showError(error, '获取合同详情')
   } finally {
     loading.value = false
   }
@@ -533,13 +534,13 @@ const handleSubmitApproval = async () => {
     
     submitting.value = true
     await approvalApi.submitContractApproval(contractInfo.value!.id)
-    ElMessage.success('提交成功')
+    showSuccess('提交审批', '合同')
     await fetchContractInfo()
     await fetchApprovalDetail()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('提交审批失败', error)
-      ElMessage.error(error.response?.data?.detail || '提交失败')
+      showError(error, '提交审批')
     }
   } finally {
     submitting.value = false
@@ -560,13 +561,13 @@ const handleWithdrawApproval = async () => {
     
     withdrawing.value = true
     await approvalApi.cancelContractApproval(contractInfo.value!.id)
-    ElMessage.success('撤回成功')
+    showSuccess('撤回审批', '合同')
     await fetchContractInfo()
     approvalDetail.value = null
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('撤回失败', error)
-      ElMessage.error(error.response?.data?.detail || '撤回失败')
+      showError(error, '撤回审批')
     }
   } finally {
     withdrawing.value = false
@@ -587,13 +588,13 @@ const handleApprove = async () => {
     
     approving.value = true
     await approvalApi.approveContract(contractInfo.value!.id, { action: 'APPROVE' })
-    ElMessage.success('已同意')
+    showSuccess('同意审批', '合同')
     await fetchContractInfo()
     await fetchApprovalDetail()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('审批失败', error)
-      ElMessage.error(error.response?.data?.detail || '审批失败')
+      showError(error, '审批合同')
     }
   } finally {
     approving.value = false
@@ -612,18 +613,18 @@ const confirmReject = async () => {
   
   try {
     rejecting.value = true
-    await approvalApi.approveContract(contractInfo.value!.id, { 
+    await approvalApi.approveContract(contractInfo.value!.id, {
       action: 'REJECT',
-      comment: rejectForm.reason 
+      comment: rejectForm.reason
     })
-    ElMessage.success('已拒绝')
+    showSuccess('拒绝审批', '合同')
     rejectModalVisible.value = false
     rejectForm.reason = ''
     await fetchContractInfo()
     await fetchApprovalDetail()
   } catch (error: any) {
     console.error('拒绝失败', error)
-    ElMessage.error(error.response?.data?.detail || '拒绝失败')
+    showError(error, '拒绝审批')
   } finally {
     rejecting.value = false
   }
@@ -642,12 +643,12 @@ const handleMarkEffective = async () => {
     )
     
     await contractApi.updateContractStatus(contractInfo.value!.id, { status: 'EFFECTIVE' })
-    ElMessage.success('标记成功')
+    showSuccess('标记生效', '合同')
     await fetchContractInfo()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('标记失败', error)
-      ElMessage.error(error.response?.data?.detail || '标记失败')
+      showError(error, '标记生效')
     }
   }
 }

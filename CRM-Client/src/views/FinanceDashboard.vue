@@ -136,7 +136,7 @@
               </div>
             </div>
           </div>
-          <el-empty v-else description="暂无逾期预警" :image-size="80" />
+          <el-empty v-else description="添加回款计划，预防逾期风险" :image-size="80" />
         </div>
       </el-col>
     </el-row>

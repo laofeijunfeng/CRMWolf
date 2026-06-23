@@ -1,6 +1,43 @@
+---
+priority: high
+status: active
+module_type: business
+---
+
 # 回款管理模块
 
-**版本：2.0 | 更新日期：2026-06-12**
+**版本：2.1 | 更新日期：2026-06-12**
+
+---
+
+## AI 交互意图
+
+### AI 在此模块的核心任务
+
+| 任务场景 | AI 操作意图 | 约束条件 | 风险等级 |
+|----------|-------------|----------|----------|
+| 创建回款计划 | 调用 `create_payment_plan` 工具 | 必须关联合同、计划金额累计 ≤ 合同金额 | P0 |
+| 登记回款 | 调用 `create_payment_record` 工具 | 必须关联合同、回款金额校验 | P0 |
+| 确认回款 | 调用 `confirm_payment` 工具 | 需财务权限（FINANCE）、更新回款状态 | P0 |
+| 查询回款 | 调用 `query_payments` 工具 | 默认 team_id 过滤、禁止跨团队 | P0 |
+
+### AI 禁止行为
+
+| 禁止行为 | 原因 | 替代方案 |
+|----------|------|----------|
+| ❌ 回款计划金额 > 合同金额 | 违反业务约束 | 累计计划金额必须 ≤ 合同总金额 |
+| ❌ 跨 team_id 查询回款 | 违反团队隔离红线 | 必须注入当前用户 team_id |
+| ❌ 臆测回款状态 | 违反禁止臆测红线 | 状态查阅 GLOSSARY.md |
+| ❌ 非财务人员确认回款 | 违反权限规则 | 需 FINANCE 角色权限 |
+
+### AI 必查文档
+
+| 场景 | 必查文档 | 查阅时机 |
+|------|----------|----------|
+| 定义类型 | `CRM-Client/docs/TYPESCRIPT.md` | 写代码前 |
+| 查权限码 | `CRM-Docs/system/GLOSSARY.md` | 处理权限检查前 |
+| 查 API 参数 | `CRM-Docs/system/BUSINESS-CHAIN-API.md` | 调用接口前 |
+| 查 CRUD 模式 | `CRM-Docs/best-practices/backend/crud-patterns.md` | 写 CRUD 前 |
 
 ---
 

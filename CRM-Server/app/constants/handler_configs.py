@@ -64,6 +64,7 @@ from app.schemas.invoice import InvoiceApplicationCreate, InvoiceApplicationUpda
 from app.models.lead import LeadSource, LeadStatus, CompanyScale, FollowUpMethod
 from app.models.customer import CustomerStatus
 from app.models.opportunity import OpportunityStatus, PurchaseType, LicenseType
+from app.models.invoice import InvoiceType
 
 
 # ============================================================================
@@ -315,6 +316,16 @@ ENUM_MAPPINGS: Dict[str, Dict[str, Any]] = {
             "订阅制": "SUBSCRIPTION",
             "买断": "PERPETUAL",
             "买断制": "PERPETUAL",
+        },
+    },
+    "invoice_type": {
+        "enum_class": InvoiceType,
+        "display_name": "发票类型",
+        "values": {
+            "增值税专用发票": "VAT_SPECIAL",
+            "专票": "VAT_SPECIAL",
+            "普通发票": "VAT_NORMAL",
+            "普票": "VAT_NORMAL",
         },
     },
 }

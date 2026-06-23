@@ -23,6 +23,11 @@ dependencies = [
     "hiredis==3.3.0",
     "async-timeout==5.0.1",
     "email-validator==2.3.0",
+    # LangChain/LangGraph for AI Assistant
+    "langchain>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
 ]
 
 [project.optional-dependencies]
@@ -92,6 +97,23 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "jose.*"
+ignore_missing_imports = true
+
+# LangChain/LangGraph 类型检查（部分包类型不完整）
+[[tool.mypy.overrides]]
+module = "langchain.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langchain_anthropic.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langgraph.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langchain_core.*"
 ignore_missing_imports = true
 
 # ===== Pytest 配置 =====

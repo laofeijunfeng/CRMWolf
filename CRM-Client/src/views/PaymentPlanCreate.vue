@@ -5,7 +5,7 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">创建回款计划</h1>
+        <h1 class="wolf-page-title">创建回款计划</h1>
       </div>
     </div>
 
@@ -33,7 +33,7 @@
 
         <div class="plans-form">
           <div v-if="form.plans.length === 0" class="empty-plans">
-            <el-empty description="暂无计划，请点击上方按钮添加">
+            <el-empty description="添加回款计划阶段，追踪回款进度">
               <el-button type="primary" @click="addPlan">
                 添加第一个阶段
               </el-button>
@@ -125,7 +125,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft, Plus, Delete } from '@element-plus/icons-vue'
 import contractApi from '@/api/contract'
 import paymentApi from '@/api/payment'
@@ -162,7 +162,7 @@ const fetchContractInfo = async () => {
     contractInfo.value = data
   } catch (error: any) {
     console.error('获取合同信息失败', error)
-    ElMessage.error('获取合同信息失败')
+    showError(error, '获取合同信息')
   } finally {
     loading.value = false
   }
@@ -182,22 +182,22 @@ const removePlan = (index: number) => {
 
 const validatePlans = () => {
   if (form.value.plans.length === 0) {
-    ElMessage.error('请至少添加一个回款计划')
+    showError(new Error('请至少添加一个回款计划'), '验证')
     return false
   }
 
   for (let i = 0; i < form.value.plans.length; i++) {
     const plan = form.value.plans[i]
     if (!plan.stage_name) {
-      ElMessage.error(`请填写第 ${i + 1} 阶段的阶段名称`)
+      showError(new Error(`请填写第 ${i + 1} 阶段的阶段名称`), '验证')
       return false
     }
     if (!plan.planned_amount || plan.planned_amount <= 0) {
-      ElMessage.error(`请填写第 ${i + 1} 阶段的计划金额`)
+      showError(new Error(`请填写第 ${i + 1} 阶段的计划金额`), '验证')
       return false
     }
     if (!plan.due_date) {
-      ElMessage.error(`请填写第 ${i + 1} 阶段的计划日期`)
+      showError(new Error(`请填写第 ${i + 1} 阶段的计划日期`), '验证')
       return false
     }
   }
@@ -213,11 +213,11 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     await paymentApi.createPaymentPlans(contractId.value, form.value)
-    ElMessage.success('创建成功')
+    showSuccess('创建', '回款计划')
     router.back()
   } catch (error: any) {
     console.error('创建回款计划失败', error)
-    ElMessage.error(error.response?.data?.detail || '创建失败')
+    showError(error, '创建回款计划')
   } finally {
     submitting.value = false
   }

@@ -1,6 +1,44 @@
+---
+priority: high
+status: active
+module_type: business
+---
+
 # 线索管理模块 - 功能说明
 
-> 版本：2.0 | 更新日期：2026-06-12
+> 版本：2.1 | 更新日期：2026-06-12
+
+---
+
+## AI 交互意图
+
+### AI 在此模块的核心任务
+
+| 任务场景 | AI 操作意图 | 约束条件 | 风险等级 |
+|----------|-------------|----------|----------|
+| 创建线索 | 调用 `create_lead` 工具 | 必填字段校验（lead_name, contact_phone）、team_id 隔离 | P0 |
+| 跟进线索 | 调用 `create_follow_up` 工具 | 自动注入 lead_id、跟进时间解析 | P1 |
+| 线索转化 | 调用 `convert_lead` 工具 | 状态机校验（仅 NEW/FOLLOWING 可转化）、需用户确认 | P0 |
+| 查询线索 | 调用 `query_leads` 工具 | 默认 team_id 过滤、禁止跨团队查询 | P0 |
+| 状态变更 | 调用 `change_lead_status` 工具 | 状态机校验、INVALID 为终态不可逆 | P0 |
+
+### AI 禁止行为
+
+| 禁止行为 | 原因 | 替代方案 |
+|----------|------|----------|
+| ❌ 跨 team_id 查询线索 | 违反团队隔离红线 | 必须注入当前用户 team_id |
+| ❌ 臆测线索状态枚举 | 违反禁止臆测红线 | 查阅 GLOSSARY.md 状态枚举表 |
+| ❌ 直接将 INVALID 状态改为其他状态 | 违反状态机规则 | INVALID 是终态，不可逆 |
+| ❌ 绕过 convert_lead 直接创建客户 | 违反转化流程规则 | 必须通过转化工具 |
+
+### AI 必查文档
+
+| 场景 | 必查文档 | 查阅时机 |
+|------|----------|----------|
+| 定义类型 | `CRM-Client/docs/TYPESCRIPT.md` | 写代码前 |
+| 查状态枚举 | `CRM-Docs/system/GLOSSARY.md` | 处理状态字段前 |
+| 查 API 参数 | `CRM-Docs/system/BUSINESS-CHAIN-API.md` | 调用接口前 |
+| 查 CRUD 模式 | `CRM-Docs/best-practices/backend/crud-patterns.md` | 写 CRUD 前 |
 
 ---
 

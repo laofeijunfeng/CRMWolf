@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="handleGoBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ isEdit ? '编辑客户' : '新建客户' }}</h1>
+        <h1 class="wolf-page-title">{{ isEdit ? '编辑客户' : '新建客户' }}</h1>
       </div>
     </div>
 
@@ -165,7 +165,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import customerApi, { type CustomerCreate, type CustomerUpdate, type CustomerDetailResponse } from '@/api/customer'
 import procurementApi from '@/api/procurement'
@@ -243,7 +243,7 @@ const fetchCustomerDetail = async () => {
     })
     profileStatus.value = res.profile_status
   } catch (error: any) {
-    ElMessage.error(error.message || '获取客户详情失败')
+    showError(error, '获取客户详情')
     router.back()
   } finally {
     loading.value = false
@@ -283,7 +283,7 @@ const handleSubmit = async () => {
         project_background: form.project_background || undefined
       }
       await customerApi.updateCustomer(customerId.value, updateData)
-      ElMessage.success('更新成功')
+      showSuccess('更新', '客户')
     } else {
       const createData: CustomerCreate = {
         account_name: form.account_name,
@@ -294,11 +294,11 @@ const handleSubmit = async () => {
         default_procurement_method_id: form.default_procurement_method_id || undefined
       }
       await customerApi.createCustomer(createData)
-      ElMessage.success('创建成功，AI正在生成客户档案')
+      showSuccess('创建', '客户')
     }
     router.back()
   } catch (error: any) {
-    ElMessage.error(error.message || (isEdit.value ? '更新失败' : '创建失败'))
+    showError(error, isEdit.value ? '更新客户' : '创建客户')
   } finally {
     submitting.value = false
   }

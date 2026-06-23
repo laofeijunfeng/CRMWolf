@@ -1,5 +1,8 @@
 <template>
   <div class="opportunities-page">
+    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
+    <h1 class="wolf-page-title">商机管理</h1>
+
     <!-- 快捷筛选标签 + 操作按钮 -->
     <div class="filter-tabs-bar">
       <div class="filter-tabs">
@@ -45,9 +48,6 @@
           </template>
           <template #default="{ row }">
             <div class="name-cell">
-              <el-icon class="magicwand-icon" @click="handleMagicWand(row)">
-                <MagicStick />
-              </el-icon>
               <span class="link-text" @click="router.push(`/opportunities/${row.id}`)">{{ row.opportunity_name }}</span>
             </div>
           </template>
@@ -184,24 +184,17 @@
     </div>
 
     <!-- Magic Wand 弹窗 -->
-    <MagicWandDialog
-      v-model="showMagicWand"
-      entity-type="opportunity"
-      :entity-id="magicWandEntityId"
-      :entity-name="magicWandEntityName"
-      @refresh="fetchOpportunities"
-    />
-  </div>
+    </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, View, Edit, Delete, MagicStick } from '@element-plus/icons-vue'
+import { showError, showSuccess } from '@/utils/errorMessages'
+import { Search, View, Edit, Delete } from '@element-plus/icons-vue'
 import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
 import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
-import MagicWandDialog from '@/components/MagicWandDialog.vue'
 import { opportunityApi, type Opportunity, type OpportunityListParams } from '@/api/opportunity'
 import customerApi from '@/api/customer'
 import { usePermissionStore } from '@/stores/permissions'
@@ -218,11 +211,6 @@ const activeTab = ref('all')
 
 const filterValues = ref<Record<string, FilterValue>>({})
 const sortState = ref<SortState>({ field: '', order: null })
-
-// MagicWand 弹窗
-const showMagicWand = ref(false)
-const magicWandEntityId = ref(0)
-const magicWandEntityName = ref('')
 
 const searchForm = reactive({
   keyword: '',
@@ -327,8 +315,11 @@ const fetchOpportunities = async () => {
     const response = await opportunityApi.getOpportunities(params) as any
     tableData.value = Array.isArray(response) ? response : []
     pagination.total = Array.isArray(response) ? response.length : 0
-  } catch (error) {
-    ElMessage.error('获取商机列表失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Opportunities] fetchOpportunities error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '获取商机列表')
   } finally {
     loading.value = false
   }
@@ -370,12 +361,6 @@ const handleViewCustomer = (customerId: number) => {
   router.push(`/customers/${customerId}`)
 }
 
-const handleMagicWand = (record: Opportunity) => {
-  magicWandEntityId.value = record.id
-  magicWandEntityName.value = record.opportunity_name
-  showMagicWand.value = true
-}
-
 const handleDelete = async (record: Opportunity) => {
   try {
     await ElMessageBox.confirm(
@@ -388,11 +373,15 @@ const handleDelete = async (record: Opportunity) => {
       }
     )
     await opportunityApi.deleteOpportunity(record.id)
-    ElMessage.success('删除成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('删除', '商机')
     fetchOpportunities()
-  } catch (error: any) {
-    if (error !== 'cancel' && error?.message) {
-      ElMessage.error(error.message)
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('[Opportunities] handleDelete error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '删除商机')
     }
   }
 }

@@ -193,7 +193,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { Plus, Search, ArrowDown, Edit, Check, Delete } from '@element-plus/icons-vue'
 import invoiceApi, {
   type InvoiceApplicationResponse,
@@ -266,7 +267,7 @@ const fetchInvoiceApplications = async () => {
     pagination.total = response.total || 0
   } catch (error) {
     console.error('获取发票申请列表失败', error)
-    ElMessage.error('获取发票申请列表失败')
+    showError(error, '获取发票申请列表')
   } finally {
     loading.value = false
   }
@@ -316,11 +317,11 @@ const handleEdit = (record: InvoiceApplicationResponse) => {
 const handleSubmitApproval = async (record: InvoiceApplicationResponse) => {
   try {
     await invoiceApi.submitInvoiceApplicationForApproval(record.id)
-    ElMessage.success('提交成功')
+    showSuccess('提交审批', '发票申请')
     fetchInvoiceApplications()
   } catch (error) {
     console.error('提交审批失败', error)
-    ElMessage.error('提交审批失败')
+    showError(error, '提交审批')
   }
 }
 
@@ -332,12 +333,12 @@ const handleWithdraw = async (record: InvoiceApplicationResponse) => {
       type: 'warning'
     })
     await invoiceApi.withdrawInvoiceApplication(record.id)
-    ElMessage.success('撤回成功')
+    showSuccess('撤回审批', '发票申请')
     fetchInvoiceApplications()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('撤回失败', error)
-      ElMessage.error(error.response?.data?.detail || '撤回失败')
+      showError(error, '撤回审批')
     }
   }
 }
@@ -350,12 +351,12 @@ const handleDelete = async (record: InvoiceApplicationResponse) => {
       type: 'warning'
     })
     await invoiceApi.deleteInvoiceApplication(record.id)
-    ElMessage.success('删除成功')
+    showSuccess('删除', '发票申请')
     fetchInvoiceApplications()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('删除失败', error)
-      ElMessage.error(error.response?.data?.detail || '删除失败')
+      showError(error, '删除发票申请')
     }
   }
 }
@@ -386,12 +387,12 @@ const handleConfirmInvoiced = async () => {
 
   try {
     await invoiceApi.markAsInvoiced(currentApplication.value.id, invoicedForm.value.invoice_number)
-    ElMessage.success('标记成功')
+    showSuccess('标记开票', '发票申请')
     invoicedModalVisible.value = false
     fetchInvoiceApplications()
   } catch (error) {
     console.error('标记开票失败', error)
-    ElMessage.error('标记开票失败')
+    showError(error, '标记开票')
   }
 }
 

@@ -1,5 +1,8 @@
 <template>
   <div class="leads-page">
+    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
+    <h1 class="wolf-page-title">线索管理</h1>
+
     <!-- 快捷筛选标签 + 操作按钮 -->
     <div class="filter-tabs-bar">
       <div class="filter-tabs">
@@ -52,9 +55,6 @@
           </template>
           <template #default="{ row }">
             <div class="name-cell">
-              <el-icon class="magicwand-icon" @click="handleMagicWand(row)">
-                <MagicStick />
-              </el-icon>
               <span class="link-text" @click="handleViewDetail(row)">{{ row.lead_name }}</span>
             </div>
           </template>
@@ -273,15 +273,6 @@
       @success="fetchLeadList"
     />
 
-    <!-- Magic Wand 弹窗 -->
-    <MagicWandDialog
-      v-model="showMagicWand"
-      entity-type="lead"
-      :entity-id="magicWandEntityId"
-      :entity-name="magicWandEntityName"
-      @refresh="fetchLeadList"
-    />
-
     <!-- 标记无效弹窗 -->
     <el-dialog
       v-model="invalidModalVisible"
@@ -314,11 +305,11 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import {
   Plus, Search, View, Edit, User, UserFilled, RefreshRight, CircleCheck, CircleClose, Delete, MagicStick
 } from '@element-plus/icons-vue'
 import AILeadCreateDialog from '@/components/AILeadCreateDialog.vue'
-import MagicWandDialog from '@/components/MagicWandDialog.vue'
 import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
 import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
 import { leadApi, type Lead, type LeadListParams } from '@/api/lead'
@@ -343,11 +334,6 @@ const sortState = ref<SortState>({ field: '', order: null })
 
 // AI 创建弹窗
 const showAILeadCreate = ref(false)
-
-// Magic Wand 弹窗
-const showMagicWand = ref(false)
-const magicWandEntityId = ref(0)
-const magicWandEntityName = ref('')
 
 // 标记无效弹窗
 const invalidModalVisible = ref(false)
@@ -571,8 +557,11 @@ const fetchLeadList = async () => {
 
     tableData.value = res.filter((item: Lead) => item.status !== 2)
     pagination.total = tableData.value.length
-  } catch (error) {
-    ElMessage.error('获取线索列表失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Leads] fetchLeadList error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '获取线索列表')
   } finally {
     loading.value = false
   }
@@ -612,10 +601,14 @@ const handleViewDetail = (record: Lead) => router.push(`/leads/${record.id}`)
 const handleClaim = async (id: number) => {
   try {
     await leadApi.claimLead(id)
-    ElMessage.success('领取成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('领取', '线索')
     fetchLeadList()
-  } catch (error: any) {
-    ElMessage.error(error.message || '领取失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Leads] handleClaim error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '领取线索')
   }
 }
 
@@ -637,11 +630,15 @@ const handleAssignModalOk = async () => {
   } catch { return }
   try {
     await leadApi.assignLead(selectedLead.value.id, { owner_id: assignForm.owner_id })
-    ElMessage.success('分配成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('分配', '线索')
     assignModalVisible.value = false
     fetchLeadList()
-  } catch (error: any) {
-    ElMessage.error(error.message || '分配失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Leads] handleAssign error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '分配线索')
   }
 }
 
@@ -651,10 +648,16 @@ const handleReturn = async (id: number) => {
       confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning'
     })
     await leadApi.returnLead(id)
-    ElMessage.success('退回成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('退回公海', '线索')
     fetchLeadList()
-  } catch (error: any) {
-    if (error !== 'cancel') ElMessage.error(error.message || '退回失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('[Leads] handleReturn error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '退回线索到公海')
+    }
   }
 }
 
@@ -673,11 +676,15 @@ const handleInvalidModalOk = async () => {
   } catch { return }
   try {
     await leadApi.markInvalid(selectedLeadForInvalid.value.id, { reason: invalidForm.reason })
-    ElMessage.success('已标记无效')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('标记无效', '线索')
     invalidModalVisible.value = false
     fetchLeadList()
-  } catch (error: any) {
-    ElMessage.error(error.message || '操作失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[Leads] handleMarkInvalid error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '标记线索为无效')
   }
 }
 
@@ -689,17 +696,17 @@ const handleDelete = async (record: Lead) => {
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
     await leadApi.deleteLead(record.id)
-    ElMessage.success('删除成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('删除', '线索')
     fetchLeadList()
-  } catch (error: any) {
-    if (error !== 'cancel') ElMessage.error(error.message || '删除失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('[Leads] handleDelete error:', err)
+      // ✅ P0: Copywriting - 具体 + 方向性
+      showError(error, '删除线索')
+    }
   }
-}
-
-const handleMagicWand = (record: Lead) => {
-  magicWandEntityId.value = record.id
-  magicWandEntityName.value = record.lead_name
-  showMagicWand.value = true
 }
 
 const fetchUserOptions = async () => {

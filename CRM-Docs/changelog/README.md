@@ -34,9 +34,10 @@ changelog/
 
 ### 缺陷修复 (issues/)
 
-| 文档 | 日期 | 缺陷类型 | 关联 Issue | 核心修复 |
-|------|------|----------|------------|----------|
-| _暂无记录_ | - | - | - | - |
+| 文档 | 日期 | 缺陷类型 | 严重级别 | 核心修复 |
+|------|------|----------|----------|----------|
+| [Workflow 异常处理机制补全](issues/2026-06-12-1801-workflow-exception-handling-fix.md) | 2026-06-12 18:01 | `IndexError` + 前端事件缺失 | 🔴 高 | 补全异常事件处理，修复用户卡住问题 |
+| [Workflow Orchestrator NameError](issues/2026-06-12-1744-workflow-db-nameerror-fix.md) | 2026-06-12 17:44 | `NameError` | 🔴 高 | 修复 `_execute_ask_user_step` 中 `db` 未定义 bug |
 
 ### 技术重构 (technical/)
 

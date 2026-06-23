@@ -121,7 +121,8 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { showSuccess } from '@/utils/errorMessages'
 import { SwitchButton, User, UserFilled, Document, ShoppingCart, Cpu, ArrowRight } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
@@ -216,7 +217,7 @@ const handleLogout = () => {
     type: 'warning'
   }).then(() => {
     userStore.logout()
-    ElMessage.success('已退出登录')
+    showSuccess('退出登录', '账户')
     router.push('/login')
   }).catch(() => {})
 }

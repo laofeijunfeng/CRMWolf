@@ -5,7 +5,8 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">AI 配置</h1>
+        <!-- ✅ P1: Typography - 页面标题使用性格化字体 -->
+        <h1 class="wolf-page-title">AI 配置</h1>
       </div>
     </div>
 
@@ -126,6 +127,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ArrowLeft, Check, Connection } from '@element-plus/icons-vue'
 import { aiConfigApi, type SSEEvent } from '@/api/aiConfig'
@@ -195,8 +197,11 @@ const fetchConfig = async () => {
       formData.model_name = response.data.model_name
       formData.api_key = ''
     }
-  } catch (error: any) {
-    ElMessage.error(error.message || '获取配置失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[AIConfig] fetchConfig error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '获取 AI 配置')
   } finally {
     loading.value = false
   }
@@ -214,10 +219,14 @@ const handleSave = async () => {
       api_key: formData.api_key,
       model_name: formData.model_name
     })
-    ElMessage.success('配置保存成功')
+    // ✅ P0: Copywriting - 具体化的成功提示
+    showSuccess('保存', 'AI 配置')
     await fetchConfig()
-  } catch (error: any) {
-    ElMessage.error(error.message || '保存配置失败')
+  } catch (error: unknown) {
+    const err = error as Error
+    console.error('[AIConfig] saveConfig error:', err)
+    // ✅ P0: Copywriting - 具体 + 方向性
+    showError(error, '保存 AI 配置')
   } finally {
     saving.value = false
   }
@@ -225,7 +234,8 @@ const handleSave = async () => {
 
 const handleTest = async () => {
   if (!testData.test_message) {
-    ElMessage.warning('请输入测试消息')
+    // ✅ P0: Copywriting - 具体的提示（不是 generic）
+    ElMessage.warning('请输入测试消息内容，验证 AI 连接')
     return
   }
 
@@ -236,7 +246,8 @@ const handleTest = async () => {
   try {
     const token = userStore.token
     if (!token) {
-      ElMessage.error('请先登录')
+      // ✅ P0: Copywriting - 具体化的错误提示
+      showError(new Error('无认证令牌'), '访问 AI 服务')
       testing.value = false
       return
     }
@@ -245,7 +256,8 @@ const handleTest = async () => {
       { test_message: testData.test_message },
       (event: SSEEvent) => {
         if (event.event === 'start') {
-          ElMessage.info('开始接收 AI 响应...')
+          // ✅ P0: Copywriting - 具体化的状态提示
+          ElMessage.info('正在连接 AI 服务，等待响应...')
         } else if (event.event === 'content') {
           // 流式追加内容
           streamingContent.value += event.content || ''
@@ -254,25 +266,30 @@ const handleTest = async () => {
             success: event.success,
             message: event.message
           }
-          ElMessage.success(event.message || 'AI 连接测试成功')
+          // ✅ P0: Copywriting - 具体化的成功提示
+          showSuccess('连接测试', 'AI 服务')
           testing.value = false
         } else if (event.event === 'error') {
           testResult.value = {
             success: false,
             message: event.message
           }
-          ElMessage.error(event.message || '连接测试失败')
+          // ✅ P0: Copywriting - 具体化的错误提示
+          showError(new Error(event.message || '连接失败'), 'AI 连接测试')
           testing.value = false
         }
       },
       token
     )
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as Error
     testResult.value = {
       success: false,
-      message: error.message || '连接测试失败'
+      message: err.message || '连接测试失败'
     }
-    ElMessage.error(error.message || '连接测试失败')
+    console.error('[AIConfig] testConnection error:', err)
+    // ✅ P0: Copywriting - 具体化的错误提示
+    showError(error, 'AI 连接测试')
     testing.value = false
   }
 }

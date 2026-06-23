@@ -134,7 +134,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import { Refresh, Search, Check } from '@element-plus/icons-vue'
 import financeApi, { type PendingPaymentConfirmation, type PaymentConfirmationRequest } from '@/api/finance'
 
@@ -168,7 +168,7 @@ const fetchData = async () => {
     pagination.total = response?.length || 0
   } catch (error) {
     console.error('获取待确认回款列表失败', error)
-    ElMessage.error('获取数据失败')
+    showError(error, '获取待确认回款列表')
   } finally {
     loading.value = false
   }
@@ -213,12 +213,12 @@ const handleConfirmPayment = async () => {
   confirming.value = true
   try {
     await financeApi.confirmPayment(currentRecord.value.id, confirmForm)
-    ElMessage.success('回款确认成功')
+    showSuccess('确认', '回款')
     confirmModalVisible.value = false
     fetchData()
   } catch (error) {
     console.error('确认回款失败', error)
-    ElMessage.error('确认失败')
+    showError(error, '确认回款')
   } finally {
     confirming.value = false
   }

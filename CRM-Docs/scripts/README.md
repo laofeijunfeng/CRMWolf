@@ -8,6 +8,7 @@
 
 | 脚本 | 用途 | 执行时机 | 版本 |
 |------|------|----------|------|
+| `check-doc-location.sh` | **检查根目录散落文档** | **pre-commit + CI** | Shell ✅ |
 | `check-doc-status.sh` | 检查状态标签完整性 | 每次 PR | Shell |
 | `archive_docs.sh` | 自动归档已完成文档 | 每次 CI / 定时 | Shell |
 | `update_doc_nav.py` | **更新导航 README（完整版）** | 归档后自动 | **Python ✅** |
@@ -19,6 +20,7 @@
 
 | 脚本 | 推荐使用 | 说明 |
 |------|----------|------|
+| **`check-doc-location.sh`** | ✅ **必须** | 阻止根目录散落文档，pre-commit hook |
 | **`update_doc_nav.py`** | ✅ **推荐** | 完整版，生成规范的 README 内容 |
 | `update-doc-nav.sh` | ❌ 已废弃 | 简化版，仅统计，不生成内容 |
 
@@ -27,6 +29,11 @@
 ## 执行流程
 
 ```
+Git 提交（pre-commit）
+    ↓
+check-doc-location.sh（检查根目录散落文档） ← 🆕 新增
+    ↓ [违规则阻止提交]
+    
 PR 提交
     ↓
 check-doc-status.sh（检查状态标签）

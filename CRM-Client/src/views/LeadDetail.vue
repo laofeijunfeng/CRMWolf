@@ -6,7 +6,7 @@
         <el-button class="back-btn" @click="router.back()">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ leadData?.lead_name || '线索详情' }}</h1>
+        <h1 class="wolf-page-title">{{ leadData?.lead_name || '线索详情' }}</h1>
       </div>
       <div class="page-header-right">
         <el-button type="primary" @click="handleEdit">编辑</el-button>
@@ -260,7 +260,7 @@
         </el-table-column>
       </el-table>
       <div v-if="scoreDetails.length === 0" class="score-details-empty">
-        <el-empty description="暂无计算明细" />
+        <el-empty description="查看计算明细，了解评分依据" />
       </div>
     </el-dialog>
   </div>
@@ -269,7 +269,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { showError, showSuccess } from '@/utils/errorMessages'
 import {
   ArrowLeft,
   Plus
@@ -376,7 +376,7 @@ const fetchLeadDetail = async () => {
       }
     }
   } catch (error: any) {
-    ElMessage.error(error.message || '获取线索详情失败')
+    showError(error, '获取线索详情')
   } finally {
     loading.value = false
   }
@@ -403,11 +403,11 @@ const handleEditModalOk = async () => {
       company_scale: editForm.company_scale || undefined
     }
     await leadApi.updateLead(leadId, updateData)
-    ElMessage.success('更新成功')
+    showSuccess('更新', '线索')
     editModalVisible.value = false
     await fetchLeadDetail()
   } catch (error: any) {
-    ElMessage.error(error.message || '更新失败')
+    showError(error, '更新线索')
   }
 }
 
@@ -451,23 +451,23 @@ const handleFollowUpModalOk = async () => {
       next_action: followUpForm.next_action || null
     }
     await leadApi.addFollowUp(leadId, data)
-    ElMessage.success('添加成功')
+    showSuccess('添加', '跟进记录')
     followUpModalVisible.value = false
     // 刷新跟进记录
     await fetchLeadDetail()
   } catch (error: any) {
-    ElMessage.error(error.message || '添加失败')
+    showError(error, '添加跟进')
   }
 }
 
 const handleFollowUpDelete = async (followUp: any) => {
   try {
     await leadApi.deleteFollowUp(leadId, followUp['id'])
-    ElMessage.success('删除成功')
+    showSuccess('删除', '跟进记录')
     // 刷新跟进记录
     await fetchLeadDetail()
   } catch (error: any) {
-    ElMessage.error(error.message || '删除失败')
+    showError(error, '删除跟进')
   }
 }
 

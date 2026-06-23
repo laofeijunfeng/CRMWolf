@@ -124,10 +124,12 @@ class ActionEntry:
         content: str,
         follow_up_time: Optional[datetime] = None,
         method: Optional[str] = "电话",
+        follow_up_method: Optional[str] = None,  # Alias (AI may use this)
         next_action: Optional[str] = None,
         opportunity_id: Optional[int] = None,
         preview: bool = True,
         action_id: Optional[str] = None,
+        **kwargs,  # Accept additional params from AI (customer_name, etc.)
     ) -> ActionEntryResult:
         """创建跟进入口函数
 
@@ -137,6 +139,9 @@ class ActionEntry:
         3. preview=True → 返回 ActionPlan
         4. preview=False → 调用 CRUD → 记录审计
         """
+        # Normalize method parameter
+        final_method = method or follow_up_method or "电话"
+
         # Step 1: 权限校验 + 业务校验
         customer = self._check_customer_permission(customer_id)
         if customer is None:
@@ -152,10 +157,10 @@ class ActionEntry:
         # Step 3: Preview 态
         if preview:
             plan = ActionPlan(
-                description=f"为客户 #{customer_id} ({customer.customer_name}) 创建跟进记录",
+                description=f"为客户 #{customer_id} ({customer.account_name}) 创建跟进记录",
                 changes=[
                     FieldChange(field="content", to_value=content),
-                    FieldChange(field="method", to_value=method),
+                    FieldChange(field="method", to_value=final_method),
                     FieldChange(
                         field="follow_up_time",
                         to_value=follow_up_time.isoformat() if follow_up_time else None
@@ -179,7 +184,7 @@ class ActionEntry:
                 customer_id=customer_id,
                 content=content,
                 follow_up_time=follow_up_time,
-                method=method,
+                method=final_method,  # Use normalized method
                 next_action=next_action,
                 opportunity_id=opportunity_id,
             )
@@ -193,7 +198,7 @@ class ActionEntry:
                 outcome="success",
                 params={
                     "content": content,
-                    "method": method,
+                    "method": final_method,  # Use normalized method
                     "opportunity_id": opportunity_id,
                 }
             )
@@ -249,7 +254,7 @@ class ActionEntry:
         # Preview 态
         if preview:
             plan = ActionPlan(
-                description=f"为客户 #{customer_id} ({customer.customer_name}) 设置提醒",
+                description=f"为客户 #{customer_id} ({customer.account_name}) 设置提醒",
                 changes=[
                     FieldChange(
                         field="reminder_time",
@@ -315,7 +320,7 @@ class ActionEntry:
         # Preview 态
         if preview:
             plan = ActionPlan(
-                description=f"为客户 #{customer_id} ({customer.customer_name}) 创建商机: {opportunity_name}",
+                description=f"为客户 #{customer_id} ({customer.account_name}) 创建商机: {opportunity_name}",
                 changes=[
                     FieldChange(field="opportunity_name", to_value=opportunity_name),
                     FieldChange(field="customer_id", to_value=customer_id),
@@ -633,6 +638,169 @@ class ActionEntry:
                 },
             )
         except ValueError as e:
+            return ActionEntryResult(
+                action_id=action_id,
+                status="failed",
+                error=str(e),
+            )
+
+    # ==================== 创建客户 ====================
+
+    def create_customer(
+        self,
+        account_name: str,
+        contact_phone: Optional[str] = None,
+        contact_name: Optional[str] = None,
+        customer_source: Optional[str] = None,
+        source: Optional[str] = None,  # Alias for customer_source (AI may use either)
+        address: Optional[str] = None,
+        remark: Optional[str] = None,
+        city: Optional[str] = None,  # 必填字段
+        preview: bool = True,
+        action_id: Optional[str] = None,
+        **kwargs,  # Accept additional params from AI
+    ) -> ActionEntryResult:
+        """创建客户入口函数
+
+        流程：
+        1. 业务校验：客户名称是否重复
+        2. Preview → 返回 ActionPlan
+        3. Execute → 调用 CRUD → 记录审计
+        """
+        from app.crud.customer import customer_crud
+
+        action_id = action_id or generate_action_id()
+
+        # Normalize parameter names
+        final_source = customer_source or source or "其他"
+
+        # 业务校验：检查同名客户（可选）
+        # Note: 根据业务规则，可能允许同名客户
+
+        # Preview 态
+        if preview:
+            plan = ActionPlan(
+                description=f"创建客户: {account_name}",
+                changes=[
+                    FieldChange(field="account_name", to_value=account_name),
+                    FieldChange(field="city", to_value=city or "未知"),
+                    FieldChange(field="contact_phone", to_value=contact_phone),
+                    FieldChange(field="contact_name", to_value=contact_name),
+                    FieldChange(field="customer_source", to_value=final_source),
+                    FieldChange(field="address", to_value=address),
+                    FieldChange(field="remark", to_value=remark),
+                ],
+                entity_type="Customer",
+            )
+            risk_level = get_action_risk("create_customer")
+            return ActionEntryResult(
+                action_id=action_id,
+                status="preview",
+                plan=plan,
+                requires_confirmation=risk_level == RiskLevel.HIGH,
+            )
+
+        # Execute 态
+        try:
+            customer = self.executor.create_customer(
+                account_name=account_name,
+                city=city,  # 传递 city 参数
+                contact_phone=contact_phone,
+                contact_name=contact_name,
+                customer_source=final_source,  # 使用 normalized source
+                address=address,
+                remark=remark,
+            )
+
+            # 记录 AI 审计日志
+            self._log_ai_action(
+                action_id=action_id,
+                action_type="create_customer",
+                resource_type="CUSTOMER",
+                resource_id=customer.id,
+                outcome="success",
+                params={
+                    "account_name": account_name,
+                    "contact_phone": contact_phone,
+                }
+            )
+
+            return ActionEntryResult(
+                action_id=action_id,
+                status="completed",
+                data={
+                    "customer_id": customer.id,
+                    "account_name": customer.account_name,
+                },
+            )
+        except ValueError as e:
+            return ActionEntryResult(
+                action_id=action_id,
+                status="failed",
+                error=str(e),
+            )
+
+    # ==================== 查询客户 ====================
+
+    def query_customer(
+        self,
+        keyword: Optional[str] = None,
+        account_name: Optional[str] = None,  # AI may use account_name for search
+        status: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+        preview: bool = True,
+        action_id: Optional[str] = None,
+        **kwargs,  # Accept additional params from AI
+    ) -> ActionEntryResult:
+        """查询客户入口函数
+
+        流程：
+        1. Preview → 返回查询参数预览
+        2. Execute → 调用 CRUD → 返回结果
+        """
+        action_id = action_id or generate_action_id()
+
+        # Normalize search keyword
+        final_keyword = keyword or account_name or None
+
+        # Preview 态
+        if preview:
+            plan = ActionPlan(
+                description=f"查询客户列表（关键词: {final_keyword or '全部'}）",
+                changes=[
+                    FieldChange(field="keyword", to_value=final_keyword),
+                    FieldChange(field="status", to_value=status),
+                    FieldChange(field="page", to_value=page),
+                    FieldChange(field="page_size", to_value=page_size),
+                ],
+                entity_type="CustomerQuery",
+            )
+            # 查询操作无风险，无需确认
+            return ActionEntryResult(
+                action_id=action_id,
+                status="preview",
+                plan=plan,
+                requires_confirmation=False,
+            )
+
+        # Execute 态
+        try:
+            result = self.executor.query_customer_list(
+                keyword=final_keyword,
+                status=status,
+                page=page,
+                page_size=page_size,
+            )
+
+            # 查询操作不记录审计日志（只读操作）
+
+            return ActionEntryResult(
+                action_id=action_id,
+                status="completed",
+                data=result,
+            )
+        except Exception as e:
             return ActionEntryResult(
                 action_id=action_id,
                 status="failed",

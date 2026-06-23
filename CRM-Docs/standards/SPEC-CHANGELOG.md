@@ -4,6 +4,42 @@
 
 ---
 
+## Version 1.3 (2026-06-12)
+
+### 文档更新
+- 更新 `CLAUDE.md` 版本 2.1 → 2.2
+  - 新增"权威文档"章节（单一事实来源 + 优先级裁决规则）
+  - 明确 critical/high/normal 三级优先级体系
+
+### 权威文档 priority 标签新增
+- `CRM-Client/docs/TYPESCRIPT.md` - priority: high（类型权威）
+- `CRM-Client/docs/COMPONENTS.md` - priority: high（组件权威）
+- `CRM-Docs/system/GLOSSARY.md` - priority: high（枚举权威）
+- `CRM-Docs/system/BUSINESS-CHAIN-API.md` - priority: high（API 权威）
+- `CRM-Docs/standards/AI-API-STANDARD.md` - priority: high（AI 规范权威）
+
+### 模块文档 AI 交互意图章节新增
+- `CRM-Docs/system/modules/01-lead-management.md` - AI 核心任务 + 禁止行为 + 必查文档
+- `CRM-Docs/system/modules/02-customer-management.md` - AI 核心任务 + 禁止行为 + 必查文档
+- `CRM-Docs/system/modules/03-opportunity-management.md` - AI 核心任务 + 禁止行为 + 必查文档
+- `CRM-Docs/system/modules/04-contract-management.md` - AI 核心任务 + 禁止行为 + 必查文档
+- `CRM-Docs/system/modules/05-payment-management.md` - AI 核心任务 + 禁止行为 + 必查文档
+- `CRM-Docs/system/modules/06-invoice-management.md` - AI 核心任务 + 禁止行为 + 必查文档
+- `CRM-Docs/system/modules/07-finance-management.md` - AI 核心任务 + 禁止行为 + 特殊权限说明
+- `CRM-Docs/system/modules/ai-features.md` - AI 核心任务 + 禁止行为 + 配置开关
+
+### 变更原因
+- 建立"单一事实来源"体系，解决文档冲突裁决问题
+- 为每个业务模块明确 AI 交互意图，提升 AI 检索准确率和执行效率
+- 建立 priority 标签体系，明确文档优先级
+
+### 影响分析
+- **Affected docs**: CLAUDE.md + 5 个权威文档 + 8 个模块文档
+- **Migration needed**: No
+- **Breaking change**: No
+
+---
+
 ## Version 1.2 (2026-06-12)
 
 ### 新增文档
@@ -54,6 +90,37 @@
 - **New dirs**: archive/, changelog/, scripts/
 - **Migration needed**: Yes（需为现有文档补全状态标签）
 - **Breaking change**: No（现有文档不受影响）
+
+---
+
+## Version 1.2 (2026-06-12)
+
+### 文档更新
+- 更新 `DOC-LIFECYCLE.md` 版本 1.0 → 1.1
+  - 新增禁止行为：根目录散落 md 文档、创建 PHASE-X-SUMMARY 等临时文档
+  - 新增 CRM-Docs 根目录规范章节（唯一允许 README.md）
+  - 新增进度跟踪文档替代方案表格（使用 Task 工具替代）
+  - 新增 `check-doc-location.sh` 校验脚本规范
+- 新增 `scripts/check-doc-location.sh` - 检测根目录散落文档脚本
+- 更新 `CLAUDE.md` - 新增文档位置红线 + 进度文档红线
+- 更新 `scripts/README.md` - 新增 check-doc-location 脚本说明
+
+### 文档清理
+- 删除 `CRM-Docs/index.md`（多余，已有 README.md）
+- 归档 12 个根目录散落文档到正确位置：
+  - 实施总结类 → `changelog/technical/2026-06-12-*.md`
+  - 阶段总结类 → `changelog/technical/2026-06-12-phase-*.md`
+  - 下一步指南 → `plans/NEXT-STEPS-GUIDE.md`
+
+### 变更原因
+- AI 在执行"文档生命周期管理方案"任务时创建了散落在根目录的临时进度文档
+- 违反了自己创建的 DOC-LIFECYCLE.md 目录结构规范
+- 需要建立预防机制避免类似情况再次发生
+
+### 预防机制
+- **红线规则**：CLAUDE.md 新增"文档位置"和"进度文档"红线
+- **校验脚本**：`check-doc-location.sh` 检测根目录散落文档
+- **执行时机**：pre-commit hook + CI Pipeline
 
 ---
 
@@ -171,4 +238,4 @@
 
 ---
 
-**版本：1.2 | 最后更新：2026-06-12**
+**版本：1.3 | 最后更新：2026-06-12**

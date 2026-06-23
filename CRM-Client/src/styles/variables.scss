@@ -3,14 +3,20 @@
 
 // ==================== 背景色规范 ====================
 // 用色彩分层替代分割线，拒绝纯白
+// 微调为更中性的暖灰（避免模板 warm cream）
 
-$wolf-bg-page: #F9F8F5;        // 页面画布底色（暖调浅米白）
+$wolf-bg-page: #F8F6F2;        // 页面画布底色（中性暖灰，不是模板 warm cream）
 $wolf-bg-card: #FFFFFF;        // 卡片/模块容器底色
 $wolf-bg-elevated: #FAF9F7;    // 弹窗/抽屉内容区底色
 $wolf-bg-sidebar: #F2F0EB;     // 侧边栏底色（浅米灰）
 $wolf-bg-hover: #F5F5F5;       // hover态背景、斑马纹行背景
 $wolf-bg-active: #EAEAEA;      // active/pressed态背景
 $wolf-bg-disabled: #F5F5F5;    // 禁用态背景
+
+// ==================== AI 专属背景色 ====================
+// Signature: AI 对话区的独特视觉标识
+
+$wolf-bg-ai-message: #F0F4F8;  // AI 消息背景（微蓝调，暗示智能）
 
 // ==================== 中性色梯度 ====================
 // 全页面95%的色彩来源，仅用中性色区分信息层级
@@ -69,10 +75,18 @@ $wolf-purple-bg: #F5F5F5;
 $wolf-purple-border: #E5E5E5;
 
 // ==================== 字体系统 ====================
-// 仅用5种组合，无多余样式
+// Signature: IBM Plex Sans（技术产品的独特 vernacular）
+// 仅用于关键位置（页面主标题、AI 对话标题）≤5% 的文字
+// 其他位置保持系统字体栈（功能性、性能优先）
 
+// 基础字体栈（功能性）
 $wolf-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-$wolf-font-mono: "SF Mono", Monaco, "Cascadia Code", monospace;
+
+// Signature: IBM Plex Sans（性格化 Display face）
+$wolf-font-display: "IBM Plex Sans", $wolf-font-family;
+
+// Signature: IBM Plex Mono（技术 vernacular）
+$wolf-font-mono: "IBM Plex Mono", "SF Mono", Monaco, "Cascadia Code", monospace;
 
 // 字号（仅4种）
 $wolf-font-size-title: 16px;      // 页面主标题
@@ -279,3 +293,7 @@ $--spacing-xl: 32px;
 
 $--transition-base: all 0.2s ease-in-out;
 $--transition-fade: opacity 0.2s ease-in-out;
+
+// ==================== Typography 统一样式导入 ====================
+// 必须在所有变量定义之后导入
+@import '_typography.scss';
