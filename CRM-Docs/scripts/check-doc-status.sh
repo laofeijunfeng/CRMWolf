@@ -52,6 +52,46 @@ for doc in CRM-Docs/requirements/*.md; do
   echo "✅ $doc: status=$status"
 done
 
+# 检查 system/design/ 目录
+echo ""
+echo "📋 system/design/ 目录检查:"
+for doc in CRM-Docs/system/design/*.md; do
+  if [ "$doc" == "CRM-Docs/system/design/README.md" ]; then
+    continue
+  fi
+
+  if [ ! -f "$doc" ]; then
+    continue
+  fi
+
+  status=$(grep -E "^status:" "$doc" | head -1 | sed 's/status: //' | tr -d ' ')
+
+  if [ -z "$status" ]; then
+    echo "❌ 缺少状态标签: $doc"
+    exit 1
+  fi
+
+  valid_statuses="active deprecated"
+  if ! echo "$valid_statuses" | grep -w "$status" > /dev/null; then
+    echo "❌ 无效状态标签 ($status): $doc"
+    exit 1
+  fi
+
+  created=$(grep -E "^created:" "$doc" | head -1)
+  if [ -z "$created" ]; then
+    echo "❌ 缺少创建日期标签: $doc"
+    exit 1
+  fi
+
+  updated=$(grep -E "^updated:" "$doc" | head -1)
+  if [ -z "$updated" ]; then
+    echo "❌ 缺少更新日期标签: $doc"
+    exit 1
+  fi
+
+  echo "✅ $doc: status=$status"
+done
+
 # 检查 plans/ 目录
 echo ""
 echo "📋 plans/ 目录检查:"
