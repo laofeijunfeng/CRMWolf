@@ -289,12 +289,26 @@ interface ConversationMessage {
 
 ---
 
-## 📝 待审批问题
+## 📝 设计决策记录
 
-1. **持久化方案**: 是否需要将 executionSteps 存储到数据库？如果需要，后端改动范围如何？
-2. **自动收起逻辑**: 执行完成后是否自动收起？延迟多少秒合适？
-3. **轨迹导航**: 是否需要实现"点击步骤卡片跳转到对应消息"的功能？
+| 决策项 | 选择 | 原因 |
+|--------|------|------|
+| **持久化方案** | ✅ 存储到数据库 | 解决 \"刷新丢失\" 痛点，完整历史恢复 |
+| **自动收起逻辑** | ✅ 执行完成后 3 秒自动收起 | UI 清洁 + 用户注意力转向结果 |
+| **轨迹导航** | ✅ 点击步骤卡片跳转到对应消息 | 建立 \"AI 行为\" 与 \"用户提问\" 的链接 |
 
 ---
 
-**下一步**: 请审批本设计方案，确认后开始 Phase 1 实施。
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 0 | — | — |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | issues_open | score: 6/10 → 8/10, 3 decisions |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+VERDICT: Design Review completed with 3 decisions made, 0 unresolved.
+
+NO UNRESOLVED DECISIONS

@@ -33,13 +33,8 @@ CRMWolf/
 │   ├── requirements/    # 需求文档
 │   └── plans/           # 实施计划
 │
-├── CLAUDE.md            # Claude Code 项目宪法
-├── AGENTS.md            # AI + 团队行为准则
-└── .claude/             # Claude Code 配置（团队共享规则）
-    ├── rules/           # 项目规则（上传）
-    ├── skills/          # 自定义技能（上传）
-    └ settings.json      # 全局配置（上传）
-    └ settings.local.json # 用户特定配置（不上传）
+├── README.md            # 项目说明（本文件）
+└── CONTRIBUTING.md      # 贡献指南（开发规范）
 ```
 
 ---
@@ -85,10 +80,9 @@ alembic current                    # 验证版本
 
 ### 新人入门
 
-1. **阅读项目宪法**：`CLAUDE.md`（红线锁定 + 规范导航）
-2. **了解行为准则**：`AGENTS.md`（AI + 团队协作规范）
-3. **快速上手**：`CRM-Docs/standards/QUICK-START.md`（5 分钟掌握规范）
-4. **系统说明**：`CRM-Docs/system/SYSTEM-DESCRIPTION.md`（功能全貌）
+1. **阅读贡献指南**：`CONTRIBUTING.md`（开发红线 + 规范）
+2. **快速上手**：`CRM-Docs/standards/QUICK-START.md`（5 分钟掌握规范）
+3. **系统说明**：`CRM-Docs/system/SYSTEM-DESCRIPTION.md`（功能全貌）
 
 ### 核心规范
 
@@ -130,6 +124,16 @@ git push origin main
 | AI 助手 | 智能对话、意图识别、自动操作 |
 
 详细功能说明：`CRM-Docs/system/modules/`
+
+---
+
+## 贡献指南
+
+请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解：
+- 开发红线（TypeScript 四禁令、分支纪律）
+- 前端/后端开发规范
+- 测试覆盖率要求
+- 提交规范
 
 ---
 
