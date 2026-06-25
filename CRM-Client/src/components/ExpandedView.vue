@@ -1,4 +1,88 @@
 <!-- CRM-Client/src/components/ExpandedView.vue -->
+<!-- V2 紧凑设计：Inline Steps + max-height 280px -->
+
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { ArrowUp } from '@element-plus/icons-vue'
+import InlineStep from './InlineStep.vue'
+import InlineCandidate from './InlineCandidate.vue'
+import CompactConfirmSummary from './CompactConfirmSummary.vue'
+import CompactInfoGap from './CompactInfoGap.vue'
+import type { ExecutionStep } from '@/types/agentExecution'
+import { ExecutionStepType } from '@/types/agentExecution'
+
+interface Props {
+  steps: ExecutionStep[]
+  currentRound?: number
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  collapse: []
+  confirm: [stepId: string]
+  cancel: []
+  submit: [value: string]
+  selectCandidate: [id: number]
+}>()
+
+const selectedCandidate = ref<number | null>(null)
+
+// 计算总轮次
+const totalRounds = computed(() => {
+  const rounds = props.steps.map(s => s.round).filter(Boolean) as number[]
+  return Math.max(...rounds, 0)
+})
+
+// 获取步骤状态
+const getStepStatus = (step: ExecutionStep): 'success' | 'error' | 'warning' | 'loading' => {
+  if (step.type === ExecutionStepType.WAITING_FOR_USER) return 'warning'
+  if (step.success === false || step.error) return 'error'
+  if (step.success === true) return 'success'
+  if (step.type === ExecutionStepType.TOOL_CALL) return 'loading'
+  return 'success'
+}
+
+// 处理候选选择
+const handleSelectCandidate = (id: number) => {
+  selectedCandidate.value = id
+  emit('selectCandidate', id)
+}
+
+// 处理确认
+const handleConfirm = (stepId: string) => {
+  emit('confirm', stepId)
+}
+
+// 处理取消
+const handleCancel = () => {
+  emit('cancel')
+}
+
+// 处理提交
+const handleSubmit = (value: string) => {
+  emit('submit', value)
+}
+
+// 键盘导航
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    emit('collapse')
+    event.preventDefault()
+  }
+}
+
+// 将 detail_params 转换为 CompactConfirmSummary 的 params 格式
+const convertDetailParams = (step: ExecutionStep) => {
+  if (!step.detail_params) return {}
+  const result: Record<string, { value: string; isEntity?: boolean }> = {}
+  for (const [key, val] of Object.entries(step.detail_params)) {
+    result[key] = val
+  }
+  return result
+}
+</script>
+
 <template>
   <div
     class="expanded-view"
@@ -6,214 +90,159 @@
     @keydown="handleKeydown"
   >
     <!-- 收起按钮 -->
-    <div class="collapse-button" @click="handleToggleExpand">
+    <div class="expand-header" @click="emit('collapse')">
       <el-icon><ArrowUp /></el-icon>
       <span>收起</span>
     </div>
 
-    <!-- 步骤列表 -->
-    <div class="steps-list">
-      <div
-        v-for="(step, index) in steps"
-        :key="step.id"
-        class="step-item"
-        role="listitem"
-        :aria-label="`Round ${step.round || 1} - ${step.title}`"
-        tabindex="0"
-        @click="handleStepClick(step)"
-      >
-        <!-- 轮次分隔线 -->
-        <div
-          v-if="shouldShowRoundSeparator(step, index)"
-          class="round-separator"
-        >
-          Round {{ step.round }}
-        </div>
+    <!-- 滚动容器 -->
+    <div class="expanded-content">
+      <template v-for="step in steps" :key="step.id">
 
-        <!-- 思考气泡（针对 TOOL_CALL 步骤） -->
-        <ThinkingBubble
-          v-if="step.type === ExecutionStepType.TOOL_CALL && step.description"
-          :content="step.description"
+        <!-- Inline Step -->
+        <InlineStep
+          v-if="step.type !== ExecutionStepType.WAITING_FOR_USER"
+          :step="step"
+          :round="step.round"
+          :total-rounds="totalRounds"
+          :is-current="step.round === currentRound"
+          :status="getStepStatus(step)"
         />
 
-        <!-- 业务参数（如果有且不重复） -->
-        <div
-          v-if="step.businessParams && step.type === ExecutionStepType.TOOL_CALL && step.businessParams !== step.description"
-          class="business-params"
-        >
-          {{ step.businessParams }}
-        </div>
+        <!-- waiting_for_user 类型处理 -->
+        <template v-if="step.type === ExecutionStepType.WAITING_FOR_USER">
 
-        <!-- 结果摘要卡片 -->
-        <StatusCard
-          v-if="shouldShowStatusCard(step)"
-          :type="getStatusCardType(step)"
-          :title="step.title"
-          :summary="getStatusCardSummary(step)"
-          :timestamp="formatTimestamp(step.timestamp)"
-          :show-actions="false"
-        />
-      </div>
+          <!-- InlineCandidate: 候选选择（消歧） -->
+          <template v-if="step.confirmationType === 'disambiguation' && step.options?.length > 0">
+            <InlineCandidate
+              v-for="candidate in step.options"
+              :key="candidate.id"
+              :candidate="candidate"
+              :selected="selectedCandidate === candidate.id"
+              @select="handleSelectCandidate(candidate.id)"
+              @cancel="handleCancel"
+            />
+
+            <!-- 按钮容器 -->
+            <div class="action-buttons-inline">
+              <button class="btn-sm btn-confirm" @click="handleConfirm(step.id)">确认选择</button>
+              <button class="btn-sm btn-cancel" @click="handleCancel">取消</button>
+            </div>
+          </template>
+
+          <!-- CompactConfirmSummary: 操作确认 -->
+          <template v-else-if="step.confirmationType === 'confirmation'">
+            <CompactConfirmSummary
+              :round="step.round"
+              :title="step.title"
+              :params="convertDetailParams(step)"
+              :risk-level="step.riskLevel"
+              @confirm="handleConfirm(step.id)"
+              @cancel="handleCancel"
+            />
+          </template>
+
+          <!-- CompactInfoGap: 信息补全 -->
+          <template v-else-if="step.confirmationType === 'info_gap'">
+            <CompactInfoGap
+              :round="step.round"
+              :title="step.title"
+              :filled-params="step.summary_params"
+              :missing-field="step.error?.replace('缺少必填字段：', '') || '未知字段'"
+              @submit="handleSubmit"
+              @cancel="handleCancel"
+            />
+          </template>
+
+          <!-- 默认：无 confirmationType 的等待用户 -->
+          <template v-else>
+            <InlineStep
+              :step="step"
+              :round="step.round"
+              :status="getStepStatus(step)"
+            />
+          </template>
+        </template>
+      </template>
     </div>
   </div>
 </template>
-
-<script setup lang="ts">
-import { ArrowUp } from '@element-plus/icons-vue'
-import ThinkingBubble from './ThinkingBubble.vue'
-import StatusCard from './StatusCard.vue'
-import type { ExecutionStep } from '@/types/agentExecution'
-import { ExecutionStepType } from '@/types/agentExecution'
-
-interface Props {
-  steps: ExecutionStep[]
-  stepToMessageMap?: Record<string, number>
-}
-
-const props = defineProps<Props>()
-
-const emit = defineEmits<{
-  (e: 'toggle-expand'): void
-  (e: 'navigate-to-message', messageId: number): void
-}>()
-
-// ← 是否应该显示轮次分隔线
-const shouldShowRoundSeparator = (step: ExecutionStep, index: number): boolean => {
-  if (!step.round) return false
-
-  if (index === 0) return true
-
-  const prevStep = props.steps[index - 1]
-  return prevStep?.round !== step.round
-}
-
-// ← 是否应该显示 StatusCard
-const shouldShowStatusCard = (step: ExecutionStep): boolean => {
-  return (
-    step.type === ExecutionStepType.TOOL_RESULT ||
-    step.type === ExecutionStepType.ROUND_COMPLETED ||
-    step.type === ExecutionStepType.REACT_COMPLETE ||
-    step.type === ExecutionStepType.ERROR
-  )
-}
-
-// ← 获取 StatusCard 类型
-const getStatusCardType = (
-  step: ExecutionStep
-): 'success' | 'warning' | 'error' | 'loading' => {
-  if (step.type === ExecutionStepType.ERROR) return 'error'
-  if (step.success === true) return 'success'
-  if (step.success === false) return 'error'
-  return 'success'
-}
-
-// ← 获取 StatusCard 摘要
-const getStatusCardSummary = (step: ExecutionStep): string => {
-  if (step.error) return step.error
-  if (step.description) return step.description
-  return ''
-}
-
-// ← 格式化时间戳
-const formatTimestamp = (timestamp: Date): string => {
-  const date = new Date(timestamp)
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  const seconds = String(date.getSeconds()).padStart(2, '0')
-  return `${hours}:${minutes}:${seconds}`
-}
-
-// Task 17: 点击步骤卡片触发跳转
-const handleStepClick = (step: ExecutionStep) => {
-  const messageId = props.stepToMessageMap?.[step.id]
-
-  if (messageId) {
-    emit('navigate-to-message', messageId)
-    console.log('[Navigation] Navigate to message:', messageId, 'from step:', step.id)
-  }
-}
-
-const handleToggleExpand = () => {
-  emit('toggle-expand')
-}
-
-// ← 键盘导航（WCAG 要求）
-const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Escape') {
-    emit('toggle-expand')
-    event.preventDefault()
-  }
-}
-</script>
 
 <style scoped lang="scss">
 @use '@/styles/variables.scss' as *;
 
 .expanded-view {
-  max-height: 300px;
+  max-height: 280px;
   overflow-y: auto;
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-md;
+}
 
-  .collapse-button {
-    display: flex;
-    align-items: center;
-    gap: $wolf-space-xs;
-    padding: $wolf-space-sm;
-    cursor: pointer;
-    color: $wolf-text-tertiary;
-    font-size: $wolf-font-size-caption;
-    transition: color 0.2s;
+.expand-header {
+  padding: 4px 16px;
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  color: $wolf-text-tertiary;
+  font-size: $wolf-font-size-caption;
+  cursor: pointer;
+  background: $wolf-bg-hover;
+  transition: background 0.15s;
 
-    &:hover {
-      color: $wolf-primary;
-    }
-
-    &:focus-visible {
-      outline: 2px solid $wolf-primary;
-      outline-offset: 2px;
-    }
+  &:hover {
+    background: $wolf-bg-inline-hover;
   }
 
-  .steps-list {
-    display: flex;
-    flex-direction: column;
-    gap: $wolf-space-sm;
-
-    .step-item {
-      cursor: pointer;
-
-      &:focus-visible {
-        outline: 2px solid $wolf-primary;
-        outline-offset: 1px;
-      }
-
-      .round-separator {
-        font-size: $wolf-font-size-caption;
-        font-weight: $wolf-font-weight-medium;
-        color: $wolf-text-tertiary;
-        padding: $wolf-space-xs 0;
-        border-bottom: 1px dashed $wolf-border-light;
-        margin-bottom: $wolf-space-sm;
-      }
-
-      .business-params {
-        font-size: $wolf-font-size-auxiliary;
-        color: $wolf-text-secondary;
-        padding: $wolf-space-sm;
-        background: $wolf-bg-hover;
-        border-radius: $wolf-radius-sm;
-        margin-bottom: $wolf-space-sm;
-        white-space: pre-wrap;
-        line-height: $wolf-line-height-body;
-      }
-    }
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+    outline-offset: 2px;
   }
 }
 
-// ← Reduced Motion 支持（WCAG 要求）
+.expanded-content {
+  padding: $wolf-space-sm 0;
+}
+
+.action-buttons-inline {
+  padding: $wolf-space-sm $wolf-space-md;
+  margin-top: $wolf-space-xs;
+  display: flex;
+  gap: $wolf-space-sm;
+}
+
+.btn-sm {
+  padding: 4px 12px;
+  border-radius: $wolf-radius-sm;
+  font-size: $wolf-font-size-caption;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s;
+}
+
+.btn-confirm {
+  background: $wolf-primary;
+  color: white;
+
+  &:hover {
+    background: $wolf-primary-hover;
+  }
+}
+
+.btn-cancel {
+  background: $wolf-bg-hover;
+  color: $wolf-text-primary;
+  border: 1px solid $wolf-border-light;
+
+  &:hover {
+    background: $wolf-bg-hover-deep;
+  }
+}
+
+// Reduced Motion 支持
 @media (prefers-reduced-motion: reduce) {
-  .expanded-view * {
+  .expanded-view *,
+  .btn-sm {
     transition: none !important;
-    animation: none !important;
   }
 }
 </style>
