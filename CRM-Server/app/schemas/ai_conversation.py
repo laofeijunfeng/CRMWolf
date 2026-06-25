@@ -10,13 +10,18 @@ from enum import Enum
 
 
 class ExecutionStepType(str, Enum):
-    """执行步骤类型枚举"""
-    ROUND_START = "ROUND_START"
-    TOOL_CALL = "TOOL_CALL"
-    TOOL_RESULT = "TOOL_RESULT"
-    ROUND_COMPLETED = "ROUND_COMPLETED"
-    REACT_COMPLETE = "REACT_COMPLETE"
-    ERROR = "ERROR"
+    """执行步骤类型枚举（与前端 agentExecution.ts 对齐）"""
+    REACT_START = "react_start"
+    ROUND_START = "round_start"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    WAITING_FOR_USER = "waiting_for_user"
+    DISAMBIGUATION_REQUIRED = "disambiguation_required"
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    ROUND_COMPLETED = "round_completed"
+    REACT_COMPLETE = "react_complete"
+    MAX_ROUNDS_REACHED = "max_rounds_reached"
+    ERROR = "error"
 
 
 class ExecutionStepSchema(BaseModel):
@@ -25,14 +30,23 @@ class ExecutionStepSchema(BaseModel):
     type: ExecutionStepType = Field(..., description="步骤类型")
     title: str = Field(..., description="业务化标题")
     description: Optional[str] = Field(None, description="步骤描述")
-    timestamp: datetime = Field(..., description="时间戳")
+    timestamp: str = Field(..., description="时间戳（ISO 8601 格式）")
     round: Optional[int] = Field(None, description="轮次编号")
     tool: Optional[str] = Field(None, description="工具名称")
     params: Optional[dict] = Field(None, description="工具参数")
-    result: Optional[dict] = Field(None, description="执行结果")
+    result: Optional[Any] = Field(None, description="执行结果（可为任意类型）")
     success: Optional[bool] = Field(None, description="是否成功")
     error: Optional[str] = Field(None, description="错误信息")
     businessParams: Optional[str] = Field(None, description="业务化参数描述")
+    # V2 新增字段（向后兼容，全部 Optional）
+    inline_text: Optional[str] = Field(None, description="Inline 显示文本（单行合并）")
+    thinking: Optional[str] = Field(None, description="AI 推理过程")
+    summary: Optional[str] = Field(None, description="业务化摘要")
+    summary_params: Optional[dict] = Field(None, description="摘要参数（简化版）")
+    detail_params: Optional[dict] = Field(None, description="详情参数（完整版）")
+    confirmationType: Optional[str] = Field(None, description="确认类型：disambiguation | confirmation | info_gap")
+    riskLevel: Optional[str] = Field(None, description="风险等级：low | medium | high")
+    options: Optional[List[dict]] = Field(None, description="候选列表（V2 格式）")
 
     class Config:
         from_attributes = True
