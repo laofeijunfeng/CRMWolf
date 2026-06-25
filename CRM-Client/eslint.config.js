@@ -66,7 +66,19 @@ export default [
     files: ['**/*.vue'],
     languageOptions: {
       parserOptions: {
-        parser: tseslint.parser
+        parser: tseslint.parser,
+        project: './tsconfig.json',
+        extraFileExtensions: ['.vue']
+      }
+    }
+  },
+
+  // TypeScript 文件也需要类型信息
+  {
+    files: ['**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: './tsconfig.json'
       }
     }
   },
