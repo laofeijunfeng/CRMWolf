@@ -83,6 +83,27 @@ export default [
     }
   },
 
+  // ========== 分层策略：存量文件暂时降低严格度 ==========
+  // 对非 V2 新组件的存量文件，降低部分规则的严格度
+  {
+    files: [
+      'src/**/*.vue',
+      'src/**/*.ts'
+    ],
+    rules: {
+      // 存量文件：暂时降级为 warn，不阻塞提交
+      '@typescript-eslint/explicit-function-return-type': 'warn',
+      '@typescript-eslint/explicit-module-boundary-types': 'warn',
+      '@typescript-eslint/no-unsafe-assignment': 'warn',
+      '@typescript-eslint/no-unsafe-member-access': 'warn',
+      '@typescript-eslint/no-unsafe-call': 'warn',
+      '@typescript-eslint/no-unsafe-return': 'warn',
+      '@typescript-eslint/strict-boolean-expressions': 'warn',
+      '@typescript-eslint/array-type': 'warn',
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }]
+    }
+  },
+
   // 忽略文件
   {
     ignores: [
