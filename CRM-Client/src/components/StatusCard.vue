@@ -146,12 +146,12 @@ const handleIgnore = () => {
   border-radius: $wolf-radius-lg;  // 12px 圆角
   background: $wolf-bg-card;       // 白色背景
   box-shadow: $wolf-shadow-card;   // 轻阴影
-  margin-bottom: $wolf-card-gap;   // 16px 间距
+  margin-bottom: $wolf-space-md;   // ← 修复：使用 16px 间距（符合 mockup 规范）
   transition: all 0.2s ease;
 
-  // 成功卡片样式 - 使用灰色背景区分层级
+  // 成功卡片样式 - 使用白色背景（符合 mockup 规范）
   &.card-success {
-    background: $wolf-bg-hover;    // 灰色背景（与白色抽屉区分）
+    background: $wolf-bg-card;    // ← 白色背景（与外层容器统一）
 
     .status-icon {
       color: $wolf-success-text;  // 绿色图标

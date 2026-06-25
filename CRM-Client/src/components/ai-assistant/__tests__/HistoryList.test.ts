@@ -53,11 +53,17 @@ describe('HistoryList', () => {
     const wrapper = mount(HistoryList, {
       props: {
         groups: emptyGroups
+      },
+      global: {
+        stubs: {
+          HistoryItem: true
+        }
       }
     })
 
     expect(wrapper.find('.history-list__empty').exists()).toBe(true)
-    expect(wrapper.find('.history-list__empty-text').text()).toBe('暂无历史对话')
+    // Updated selector to match actual component structure
+    expect(wrapper.find('.history-list__empty-title').text()).toBe('开始你的第一个对话')
   })
 
   it('shows loading state', () => {

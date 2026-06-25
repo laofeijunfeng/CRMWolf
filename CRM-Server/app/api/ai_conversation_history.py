@@ -119,13 +119,13 @@ def create_conversation(
 
     保存用户的 AI 对话到数据库，用于后续查阅和上下文恢复
     """
-    # 转换消息格式
+    # 转换消息格式（将 Pydantic 对象序列化为 dict）
     messages = [
         {
             "role": m.role,
             "content": m.content,
             "timestamp": m.timestamp,
-            "execution_steps": m.execution_steps if m.execution_steps else None
+            "execution_steps": [step.model_dump() for step in m.execution_steps] if m.execution_steps else None
         }
         for m in params.messages
     ]
@@ -167,13 +167,13 @@ def update_conversation(
     if existing_conv.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权限修改此对话")
 
-    # 转换消息格式
+    # 转换消息格式（将 Pydantic 对象序列化为 dict）
     messages = [
         {
             "role": m.role,
             "content": m.content,
             "timestamp": m.timestamp,
-            "execution_steps": m.execution_steps if m.execution_steps else None
+            "execution_steps": [step.model_dump() for step in m.execution_steps] if m.execution_steps else None
         }
         for m in params.messages
     ]

@@ -27,6 +27,27 @@
       </div>
     </div>
 
+    <!-- UX 优化：已筛选汇总区 -->
+    <div v-if="hasActiveFilters" class="active-filter-summary">
+      <div class="filter-count-badge">
+        <span class="badge-num">{{ activeFilterCount }}</span>
+        <span class="badge-text">个筛选条件</span>
+      </div>
+      <div class="filter-tags-row">
+        <span
+          v-for="{ field, label, valuePreview } in activeFilterList"
+          :key="field"
+          class="filter-tag"
+          @click="handleClearFilterTag(field)"
+        >
+          <span class="tag-label">{{ label }}:</span>
+          <span class="tag-value">{{ valuePreview }}</span>
+          <span class="tag-close">×</span>
+        </span>
+      </div>
+      <button class="clear-all-btn" @click="handleClearAllFilters">清除全部</button>
+    </div>
+
     <!-- 表格区 -->
     <div class="table-card">
       <el-table
@@ -382,7 +403,78 @@ const canCreateOpportunity = computed(() => permissionStore.hasPermission('oppor
 // 公海领取：不需要特殊权限，只要有访问公海的能力即可
 const canAccessPublic = computed(() => permissionStore.hasAnyPermission(['customer:view:own', 'customer:view:all']))
 
-// 行级权限检查函数
+// ==================== UX 优化：已筛选汇总区 ====================
+// 筛选字段标签映射
+const filterFieldLabels: Record<string, string> = {
+  account_name: '客户名称',
+  city: '城市',
+  status: '状态',
+  score: '热力值'
+}
+
+// 状态值标签映射
+const statusValueLabels: Record<number, string> = {
+  0: '跟进中',
+  1: '已赢单',
+  2: '已输单',
+  3: '已失效'
+}
+
+// 是否有活跃筛选条件
+const hasActiveFilters = computed(() => Object.keys(filterValues.value).length > 0)
+
+// 活跃筛选条件数量
+const activeFilterCount = computed(() => Object.keys(filterValues.value).length)
+
+// 活跃筛选条件列表（用于标签显示）
+const activeFilterList = computed(() => {
+  return Object.entries(filterValues.value).map(([field, value]) => {
+    const label = filterFieldLabels[field] || field
+    let valuePreview = ''
+
+    if (value.search) {
+      valuePreview = value.search
+    } else if (value.select !== undefined) {
+      valuePreview = field === 'status'
+        ? statusValueLabels[value.select as number] || String(value.select)
+        : String(value.select)
+    } else if (value.range) {
+      valuePreview = `${value.range.min ?? 0}-${value.range.max ?? 100}`
+    }
+
+    return { field, label, valuePreview }
+  })
+})
+
+// 获取筛选标签显示
+const getFilterLabel = (field: string) => filterFieldLabels[field] || field
+
+// 获取筛选值预览显示
+const getFilterValuePreview = (value: FilterValue, field: string): string => {
+  if (value.search) return value.search
+  if (value.select !== undefined) {
+    if (field === 'status') {
+      return statusValueLabels[value.select as number] || String(value.select)
+    }
+    return String(value.select)
+  }
+  if (value.range) {
+    return `${value.range.min ?? 0}-${value.range.max ?? 100}`
+  }
+  return '...'
+}
+
+// 清除单个筛选条件
+const handleClearFilterTag = (field: string) => {
+  handleFilterClear(field)
+}
+
+// 清除全部筛选条件
+const handleClearAllFilters = () => {
+  handleReset()
+}
+
+// ==================== 行级权限检查函数 ====================
 const canEditRow = (row: CustomerResponse): boolean => {
   if (canEditAllCustomer.value) return true
   if (canEditOwnCustomer.value && row.owner_id === String(userStore.userInfo?.id)) return true
@@ -781,7 +873,7 @@ onMounted(() => {
   background: $wolf-bg-card;
   border-radius: $wolf-radius-sm;
   cursor: pointer;
-  transition: all 0.2s ease-in-out;
+  transition: all 0.15s ease; // UX 优化：0.15s 过渡
 
   &:hover {
     background: $wolf-bg-hover;
@@ -795,7 +887,91 @@ onMounted(() => {
   }
 }
 
-// 表格区 - 卡片容器样式
+// ==================== UX 优化：已筛选汇总区样式 ====================
+.active-filter-summary {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-md;
+  padding: $wolf-space-sm $wolf-space-md;
+  background: #F7F7F5;
+  border-radius: $wolf-radius-sm;
+  margin-bottom: $wolf-space-md;
+  flex-wrap: wrap;
+}
+
+.filter-count-badge {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  padding: $wolf-space-xs $wolf-space-sm;
+  background: $wolf-primary-light;
+  border-radius: $wolf-radius-sm;
+
+  .badge-num {
+    font-size: $wolf-font-size-body;
+    font-weight: $wolf-font-weight-semibold;
+    color: $wolf-primary;
+  }
+
+  .badge-text {
+    font-size: $wolf-font-size-caption;
+    color: $wolf-primary;
+  }
+}
+
+.filter-tags-row {
+  display: flex;
+  gap: $wolf-space-sm;
+  flex-wrap: wrap;
+}
+
+.filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: $wolf-space-xs $wolf-space-sm;
+  background: $wolf-primary-light;
+  color: $wolf-primary;
+  border-radius: $wolf-radius-sm;
+  font-size: $wolf-font-size-caption;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: rgba($wolf-primary, 0.2);
+  }
+
+  .tag-label {
+    color: $wolf-text-tertiary;
+  }
+
+  .tag-value {
+    color: $wolf-primary;
+    font-weight: $wolf-font-weight-medium;
+  }
+
+  .tag-close {
+    color: $wolf-text-placeholder;
+    font-size: 14px;
+    margin-left: 4px;
+  }
+}
+
+.clear-all-btn {
+  padding: $wolf-space-xs $wolf-space-sm;
+  background: transparent;
+  border: none;
+  color: $wolf-text-tertiary;
+  font-size: $wolf-font-size-caption;
+  cursor: pointer;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: $wolf-text-secondary;
+  }
+}
+
+// ==================== 表格区 - 卡片容器样式 ====================
 .table-card {
   background: $wolf-bg-card;
   border-radius: $wolf-radius-md;
@@ -866,18 +1042,25 @@ onMounted(() => {
   color: $wolf-text-tertiary;
 }
 
-// 操作区
+// 操作区 - UX 优化：hover 时显示（减少视觉噪音）
 .action-cell {
   display: flex;
   align-items: center;
   gap: $wolf-space-sm;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+// 行 hover 时显示操作按钮
+.el-table__row:hover .action-cell {
+  opacity: 1;
 }
 
 .action-icon {
   font-size: 16px;
   color: $wolf-text-link;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s ease;
 
   &:hover {
     color: $wolf-text-link-hover;

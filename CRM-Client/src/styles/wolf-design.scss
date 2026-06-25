@@ -709,24 +709,40 @@ html, body {
       color: $wolf-table-cell-text !important;
       line-height: $wolf-table-line-height !important;
       background-color: #FFFFFF !important;           // 固定白色背景
-      border-bottom: 1px solid $wolf-table-border-color !important;
+      border-bottom: 1px solid $wolf-table-border-color !important; // 极淡分隔线
       border-right: none !important;
       text-align: left !important;
       vertical-align: middle !important;
       overflow: hidden !important;
       text-overflow: ellipsis !important;
       white-space: nowrap !important;
+      transition: background-color 0.15s ease; // UX 优化：平滑过渡
     }
 
-    // Hover态
+    // Hover态 - UX 优化：背景明显加深
     &:hover td.el-table__cell {
-      background-color: $wolf-table-hover-bg !important;
+      background-color: $wolf-table-hover-bg !important; // #F0F0ED 明显加深
     }
 
     // 选中态
     &.current-row td.el-table__cell {
       background-color: $wolf-table-selected-bg !important;
     }
+  }
+
+  // UX 优化：hover 时显示行内操作按钮（减少视觉噪音）
+  .row-actions {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+
+    .el-button--small {
+      padding: 4px 8px !important;
+      height: 24px !important;
+    }
+  }
+
+  .el-table__row:hover .row-actions {
+    opacity: 1;
   }
 
   // 禁用斑马纹
@@ -1099,17 +1115,50 @@ html, body {
   }
 }
 
-// Form
+// Form - UX 优化：必填标识前置 + 错误提示样式
 .el-form {
   .el-form-item__label {
     font-size: $wolf-font-size-auxiliary !important;
     color: $wolf-text-tertiary !important;
     font-weight: $wolf-font-weight-normal !important;
+
+    // UX 优化：必填标识前置 + 主色
+    .el-form-item__label-content::before {
+      content: none !important; // 移除 Element Plus 默认红色 *
+    }
   }
 
+  // UX 优化：错误提示样式（浅红背景 + 图标 + 文字）
   .el-form-item__error {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: $wolf-space-xs !important;
+    padding: $wolf-space-xs $wolf-space-sm !important;
+    background-color: $wolf-danger-bg !important; // #FCECEC 浅红背景
+    color: $wolf-danger-text !important; // #7A2828 低饱和暗红
+    border-radius: $wolf-radius-sm !important;
     font-size: $wolf-font-size-caption !important;
-    color: $wolf-danger-text !important;
+    margin-top: $wolf-space-sm !important;
+
+    // 添加图标前缀（通过 CSS 实现）
+    &::before {
+      content: '⚠' !important;
+      font-size: 12px !important;
+    }
+  }
+
+  // UX 优化：表单项间距统一
+  .el-form-item {
+    margin-bottom: $wolf-space-lg !important; // 24px
+  }
+}
+
+// UX 优化：输入框 hover/focus 背景变化（已在 .el-input 中定义，此处增强）
+.el-form-item.is-error {
+  .el-input__wrapper,
+  .el-select .el-input__wrapper {
+    background-color: rgba($wolf-danger-bg, 0.3) !important;
+    border: 1px solid $wolf-danger-text !important;
   }
 }
 
@@ -1197,6 +1246,190 @@ html, body {
     font-size: $wolf-font-size-body !important;
     color: $wolf-text-secondary !important;
   }
+}
+
+// ==================== 筛选区布局规范 ====================
+// UX 优化：分组布局 + 分隔线 + 已筛选标签
+
+// 筛选区容器
+.wolf-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: $wolf-space-md;
+  background: #F7F7F5; // 略深于页面底色
+  border-radius: $wolf-radius-sm;
+}
+
+// 筛选分组（左侧搜索、中间筛选、右侧按钮）
+.wolf-filter-group {
+  display: flex;
+  gap: $wolf-space-sm;
+  align-items: center;
+
+  &.wolf-filter-group--left {
+    flex-shrink: 0;
+  }
+
+  &.wolf-filter-group--center {
+    flex: 1;
+    justify-content: flex-start;
+  }
+
+  &.wolf-filter-group--right {
+    flex-shrink: 0;
+    gap: $wolf-space-xs;
+  }
+}
+
+// 筛选分隔线
+.wolf-filter-divider {
+  width: 1px;
+  height: 24px;
+  background: $wolf-border-default;
+  margin: 0 $wolf-space-md;
+}
+
+// 搜索输入框包装器
+.wolf-search-wrapper {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  padding: $wolf-space-sm $wolf-space-md;
+  background: $wolf-bg-card;
+  border-radius: 6px;
+  min-width: 200px;
+
+  .search-icon {
+    font-size: 14px;
+    color: $wolf-text-placeholder;
+  }
+
+  .el-input__wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .el-input__inner {
+    font-size: $wolf-font-size-body !important;
+  }
+}
+
+// 已筛选汇总区
+.wolf-active-filters {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-md;
+  padding: $wolf-space-sm $wolf-space-md;
+  background: $wolf-bg-hover;
+  border-radius: $wolf-radius-sm;
+  margin-top: $wolf-space-sm;
+  flex-wrap: wrap;
+}
+
+// 筛选数量徽章
+.wolf-filter-badge {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  padding: $wolf-space-xs $wolf-space-sm;
+  background: $wolf-primary-light;
+  border-radius: $wolf-radius-sm;
+
+  .badge-num {
+    font-size: $wolf-font-size-body;
+    font-weight: $wolf-font-weight-semibold;
+    color: $wolf-primary;
+  }
+
+  .badge-text {
+    font-size: $wolf-font-size-caption;
+    color: $wolf-primary;
+  }
+}
+
+// 已筛选标签行
+.wolf-filter-tags {
+  display: flex;
+  gap: $wolf-space-sm;
+  flex-wrap: wrap;
+
+  .wolf-filter-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: $wolf-space-xs $wolf-space-sm;
+    background: $wolf-primary-light;
+    color: $wolf-primary;
+    border-radius: $wolf-radius-sm;
+    font-size: $wolf-font-size-caption;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: rgba($wolf-primary, 0.2);
+    }
+
+    .tag-label {
+      color: $wolf-text-tertiary;
+    }
+
+    .tag-value {
+      color: $wolf-primary;
+      font-weight: $wolf-font-weight-medium;
+    }
+
+    .tag-close {
+      color: $wolf-text-placeholder;
+      font-size: 14px;
+      margin-left: 4px;
+    }
+  }
+}
+
+// 清除全部按钮
+.wolf-clear-all {
+  padding: $wolf-space-xs $wolf-space-sm;
+  background: transparent;
+  border: none;
+  color: $wolf-text-tertiary;
+  font-size: $wolf-font-size-caption;
+  cursor: pointer;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: $wolf-text-secondary;
+  }
+}
+
+// ==================== 表头筛选状态优化 ====================
+// UX 优化：已筛选列标题变色 + 筛选值预览
+
+// 已筛选列标题样式
+.wolf-th-filtered {
+  background: rgba($wolf-primary, 0.05) !important;
+
+  .th-label {
+    color: $wolf-primary !important;
+    font-weight: $wolf-font-weight-medium !important;
+  }
+
+  .wolf-filter-preview {
+    font-size: $wolf-font-size-caption;
+    color: $wolf-text-tertiary;
+    background: $wolf-bg-hover;
+    padding: 2px 6px;
+    border-radius: $wolf-radius-sm;
+    margin-left: 4px;
+  }
+}
+
+// 筛选图标激活态
+.wolf-filter-icon-active {
+  color: $wolf-primary !important;
+  font-size: 12px !important;
 }
 
 // ==================== 工具类 ====================

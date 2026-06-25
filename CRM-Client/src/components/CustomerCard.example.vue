@@ -16,8 +16,8 @@ import type { CustomerResponse, CustomerCreate } from '@/schemas/customer'
 import { CustomerStatusMap } from '@/schemas/common'
 
 // ===== 3. Store 导入 =====
-import { useCustomerStore } from '@/stores/customer'
-import { usePermissionsStore } from '@/stores/permissions'
+import { useCustomerStore } from '@/stores/example-customer'
+import { usePermissionStore } from '@/stores/permissions'
 
 // ===== 4. Props 定义（必须类型化） =====
 const props = defineProps({
@@ -45,7 +45,7 @@ const emit = defineEmits<{
 
 // ===== 6. Store 使用 =====
 const customerStore = useCustomerStore()
-const permissionsStore = usePermissionsStore()
+const permissionStore = usePermissionStore()
 
 // 正确解构：State 用 storeToRefs，Actions 直接解构
 const { loading, error } = storeToRefs(customerStore)
@@ -71,12 +71,12 @@ const statusText = computed<string>(() => {
 
 /** 是否有编辑权限 */
 const canEdit = computed<boolean>(() => {
-  return permissionsStore.hasPermission('customer:edit:own') || permissionsStore.hasPermission('customer:edit:all')
+  return permissionStore.hasPermission('customer:edit:own') || permissionStore.hasPermission('customer:edit:all')
 })
 
 /** 是否可以删除 */
 const canDelete = computed<boolean>(() => {
-  return permissionsStore.hasPermission('customer:delete:own') || permissionsStore.hasPermission('customer:delete:all')
+  return permissionStore.hasPermission('customer:delete:own') || permissionStore.hasPermission('customer:delete:all')
 })
 
 // ===== 9. 方法（必须参数和返回类型） =====
@@ -194,55 +194,3 @@ onMounted(() => {
   padding: var(--wolf-spacing-lg);
 }
 </style>
-
-// ===== 错误示例（禁止） =====
-
-/**
- * ❌ 禁止示例 1：Props 使用 Object 无类型
- *
- * // 错误
- * const props = defineProps({
- *   customer: Object  // 无类型
- * })
- *
- * // 正确
- * const props = defineProps({
- *   customer: {
- *     type: Object as PropType<CustomerResponse>,
- *     required: true
- *   }
- * })
- */
-
-/**
- * ❌ 禁止示例 2：Emits 使用数组无类型
- *
- * // 错误
- * const emit = defineEmits(['update', 'delete'])
- *
- * // 正确
- * const emit = defineEmits<{
- *   (e: 'update', value: CustomerCreate): void
- *   (e: 'delete', id: number): void
- * }>()
- */
-
-/**
- * ❌ 禁止示例 3：直接解构 Store State
- *
- * // 错误
- * const { items } = customerStore  // 失去响应性
- *
- * // 正确
- * const { items } = storeToRefs(customerStore)
- */
-
-/**
- * ❌ 禁止示例 4：内联定义类型
- *
- * // 错误
- * interface LocalType { ... }  // 在组件内定义
- *
- * // 正确：从 schemas/ 导入
- * import type { CustomerResponse } from '@/schemas/customer'
- */

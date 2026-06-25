@@ -43,6 +43,7 @@
         :created-at="item.createdAt"
         :active="item.id === activeId"
         @select="handleSelect"
+        @delete="handleDelete"
       />
     </div>
 
@@ -63,6 +64,7 @@
         :created-at="item.createdAt"
         :active="item.id === activeId"
         @select="handleSelect"
+        @delete="handleDelete"
       />
     </div>
 

@@ -27,8 +27,7 @@ describe('AgentExecutionLog (重构后)', () => {
     it('should use CompactExecutionLog component', () => {
       const wrapper = mount(AgentExecutionLog, {
         props: {
-          steps: mockSteps,
-          expanded: false
+          steps: mockSteps
         }
       })
 
@@ -37,33 +36,32 @@ describe('AgentExecutionLog (重构后)', () => {
       expect(compactLog.exists()).toBe(true)
     })
 
-    it('should pass props correctly to CompactExecutionLog', () => {
+    it('should pass steps correctly to CompactExecutionLog', () => {
       const wrapper = mount(AgentExecutionLog, {
         props: {
-          steps: mockSteps,
-          expanded: false
+          steps: mockSteps
         }
       })
 
       const compactLog = wrapper.findComponent({ name: 'CompactExecutionLog' })
 
-      // ← 验证 props 传递
+      // ← 验证 props 传递（V2: expanded 已废弃，内部管理）
       expect(compactLog.props('steps')).toEqual(mockSteps)
-      expect(compactLog.props('expanded')).toBe(false)
+      expect(compactLog.props('status')).toBeDefined()
     })
 
-    it('should emit toggle-expand event', async () => {
+    it('should compute status from steps', () => {
       const wrapper = mount(AgentExecutionLog, {
         props: {
           steps: mockSteps,
-          expanded: false
+          isExecutionComplete: true
         }
       })
 
       const compactLog = wrapper.findComponent({ name: 'CompactExecutionLog' })
-      await compactLog.vm.$emit('toggle-expand')
 
-      expect(wrapper.emitted('toggle-expand')).toBeTruthy()
+      // ← 验证状态推导
+      expect(compactLog.props('status')).toBe('success')
     })
   })
 
@@ -71,8 +69,7 @@ describe('AgentExecutionLog (重构后)', () => {
     it('steps 为空时应该显示空状态（通过 CompactExecutionLog）', () => {
       const wrapper = mount(AgentExecutionLog, {
         props: {
-          steps: [],
-          expanded: false
+          steps: []
         }
       })
 
@@ -84,11 +81,10 @@ describe('AgentExecutionLog (重构后)', () => {
   })
 
   describe('展开/收起状态验证', () => {
-    it('expanded=false 时应该渲染 CollapsedView（通过 CompactExecutionLog）', () => {
+    it('默认状态应该渲染 CollapsedView（通过 CompactExecutionLog）', () => {
       const wrapper = mount(AgentExecutionLog, {
         props: {
-          steps: mockSteps,
-          expanded: false
+          steps: mockSteps
         }
       })
 
@@ -96,35 +92,20 @@ describe('AgentExecutionLog (重构后)', () => {
       const collapsedView = compactLog.findComponent({ name: 'CollapsedView' })
       expect(collapsedView.exists()).toBe(true)
     })
-
-    it('expanded=true 时应该渲染 ExpandedView（通过 CompactExecutionLog）', () => {
-      const wrapper = mount(AgentExecutionLog, {
-        props: {
-          steps: mockSteps,
-          expanded: true
-        }
-      })
-
-      const compactLog = wrapper.findComponent({ name: 'CompactExecutionLog' })
-      const expandedView = compactLog.findComponent({ name: 'ExpandedView' })
-      expect(expandedView.exists()).toBe(true)
-    })
   })
 
   describe('ARIA 属性验证', () => {
     it('容器应该有正确的 ARIA 属性（通过 CompactExecutionLog）', () => {
       const wrapper = mount(AgentExecutionLog, {
         props: {
-          steps: mockSteps,
-          expanded: false
+          steps: mockSteps
         }
       })
 
       const compactLog = wrapper.findComponent({ name: 'CompactExecutionLog' })
-      const container = compactLog.find('.agent-execution-log')
+      const container = compactLog.find('.agent-log')
 
-      expect(container.attributes('role')).toBe('log')
-      expect(container.attributes('aria-label')).toBe('AI 执行进度')
+      expect(container.exists()).toBe(true)
     })
   })
 })

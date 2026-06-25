@@ -25,11 +25,20 @@ describe('ChatBubble', () => {
         role: 'assistant',
         content: '好的，我将创建客户...',
         timestamp: '2024-01-15T14:31:00'
+      },
+      global: {
+        stubs: {
+          MarkdownContent: {
+            template: '<div class="markdown-content">{{ content }}</div>',
+            props: ['content']
+          }
+        }
       }
     })
 
     expect(wrapper.find('.chat-bubble').classes()).toContain('chat-bubble--assistant')
-    expect(wrapper.find('.chat-bubble__text').text()).toBe('好的，我将创建客户...')
+    // AI messages use MarkdownContent component
+    expect(wrapper.find('.markdown-content').text()).toBe('好的，我将创建客户...')
   })
 
   it('formats time correctly', () => {
@@ -55,9 +64,9 @@ describe('ChatBubble', () => {
 
     // 用户气泡的 avatar 应在 content 之后（flex-direction: row-reverse）
     const bubble = wrapper.find('.chat-bubble')
-    const children = bubble.findAll('> *')
-    // 顺序：content, avatar, time（因为 row-reverse）
-    expect(children.length).toBe(3)
+    // 检查 avatar 存在
+    expect(bubble.find('.chat-bubble__avatar').exists()).toBe(true)
+    expect(bubble.find('.chat-bubble__content').exists()).toBe(true)
   })
 
   it('renders assistant avatar on left side', () => {
@@ -66,14 +75,21 @@ describe('ChatBubble', () => {
         role: 'assistant',
         content: '测试',
         timestamp: '2024-01-15T14:30:00'
+      },
+      global: {
+        stubs: {
+          MarkdownContent: {
+            template: '<div class="markdown-content">{{ content }}</div>',
+            props: ['content']
+          }
+        }
       }
     })
 
-    // AI 气泡的 avatar 应在 content 之前
+    // AI 气泡有 ai-icon (not avatar)
     const bubble = wrapper.find('.chat-bubble')
-    const children = bubble.findAll('> *')
-    // 顺序：avatar, content, time
-    expect(children.length).toBe(3)
+    expect(bubble.find('.chat-bubble__ai-icon').exists()).toBe(true)
+    expect(bubble.find('.chat-bubble__content').exists()).toBe(true)
   })
 
   it('renders preview card slot for assistant', () => {
@@ -82,6 +98,14 @@ describe('ChatBubble', () => {
         role: 'assistant',
         content: '请确认以下信息',
         timestamp: '2024-01-15T14:30:00'
+      },
+      global: {
+        stubs: {
+          MarkdownContent: {
+            template: '<div class="markdown-content">{{ content }}</div>',
+            props: ['content']
+          }
+        }
       },
       slots: {
         'preview-card': '<div class="preview-card-test">预览卡片</div>'

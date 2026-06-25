@@ -1,6 +1,6 @@
 <template>
   <div class="filter-header" ref="componentRef" @click.stop>
-    <span class="header-label">{{ label }}</span>
+    <span :class="['header-label', { filtered: hasActiveFilter }]">{{ label }}</span>
     <el-popover
       v-if="filter"
       :visible="popoverVisible"
@@ -17,6 +17,10 @@
           <Filter />
         </el-icon>
       </template>
+      <!-- UX 优化：筛选值预览 -->
+      <span v-if="hasActiveFilter && filterPreview" class="filter-preview">
+        {{ filterPreview }}
+      </span>
       <div class="filter-popover-content">
         <el-input
           v-if="filter.type === 'search'"
@@ -190,6 +194,45 @@ const hasActiveFilter = computed(() => {
   }
 })
 
+// UX 优化：筛选值预览显示
+const filterPreview = computed(() => {
+  if (!props.filter || !props.filterValue) return ''
+
+  const fv = props.filterValue
+  switch (props.filter.type) {
+    case 'search':
+      return fv.search || ''
+    case 'select':
+      const sel = fv.select
+      if (Array.isArray(sel)) {
+        return sel.length > 0 ? sel.map(v => {
+          const opt = props.filter?.options?.find(o => o.value === v)
+          return opt?.label || String(v)
+        }).join(', ') : ''
+      }
+      if (sel !== null && sel !== undefined) {
+        const opt = props.filter?.options?.find(o => o.value === sel)
+        return opt?.label || String(sel)
+      }
+      return ''
+    case 'daterange':
+      if (fv.daterange && fv.daterange[0] && fv.daterange[1]) {
+        return `${fv.daterange[0]} ~ ${fv.daterange[1]}`
+      }
+      return ''
+    case 'numrange':
+      const nr = fv.numrange
+      if (nr) {
+        const min = nr[0] ?? props.filter.min ?? 0
+        const max = nr[1] ?? props.filter.max ?? 100
+        return `${min}-${max}`
+      }
+      return ''
+    default:
+      return ''
+  }
+})
+
 const popoverWidth = computed(() => {
   if (!props.filter) return 200
   switch (props.filter.type) {
@@ -296,12 +339,18 @@ const handleSort = (order: 'asc' | 'desc') => {
   font-weight: $wolf-table-header-font-weight;
   color: $wolf-table-header-text;
   white-space: nowrap;
+
+  // UX 优化：已筛选列标题变色
+  &.filtered {
+    color: $wolf-primary;
+    font-weight: $wolf-font-weight-medium;
+  }
 }
 
 .filter-icon {
   font-size: 14px;
   color: $wolf-text-placeholder;
-  transition: all 0.2s ease-in-out;
+  transition: all 0.15s ease;
 
   &:hover {
     color: $wolf-text-tertiary;
@@ -310,6 +359,20 @@ const handleSort = (order: 'asc' | 'desc') => {
   &.active {
     color: $wolf-primary;
   }
+}
+
+// UX 优化：筛选值预览样式
+.filter-preview {
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-tertiary;
+  background: $wolf-bg-hover;
+  padding: 2px 6px;
+  border-radius: $wolf-radius-sm;
+  margin-left: 4px;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sort-icons {
@@ -322,7 +385,7 @@ const handleSort = (order: 'asc' | 'desc') => {
 .sort-icon {
   font-size: 10px;
   color: $wolf-text-placeholder;
-  transition: all 0.2s ease-in-out;
+  transition: all 0.15s ease;
 
   &:hover {
     color: $wolf-text-tertiary;

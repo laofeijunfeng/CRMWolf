@@ -263,7 +263,7 @@ onMounted(async () => {
   overflow-y: auto;
 }
 
-// 菜单项样式 - 参考 Settings.vue 的 settings-item 样式
+// 菜单项样式 - UX 优化：左侧指示条 + 0.15s 过渡动画
 .menu-item {
   display: flex;
   align-items: center;
@@ -271,17 +271,49 @@ onMounted(async () => {
   padding: $wolf-space-md;
   margin-bottom: 4px;
   cursor: pointer;
-  transition: background 0.2s;
   border-radius: $wolf-radius-sm;
   color: $wolf-text-tertiary;
+  position: relative;
+  transition: all 0.15s ease;
+
+  // 左侧指示条（Signature 元素）
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 16px;
+    background: $wolf-primary;
+    border-radius: 0 2px 2px 0;
+    transition: width 0.15s ease;
+  }
 
   &:hover {
     background: $wolf-bg-hover;
+    color: $wolf-text-secondary;
+
+    &::before {
+      width: 3px; // hover 时显示 3px 指示条
+    }
+
+    .item-arrow {
+      opacity: 1;
+    }
   }
 
   &.active {
-    background: $wolf-bg-hover;
+    background: $wolf-primary-light;
     color: $wolf-primary;
+
+    &::before {
+      width: 4px; // active 时显示 4px 高亮条
+    }
+
+    .item-arrow {
+      opacity: 1;
+    }
   }
 }
 
@@ -307,13 +339,7 @@ onMounted(async () => {
   color: $wolf-text-placeholder;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.menu-item:hover .item-arrow,
-.menu-item.active .item-arrow {
-  opacity: 1;
-  color: $wolf-text-tertiary;
+  transition: opacity 0.15s ease; // 与菜单项过渡时间一致
 }
 
 // 用户信息区域 - 同样采用列表项样式

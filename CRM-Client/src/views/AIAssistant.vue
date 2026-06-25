@@ -279,13 +279,29 @@ async function handleSelectConversation(id: number): Promise<void> {
   // ✅ ChatGPT 模式：立即加载历史对话内容
   await store.loadConversation(id)
 
-  // 清空所有状态
+  // 清空临时状态
   currentPreviewData.value = null
   sessionId.value = null
   isStreamingAIMessage.value = false
 
-  // ✅ 清空执行步骤（历史对话不需要显示执行过程）
-  agentLog.clear()
+  // ✅ 恢复最后一条 AI 消息的 executionSteps（修复刷新后消失的问题）
+  const executionSteps = store.getLastAIMessageExecutionSteps()
+  if (executionSteps.length > 0) {
+    // 将 executionSteps 恢复到 agentLog composable
+    // 使用 localStorage 缓存方式恢复
+    const cacheKey = `execution_steps_${id}`
+    localStorage.setItem(cacheKey, JSON.stringify(executionSteps))
+    agentLog.restoreFromLocalStorage()
+
+    console.log('[AIAssistant] Restored execution steps from conversation:', {
+      conversationId: id,
+      stepsCount: executionSteps.length,
+      lastStep: executionSteps[executionSteps.length - 1]?.title
+    })
+  } else {
+    // 无执行步骤时，清空 agentLog 状态
+    agentLog.clear()
+  }
 
   console.log('[AIAssistant] Selected conversation:', id)
 }
