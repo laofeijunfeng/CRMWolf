@@ -162,6 +162,13 @@ class EntityCandidate(TypedDict):
     hint: str  # Differentiating hint (e.g., "最近跟进 5/20")
     matched_by: str  # "exact_norm" | "prefix_norm" | "wide" | "raw"
     entity_type: str
+    # V2 fields for inline display
+    industry: Optional[str]  # 行业
+    status: Optional[str]  # 状态
+    amount: Optional[float]  # 金额（商机）
+    stage: Optional[str]  # 阶段（商机）
+    entity_info_inline: Optional[str]  # 格式化 Inline 文本
+    entity_info_detail: Optional[Dict[str, Any]]  # Hover 详情
 
 
 # ==================== Helper Functions ====================
