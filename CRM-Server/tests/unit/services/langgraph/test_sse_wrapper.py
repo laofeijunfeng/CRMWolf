@@ -81,6 +81,7 @@ class TestSSEEventBuilders:
         """Test waiting_for_user event format."""
         event = build_waiting_for_user_event(
             question="请选择客户",
+            confirmationType="disambiguation",
             options=["张三科技", "光大证券"],
             missing_fields=["customer_id"],
             field_options={"customer_source": ["线上", "电话"]},
@@ -172,19 +173,25 @@ class TestSSECompatibility:
 
     def test_waiting_for_user_format_matches(self) -> None:
         """Test waiting_for_user format matches legacy."""
-        # Legacy waiting_for_user event structure
+        # Legacy + V2 waiting_for_user event structure
         expected_fields = {
             "question",
+            "confirmationType",  # V2 新增
             "options",
             "missing_fields",
             "field_options",
+            "riskLevel",  # V2 新增
+            "params",  # V2 新增
         }
 
         event = build_waiting_for_user_event(
             question="Test",
+            confirmationType="disambiguation",
             options=["A", "B"],
             missing_fields=["field1"],
             field_options={"field1": {"options": ["X", "Y"]}},
+            riskLevel="low",
+            params={"action": "test"},
         )
 
         # Parse event data
@@ -281,7 +288,7 @@ class TestSSEEventParsing:
         events = [
             build_start_event("session-123"),
             build_tool_call_event("create_follow_up"),
-            build_waiting_for_user_event("Test?", ["A", "B"]),
+            build_waiting_for_user_event(question="Test?", options=["A", "B"]),
         ]
 
         for event in events:

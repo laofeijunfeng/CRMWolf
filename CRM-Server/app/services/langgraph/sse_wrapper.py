@@ -113,16 +113,22 @@ def build_tool_result_event(tool: str, result: Dict[str, Any]) -> str:
 
 def build_waiting_for_user_event(
     question: str,
-    options: Optional[List[str]] = None,
+    confirmationType: Optional[str] = None,  # V2 新增："disambiguation" | "confirmation" | "info_gap"
+    options: Optional[List[Any]] = None,  # V2 改为 Dict 格式，兼容旧 List[str]
     missing_fields: Optional[List[str]] = None,
     field_options: Optional[Dict[str, Any]] = None,
+    riskLevel: Optional[str] = None,  # V2 新增："low" | "medium" | "high"
+    params: Optional[Dict[str, Any]] = None,  # V2 新增：当前操作参数
 ) -> str:
     """Build waiting for user event."""
     data = {
         "question": question,
+        "confirmationType": confirmationType,
         "options": options or [],
         "missing_fields": missing_fields or [],
         "field_options": field_options or {},
+        "riskLevel": riskLevel,
+        "params": params,
     }
     return build_sse_event(SSE_EVENT_TYPES["WAITING_FOR_USER"], data)
 
@@ -349,11 +355,16 @@ async def stream_sse_events(
 
                 # Build waiting_for_user event with proper fields
                 question = interrupt_value.get("question", "请提供更多信息")
+                confirmationType = interrupt_value.get("confirmationType")
                 options = interrupt_value.get("options", [])
                 missing_fields = interrupt_value.get("missing_fields", [])
                 field_options = interrupt_value.get("field_options", {})
+                riskLevel = interrupt_value.get("riskLevel")
+                params = interrupt_value.get("params")
 
-                yield build_waiting_for_user_event(question, options, missing_fields, field_options)
+                yield build_waiting_for_user_event(
+                    question, confirmationType, options, missing_fields, field_options, riskLevel, params
+                )
 
                 # Stop streaming on interrupt
                 return
@@ -445,10 +456,13 @@ async def stream_resume_sse_events(
                 # Another interrupt during resume
                 interrupt_value = event_data.get("value", {})
                 yield build_waiting_for_user_event(
-                    interrupt_value.get("question", ""),
-                    interrupt_value.get("options", []),
-                    interrupt_value.get("missing_fields", []),
-                    interrupt_value.get("field_options", {}),
+                    question=interrupt_value.get("question", ""),
+                    confirmationType=interrupt_value.get("confirmationType"),
+                    options=interrupt_value.get("options", []),
+                    missing_fields=interrupt_value.get("missing_fields", []),
+                    field_options=interrupt_value.get("field_options", {}),
+                    riskLevel=interrupt_value.get("riskLevel"),
+                    params=interrupt_value.get("params"),
                 )
                 return
 
