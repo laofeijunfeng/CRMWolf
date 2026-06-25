@@ -53,3 +53,5 @@ CRM-Server/uploads/**.tar
 # 上传团队共享的规则和技能，不上传用户特定配置
 .claude/settings.local.json
 .claude/memory/
+.sdd/
+.superpowers/
