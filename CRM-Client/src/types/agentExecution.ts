@@ -101,6 +101,36 @@ export interface ExecutionStep {
 
   /** ReAct 会话 ID（可选） */
   sessionId?: string
+
+  // ===== V2 新增字段（向后兼容） =====
+  /** Inline 显示文本（单行合并） */
+  inline_text?: string
+
+  /** AI 推理过程 */
+  thinking?: string
+
+  /** 业务化摘要 */
+  summary?: string
+
+  /** 摘要参数（简化版） */
+  summary_params?: Record<string, string>
+
+  /** 详情参数（完整版） */
+  detail_params?: Record<string, { value: string; isEntity?: boolean }>
+
+  /** 确认类型：disambiguation | confirmation | info_gap */
+  confirmationType?: 'disambiguation' | 'confirmation' | 'info_gap'
+
+  /** 风险等级：low | medium | high */
+  riskLevel?: 'low' | 'medium' | 'high'
+
+  /** 候选列表（V2 格式） */
+  options?: Array<{
+    id: number
+    name: string
+    entity_info_inline?: string
+    entity_info_detail?: Record<string, string>
+  }>
 }
 
 /**
