@@ -100,15 +100,29 @@ def build_node_result_event(node: str, result: Dict[str, Any]) -> str:
     return build_sse_event(SSE_EVENT_TYPES["NODE_RESULT"], {"node": node, "result": display_result})
 
 
-def build_tool_call_event(tool: str, params: Optional[Dict[str, Any]] = None) -> str:
+def build_tool_call_event(
+    tool: str,
+    params: Optional[Dict[str, Any]] = None,
+    thinking: Optional[str] = None,  # V2 新增：AI 推理过程
+) -> str:
     """Build tool call event."""
-    return build_sse_event(SSE_EVENT_TYPES["TOOL_CALL"], {"tool": tool, "params": params or {}})
+    return build_sse_event(
+        SSE_EVENT_TYPES["TOOL_CALL"],
+        {"tool": tool, "params": params or {}, "thinking": thinking}
+    )
 
 
-def build_tool_result_event(tool: str, result: Dict[str, Any]) -> str:
+def build_tool_result_event(
+    tool: str,
+    result: Dict[str, Any],
+    summary: Optional[str] = None,  # V2 新增：业务化摘要
+) -> str:
     """Build tool result event."""
     display_result = filter_result_for_display(result)
-    return build_sse_event(SSE_EVENT_TYPES["TOOL_RESULT"], {"tool": tool, "result": display_result})
+    return build_sse_event(
+        SSE_EVENT_TYPES["TOOL_RESULT"],
+        {"tool": tool, "result": display_result, "summary": summary}
+    )
 
 
 def build_waiting_for_user_event(
