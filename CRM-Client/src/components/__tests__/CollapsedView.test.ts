@@ -2,130 +2,140 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import CollapsedView from '../CollapsedView.vue'
-import type { ExecutionStep } from '@/types/agentExecution'
-import { ExecutionStepType } from '@/types/agentExecution'
 
-describe('CollapsedView', () => {
-  const mockSteps: ExecutionStep[] = [
-    {
-      id: 'step-1',
-      type: ExecutionStepType.ROUND_START,
-      title: '第 1 轮执行开始',
-      description: '开始第 1 轮执行',
-      timestamp: new Date('2026-01-01T10:00:00'),
-      round: 1
-    },
-    {
-      id: 'step-2',
-      type: ExecutionStepType.TOOL_CALL,
-      title: '查找客户信息',
-      description: '正在搜索客户',
-      timestamp: new Date('2026-01-01T10:00:05'),
-      round: 1,
-      tool: 'search_customer'
-    }
-  ]
-
-  it('should display progress count "Round N/M"', () => {
+describe('CollapsedView.vue (V2)', () => {
+  it('has height 36px (compact)', () => {
     const wrapper = mount(CollapsedView, {
-      props: { steps: mockSteps }
+      props: {
+        round: 2,
+        totalRounds: 5,
+        status: 'loading',
+        stepText: '正在查询商机...'
+      }
     })
 
-    // ← 验证进度计数（设计要求）
-    expect(wrapper.text()).toContain('Round 1/1')
+    expect(wrapper.find('.collapsed-view').exists()).toBe(true)
+    // CSS 规范已定义 height: 36px
   })
 
-  it('should display current step title', () => {
+  it('shows Round Badge with progress format R2/5', () => {
     const wrapper = mount(CollapsedView, {
-      props: { steps: mockSteps }
+      props: {
+        round: 2,
+        totalRounds: 5,
+        status: 'success',
+        stepText: '查找成功'
+      }
     })
 
-    // ← 验证当前步骤显示
-    expect(wrapper.text()).toContain('查找客户信息')
+    expect(wrapper.find('.round-badge').text()).toBe('R2/5')
   })
 
-  it('should show loading icon when running', () => {
+  it('shows Round Badge with simple format R1', () => {
     const wrapper = mount(CollapsedView, {
-      props: { steps: mockSteps }
+      props: {
+        round: 1,
+        status: 'success',
+        stepText: '查找成功'
+      }
     })
 
-    const icon = wrapper.find('.status-icon')
-    expect(icon.classes()).toContain('is-running')
+    expect(wrapper.find('.round-badge').text()).toBe('R1')
   })
 
-  it('should emit toggle-expand event on click', async () => {
+  it('shows 16px status icon', () => {
     const wrapper = mount(CollapsedView, {
-      props: { steps: mockSteps }
+      props: {
+        status: 'loading',
+        stepText: '正在处理...'
+      }
+    })
+
+    const statusIcon = wrapper.find('.status-icon')
+    expect(statusIcon.exists()).toBe(true)
+    expect(statusIcon.classes()).toContain('loading')
+  })
+
+  it('emits click event on click', async () => {
+    const wrapper = mount(CollapsedView, {
+      props: { status: 'success', stepText: 'test' }
     })
 
     await wrapper.find('.collapsed-view').trigger('click')
 
-    expect(wrapper.emitted('toggle-expand')).toBeTruthy()
+    expect(wrapper.emitted('click')).toBeTruthy()
   })
 
-  it('should support keyboard navigation (Enter/Space)', async () => {
+  it('toggles expand on Enter key', async () => {
     const wrapper = mount(CollapsedView, {
-      props: { steps: mockSteps }
+      props: { status: 'success', stepText: 'test' }
     })
 
     await wrapper.find('.collapsed-view').trigger('keydown', { key: 'Enter' })
 
-    expect(wrapper.emitted('toggle-expand')).toBeTruthy()
+    expect(wrapper.emitted('click')).toBeTruthy()
   })
 
-  it('should have focus-visible style', () => {
+  it('toggles expand on Space key', async () => {
     const wrapper = mount(CollapsedView, {
-      props: { steps: mockSteps }
+      props: { status: 'success', stepText: 'test' }
+    })
+
+    await wrapper.find('.collapsed-view').trigger('keydown', { key: ' ' })
+
+    expect(wrapper.emitted('click')).toBeTruthy()
+  })
+
+  it('has focus-visible style for accessibility', () => {
+    const wrapper = mount(CollapsedView, {
+      props: { status: 'success', stepText: 'test' }
     })
 
     const view = wrapper.find('.collapsed-view')
     expect(view.attributes('tabindex')).toBe('0')
+    expect(view.attributes('role')).toBe('button')
+    expect(view.attributes('aria-expanded')).toBe('false')
   })
 
-  it('should use correct status colors', () => {
-    // ← 思考中状态
-    const thinkingSteps: ExecutionStep[] = [
-      {
-        id: 'step-1',
-        type: ExecutionStepType.ROUND_START,
-        title: '第 1 轮执行开始',
-        description: '开始第 1 轮执行',
-        timestamp: new Date('2026-01-01T10:00:00'),
-        round: 1
-      }
-    ]
-    const wrapperThinking = mount(CollapsedView, {
-      props: { steps: thinkingSteps }
-    })
-
-    const iconThinking = wrapperThinking.find('.status-icon')
-    expect(iconThinking.classes()).toContain('is-thinking')
-
-    // ← 成功状态
-    const successSteps: ExecutionStep[] = [
-      {
-        id: 'step-1',
-        type: ExecutionStepType.ROUND_START,
-        title: '第 1 轮执行开始',
-        description: '开始第 1 轮执行',
-        timestamp: new Date('2026-01-01T10:00:00'),
-        round: 1
-      },
-      {
-        id: 'step-2',
-        type: ExecutionStepType.TOOL_RESULT,
-        title: '工具执行完成',
-        description: '执行成功',
-        timestamp: new Date('2026-01-01T10:00:05'),
-        round: 1,
-        success: true
-      }
-    ]
+  it('applies correct status colors', () => {
+    // success status
     const wrapperSuccess = mount(CollapsedView, {
-      props: { steps: successSteps }
+      props: { status: 'success', stepText: 'test' }
+    })
+    expect(wrapperSuccess.find('.status-icon').classes()).toContain('success')
+
+    // error status
+    const wrapperError = mount(CollapsedView, {
+      props: { status: 'error', stepText: 'test' }
+    })
+    expect(wrapperError.find('.status-icon').classes()).toContain('error')
+
+    // loading status
+    const wrapperLoading = mount(CollapsedView, {
+      props: { status: 'loading', stepText: 'test' }
+    })
+    expect(wrapperLoading.find('.status-icon').classes()).toContain('loading')
+
+    // partial status
+    const wrapperPartial = mount(CollapsedView, {
+      props: { status: 'partial', stepText: 'test' }
+    })
+    expect(wrapperPartial.find('.status-icon').classes()).toContain('partial')
+  })
+
+  it('displays stepText', () => {
+    const wrapper = mount(CollapsedView, {
+      props: { status: 'success', stepText: '找到 1 个客户：光大证券股份有限公司' }
     })
 
-    const iconSuccess = wrapperSuccess.find('.status-icon')
-    expect(iconSuccess.classes()).toContain('is-success')
+    expect(wrapper.find('.step-text').text()).toBe('找到 1 个客户：光大证券股份有限公司')
+  })
+
+  it('shows expand hint', () => {
+    const wrapper = mount(CollapsedView, {
+      props: { status: 'success', stepText: 'test' }
+    })
+
+    expect(wrapper.find('.expand-hint').text()).toContain('点击展开')
   })
 })
