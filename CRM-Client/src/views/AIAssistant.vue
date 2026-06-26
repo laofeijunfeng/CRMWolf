@@ -126,6 +126,7 @@ import { useAIConversationStore } from '@/stores/aiConversation'
 import { useUserStore } from '@/stores/user'
 import { aiAssistantApi, type AIAssistantSSEEvent } from '@/api/aiAssistant'
 import { useAgentExecutionLog } from '@/composables/useAgentExecutionLog'
+import { logger } from '@/utils/logger'
 import AgentExecutionLog from '@/components/AgentExecutionLog.vue'
 import { Operation } from '@element-plus/icons-vue'
 import HistoryList from '@/components/ai-assistant/HistoryList.vue'
@@ -222,21 +223,27 @@ onMounted(async () => {
     const recentConversation = store.allHistory[0]
     if (recentConversation) {
       await store.loadConversation(recentConversation.id)
-      console.log('[AIAssistant] Restored recent conversation:', recentConversation.id)
 
-      // ← Task 13: 恢复最后一条 AI 消息的 executionSteps
+      // ← Task 6: 使用 logger 追踪恢复流程
       const executionSteps = store.getLastAIMessageExecutionSteps()
-      if (executionSteps.length > 0) {
-        // 将 executionSteps 恢复到 agentLog composable 的内部状态
-        // 注意：agentLog.steps 是 readonly，需要访问内部 steps（通过 restoreFromLocalStorage 或直接设置）
-        // 这里使用 restoreFromLocalStorage 的方式：先缓存到 localStorage，再恢复
-        const cacheKey = `execution_steps_${recentConversation.id}`
-        localStorage.setItem(cacheKey, JSON.stringify(executionSteps))
-        agentLog.restoreFromLocalStorage()
 
-        console.log('[AIAssistant] Restored execution steps from last AI message:', {
+      logger.info('[AIAssistant]', 'restore_start', {
+        recentConversationId: recentConversation.id,
+        storeCurrentId: currentId.value,
+        executionStepsCount: executionSteps.length
+      })
+
+      if (executionSteps.length > 0) {
+        // ✅ 修复：直接设置步骤，避免不必要的 localStorage 中间步骤
+        agentLog.setStepsDirectly(executionSteps)
+
+        logger.info('[AIAssistant]', 'restore_success', {
           stepsCount: executionSteps.length,
           lastStep: executionSteps[executionSteps.length - 1]?.title
+        })
+      } else {
+        logger.warn('[AIAssistant]', 'restore_empty', {
+          reason: 'No execution steps to restore'
         })
       }
     }
@@ -287,13 +294,10 @@ async function handleSelectConversation(id: number): Promise<void> {
   // ✅ 恢复最后一条 AI 消息的 executionSteps（修复刷新后消失的问题）
   const executionSteps = store.getLastAIMessageExecutionSteps()
   if (executionSteps.length > 0) {
-    // 将 executionSteps 恢复到 agentLog composable
-    // 使用 localStorage 缓存方式恢复
-    const cacheKey = `execution_steps_${id}`
-    localStorage.setItem(cacheKey, JSON.stringify(executionSteps))
-    agentLog.restoreFromLocalStorage()
+    // ✅ 修复：直接设置步骤，避免 localStorage round-trip
+    agentLog.setStepsDirectly(executionSteps)
 
-    console.log('[AIAssistant] Restored execution steps from conversation:', {
+    logger.info('[AIAssistant]', 'restore_from_conversation', {
       conversationId: id,
       stepsCount: executionSteps.length,
       lastStep: executionSteps[executionSteps.length - 1]?.title
@@ -303,7 +307,7 @@ async function handleSelectConversation(id: number): Promise<void> {
     agentLog.clear()
   }
 
-  console.log('[AIAssistant] Selected conversation:', id)
+  logger.info('[AIAssistant]', 'selected_conversation', { conversationId: id })
 }
 
 /** 删除对话 */
@@ -414,7 +418,7 @@ async function handleSendMessage(message: string): Promise<void> {
 
 /** 处理 SSE 事件 */
 function handleSSEEvent(event: AIAssistantSSEEvent): void {
-  console.log('[AIAssistant] SSE event:', event.event)
+  console.log('[AIAssistant] SSE event:', event.event, event)
 
   // 提取 session_id
   if (event.session_id && !sessionId.value) {
@@ -461,8 +465,22 @@ function handleSSEEvent(event: AIAssistantSSEEvent): void {
       break
 
     case 'complete':
-      // Agent 完成 - 不追加内容（避免重复）
-      // 'result' 事件已包含完整内容，'complete' 事件仅作为流结束信号
+      // Agent 完成 - 检查是否有 answer 字段
+      if (event.answer && isStreamingAIMessage.value) {
+        store.appendAIMessageContent(event.answer)
+      }
+      break
+
+    case 'react_complete':
+      // ✅ 新增：Agent 执行完成，如果没有 content，生成默认回复
+      // 如果 AI 消息内容为空，根据执行步骤生成默认回复
+      const lastAIMessage = messages.value.filter(m => m.role === 'assistant').pop()
+      if (lastAIMessage && lastAIMessage.content === '' && isStreamingAIMessage.value) {
+        // 生成默认回复：执行已完成
+        const defaultReply = '操作已成功执行完成。'
+        store.appendAIMessageContent(defaultReply)
+        console.log('[AIAssistant] Generated default reply for empty content')
+      }
       break
 
     case 'error':
