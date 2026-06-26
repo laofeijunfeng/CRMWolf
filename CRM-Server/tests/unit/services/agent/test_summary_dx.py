@@ -81,3 +81,120 @@ class TestPhaseContracts:
             summary_latency_ms=0,
         )
         assert output.summary_type == "fallback"
+
+
+class TestEdgeScenarioHandler:
+    """Test edge scenario detection and handling"""
+
+    def test_edge_scenarios_defined(self):
+        """Test EDGE_SCENARIOS constants are defined"""
+        from app.services.agent.edge_scenarios import EDGE_SCENARIOS, SCENARIO_PRIORITY
+
+        assert "timeout" in EDGE_SCENARIOS
+        assert "partial_success" in EDGE_SCENARIOS
+        assert "retry" in EDGE_SCENARIOS
+        assert "cache_miss" in EDGE_SCENARIOS
+
+    def test_scenario_priority_order(self):
+        """Test SCENARIO_PRIORITY order (timeout = highest)"""
+        from app.services.agent.edge_scenarios import SCENARIO_PRIORITY
+
+        assert SCENARIO_PRIORITY[0] == "timeout"
+        assert SCENARIO_PRIORITY.index("interact") < SCENARIO_PRIORITY.index("query")
+
+    def test_detect_timeout_by_rounds(self):
+        """Test timeout detection when round_num >= max_rounds"""
+        from app.services.agent.edge_scenarios import EdgeScenarioHandler
+        from app.services.agent.tools import ToolResult
+
+        handler = EdgeScenarioHandler()
+        tool_result = ToolResult(success=True, data={"id": 123})
+        scenario = handler.detect(
+            round_num=10,
+            max_rounds=10,
+            tool_result=tool_result,
+            enhanced_data={"customer": {}},
+            llm_timeout=False,
+        )
+        assert scenario == "timeout"
+
+    def test_detect_timeout_by_llm_timeout(self):
+        """Test timeout detection when llm_timeout=True"""
+        from app.services.agent.edge_scenarios import EdgeScenarioHandler
+        from app.services.agent.tools import ToolResult
+
+        handler = EdgeScenarioHandler()
+        tool_result = ToolResult(success=True, data={"id": 123})
+        scenario = handler.detect(
+            round_num=1,
+            max_rounds=10,
+            tool_result=tool_result,
+            enhanced_data={"customer": {}},
+            llm_timeout=True,
+        )
+        assert scenario == "timeout"
+
+    def test_detect_partial_success(self):
+        """Test partial_success detection"""
+        from app.services.agent.edge_scenarios import EdgeScenarioHandler
+        from app.services.agent.tools import ToolResult
+
+        handler = EdgeScenarioHandler()
+        # Simulate incomplete data (missing critical fields)
+        tool_result = ToolResult(success=True, data={"id": None})
+        scenario = handler.detect(
+            round_num=1,
+            max_rounds=10,
+            tool_result=tool_result,
+            enhanced_data={"customer": {}},
+            llm_timeout=False,
+        )
+        assert scenario == "partial_success"
+
+    def test_detect_cache_miss(self):
+        """Test cache_miss detection when enhanced_data is None"""
+        from app.services.agent.edge_scenarios import EdgeScenarioHandler
+        from app.services.agent.tools import ToolResult
+
+        handler = EdgeScenarioHandler()
+        tool_result = ToolResult(success=True, data={"id": 123})
+        scenario = handler.detect(
+            round_num=1,
+            max_rounds=10,
+            tool_result=tool_result,
+            enhanced_data=None,
+            llm_timeout=False,
+        )
+        assert scenario == "cache_miss"
+
+    def test_detect_none_for_normal_case(self):
+        """Test None return for normal case (no edge scenario)"""
+        from app.services.agent.edge_scenarios import EdgeScenarioHandler
+        from app.services.agent.tools import ToolResult
+
+        handler = EdgeScenarioHandler()
+        tool_result = ToolResult(success=True, data={"id": 123, "name": "光大证券"})
+        scenario = handler.detect(
+            round_num=1,
+            max_rounds=10,
+            tool_result=tool_result,
+            enhanced_data={"customer": {"id": 123}},
+            llm_timeout=False,
+        )
+        assert scenario is None
+
+    def test_get_strategy(self):
+        """Test get_strategy returns correct strategy"""
+        from app.services.agent.edge_scenarios import EdgeScenarioHandler
+
+        handler = EdgeScenarioHandler()
+        assert handler.get_strategy("timeout") == "fallback_summary + offer_continue"
+        assert handler.get_strategy("partial_success") == "report_partial + suggest_next"
+
+    def test_get_priority(self):
+        """Test get_priority returns correct priority number"""
+        from app.services.agent.edge_scenarios import EdgeScenarioHandler
+
+        handler = EdgeScenarioHandler()
+        assert handler.get_priority("timeout") == 1
+        assert handler.get_priority("cache_miss") == 8
