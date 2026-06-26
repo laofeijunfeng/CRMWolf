@@ -717,8 +717,8 @@ class CRMWolfAgent:
             # 工具失败，调整策略
             logger.warning(f"Tool failed: {observation.error}")
 
-            # 根据错误类型判断
-            if "不存在" in observation.error or "未找到" in observation.error:
+            # 根据错误类型判断（注意：error 可能为 None）
+            if observation.error and ("不存在" in observation.error or "未找到" in observation.error):
                 # 实体不存在，重新搜索或询问
                 return ReflectionResult(
                     should_continue=True,
@@ -728,7 +728,7 @@ class CRMWolfAgent:
             # 其他错误，询问用户
             return ReflectionResult(
                 should_continue=False,
-                final_answer=f"操作失败：{observation.error}，请提供更多信息",
+                final_answer=f"操作失败：{observation.error or '未知错误'}，请提供更多信息",
             )
 
     # ==================== 数据增强和场景识别 ====================
