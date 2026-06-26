@@ -321,13 +321,28 @@ class CRMWolfAgent:
                         # No tool history - use fallback
                         phase2_output = self.fallback.phase2_fallback(reasoning.tool_name)
 
-                    # 调用 LLM 生成业务化总结
-                    final_answer = await self._generate_summary(
-                        scenario=phase2_output.scenario,
-                        user_message=user_message,
-                        enhanced_data=phase2_output.input_data,
-                        tool_history=self.memory.get_tool_history(),
-                    )
+                    # ===== 新增：Phase 3 Summary Generation + Fallback =====
+                    phase3_output: Phase3Output
+                    try:
+                        start_time = time.time()
+                        final_answer = await self._generate_summary(
+                            scenario=phase2_output.scenario,
+                            user_message=user_message,
+                            enhanced_data=phase2_output.input_data,
+                            tool_history=tool_history,
+                        )
+                        elapsed_ms = (time.time() - start_time) * 1000
+
+                        phase3_output = Phase3Output(
+                            summary_text=final_answer,
+                            summary_type="detailed",
+                            summary_latency_ms=elapsed_ms,
+                        )
+                        logger.info(f"Phase 3 summary success: {elapsed_ms:.1f}ms")
+                    except Exception as e:
+                        logger.warning(f"Phase 3 summary failed: {e}")
+                        phase3_output = self.fallback.phase3_fallback(tool_history, user_message)
+                        final_answer = phase3_output.summary_text
 
                     self.memory.add_agent_message(final_answer)
 
