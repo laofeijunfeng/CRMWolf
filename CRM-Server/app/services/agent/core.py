@@ -189,15 +189,35 @@ class CRMWolfAgent:
 
             # Step 2: 判断是否完成
             if reasoning.is_complete:
-                # 任务完成，返回最终答案
-                final_answer = reasoning.final_answer or "任务完成"
+                # 任务完成
+                # ===== 新增：场景分类 + 智能总结 =====
+                tool_history = self.memory.get_tool_history()
+
+                # 如果有工具历史，生成智能总结
+                if tool_history:
+                    scenario = self._classify_scenario(tool_history, reasoning)
+
+                    # 获取最后的 enhanced_data（如果有）
+                    # Note: enhanced_data 在工具执行后生成，如果直接完成则无 enhanced_data
+                    enhanced_data = {}
+
+                    final_answer = await self._generate_summary(
+                        scenario=scenario,
+                        user_message=user_message,
+                        enhanced_data=enhanced_data,
+                        tool_history=tool_history,
+                    )
+                else:
+                    # 无工具历史，使用 reasoning 的 final_answer
+                    final_answer = reasoning.final_answer or "任务完成"
+
                 self.memory.add_agent_message(final_answer)
 
                 logger.info(f"Agent completed at round {round_num + 1}")
                 return AgentResponse(
                     session_id=session_id,
                     answer=final_answer,
-                    tool_calls=self.memory.get_tool_history(),
+                    tool_calls=tool_history,
                     rounds=round_num + 1,
                 )
 
@@ -220,6 +240,9 @@ class CRMWolfAgent:
                         rounds=round_num + 1,
                     )
 
+                # ===== 新增：数据增强（聚合相关实体数据） =====
+                enhanced_data = await self._enhance_data(reasoning.tool_name, tool_result)
+
                 # Step 4: Observe（观察）
                 observation = self._observe(tool_result)
 
@@ -237,9 +260,23 @@ class CRMWolfAgent:
                 # Step 6: 判断是否继续循环
                 if not reflection.should_continue:
                     # Reflection 判断应该终止
-                    final_answer = reflection.final_answer or "部分完成，请继续..."
+                    # ===== 新增：场景分类 + 智能总结 =====
+                    scenario = self._classify_scenario(
+                        self.memory.get_tool_history(),
+                        reasoning
+                    )
+
+                    # 调用 LLM 生成业务化总结
+                    final_answer = await self._generate_summary(
+                        scenario=scenario,
+                        user_message=user_message,
+                        enhanced_data=enhanced_data,
+                        tool_history=self.memory.get_tool_history(),
+                    )
+
                     self.memory.add_agent_message(final_answer)
 
+                    logger.info(f"Agent completed at round {round_num + 1} with summary")
                     return AgentResponse(
                         session_id=session_id,
                         answer=final_answer,
@@ -616,6 +653,258 @@ class CRMWolfAgent:
                 should_continue=False,
                 final_answer=f"操作失败：{observation.error}，请提供更多信息",
             )
+
+    # ==================== 数据增强和场景识别 ====================
+
+    # 数据增强规则：根据工具类型决定是否需要聚合相关实体数据
+    ENHANCE_RULES = {
+        "search_customer": {
+            "enhance_with": "get_entity_context",
+            "entity_type": "customer",
+            "condition": "unique_result",  # 只对唯一结果增强
+        },
+        "follow_up_customer": {
+            "enhance_with": "get_entity_context",
+            "entity_type": "customer",
+            "use_param": "customer_id",
+        },
+        "create_opportunity": {
+            "enhance_with": "get_entity_context",
+            "entity_type": "customer",
+            "use_param": "customer_id",
+        },
+        "win_opportunity": {
+            "enhance_with": "get_entity_context",
+            "entity_type": "opportunity",
+            "use_param": "opportunity_id",
+        },
+        "lose_opportunity": {
+            "enhance_with": "get_entity_context",
+            "entity_type": "opportunity",
+            "use_param": "opportunity_id",
+        },
+    }
+
+    # 场景分类规则：根据工具名称和历史判断场景类型
+    SCENARIO_MAP = {
+        # 查询类
+        "search_customer": "query",
+        "search_opportunity": "query",
+        "get_entity_context": "query",
+        # 执行类
+        "follow_up_customer": "execute",
+        "follow_up_lead": "execute",
+        "create_opportunity": "execute",
+        "update_stage": "execute",
+        "win_opportunity": "execute",
+        "lose_opportunity": "execute",
+        "set_reminder": "execute",
+    }
+
+    async def _enhance_data(self, tool_name: str, tool_result: ToolResult) -> Dict[str, Any]:
+        """
+        数据增强：根据工具类型，自动聚合相关实体数据
+
+        Args:
+            tool_name: 工具名称
+            tool_result: 工具执行结果
+
+        Returns:
+            增强后的数据（包含原始结果 + 关联数据）
+        """
+        rule = self.ENHANCE_RULES.get(tool_name)
+        if not rule:
+            # 不需要增强，返回原始数据
+            return tool_result.data or {}
+
+        # 复用 GetContextHandler
+        from app.services.skills.handlers.get_context_handler import GetContextHandler
+
+        handler = GetContextHandler()
+        entity_id = self._extract_entity_id(tool_result, rule)
+
+        # 检查增强条件
+        if rule.get("condition") == "unique_result":
+            # 搜索工具：只对唯一结果增强
+            data = tool_result.data
+            if not data or not isinstance(data, list) or len(data) != 1:
+                return tool_result.data or {}
+
+        if entity_id:
+            try:
+                context_result = await handler.execute(
+                    db=self.db,
+                    handler_config={},
+                    params={"entity_type": rule["entity_type"], "entity_id": entity_id},
+                    user_id=self.user_id,
+                    team_id=self.team_id,
+                )
+
+                if context_result.get("success"):
+                    logger.info(f"Data enhanced for {rule['entity_type']} ID {entity_id}")
+                    return context_result.get("context", {})
+            except Exception as e:
+                logger.warning(f"Data enhancement failed: {e}")
+                return tool_result.data or {}
+
+        return tool_result.data or {}
+
+    def _extract_entity_id(self, tool_result: ToolResult, rule: Dict[str, Any]) -> Optional[int]:
+        """
+        从工具结果或参数中提取实体 ID
+
+        Args:
+            tool_result: 工具执行结果
+            rule: 增强规则
+
+        Returns:
+            实体 ID（可能为 None）
+        """
+        # 方法 1：从参数获取
+        if rule.get("use_param"):
+            # 从最近工具调用的参数中获取
+            tool_history = self.memory.get_tool_history()
+            if tool_history:
+                last_call = tool_history[-1]
+                entity_id = last_call.get("tool_params", {}).get(rule["use_param"])
+                if entity_id:
+                    return entity_id
+
+        # 方法 2：从结果获取
+        data = tool_result.data
+        if data:
+            if isinstance(data, list) and len(data) > 0:
+                # 搜索结果：取第一个结果的 ID
+                first_result = data[0]
+                if isinstance(first_result, dict):
+                    return first_result.get("id")
+            elif isinstance(data, dict):
+                # 单个结果：直接取 ID
+                return data.get("id")
+                # 或从嵌套字段获取（如 follow_up_id → customer_id）
+                if "follow_up_id" in data and "customer_id" in data:
+                    return data.get("customer_id")
+
+        return None
+
+    def _classify_scenario(self, tool_history: List[Dict[str, Any]], reasoning: ReasoningResult) -> str:
+        """
+        场景分类：判断当前任务类型
+
+        Args:
+            tool_history: 工具调用历史
+            reasoning: 当前推理结果
+
+        Returns:
+            场景类型：query | execute | multi | interact
+        """
+        # 1. 多意图判断：执行历史 > 1
+        if len(tool_history) > 1:
+            return "multi"
+
+        # 2. 交互类判断：需要用户选择/确认
+        if reasoning.waiting_for_user:
+            return "interact"
+
+        # 3. 单意图判断：基于工具名称
+        tool_name = reasoning.tool_name
+        if tool_name:
+            return self.SCENARIO_MAP.get(tool_name, "execute")
+
+        # 4. 默认：执行类
+        return "execute"
+
+    async def _generate_summary(
+        self,
+        scenario: str,
+        user_message: str,
+        enhanced_data: Dict[str, Any],
+        tool_history: List[Dict[str, Any]],
+    ) -> str:
+        """
+        智能总结：调用 LLM 生成业务化总结
+
+        Args:
+            scenario: 场景类型（query/execute/multi/interact）
+            user_message: 用户原始输入
+            enhanced_data: 增强后的完整数据
+            tool_history: 工具执行历史
+
+        Returns:
+            业务化总结文本
+        """
+        logger.info(f"Generating summary for scenario: {scenario}")
+
+        # 构建总结 Prompt（使用 AgentPrompts 的方法）
+        summary_prompt = self.prompts.build_summary_prompt(
+            scenario=scenario,
+            user_message=user_message,
+            enhanced_data=enhanced_data,
+            tool_history=tool_history,
+        )
+
+        try:
+            # 调用 LLM 生成总结
+            response_text = await ai_service._stream_chat_collect(
+                api_host=self.config.api_host,
+                api_key=self.api_key,
+                model=self.config.model_name,
+                messages=[
+                    {"role": "system", "content": self.prompts.SUMMARY_SYSTEM_PROMPT},
+                    {"role": "user", "content": summary_prompt},
+                ],
+                temperature=0.7,  # 总结时可以稍微有创造性
+                max_tokens=1000,
+            )
+
+            logger.info(f"Summary generated successfully")
+            return response_text.strip()
+
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}")
+            # Fallback：使用简单模板生成总结
+            return self._build_fallback_summary(tool_history, scenario)
+
+    def _build_fallback_summary(
+        self,
+        tool_history: List[Dict[str, Any]],
+        scenario: str,
+    ) -> str:
+        """
+        Fallback 总结：当 LLM 总结失败时使用简单模板
+
+        Args:
+            tool_history: 工具执行历史
+            scenario: 场景类型
+
+        Returns:
+            简单总结文本
+        """
+        if not tool_history:
+            return "操作已完成。"
+
+        # 构建简单总结
+        if scenario == "multi":
+            # 多意图：列出所有操作
+            parts = []
+            for i, call in enumerate(tool_history, 1):
+                tool_name = call.get("tool_name", "unknown")
+                result_msg = call.get("tool_result", {}).get("message", "完成")
+                parts.append(f"操作{i}: {tool_name} - {result_msg}")
+            return "已完成以下操作：\n" + "\n".join(parts)
+
+        elif scenario == "query":
+            # 查询类：返回结果摘要
+            last_call = tool_history[-1]
+            result_msg = last_call.get("tool_result", {}).get("message", "查询完成")
+            return result_msg
+
+        else:
+            # 执行类：返回执行确认
+            last_call = tool_history[-1]
+            tool_name = last_call.get("tool_name", "unknown")
+            result_msg = last_call.get("tool_result", {}).get("message", "完成")
+            return f"已完成 {tool_name}，{result_msg}"
 
     def _parse_reasoning_response(self, response_text: str) -> ReasoningResult:
         """
