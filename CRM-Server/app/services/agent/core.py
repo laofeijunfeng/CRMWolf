@@ -28,6 +28,12 @@ import logging
 from app.services.agent.memory import AgentMemory
 from app.services.agent.tools import ToolRegistry, ToolResult
 from app.services.agent.prompts import AgentPrompts
+
+# ===== 新增：DX 优化导入 =====
+from app.services.agent.phase_contracts import Phase1Output, Phase2Output, Phase3Output
+from app.services.agent.edge_scenarios import EdgeScenarioHandler, EDGE_SCENARIOS, SCENARIO_PRIORITY
+from app.services.agent.fallback_handler import PhaseFallback
+
 from app.services.ai_service import ai_service
 from app.crud.ai_config import ai_config_crud
 
@@ -137,6 +143,11 @@ class CRMWolfAgent:
         self.memory = AgentMemory(db, team_id, user_id)
         self.tool_registry = ToolRegistry(db, team_id)
         self.prompts = AgentPrompts()
+
+        # ===== 新增：DX 优化 Handler 初始化 =====
+        self.edge_handler = EdgeScenarioHandler()
+        self.fallback = PhaseFallback()
+        self._phase_metrics: Dict[str, Any] = {}  # Placeholder for Task 6
 
         # ===== 新增：Guardrails =====
         self.guardrail = ConfidenceGuardrail()
