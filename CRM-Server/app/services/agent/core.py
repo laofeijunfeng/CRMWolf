@@ -34,6 +34,7 @@ from app.services.agent.prompts import AgentPrompts
 from app.services.agent.phase_contracts import Phase1Output, Phase2Output, Phase3Output
 from app.services.agent.edge_scenarios import EdgeScenarioHandler, EDGE_SCENARIOS, SCENARIO_PRIORITY
 from app.services.agent.fallback_handler import PhaseFallback
+from app.services.agent.summary_monitor import SummaryQualityMonitor
 
 from app.services.ai_service import ai_service
 from app.crud.ai_config import ai_config_crud
@@ -152,6 +153,9 @@ class CRMWolfAgent:
 
         # ===== 新增：Guardrails =====
         self.guardrail = ConfidenceGuardrail()
+
+        # ===== 新增：Summary Quality Monitor =====
+        self.monitor = SummaryQualityMonitor()
 
         logger.info(f"Agent initialized: team_id={team_id}, model={self.config.model_name}")
 
@@ -343,6 +347,9 @@ class CRMWolfAgent:
                         logger.warning(f"Phase 3 summary failed: {e}")
                         phase3_output = self.fallback.phase3_fallback(tool_history, user_message)
                         final_answer = phase3_output.summary_text
+
+                    # ===== 新增：Metrics Tracking =====
+                    self.monitor.track_summary(phase1_output, phase2_output, phase3_output)
 
                     self.memory.add_agent_message(final_answer)
 
