@@ -197,7 +197,7 @@ class TestToolRegistry:
         """测试获取 search_customer Handler"""
 
         registry = ToolRegistry(mock_db, team_id=4)
-        handler = registry.get_handler("search_customer")
+        handler, config = registry.get_handler("search_customer")
 
         # 验证 Handler 存在
         assert handler is not None

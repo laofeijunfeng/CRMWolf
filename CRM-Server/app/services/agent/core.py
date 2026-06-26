@@ -24,10 +24,18 @@ from datetime import datetime
 from dataclasses import dataclass
 import json
 import logging
+import time
 
 from app.services.agent.memory import AgentMemory
 from app.services.agent.tools import ToolRegistry, ToolResult
 from app.services.agent.prompts import AgentPrompts
+
+# ===== 新增：DX 优化导入 =====
+from app.services.agent.phase_contracts import Phase1Output, Phase2Output, Phase3Output
+from app.services.agent.edge_scenarios import EdgeScenarioHandler, EDGE_SCENARIOS, SCENARIO_PRIORITY
+from app.services.agent.fallback_handler import PhaseFallback
+from app.services.agent.summary_monitor import SummaryQualityMonitor
+
 from app.services.ai_service import ai_service
 from app.crud.ai_config import ai_config_crud
 
@@ -138,8 +146,16 @@ class CRMWolfAgent:
         self.tool_registry = ToolRegistry(db, team_id)
         self.prompts = AgentPrompts()
 
+        # ===== 新增：DX 优化 Handler 初始化 =====
+        self.edge_handler = EdgeScenarioHandler()
+        self.fallback = PhaseFallback()
+        self._phase_metrics: Dict[str, Any] = {}  # Placeholder for Task 6
+
         # ===== 新增：Guardrails =====
         self.guardrail = ConfidenceGuardrail()
+
+        # ===== 新增：Summary Quality Monitor =====
+        self.monitor = SummaryQualityMonitor()
 
         logger.info(f"Agent initialized: team_id={team_id}, model={self.config.model_name}")
 
@@ -240,8 +256,23 @@ class CRMWolfAgent:
                         rounds=round_num + 1,
                     )
 
-                # ===== 新增：数据增强（聚合相关实体数据） =====
-                enhanced_data = await self._enhance_data(reasoning.tool_name, tool_result)
+                # ===== 新增：数据增强（聚合相关实体数据） + Fallback =====
+                phase1_output: Phase1Output
+                try:
+                    start_time = time.time()
+                    enhanced_data = await self._enhance_data(reasoning.tool_name, tool_result)
+                    elapsed_ms = (time.time() - start_time) * 1000
+
+                    phase1_output = Phase1Output(
+                        raw_data=tool_result.data or {},
+                        enhanced_data=enhanced_data,
+                        enhancement_status="success",
+                        enhancement_latency_ms=elapsed_ms,
+                    )
+                    logger.info(f"Phase 1 enhancement success: {elapsed_ms:.1f}ms")
+                except Exception as e:
+                    logger.warning(f"Phase 1 enhancement failed: {e}")
+                    phase1_output = self.fallback.phase1_fallback(tool_result)
 
                 # Step 4: Observe（观察）
                 observation = self._observe(tool_result)
@@ -260,19 +291,65 @@ class CRMWolfAgent:
                 # Step 6: 判断是否继续循环
                 if not reflection.should_continue:
                     # Reflection 判断应该终止
-                    # ===== 新增：场景分类 + 智能总结 =====
-                    scenario = self._classify_scenario(
-                        self.memory.get_tool_history(),
-                        reasoning
+                    # ===== 新增：Edge Scenario Detection =====
+                    phase2_output: Phase2Output
+
+                    # First check edge scenarios
+                    edge_scenario = self.edge_handler.detect(
+                        round_num=round_num,
+                        max_rounds=self.MAX_ROUNDS,
+                        tool_result=tool_result,
+                        enhanced_data=phase1_output.enhanced_data if hasattr(phase1_output, 'enhanced_data') else None,
+                        llm_timeout=False,  # LLM timeout tracking not yet implemented
                     )
 
-                    # 调用 LLM 生成业务化总结
-                    final_answer = await self._generate_summary(
-                        scenario=scenario,
-                        user_message=user_message,
-                        enhanced_data=enhanced_data,
-                        tool_history=self.memory.get_tool_history(),
-                    )
+                    if edge_scenario:
+                        # Edge scenario detected
+                        phase2_output = Phase2Output(
+                            scenario=edge_scenario,
+                            scenario_priority=self.edge_handler.get_priority(edge_scenario),
+                            scenario_confidence=1.0,  # Edge scenarios are deterministic
+                            input_data=phase1_output.raw_data,  # Use raw data for edge cases
+                        )
+                        logger.warning(f"Edge scenario detected: {edge_scenario}")
+                    elif tool_history:
+                        # Normal classification
+                        scenario = self._classify_scenario(tool_history, reasoning)
+                        phase2_output = Phase2Output(
+                            scenario=scenario,
+                            scenario_priority=self._get_scenario_priority(scenario),
+                            scenario_confidence=0.9,
+                            input_data=phase1_output.enhanced_data or phase1_output.raw_data,
+                        )
+                    else:
+                        # No tool history - use fallback
+                        phase2_output = self.fallback.phase2_fallback(reasoning.tool_name)
+
+                    # ===== 新增：Phase 3 Summary Generation + Fallback =====
+                    phase3_output: Phase3Output
+                    try:
+                        start_time = time.time()
+                        final_answer = await self._generate_summary(
+                            scenario=phase2_output.scenario,
+                            user_message=user_message,
+                            enhanced_data=phase2_output.input_data,
+                            tool_history=tool_history,
+                        )
+                        elapsed_ms = (time.time() - start_time) * 1000
+
+                        phase3_output = Phase3Output(
+                            summary_text=final_answer,
+                            summary_type="detailed",
+                            summary_latency_ms=elapsed_ms,
+                        )
+                        logger.info(f"Phase 3 summary success: {elapsed_ms:.1f}ms")
+                    except Exception as e:
+                        logger.warning(f"Phase 3 summary failed: {e}")
+                        phase3_output = self.fallback.phase3_fallback(tool_history, user_message)
+                        final_answer = phase3_output.summary_text
+
+                    # ===== 新增：Metrics Tracking =====
+                    self.monitor.track_summary(phase1_output, phase2_output, phase3_output)
 
                     self.memory.add_agent_message(final_answer)
 
@@ -813,6 +890,20 @@ class CRMWolfAgent:
 
         # 4. 默认：执行类
         return "execute"
+
+    def _get_scenario_priority(self, scenario: str) -> int:
+        """
+        Get priority number for scenario.
+
+        Args:
+            scenario: Scenario name
+
+        Returns:
+            Priority number (1-8, lower = higher priority)
+        """
+        if scenario in SCENARIO_PRIORITY:
+            return SCENARIO_PRIORITY.index(scenario) + 1
+        return 6  # Default execute priority
 
     async def _generate_summary(
         self,
