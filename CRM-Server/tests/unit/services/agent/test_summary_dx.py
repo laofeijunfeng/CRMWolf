@@ -282,3 +282,50 @@ class TestPhaseFallback:
         summary = fallback._build_simple_summary(tool_history, "查询客户")
 
         assert "- search_customer: 已执行" in summary
+
+
+class TestPromptVersionManager:
+    """Test prompt version management"""
+
+    def test_versions_defined(self):
+        """Test VERSIONS registry has initial versions"""
+        from app.services.agent.prompt_versions import PromptVersionManager, VERSIONS
+
+        assert "v1.0" in VERSIONS
+        assert "v1.1" in VERSIONS
+
+    def test_get_active_version_default(self):
+        """Test get_active_version returns v1.0 by default"""
+        from app.services.agent.prompt_versions import PromptVersionManager
+
+        manager = PromptVersionManager()
+        version = manager.get_active_version()
+        assert version == "v1.0"
+
+    def test_activate_version(self):
+        """Test activate_version changes active version"""
+        from app.services.agent.prompt_versions import PromptVersionManager
+
+        manager = PromptVersionManager()
+        # Activate v1.1
+        result = manager.activate_version("v1.1")
+        assert result is True
+        assert manager.get_active_version() == "v1.1"
+        # Reset back to v1.0
+        manager.activate_version("v1.0")
+
+    def test_activate_unknown_version(self):
+        """Test activate_version returns False for unknown version"""
+        from app.services.agent.prompt_versions import PromptVersionManager
+
+        manager = PromptVersionManager()
+        result = manager.activate_version("v99.0")
+        assert result is False
+
+    def test_get_prompt_for_version(self):
+        """Test get_prompt returns prompt text"""
+        from app.services.agent.prompt_versions import PromptVersionManager
+
+        manager = PromptVersionManager()
+        prompt = manager.get_prompt("v1.0")
+        assert "业务总结助手" in prompt
