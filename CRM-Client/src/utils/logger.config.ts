@@ -24,7 +24,7 @@ export interface LoggerConfig {
 }
 
 export const DEFAULT_LOGGER_CONFIG: LoggerConfig = {
-  enabled: import.meta.env.PROD,
+  enabled: true,  // ← 开发环境也启用（用于调试）
   endpoint: '/v1/logs/batch',
   beaconEndpoint: '/v1/logs/beacon',
   bufferSize: 20,

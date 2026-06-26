@@ -52,56 +52,19 @@ describe('CompactExecutionLog.vue (V2)', () => {
     expect(wrapper.find('.expanded-view').exists()).toBe(true)
   })
 
-  it('auto collapses after 3 seconds when status is success', async () => {
+  it('stays expanded after success status', async () => {
+    // 移除自动收起后，展开状态应该保持
     const wrapper = mount(CompactExecutionLog, {
-      props: {
-        steps: mockSteps,
-        status: 'success',
-        autoCollapse: true,
-        autoCollapseDelay: 3000
-      }
-    })
-
-    // 先展开
-    await wrapper.find('.collapsed-view').trigger('click')
-    expect(wrapper.find('.expanded-view').exists()).toBe(true)
-
-    // 快进 3 秒并等待 DOM 更新
-    vi.advanceTimersByTime(3000)
-    await wrapper.vm.$nextTick()
-
-    // 应该自动收起
-    expect(wrapper.find('.collapsed-view').exists()).toBe(true)
-  })
-
-  it('does not auto collapse when status is loading', async () => {
-    const loadingSteps: ExecutionStep[] = [
-      {
-        id: 'step-1',
-        type: ExecutionStepType.TOOL_CALL,
-        title: '正在执行',
-        timestamp: new Date(),
-        round: 1
-      }
-    ]
-
-    const wrapper = mount(CompactExecutionLog, {
-      props: {
-        steps: loadingSteps,
-        status: 'loading',
-        autoCollapse: true,
-        autoCollapseDelay: 3000
-      }
+      props: { steps: mockSteps, status: 'success' }
     })
 
     // 展开
     await wrapper.find('.collapsed-view').trigger('click')
     expect(wrapper.find('.expanded-view').exists()).toBe(true)
 
-    // 快进 3 秒
-    vi.advanceTimersByTime(3000)
-
-    // 仍然展开
+    // 快进 5 秒后仍然展开
+    vi.advanceTimersByTime(5000)
+    await wrapper.vm.$nextTick()
     expect(wrapper.find('.expanded-view').exists()).toBe(true)
   })
 

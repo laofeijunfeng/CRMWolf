@@ -440,8 +440,21 @@ function handleSSEEvent(event: AIAssistantSSEEvent): void {
 
     case 'content':
       // ✅ 内容事件 - 流式追加并实时保存
+      // 🔍 DEBUG: 追踪 content 事件
+      logger.info('[AIAssistant]', 'sse_content_event', {
+        hasContent: !!event.content,
+        contentLength: event.content?.length || 0,
+        contentPreview: event.content?.slice(0, 50) || 'NO CONTENT',
+        isStreaming: isStreamingAIMessage.value
+      })
+
       if (event.content && isStreamingAIMessage.value) {
         store.appendAIMessageContent(event.content)
+      } else {
+        // 🔍 DEBUG: 记录跳过的原因
+        logger.warn('[AIAssistant]', 'sse_content_skipped', {
+          reason: !event.content ? 'NO EVENT.CONTENT' : 'NOT STREAMING'
+        })
       }
       break
 
@@ -473,8 +486,17 @@ function handleSSEEvent(event: AIAssistantSSEEvent): void {
 
     case 'react_complete':
       // ✅ 新增：Agent 执行完成，如果没有 content，生成默认回复
-      // 如果 AI 消息内容为空，根据执行步骤生成默认回复
+      // 🔍 DEBUG: 追踪 react_complete 时的 content 状态
       const lastAIMessage = messages.value.filter(m => m.role === 'assistant').pop()
+      logger.info('[AIAssistant]', 'react_complete_event', {
+        hasLastAIMessage: !!lastAIMessage,
+        contentLength: lastAIMessage?.content?.length || 0,
+        contentPreview: lastAIMessage?.content?.slice(0, 50) || 'NO CONTENT',
+        isStreaming: isStreamingAIMessage.value,
+        willGenerateDefault: lastAIMessage?.content === '' && isStreamingAIMessage.value
+      })
+
+      // 如果 AI 消息内容为空，根据执行步骤生成默认回复
       if (lastAIMessage && lastAIMessage.content === '' && isStreamingAIMessage.value) {
         // 生成默认回复：执行已完成
         const defaultReply = '操作已成功执行完成。'

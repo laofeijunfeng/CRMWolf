@@ -15,8 +15,10 @@ $wolf-bg-disabled: #F5F5F5;    // 禁用态背景
 
 // ==================== AI 专属背景色 ====================
 // Signature: AI 对话区的独特视觉标识
+// 来源: AI-THINKING-PROCESS-MOCKUP-V2.html
 
 $wolf-bg-ai-message: #F0F4F8;  // AI 消息背景（微蓝调，暗示智能）
+$wolf-bg-inline-hover: rgba(#4A6FA5, 0.05);  // Inline hover 背景（AI 执行日志组件专用）
 
 // ==================== 中性色梯度 ====================
 // 全页面95%的色彩来源，仅用中性色区分信息层级

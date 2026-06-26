@@ -22,10 +22,14 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const roundBadgeText = computed(() => {
+  // 修复：检查 props.round 是否存在，避免显示 Rundefined/2
+  if (props.round === undefined || props.round === null) {
+    return ''
+  }
   if (props.totalRounds) {
     return `R${props.round}/${props.totalRounds}`
   }
-  return props.round ? `R${props.round}` : ''
+  return `R${props.round}`
 })
 
 const inlineText = computed(() => {

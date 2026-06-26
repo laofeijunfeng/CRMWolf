@@ -1,8 +1,8 @@
 <!-- CRM-Client/src/components/CompactExecutionLog.vue -->
-<!-- V2 紧凑设计：自动收起 + 键盘导航 -->
+<!-- V2 紧凑设计：键盘导航 -->
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import SmartBoundaryLine from './SmartBoundaryLine.vue'
 import EmptyState from './EmptyState.vue'
 import CollapsedView from './CollapsedView.vue'
@@ -13,14 +13,9 @@ import { ExecutionStepType } from '@/types/agentExecution'
 interface Props {
   steps: ExecutionStep[]
   status: 'empty' | 'loading' | 'success' | 'error' | 'partial'
-  autoCollapse?: boolean
-  autoCollapseDelay?: number
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  autoCollapse: true,
-  autoCollapseDelay: 3000
-})
+const props = defineProps<Props>()
 
 const emit = defineEmits<{
   confirm: [stepId: string]
@@ -30,7 +25,6 @@ const emit = defineEmits<{
 }>()
 
 const expanded = ref(false)
-const autoCollapseTimer = ref<number | null>(null)
 
 // 计算边界线状态
 const boundaryStatus = computed(() => {
@@ -77,46 +71,7 @@ const isRunning = computed(() => {
 // 展开/收起切换
 const toggleExpand = () => {
   expanded.value = !expanded.value
-
-  if (expanded.value) {
-    // 展开时：如果状态已经是 success，启动自动收起
-    if (props.status === 'success') {
-      startAutoCollapse()
-    }
-  } else {
-    // 收起时取消计时器
-    cancelAutoCollapse()
-  }
 }
-
-// 开始自动收起计时
-const startAutoCollapse = () => {
-  if (props.autoCollapse && props.status === 'success' && expanded.value) {
-    autoCollapseTimer.value = window.setTimeout(() => {
-      expanded.value = false
-    }, props.autoCollapseDelay)
-  }
-}
-
-// 取消自动收起计时
-const cancelAutoCollapse = () => {
-  if (autoCollapseTimer.value) {
-    window.clearTimeout(autoCollapseTimer.value)
-    autoCollapseTimer.value = null
-  }
-}
-
-// 监听状态变化：成功时启动自动收起
-watch(
-  () => props.status,
-  (newStatus) => {
-    if (newStatus === 'success' && expanded.value) {
-      startAutoCollapse()
-    } else {
-      cancelAutoCollapse()
-    }
-  }
-)
 
 // 处理确认
 const handleConfirm = (stepId: string) => {
@@ -137,11 +92,6 @@ const handleSubmit = (value: string) => {
 const handleSelectCandidate = (id: number) => {
   emit('selectCandidate', id)
 }
-
-// 清理计时器
-onUnmounted(() => {
-  cancelAutoCollapse()
-})
 </script>
 
 <template>

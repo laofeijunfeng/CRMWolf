@@ -31,10 +31,14 @@ const handleKeydown = (event: KeyboardEvent) => {
 }
 
 const roundBadgeText = computed(() => {
+  // 修复：检查 props.round 是否存在，避免显示 Rundefined/2
+  if (props.round === undefined || props.round === null) {
+    return ''
+  }
   if (props.totalRounds) {
     return `R${props.round}/${props.totalRounds}`
   }
-  return props.round ? `R${props.round}` : ''
+  return `R${props.round}`
 })
 </script>
 
@@ -123,17 +127,17 @@ const roundBadgeText = computed(() => {
 }
 
 .status-icon.success {
-  background: $wolf-success-bg-deep;
+  background: $wolf-success-text;  // 设计规范功能色：#2B633C
   color: white;
 }
 
 .status-icon.error {
-  background: $wolf-danger-bg-deep;
+  background: $wolf-danger-text;  // 设计规范功能色：#7A2828
   color: white;
 }
 
 .status-icon.partial {
-  background: $wolf-warning-bg-deep;
+  background: $wolf-warning-text;  // 设计规范功能色：#7A4F1E
   color: white;
 }
 

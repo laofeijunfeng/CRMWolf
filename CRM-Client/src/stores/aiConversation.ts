@@ -222,6 +222,13 @@ export const useAIConversationStore = defineStore('aiConversation', () => {
    * ChatGPT 模式：实时追加，实时保存
    */
   async function appendAIMessageContent(content: string): Promise<void> {
+    // 🔍 DEBUG: 追踪 appendAIMessageContent 调用
+    console.log('[AIConversationStore] appendAIMessageContent called:', {
+      contentLength: content?.length || 0,
+      contentPreview: content?.slice(0, 50) || 'NO CONTENT',
+      hasCurrentConversation: !!currentConversation.value
+    })
+
     if (!currentConversation.value) {
       console.error('[AIConversationStore] No current conversation')
       return
@@ -232,12 +239,23 @@ export const useAIConversationStore = defineStore('aiConversation', () => {
       .filter(m => m.role === 'assistant')
       .pop()
 
+    // 🔍 DEBUG: 追踪 AI 消息状态
+    console.log('[AIConversationStore] lastAIMessage state:', {
+      hasLastAIMessage: !!lastAIMessage,
+      beforeContentLength: lastAIMessage?.content?.length || 0,
+      beforeContentPreview: lastAIMessage?.content?.slice(-50) || 'NO CONTENT'
+    })
+
     if (lastAIMessage) {
       lastAIMessage.content += content
 
+      // 🔍 DEBUG: 追踪追加后状态
+      console.log('[AIConversationStore] content appended:', {
+        afterContentLength: lastAIMessage.content.length,
+        afterContentPreview: lastAIMessage.content.slice(-50)
+      })
+
       // 实时保存（防止刷新丢失）
-      // 注意：这里可以优化为批量保存（例如每 500ms 保存一次）
-      // 当前为简化实现，每次追加都保存
       await saveCurrentConversation()
     }
   }

@@ -35,11 +35,29 @@ const totalRounds = computed(() => {
 })
 
 // 获取步骤状态
-const getStepStatus = (step: ExecutionStep): 'success' | 'error' | 'warning' | 'loading' => {
+const getStepStatus = (step: ExecutionStep, index: number): 'success' | 'error' | 'warning' | 'loading' => {
+  // WAITING_FOR_USER: warning 状态
   if (step.type === ExecutionStepType.WAITING_FOR_USER) return 'warning'
+
+  // 有错误信息或明确失败：error 状态
   if (step.success === false || step.error) return 'error'
+
+  // 明确成功：success 状态
   if (step.success === true) return 'success'
-  if (step.type === ExecutionStepType.TOOL_CALL) return 'loading'
+
+  // TOOL_CALL 特殊处理：检查是否有对应的 TOOL_RESULT
+  if (step.type === ExecutionStepType.TOOL_CALL) {
+    // 查找下一个步骤是否是 TOOL_RESULT
+    const nextStep = props.steps[index + 1]
+    if (nextStep && nextStep.type === ExecutionStepType.TOOL_RESULT) {
+      // 根据 TOOL_RESULT 的状态决定 TOOL_CALL 的显示状态
+      return nextStep.success === false ? 'error' : 'success'
+    }
+    // 没有 TOOL_RESULT，说明还在执行中
+    return 'loading'
+  }
+
+  // 默认：success 状态
   return 'success'
 }
 
@@ -97,7 +115,7 @@ const convertDetailParams = (step: ExecutionStep) => {
 
     <!-- 滚动容器 -->
     <div class="expanded-content">
-      <template v-for="step in steps" :key="step.id">
+      <template v-for="(step, index) in steps" :key="step.id">
 
         <!-- Inline Step -->
         <InlineStep
@@ -106,7 +124,7 @@ const convertDetailParams = (step: ExecutionStep) => {
           :round="step.round"
           :total-rounds="totalRounds"
           :is-current="step.round === currentRound"
-          :status="getStepStatus(step)"
+          :status="getStepStatus(step, index)"
         />
 
         <!-- waiting_for_user 类型处理 -->
@@ -159,7 +177,7 @@ const convertDetailParams = (step: ExecutionStep) => {
             <InlineStep
               :step="step"
               :round="step.round"
-              :status="getStepStatus(step)"
+              :status="getStepStatus(step, index)"
             />
           </template>
         </template>
@@ -190,7 +208,7 @@ const convertDetailParams = (step: ExecutionStep) => {
   transition: background 0.15s;
 
   &:hover {
-    background: $wolf-bg-inline-hover;
+    background: $wolf-bg-active;
   }
 
   &:focus-visible {
@@ -234,7 +252,7 @@ const convertDetailParams = (step: ExecutionStep) => {
   border: 1px solid $wolf-border-light;
 
   &:hover {
-    background: $wolf-bg-hover-deep;
+    background: $wolf-bg-active; // 第二层 hover (pressed state)
   }
 }
 
