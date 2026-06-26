@@ -531,16 +531,12 @@ export function useAgentExecutionLog() {
   /**
    * 获取 localStorage 缓存键
    *
-   * @param conversationId - 可选的对话 ID（如果未提供，从 store 获取）
    * @returns 缓存键名
    */
-  function getLocalStorageKey(conversationId?: number): string {
+  function getLocalStorageKey(): string {
     const store = useAIConversationStore()
-    // 兼容测试 mock：测试中 store.currentId 可能是 { value: 123 } 格式
-    // 生产环境中 Pinia 会自动 unwrap，直接访问 store.currentId 即可
-    const currentId = store.currentId
-    const id = conversationId ?? (typeof currentId === 'object' && currentId !== null && 'value' in currentId ? (currentId as { value: number | null }).value : currentId as number | null)
-    return `execution_steps_${id ?? 'temp'}`
+    const conversationId = store.currentId.value // ← 修复：访问 .value
+    return `execution_steps_${conversationId ?? 'temp'}`
   }
 
   /**
@@ -569,74 +565,16 @@ export function useAgentExecutionLog() {
    */
   function restoreFromLocalStorage(): boolean {
     const key = getLocalStorageKey()
-
-    // 🔍 DEBUG: 详细追踪 restore 过程
-    const store = useAIConversationStore()
-    console.log('[AgentExecutionLog] restoreFromLocalStorage - DIAGNOSTIC:', {
-      computedKey: key,
-      // ✅ 修复：正确访问 Pinia store 的 ref
-      storeCurrentId: store.currentId as unknown as number | null,
-      storeHasCurrentConversation: store.hasCurrentConversation,
-      allLocalStorageKeys: Object.keys(localStorage).filter(k => k.startsWith('execution_steps')),
-      localStorageContents: Object.fromEntries(
-        Object.keys(localStorage)
-          .filter(k => k.startsWith('execution_steps'))
-          .map(k => [k, localStorage.getItem(k)?.slice(0, 100) + '...'])
-      )
-    })
-
     try {
       const cached = localStorage.getItem(key)
-      console.log('[AgentExecutionLog] restoreFromLocalStorage - cache check:', {
-        key,
-        hasCachedData: !!cached,
-        cachedDataLength: cached?.length || 0,
-        cachedDataPreview: cached?.slice(0, 200) || 'NO DATA'
-      })
-
       if (cached) {
         const parsedSteps = JSON.parse(cached) as ExecutionStep[]
-
-        // 🔍 DEBUG: 检查解析后的数据格式
-        console.log('[AgentExecutionLog] restoreFromLocalStorage - parsed data:', {
-          stepsCount: parsedSteps.length,
-          firstStep: parsedSteps[0] ? {
-            id: parsedSteps[0].id,
-            type: parsedSteps[0].type,
-            title: parsedSteps[0].title,
-            timestampType: typeof parsedSteps[0].timestamp,
-            timestampValue: parsedSteps[0].timestamp
-          } : 'NO STEPS',
-          lastStep: (() => {
-            const last = parsedSteps[parsedSteps.length - 1]
-            return last ? {
-              id: last.id,
-              type: last.type,
-              title: last.title
-            } : 'NO STEPS'
-          })()
+        steps.value = parsedSteps
+        console.log('[AgentExecutionLog] Restored steps from localStorage:', {
+          key,
+          stepsCount: parsedSteps.length
         })
-
-        // ✅ 转换 timestamp 从 string 到 Date（JSON.parse 后 timestamp 是 string）
-        // 同时确保 description 字段有值
-        const convertedSteps: ExecutionStep[] = parsedSteps.map(step => ({
-          ...step,
-          type: step.type as ExecutionStepType,
-          description: step.description || step.title || '',  // ← 确保 description 有值
-          timestamp: typeof step.timestamp === 'string' ? new Date(step.timestamp) : step.timestamp
-        }))
-
-        steps.value = convertedSteps
-
-        // 🔍 DEBUG: 验证 steps.value 已更新
-        console.log('[AgentExecutionLog] restoreFromLocalStorage - AFTER SET:', {
-          stepsValueLength: steps.value.length,
-          stepsValueFirstStep: steps.value[0]?.title || 'EMPTY'
-        })
-
         return true
-      } else {
-        console.warn('[AgentExecutionLog] restoreFromLocalStorage - NO CACHE FOUND for key:', key)
       }
     } catch (error) {
       console.error('[AgentExecutionLog] Failed to parse cached steps:', error)
@@ -656,11 +594,8 @@ export function useAgentExecutionLog() {
   /**
    * 将 executionSteps 保存到当前 AI 消息
    * SSE 流结束时触发
-   *
-   * ✅ 修复：只设置 executionSteps，不立即保存
-   * 等待 finishAIMessage 后统一保存完整数据（包括 content）
    */
-  function saveExecutionStepsToCurrentMessage(): void {
+  async function saveExecutionStepsToCurrentMessage(): Promise<void> {
     const store = useAIConversationStore()
 
     if (!store.hasCurrentConversation) {
@@ -669,92 +604,16 @@ export function useAgentExecutionLog() {
     }
 
     // 设置当前 AI 消息的执行步骤
-    // ✅ 转换为 store 兼容的格式（timestamp 转换为 ISO string）
-    const stepsForStore = steps.value.map(step => ({
-      ...step,
-      timestamp: step.timestamp instanceof Date ? step.timestamp.toISOString() : String(step.timestamp)
-    }))
-    store.setAIMessageExecutionSteps(stepsForStore as unknown as ExecutionStep[])
+    store.setAIMessageExecutionSteps(steps.value)
 
-    // 清理 localStorage 缓存（已设置到 Store）
+    // 保存对话到数据库
+    await store.saveCurrentConversation()
+
+    // 清理 localStorage 缓存（已保存到数据库）
     clearLocalStorageCache()
 
-    console.log('[AgentExecutionLog] Set execution steps (will save in finishAIMessage):', {
+    console.log('[AgentExecutionLog] Saved execution steps to message:', {
       stepsCount: steps.value.length
-    })
-  }
-
-  /**
-   * ✅ 新增：直接设置执行步骤（用于页面刷新恢复）
-   *
-   * 避免不必要的 localStorage 中间步骤
-   * 直接将 execution steps 设置到 composable 的内部状态
-   *
-   * @param executionSteps - 从 Store 获取的执行步骤数组（timestamp 可能是 string）
-   */
-  function setStepsDirectly(executionSteps: Array<{
-    id: string
-    type: string
-    title: string
-    description?: string
-    timestamp: string | Date  // ← 接受 string 或 Date
-    round?: number
-    tool?: string
-    params?: Record<string, unknown>
-    result?: unknown
-    success?: boolean
-    error?: string
-    businessParams?: string
-    data?: unknown
-    sessionId?: string
-    inline_text?: string
-    thinking?: string
-    summary?: string
-    summary_params?: Record<string, string>
-    detail_params?: Record<string, { value: string; isEntity?: boolean }>
-    confirmationType?: 'disambiguation' | 'confirmation' | 'info_gap'
-    riskLevel?: 'low' | 'medium' | 'high'
-    options?: Array<{
-      id: number
-      name: string
-      entity_info_inline?: string
-      entity_info_detail?: Record<string, string>
-    }>
-  }>): void {
-    console.log('[AgentExecutionLog] setStepsDirectly - INPUT:', {
-      stepsCount: executionSteps.length,
-      firstStep: executionSteps[0]?.title || 'NO FIRST STEP',
-      lastStep: (() => {
-        const last = executionSteps[executionSteps.length - 1]
-        return last?.title || 'NO LAST STEP'
-      })()
-    })
-
-    // ✅ 转换 timestamp 从 string 到 Date（如果需要）
-    // 同时确保 description 字段有值（ExecutionStep interface 要求 description 是必需的）
-    const convertedSteps: ExecutionStep[] = executionSteps.map(step => ({
-      ...step,
-      type: step.type as ExecutionStepType,  // ← 转换类型
-      description: step.description || step.title || '',  // ← 确保 description 有值
-      timestamp: typeof step.timestamp === 'string' ? new Date(step.timestamp) : step.timestamp  // ← 转换时间戳
-    }))
-
-    // ✅ 直接设置步骤（不需要 localStorage 中间步骤）
-    steps.value = convertedSteps
-
-    // ✅ 标记为已完成（因为是从历史恢复的）
-    if (convertedSteps.length > 0) {
-      const lastStep = convertedSteps[convertedSteps.length - 1]
-      if (lastStep?.type === ExecutionStepType.REACT_COMPLETE || lastStep?.type === ExecutionStepType.ERROR) {
-        isCompleted.value = true
-        isExecuting.value = false
-      }
-    }
-
-    console.log('[AgentExecutionLog] setStepsDirectly - AFTER SET:', {
-      stepsValueLength: steps.value.length,
-      isCompleted: isCompleted.value,
-      isExecuting: isExecuting.value
     })
   }
 
@@ -802,10 +661,7 @@ export function useAgentExecutionLog() {
     // 持久化方法（Task 12 新增）
     saveExecutionStepsToCurrentMessage,
     restoreFromLocalStorage,
-    clearLocalStorageCache,
-
-    // ✅ 新增：直接设置步骤（用于页面刷新恢复）
-    setStepsDirectly
+    clearLocalStorageCache
   }
 }
 
