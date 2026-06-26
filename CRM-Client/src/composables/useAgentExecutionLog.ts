@@ -88,6 +88,12 @@ export function useAgentExecutionLog() {
         handleToolResult(event)
         break
 
+      case 'content':
+        // ===== 新增：处理 content 事件（LLM 流式输出） =====
+        // 内容事件：将 LLM 生成的总结追加到 AI 消息
+        handleContent(event)
+        break
+
       case 'waiting_for_user':
         handleWaitingForUser(event)
         break
@@ -228,6 +234,24 @@ export function useAgentExecutionLog() {
     step.result = resultData.data ?? event.data
 
     steps.value.push(step)
+  }
+
+  /**
+   * 处理 content 事件
+   *
+   * LLM 流式输出的内容片段，追加到 AI 消息
+   */
+  function handleContent(event: AIAssistantSSEEvent): void {
+    // content 事件：LLM 生成的总结内容
+    // 将内容追加到当前 AI 消息（通过 Store）
+    if (event.content) {
+      const store = useAIConversationStore()
+      store.appendAIMessageContent(event.content)
+      console.log('[AgentExecutionLog] Content event processed:', {
+        contentLength: event.content.length,
+        contentPreview: event.content.slice(0, 50)
+      })
+    }
   }
 
   /**
@@ -592,6 +616,77 @@ export function useAgentExecutionLog() {
   }
 
   /**
+   * ✅ 新增：直接设置执行步骤（用于页面刷新恢复）
+   *
+   * 避免不必要的 localStorage 中间步骤
+   * 直接将 execution steps 设置到 composable 的内部状态
+   *
+   * @param executionSteps - 从 Store 获取的执行步骤数组（timestamp 可能是 string）
+   */
+  function setStepsDirectly(executionSteps: Array<{
+    id: string
+    type: string
+    title: string
+    description?: string
+    timestamp: string | Date
+    round?: number
+    tool?: string
+    params?: Record<string, unknown>
+    result?: unknown
+    success?: boolean
+    error?: string
+    businessParams?: string
+    data?: unknown
+    sessionId?: string
+    inline_text?: string
+    thinking?: string
+    summary?: string
+    summary_params?: Record<string, string>
+    detail_params?: Record<string, { value: string; isEntity?: boolean }>
+    confirmationType?: 'disambiguation' | 'confirmation' | 'info_gap'
+    riskLevel?: 'low' | 'medium' | 'high'
+    options?: Array<{
+      id: number
+      name: string
+      entity_info_inline?: string
+      entity_info_detail?: Record<string, string>
+    }>
+  }>): void {
+    console.log('[AgentExecutionLog] setStepsDirectly - INPUT:', {
+      stepsCount: executionSteps.length,
+      firstStep: executionSteps[0]?.title || 'NO FIRST STEP',
+      lastStep: executionSteps[executionSteps.length - 1]?.title || 'NO LAST STEP'
+    })
+
+    // ✅ 转换 timestamp 从 string 到 Date（如果需要）
+    // 同时确保 description 字段有值（ExecutionStep interface 要求 description 是必需的）
+    const convertedSteps: ExecutionStep[] = executionSteps.map(step => ({
+      ...step,
+      type: step.type as ExecutionStepType,
+      description: step.description || step.title || '',
+      timestamp: typeof step.timestamp === 'string' ? new Date(step.timestamp) : step.timestamp
+    }))
+
+    // ✅ 直接设置步骤
+    steps.value = convertedSteps
+
+    // ✅ 标记为已完成（因为是从历史恢复的）
+    if (convertedSteps.length > 0) {
+      const lastStep = convertedSteps[convertedSteps.length - 1]
+      if (lastStep?.type === ExecutionStepType.REACT_COMPLETE || lastStep?.type === ExecutionStepType.ERROR) {
+        isCompleted.value = true
+        isExecuting.value = false
+      }
+    }
+
+    console.log('[AgentExecutionLog] setStepsDirectly - AFTER SET:', {
+      stepsValueLength: steps.value.length,
+      isCompleted: isCompleted.value,
+      isExecuting: isExecuting.value
+    })
+  }
+
+  /**
    * 将 executionSteps 保存到当前 AI 消息
    * SSE 流结束时触发
    */
@@ -661,7 +756,10 @@ export function useAgentExecutionLog() {
     // 持久化方法（Task 12 新增）
     saveExecutionStepsToCurrentMessage,
     restoreFromLocalStorage,
-    clearLocalStorageCache
+    clearLocalStorageCache,
+
+    // ✅ 新增：直接设置步骤（用于页面刷新恢复）
+    setStepsDirectly
   }
 }
 

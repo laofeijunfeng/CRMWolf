@@ -400,6 +400,45 @@ class ToolRegistry:
                 },
             },
 
+            # ===== 上下文获取工具 =====
+
+            {
+                "name": "get_entity_context",
+                "description": """获取实体的完整上下文信息。
+
+用途：AI 需要完整信息时调用（如查询客户详情、生成业务报告）
+参数：entity_type（customer/opportunity/contract/lead）+ entity_name 或 entity_id
+返回：基本信息 + 关联实体 + 最近活动 + 格式化文本
+
+示例：
+- entity_type="customer", entity_name="光大证券"
+  → 客户信息 + 商机列表 + 合同列表 + 最近跟进
+
+场景：
+- 查询客户详情 → 生成完整的客户报告
+- 创建跟进后 → 获取客户上下文，生成总结
+""",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "entity_type": {
+                            "type": "string",
+                            "enum": ["customer", "opportunity", "contract", "lead"],
+                            "description": "实体类型（customer/opportunity/contract/lead）"
+                        },
+                        "entity_name": {
+                            "type": "string",
+                            "description": "实体名称（可选，用于模糊查找）"
+                        },
+                        "entity_id": {
+                            "type": "integer",
+                            "description": "实体 ID（可选，精确查找）"
+                        },
+                    },
+                    "required": ["entity_type"],
+                },
+            },
+
             # ===== 其他工具（未来扩展）=====
             # create_contract, create_invoice, approve_contract 等
         ]
@@ -416,6 +455,7 @@ class ToolRegistry:
         from app.services.skills.handlers.create_handler import CreateHandler
         from app.services.skills.handlers.status_change_handler import StatusChangeHandler
         from app.services.skills.handlers.stage_advance_handler import StageAdvanceHandler
+        from app.services.skills.handlers.get_context_handler import GetContextHandler
 
         # 搜索工具暂时使用简化版本（后续优化）
         from app.services.agent.handlers import (
@@ -445,6 +485,7 @@ class ToolRegistry:
             "win_opportunity": _build_handler_entry("win_opportunity", StatusChangeHandler()),
             "lose_opportunity": _build_handler_entry("lose_opportunity", StatusChangeHandler()),
             "set_reminder": _build_handler_entry("set_reminder", SetReminderHandler()),
+            "get_entity_context": _build_handler_entry("get_entity_context", GetContextHandler()),
         }
 
 

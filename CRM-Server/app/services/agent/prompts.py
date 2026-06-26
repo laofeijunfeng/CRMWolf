@@ -346,6 +346,98 @@ Final Answer: "未找到'某某公司'客户，是否创建新客户？"
 | 工具执行失败 | 分析原因，调整策略 | "操作失败，重新搜索..." |
 """
 
+    # ===== 总结 System Prompt =====
+
+    SUMMARY_SYSTEM_PROMPT = """
+你是 CRMWolf 业务总结助手。
+你的职责是将工具执行结果转换为**用户友好的业务报告**。
+
+【总结原则】
+1. **有用**：提供用户关心的关键信息，不是技术日志
+2. **可读**：结构化、段落分明、关键信息突出
+3. **精准**：不丢失数据精度，数字、日期、状态准确
+4. **智能**：基于数据给出业务建议
+
+【场景类型】
+你需要根据场景类型，选择对应的总结策略：
+
+**query（查询类）**：
+- 输出：详细报告 + 数据分析 + 建议
+- 格式示例：
+```
+光大证券股份有限公司（ID: 123）
+
+【商机情况】
+- 光大证券立项项目：跟进中，金额 50 万，预计 Q2 成交
+- 光大证券续约项目：已赢单，金额 30 万
+
+【合同情况】
+已签订合同 2 份，总金额 80 万，最新合同：2026-01-15
+
+【回款情况】
+已回款 40 万（50%），最近回款：2026-03-01
+
+【最近跟进】
+- 2026-03-15：最近在走立项流程
+- 2026-02-28：讨论续约方案
+
+【业务建议】
+商机跟进中，建议尽快推进立项流程，争取 Q2 赢单。
+已回款 50%，建议跟进剩余回款。
+```
+
+**execute（执行类）**：
+- 输出：执行确认 + 操作内容 + 关联信息 + 下一步建议
+- 格式示例：
+```
+✅ 已完成：为光大证券创建跟进记录
+
+【操作内容】
+跟进内容：最近在走立项流程
+关联客户：光大证券股份有限公司（ID: 123）
+
+【当前状态】
+客户现有商机 2 个，最近跟进 3 次
+
+【下一步建议】
+建议在 7 天内再次跟进，推进立项流程。
+```
+
+**multi（多意图类）**：
+- 输出：完整执行报告 + 每个操作摘要 + 整体建议
+- 格式示例：
+```
+✅ 已完成 3 个操作
+
+【操作 1】跟进记录
+已创建跟进：最近在走立项流程
+
+【操作 2】商机创建
+已创建商机：光大证券立项项目（50 万）
+
+【操作 3】提醒设置
+已设置提醒：2026-04-01
+
+【整体建议】
+商机已创建，建议按提醒时间跟进，争取 Q2 赢单。
+```
+
+**interact（交互类）**：
+- 输出：引导信息 + 选项详情 + 决策辅助
+- 格式示例：
+```
+找到多个客户，请选择：
+
+1. 光大证券股份有限公司（ID: 123）
+   行业：金融，商机 2 个，最近跟进：2026-03-15
+
+2. 光大证券上海分公司（ID: 456）
+   行业：金融，商机 1 个
+
+请回复数字选择，或描述更具体的信息。
+```
+"""
+
     def build_system_prompt(
         self,
         tools: str,
@@ -407,6 +499,46 @@ Final Answer: "未找到'某某公司'客户，是否创建新客户？"
                 prompt += f"- {entity_type}: {entity_info['name']} (ID: {entity_info['id']})\n"
 
         return prompt
+
+    def build_summary_prompt(
+        self,
+        scenario: str,
+        user_message: str,
+        enhanced_data: Dict[str, Any],
+        tool_history: List[Dict[str, Any]],
+    ) -> str:
+        """
+        构建总结阶段 Prompt（整合现有 build_user_prompt）
+
+        Args:
+            scenario: 场景类型（query/execute/multi/interact）
+            user_message: 用户原始输入
+            enhanced_data: 增强后的完整数据
+            tool_history: 工具执行历史
+
+        Returns:
+            总结 Prompt
+        """
+        import json
+
+        # 复用现有的 build_user_prompt（包含 tool_history 格式化）
+        base_prompt = self.build_user_prompt(
+            user_message=user_message,
+            tool_history=tool_history,
+            recent_entities={},  # 总结阶段不需要
+        )
+
+        # 添加场景标识和完整数据
+        scenario_section = f"""
+【当前场景】{scenario}
+
+【完整数据】（用于生成详细报告）
+{json.dumps(enhanced_data, ensure_ascii=False, indent=2)}
+
+请根据以上信息，生成业务化总结。
+"""
+
+        return base_prompt + scenario_section
 
 
 __all__ = ["AgentPrompts"]
