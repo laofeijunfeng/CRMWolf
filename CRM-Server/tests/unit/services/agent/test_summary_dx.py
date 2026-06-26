@@ -2,6 +2,7 @@
 
 import pytest
 from app.services.agent.phase_contracts import Phase1Output, Phase2Output, Phase3Output
+from app.services.agent.summary_monitor import SummaryQualityMonitor
 
 
 class TestPhaseContracts:
@@ -329,3 +330,68 @@ class TestPromptVersionManager:
         manager = PromptVersionManager()
         prompt = manager.get_prompt("v1.0")
         assert "业务总结助手" in prompt
+
+
+class TestSummaryQualityMonitor:
+    """Test quality monitoring"""
+
+    def test_metrics_initial_state(self):
+        """Test initial metrics state"""
+        monitor = SummaryQualityMonitor()
+        metrics = monitor.get_metrics()
+        assert metrics["total_summaries"] == 0
+
+    def test_track_summary_success(self):
+        """Test tracking successful summary"""
+        monitor = SummaryQualityMonitor()
+
+        phase1 = Phase1Output(raw_data={}, enhanced_data={}, enhancement_status="success", enhancement_latency_ms=100)
+        phase2 = Phase2Output(scenario="execute", scenario_priority=6, scenario_confidence=0.9, input_data={})
+        phase3 = Phase3Output(summary_text="已完成", summary_type="detailed", summary_latency_ms=200)
+
+        monitor.track_summary(phase1, phase2, phase3)
+
+        metrics = monitor.get_metrics()
+        assert metrics["total_summaries"] == 1
+
+    def test_track_summary_fallback(self):
+        """Test tracking fallback summary"""
+        monitor = SummaryQualityMonitor()
+
+        phase1 = Phase1Output(raw_data={}, enhanced_data=None, enhancement_status="fallback", enhancement_latency_ms=0)
+        phase2 = Phase2Output(scenario="execute", scenario_priority=6, scenario_confidence=0.5, input_data={})
+        phase3 = Phase3Output(summary_text="- tool: 已执行", summary_type="fallback", summary_latency_ms=0)
+
+        monitor.track_summary(phase1, phase2, phase3)
+
+        metrics = monitor.get_metrics()
+        assert metrics["total_summaries"] == 1
+
+    def test_get_metrics_after_multiple_tracks(self):
+        """Test metrics after multiple tracks"""
+        monitor = SummaryQualityMonitor()
+
+        # Track 3 summaries
+        for i in range(3):
+            phase1 = Phase1Output(raw_data={}, enhanced_data={}, enhancement_status="success", enhancement_latency_ms=100)
+            phase2 = Phase2Output(scenario="execute", scenario_priority=6, scenario_confidence=0.9, input_data={})
+            phase3 = Phase3Output(summary_text="已完成", summary_type="detailed", summary_latency_ms=200)
+            monitor.track_summary(phase1, phase2, phase3)
+
+        metrics = monitor.get_metrics()
+        assert metrics["total_summaries"] == 3
+        assert metrics["avg_latency_ms"] > 0
+
+    def test_reset_metrics(self):
+        """Test reset_metrics"""
+        monitor = SummaryQualityMonitor()
+
+        phase1 = Phase1Output(raw_data={}, enhanced_data={}, enhancement_status="success", enhancement_latency_ms=100)
+        phase2 = Phase2Output(scenario="execute", scenario_priority=6, scenario_confidence=0.9, input_data={})
+        phase3 = Phase3Output(summary_text="已完成", summary_type="detailed", summary_latency_ms=200)
+
+        monitor.track_summary(phase1, phase2, phase3)
+        monitor.reset_metrics()
+
+        metrics = monitor.get_metrics()
+        assert metrics["total_summaries"] == 0
