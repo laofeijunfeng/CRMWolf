@@ -287,17 +287,45 @@ class CRMWolfAgent:
                 # Step 6: 判断是否继续循环
                 if not reflection.should_continue:
                     # Reflection 判断应该终止
-                    # ===== 新增：场景分类 + 智能总结 =====
-                    scenario = self._classify_scenario(
-                        self.memory.get_tool_history(),
-                        reasoning
+                    # ===== 新增：Edge Scenario Detection =====
+                    phase2_output: Phase2Output
+
+                    # First check edge scenarios
+                    edge_scenario = self.edge_handler.detect(
+                        round_num=round_num,
+                        max_rounds=self.MAX_ROUNDS,
+                        tool_result=tool_result,
+                        enhanced_data=phase1_output.enhanced_data if hasattr(phase1_output, 'enhanced_data') else None,
+                        llm_timeout=False,  # LLM timeout tracking not yet implemented
                     )
+
+                    if edge_scenario:
+                        # Edge scenario detected
+                        phase2_output = Phase2Output(
+                            scenario=edge_scenario,
+                            scenario_priority=self.edge_handler.get_priority(edge_scenario),
+                            scenario_confidence=1.0,  # Edge scenarios are deterministic
+                            input_data=phase1_output.raw_data,  # Use raw data for edge cases
+                        )
+                        logger.warning(f"Edge scenario detected: {edge_scenario}")
+                    elif tool_history:
+                        # Normal classification
+                        scenario = self._classify_scenario(tool_history, reasoning)
+                        phase2_output = Phase2Output(
+                            scenario=scenario,
+                            scenario_priority=self._get_scenario_priority(scenario),
+                            scenario_confidence=0.9,
+                            input_data=phase1_output.enhanced_data or phase1_output.raw_data,
+                        )
+                    else:
+                        # No tool history - use fallback
+                        phase2_output = self.fallback.phase2_fallback(reasoning.tool_name)
 
                     # 调用 LLM 生成业务化总结
                     final_answer = await self._generate_summary(
-                        scenario=scenario,
+                        scenario=phase2_output.scenario,
                         user_message=user_message,
-                        enhanced_data=phase1_output.enhanced_data,
+                        enhanced_data=phase2_output.input_data,
                         tool_history=self.memory.get_tool_history(),
                     )
 
@@ -840,6 +868,20 @@ class CRMWolfAgent:
 
         # 4. 默认：执行类
         return "execute"
+
+    def _get_scenario_priority(self, scenario: str) -> int:
+        """
+        Get priority number for scenario.
+
+        Args:
+            scenario: Scenario name
+
+        Returns:
+            Priority number (1-8, lower = higher priority)
+        """
+        if scenario in SCENARIO_PRIORITY:
+            return SCENARIO_PRIORITY.index(scenario) + 1
+        return 6  # Default execute priority
 
     async def _generate_summary(
         self,
