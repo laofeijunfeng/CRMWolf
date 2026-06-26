@@ -24,6 +24,7 @@ from datetime import datetime
 from dataclasses import dataclass
 import json
 import logging
+import time
 
 from app.services.agent.memory import AgentMemory
 from app.services.agent.tools import ToolRegistry, ToolResult
@@ -251,8 +252,23 @@ class CRMWolfAgent:
                         rounds=round_num + 1,
                     )
 
-                # ===== 新增：数据增强（聚合相关实体数据） =====
-                enhanced_data = await self._enhance_data(reasoning.tool_name, tool_result)
+                # ===== 新增：数据增强（聚合相关实体数据） + Fallback =====
+                phase1_output: Phase1Output
+                try:
+                    start_time = time.time()
+                    enhanced_data = await self._enhance_data(reasoning.tool_name, tool_result)
+                    elapsed_ms = (time.time() - start_time) * 1000
+
+                    phase1_output = Phase1Output(
+                        raw_data=tool_result.data or {},
+                        enhanced_data=enhanced_data,
+                        enhancement_status="success",
+                        enhancement_latency_ms=elapsed_ms,
+                    )
+                    logger.info(f"Phase 1 enhancement success: {elapsed_ms:.1f}ms")
+                except Exception as e:
+                    logger.warning(f"Phase 1 enhancement failed: {e}")
+                    phase1_output = self.fallback.phase1_fallback(tool_result)
 
                 # Step 4: Observe（观察）
                 observation = self._observe(tool_result)
@@ -281,7 +297,7 @@ class CRMWolfAgent:
                     final_answer = await self._generate_summary(
                         scenario=scenario,
                         user_message=user_message,
-                        enhanced_data=enhanced_data,
+                        enhanced_data=phase1_output.enhanced_data,
                         tool_history=self.memory.get_tool_history(),
                     )
 
