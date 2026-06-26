@@ -20,6 +20,8 @@ from app.api.ai_config import router as ai_config_router
 from app.api.ai import router as ai_openapi_router
 from app.api.workflow_undo import router as workflow_undo_router
 from app.api.ai_conversation_history import router as ai_conversation_history_router
+# Frontend Logs 路由
+from app.api.frontend_logs import router as frontend_logs_router
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
@@ -104,6 +106,9 @@ app.include_router(workflow_undo_router)
 
 # AI 对话历史路由
 app.include_router(ai_conversation_history_router)
+
+# Frontend Logs 路由（前端日志系统）
+app.include_router(frontend_logs_router)
 
 # AI 对话胶水层路由
 from app.glue.router import router as glue_router
