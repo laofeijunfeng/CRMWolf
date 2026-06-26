@@ -291,6 +291,9 @@ class CRMWolfAgent:
                 # Step 6: 判断是否继续循环
                 if not reflection.should_continue:
                     # Reflection 判断应该终止
+                    # ===== 重新获取 tool_history（当前工具已添加） =====
+                    tool_history = self.memory.get_tool_history()
+
                     # ===== 新增：Edge Scenario Detection =====
                     phase2_output: Phase2Output
 
