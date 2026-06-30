@@ -252,6 +252,10 @@ const getStatusClass = (status: string) => {
 }
 
 const canEditContract = computed(() => {
+  // 只有草稿状态的合同可以编辑
+  if (contractInfo.value?.status !== 'DRAFT') {
+    return false
+  }
   return permissionStore.canEditOwn('contract') || permissionStore.canEditAll('contract')
 })
 
