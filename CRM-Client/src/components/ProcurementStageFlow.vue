@@ -264,7 +264,7 @@ onMounted(async () => {
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
-  justify-content: flex-start;
+  justify-content: stretch;
 }
 
 .stage-node {
@@ -278,6 +278,8 @@ onMounted(async () => {
   border: 1px solid var(--wolf-border-light);
   transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
   min-width: 100px;
+  flex-grow: 1;
+  flex-basis: 0;
   cursor: default;
 }
 
@@ -308,11 +310,23 @@ onMounted(async () => {
   box-shadow: 0 4px 16px rgba(22, 93, 255, 0.2);
 }
 
-/* 完成状态 */
+/* 完成状态 - 优雅的绿色点缀 */
 .stage-node.is-completed {
-  border-color: var(--wolf-success-border);
-  background: var(--wolf-success-bg);
+  border-color: var(--wolf-success);
+  background: transparent;
   box-shadow: none;
+}
+
+.stage-node.is-completed::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  border-radius: calc(var(--wolf-radius-md) - 4px);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.05) 0%, rgba(34, 197, 94, 0.02) 100%);
+  pointer-events: none;
 }
 
 /* === 节点图标 === */
@@ -332,6 +346,7 @@ onMounted(async () => {
 .stage-node.is-completed .node-icon {
   background: var(--wolf-success);
   color: white;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
 }
 
 .stage-node.is-current .node-icon {
@@ -415,11 +430,39 @@ onMounted(async () => {
 
 .stage-node.is-completed .node-name {
   color: var(--wolf-success);
+  position: relative;
+}
+
+.stage-node.is-completed .node-name::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 2px;
+  background: var(--wolf-success);
+  border-radius: 1px;
+  opacity: 0.5;
 }
 
 .stage-node.is-current .node-name {
   color: var(--wolf-primary);
   font-weight: var(--wolf-font-weight-semibold);
+}
+
+/* 阶段少时居中显示 */
+.stage-nodes:has(.stage-node:nth-child(1):last-child),
+.stage-nodes:has(.stage-node:nth-child(2):last-child),
+.stage-nodes:has(.stage-node:nth-child(3):last-child) {
+  justify-content: center;
+}
+
+.stage-nodes:has(.stage-node:nth-child(1):last-child) .stage-node,
+.stage-nodes:has(.stage-node:nth-child(2):last-child) .stage-node,
+.stage-nodes:has(.stage-node:nth-child(3):last-child) .stage-node {
+  flex-grow: 0;
+  min-width: 120px;
 }
 
 .node-meta {
@@ -483,6 +526,19 @@ onMounted(async () => {
   .node-name {
     font-size: 12px;
     max-width: 80px;
+  }
+
+  /* 移动端阶段少时居中 */
+  .stage-nodes:has(.stage-node:nth-child(1):last-child) {
+    justify-content: center;
+  }
+
+  .stage-nodes:has(.stage-node:nth-child(2):last-child) {
+    justify-content: center;
+  }
+
+  .stage-nodes:has(.stage-node:nth-child(3):last-child) {
+    justify-content: center;
   }
 }
 
