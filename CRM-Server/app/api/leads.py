@@ -92,17 +92,18 @@ def get_leads(
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
-    from app.crud.role import role_crud
+    from app.crud.permission import permission_crud
 
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
+    # 获取用户权限码
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
 
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_director = "SALES_DIRECTOR" in role_codes
+    # 检查是否有 view:all 权限
+    has_view_all = "lead:view:all" in permission_codes
 
     # 如果前端传入 owner_id 参数，使用它（用于「我的线索」功能）
-    # 否则根据权限自动设置
-    if owner_id is None and not (is_admin or is_director):
+    # 否则根据权限自动设置：有 view:all 则看全部，只有 view:own 则看自己的
+    if owner_id is None and not has_view_all:
         owner_id = str(current_user.id)
 
     leads, total = lead_crud.get_multi(
@@ -159,16 +160,17 @@ def get_lead_statistics(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.crud.role import role_crud
+    from app.crud.permission import permission_crud
 
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
+    # 获取用户权限码
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
 
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_director = "SALES_DIRECTOR" in role_codes
+    # 检查是否有 view:all 权限
+    has_view_all = "lead:view:all" in permission_codes
 
     owner_id = None
-    if not (is_admin or is_director):
+    if not has_view_all:
         owner_id = str(current_user.id)
 
     return lead_crud.get_statistics(db, team_id, owner_id)

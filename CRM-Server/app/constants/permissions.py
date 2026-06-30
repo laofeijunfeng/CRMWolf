@@ -121,6 +121,44 @@ ALL_PERMISSIONS = [
     # 热力值权限
     {"name": "查看热力值配置", "code": "score:config:view", "resource": "score", "action": "config", "scope": "view"},
     {"name": "编辑热力值配置", "code": "score:config:edit", "resource": "score", "action": "config", "scope": "edit"},
+
+    # ===== 补充缺失的权限定义 =====
+
+    # 客户 - 补充 delete:all
+    {"name": "删除所有客户", "code": "customer:delete:all", "resource": "customer", "action": "delete", "scope": "all"},
+
+    # 线索 - 补充 delete:all
+    {"name": "删除所有线索", "code": "lead:delete:all", "resource": "lead", "action": "delete", "scope": "all"},
+
+    # 商机 - 补充 delete:all
+    {"name": "删除所有商机", "code": "opportunity:delete:all", "resource": "opportunity", "action": "delete", "scope": "all"},
+
+    # 合同 - 补充 delete:all 和审批权限
+    {"name": "删除所有合同", "code": "contract:delete:all", "resource": "contract", "action": "delete", "scope": "all"},
+    {"name": "审批所有合同", "code": "contract:approve:all", "resource": "contract", "action": "approve", "scope": "all"},
+    {"name": "审批自己的合同", "code": "contract:approve:own", "resource": "contract", "action": "approve", "scope": "own"},
+
+    # 发票 - 补充完整权限集
+    {"name": "审批发票申请", "code": "invoice:approve", "resource": "invoice", "action": "approve"},
+    {"name": "标记已开票", "code": "invoice:mark_issued", "resource": "invoice", "action": "mark_issued"},
+    {"name": "编辑发票申请", "code": "invoice:edit:own", "resource": "invoice", "action": "edit", "scope": "own"},
+    {"name": "删除发票申请", "code": "invoice:delete:own", "resource": "invoice", "action": "delete", "scope": "own"},
+    {"name": "创建发票抬头", "code": "invoice:title:create", "resource": "invoice_title", "action": "create"},
+    {"name": "编辑发票抬头", "code": "invoice:title:edit", "resource": "invoice_title", "action": "edit"},
+    {"name": "删除发票抬头", "code": "invoice:title:delete", "resource": "invoice_title", "action": "delete"},
+    {"name": "设置默认抬头", "code": "invoice:title:set_default", "resource": "invoice_title", "action": "set_default"},
+    {"name": "提交发票申请", "code": "invoice:submit", "resource": "invoice", "action": "submit"},
+    {"name": "撤回发票申请", "code": "invoice:withdraw", "resource": "invoice", "action": "withdraw"},
+
+    # 回款 - 补充完整权限集
+    {"name": "编辑回款记录", "code": "payment:record:edit", "resource": "payment_record", "action": "edit"},
+    {"name": "删除回款记录", "code": "payment:record:delete", "resource": "payment_record", "action": "delete"},
+    {"name": "确认回款入账", "code": "payment:confirm", "resource": "payment", "action": "confirm"},
+
+    # 财务权限
+    {"name": "查看财务审计日志", "code": "finance:audit:view", "resource": "finance", "action": "audit", "scope": "view"},
+    {"name": "查看应收账款", "code": "finance:receivables:view", "resource": "finance", "action": "receivables", "scope": "view"},
+    {"name": "查看财务报表", "code": "finance:reports:view", "resource": "finance", "action": "reports", "scope": "view"},
 ]
 
 # 角色定义
@@ -136,22 +174,22 @@ ROLE_PERMISSIONS_MAPPING = {
     "TEAM_ADMIN": "all",  # 所有权限
     "SALES_DIRECTOR": [
         "customer:view:all", "customer:view:own", "customer:create",
-        "customer:edit:own", "customer:edit:all", "customer:delete:own",
+        "customer:edit:own", "customer:edit:all", "customer:delete:own", "customer:delete:all",
         "customer:return", "customer:claim", "customer:assign",
         "customer:contact:create", "customer:contact:edit", "customer:contact:delete",
         "customer:follow_up:create", "customer:follow_up:edit", "customer:follow_up:delete",
         "opportunity:view:all", "opportunity:view:own", "opportunity:create",
-        "opportunity:edit:own", "opportunity:edit:all", "opportunity:delete:own",
+        "opportunity:edit:own", "opportunity:edit:all", "opportunity:delete:own", "opportunity:delete:all",
         "opportunity:stage", "opportunity:win", "opportunity:lose", "opportunity:assign",
         "opportunity:analytics:view", "opportunity:stage:manage",
         "opportunity:stage:create", "opportunity:stage:edit", "opportunity:stage:delete",
         "lead:view:all", "lead:view:own", "lead:create",
-        "lead:edit:own", "lead:edit:all", "lead:delete:own",
+        "lead:edit:own", "lead:edit:all", "lead:delete:own", "lead:delete:all",
         "lead:assign", "lead:claim", "lead:return", "lead:convert",
         "lead:follow_up:create", "lead:import",
         "contract:view:all", "contract:view:own", "contract:create",
-        "contract:edit:own", "contract:edit:all", "contract:delete:own",
-        "contract:submit", "contract:cancel",
+        "contract:edit:own", "contract:edit:all", "contract:delete:own", "contract:delete:all",
+        "contract:submit", "contract:cancel", "contract:approve:own",
         "invoice:view:all", "invoice:view:own", "invoice:create",
         "payment:view:all", "payment:view:own", "payment:register",
         "payment:plan:create", "payment:plan:edit", "payment:plan:delete", "payment:plan:view:all",
@@ -160,15 +198,19 @@ ROLE_PERMISSIONS_MAPPING = {
     ],
     "SALES_MEMBER": [
         "customer:view:own", "customer:create", "customer:edit:own",
+        "customer:delete:own",  # ← 补充删除权限
         "customer:return", "customer:claim",
         "customer:contact:create", "customer:contact:edit", "customer:contact:delete",
         "customer:follow_up:create", "customer:follow_up:edit", "customer:follow_up:delete",
         "opportunity:view:own", "opportunity:create", "opportunity:edit:own",
+        "opportunity:delete:own",  # ← 补充删除权限
         "opportunity:stage", "opportunity:win", "opportunity:lose",
         "lead:view:own", "lead:create", "lead:edit:own",
+        "lead:delete:own",  # ← 补充删除权限
         "lead:claim", "lead:return", "lead:convert",
-        "lead:follow_up:create",
+        "lead:follow_up:create", "lead:import",  # ← 补充导入权限
         "contract:view:own", "contract:create", "contract:edit:own",
+        "contract:delete:own",  # ← 补充删除权限
         "contract:submit",
         "invoice:view:own", "invoice:create",
         "payment:view:own", "payment:plan:view:all",
@@ -176,9 +218,13 @@ ROLE_PERMISSIONS_MAPPING = {
     ],
     "FINANCE": [
         "invoice:view:all", "invoice:view:own", "invoice:create",
+        "invoice:approve", "invoice:mark_issued",  # ← 补充核心财务权限
+        "invoice:title:create", "invoice:title:edit", "invoice:title:delete", "invoice:title:set_default",
         "payment:view:all", "payment:view:own", "payment:register",
-        "payment:plan:view:all",
+        "payment:confirm",  # ← 补充回款确认权限
+        "payment:plan:view:all", "payment:plan:create", "payment:plan:edit", "payment:plan:delete",
         "contract:view:all", "contract:view:own",
+        "finance:audit:view", "finance:receivables:view", "finance:reports:view",  # ← 补充财务报表权限
         "statistics:view", "report:view:own",
     ],
 }

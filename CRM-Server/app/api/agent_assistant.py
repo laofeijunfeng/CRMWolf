@@ -125,11 +125,11 @@ async def get_session_state(
         Session 状态信息
     """
     from app.services.agent.memory import AgentMemory
-    from app.services.langgraph.checkpointer import redis_client
+    from app.core.redis import get_redis_client
 
     db = SessionLocal()
     try:
-        memory = AgentMemory(db, team_id, current_user.id, redis_client)
+        memory = AgentMemory(db, team_id, current_user.id, get_redis_client())
         memory.load_session(session_id)
 
         return {
@@ -158,10 +158,10 @@ async def delete_session(
     Returns:
         删除结果
     """
-    from app.services.langgraph.checkpointer import redis_client
+    from app.core.redis import get_redis_client
 
     # 删除 Redis 中的 Session
-    redis_client.delete(f"agent_session:{session_id}")
+    get_redis_client().delete(f"agent_session:{session_id}")
 
     return {"message": "Session deleted", "session_id": session_id}
 

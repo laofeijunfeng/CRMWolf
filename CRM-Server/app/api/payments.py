@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from app.core.deps import require_permission
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import date
@@ -26,20 +27,24 @@ def create_payment_plans(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：创建回款计划
+    permission_checker = require_permission("payment:plan:create")
+    permission_checker(current_user, db)
+
     contract = contract_crud.get_by_id(db, contract_id, team_id)
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="合同不存在"
         )
-    
+
     from app.models.contract import ContractStatus
     if contract.status not in [ContractStatus.SIGNED, ContractStatus.EFFECTIVE]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"只有已签署或已生效的合同可以创建回款计划，当前状态: {contract.status}"
         )
-    
+
     try:
         plans = payment_plan_crud.batch_create(db, contract_id, plans_data.plans, str(current_user.id))
         return plans
@@ -207,25 +212,29 @@ def update_payment_plan(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：编辑回款计划
+    permission_checker = require_permission("payment:plan:edit")
+    permission_checker(current_user, db)
+
     plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款计划不存在"
         )
-    
+
     if plan.status in [PaymentPlanStatus.COMPLETED]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="已完成的回款计划不能修改"
         )
-    
+
     if plan.payment_records:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="存在关联的回款记录，不能修改金额和日期"
         )
-    
+
     try:
         updated_plan = payment_plan_crud.update(db, plan, plan_data)
         paid_amount = sum(float(r.actual_amount) for r in updated_plan.payment_records)
@@ -246,6 +255,10 @@ def delete_payment_plan(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：删除回款计划
+    permission_checker = require_permission("payment:plan:delete")
+    permission_checker(current_user, db)
+
     try:
         success = payment_plan_crud.delete(db, plan_id, team_id)
         if not success:
@@ -268,6 +281,10 @@ def create_payment_record(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：登记回款
+    permission_checker = require_permission("payment:register")
+    permission_checker(current_user, db)
+
     plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
@@ -327,13 +344,17 @@ def update_payment_record(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：编辑回款记录
+    permission_checker = require_permission("payment:record:edit")
+    permission_checker(current_user, db)
+
     record = payment_record_crud.get_by_id(db, record_id, team_id)
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款记录不存在"
         )
-    
+
     try:
         updated_record = payment_record_crud.update(db, record, record_data)
         return updated_record
@@ -351,6 +372,10 @@ def delete_payment_record(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：删除回款记录
+    permission_checker = require_permission("payment:record:delete")
+    permission_checker(current_user, db)
+
     try:
         success = payment_record_crud.delete(db, record_id, team_id)
         if not success:

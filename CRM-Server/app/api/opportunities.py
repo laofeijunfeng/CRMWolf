@@ -67,6 +67,19 @@ def get_opportunities(
 ):
     from sqlalchemy import text
     from app.models.user import User
+    from app.crud.permission import permission_crud
+
+    # 获取用户权限码
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    # 检查是否有 view:all 权限
+    has_view_all = "opportunity:view:all" in permission_codes
+
+    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的商机
+    actual_owner_id = owner_id
+    if actual_owner_id is None and not has_view_all:
+        actual_owner_id = str(current_user.id)
 
     opportunities, _ = opportunity_crud.get_multi(
         db=db,
@@ -75,7 +88,7 @@ def get_opportunities(
         limit=limit,
         status=status,
         stage_id=stage_id,
-        owner_id=owner_id,
+        owner_id=actual_owner_id,
         customer_id=customer_id,
         keyword=keyword,
         order_by=order_by,

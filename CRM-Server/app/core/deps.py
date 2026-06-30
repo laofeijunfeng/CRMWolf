@@ -595,3 +595,276 @@ def check_contract_edit_permission(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="缺少权限: contract:edit:own 或 contract:edit:all"
     )
+
+
+# ===== View Permission Checkers =====
+
+def check_lead_view_permission(
+    lead_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    检查线索查看权限（基于权限码）
+
+    权限规则：
+    - lead:view:all → 可查看任何线索
+    - lead:view:own → 只能查看自己负责或创建的线索
+    """
+    from app.crud.lead import lead_crud
+
+    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    if not lead:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="线索不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    # 检查是否有全部查看权限
+    if "lead:view:all" in permission_codes:
+        return lead
+
+    # 检查是否有查看自己线索的权限
+    if "lead:view:own" in permission_codes:
+        if lead.owner_id == str(current_user.id) or lead.creator_id == str(current_user.id):
+            return lead
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能查看自己负责的线索"
+        )
+
+    # 无任何查看权限
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少权限: lead:view:own 或 lead:view:all"
+    )
+
+
+def check_customer_view_permission(
+    customer_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    检查客户查看权限（基于权限码）
+
+    权限规则：
+    - customer:view:all → 可查看任何客户
+    - customer:view:own → 只能查看自己负责的客户
+    """
+    from app.crud.customer import customer_crud
+
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="客户不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    # 检查是否有全部查看权限
+    if "customer:view:all" in permission_codes:
+        return customer
+
+    # 检查是否有查看自己客户的权限
+    if "customer:view:own" in permission_codes:
+        if customer.owner_id == str(current_user.id):
+            return customer
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能查看自己负责的客户"
+        )
+
+    # 无任何查看权限
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少权限: customer:view:own 或 customer:view:all"
+    )
+
+
+def check_opportunity_view_permission(
+    opportunity_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    检查商机查看权限（基于权限码）
+
+    权限规则：
+    - opportunity:view:all → 可查看任何商机
+    - opportunity:view:own → 只能查看自己负责的商机
+    """
+    from app.crud.opportunity import opportunity_crud
+
+    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
+    if not opportunity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="商机不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    # 检查是否有全部查看权限
+    if "opportunity:view:all" in permission_codes:
+        return opportunity
+
+    # 检查是否有查看自己商机的权限
+    if "opportunity:view:own" in permission_codes:
+        if opportunity.owner_id == str(current_user.id):
+            return opportunity
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能查看自己负责的商机"
+        )
+
+    # 无任何查看权限
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少权限: opportunity:view:own 或 opportunity:view:all"
+    )
+
+
+def check_contract_view_permission(
+    contract_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    检查合同查看权限（基于权限码）
+
+    权限规则：
+    - contract:view:all → 可查看任何合同
+    - contract:view:own → 只能查看自己负责的合同
+    """
+    from app.crud.contract import contract_crud
+
+    contract = contract_crud.get_by_id(db, contract_id, team_id)
+    if not contract:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="合同不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    # 检查是否有全部查看权限
+    if "contract:view:all" in permission_codes:
+        return contract
+
+    # 检查是否有查看自己合同的权限
+    if "contract:view:own" in permission_codes:
+        if contract.owner_id == str(current_user.id):
+            return contract
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能查看自己负责的合同"
+        )
+
+    # 无任何查看权限
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少权限: contract:view:own 或 contract:view:all"
+    )
+
+
+def check_invoice_view_permission(
+    invoice_application_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    检查发票申请查看权限（基于权限码）
+
+    权限规则：
+    - invoice:view:all → 可查看任何发票申请
+    - invoice:view:own → 只能查看自己申请的发票申请
+    """
+    from app.crud.invoice import invoice_application_crud
+
+    application = invoice_application_crud.get_by_id(db, invoice_application_id, team_id)
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="发票申请不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    # 检查是否有全部查看权限
+    if "invoice:view:all" in permission_codes:
+        return application
+
+    # 检查是否有查看自己发票申请的权限
+    if "invoice:view:own" in permission_codes:
+        if application.applicant_id == str(current_user.id):
+            return application
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能查看自己申请的发票申请"
+        )
+
+    # 无任何查看权限
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少权限: invoice:view:own 或 invoice:view:all"
+    )
+
+
+def check_payment_view_permission(
+    payment_plan_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    检查回款计划查看权限（基于权限码）
+
+    权限规则：
+    - payment:view:all → 可查看任何回款计划
+    - payment:view:own → 只能查看自己负责的回款计划（申请人）
+    """
+    from app.crud.payment import payment_plan_crud
+
+    plan = payment_plan_crud.get_by_id(db, payment_plan_id, team_id)
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="回款计划不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    # 检查是否有全部查看权限
+    if "payment:view:all" in permission_codes:
+        return plan
+
+    # 检查是否有查看自己回款计划的权限
+    if "payment:view:own" in permission_codes:
+        # 回款计划的负责人通过合同关联
+        if plan.contract and plan.contract.owner_id == str(current_user.id):
+            return plan
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能查看自己负责的回款计划"
+        )
+
+    # 无任何查看权限
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少权限: payment:view:own 或 payment:view:all"
+    )

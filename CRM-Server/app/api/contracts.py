@@ -180,6 +180,20 @@ def get_contracts(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    from app.crud.permission import permission_crud
+
+    # 获取用户权限码
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    # 检查是否有 view:all 权限
+    has_view_all = "contract:view:all" in permission_codes
+
+    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的合同
+    actual_owner_id = owner_id
+    if actual_owner_id is None and not has_view_all:
+        actual_owner_id = str(current_user.id)
+
     contracts, total = contract_crud.get_multi(
         db=db,
         team_id=team_id,
@@ -190,7 +204,7 @@ def get_contracts(
         license_type=license_type,
         contract_number=contract_number,
         keyword=keyword,
-        owner_id=owner_id,
+        owner_id=actual_owner_id,
         order_by=order_by,
         order_dir=order_dir
     )

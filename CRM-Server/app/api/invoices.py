@@ -29,20 +29,24 @@ def create_invoice_title(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：创建发票抬头
+    permission_checker = require_permission("invoice:title:create")
+    permission_checker(current_user, db)
+
     customer = db.query(Customer).filter(Customer.id == customer_id, Customer.team_id == team_id).first()
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户不存在"
         )
-    
+
     existing_title = invoice_title_crud.get_by_taxpayer_id(db, customer_id, title_data.taxpayer_id, team_id)
     if existing_title:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该纳税人识别号已存在"
         )
-    
+
     title = invoice_title_crud.create(db, customer_id, title_data, team_id)
     return title
 
@@ -82,13 +86,17 @@ def update_invoice_title(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：编辑发票抬头
+    permission_checker = require_permission("invoice:title:edit")
+    permission_checker(current_user, db)
+
     title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="开票抬头不存在"
         )
-    
+
     updated_title = invoice_title_crud.update(db, title, title_data)
     return updated_title
 
@@ -100,6 +108,10 @@ def set_default_invoice_title(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：设置默认抬头
+    permission_checker = require_permission("invoice:title:set_default")
+    permission_checker(current_user, db)
+
     title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
@@ -123,6 +135,10 @@ def delete_invoice_title(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：删除发票抬头
+    permission_checker = require_permission("invoice:title:delete")
+    permission_checker(current_user, db)
+
     success = invoice_title_crud.delete(db, title_id, team_id)
     if not success:
         raise HTTPException(

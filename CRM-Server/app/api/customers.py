@@ -466,16 +466,21 @@ def get_customers(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.crud.role import role_crud
+    from app.crud.permission import permission_crud
 
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
+    # 获取用户权限码
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
 
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_director = "SALES_DIRECTOR" in role_codes
+    # 检查是否有 view:all 权限
+    has_view_all = "customer:view:all" in permission_codes
 
     actual_owner_id = owner_id
     if owner_id in ["me", "my"]:
+        actual_owner_id = str(current_user.id)
+
+    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的客户
+    if actual_owner_id is None and not has_view_all:
         actual_owner_id = str(current_user.id)
 
     customers, _ = customer_crud.get_multi(
@@ -682,12 +687,30 @@ def update_customer(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    from app.crud.permission import permission_crud
+
     customer = customer_crud.get_by_id(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户不存在"
         )
+
+    # 权限检查：edit:all 可编辑所有，edit:own 只能编辑自己的
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    has_edit_all = "customer:edit:all" in permission_codes
+    has_edit_own = "customer:edit:own" in permission_codes
+
+    if not has_edit_all:
+        if has_edit_own and customer.owner_id == str(current_user.id):
+            pass  # 允许编辑自己的客户
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能编辑自己负责的客户"
+            )
 
     if customer_update.account_name:
         existing_customer = customer_crud.get_by_name(db, customer_update.account_name, team_id)

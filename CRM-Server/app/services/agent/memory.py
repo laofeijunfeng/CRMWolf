@@ -37,13 +37,13 @@ class AgentMemory:
         self.team_id = team_id
         self.user_id = user_id
 
-        # 复用现有的 Redis 客户端
+        # 复用现有的 Redis 客户端（统一入口）
         if redis_client:
             self.redis_client = redis_client
         else:
-            # 直接创建 Redis 客户端（不依赖 langgraph）
-            import redis
-            self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
+            # 使用 core.redis 统一入口（而非硬编码 localhost）
+            from app.core.redis import get_redis_client
+            self.redis_client = get_redis_client()
 
         # 会话状态
         self.session_id: Optional[str] = None
