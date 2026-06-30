@@ -11,7 +11,7 @@ debug_mode = os.getenv("CRM_DEBUG", "true").lower() == "true"
 setup_logging(debug=debug_mode)
 logger = get_logger(__name__)
 
-from app.api import auth, users, roles, permissions, leads, customers, customer_follow_ups, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, calendar, teams, industry, lead_ai, procurement_ai
+from app.api import auth, users, roles, permissions, leads, customers, customer_follow_ups, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, calendar, teams, industry, lead_ai, procurement_ai, approval_ai
 from app.api.customer_ai import router as customer_ai_router
 # from app.api.web_assistant import router as web_assistant_router  # 暂时禁用（依赖旧的 LangGraph）
 from app.api.agent_assistant import router as agent_assistant_router
@@ -54,73 +54,72 @@ app.add_exception_handler(ValidationError, pydantic_validation_exception_handler
 app.add_exception_handler(SQLAlchemyError, sqlalchemy_exception_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
-app.include_router(auth.router)
-app.include_router(users.router)
-app.include_router(roles.router)
-app.include_router(permissions.router)
-app.include_router(leads.router)
-app.include_router(leads.analytics_router)
-app.include_router(lead_ai.router)
-app.include_router(procurement_ai.router)
-app.include_router(customers.router)
-app.include_router(customer_ai_router)
-app.include_router(industry.router)
-app.include_router(customer_procurement.router)
-app.include_router(customer_follow_ups.router)
-app.include_router(opportunities.router)
-app.include_router(opportunities.analytics_router)
-app.include_router(filter_options.router)
-app.include_router(contracts.router)
-app.include_router(approvals.router)
-app.include_router(payments.router)
-app.include_router(invoices.router, prefix="/v1")
-app.include_router(invoices.invoice_router, prefix="/v1")
-app.include_router(finance.router, prefix="/v1")
-app.include_router(operation_logs.router, prefix="/v1")
-app.include_router(procurement_methods.router)
-app.include_router(procurement_stage_templates.router)
-app.include_router(opportunity_stages.router)
-app.include_router(procurement_admin.router)
-app.include_router(teams.router)
-
-# 日历路由
-app.include_router(calendar.router)
-
-# AI 配置管理路由
-app.include_router(ai_config_router)
-
-# 聊天机器人路由（通用接口 - 暂时禁用，依赖旧的 LangGraph）
-# app.include_router(chat_router)
-
-# Web AI 助手路由（LangGraph 架构 - 暂时禁用）
-# app.include_router(web_assistant_router)
-
-# Agent AI 助手路由（ReAct 循环架构 - 唯一入口）
-app.include_router(agent_assistant_router)
-
-# AI OpenAPI 路由（面向 AI Agent 的标准化接口）
-app.include_router(ai_openapi_router)
-
-# Workflow Undo 路由（撤销机制）
-app.include_router(workflow_undo_router)
-
-# AI 对话历史路由
-app.include_router(ai_conversation_history_router)
-
-# Frontend Logs 路由（前端日志系统）
-app.include_router(frontend_logs_router)
-
-# AI 对话胶水层路由
-from app.glue.router import router as glue_router
-app.include_router(glue_router)
-
-# 热力值权重配置路由
+# ========================================
+# 路由注册（统一 /api 前缀）
+# ========================================
+from fastapi import APIRouter
 from app.api.score_weights import router as score_weights_router
-app.include_router(score_weights_router)
-
-# 热力值查询路由
 from app.api.scores import router as scores_router
-app.include_router(scores_router)
+from app.glue.router import router as glue_router
+
+# 创建主 API 路由
+api_router = APIRouter()
+
+# === 认证相关（模块内部无 /v1，main.py 添加 /v1）===
+api_router.include_router(auth.router, prefix="/v1")
+api_router.include_router(users.router, prefix="/v1")
+api_router.include_router(roles.router, prefix="/v1")
+api_router.include_router(permissions.router, prefix="/v1")
+
+# === 业务路由（模块内部已有 /v1）===
+api_router.include_router(leads.router)
+api_router.include_router(leads.analytics_router)
+api_router.include_router(lead_ai.router)
+api_router.include_router(procurement_ai.router)
+api_router.include_router(approval_ai.router)
+api_router.include_router(customers.router)
+api_router.include_router(customer_ai_router)
+api_router.include_router(industry.router)
+api_router.include_router(customer_procurement.router)
+api_router.include_router(customer_follow_ups.router)
+api_router.include_router(opportunities.router)
+api_router.include_router(opportunities.analytics_router)
+api_router.include_router(filter_options.router)
+api_router.include_router(contracts.router)
+api_router.include_router(approvals.router)
+api_router.include_router(payments.router)
+api_router.include_router(invoices.router, prefix="/v1")
+api_router.include_router(invoices.invoice_router, prefix="/v1")
+api_router.include_router(finance.router, prefix="/v1")
+api_router.include_router(operation_logs.router, prefix="/v1")
+api_router.include_router(procurement_methods.router)
+api_router.include_router(procurement_stage_templates.router)
+api_router.include_router(opportunity_stages.router)
+api_router.include_router(procurement_admin.router)
+api_router.include_router(teams.router)
+
+# === 日历路由 ===
+api_router.include_router(calendar.router)
+
+# === AI 相关路由 ===
+api_router.include_router(ai_config_router)
+api_router.include_router(agent_assistant_router)
+api_router.include_router(ai_conversation_history_router)
+api_router.include_router(frontend_logs_router)
+api_router.include_router(score_weights_router)
+api_router.include_router(scores_router)
+
+# === AI OpenAPI 路由（无 /v1 前缀）===
+api_router.include_router(ai_openapi_router)
+
+# === Workflow Undo 路由 ===
+api_router.include_router(workflow_undo_router)
+
+# === AI GLUE 胶水层路由 ===
+api_router.include_router(glue_router)
+
+# 注册主 API 路由到 app（添加统一的 /api 前缀）
+app.include_router(api_router, prefix="/api")
 
 
 @app.on_event("startup")
