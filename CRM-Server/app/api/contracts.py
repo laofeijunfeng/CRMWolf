@@ -257,7 +257,7 @@ def get_contracts(
             
             if creator_data:
                 creator_info = {
-                    "id": creator_data[0],
+                    "id": str(creator_data[0]),
                     "name": creator_data[1],
                     "email": creator_data[2],
                     "mobile": creator_data[3],
@@ -450,7 +450,7 @@ def get_contract(
         
         if creator_data:
             creator_info = {
-                "id": creator_data[0],
+                "id": str(creator_data[0]),
                 "name": creator_data[1],
                 "email": creator_data[2],
                 "mobile": creator_data[3],
