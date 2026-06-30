@@ -12,7 +12,7 @@ from app.services.permission_service import permission_service
 router = APIRouter(prefix="/roles", tags=["角色管理"])
 
 
-@router.get("/", response_model=List[RoleResponse], summary="获取角色列表", description="获取系统中的所有角色列表")
+@router.get("", response_model=List[RoleResponse], summary="获取角色列表", description="获取系统中的所有角色列表")
 def get_roles(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -48,7 +48,7 @@ def get_role(
     )
 
 
-@router.post("/", response_model=RoleResponse, status_code=status.HTTP_201_CREATED, summary="创建角色", description="创建新的角色，需要提供角色名称和代码")
+@router.post("", response_model=RoleResponse, status_code=status.HTTP_201_CREATED, summary="创建角色", description="创建新的角色，需要提供角色名称和代码")
 def create_role(
     role: RoleCreate,
     current_user = Depends(require_permission("role:manage")),

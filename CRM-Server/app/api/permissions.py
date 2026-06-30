@@ -10,7 +10,7 @@ from app.services.permission_service import permission_service
 router = APIRouter(prefix="/permissions", tags=["权限管理"])
 
 
-@router.get("/", response_model=List[PermissionResponse], summary="获取权限列表", description="获取系统中的所有权限列表，支持按资源和操作类型筛选")
+@router.get("", response_model=List[PermissionResponse], summary="获取权限列表", description="获取系统中的所有权限列表，支持按资源和操作类型筛选")
 def get_permissions(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -38,7 +38,7 @@ def get_permission(
     return permission
 
 
-@router.post("/", response_model=PermissionResponse, status_code=status.HTTP_201_CREATED, summary="创建权限", description="创建新的权限，需要提供权限名称、代码、资源和操作类型")
+@router.post("", response_model=PermissionResponse, status_code=status.HTTP_201_CREATED, summary="创建权限", description="创建新的权限，需要提供权限名称、代码、资源和操作类型")
 def create_permission(
     permission: PermissionCreate,
     current_user = Depends(require_permission("permission:manage")),
