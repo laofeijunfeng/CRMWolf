@@ -14,51 +14,82 @@
       </template>
 
       <div class="stage-content">
-        <el-steps 
-          :active="currentStepIndex" 
-          align-center
-          finish-status="success"
-          process-status="process"
-          class="stage-steps"
-        >
-          <el-step
-            v-for="stage in allStages"
-            :key="stage.id"
-            :status="getStepStatus(stage)"
-            :class="{
-              'is-finish': getStepStatus(stage) === 'success',
-              'is-process': getStepStatus(stage) === 'process',
-              'is-wait': getStepStatus(stage) === 'wait'
-            }"
-            class="stage-step"
-          >
-            <template #icon>
-              <div 
-                class="step-icon-wrapper"
-                :class="{ 'is-clickable': canClickStage(stage) }"
-                @click.stop="handleStageClick(stage)"
-              >
-                <span class="step-win-rate">{{ stage.win_probability }}%</span>
-              </div>
-            </template>
+        <!-- 进度条背景 -->
+        <div class="progress-track">
+          <div
+            class="progress-fill"
+            :style="{ width: progressWidth }"
+          ></div>
+        </div>
 
-            <template #title>
-              <div 
-                class="step-title"
-                :class="{ 'is-clickable': canClickStage(stage) }"
-                @click.stop="handleStageClick(stage)"
-              >{{ stage.stage_name }}</div>
-            </template>
-            
-            <template #description>
-              <div class="step-description">
-                <div class="step-meta">
-                  <el-tag v-if="stage.can_skip" size="small" type="warning">可跳过</el-tag>
-                </div>
+        <!-- 阶段节点 -->
+        <div class="stage-nodes">
+          <div
+            v-for="(stage, index) in allStages"
+            :key="stage.id"
+            class="stage-node"
+            :class="{
+              'is-completed': isCompleted(stage),
+              'is-current': isCurrent(stage),
+              'is-clickable': canClickStage(stage),
+              'is-skippable': stage.can_skip
+            }"
+            :aria-label="`阶段: ${stage.stage_name}, 赢率: ${stage.win_probability}%${isCurrent(stage) ? ', 当前阶段' : ''}${canClickStage(stage) ? ', 可点击推进' : ''}`"
+            :tabindex="canClickStage(stage) ? 0 : -1"
+            @click="handleStageClick(stage)"
+            @keydown.enter="handleStageClick(stage)"
+            @keydown.space.prevent="handleStageClick(stage)"
+          >
+            <!-- 节点图标 -->
+            <div class="node-icon">
+              <!-- 完成状态：勾选图标 -->
+              <svg v-if="isCompleted(stage)" class="node-check" viewBox="0 0 24 24" fill="none">
+                <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <!-- 当前状态：脉冲动画 -->
+              <div v-else-if="isCurrent(stage)" class="node-pulse">
+                <span class="pulse-ring"></span>
+                <span class="pulse-dot"></span>
               </div>
-            </template>
-          </el-step>
-        </el-steps>
+              <!-- 等待状态：序号 -->
+              <span v-else class="node-number">{{ index + 1 }}</span>
+            </div>
+
+            <!-- 节点信息 -->
+            <div class="node-info">
+              <span class="node-name">{{ stage.stage_name }}</span>
+              <div class="node-meta">
+                <el-tag
+                  :type="isCompleted(stage) ? 'success' : isCurrent(stage) ? '' : 'info'"
+                  size="small"
+                  effect="plain"
+                >
+                  {{ stage.win_probability }}%
+                </el-tag>
+                <el-tag v-if="stage.can_skip" type="warning" size="small" effect="plain">
+                  可跳过
+                </el-tag>
+              </div>
+            </div>
+
+            <!-- 可点击提示箭头 -->
+            <svg
+              v-if="canClickStage(stage) && !isCurrent(stage)"
+              class="click-hint"
+              viewBox="0 0 24 24"
+            >
+              <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- 帮助提示 -->
+        <div class="stage-hint">
+          <svg class="hint-icon" viewBox="0 0 24 24">
+            <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>点击未完成阶段可推进商机状态</span>
+        </div>
       </div>
     </el-card>
   </div>
@@ -78,6 +109,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const loading = ref(false)
+const isAdvancing = ref(false)
 
 const allStages = ref<OpportunityProcurementStageInfo[]>([])
 
@@ -85,69 +117,69 @@ const currentStage = computed(() => {
   return allStages.value.find(stage => stage.is_current) || null
 })
 
-const currentStepIndex = computed(() => {
-  if (!currentStage.value) return 0
-  return allStages.value.findIndex(s => s.id === currentStage.value?.id)
+const progressWidth = computed(() => {
+  if (!currentStage.value || allStages.value.length === 0) return '0%'
+  const currentIndex = allStages.value.findIndex(s => s.id === currentStage.value?.id)
+  const percentage = ((currentIndex + 1) / allStages.value.length) * 100
+  return `${percentage}%`
 })
 
-const getStepStatus = (stage: OpportunityProcurementStageInfo): 'success' | 'process' | 'wait' => {
-  if (!currentStage.value) return 'wait'
-  if (stage.id === currentStage.value.id) return 'process'
-  if (stage.sort_order < currentStage.value.sort_order) return 'success'
-  return 'wait'
+const isCompleted = (stage: OpportunityProcurementStageInfo): boolean => {
+  if (!currentStage.value) return false
+  return stage.sort_order < currentStage.value.sort_order
 }
 
-onMounted(async () => {
-  await fetchOpportunityStages()
-})
+const isCurrent = (stage: OpportunityProcurementStageInfo): boolean => {
+  if (!currentStage.value) return false
+  return stage.id === currentStage.value.id
+}
 
-const canClickStage = (stage: OpportunityProcurementStageInfo) => {
-  if (!currentStage.value) {
-    return true
-  }
-  if (stage.id === currentStage.value.id) {
-    return false
-  }
+const canClickStage = (stage: OpportunityProcurementStageInfo): boolean => {
+  if (!currentStage.value) return true
+  if (stage.id === currentStage.value.id) return false
   return stage.sort_order > currentStage.value.sort_order
 }
 
 const handleStageClick = async (stage: OpportunityProcurementStageInfo) => {
-  if (!canClickStage(stage)) return
-  
+  if (!canClickStage(stage) || isAdvancing.value) return
+
   const isNewOpportunity = !currentStage.value
   const confirmMessage = isNewOpportunity
-    ? `确定要将商机的起始阶段设置为"${stage.stage_name}"吗？赢率将为 ${stage.win_probability}%。`
-    : `确定要将商机阶段推进到"${stage.stage_name}"吗？当前赢率将从 ${currentStage.value?.win_probability}% 变为 ${stage.win_probability}%。`
-  
-  const confirmTitle = isNewOpportunity ? '设置起始阶段' : '确认推进阶段'
-  
+    ? `确定将商机的起始阶段设置为「${stage.stage_name}」？赢率将从 0% 变为 ${stage.win_probability}%。`
+    : `确定将商机推进到「${stage.stage_name}」？赢率将从 ${currentStage.value?.win_probability}% 变为 ${stage.win_probability}%。`
+
+  const confirmTitle = isNewOpportunity ? '设置起始阶段' : '推进阶段'
+
   try {
-    await ElMessageBox.confirm(
-      confirmMessage,
-      confirmTitle,
-      {
-        confirmButtonText: '确认',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
+    await ElMessageBox.confirm(confirmMessage, confirmTitle, {
+      confirmButtonText: '确认推进',
+      cancelButtonText: '取消',
+      type: 'info',
+      customClass: 'stage-confirm-dialog'
+    })
+
+    isAdvancing.value = true
     loading.value = true
+
     try {
       await procurementApi.moveOpportunityStage(props.opportunityId, {
         stage_template_id: stage.id
       })
-      ElMessage.success('阶段推进成功')
+      ElMessage.success({
+        message: `阶段已推进至「${stage.stage_name}」`,
+        duration: 2000
+      })
       await fetchOpportunityStages()
     } catch (error: any) {
       console.error('推进阶段失败', error)
       if (error?.response?.data?.detail) {
         ElMessage.error(error.response.data.detail)
       } else {
-        ElMessage.error('推进阶段失败')
+        ElMessage.error('阶段推进失败，请稍后重试')
       }
     } finally {
       loading.value = false
+      isAdvancing.value = false
     }
   } catch {
     // 用户取消操作
@@ -198,162 +230,274 @@ onMounted(async () => {
 .current-stage-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .current-stage-name {
   font-size: var(--wolf-font-size-body);
   font-weight: var(--wolf-font-weight-medium);
-  color: var(--wolf-text-primary);
+  color: var(--wolf-primary);
 }
 
 .stage-content {
-  padding: var(--wolf-card-padding) 0;
+  padding: var(--wolf-card-padding);
 }
 
-.stage-steps {
-  margin-bottom: var(--wolf-spacing-lg);
-  
-  :deep(.el-step__head) {
-    padding-bottom: 16px;
-  }
-  
-  :deep(.el-step__head.is-process) {
-    color: var(--wolf-primary);
-  }
-  
-  :deep(.el-step__head.is-finish) {
-    color: var(--wolf-success) !important;
-  }
-  
-  :deep(.el-step__head.is-wait) {
-    color: var(--wolf-text-tertiary);
-  }
-  
-  :deep(.el-step__line) {
-    background-color: var(--wolf-border-light);
-  }
-  
-  :deep(.el-step__line.is-finish) {
-    background-color: var(--wolf-success) !important;
-  }
-  
-  :deep(.el-step__icon) {
-    width: auto;
-    height: auto;
-    border: none;
-    background: transparent;
-  }
+/* === 进度条 === */
+.progress-track {
+  height: 4px;
+  background: var(--wolf-border-light);
+  border-radius: 2px;
+  margin-bottom: 24px;
+  overflow: hidden;
 }
 
-.step-icon-wrapper {
-  width: 48px;
-  height: 48px;
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--wolf-success) 0%, var(--wolf-primary) 100%);
+  border-radius: 2px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* === 阶段节点 === */
+.stage-nodes {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.stage-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 12px;
+  border-radius: var(--wolf-radius-md);
+  background: var(--wolf-bg-hover);
+  border: 1px solid var(--wolf-border-light);
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+  min-width: 100px;
+  cursor: default;
+}
+
+/* 可点击状态：初始视觉提示 */
+.stage-node.is-clickable:not(.is-current) {
+  cursor: pointer;
+  border-color: var(--wolf-primary-lighter);
+  background: var(--wolf-bg-hover);
+  box-shadow: 0 2px 8px rgba(22, 93, 255, 0.06);
+}
+
+.stage-node.is-clickable:not(.is-current):hover {
+  border-color: var(--wolf-primary);
+  background: var(--wolf-primary-light);
+  box-shadow: 0 4px 16px rgba(22, 93, 255, 0.15);
+}
+
+.stage-node.is-clickable:not(.is-current):focus-visible {
+  outline: 2px solid var(--wolf-primary);
+  outline-offset: 2px;
+  border-color: var(--wolf-primary);
+}
+
+/* 当前状态 */
+.stage-node.is-current {
+  border-color: var(--wolf-primary);
+  background: var(--wolf-primary-light);
+  box-shadow: 0 4px 16px rgba(22, 93, 255, 0.2);
+}
+
+/* 完成状态 */
+.stage-node.is-completed {
+  border-color: var(--wolf-success-border);
+  background: var(--wolf-success-bg);
+  box-shadow: none;
+}
+
+/* === 节点图标 === */
+.node-icon {
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: var(--wolf-font-weight-semibold);
-  border: 2px solid var(--wolf-border-color);
-  background: var(--wolf-bg-hover);
-  color: var(--wolf-text-tertiary);
-  transition: all 0.3s ease;
-  cursor: default;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
 }
 
-.step-icon-wrapper.is-clickable {
-  cursor: pointer;
+.stage-node.is-completed .node-icon {
+  background: var(--wolf-success);
+  color: white;
 }
 
-.step-icon-wrapper.is-clickable:hover {
-  border-color: var(--wolf-primary) !important;
-  background: var(--wolf-primary-light) !important;
-  color: var(--wolf-primary) !important;
-  transform: scale(1.1);
-  box-shadow: 0 2px 8px rgba(22, 93, 255, 0.2);
-}
-
-:deep(.el-step.is-process .step-icon-wrapper) {
-  border-color: var(--wolf-primary);
+.stage-node.is-current .node-icon {
   background: var(--wolf-primary);
   color: white;
-  box-shadow: 0 2px 8px rgba(22, 93, 255, 0.2);
 }
 
-:deep(.el-step.is-finish .el-step__head) {
-  color: var(--wolf-success) !important;
+.stage-node:not(.is-completed):not(.is-current) .node-icon {
+  background: var(--wolf-border-light);
+  color: var(--wolf-text-tertiary);
 }
 
-:deep(.el-step.is-finish .el-step__head.is-process) {
-  color: var(--wolf-success) !important;
+.stage-node.is-clickable:not(.is-current):hover .node-icon {
+  background: var(--wolf-primary);
+  color: white;
 }
 
-:deep(.el-step.is-finish .el-step__line-inner) {
-  background-color: var(--wolf-success) !important;
-  border-color: var(--wolf-success) !important;
+.node-check {
+  width: 20px;
+  height: 20px;
 }
 
-:deep(.el-step.is-finish .el-step-icon) {
-  color: var(--wolf-success) !important;
-  border-color: var(--wolf-success-border) !important;
-}
-
-:deep(.el-step.is-finish .el-step-icon.is-icon) {
-  color: var(--wolf-success) !important;
-}
-
-:deep(.el-step.is-finish .step-icon-wrapper) {
-  border-color: var(--wolf-success-border) !important;
-  background: var(--wolf-success-bg) !important;
-  color: var(--wolf-success) !important;
-}
-
-:deep(.el-step.is-finish .step-title) {
-  color: var(--wolf-success) !important;
-}
-
-:deep(.el-step.is-finish .el-step__line),
-:deep(.el-step__line.is-finish) {
-  background-color: var(--wolf-success) !important;
-}
-
-.step-win-rate {
-  font-size: 11px;
-  font-weight: 600;
+.node-number {
   line-height: 1;
 }
 
-.step-title {
-  font-size: var(--wolf-font-size-body);
-  font-weight: var(--wolf-font-weight-medium);
-  color: var(--wolf-text-primary);
-  cursor: default;
-  transition: all 0.3s ease;
-}
-
-.step-title.is-clickable {
-  cursor: pointer;
-}
-
-.step-title.is-clickable:hover {
-  color: var(--wolf-primary) !important;
-}
-
-.step-description {
-  padding: 8px 0 0 0;
-}
-
-.step-meta {
+/* 脉冲动画 */
+.node-pulse {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  justify-content: center;
 }
 
-.win-rate {
-  font-size: var(--wolf-font-size-small);
+.pulse-ring {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--wolf-primary);
+  opacity: 0.3;
+  animation: pulse 2s ease-out infinite;
+}
+
+.pulse-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* === 节点信息 === */
+.node-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.node-name {
+  font-size: 14px;
   font-weight: var(--wolf-font-weight-medium);
+  color: var(--wolf-text-primary);
+  text-align: center;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-node.is-completed .node-name {
+  color: var(--wolf-success);
+}
+
+.stage-node.is-current .node-name {
+  color: var(--wolf-primary);
+  font-weight: var(--wolf-font-weight-semibold);
+}
+
+.node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
+
+/* === 点击提示箭头 === */
+.click-hint {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 16px;
+  height: 16px;
+  color: var(--wolf-primary);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.stage-node.is-clickable:not(.is-current):hover .click-hint {
+  opacity: 1;
+}
+
+/* === 帮助提示 === */
+.stage-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 8px 12px;
+  background: var(--wolf-bg-hover);
+  border-radius: var(--wolf-radius-sm);
+  color: var(--wolf-text-tertiary);
+  font-size: 13px;
+}
+
+.hint-icon {
+  width: 16px;
+  height: 16px;
   color: var(--wolf-text-secondary);
+}
+
+/* === 响应式 === */
+@media (max-width: 768px) {
+  .stage-nodes {
+    gap: 12px;
+  }
+
+  .stage-node {
+    min-width: 80px;
+    padding: 12px 8px;
+  }
+
+  .node-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .node-name {
+    font-size: 12px;
+    max-width: 80px;
+  }
+}
+
+/* === 无障碍：减少动画 === */
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill {
+    transition: none;
+  }
+
+  .pulse-ring {
+    animation: none;
+  }
+
+  .stage-node {
+    transition: none;
+  }
 }
 </style>
