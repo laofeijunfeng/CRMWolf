@@ -13,6 +13,7 @@
     <!-- 表单区 -->
     <div class="form-container">
       <div class="form-card">
+        <div class="card-title">基本信息</div>
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
           <div class="form-grid">
             <el-form-item prop="contract_name" label="合同名称">
@@ -155,13 +156,14 @@
             </el-form-item>
           </div>
         </el-form>
+      </div>
 
-        <div class="form-actions">
-          <el-button @click="handleBack">取消</el-button>
-          <el-button type="primary" @click="handleSubmit" :loading="submitting">
-            提交
-          </el-button>
-        </div>
+      <!-- 表单操作 -->
+      <div class="form-actions-card">
+        <el-button @click="handleBack">取消</el-button>
+        <el-button type="primary" @click="handleSubmit" :loading="submitting">
+          提交
+        </el-button>
       </div>
     </div>
   </div>
@@ -471,7 +473,17 @@ onMounted(async () => {
   background: $wolf-bg-card;
   border-radius: $wolf-radius-lg;
   padding: $wolf-card-padding;
+  margin-bottom: $wolf-space-md;
   box-shadow: $wolf-shadow-card;
+}
+
+.card-title {
+  font-size: $wolf-font-size-body;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+  margin-bottom: $wolf-space-md;
+  padding-bottom: $wolf-space-sm;
+  border-bottom: 1px solid $wolf-border-light;
 }
 
 // 表单网格
@@ -521,13 +533,15 @@ onMounted(async () => {
   }
 }
 
-// 操作按钮
-.form-actions {
+// 表单操作卡片
+.form-actions-card {
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-lg;
+  padding: $wolf-space-md;
+  box-shadow: $wolf-shadow-card;
   display: flex;
   justify-content: flex-end;
   gap: $wolf-space-sm;
-  padding-top: $wolf-space-lg;
-  border-top: 1px solid $wolf-border-light;
 }
 
 // 响应式
@@ -544,7 +558,7 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 
-  .form-actions {
+  .form-actions-card {
     flex-direction: column-reverse;
 
     .el-button {
