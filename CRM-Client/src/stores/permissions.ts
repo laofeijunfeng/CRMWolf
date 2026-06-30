@@ -52,19 +52,19 @@ export const usePermissionStore = defineStore('permissions', () => {
   }
 
   const canApproveOwn = (resource: string): boolean => {
-    return hasPermission(`${resource}:approve_own`)
+    return hasPermission(`${resource}:approve:own`)
   }
 
   const canApproveAll = (resource: string): boolean => {
-    return hasPermission(`${resource}:approve_all`)
+    return hasPermission(`${resource}:approve:all`)
   }
 
   const canSubmitApproval = (resource: string): boolean => {
-    return hasPermission(`${resource}:submit_approval`)
+    return hasPermission(`${resource}:submit`)
   }
 
   const canCancelApproval = (resource: string): boolean => {
-    return hasPermission(`${resource}:cancel_approval`)
+    return hasPermission(`${resource}:cancel`)
   }
 
   const fetchPermissions = async () => {
