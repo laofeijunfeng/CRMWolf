@@ -9,14 +9,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # 数据库配置（拆分为独立变量，支持密码特殊字符）
-      DB_HOST: 8.134.219.103
+      # 数据库配置（使用同网络容器名访问）
+      DB_HOST: mysql8
       DB_PORT: 3306
       DB_USER: root
       DB_PASSWORD: "DA2zGezRm0NPFnqJvs55"
       DB_NAME: crm_db
       SECRET_KEY: MbYbcwzfpsq5y5WUoecr9gjd5qV5Wd2V
-      REDIS_HOST: 8.134.219.103
+      REDIS_HOST: redis6
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       REDIS_DB: 5
