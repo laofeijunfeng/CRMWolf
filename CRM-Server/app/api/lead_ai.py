@@ -15,7 +15,7 @@ from app.models.user import User
 from app.models.lead import LeadSource, CompanyScale, Lead, LeadStatus
 from app.schemas.lead_ai import LeadAIParseRequest, LeadAICreateRequest
 from app.schemas.lead import LeadCreate, LeadResponse
-from app.services.lead_ai_parser import lead_ai_parser_service
+from app.services.ai_parser.factory import EntityAIParserFactory
 from app.services.follow_up_parser import follow_up_parser_service
 from app.crud.lead import lead_crud, lead_follow_up_crud
 from app.schemas.lead import LeadFollowUpCreate

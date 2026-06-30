@@ -1,8 +1,9 @@
 """
-AI 解析客户跟进信息接口
+AI 解析客户信息接口
 
-用于 MagicWand 魔术棒功能，从自然语言中提取跟进信息
-复用 follow_up_parser_service
+包含两个功能：
+1. 客户跟进记录解析（MagicWand 魔术棒功能）- 已有
+2. 客户创建解析（AI 智能创建）- 新增
 """
 import json
 from datetime import datetime
@@ -10,12 +11,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
-from app.core.deps import get_current_active_user, get_db, get_current_user_team
+from app.core.database import SessionLocal, get_db
+from app.core.deps import get_current_active_user, get_current_user_team
 from app.models.user import User
+
+# 已有功能（MagicWand）
 from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest
 from app.services.follow_up_parser import follow_up_parser_service
-from app.models.lead import FollowUpMethod  # 跟进方式枚举在 lead.py 中定义
+
+# 新增功能（AI 创建客户）
+from app.schemas.customer_ai_create import CustomerAICreateParseRequest, CustomerAICreateRequest
+from app.services.ai_parser.factory import EntityAIParserFactory
 
 
 router = APIRouter(prefix="/v1/customers/ai", tags=["AI 客户跟进"])
@@ -180,3 +186,94 @@ async def get_react_session_status(
         "execution_history": session.get("execution_history", []),
         "entity_context": session.get("entity_context")
     }
+
+# ==================== 新增功能：AI 创建客户 ====================
+
+@router.post("/create/parse")
+async def parse_customer_create_info(
+    request: CustomerAICreateParseRequest,
+    current_user: User = Depends(get_current_active_user),
+    team_id: int = Depends(get_current_user_team)
+):
+    """
+    AI 解析客户创建信息（SSE 流式响应）
+    
+    用于 AI 智能创建客户
+    """
+    parser = EntityAIParserFactory.get_parser("customer")
+    if not parser:
+        raise HTTPException(status_code=500, detail="Parser not found")
+    
+    async def generate_sse():
+        db = SessionLocal()
+        try:
+            async for event in parser.parse_stream(db, request.content, team_id):
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            db.close()
+    
+    return StreamingResponse(
+        generate_sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@router.post("/create/submit", status_code=status.HTTP_201_CREATED)
+async def create_customer_from_ai(
+    request: CustomerAICreateRequest,
+    current_user: User = Depends(get_current_active_user),
+    team_id: int = Depends(get_current_user_team),
+    db: Session = Depends(get_db)
+):
+    """
+    从 AI 解析结果创建客户（用户确认后提交）
+    
+    创建客户 + 主联系人 + 触发档案生成 + 创建跟进记录
+    """
+    parser = EntityAIParserFactory.get_parser("customer")
+    if not parser:
+        raise HTTPException(status_code=500, detail="Parser not found")
+    
+    try:
+        # 创建客户 + 主联系人
+        customer = await parser.create_entity(
+            db=db,
+            parsed_data={
+                "customer_info": request.customer_info.model_dump(),
+                "contact_info": request.contact_info.model_dump(),
+                "follow_up_info": request.follow_up_info.model_dump() if request.follow_up_info else None
+            },
+            user_id=str(current_user.id),
+            team_id=team_id
+        )
+        
+        # 执行创建后的额外操作（触发档案生成 + 创建跟进记录）
+        await parser.post_create_actions(
+            db=db,
+            entity=customer,
+            parsed_data={
+                "customer_info": request.customer_info.model_dump(),
+                "contact_info": request.contact_info.model_dump(),
+                "follow_up_info": request.follow_up_info.model_dump() if request.follow_up_info else None
+            },
+            user_id=str(current_user.id),
+            team_id=team_id
+        )
+        
+        return {
+            "id": customer.id,
+            "account_name": customer.account_name,
+            "city": customer.city,
+            "status": customer.status,
+            "profile_status": customer.profile_status
+        }
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建失败：{str(e)}")
