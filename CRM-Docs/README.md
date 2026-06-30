@@ -22,6 +22,10 @@ CRM-Docs/
 │   ├── design/           # 🆕 设计规范子目录
 │   └── README.md         # 系统说明导航入口
 │
+├── features/             # 🆕 功能特性文档（详细说明）
+│   ├── approval-workflow.md  # 合同审批流程功能说明
+│   └── ...               # 其他功能特性文档
+│
 ├── requirements/         # 需求文档（活跃）
 │   ├── README.md         # 状态汇总 + 导航
 │   └── *.md              # 各需求文档
@@ -81,6 +85,21 @@ CRM-Docs/
 | 文档 | 说明 |
 |------|------|
 | [UI-DESIGN-SPEC.md](system/design/UI-DESIGN-SPEC.md) | UI 设计规范 |
+
+---
+
+## 功能特性文档 (features/)
+
+详细的功能特性说明文档，包含用户操作指南、API 接口文档、权限模型和设计决策。
+
+| 文档 | 说明 | 用途 |
+|------|------|------|
+| [approval-workflow.md](features/approval-workflow.md) | 合同审批流程功能说明 | 审批操作指南、API 接口、权限模型、设计决策 |
+
+**适用场景：**
+- 新人学习特定功能的完整工作流
+- 开发者查阅 API 接口和权限逻辑
+- 管理员配置审批流程
 
 ---
 
@@ -177,6 +196,7 @@ CRM-Docs/
 1. [QUICK-START.md](standards/QUICK-START.md) - 5 分钟快速上手
 2. [SYSTEM-DESCRIPTION.md](system/SYSTEM-DESCRIPTION.md) - 了解系统全貌
 3. [modules/](system/modules/) - 各模块功能说明
+4. [features/](features/) - 详细功能特性文档（审批流程等）
 
 ### 开发任务
 
@@ -187,6 +207,7 @@ CRM-Docs/
 | 修复 Bug | modules/*.md（业务逻辑） |
 | 权限相关 | GLOSSARY.md（权限码清单） |
 | 模块开发 | modules/*.md（功能、API、数据模型） |
+| 审批功能 | features/approval-workflow.md（完整功能说明） |
 
 ---
 
@@ -201,4 +222,4 @@ CRM-Docs/
 ---
 
 > **维护团队**：CRMWolf 开发团队
-> **最后更新**：2026-06-12
+> **最后更新**：2026-06-30
