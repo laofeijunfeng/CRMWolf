@@ -252,16 +252,17 @@ class ContractCRUD:
         customer_id: int,
         signing_contact_id: int,
         contract_name: str,
-        creator_id: str
+        creator_id: str,
+        team_id: int
     ) -> Contract:
         from app.models.opportunity import Opportunity
-        
+
         opportunity = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
         if not opportunity:
             raise ValueError("商机不存在")
-        
+
         contract_number = ContractNumberGenerator.generate_contract_number(db)
-        
+
         actual_amount = opportunity.actual_amount if opportunity.actual_amount else Decimal('0')
         standard_unit_price = ContractPricingService.calculate_standard_unit_price(
             total_amount=actual_amount,
@@ -269,8 +270,9 @@ class ContractCRUD:
             license_type=opportunity.license_type,
             subscription_years=opportunity.subscription_years
         )
-        
+
         db_obj = Contract(
+            team_id=team_id,
             contract_number=contract_number,
             contract_name=contract_name,
             customer_id=customer_id,
