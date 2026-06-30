@@ -10,14 +10,14 @@ services:
       - "8000:8000"
     environment:
       # 数据库配置（拆分为独立变量，支持密码特殊字符）
-      DB_HOST: 192.168.10.33
-      DB_PORT: 3307
+      DB_HOST: 8.134.219.103
+      DB_PORT: 3306
       DB_USER: root
-      DB_PASSWORD: "apifox@dkhz"
+      DB_PASSWORD: "DA2zGezRm0NPFnqJvs55"
       DB_NAME: crm_db
       SECRET_KEY: MbYbcwzfpsq5y5WUoecr9gjd5qV5Wd2V
-      REDIS_HOST: 192.168.10.33
-      REDIS_PORT: 6380
+      REDIS_HOST: 8.134.219.103
+      REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       REDIS_DB: 5
       CRM_DEBUG: ${CRM_DEBUG:-false}
@@ -44,4 +44,4 @@ services:
 
 networks:
   default:
-    name: crm-network
+    name: crmwolf-network
