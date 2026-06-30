@@ -20,9 +20,9 @@
         >公海客户</span>
       </div>
       <div class="filter-actions">
-        <el-button v-if="canCreateCustomer" type="primary" @click="router.push('/customers/create')">
-          <el-icon><Plus /></el-icon>
-          新建客户
+        <el-button v-if="canCreateCustomer" type="primary" @click="showAICustomerCreate = true">
+          <el-icon><MagicStick /></el-icon>
+          AI 创建客户
         </el-button>
       </div>
     </div>
@@ -331,6 +331,12 @@
     </el-dialog>
 
     <!-- AI 魔术棒弹窗 -->
+
+    <!-- AI 创建客户弹窗 -->
+    <AICustomerCreateDialog
+      v-model="showAICustomerCreate"
+      @success="fetchCustomerList"
+    />
     </div>
 </template>
 
@@ -347,8 +353,10 @@ import {
   Trophy,
   CircleClose,
   Delete,
-  Opportunity
+  Opportunity,
+  MagicStick
 } from '@element-plus/icons-vue'
+import AICustomerCreateDialog from '@/components/AICustomerCreateDialog.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import customerApi, {
@@ -385,6 +393,7 @@ const sortState = ref<SortState>({ field: '', order: null })
 
 const ownerOptions = ref<OwnerFilterOption[]>([])
 const activeTab = ref('all')
+const showAICustomerCreate = ref(false)
 
 const pagination = reactive({
   current: 1,
