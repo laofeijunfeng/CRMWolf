@@ -12,8 +12,11 @@ from app.schemas.approval import (
 
 
 class ApprovalFlowCRUD:
-    def get_by_id(self, db: Session, flow_id: int) -> Optional[ApprovalFlow]:
-        return db.query(ApprovalFlow).filter(ApprovalFlow.id == flow_id).first()
+    def get_by_id(self, db: Session, flow_id: int, team_id: Optional[int] = None) -> Optional[ApprovalFlow]:
+        query = db.query(ApprovalFlow).filter(ApprovalFlow.id == flow_id)
+        if team_id is not None:
+            query = query.filter(ApprovalFlow.team_id == team_id)
+        return query.first()
 
     def get_by_code(self, db: Session, flow_code: str, team_id: Optional[int] = None) -> Optional[ApprovalFlow]:
         query = db.query(ApprovalFlow).filter(ApprovalFlow.flow_code == flow_code)
@@ -117,13 +120,17 @@ class ApprovalFlowCRUD:
 
 
 class ApprovalCRUD:
-    def get_by_id(self, db: Session, approval_id: int) -> Optional[Approval]:
-        return db.query(Approval).filter(Approval.id == approval_id).first()
-    
-    def get_by_contract_id(self, db: Session, contract_id: int) -> Optional[Approval]:
-        return db.query(Approval).filter(
-            Approval.contract_id == contract_id
-        ).order_by(Approval.created_time.desc()).first()
+    def get_by_id(self, db: Session, approval_id: int, team_id: Optional[int] = None) -> Optional[Approval]:
+        query = db.query(Approval).filter(Approval.id == approval_id)
+        if team_id is not None:
+            query = query.filter(Approval.team_id == team_id)
+        return query.first()
+
+    def get_by_contract_id(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> Optional[Approval]:
+        query = db.query(Approval).filter(Approval.contract_id == contract_id)
+        if team_id is not None:
+            query = query.filter(Approval.team_id == team_id)
+        return query.order_by(Approval.created_time.desc()).first()
     
     def get_multi(self, db: Session, skip: int = 0, limit: int = 100, status: Optional[str] = None) -> Tuple[List[Approval], int]:
         query = db.query(Approval)
@@ -164,7 +171,8 @@ class ApprovalCRUD:
             approver_id=submitter_id,
             approver_name=submitter_name,
             action=ApprovalAction.SUBMIT,
-            comment=None
+            comment=None,
+            team_id=db_approval.team_id
         )
         db.add(record)
         
@@ -190,7 +198,8 @@ class ApprovalCRUD:
             approver_id=approver_id,
             approver_name=approver_name,
             action=action_request.action.value,
-            comment=action_request.comment
+            comment=action_request.comment,
+            team_id=approval.team_id
         )
         db.add(record)
         

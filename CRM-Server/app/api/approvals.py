@@ -78,16 +78,17 @@ def get_approval_flows(
 """)
 def get_approval_flow(
     flow_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    flow = approval_flow_crud.get_by_id(db, flow_id)
+    flow = approval_flow_crud.get_by_id(db, flow_id, team_id)
     if not flow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="审批流程不存在"
         )
-    
+
     return flow
 
 
@@ -182,15 +183,16 @@ def create_approval_flow(
 def update_approval_flow(
     flow_id: int,
     flow_data: ApprovalFlowUpdate,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from app.core.deps import require_permission
-    
+
     permission_checker = require_permission("approval:flow:update")
     permission_checker(current_user, db)
-    
-    flow = approval_flow_crud.get_by_id(db, flow_id)
+
+    flow = approval_flow_crud.get_by_id(db, flow_id, team_id)
     if not flow:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -241,23 +243,24 @@ def update_approval_flow(
 async def submit_contract_approval(
     contract_id: int,
     submit_data: ApprovalSubmitRequest,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id)
+    contract = contract_crud.get_by_id(db, contract_id, team_id)
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="合同不存在"
         )
-    
+
     if contract.status != ContractStatus.DRAFT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"只有草稿状态的合同可以提交审批，当前状态: {contract.status}"
         )
-    
-    existing_approval = approval_crud.get_by_contract_id(db, contract_id)
+
+    existing_approval = approval_crud.get_by_contract_id(db, contract_id, team_id)
     if existing_approval and existing_approval.status == ApprovalStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -328,7 +331,7 @@ async def submit_contract_approval(
 
 **权限要求：**
 - 必须是当前审批节点的审批角色
-- 如审批自己创建的合同，需要额外权限：contract:approve_own
+- 如审批自己创建的合同，需要额外权限：contract:approve:own
 
 **业务规则：**
 - 只有当前节点对应的审批角色才能操作
@@ -348,7 +351,7 @@ async def approve_contract(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    approval = approval_crud.get_by_contract_id(db, contract_id)
+    approval = approval_crud.get_by_contract_id(db, contract_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -370,13 +373,13 @@ async def approve_contract(
             detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}"
         )
     
-    contract = contract_crud.get_by_id(db, contract_id)
+    contract = contract_crud.get_by_id(db, contract_id, team_id)
     if contract and contract.creator_id == str(current_user.id):
         from app.crud.permission import permission_crud
         user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
         permission_codes = {p.code for p in user_permissions}
         
-        if "contract:approve_own" not in permission_codes:
+        if "contract:approve:own" not in permission_codes:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="您没有权限审批自己创建的合同"
@@ -457,10 +460,11 @@ async def approve_contract(
 """)
 def cancel_approval(
     contract_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    approval = approval_crud.get_by_contract_id(db, contract_id)
+    approval = approval_crud.get_by_contract_id(db, contract_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -518,10 +522,11 @@ def cancel_approval(
 """)
 def get_approval_detail(
     contract_id: int,
+    team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    approval = approval_crud.get_by_contract_id(db, contract_id)
+    approval = approval_crud.get_by_contract_id(db, contract_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
