@@ -464,8 +464,6 @@ onMounted(async () => {
 
 // 表单容器
 .form-container {
-  max-width: 800px;
-  margin: 0 auto;
   padding: $wolf-page-padding;
 }
 
