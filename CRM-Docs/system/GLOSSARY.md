@@ -17,60 +17,106 @@ status: active
 
 | 权限码 | 名称 | 说明 |
 |--------|------|------|
-| `lead:view_own` | 查看自己的线索 | 仅看自己负责的 |
-| `lead:view_all` | 查看所有线索 | 看全部线索 |
+| `lead:view:own` | 查看自己的线索 | 仅看自己负责的 |
+| `lead:view:all` | 查看所有线索 | 看全部线索 |
 | `lead:create` | 创建线索 | 新建线索 |
-| `lead:edit_own` | 编辑自己的线索 | 编辑自己负责的线索 |
-| `lead:edit_all` | 编辑所有线索 | 编辑任意线索 |
-| `lead:delete_own` | 删除自己的线索 | 删除自己负责的线索 |
-| `lead:delete_all` | 删除所有线索 | 删除任意线索（管理员） |
+| `lead:edit:own` | 编辑自己的线索 | 编辑自己负责的线索 |
+| `lead:edit:all` | 编辑所有线索 | 编辑任意线索 |
+| `lead:delete:own` | 删除自己的线索 | 删除自己负责的线索 |
+| `lead:delete:all` | 删除所有线索 | 删除任意线索（管理员） |
 | `lead:convert` | 转化线索 | 转化为客户 |
 | `lead:claim` | 认领线索 | 从公海认领 |
 | `lead:assign` | 分配线索 | 分配给其他销售 |
-| `lead:return_to_pool` | 退回公海 | 退回到公海池 |
+| `lead:return` | 退回公海 | 退回到公海池 |
 
 ### 1.2 客户权限
 
 | 权限码 | 名称 | 说明 |
 |--------|------|------|
-| `customer:view_own` | 查看自己的客户 | 仅看自己负责的 |
-| `customer:view_all` | 查看所有客户 | 看全部客户 |
+| `customer:view:own` | 查看自己的客户 | 仅看自己负责的 |
+| `customer:view:all` | 查看所有客户 | 看全部客户 |
 | `customer:create` | 创建客户 | 新建客户 |
-| `customer:update` | 更新客户 | 编辑客户 |
-| `customer:delete` | 删除客户 | 删除客户 |
+| `customer:edit:own` | 编辑自己的客户 | 编辑自己负责的客户 |
+| `customer:edit:all` | 编辑所有客户 | 编辑任意客户 |
+| `customer:delete:own` | 删除自己的客户 | 删除自己负责的客户 |
+| `customer:delete:all` | 删除所有客户 | 删除任意客户（管理员） |
+| `customer:return` | 退回公海 | 退回公海池 |
+| `customer:claim` | 领取客户 | 从公海领取 |
+| `customer:assign` | 分配客户 | 分配给其他销售 |
 
 ### 1.3 商机权限
 
 | 权限码 | 名称 | 说明 |
 |--------|------|------|
-| `opportunity:view_own` | 查看自己的商机 | 仅看自己负责的 |
-| `opportunity:view_all` | 查看所有商机 | 看全部商机 |
+| `opportunity:view:own` | 查看自己的商机 | 仅看自己负责的 |
+| `opportunity:view:all` | 查看所有商机 | 看全部商机 |
 | `opportunity:create` | 创建商机 | 新建商机 |
-| `opportunity:update` | 更新商机 | 编辑商机 |
-| `opportunity:delete` | 删除商机 | 删除商机 |
+| `opportunity:edit:own` | 编辑自己的商机 | 编辑自己负责的商机 |
+| `opportunity:edit:all` | 编辑所有商机 | 编辑任意商机 |
+| `opportunity:delete:own` | 删除自己的商机 | 删除自己负责的商机 |
+| `opportunity:delete:all` | 删除所有商机 | 删除任意商机（管理员） |
+| `opportunity:stage` | 推进商机阶段 | 推进采购阶段 |
+| `opportunity:win` | 标记赢单 | 标记为赢单 |
+| `opportunity:lose` | 标记输单 | 标记为输单 |
 
 ### 1.4 合同权限
 
 | 权限码 | 名称 | 说明 |
 |--------|------|------|
-| `contract:view_own` | 查看自己的合同 | 仅看自己负责的 |
-| `contract:view_all` | 查看所有合同 | 看全部合同 |
+| `contract:view:own` | 查看自己的合同 | 仅看自己负责的 |
+| `contract:view:all` | 查看所有合同 | 看全部合同 |
 | `contract:create` | 创建合同 | 新建合同 |
-| `contract:update` | 更新合同 | 编辑合同 |
-| `contract:delete` | 删除合同 | 删除合同 |
-| `contract:approve` | 审批合同 | 审批合同申请 |
+| `contract:edit:own` | 编辑自己的合同 | 编辑自己负责的合同 |
+| `contract:edit:all` | 编辑所有合同 | 编辑任意合同 |
+| `contract:delete:own` | 删除自己的合同 | 删除自己负责的合同 |
+| `contract:delete:all` | 删除所有合同 | 删除任意合同（管理员） |
+| `contract:approve:own` | 审批自己的合同 | 审批自己创建的合同 |
+| `contract:approve:all` | 审批所有合同 | 审批任意合同 |
+| `contract:submit` | 提交审批 | 提交合同审批申请 |
+| `contract:cancel` | 撤回审批 | 撤回合同审批申请 |
 
 ### 1.5 发票权限
 
 | 权限码 | 名称 | 说明 |
 |--------|------|------|
-| `invoice:view_own` | 查看自己的发票申请 | 仅看自己申请的 |
-| `invoice:view_all` | 查看所有发票申请 | 看全部申请 |
+| `invoice:view:own` | 查看自己的发票申请 | 仅看自己申请的 |
+| `invoice:view:all` | 查看所有发票申请 | 看全部申请 |
 | `invoice:create` | 创建发票申请 | 新建申请 |
-| `invoice:update` | 更新发票申请 | 编辑申请 |
-| `invoice:delete` | 删除发票申请 | 删除申请 |
-| `invoice:approve` | 审批发票申请 | 审批申请 |
+| `invoice:edit:own` | 编辑发票申请 | 编辑申请（仅草稿） |
+| `invoice:delete:own` | 删除发票申请 | 删除申请（仅草稿） |
+| `invoice:approve` | 审批发票申请 | 财务审批 |
 | `invoice:mark_issued` | 标记已开票 | 标记开票完成 |
+| `invoice:submit` | 提交审批 | 提交发票审批申请 |
+| `invoice:withdraw` | 撤回申请 | 撤回发票申请 |
+
+### 1.6 回款权限
+
+| 权限码 | 名称 | 说明 |
+|--------|------|------|
+| `payment:view:own` | 查看自己的回款 | 仅看自己负责的 |
+| `payment:view:all` | 查看所有回款 | 看全部回款 |
+| `payment:register` | 登记回款 | 登记回款记录 |
+| `payment:confirm` | 确认回款入账 | 财务确认 |
+| `payment:plan:create` | 创建回款计划 | 新建回款计划 |
+| `payment:plan:edit` | 编辑回款计划 | 编辑回款计划 |
+| `payment:plan:delete` | 删除回款计划 | 删除回款计划 |
+
+### 1.7 发票抬头权限
+
+| 权限码 | 名称 | 说明 |
+|--------|------|------|
+| `invoice:title:create` | 创建发票抬头 | 新建抬头 |
+| `invoice:title:edit` | 编辑发票抬头 | 编辑抬头 |
+| `invoice:title:delete` | 删除发票抬头 | 删除抬头 |
+| `invoice:title:set_default` | 设置默认抬头 | 设置默认抬头 |
+
+### 1.8 系统权限
+
+| 权限码 | 名称 | 说明 |
+|--------|------|------|
+| `user:manage` | 用户管理 | 管理用户 |
+| `role:manage` | 角色管理 | 管理角色 |
+| `permission:manage` | 权限管理 | 管理权限 |
 
 ### 1.6 系统权限
 
@@ -86,10 +132,19 @@ status: active
 
 | 角色代码 | 名称 | 说明 |
 |----------|------|------|
-| `SYSTEM_ADMIN` | 系统管理员 | 最高权限，首个注册用户自动获得 |
+| `TEAM_ADMIN` | 团队所有者 | 最高权限，团队创建者 |
 | `SALES_DIRECTOR` | 销售总监 | 管理全部数据，审批合同 |
-| `SALES_MEMBER` | 销售成员 | 管理自己的数据 |
-| `FINANCE` | 财务人员 | 发票审批、回款确认 |
+| `SALES_MEMBER` | 销售成员 | 管理自己的数据（包括删除自己的数据） |
+| `FINANCE` | 财务人员 | 发票审批、回款确认、财务报表 |
+
+### 2.1 角色权限差异
+
+| 角色 | 关键权限差异 |
+|------|-------------|
+| `TEAM_ADMIN` | 拥有所有权限（包括 delete:all、approve:all） |
+| `SALES_DIRECTOR` | view:all、edit:all、delete:own + approve:own |
+| `SALES_MEMBER` | view:own、edit:own、delete:own（只能操作自己的数据） |
+| `FINANCE` | invoice:approve、payment:confirm、finance:*（财务专属权限） |
 
 ---
 

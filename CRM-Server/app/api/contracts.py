@@ -189,8 +189,16 @@ def get_contracts(
     # 检查是否有 view:all 权限
     has_view_all = "contract:view:all" in permission_codes
 
-    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的合同
+    # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
     actual_owner_id = owner_id
+    if actual_owner_id is not None and actual_owner_id != str(current_user.id):
+        if not has_view_all:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据"
+            )
+
+    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的合同
     if actual_owner_id is None and not has_view_all:
         actual_owner_id = str(current_user.id)
 

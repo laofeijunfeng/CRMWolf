@@ -479,6 +479,14 @@ def get_customers(
     if owner_id in ["me", "my"]:
         actual_owner_id = str(current_user.id)
 
+    # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
+    if actual_owner_id is not None and actual_owner_id != str(current_user.id):
+        if not has_view_all:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
+            )
+
     # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的客户
     if actual_owner_id is None and not has_view_all:
         actual_owner_id = str(current_user.id)

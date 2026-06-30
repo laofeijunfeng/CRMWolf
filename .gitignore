@@ -55,3 +55,6 @@ CRM-Server/uploads/**.tar
 .claude/memory/
 .sdd/
 .superpowers/
+
+# Docker images
+*.tar

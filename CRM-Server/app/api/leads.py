@@ -101,8 +101,19 @@ def get_leads(
     # 检查是否有 view:all 权限
     has_view_all = "lead:view:all" in permission_codes
 
-    # 如果前端传入 owner_id 参数，使用它（用于「我的线索」功能）
-    # 否则根据权限自动设置：有 view:all 则看全部，只有 view:own 则看自己的
+    # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
+    if owner_id is not None and owner_id not in ["me", "my"] and owner_id != str(current_user.id):
+        if not has_view_all:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据"
+            )
+
+    # 处理 "me"/"my" 参数
+    if owner_id in ["me", "my"]:
+        owner_id = str(current_user.id)
+
+    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的线索
     if owner_id is None and not has_view_all:
         owner_id = str(current_user.id)
 
