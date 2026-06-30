@@ -39,6 +39,10 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      # SSL证书挂载（将证书文件放在 ./ssl/ 目录）
+      - ./ssl:/etc/nginx/ssl:ro
     depends_on:
       - backend
 
