@@ -216,7 +216,7 @@ class CustomerUpdate(BaseModel):
 
 
 class CustomerStatusUpdate(BaseModel):
-    status: CustomerStatusEnum = Field(..., description="客户状态")
+    status: int = Field(..., ge=0, le=3, description="客户状态：0跟进中, 1已成交, 2已输单, 3已沉寂")
 
 
 class ConvertLeadToCustomer(BaseModel):

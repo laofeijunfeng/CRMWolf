@@ -717,7 +717,7 @@ async def update_customer_status(
             detail="客户不存在"
         )
 
-    new_status = int(status_update.status)
+    new_status = status_update.status
     updated_customer = customer_crud.update_status(db, customer, new_status)
 
     if new_status == 1:
