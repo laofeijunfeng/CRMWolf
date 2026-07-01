@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, get_user_teams
 from app.crud.team import team_crud, user_team_crud
 from app.crud.role import role_crud
+from app.crud.user import user_crud
 from app.services.permission_service import permission_service
 from app.models.user import User
 from app.schemas.team import (
@@ -20,7 +21,8 @@ from app.schemas.team import (
     AssignRolesRequest,
     TeamMemberResponse,
     RoleSimpleResponse,
-    UserTeamsListResponse
+    UserTeamsListResponse,
+    ResetPasswordRequest
 )
 
 router = APIRouter(prefix="/v1/teams", tags=["团队"])
@@ -427,3 +429,45 @@ def get_member_roles(
 
     roles = role_crud.get_user_roles(db, user_id, team_id)
     return [RoleSimpleResponse(id=r.id, name=r.name, code=r.code) for r in roles]
+
+
+@router.post("/{team_id}/members/{user_id}/reset-password", summary="重置成员密码", description="重置团队成员密码（仅 TEAM_ADMIN 可调用）")
+async def reset_member_password(
+    team_id: int,
+    user_id: int,
+    request: ResetPasswordRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    重置团队成员密码（仅 TEAM_ADMIN 可调用）
+
+    直接设置新密码，无需验证旧密码
+    """
+    # 权限检查：仅 TEAM_ADMIN 可调用
+    if not is_team_admin(db, team_id, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="仅团队所有者可重置成员密码"
+        )
+
+    # 检查目标用户是否属于该团队
+    target_user = user_crud.get_by_id(db, user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在"
+        )
+
+    # 检查目标用户是否属于该团队（通过角色关联）
+    user_roles = role_crud.get_user_roles(db, user_id, team_id)
+    if not user_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该用户不属于当前团队"
+        )
+
+    # 更新密码（复用现有 CRUD 方法）
+    user_crud.set_password(db, target_user, request.new_password)
+
+    return {"message": f"已重置 {target_user.name} 的密码"}
