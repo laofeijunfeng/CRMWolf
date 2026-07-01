@@ -952,12 +952,12 @@ const tabs = [
   { key: 'invoices', label: '发票' }
 ]
 
-const handleFollowUpDelete = async (followUp: any) => {
+const handleFollowUpDelete = async (followUp: { id: number }) => {
   try {
     await customerFollowUpApi.deleteFollowUp(followUp['id'])
     showSuccess('删除', '跟进记录')
     await fetchFollowUps()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '删除跟进记录')
   }
 }
@@ -983,7 +983,7 @@ const handleRegenerateProfile = async () => {
     showSuccess('重新生成', '客户档案')
     // Refresh customer detail to show GENERATING status
     await fetchCustomerDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '重新生成客户档案')
   } finally {
     loading.value = false
@@ -1042,7 +1042,7 @@ const contactForm = reactive<ContactCreate>({
   wechat_id: '',
   is_decision_maker: false,
   remark: ''
-}) as any
+})
 
 const editContactModalVisible = ref(false)
 const editContactFormRef = ref()
@@ -1055,7 +1055,7 @@ const editContactForm = reactive<ContactUpdate>({
   wechat_id: '',
   is_decision_maker: false,
   remark: ''
-}) as any
+})
 
 const contactFormRules = {
   name: [{ required: true, message: '请输入联系人姓名', trigger: 'blur' }],
@@ -1120,7 +1120,7 @@ const invoiceTitleFormRules = {
 
 const fetchCustomerDetail = async () => {
   try {
-    const data = await customerApi.getCustomerDetail(customerId.value) as any
+    const data = await customerApi.getCustomerDetail(customerId.value)
     customerDetail.value = data
 
     // 获取热力值明细
@@ -1133,7 +1133,7 @@ const fetchCustomerDetail = async () => {
         scoreDetails.value = []
       }
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取客户详情失败', error)
     showError(error, '获取客户详情')
   }
@@ -1141,9 +1141,9 @@ const fetchCustomerDetail = async () => {
 
 const fetchFollowUps = async () => {
   try {
-    const data = await customerFollowUpApi.getFollowUps(customerId.value) as any
+    const data = await customerFollowUpApi.getFollowUps(customerId.value)
     followUps.value = Array.isArray(data) ? data : (data.data || [])
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取跟进记录失败', error)
   }
 }
@@ -1151,9 +1151,9 @@ const fetchFollowUps = async () => {
 const fetchContracts = async () => {
   try {
     contractsLoading.value = true
-    const data = await customerApi.getContracts(customerId.value) as any
+    const data = await customerApi.getContracts(customerId.value)
     contracts.value = data || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取合同列表失败', error)
     showError(error, '获取合同列表')
   } finally {
@@ -1164,9 +1164,9 @@ const fetchContracts = async () => {
 const fetchPaymentPlans = async () => {
   try {
     paymentPlansLoading.value = true
-    const data = await customerApi.getPaymentPlans(customerId.value) as any
+    const data = await customerApi.getPaymentPlans(customerId.value)
     paymentPlans.value = data || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取回款计划失败', error)
     showError(error, '获取回款计划')
   } finally {
@@ -1177,9 +1177,9 @@ const fetchPaymentPlans = async () => {
 const fetchInvoices = async () => {
   try {
     invoicesLoading.value = true
-    const data = await customerApi.getInvoices(customerId.value) as any
+    const data = await customerApi.getInvoices(customerId.value)
     invoices.value = data || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取发票列表失败', error)
     showError(error, '获取发票列表')
   } finally {
@@ -1190,9 +1190,9 @@ const fetchInvoices = async () => {
 const fetchInvoiceTitles = async () => {
   try {
     invoiceTitlesLoading.value = true
-    const data = await invoiceApi.getInvoiceTitles(customerId.value) as any
+    const data = await invoiceApi.getInvoiceTitles(customerId.value)
     invoiceTitles.value = data?.invoice_titles || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取发票抬头列表失败', error)
     showError(error, '获取发票抬头列表')
   } finally {
@@ -1280,7 +1280,7 @@ const showInvoiceTitleModal = () => {
   invoiceTitleFormVisible.value = true
 }
 
-const editInvoiceTitle = (title: any) => {
+const editInvoiceTitle = (title: { id: number }) => {
   isEditingTitle.value = true
   currentEditTitleId.value = title.id
   Object.assign(invoiceTitleForm, {
@@ -1314,7 +1314,7 @@ const handleSaveInvoiceTitle = async () => {
       showSuccess('更新', '发票抬头')
     } else {
       const { is_default, ...createData } = invoiceTitleForm
-      const result = await invoiceApi.createInvoiceTitle(customerId.value, createData) as any
+      const result = await invoiceApi.createInvoiceTitle(customerId.value, createData)
       
       if (is_default && result?.id) {
         await invoiceApi.setDefaultInvoiceTitle(result.id)
@@ -1325,7 +1325,7 @@ const handleSaveInvoiceTitle = async () => {
     
     invoiceTitleFormVisible.value = false
     await fetchInvoiceTitles()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error?.response?.data?.detail) {
       showError(error, '保存发票抬头')
     } else if (error?.message) {
@@ -1364,7 +1364,7 @@ const handleDeleteInvoiceTitle = async () => {
   }
 }
 
-const createInvoice = (title: any) => {
+const createInvoice = (title: { id: number }) => {
   router.push({
     name: 'InvoiceCreate',
     query: {
@@ -1415,7 +1415,7 @@ const handleAddContactOk = async () => {
   }
 }
 
-const handleEditContact = (record: any) => {
+const handleEditContact = (record: { id: number }) => {
   Object.assign(editContactForm, {
     ...record,
     gender: record.gender?.toString() || '0'
@@ -1442,7 +1442,7 @@ const handleEditContactOk = async () => {
   }
 }
 
-const handleSetPrimary = async (record: any) => {
+const handleSetPrimary = async (record: { id: number }) => {
   try {
     await customerApi.setPrimaryContact(record.id)
     // ✅ P0: Copywriting - 具体化的成功提示
@@ -1458,7 +1458,7 @@ const handleSetPrimary = async (record: any) => {
   }
 }
 
-const handleDeleteContact = async (record: any) => {
+const handleDeleteContact = async (record: { id: number }) => {
   try {
     await ElMessageBox.confirm(
       `确认要删除联系人 "${record.name}" 吗？`,
@@ -1483,7 +1483,7 @@ const handleDeleteContact = async (record: any) => {
   }
 }
 
-const handleContactAction = (cmd: string, record: any) => {
+const handleContactAction = (cmd: string, record: { id: number }) => {
   if (cmd === 'setPrimary') {
     handleSetPrimary(record)
   } else if (cmd === 'delete') {
@@ -1530,7 +1530,7 @@ const handleEditCustomer = () => {
 const fetchOpportunities = async () => {
   try {
     opportunitiesLoading.value = true
-    const data = await opportunityApi.getOpportunities({ customer_id: customerId.value }) as any
+    const data = await opportunityApi.getOpportunities({ customer_id: customerId.value })
     opportunities.value = data || []
   } catch (error) {
     console.error('Failed to fetch opportunities:', error)
@@ -1572,7 +1572,7 @@ const formatAmount = (amount: string | number) => {
 }
 
 // 客户状态样式
-const getStatusClass = (status: any) => {
+const getStatusClass = (status: string) => {
   const statusMap: Record<number, string> = {
     0: 'status-following',
     1: 'status-success',
@@ -1582,7 +1582,7 @@ const getStatusClass = (status: any) => {
   return statusMap[status] || 'status-default'
 }
 
-const getStatusText = (status: any) => {
+const getStatusText = (status: string) => {
   const statusMap: Record<number, string> = {
     0: '跟进中',
     1: '成交',
@@ -1592,7 +1592,7 @@ const getStatusText = (status: any) => {
   return statusMap[status] || '未知'
 }
 
-const formatDateTime = (dateStr: any) => {
+const formatDateTime = (dateStr: string | Date) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
   const year = date.getFullYear()
