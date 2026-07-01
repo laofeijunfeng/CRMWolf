@@ -250,7 +250,7 @@ const fetchUsers = async () => {
       params.region = searchForm.region
     }
 
-    const data = await
+    const data = await userApi.getUsers(params)
     tableData.value = data
     pagination.total = data.length
   } catch (error: unknown) {
