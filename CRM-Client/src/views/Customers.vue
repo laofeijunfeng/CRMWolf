@@ -24,6 +24,10 @@
           <el-icon><MagicStick /></el-icon>
           AI 创建客户
         </el-button>
+        <el-button v-if="canCreateCustomer" @click="router.push('/customers/create')">
+          <el-icon><Edit /></el-icon>
+          手动创建
+        </el-button>
       </div>
     </div>
 
