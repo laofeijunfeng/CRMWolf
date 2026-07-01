@@ -27,7 +27,7 @@ export interface SkillAction {
   display_name: string
   description: string
   handler_type: string
-  handler_config: Record<string, any>
+  handler_config: Record<string, unknown>
   required_params: string[]
   optional_params: string[]
   permission_code: string
@@ -75,7 +75,7 @@ export interface SkillActionCreate {
   display_name: string
   description: string
   handler_type: string
-  handler_config: Record<string, any>
+  handler_config: Record<string, unknown>
   required_params?: string[]
   optional_params?: string[]
   permission_code: string

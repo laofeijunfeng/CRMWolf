@@ -103,10 +103,10 @@ interface Recommendation {
 interface Props {
   actionType: string
   actionDisplayName: string
-  params: Record<string, any>
+  params: Record<string, unknown>
   riskLevel: 'low' | 'medium' | 'high'
   summaryText: string
-  detailedParams: Record<string, any>
+  detailedParams: Record<string, unknown>
   recommendation?: Recommendation
   undoTtl: number
 }
@@ -114,7 +114,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  confirm: [params?: Record<string, any>]
+  confirm: [params?: Record<string, unknown>]
   cancel: []
   expand: []
   selectAlternative: [id: number]
@@ -157,7 +157,7 @@ function getParamLabel(key: string): string {
   return PARAM_LABEL_MAP[key] || key
 }
 
-function formatParamValue(key: string, value: any): string {
+function formatParamValue(key: string, value: unknown): string {
   if (value === null || value === undefined) return '未设置'
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (typeof value === 'number') {

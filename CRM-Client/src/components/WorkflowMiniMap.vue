@@ -84,11 +84,11 @@ interface StepResult {
 interface InlinePillData {
   actionType: string
   actionDisplayName: string
-  params: Record<string, any>
+  params: Record<string, unknown>
   riskLevel: 'low' | 'medium' | 'high'
   summaryText: string
-  detailedParams: Record<string, any>
-  recommendation?: any
+  detailedParams: Record<string, unknown>
+  recommendation?: unknown
   undoTtl: number
 }
 
