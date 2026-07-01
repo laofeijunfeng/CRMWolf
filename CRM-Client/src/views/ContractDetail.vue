@@ -293,13 +293,13 @@ const canApprove = computed(() => {
     return false
   }
   
-  const userRoles = (userStore.userInfo as any)?.roles || []
+  const userRoles = userStore.userInfo?.roles || []
   
   if (!Array.isArray(userRoles) || userRoles.length === 0) {
     return false
   }
   
-  const roleCodes = userRoles.map((r: any) => r.code)
+  const roleCodes = userRoles.map(r => r.code)
   
   if (roleCodes.includes('SYSTEM_ADMIN')) {
     return true

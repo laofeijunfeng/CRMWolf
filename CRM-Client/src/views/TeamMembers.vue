@@ -260,7 +260,7 @@ const formatDate = (dateStr: string) => {
 const fetchTeamInfo = async () => {
   if (!teamId.value) return
   try {
-    const response = await teamApi.getTeamDetail(teamId.value) as any
+    const response = await teamApi.getTeamDetail(teamId.value)
     team.value = response
   } catch (error) {
     console.error('获取团队信息失败', error)
@@ -271,7 +271,7 @@ const fetchMembers = async () => {
   if (!teamId.value) return
   loading.value = true
   try {
-    const response = await teamApi.getTeamMembers(teamId.value) as any
+    const response = await teamApi.getTeamMembers(teamId.value)
     members.value = response
   } catch (error) {
     console.error('获取成员列表失败', error)
@@ -302,7 +302,7 @@ const handleSearchEmail = async () => {
   hasSearched.value = false
   try {
     // 不传 excludeTeamId，获取所有匹配用户，前端自行判断是否已在团队中
-    const response = await userApi.searchUsers(inviteForm.email.trim()) as any
+    const response = await userApi.searchUsers(inviteForm.email.trim())
     searchResults.value = response
     hasSearched.value = true
   } catch (error) {
@@ -316,7 +316,7 @@ const handleSearchEmail = async () => {
 
 const handleInviteUser = async (user: UserSearchResult) => {
   try {
-    await teamApi.addMemberDirect(teamId.value!, user.id) as any
+    await teamApi.addMemberDirect(teamId.value!, user.id)
     ElMessage.success(`${user.name} 已加入团队`)
     inviteDialogVisible.value = false
     fetchMembers()
@@ -333,7 +333,7 @@ const handleRemoveMember = (member: TeamMemberResponse) => {
     { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
   ).then(async () => {
     try {
-      await teamApi.removeMember(teamId.value!, member.id.toString()) as any
+      await teamApi.removeMember(teamId.value!, member.id.toString())
       ElMessage.success('成员已移除')
       fetchMembers()
     } catch (error: unknown) {
@@ -346,7 +346,7 @@ const handleRemoveMember = (member: TeamMemberResponse) => {
 const handleRegenerateCode = async () => {
   codeLoading.value = true
   try {
-    const response = await teamApi.regenerateInviteCode(teamId.value!) as any
+    const response = await teamApi.regenerateInviteCode(teamId.value!)
     team.value = { ...team.value!, code: response.code }
     ElMessage.success('邀请码已重置')
   } catch (error: unknown) {
@@ -360,7 +360,7 @@ const handleRegenerateCode = async () => {
 // 获取所有可用角色
 const fetchAvailableRoles = async () => {
   try {
-    const response = await roleApi.getRoles() as any
+    const response = await roleApi.getRoles()
     availableRoles.value = response
   } catch (error) {
     console.error('获取角色列表失败', error)
@@ -371,7 +371,7 @@ const fetchAvailableRoles = async () => {
 const fetchCurrentUserRoles = async () => {
   if (!teamId.value) return
   try {
-    const response = await authApi.getUserRoles() as any
+    const response = await authApi.getUserRoles()
     currentUserRoles.value = response || []
   } catch (error) {
     console.error('获取当前用户角色失败', error)
@@ -391,7 +391,7 @@ const handleSaveRoles = async () => {
 
   saveRolesLoading.value = true
   try {
-    await teamApi.assignMemberRoles(teamId.value, selectedMember.value.id, selectedRoleIds.value) as any
+    await teamApi.assignMemberRoles(teamId.value, selectedMember.value.id, selectedRoleIds.value)
     ElMessage.success('角色已分配')
     roleDialogVisible.value = false
     fetchMembers()

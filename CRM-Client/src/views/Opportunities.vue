@@ -255,7 +255,7 @@ const canDeleteRow = (row: Opportunity): boolean => {
 
 const fetchCustomers = async () => {
   try {
-    const response = await customerApi.getCustomers({ skip: 0, limit: 100 }) as any
+    const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
     customers.value = response || []
   } catch (error) {
     console.error('获取客户列表失败', error)
@@ -312,7 +312,7 @@ const fetchOpportunities = async () => {
       params.order_dir = sortState.value.order
     }
 
-    const response = await opportunityApi.getOpportunities(params) as any
+    const response = await opportunityApi.getOpportunities(params)
     tableData.value = Array.isArray(response) ? response : []
     pagination.total = Array.isArray(response) ? response.length : 0
   } catch (error: unknown) {

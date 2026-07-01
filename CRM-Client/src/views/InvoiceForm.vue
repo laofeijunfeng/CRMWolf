@@ -249,7 +249,7 @@ const formRules = {
   invoice_amount: [
     { required: true, message: '请输入开票金额' },
     {
-      validator: (rule: any, value: number, callback: (error?: string) => void) => {
+      validator: (rule: unknown, value: number, callback: (error?: string) => void) => {
         if (value <= 0) {
           callback('开票金额必须大于0')
         } else {
@@ -263,7 +263,7 @@ const formRules = {
 const fetchCustomers = async () => {
   customersLoading.value = true
   try {
-    const response = await customerApi.getCustomers({ skip: 0, limit: 100 }) as any
+    const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
     customers.value = response || []
   } catch (error) {
     console.error('获取客户列表失败', error)
@@ -280,7 +280,7 @@ const fetchContracts = async (customerId: number) => {
 
   contractsLoading.value = true
   try {
-    const response = await contractApi.getCustomerContracts(customerId) as any
+    const response = await contractApi.getCustomerContracts(customerId)
     contracts.value = response || []
   } catch (error) {
     console.error('获取合同列表失败', error)
@@ -297,7 +297,7 @@ const fetchPaymentPlans = async (contractId: number) => {
 
   paymentPlansLoading.value = true
   try {
-    const response = await paymentApi.getPaymentPlans(contractId) as any
+    const response = await paymentApi.getPaymentPlans(contractId)
     paymentPlans.value = response || []
   } catch (error) {
     console.error('获取回款计划失败', error)
@@ -314,7 +314,7 @@ const fetchInvoiceTitles = async (customerId: number) => {
 
   invoiceTitlesLoading.value = true
   try {
-    const response = await invoiceApi.getInvoiceTitles(customerId) as any
+    const response = await invoiceApi.getInvoiceTitles(customerId)
     invoiceTitles.value = response.invoice_titles || []
   } catch (error) {
     console.error('获取开票抬头失败', error)
@@ -442,7 +442,7 @@ const loadInvoiceData = async () => {
   if (!isEditing.value) return
 
   try {
-    const response = await invoiceApi.getInvoiceApplication(Number(invoiceId.value)) as any
+    const response = await invoiceApi.getInvoiceApplication(Number(invoiceId.value))
     const data = response as InvoiceApplicationResponse
 
     formData.customer_id = data.customer_id

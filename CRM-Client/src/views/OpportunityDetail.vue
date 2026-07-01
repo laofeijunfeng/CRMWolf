@@ -314,7 +314,7 @@ const fetchOpportunityDetail = async () => {
   loading.value = true
   try {
     const id = Number(route.params.id)
-    const data = await opportunityApi.getOpportunity(id) as any
+    const data = await opportunityApi.getOpportunity(id)
     opportunity.value = data
     await fetchRelatedContract()
   } catch (error: unknown) {

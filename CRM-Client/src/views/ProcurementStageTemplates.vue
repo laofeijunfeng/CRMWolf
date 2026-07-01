@@ -240,7 +240,7 @@ const fetchStageTemplates = async () => {
   try {
     const data = await procurementApi.getStageTemplates({
       procurement_method_id: methodId.value
-    }) as any
+    })
     stageTemplates.value = (data || []).sort((a: ProcurementStageTemplate, b: ProcurementStageTemplate) =>
       a.sort_order - b.sort_order
     )
@@ -254,7 +254,7 @@ const fetchStageTemplates = async () => {
 
 const fetchImpactAssessment = async (templateId: number) => {
   try {
-    const data = await procurementApi.assessTemplateChange(templateId) as any
+    const data = await procurementApi.assessTemplateChange(templateId)
     impactAssessment.value = data
   } catch (error: unknown) {
     console.error('获取影响评估失败', error)

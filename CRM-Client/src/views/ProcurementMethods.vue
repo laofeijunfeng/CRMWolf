@@ -400,7 +400,7 @@ const formatDateTime = (dateStr: string) => {
 const fetchProcurementMethods = async () => {
   loading.value = true
   try {
-    const data = await procurementApi.getProcurementMethods() as any
+    const data = await procurementApi.getProcurementMethods()
     procurementMethods.value = data || []
   } catch (error: unknown) {
     console.error('获取采购方式失败', error)
@@ -413,7 +413,7 @@ const fetchProcurementMethods = async () => {
 const fetchMethodStages = async (methodId: number) => {
   detailLoading.value = true
   try {
-    const data = await procurementApi.getStageTemplates({ procurement_method_id: methodId }) as any
+    const data = await procurementApi.getStageTemplates({ procurement_method_id: methodId })
     currentMethodStages.value = data || []
   } catch (error: unknown) {
     console.error('获取阶段模板失败', error)
@@ -572,7 +572,7 @@ const handleStageSubmit = async () => {
         Object.assign(currentMethodStages.value[index], stageFormData)
       }
     } else {
-      const data = await procurementApi.createStageTemplate(stageFormData) as any
+      const data = await procurementApi.createStageTemplate(stageFormData)
       ElMessage.success('创建成功')
       currentMethodStages.value.push({ ...stageFormData, id: data.id } as ProcurementStageTemplate)
     }

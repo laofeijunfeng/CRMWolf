@@ -100,7 +100,7 @@ const handleSubmit = async () => {
     await teamStore.joinTeam(form.code)
     showSuccess('加入', '团队')
     router.push('/leads')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('加入团队失败', error)
     showError(error, '加入团队')
   } finally {

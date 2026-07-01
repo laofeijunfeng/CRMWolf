@@ -170,7 +170,7 @@ const fetchPublicLeads = async () => {
     const res = await leadApi.getPublicLeads({
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize
-    }) as any
+    })
     tableData.value = res.filter((item: Lead) => item.status !== 2)
     pagination.total = tableData.value.length
   } catch (error) {
@@ -211,7 +211,7 @@ const handleClaim = async (id: number) => {
     await leadApi.claimLead(id)
     ElMessage.success('领取成功')
     fetchPublicLeads()
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || error.message || '领取失败')
   }
 }
@@ -234,7 +234,7 @@ const handleCreateModalOk = async () => {
     ElMessage.success('创建成功')
     createModalVisible.value = false
     fetchPublicLeads()
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || error.message || '操作失败')
   }
 }

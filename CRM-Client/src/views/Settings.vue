@@ -219,7 +219,7 @@ const handleMyOperationsReset = () => myTimeline.resetFilters()
 const fetchUserRoles = async () => {
   rolesLoading.value = true
   try {
-    const response = await authApi.getUserRoles() as any
+    const response = await authApi.getUserRoles()
     userRoles.value = response || []
   } catch (error) {
     console.error('获取用户角色失败', error)

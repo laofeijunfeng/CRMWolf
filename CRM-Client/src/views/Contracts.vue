@@ -308,9 +308,9 @@ const fetchContractList = async () => {
 
     // 快捷筛选标签
     if (activeTab.value !== 'all') {
-      params.status = activeTab.value as any
+      params.status = activeTab.value
     } else if (statusFilter) {
-      params.status = statusFilter as any
+      params.status = statusFilter
     }
 
     if (sortState.value.order) {

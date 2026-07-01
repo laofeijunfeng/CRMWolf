@@ -245,10 +245,10 @@ const fetchData = async () => {
           'approved': 'APPROVED',
           'rejected': 'REJECTED'
         }
-        params.status = statusMap[activeTab.value] as any
+        params.status = statusMap[activeTab.value]
       }
 
-      const response = await invoiceApi.getInvoiceApplications(params) as any
+      const response = await invoiceApi.getInvoiceApplications(params)
       tableData.value = response.items || []
       pagination.total = response.total || 0
     } catch (error) {

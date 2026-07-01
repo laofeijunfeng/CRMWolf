@@ -637,7 +637,7 @@ const fetchCustomerList = async () => {
     const statusSelect = filterValues.value['status']?.select
     const status = statusSelect !== undefined && statusSelect !== null ? statusSelect : searchForm.status
 
-    const params: any = {
+    const params: Record<string, unknown> = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
       keyword,
@@ -652,7 +652,7 @@ const fetchCustomerList = async () => {
     }
 
     if (activeTab.value === 'public') {
-      const response = await customerApi.getPublicCustomers(params) as any
+      const response = await customerApi.getPublicCustomers(params)
       tableData.value = Array.isArray(response) ? response : []
       pagination.total = Array.isArray(response) ? response.length : 0
     } else {
@@ -662,7 +662,7 @@ const fetchCustomerList = async () => {
         params.owner_id = searchForm.owner_id
       }
 
-      const response = await customerApi.getCustomers(params) as any
+      const response = await customerApi.getCustomers(params)
       tableData.value = response.data?.items || response || []
       pagination.total = response.data?.total || response.length || 0
     }
@@ -824,7 +824,7 @@ const handleReturnModalOk = async () => {
 
 const fetchOwnerOptions = async () => {
   try {
-    const response = await customerApi.getOwnerFilterOptions() as any
+    const response = await customerApi.getOwnerFilterOptions()
     ownerOptions.value = response.data || []
   } catch (error) {
     console.error('Failed to fetch owner options:', error)
@@ -833,7 +833,7 @@ const fetchOwnerOptions = async () => {
 
 const fetchIndustryOptions = async () => {
   try {
-    const response = await customerApi.getIndustryOptions() as any
+    const response = await customerApi.getIndustryOptions()
     industryOptions.value = response || []
   } catch (error) {
     console.error('Failed to fetch industry options:', error)

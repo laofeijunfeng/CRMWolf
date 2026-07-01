@@ -228,8 +228,8 @@ const fetchPublicCustomers = async () => {
       limit: pagination.pageSize,
       keyword: searchForm.keyword || undefined,
       city: searchForm.city || undefined,
-      status: searchForm.status as any
-    }) as any
+      status: searchForm.status
+    })
     tableData.value = res
     pagination.total = res.length
   } catch (error: unknown) {

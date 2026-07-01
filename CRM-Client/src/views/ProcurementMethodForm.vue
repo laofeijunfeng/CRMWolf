@@ -315,7 +315,7 @@ const form = ref({
   sort_order: 0,
   description: '',
   is_active: 1,
-  stages: [] as any[]
+  stages: []
 })
 
 const rules = {
@@ -329,7 +329,7 @@ const sortedStages = computed(() => {
 
 const fetchMethodDetail = async (id: string) => {
   try {
-    const method = await procurementApi.getProcurementMethod(Number(id)) as any
+    const method = await procurementApi.getProcurementMethod(Number(id))
 
     if (method) {
       form.value = {
@@ -340,7 +340,7 @@ const fetchMethodDetail = async (id: string) => {
       // 直接使用 method 中已包含的 stage_templates，不再调用单独的 API
       const stages = method.stage_templates || []
 
-      form.value.stages = stages.map((stage: any) => ({
+      form.value.stages = stages.map((stage: { stage_name: string; stage_order: number }) => ({
         id: stage.id,
         stage_name: stage.stage_name,
         template_code: stage.template_code || stage.stage_code || '',
@@ -352,7 +352,7 @@ const fetchMethodDetail = async (id: string) => {
         mark_delete: false
       }))
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取采购方式详情失败', error)
     ElMessage.error('获取采购方式详情失败，请刷新页面或稍后重试')
   }
@@ -470,7 +470,7 @@ const handleSubmit = async () => {
 
     ElMessage.success(isEdit.value ? '已保存，可以继续下一步操作' : '已创建，可以继续下一步操作')
     router.push('/procurement-methods')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('提交失败', error)
     ElMessage.error(error.message || '提交失败')
   } finally {

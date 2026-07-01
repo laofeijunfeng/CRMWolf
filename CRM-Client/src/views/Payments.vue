@@ -273,7 +273,7 @@ const fetchPaymentPlans = async () => {
       params.status = 'OVERDUE'
     }
 
-    const response = await paymentApi.listPaymentPlans(params) as any
+    const response = await paymentApi.listPaymentPlans(params)
     const data = response.data || response
 
     let filteredPlans = data.items || []
@@ -306,7 +306,7 @@ const fetchPaymentRecords = async () => {
       page_size: recordsPagination.value.pageSize
     }
 
-    const response = await paymentApi.listPaymentRecords(params) as any
+    const response = await paymentApi.listPaymentRecords(params)
     const data = response.data || response
 
     paymentRecords.value = data.items || []
@@ -441,7 +441,7 @@ const handleCreatePayment = async () => {
       showSuccess('登记', '回款')
       paymentModalVisible.value = false
       fetchPaymentPlans()
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('登记回款失败', error)
       showError(error, '登记回款')
     }

@@ -506,10 +506,10 @@ const fetchLeadList = async () => {
     const statusSelect = filterValues.value['status']?.select
     const status = statusSelect !== undefined && statusSelect !== null ? statusSelect : searchForm.status
 
-    let res: any
+    let res: unknown
 
     if (quickFilter.value === 'my') {
-      const params: any = {
+      const params: Record<string, unknown> = {
         skip: (pagination.current - 1) * pagination.pageSize,
         limit: pagination.pageSize,
         keyword,
@@ -523,7 +523,7 @@ const fetchLeadList = async () => {
       }
       res = await leadApi.getMyLeads(params)
     } else if (quickFilter.value === 'public') {
-      const params: any = {
+      const params: Record<string, unknown> = {
         skip: (pagination.current - 1) * pagination.pageSize,
         limit: pagination.pageSize,
         keyword,
@@ -552,7 +552,7 @@ const fetchLeadList = async () => {
         params.order_by = sortState.value.field
         params.order_dir = sortState.value.order
       }
-      res = await leadApi.getLeadList(params) as any
+      res = await leadApi.getLeadList(params)
     }
 
     tableData.value = res.filter((item: Lead) => item.status !== 2)
@@ -711,7 +711,7 @@ const handleDelete = async (record: Lead) => {
 
 const fetchUserOptions = async () => {
   try {
-    const response = await userApi.getUsers({ status: 'active' }) as any
+    const response = await userApi.getUsers({ status: 'active' })
     userOptions.value = Array.isArray(response) ? response : response?.data || []
   } catch (error) {
     console.error('获取用户列表失败', error)

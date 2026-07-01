@@ -193,7 +193,7 @@ const rules = {
   subscription_years: [
     {
       required: true,
-      validator: (rule: any, value: any, callback: any) => {
+      validator: (rule: unknown, value: unknown, callback: (error?: Error) => void) => {
         if (form.license_type === 'SUBSCRIPTION' && !value) {
           callback(new Error('订阅制时必须填写订阅年限'))
         } else {
@@ -324,10 +324,10 @@ const handleSubmit = async () => {
 
     let result
     if (isEdit.value && opportunityId.value) {
-      result = await opportunityApi.updateOpportunity(Number(opportunityId.value), data) as any
+      result = await opportunityApi.updateOpportunity(Number(opportunityId.value), data)
       showSuccess('更新', '商机')
     } else {
-      result = await opportunityApi.createOpportunity(data) as any
+      result = await opportunityApi.createOpportunity(data)
       showSuccess('创建', '商机')
     }
 

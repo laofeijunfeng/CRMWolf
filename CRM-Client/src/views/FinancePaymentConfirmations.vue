@@ -163,7 +163,7 @@ const searchForm = reactive({
 const fetchData = async () => {
   loading.value = true
   try {
-    const response = await financeApi.getPendingPaymentConfirmations() as any
+    const response = await financeApi.getPendingPaymentConfirmations()
     tableData.value = response || []
     pagination.total = response?.length || 0
   } catch (error) {

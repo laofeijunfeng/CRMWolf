@@ -96,7 +96,7 @@ const handleSubmit = async () => {
     await teamStore.createTeam(form.name)
     ElMessage.success('团队创建成功')
     router.push('/leads')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('创建团队失败', error)
     ElMessage.error(error.response?.data?.detail || error.message || '创建团队失败')
   } finally {

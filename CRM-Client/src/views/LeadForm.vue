@@ -175,7 +175,7 @@ onMounted(async () => {
 
 const fetchLeadDetail = async () => {
   try {
-    const response = await leadApi.getLeadDetail(parseInt(leadId.value)) as any
+    const response = await leadApi.getLeadDetail(parseInt(leadId.value))
     Object.assign(formData, {
       lead_name: response.lead_name || '',
       source: response.source || '',

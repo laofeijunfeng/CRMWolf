@@ -441,7 +441,7 @@ const fetchInvoiceDetail = async () => {
   const invoiceId = route.params.id as string
   loading.value = true
   try {
-    const data = await invoiceApi.getInvoiceApplication(Number(invoiceId)) as any
+    const data = await invoiceApi.getInvoiceApplication(Number(invoiceId))
     invoiceInfo.value = data
   } catch (error) {
     console.error('获取发票申请详情失败', error)
@@ -483,7 +483,7 @@ const handleDelete = async () => {
     await invoiceApi.deleteInvoiceApplication(invoiceInfo.value.id)
     showSuccess('删除', '发票申请')
     router.push('/invoices')
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('删除失败', error)
       showError(error, '删除发票申请')
@@ -508,7 +508,7 @@ const handleSubmit = async () => {
     await invoiceApi.submitInvoiceApplication(invoiceInfo.value.id)
     showSuccess('提交审批', '发票申请')
     fetchInvoiceDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('提交失败', error)
       showError(error, '提交审批')
@@ -535,7 +535,7 @@ const handleWithdraw = async () => {
     await invoiceApi.withdrawInvoiceApplication(invoiceInfo.value.id)
     showSuccess('撤回审批', '发票申请')
     fetchInvoiceDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('撤回失败', error)
       showError(error, '撤回审批')
@@ -564,7 +564,7 @@ const handleApprove = async () => {
     })
     showSuccess('审批通过', '发票申请')
     fetchInvoiceDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('审批失败', error)
       showError(error, '审批发票申请')

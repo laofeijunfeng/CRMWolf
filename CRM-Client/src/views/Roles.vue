@@ -271,11 +271,11 @@ const handleEdit = (record: RoleResponse) => {
 const handleConfigPermissions = async (record: RoleResponse) => {
   try {
     // 获取角色详情（包含当前权限）
-    const roleData = await roleApi.getRole(record.id) as any
+    const roleData = await roleApi.getRole(record.id)
     currentRole.value = roleData
 
     // 获取所有权限列表
-    const permsData = await permissionApi.getAllPermissions() as any
+    const permsData = await permissionApi.getAllPermissions()
     allPermissions.value = permsData
 
     // 设置当前已选权限

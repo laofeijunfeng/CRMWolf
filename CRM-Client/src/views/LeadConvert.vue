@@ -192,12 +192,12 @@ const formatDate = (dateStr: string) => {
 const fetchLeadDetail = async () => {
   loading.value = true
   try {
-    const res = await leadApi.getLeadDetail(leadId) as any
+    const res = await leadApi.getLeadDetail(leadId)
     leadData.value = res
 
     convertForm.account_name = res.lead_name || ''
     convertForm.city = res.city || ''
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '获取线索详情')
     router.back()
   } finally {
@@ -207,7 +207,7 @@ const fetchLeadDetail = async () => {
 
 const fetchProcurementMethodOptions = async () => {
   try {
-    const res = await procurementApi.getProcurementMethodOptions() as any
+    const res = await procurementApi.getProcurementMethodOptions()
     procurementMethodOptions.value = res || []
   } catch (error) {
     console.error('获取采购方式选项失败:', error)
@@ -229,10 +229,10 @@ const handleSubmit = async () => {
       address: convertForm.address || undefined,
       default_procurement_method_id: convertForm.default_procurement_method_id || undefined
     }
-    const result = await customerApi.convertLeadToCustomer(data) as any
+    const result = await customerApi.convertLeadToCustomer(data)
     showSuccess('转化', '线索')
     router.push(`/customers/${result.customer_id}`)
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '转化线索')
   } finally {
     loading.value = false

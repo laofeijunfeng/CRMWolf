@@ -243,7 +243,7 @@ const fetchMyLeads = async () => {
     const res = await leadApi.getMyLeads({
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize
-    }) as any
+    })
     tableData.value = res.filter((item: Lead) => item.status !== 2)
     pagination.total = tableData.value.length
   } catch (error) {
@@ -357,7 +357,7 @@ const handleConvertModalOk = async () => {
       industry: convertForm.industry || undefined,
       address: convertForm.address || undefined
     }
-    const result = await customerApi.convertLeadToCustomer(data) as any
+    const result = await customerApi.convertLeadToCustomer(data)
     ElMessage.success(`转化成功！客户ID：${result.customer_id}，联系人ID：${result.contact_id}`)
     convertModalVisible.value = false
     fetchMyLeads()

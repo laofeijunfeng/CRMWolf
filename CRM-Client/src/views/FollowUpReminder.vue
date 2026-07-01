@@ -155,7 +155,7 @@ const getSourceType = (source: string) => {
 const fetchFollowUpReminder = async () => {
   loading.value = true
   try {
-    const res = await leadApi.getFollowUpReminder(days.value) as any
+    const res = await leadApi.getFollowUpReminder(days.value)
     tableData.value = res.filter((item: Lead) => item.status !== 2)
   } catch (error) {
     console.error('获取待跟进线索列表失败', error)
@@ -202,7 +202,7 @@ const handleFollowUpModalOk = async () => {
     ElMessage.success('添加成功')
     followUpModalVisible.value = false
     fetchFollowUpReminder()
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || error.message || '添加失败')
   }
 }

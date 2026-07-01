@@ -218,7 +218,7 @@ const filterForm = reactive({
 const fetchAgingAnalysis = async () => {
   loading.value = true
   try {
-    const response = await financeApi.getAccountAgingAnalysis() as any
+    const response = await financeApi.getAccountAgingAnalysis()
     agingAnalysis.value = response || { aging_data: [], total_overdue: '0', analysis_date: '' }
   } catch (error) {
     console.error('获取账龄分析失败', error)
@@ -231,7 +231,7 @@ const fetchAgingAnalysis = async () => {
 const fetchRevenueStats = async () => {
   loading.value = true
   try {
-    const response = await financeApi.getContractRevenueStats() as any
+    const response = await financeApi.getContractRevenueStats()
     revenueStats.value = response || []
     revenuePagination.total = response?.length || 0
   } catch (error) {
@@ -245,7 +245,7 @@ const fetchRevenueStats = async () => {
 const fetchOverdueAlerts = async () => {
   loading.value = true
   try {
-    const response = await financeApi.getOverduePaymentAlerts() as any
+    const response = await financeApi.getOverduePaymentAlerts()
     overdueAlerts.value = response || []
     overduePagination.total = response?.length || 0
   } catch (error) {

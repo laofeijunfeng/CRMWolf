@@ -232,7 +232,7 @@ const invoicedForm = ref({
 
 const fetchCustomers = async () => {
   try {
-    const response = await customerApi.getCustomers({ skip: 0, limit: 100 }) as any
+    const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
     customerOptions.value = response || []
   } catch (error) {
     console.error('获取客户列表失败', error)
@@ -262,7 +262,7 @@ const fetchInvoiceApplications = async () => {
       params.customer_id = searchForm.customer_id
     }
 
-    const response = await invoiceApi.getInvoiceApplications(params) as any
+    const response = await invoiceApi.getInvoiceApplications(params)
     tableData.value = response.items || []
     pagination.total = response.total || 0
   } catch (error) {
@@ -335,7 +335,7 @@ const handleWithdraw = async (record: InvoiceApplicationResponse) => {
     await invoiceApi.withdrawInvoiceApplication(record.id)
     showSuccess('撤回审批', '发票申请')
     fetchInvoiceApplications()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('撤回失败', error)
       showError(error, '撤回审批')
@@ -353,7 +353,7 @@ const handleDelete = async (record: InvoiceApplicationResponse) => {
     await invoiceApi.deleteInvoiceApplication(record.id)
     showSuccess('删除', '发票申请')
     fetchInvoiceApplications()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('删除失败', error)
       showError(error, '删除发票申请')

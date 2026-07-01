@@ -182,8 +182,8 @@ const fetchDashboardStats = async () => {
   statsLoading.value = true
   try {
     const [statsResponse, pendingInvoices] = await Promise.all([
-      financeApi.getDashboardStats() as any,
-      invoiceApi.getInvoiceApplications({ status: 'PENDING_REVIEW', page: 1, page_size: 1 }) as any
+      financeApi.getDashboardStats(),
+      invoiceApi.getInvoiceApplications({ status: 'PENDING_REVIEW', page: 1, page_size: 1 })
     ])
 
     dashboardStats.value = statsResponse
@@ -198,7 +198,7 @@ const fetchDashboardStats = async () => {
 const fetchAgingAnalysis = async () => {
   agingLoading.value = true
   try {
-    const response = await financeApi.getAccountAgingAnalysis() as any
+    const response = await financeApi.getAccountAgingAnalysis()
     agingData.value = response.aging_data || []
   } catch (error) {
     console.error('获取账龄分析失败', error)
@@ -210,7 +210,7 @@ const fetchAgingAnalysis = async () => {
 const fetchOverdueAlerts = async () => {
   alertsLoading.value = true
   try {
-    const response = await financeApi.getOverduePaymentAlerts({ days_overdue_min: 1, limit: 10 }) as any
+    const response = await financeApi.getOverduePaymentAlerts({ days_overdue_min: 1, limit: 10 })
     overdueAlerts.value = response || []
   } catch (error) {
     console.error('获取逾期预警失败', error)
