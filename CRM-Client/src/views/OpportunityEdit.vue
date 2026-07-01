@@ -22,11 +22,32 @@
           v-loading="loading"
         >
           <div class="form-grid">
-            <el-form-item label="客户">
+            <!-- 从客户创建：显示 disabled 输入框 -->
+            <el-form-item v-if="fromCustomer" label="客户">
               <el-input
                 :model-value="customerInfo?.account_name || ''"
                 disabled
               />
+            </el-form-item>
+
+            <!-- 独立创建：显示客户搜索下拉 -->
+            <el-form-item v-else prop="customer_id" label="客户" required>
+              <el-select
+                v-model="form.customer_id"
+                filterable
+                remote
+                placeholder="搜索或选择客户"
+                :remote-method="searchCustomers"
+                :loading="customerLoading"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in customerOptions"
+                  :key="item.id"
+                  :label="item.account_name"
+                  :value="item.id"
+                />
+              </el-select>
             </el-form-item>
 
             <el-form-item prop="opportunity_name" label="商机名称" required>
@@ -158,6 +179,7 @@ const userStore = useUserStore()
 const formRef = ref()
 const loading = ref(false)
 const submitting = ref(false)
+const customerLoading = ref(false)
 const customerOptions = ref<any[]>([])
 const customerInfo = ref<any>(null)
 const procurementMethods = ref<ProcurementMethod[]>([])
@@ -208,7 +230,7 @@ const rules = {
 
 const fetchProcurementMethods = async () => {
   try {
-    const data = await
+    const data = await procurementApi.getProcurementMethods({ is_active: 1 })
     procurementMethods.value = data.filter((m: ProcurementMethod) => m.is_active === 1)
       .sort((a: ProcurementMethod, b: ProcurementMethod) => a.sort_order - b.sort_order)
   } catch (error) {
@@ -218,17 +240,34 @@ const fetchProcurementMethods = async () => {
 
 const fetchCustomerOptions = async () => {
   try {
-    const data = await[]
-    customerOptions.value = data
+    const data = await customerApi.getCustomers({ limit: 100 })
+    customerOptions.value = data || []
   } catch (error) {
     console.error('获取客户列表失败', error)
+  }
+}
+
+const searchCustomers = async (query: string) => {
+  if (!query) {
+    customerOptions.value = []
+    return
+  }
+  customerLoading.value = true
+  try {
+    const data = await customerApi.getCustomers({ keyword: query, limit: 20 })
+    customerOptions.value = data || []
+  } catch (error) {
+    console.error('搜索客户失败', error)
+    customerOptions.value = []
+  } finally {
+    customerLoading.value = false
   }
 }
 
 const fetchCustomerInfo = async (id: string, setDefaults: boolean = false) => {
   loading.value = true
   try {
-    const data = await
+    const data = await customerApi.getCustomerDetail(Number(id))
     customerInfo.value = data
 
     if (setDefaults) {
@@ -261,7 +300,7 @@ const fetchCustomerInfo = async (id: string, setDefaults: boolean = false) => {
 const fetchOpportunityDetail = async (id: string) => {
   loading.value = true
   try {
-    const data = await
+    const data = await opportunityApi.getOpportunityDetail(Number(id))
     Object.assign(form, {
       opportunity_name: data.opportunity_name,
       customer_id: data.customer_id || 0,
