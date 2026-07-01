@@ -289,6 +289,155 @@ class NotificationService:
             )
             return False
 
+    async def notify_approval_reminder(
+        self,
+        approver_open_id: str,
+        approver_name: str,
+        contract_name: str,
+        waiting_hours: int,
+        node_name: str,
+        contract_id: int,
+        reminder_level: str = "light"
+    ) -> bool:
+        """发送审批催办通知给审批人
+
+        Args:
+            approver_open_id: 审批人 Open ID（API 方式使用）
+            approver_name: 审批人姓名（Webhook 方式使用）
+            contract_name: 合同名称
+            waiting_hours: 已等待小时数
+            node_name: 当前审批节点名称
+            contract_id: 合同ID
+            reminder_level: 提醒级别（light/medium/strong）
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        config = self.get_config()
+        if not config:
+            logger.warning(
+                f"通知配置未设置，跳过发送审批催办通知: "
+                f"team_id={self.team_id}, contract_name={contract_name}"
+            )
+            return False
+
+        try:
+            if config.notification_method == "webhook":
+                # Webhook 方式
+                if not config.feishu_webhook_url:
+                    logger.warning(
+                        f"Webhook URL 未配置，跳过发送: team_id={self.team_id}"
+                    )
+                    return False
+
+                if not config.feishu_webhook_enabled:
+                    logger.warning(
+                        f"Webhook 通知已禁用，跳过发送: team_id={self.team_id}"
+                    )
+                    return False
+
+                return await feishu_service.notify_approval_reminder_webhook(
+                    webhook_url=config.feishu_webhook_url,
+                    contract_name=contract_name,
+                    waiting_hours=waiting_hours,
+                    node_name=node_name,
+                    approver_name=approver_name,
+                    contract_id=contract_id,
+                    reminder_level=reminder_level
+                )
+            else:
+                # API 方式
+                return await feishu_service.notify_approval_reminder(
+                    user_id=approver_open_id,
+                    contract_name=contract_name,
+                    waiting_hours=waiting_hours,
+                    node_name=node_name,
+                    reminder_level=reminder_level
+                )
+        except Exception as e:
+            logger.error(
+                f"发送审批催办通知失败: contract_name={contract_name}, "
+                f"error={str(e)}"
+            )
+            return False
+
+    async def notify_approval_timeout_alert(
+        self,
+        submitter_open_id: str,
+        contract_name: str,
+        node_name: str,
+        approver_name: str,
+        waiting_hours: int,
+        contract_id: int,
+        reminder_level: str = "medium",
+        is_admin: bool = False
+    ) -> bool:
+        """发送审批超时告警给提交人或管理员
+
+        Args:
+            submitter_open_id: 提交人/管理员 Open ID（API 方式使用）
+            contract_name: 合同名称
+            node_name: 当前审批节点名称
+            approver_name: 当前审批人姓名
+            waiting_hours: 已等待小时数
+            contract_id: 合同ID
+            reminder_level: 提醒级别（medium/strong）
+            is_admin: 是否通知管理员
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        config = self.get_config()
+        if not config:
+            logger.warning(
+                f"通知配置未设置，跳过发送审批超时告警: "
+                f"team_id={self.team_id}, contract_name={contract_name}"
+            )
+            return False
+
+        try:
+            if config.notification_method == "webhook":
+                # Webhook 方式
+                if not config.feishu_webhook_url:
+                    logger.warning(
+                        f"Webhook URL 未配置，跳过发送: team_id={self.team_id}"
+                    )
+                    return False
+
+                if not config.feishu_webhook_enabled:
+                    logger.warning(
+                        f"Webhook 通知已禁用，跳过发送: team_id={self.team_id}"
+                    )
+                    return False
+
+                return await feishu_service.notify_approval_timeout_webhook(
+                    webhook_url=config.feishu_webhook_url,
+                    contract_name=contract_name,
+                    node_name=node_name,
+                    approver_name=approver_name,
+                    waiting_hours=waiting_hours,
+                    contract_id=contract_id,
+                    reminder_level=reminder_level,
+                    is_admin=is_admin
+                )
+            else:
+                # API 方式
+                return await feishu_service.notify_approval_timeout_alert(
+                    user_id=submitter_open_id,
+                    contract_name=contract_name,
+                    node_name=node_name,
+                    approver_name=approver_name,
+                    waiting_hours=waiting_hours,
+                    reminder_level=reminder_level,
+                    is_admin=is_admin
+                )
+        except Exception as e:
+            logger.error(
+                f"发送审批超时告警失败: contract_name={contract_name}, "
+                f"error={str(e)}"
+            )
+            return False
+
 
 # 缓存实例
 _notification_service_cache: dict = {}

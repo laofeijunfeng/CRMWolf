@@ -659,5 +659,232 @@ class FeishuService:
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
+    # ========== 审批催办通知方法 ==========
+
+    async def notify_approval_reminder(
+        self,
+        user_id: str,
+        contract_name: str,
+        waiting_hours: int,
+        node_name: str,
+        reminder_level: str = "light"
+    ) -> bool:
+        """通过飞书 API 发送审批催办通知给审批人
+
+        Args:
+            user_id: 审批人 open_id
+            contract_name: 合同名称
+            waiting_hours: 已等待小时数
+            node_name: 当前审批节点名称
+            reminder_level: 提醒级别（light/medium/strong）
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        level_icons = {
+            "light": "⏰",
+            "medium": "🔔",
+            "strong": "🚨"
+        }
+        level_texts = {
+            "light": "轻度提醒",
+            "medium": "中度催办",
+            "strong": "强度告警"
+        }
+
+        icon = level_icons.get(reminder_level, "⏰")
+        level_text = level_texts.get(reminder_level, "提醒")
+
+        title = f"{icon} 审批催办通知（{level_text}）"
+        content = f"""您有待处理的审批任务
+
+**合同名称**: {contract_name}
+**当前节点**: {node_name}
+**已等待**: {waiting_hours}小时
+
+请尽快处理或联系提交人说明情况。"""
+
+        return await self.send_message_card(user_id, title, content)
+
+    async def notify_approval_reminder_webhook(
+        self,
+        webhook_url: str,
+        contract_name: str,
+        waiting_hours: int,
+        node_name: str,
+        approver_name: str,
+        contract_id: int,
+        reminder_level: str = "light"
+    ) -> bool:
+        """通过 Webhook 发送审批催办通知
+
+        Args:
+            webhook_url: 飞书群聊机器人 Webhook URL
+            contract_name: 合同名称
+            waiting_hours: 已等待小时数
+            node_name: 当前审批节点名称
+            approver_name: 审批人姓名
+            contract_id: 合同 ID
+            reminder_level: 提醒级别（light/medium/strong）
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        level_icons = {
+            "light": "⏰",
+            "medium": "🔔",
+            "strong": "🚨"
+        }
+        level_texts = {
+            "light": "轻度提醒",
+            "medium": "中度催办",
+            "strong": "强度告警"
+        }
+
+        icon = level_icons.get(reminder_level, "⏰")
+        level_text = level_texts.get(reminder_level, "提醒")
+
+        title = f"{icon} 审批催办通知（{level_text}）"
+        content = f"""审批人 {approver_name} 有待处理的审批任务
+
+**合同名称**: {contract_name}
+**当前节点**: {node_name}
+**审批人**: {approver_name}
+**已等待**: {waiting_hours}小时
+
+请尽快处理或联系提交人说明情况。"""
+
+        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
+        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+
+        return await self.send_webhook_message(webhook_url, title, content, button_url)
+
+    async def notify_approval_timeout_alert(
+        self,
+        user_id: str,
+        contract_name: str,
+        node_name: str,
+        approver_name: str,
+        waiting_hours: int,
+        reminder_level: str = "medium",
+        is_admin: bool = False
+    ) -> bool:
+        """通过飞书 API 发送审批超时告警给提交人或管理员
+
+        Args:
+            user_id: 提交人/管理员 open_id
+            contract_name: 合同名称
+            node_name: 当前审批节点名称
+            approver_name: 当前审批人姓名
+            waiting_hours: 已等待小时数
+            reminder_level: 提醒级别（medium/strong）
+            is_admin: 是否通知管理员
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        level_icons = {
+            "medium": "⚠️",
+            "strong": "🚨"
+        }
+        level_texts = {
+            "medium": "中度催办",
+            "strong": "强度告警"
+        }
+
+        icon = level_icons.get(reminder_level, "⚠️")
+        level_text = level_texts.get(reminder_level, "告警")
+
+        if is_admin:
+            title = f"{icon} 审批超时告警（管理员）"
+            content = f"""审批任务超时告警
+
+**合同名称**: {contract_name}
+**当前节点**: {node_name}
+**当前审批人**: {approver_name}
+**已等待**: {waiting_hours}小时
+
+作为管理员，请关注此审批进度，必要时介入处理。"""
+        else:
+            title = f"{icon} 您的审批任务等待超时"
+            content = f"""您的审批任务等待超时
+
+**合同名称**: {contract_name}
+**当前节点**: {node_name}
+**当前审批人**: {approver_name}
+**已等待**: {waiting_hours}小时
+
+您可以选择：
+→ 联系审批人催办
+→ 撤回审批，修改后重新提交"""
+
+        return await self.send_message_card(user_id, title, content)
+
+    async def notify_approval_timeout_webhook(
+        self,
+        webhook_url: str,
+        contract_name: str,
+        node_name: str,
+        approver_name: str,
+        waiting_hours: int,
+        contract_id: int,
+        reminder_level: str = "medium",
+        is_admin: bool = False
+    ) -> bool:
+        """通过 Webhook 发送审批超时告警
+
+        Args:
+            webhook_url: 飞书群聊机器人 Webhook URL
+            contract_name: 合同名称
+            node_name: 当前审批节点名称
+            approver_name: 当前审批人姓名
+            waiting_hours: 已等待小时数
+            contract_id: 合同 ID
+            reminder_level: 提醒级别（medium/strong）
+            is_admin: 是否通知管理员
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        level_icons = {
+            "medium": "⚠️",
+            "strong": "🚨"
+        }
+        level_texts = {
+            "medium": "中度催办",
+            "strong": "强度告警"
+        }
+
+        icon = level_icons.get(reminder_level, "⚠️")
+        level_text = level_texts.get(reminder_level, "告警")
+
+        if is_admin:
+            title = f"{icon} 审批超时告警（管理员 - {level_text}）"
+            content = f"""审批任务超时告警，请管理员关注
+
+**合同名称**: {contract_name}
+**当前节点**: {node_name}
+**当前审批人**: {approver_name}
+**已等待**: {waiting_hours}小时
+
+作为管理员，请关注此审批进度，必要时介入处理。"""
+        else:
+            title = f"{icon} 审批超时通知（{level_text}）"
+            content = f"""审批任务等待超时
+
+**合同名称**: {contract_name}
+**当前节点**: {node_name}
+**当前审批人**: {approver_name}
+**已等待**: {waiting_hours}小时
+
+提交人可以选择：
+→ 联系审批人催办
+→ 撤回审批，修改后重新提交"""
+
+        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
+        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+
+        return await self.send_webhook_message(webhook_url, title, content, button_url)
+
 
 feishu_service = FeishuService()
