@@ -4,7 +4,7 @@ from sqlalchemy import text
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.deps import get_current_active_user, get_current_user_team, require_permission
 from app.core.logging import get_logger, log_with_fields
 from app.crud.contract import contract_crud
 from app.crud.approval import approval_flow_crud, approval_crud
@@ -252,14 +252,9 @@ def get_approval_flow(
 def create_approval_flow(
     flow_data: ApprovalFlowCreate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("approval:flow:create")),
     db: Session = Depends(get_db)
 ):
-    from app.core.deps import require_permission
-
-    permission_checker = require_permission("approval:flow:create")
-    permission_checker(current_user, db)
-
     existing_flow = approval_flow_crud.get_by_code(db, flow_data.flow_code, team_id)
     if existing_flow:
         raise HTTPException(
@@ -311,14 +306,9 @@ def update_approval_flow(
     flow_id: int,
     flow_data: ApprovalFlowUpdate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("approval:flow:update")),
     db: Session = Depends(get_db)
 ):
-    from app.core.deps import require_permission
-
-    permission_checker = require_permission("approval:flow:update")
-    permission_checker(current_user, db)
-
     flow = approval_flow_crud.get_by_id(db, flow_id, team_id)
     if not flow:
         raise HTTPException(

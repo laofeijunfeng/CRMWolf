@@ -119,13 +119,9 @@ def get_notification_config(
 def update_notification_config(
     config_data: NotificationConfigUpdate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("approval:flow:update")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查
-    permission_checker = require_permission("approval:flow:update")
-    permission_checker(current_user, db)
-
     # 准备更新数据（只包含非 None 的字段）
     update_dict: Dict[str, Any] = {}
     if config_data.notification_method is not None:
@@ -188,13 +184,9 @@ def update_notification_config(
 )
 async def test_notification(
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("approval:flow:update")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查
-    permission_checker = require_permission("approval:flow:update")
-    permission_checker(current_user, db)
-
     # 获取通知配置
     config = system_config_crud.get_notification_config(db, team_id)
     if not config:

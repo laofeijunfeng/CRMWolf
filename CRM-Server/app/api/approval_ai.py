@@ -63,7 +63,7 @@ async def parse_approval_flow(
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 async def create_approval_flow_from_ai(
     request: ApprovalAICreateRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("approval:flow:create")),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
 ):
@@ -78,10 +78,6 @@ async def create_approval_flow_from_ai(
     3. approve_role 必须是预定义角色
     4. node_order 自动修正为连续
     """
-    # 权限检查
-    permission_checker = require_permission("approval:flow:create")
-    permission_checker(current_user, db)
-
     # 检查 team_id 是否有效
     if team_id is None:
         raise HTTPException(

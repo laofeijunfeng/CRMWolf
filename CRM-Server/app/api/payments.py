@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import date
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.deps import get_current_active_user, get_current_user_team, require_permission
 from app.crud.payment import payment_plan_crud, payment_record_crud
 from app.crud.contract import contract_crud
 from app.models.payment import PaymentPlanStatus
@@ -24,13 +24,9 @@ def create_payment_plans(
     contract_id: int,
     plans_data: PaymentPlanBatchCreate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("payment:plan:create")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：创建回款计划
-    permission_checker = require_permission("payment:plan:create")
-    permission_checker(current_user, db)
-
     contract = contract_crud.get_by_id(db, contract_id, team_id)
     if not contract:
         raise HTTPException(
@@ -209,13 +205,9 @@ def update_payment_plan(
     plan_id: int,
     plan_data: PaymentPlanUpdate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("payment:plan:edit")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：编辑回款计划
-    permission_checker = require_permission("payment:plan:edit")
-    permission_checker(current_user, db)
-
     plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
@@ -252,13 +244,9 @@ def update_payment_plan(
 def delete_payment_plan(
     plan_id: int,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("payment:plan:delete")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：删除回款计划
-    permission_checker = require_permission("payment:plan:delete")
-    permission_checker(current_user, db)
-
     try:
         success = payment_plan_crud.delete(db, plan_id, team_id)
         if not success:
@@ -278,13 +266,9 @@ def create_payment_record(
     plan_id: int,
     record_data: PaymentRecordCreate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("payment:register")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：登记回款
-    permission_checker = require_permission("payment:register")
-    permission_checker(current_user, db)
-
     plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
@@ -341,13 +325,9 @@ def update_payment_record(
     record_id: int,
     record_data: PaymentRecordUpdate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("payment:record:edit")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：编辑回款记录
-    permission_checker = require_permission("payment:record:edit")
-    permission_checker(current_user, db)
-
     record = payment_record_crud.get_by_id(db, record_id, team_id)
     if not record:
         raise HTTPException(
@@ -369,13 +349,9 @@ def update_payment_record(
 def delete_payment_record(
     record_id: int,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("payment:record:delete")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：删除回款记录
-    permission_checker = require_permission("payment:record:delete")
-    permission_checker(current_user, db)
-
     try:
         success = payment_record_crud.delete(db, record_id, team_id)
         if not success:

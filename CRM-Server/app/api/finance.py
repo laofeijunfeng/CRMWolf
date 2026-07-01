@@ -33,12 +33,9 @@ def confirm_payment_record(
     record_id: int,
     confirm_data: PaymentRecordConfirm,
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("payment:confirm")),
     db: Session = Depends(get_db)
 ):
-    permission_checker = require_permission("payment:confirm")
-    permission_checker(current_user, db)
-
     record = payment_record_crud.get_by_id(db, record_id)
     if not record:
         raise HTTPException(
@@ -179,12 +176,9 @@ def get_receivables_aging_analysis(
     start_date: Optional[date] = Query(None, description="开始日期"),
     end_date: Optional[date] = Query(None, description="结束日期"),
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("finance:receivables_view")),
     db: Session = Depends(get_db)
 ):
-    permission_checker = require_permission("finance:receivables_view")
-    permission_checker(current_user, db)
-
     today = date.today()
 
     aging_buckets = {
@@ -278,12 +272,9 @@ def get_overdue_alerts(
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的记录数"),
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("finance:receivables_view")),
     db: Session = Depends(get_db)
 ):
-    permission_checker = require_permission("finance:receivables_view")
-    permission_checker(current_user, db)
-
     today = date.today()
 
     query = db.query(PaymentPlan).join(Contract).filter(
@@ -365,12 +356,9 @@ def get_contract_revenue_report(
     end_date: Optional[date] = Query(None, description="结束日期"),
     group_by: str = Query("month", description="分组方式: day(按天), week(按周), month(按月), customer(按客户)"),
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("finance:reports_view")),
     db: Session = Depends(get_db)
 ):
-    permission_checker = require_permission("finance:reports_view")
-    permission_checker(current_user, db)
-
     query = db.query(Contract).filter(
         Contract.status != "DRAFT",
         Contract.team_id == team_id
@@ -481,12 +469,9 @@ def get_pending_confirmations(
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的记录数"),
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("payment:confirm")),
     db: Session = Depends(get_db)
 ):
-    permission_checker = require_permission("payment:confirm")
-    permission_checker(current_user, db)
-
     # 通过 PaymentPlan -> Contract 关联过滤 team_id
     query = db.query(PaymentRecord).join(
         PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id

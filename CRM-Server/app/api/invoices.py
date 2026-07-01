@@ -26,13 +26,9 @@ def create_invoice_title(
     customer_id: int = Query(..., description="客户ID"),
     title_data: InvoiceTitleCreate = None,
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("invoice:title:create")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：创建发票抬头
-    permission_checker = require_permission("invoice:title:create")
-    permission_checker(current_user, db)
-
     customer = db.query(Customer).filter(Customer.id == customer_id, Customer.team_id == team_id).first()
     if not customer:
         raise HTTPException(
@@ -83,13 +79,9 @@ def update_invoice_title(
     title_id: int,
     title_data: InvoiceTitleUpdate,
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("invoice:title:edit")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：编辑发票抬头
-    permission_checker = require_permission("invoice:title:edit")
-    permission_checker(current_user, db)
-
     title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
@@ -105,13 +97,9 @@ def update_invoice_title(
 def set_default_invoice_title(
     title_id: int,
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("invoice:title:set_default")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：设置默认抬头
-    permission_checker = require_permission("invoice:title:set_default")
-    permission_checker(current_user, db)
-
     title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
@@ -132,13 +120,9 @@ def set_default_invoice_title(
 def delete_invoice_title(
     title_id: int,
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("invoice:title:delete")),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：删除发票抬头
-    permission_checker = require_permission("invoice:title:delete")
-    permission_checker(current_user, db)
-
     success = invoice_title_crud.delete(db, title_id, team_id)
     if not success:
         raise HTTPException(
@@ -277,12 +261,9 @@ def review_invoice_application(
     application_id: int,
     review_data: InvoiceApplicationReview,
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("invoice:approve")),
     db: Session = Depends(get_db)
 ):
-    permission_checker = require_permission("invoice:approve")
-    permission_checker(current_user, db)
-
     application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
@@ -340,12 +321,9 @@ def withdraw_invoice_application(
 def mark_invoice_issued(
     application_id: int,
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("invoice:mark_issued")),
     db: Session = Depends(get_db)
 ):
-    permission_checker = require_permission("invoice:mark_issued")
-    permission_checker(current_user, db)
-
     application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
