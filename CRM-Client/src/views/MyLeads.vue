@@ -326,7 +326,7 @@ const handleReturn = async (id: number) => {
     await leadApi.returnLead(id)
     ElMessage.success('退回成功')
     fetchMyLeads()
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || error.message || '退回失败')
   }
 }
@@ -336,7 +336,7 @@ const handleMarkInvalid = async (id: number) => {
     await leadApi.markInvalid(id)
     ElMessage.success('已标记为无效')
     fetchMyLeads()
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || error.message || '操作失败')
   }
 }
@@ -361,7 +361,7 @@ const handleConvertModalOk = async () => {
     ElMessage.success(`转化成功！客户ID：${result.customer_id}，联系人ID：${result.contact_id}`)
     convertModalVisible.value = false
     fetchMyLeads()
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || error.message || '转化失败')
   }
 }
@@ -399,7 +399,7 @@ const handleCreateModalOk = async () => {
     }
     createModalVisible.value = false
     fetchMyLeads()
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || error.message || '操作失败')
   }
 }

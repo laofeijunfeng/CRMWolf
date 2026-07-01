@@ -150,7 +150,7 @@ const handleLogin = async () => {
     } catch {
       router.push('/onboarding')
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '登录')
   } finally {
     loading.value = false
@@ -186,7 +186,7 @@ const handleRegister = async () => {
 
     showSuccess('注册', '账户')
     router.push('/onboarding')
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '注册')
   } finally {
     registering.value = false

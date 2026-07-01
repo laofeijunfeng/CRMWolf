@@ -317,7 +317,7 @@ const fetchOpportunityDetail = async () => {
     const data = await opportunityApi.getOpportunity(id) as any
     opportunity.value = data
     await fetchRelatedContract()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取商机详情失败', error)
     showError(error, '获取商机详情')
   } finally {
@@ -332,7 +332,7 @@ const fetchRelatedContract = async () => {
   try {
     const data = await contractApi.getContractByOpportunity(opportunity.value.id) as unknown as ContractListResponse
     relatedContract.value = data
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error.response?.status !== 404) {
       console.error('获取关联合同失败', error)
     }
@@ -473,7 +473,7 @@ const handleWinModalOk = async () => {
     showSuccess('标记赢单', '商机')
     winModalVisible.value = false
     fetchOpportunityDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '标记赢单')
   }
 }
@@ -490,7 +490,7 @@ const handleLoseModalOk = async () => {
     showSuccess('标记输单', '商机')
     loseModalVisible.value = false
     fetchOpportunityDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '标记输单')
   }
 }

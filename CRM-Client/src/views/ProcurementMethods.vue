@@ -402,7 +402,7 @@ const fetchProcurementMethods = async () => {
   try {
     const data = await procurementApi.getProcurementMethods() as any
     procurementMethods.value = data || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取采购方式失败', error)
     ElMessage.error('获取采购方式失败')
   } finally {
@@ -415,7 +415,7 @@ const fetchMethodStages = async (methodId: number) => {
   try {
     const data = await procurementApi.getStageTemplates({ procurement_method_id: methodId }) as any
     currentMethodStages.value = data || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取阶段模板失败', error)
     ElMessage.error('获取阶段模板失败')
   } finally {
@@ -475,7 +475,7 @@ const handleSubmit = async () => {
 
     dialogVisible.value = false
     await fetchProcurementMethods()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('操作失败', error)
     if (error?.response?.data?.detail) {
       ElMessage.error(error.response.data.detail)
@@ -503,7 +503,7 @@ const handleDelete = async (method: ProcurementMethod) => {
     ElMessage.success('删除成功')
 
     await fetchProcurementMethods()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('删除失败', error)
       if (error?.response?.data?.detail) {
@@ -578,7 +578,7 @@ const handleStageSubmit = async () => {
     }
 
     stageDialogVisible.value = false
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('操作失败', error)
     if (error?.response?.data?.detail) {
       ElMessage.error(error.response.data.detail)
@@ -609,7 +609,7 @@ const handleDeleteStage = async (stage: ProcurementStageTemplate) => {
     if (index > -1) {
       currentMethodStages.value.splice(index, 1)
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('删除失败', error)
       if (error?.response?.data?.detail) {

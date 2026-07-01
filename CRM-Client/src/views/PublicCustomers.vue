@@ -232,7 +232,7 @@ const fetchPublicCustomers = async () => {
     }) as any
     tableData.value = res
     pagination.total = res.length
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取公海客户列表失败', error)
     ElMessage.error(error.message || '获取公海客户列表失败')
   } finally {
@@ -274,7 +274,7 @@ const handleClaim = async (record: CustomerResponse) => {
     await customerApi.claimCustomer(record.id, data)
     ElMessage.success('领取成功')
     fetchPublicCustomers()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('领取客户失败', error)
     ElMessage.error(error.message || '领取客户失败')
   }
@@ -309,7 +309,7 @@ const handleCreateModalOk = async () => {
     ElMessage.success('创建成功')
     createModalVisible.value = false
     fetchPublicCustomers()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error.errors) return
     console.error('创建客户失败', error)
     ElMessage.error(error.message || '创建客户失败')

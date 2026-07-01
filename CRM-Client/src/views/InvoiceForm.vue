@@ -419,7 +419,7 @@ const handleSubmit = async () => {
     }
 
     router.push('/invoices')
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, isEditing.value ? '更新发票申请' : '创建发票申请')
   } finally {
     submitting.value = false

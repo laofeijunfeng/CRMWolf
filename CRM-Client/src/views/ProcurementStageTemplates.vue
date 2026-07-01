@@ -244,7 +244,7 @@ const fetchStageTemplates = async () => {
     stageTemplates.value = (data || []).sort((a: ProcurementStageTemplate, b: ProcurementStageTemplate) =>
       a.sort_order - b.sort_order
     )
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取阶段模板失败', error)
     ElMessage.error('获取阶段模板失败，请刷新页面或稍后重试')
   } finally {
@@ -256,7 +256,7 @@ const fetchImpactAssessment = async (templateId: number) => {
   try {
     const data = await procurementApi.assessTemplateChange(templateId) as any
     impactAssessment.value = data
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取影响评估失败', error)
   }
 }
@@ -331,7 +331,7 @@ const handleSubmit = async () => {
 
     drawerVisible.value = false
     await fetchStageTemplates()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('操作失败', error)
     if (error?.response?.data?.detail) {
       ElMessage.error(error.response.data.detail)
@@ -358,7 +358,7 @@ const handleDelete = async (row: ProcurementStageTemplate) => {
     await procurementApi.deleteStageTemplate(row.id)
     ElMessage.success('已删除，可以继续下一步操作')
     await fetchStageTemplates()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('删除失败', error)
       if (error?.response?.data?.detail) {

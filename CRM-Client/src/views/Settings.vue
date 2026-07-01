@@ -244,7 +244,7 @@ const changePasswordForm = reactive({
   confirmPassword: '',
 })
 
-const validateConfirmPassword = (rule: any, value: string, callback: any) => {
+const validateConfirmPassword = (rule: unknown, value: string, callback: (error?: Error) => void) => {
   if (value !== changePasswordForm.newPassword) {
     callback(new Error('两次输入的密码不一致'))
   } else {
