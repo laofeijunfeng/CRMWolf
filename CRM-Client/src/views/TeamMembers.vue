@@ -55,9 +55,18 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" fixed="right" width="160">
+          <el-table-column label="操作" fixed="right" width="200">
             <template #default="{ row }">
               <div class="action-buttons">
+                <el-button
+                  v-if="row.id !== currentUserId && isTeamAdmin"
+                  type="text"
+                  size="small"
+                  class="wolf-btn wolf-btn--text"
+                  @click="showResetPasswordDialog(row)"
+                >
+                  重置密码
+                </el-button>
                 <el-button
                   v-if="row.id !== currentUserId && isTeamAdmin"
                   type="text"
@@ -151,6 +160,44 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 重置密码对话框 -->
+    <el-dialog
+      v-model="resetPasswordVisible"
+      :title="`重置密码 - ${resetPasswordTargetUser?.name || ''}`"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="resetPasswordFormRef"
+        :model="resetPasswordForm"
+        :rules="resetPasswordRules"
+        label-width="80px"
+      >
+        <el-form-item label="新密码" prop="newPassword">
+          <el-input
+            v-model="resetPasswordForm.newPassword"
+            type="password"
+            placeholder="请输入新密码（6-50位）"
+            show-password
+          />
+        </el-form-item>
+        <el-form-item label="确认密码" prop="confirmPassword">
+          <el-input
+            v-model="resetPasswordForm.confirmPassword"
+            type="password"
+            placeholder="请再次输入新密码"
+            show-password
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetPasswordVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleResetPassword" :loading="resetPasswordLoading">
+          确认重置
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -158,6 +205,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { Plus, Refresh, Search, Loading } from '@element-plus/icons-vue'
 import { teamApi, type TeamMemberResponse, type TeamResponse, type RoleSimpleResponse } from '@/api/team'
 import userApi, { type UserSearchResult } from '@/api/user'
@@ -352,6 +400,64 @@ const handleSaveRoles = async () => {
     ElMessage.error(error.response?.data?.detail || '分配角色失败')
   } finally {
     saveRolesLoading.value = false
+  }
+}
+
+// 重置密码相关状态
+const resetPasswordVisible = ref(false)
+const resetPasswordLoading = ref(false)
+const resetPasswordFormRef = ref<FormInstance>()
+const resetPasswordTargetUser = ref<TeamMemberResponse | null>(null)
+
+const resetPasswordForm = reactive({
+  newPassword: '',
+  confirmPassword: '',
+})
+
+const validateResetConfirmPassword = (rule: any, value: string, callback: any) => {
+  if (value !== resetPasswordForm.newPassword) {
+    callback(new Error('两次输入的密码不一致'))
+  } else {
+    callback()
+  }
+}
+
+const resetPasswordRules: FormRules = {
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 6, max: 50, message: '密码长度为6-50个字符', trigger: 'blur' }
+  ],
+  confirmPassword: [
+    { required: true, message: '请确认新密码', trigger: 'blur' },
+    { validator: validateResetConfirmPassword, trigger: 'blur' }
+  ]
+}
+
+const showResetPasswordDialog = (member: TeamMemberResponse) => {
+  resetPasswordTargetUser.value = member
+  resetPasswordForm.newPassword = ''
+  resetPasswordForm.confirmPassword = ''
+  resetPasswordVisible.value = true
+}
+
+const handleResetPassword = async () => {
+  const valid = await resetPasswordFormRef.value?.validate().catch(() => false)
+  if (!valid || !resetPasswordTargetUser.value) return
+
+  resetPasswordLoading.value = true
+  try {
+    await teamApi.resetMemberPassword(
+      teamId.value!,
+      resetPasswordTargetUser.value.id,
+      { new_password: resetPasswordForm.newPassword }
+    )
+    ElMessage.success(`已重置 ${resetPasswordTargetUser.value.name} 的密码`)
+    resetPasswordVisible.value = false
+  } catch (error: any) {
+    console.error('重置密码失败', error)
+    ElMessage.error(error.response?.data?.detail || '重置密码失败')
+  } finally {
+    resetPasswordLoading.value = false
   }
 }
 
