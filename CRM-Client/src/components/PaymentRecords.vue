@@ -188,7 +188,7 @@ const handleUpdateRecord = async () => {
     editModalVisible.value = false
     fetchRecords()
     emit('record-updated')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('更新回款记录失败', error)
     ElMessage.error(error.response?.data?.detail || '更新失败')
   }
@@ -209,7 +209,7 @@ const deleteRecord = (record: PaymentRecordInfo) => {
       ElMessage.success('删除成功')
       fetchRecords()
       emit('record-updated')
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('删除回款记录失败', error)
       ElMessage.error(error.response?.data?.detail || '删除失败')
     }

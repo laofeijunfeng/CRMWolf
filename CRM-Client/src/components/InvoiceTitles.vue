@@ -159,7 +159,7 @@ const formRules = {
 const fetchInvoiceTitles = async () => {
   loading.value = true
   try {
-    const response = await invoiceApi.getInvoiceTitles(props.customerId) as any
+    const response = await invoiceApi.getInvoiceTitles(props.customerId)
     invoiceTitles.value = response.invoice_titles || []
   } catch (error) {
     console.error('获取开票抬头失败', error)
@@ -214,7 +214,7 @@ const handleSubmit = async () => {
     modalVisible.value = false
     fetchInvoiceTitles()
     emit('title-updated')
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error.response?.data?.detail) {
       ElMessage.error(error.response.data.detail)
     } else {
