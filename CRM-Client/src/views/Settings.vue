@@ -57,6 +57,12 @@
           <span class="item-desc">大模型服务参数设置</span>
           <el-icon class="item-arrow"><ArrowRight /></el-icon>
         </div>
+        <div v-if="canManageApprovalFlows" class="settings-item" @click="goToNotificationConfig">
+          <el-icon class="item-icon"><Bell /></el-icon>
+          <span class="item-text">通知配置</span>
+          <span class="item-desc">配置飞书群聊通知</span>
+          <el-icon class="item-arrow"><ArrowRight /></el-icon>
+        </div>
         <div v-if="canManageTeam" class="settings-item" @click="goToTeamMembers">
           <el-icon class="item-icon"><UserFilled /></el-icon>
           <span class="item-text">团队成员</span>
@@ -174,7 +180,7 @@ import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { showSuccess } from '@/utils/errorMessages'
-import { SwitchButton, User, UserFilled, Document, ShoppingCart, Cpu, ArrowRight, Key } from '@element-plus/icons-vue'
+import { SwitchButton, User, UserFilled, Document, ShoppingCart, Cpu, ArrowRight, Key, Bell } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
@@ -201,6 +207,7 @@ const goToApprovalFlows = () => router.push('/approval-flows')
 const goToProcurementMethods = () => router.push('/procurement-methods')
 const goToAIConfig = () => router.push('/ai-config')
 const goToTeamMembers = () => router.push('/team-members')
+const goToNotificationConfig = () => router.push('/notification-config')
 
 const myTimeline = useTimeline({
   useMyLogs: true,
