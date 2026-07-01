@@ -169,8 +169,8 @@ interface Props {
     current_step: number
     approval_steps: ApprovalStep[]
     status: string
-    flow?: any
-    records?: any[]
+    flow?: { id: number; flow_name: string; nodes: { id: number; node_order: number; node_name: string }[] }
+    records?: { id: number; node_id: number; approver_id: string; approver_name: string; action: string; comment?: string; created_time: string }[]
   }
   showHistoryOnly?: boolean
 }

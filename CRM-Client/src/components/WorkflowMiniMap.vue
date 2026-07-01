@@ -108,7 +108,7 @@ interface Props {
 defineProps<Props>()
 
 const emit = defineEmits<{
-  confirm: [params?: any]
+  confirm: [params?: unknown]
   cancel: []
   selectAlternative: [id: number]
   undoLast: []
@@ -120,7 +120,7 @@ function connectorClass(status: string): string {
   return 'pending'
 }
 
-function handleConfirm(params?: any) {
+function handleConfirm(params?: unknown) {
   emit('confirm', params)
 }
 

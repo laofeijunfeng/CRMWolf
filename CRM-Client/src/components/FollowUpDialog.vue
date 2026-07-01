@@ -197,7 +197,7 @@ const handleParse = async () => {
     }
 
     stage.value = 'confirm'
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || '解析失败')
   } finally {
     loading.value = false
@@ -222,7 +222,7 @@ const handleExecute = async () => {
     if (response.success) {
       emit('refresh')
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     executeSuccess.value = false
     executeMessage.value = error.response?.data?.detail || '执行失败'
     stage.value = 'result'

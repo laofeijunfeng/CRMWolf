@@ -65,14 +65,14 @@ const rejecting = ref(false)
 const cancelling = ref(false)
 const approvalDetail = ref<TransformedApprovalDetail | null>(null)
 
-const handleTimelineApprove = async (_step: any) => {
+const handleTimelineApprove = async (_step: { id: number }) => {
   approving.value = true
   try {
     await approvalApi.approveContract(props.contractId, { action: 'APPROVE', comment: '' })
     ElMessage.success('审批通过')
     emit('status-updated')
     await fetchApprovalDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('审批失败', error)
     ElMessage.error(error.response?.data?.detail || '审批失败')
   } finally {
@@ -80,7 +80,7 @@ const handleTimelineApprove = async (_step: any) => {
   }
 }
 
-const handleTimelineReject = async (_step: any, reason: string) => {
+const handleTimelineReject = async (_step: { id: number }, reason: string) => {
   rejecting.value = true
   try {
     await approvalApi.approveContract(props.contractId, { 
@@ -90,7 +90,7 @@ const handleTimelineReject = async (_step: any, reason: string) => {
     ElMessage.success('已拒绝，合同已退回草稿状态')
     emit('status-updated', 'DRAFT')
     approvalDetail.value = null
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('拒绝审批失败', error)
     ElMessage.error(error.response?.data?.detail || '拒绝审批失败')
   } finally {
@@ -116,12 +116,35 @@ interface ApprovalStepInfo {
   comment?: string
 }
 
+interface ApprovalFlowInfo {
+  id: number
+  flow_name: string
+  nodes: ApprovalNodeInfo[]
+}
+
+interface ApprovalNodeInfo {
+  id: number
+  node_order: number
+  node_name: string
+  node_code: string
+}
+
+interface ApprovalRecordInfo {
+  id: number
+  node_id: number
+  approver_id: string
+  approver_name: string
+  action: string
+  comment?: string
+  created_time: string
+}
+
 interface TransformedApprovalDetail {
   current_step: number
   approval_steps: ApprovalStepInfo[]
   status: string
-  flow: any
-  records: any[]
+  flow: ApprovalFlowInfo
+  records: ApprovalRecordInfo[]
 }
 
 const canSubmitApproval = computed(() => {
@@ -137,19 +160,21 @@ const isFinalStatus = computed(() => {
   return ['SIGNED', 'EFFECTIVE', 'EXPIRED', 'TERMINATED'].includes(props.contractStatus)
 })
 
-const transformApprovalData = (apiData: any): TransformedApprovalDetail | null => {
+const transformApprovalData = (apiData: unknown): TransformedApprovalDetail | null => {
   if (!apiData) return null
-  
+
+  const data = apiData as { status?: string; flow?: ApprovalFlowInfo; records?: ApprovalRecordInfo[] }
+
   const transformed: TransformedApprovalDetail = {
     current_step: 0,
     approval_steps: [],
-    status: apiData.status,
-    flow: apiData.flow,
-    records: apiData.records || []
+    status: data.status || '',
+    flow: data.flow || { id: 0, flow_name: '', nodes: [] },
+    records: data.records || []
   }
-  
-  if (apiData.flow && apiData.flow.nodes) {
-    transformed.approval_steps = apiData.flow.nodes.map((node: any): ApprovalStepInfo => ({
+
+  if (data.flow && data.flow.nodes) {
+    transformed.approval_steps = data.flow.nodes.map((node: ApprovalNodeInfo): ApprovalStepInfo => ({
       step_order: node.node_order,
       step_name: node.node_name,
       node_code: node.node_code,
@@ -168,8 +193,8 @@ const transformApprovalData = (apiData: any): TransformedApprovalDetail | null =
     }
   }
   
-  if (apiData.records) {
-    apiData.records.forEach((record: any) => {
+  if (data.records) {
+    data.records.forEach((record: ApprovalRecordInfo) => {
       const stepIndex = transformed.approval_steps.findIndex(
         (step) => step.node_id === record.node_id
       )
@@ -233,11 +258,12 @@ const fetchApprovalDetail = async () => {
 
   loading.value = true
   try {
-    const data = await approvalApi.getContractApprovalDetail(props.contractId) as any
+    const data = await approvalApi.getContractApprovalDetail(props.contractId)
     approvalDetail.value = transformApprovalData(data)
-  } catch (error: any) {
-    console.log('审批详情:', error.response?.status)
-    if (error.response?.status === 404) {
+  } catch (error: unknown) {
+    const axiosError = error as { response?: { status?: number } }
+    console.log('审批详情:', axiosError.response?.status)
+    if (axiosError.response?.status === 404) {
       approvalDetail.value = null
     } else {
       console.error('获取审批详情失败', error)
@@ -253,14 +279,15 @@ const handleSubmitApproval = async () => {
     await approvalApi.submitContractApproval(props.contractId, { comment: '' })
     ElMessage.success('提交成功，已进入审批流程')
     emit('status-updated', 'PENDING_REVIEW')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('提交审批失败', error)
-    if (error.response?.data?.errors) {
-      const validationErrors = error.response.data.errors
-      const errorMessages = validationErrors.map((e: any) => e.msg || e.message).join('; ')
+    const axiosError = error as { response?: { data?: { errors?: { msg?: string; message?: string }[]; detail?: string } } }
+    if (axiosError.response?.data?.errors) {
+      const validationErrors = axiosError.response.data.errors
+      const errorMessages = validationErrors.map(e => e.msg || e.message).join('; ')
       ElMessage.error(`提交审批失败: ${errorMessages}`)
     } else {
-      ElMessage.error(error.response?.data?.detail || '提交审批失败')
+      ElMessage.error(axiosError.response?.data?.detail || '提交审批失败')
     }
   } finally {
     submitting.value = false
@@ -283,7 +310,7 @@ const handleCancel = () => {
       ElMessage.success('已撤回审批')
       emit('status-updated', 'DRAFT')
       approvalDetail.value = null
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('撤回审批失败', error)
       ElMessage.error(error.response?.data?.detail || '撤回审批失败')
     } finally {

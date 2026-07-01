@@ -416,7 +416,7 @@ const handleCreate = async () => {
     } else {
       ElMessage.error('创建失败')
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.message || '创建失败')
   } finally {
     isCreating.value = false

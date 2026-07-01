@@ -275,7 +275,7 @@ const editableFields = computed(() => {
     label: string
     type: string
     placeholder?: string
-    options?: Array<{ label: string; value: any }>
+    options?: { label: string; value: unknown }[]
   }> = []
 
   for (const [key, value] of Object.entries(props.params)) {
@@ -326,7 +326,7 @@ function getParamLabel(key: string): string {
   return PARAM_LABEL_MAP[key] || key
 }
 
-function formatParamValue(key: string, value: any): string {
+function formatParamValue(key: string, value: unknown): string {
   if (value === null || value === undefined) {
     return '未设置'
   }
