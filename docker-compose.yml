@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # 后端 API 服务
   backend:
@@ -9,7 +7,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # 数据库配置（使用同网络容器名访问）
       DB_HOST: mysql8
       DB_PORT: 3306
       DB_USER: root
@@ -21,7 +18,6 @@ services:
       REDIS_PASSWORD: ""
       REDIS_DB: 5
       CRM_DEBUG: ${CRM_DEBUG:-false}
-      # 邮件配置（可选）
       SMTP_PROVIDER: ${SMTP_PROVIDER:-console}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-465}
@@ -39,10 +35,6 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
-    volumes:
-      # SSL证书挂载（将证书文件放在 ./ssl/ 目录）
-      - ./ssl:/etc/nginx/ssl:ro
     depends_on:
       - backend
 
