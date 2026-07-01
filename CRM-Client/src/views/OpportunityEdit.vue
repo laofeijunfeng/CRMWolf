@@ -166,9 +166,10 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
+import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { opportunityApi, PurchaseType, LicenseType, type Opportunity } from '@/api/opportunity'
-import customerApi from '@/api/customer'
+import customerApi, { type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
 import procurementApi, { type ProcurementMethod } from '@/api/procurement'
 import { useUserStore } from '@/stores/user'
 
@@ -180,8 +181,8 @@ const formRef = ref()
 const loading = ref(false)
 const submitting = ref(false)
 const customerLoading = ref(false)
-const customerOptions = ref<any[]>([])
-const customerInfo = ref<any>(null)
+const customerOptions = ref<CustomerResponse[]>([])
+const customerInfo = ref<CustomerDetailResponse | null>(null)
 const procurementMethods = ref<ProcurementMethod[]>([])
 
 const fromCustomer = computed(() => !!route.params.customerId)
