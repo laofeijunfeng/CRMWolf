@@ -284,6 +284,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'notification-config',
+        name: 'NotificationConfig',
+        component: () => import('@/views/NotificationConfig.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'team-members',
         name: 'TeamMembers',
         component: () => import('@/views/TeamMembers.vue'),
