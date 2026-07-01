@@ -171,7 +171,7 @@
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { showSuccess } from '@/utils/errorMessages'
 import { SwitchButton, User, UserFilled, Document, ShoppingCart, Cpu, ArrowRight, Key } from '@element-plus/icons-vue'
@@ -285,8 +285,9 @@ const handleChangePassword = async () => {
     })
     showSuccess('密码修改成功')
     changePasswordVisible.value = false
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('修改密码失败', error)
+    ElMessage.error('密码修改失败，请检查旧密码是否正确')
   } finally {
     changePasswordLoading.value = false
   }
