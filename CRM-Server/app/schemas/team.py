@@ -83,3 +83,13 @@ class TeamWithMembersResponse(TeamResponse):
 class UserTeamsListResponse(BaseModel):
     teams: List[TeamResponse]
     current_team_id: Optional[int] = Field(None, description="当前活跃团队ID")
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置成员密码请求"""
+    new_password: str = Field(
+        ...,
+        min_length=6,
+        max_length=50,
+        description="新密码（6-50位）"
+    )
