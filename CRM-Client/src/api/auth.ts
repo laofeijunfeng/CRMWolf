@@ -67,6 +67,11 @@ export interface PermissionResponse {
   description?: string
 }
 
+export interface ChangePasswordRequest {
+  old_password: string
+  new_password: string
+}
+
 export const authApi = {
   // 发送验证码
   sendCode: (params: SendCodeParams) => {
@@ -106,5 +111,10 @@ export const authApi = {
   // 获取当前用户权限
   getUserPermissions: (useCache = true) => {
     return request.get<{ permissions: PermissionResponse[], total: number, cached: boolean }>('/v1/auth/me/permissions', { params: { use_cache: useCache } })
+  },
+
+  // 修改密码
+  changePassword: (data: ChangePasswordRequest) => {
+    return request.post<{ message: string }>('/v1/auth/me/change-password', data)
   }
 }
