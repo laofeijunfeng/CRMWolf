@@ -150,11 +150,11 @@ const loading = ref(false)
 const submitting = ref(false)
 
 const form = ref({
-  plans: [] as Array<{
+  plans: [] as {
     stage_name: string
     planned_amount: number
     due_date: string
-  }>
+  }[]
 })
 
 const totalPlannedAmount = computed(() => {

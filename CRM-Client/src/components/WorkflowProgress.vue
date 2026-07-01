@@ -120,14 +120,14 @@ const currentStepId = ref<string>('')
 const statusClass = ref<string>('')
 const statusText = ref<string>('')
 
-const steps = ref<Array<{
+const steps = ref<{
   step_id: string
   description: string
   success?: boolean
   error?: boolean
   waiting?: boolean
   message?: string
-}>>([])
+}[]>([])
 
 const waitingForUser = ref<boolean>(false)
 const pendingQuestion = ref<string>('')

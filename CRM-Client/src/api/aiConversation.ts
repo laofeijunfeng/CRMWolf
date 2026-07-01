@@ -42,12 +42,12 @@ export interface ConversationDetail {
   actionType: string
   entityType: string | null
   entityId: number | null
-  messages: Array<{
+  messages: {
     role: 'user' | 'assistant'
     content: string
     timestamp: string
     execution_steps?: ExecutionStep[]
-  }>
+  }[]
   createdAt: string
   updatedAt: string
 }
@@ -74,12 +74,12 @@ export interface HistoryListParams {
 /** 创建对话请求参数 */
 export interface ConversationCreateParams {
   title: string
-  messages: Array<{
+  messages: {
     role: 'user' | 'assistant'
     content: string
     timestamp: string
     execution_steps?: ExecutionStep[]
-  }>
+  }[]
   action_type?: string | undefined
   entity_type?: string | undefined
   entity_id?: number | undefined
@@ -128,9 +128,9 @@ export async function update(id: number, params: ConversationCreateParams): Prom
 export async function getHistory(params: HistoryListParams = {}): Promise<HistoryListResponse> {
   const response = await request.get<{
     groups: {
-      today: Array<Record<string, unknown>>
-      yesterday: Array<Record<string, unknown>>
-      earlier: Array<Record<string, unknown>>
+      today: Record<string, unknown>[]
+      yesterday: Record<string, unknown>[]
+      earlier: Record<string, unknown>[]
     }
     total: number
   }>(
@@ -170,7 +170,7 @@ export async function deleteConversation(id: number): Promise<void> {
  * 搜索对话
  */
 export async function search(keyword: string): Promise<ConversationHistory[]> {
-  const response = await request.get<Array<Record<string, unknown>>>(
+  const response = await request.get<Record<string, unknown>[]>(
     '/v1/assistant/conversations/search',
     { params: { keyword } }
   )

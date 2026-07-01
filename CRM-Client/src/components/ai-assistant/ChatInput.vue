@@ -47,9 +47,7 @@ const props = defineProps({
 
 // ========== Emits ==========
 
-const emit = defineEmits<{
-  (e: 'send', message: string): void
-}>()
+const emit = defineEmits<(e: 'send', message: string) => void>()
 
 // ========== State ==========
 

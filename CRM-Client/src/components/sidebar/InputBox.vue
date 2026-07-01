@@ -100,9 +100,9 @@ const props = withDefaults(defineProps<{
   /** 是否加载中 */
   isLoading?: boolean
   /** 快捷指令列表 */
-  quickCommands?: Array<{ command: string; description: string }>
+  quickCommands?: { command: string; description: string }[]
   /** 动态提示列表 */
-  hints?: Array<{ command: string; description: string }>
+  hints?: { command: string; description: string }[]
 }>(), {
   entityName: '',
   entityTypeText: '',

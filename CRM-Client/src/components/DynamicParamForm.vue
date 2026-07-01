@@ -103,7 +103,7 @@ interface ParamDefinition {
   required: boolean
   placeholder: string
   default_value?: string
-  options?: Array<{ value: string; label: string }>
+  options?: { value: string; label: string }[]
 }
 
 interface Props {
@@ -160,7 +160,7 @@ const initFormModel = () => {
 
 // 生成验证规则
 const formRules = computed(() => {
-  const rules: Record<string, Array<{ required: boolean; message: string; trigger: string }>> = {}
+  const rules: Record<string, { required: boolean; message: string; trigger: string }[]> = {}
   for (const paramName in props.paramDefinitions) {
     const def = props.paramDefinitions[paramName]
     if (def && def.required) {

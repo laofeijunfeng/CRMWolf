@@ -65,9 +65,7 @@
 <script setup lang="ts">
 // ========== Emits ==========
 
-const emit = defineEmits<{
-  (e: 'quick-action', action: string): void
-}>()
+const emit = defineEmits<(e: 'quick-action', action: string) => void>()
 
 // ========== Data ==========
 

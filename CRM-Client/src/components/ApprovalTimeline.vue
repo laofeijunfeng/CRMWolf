@@ -153,13 +153,13 @@ interface ApprovalStep {
   step_name: string
   node_code?: string
   node_id?: number
-  approvers: Array<{
+  approvers: {
     approver_id: string
     approver_name: string
     approved_at?: string
     rejected_at?: string
     comment?: string
-  }>
+  }[]
   completed_at?: string
   comment?: string
 }

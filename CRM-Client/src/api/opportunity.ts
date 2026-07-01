@@ -52,7 +52,7 @@ export interface Opportunity {
     id: number
     code: string
     name: string
-    stages?: Array<{
+    stages?: {
       id: number
       stage_code: string
       stage_name: string
@@ -60,7 +60,7 @@ export interface Opportunity {
       sort_order: number
       is_default_start: boolean
       can_skip: boolean
-    }>
+    }[]
   }
   total_amount: number
   user_count: number

@@ -378,7 +378,7 @@ interface ApprovalDetailFromAPI {
     id: number
     flow_name: string
     flow_code: string
-    nodes: Array<{
+    nodes: {
       id: number
       flow_id: number
       node_name: string
@@ -387,10 +387,10 @@ interface ApprovalDetailFromAPI {
       description: string
       approve_role: string
       is_required: number
-    }>
+    }[]
   }
   current_node_id: number
-  records: Array<{
+  records: {
     id: number
     approval_id: number
     node_id: number
@@ -400,24 +400,24 @@ interface ApprovalDetailFromAPI {
     action: string
     comment: string | null
     created_time: string
-  }>
+  }[]
 }
 
 interface TransformedApprovalDetail {
   current_step: number
-  approval_steps: Array<{
+  approval_steps: {
     step_order: number
     step_name: string
     approver_role: string
     status: string
-    approval_records: Array<{
+    approval_records: {
       approver_id: string
       approver_name?: string
       action: string
       created_time: string
       comment?: string
-    }>
-  }>
+    }[]
+  }[]
   status: string
   submitter_name?: string
   submitted_at?: string

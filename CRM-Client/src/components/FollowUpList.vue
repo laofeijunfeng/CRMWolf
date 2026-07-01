@@ -102,9 +102,7 @@ interface Props {
   currentUserId?: string
 }
 
-interface Emits {
-  (e: 'delete', followUp: FollowUp): void
-}
+type Emits = (e: 'delete', followUp: FollowUp) => void
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()

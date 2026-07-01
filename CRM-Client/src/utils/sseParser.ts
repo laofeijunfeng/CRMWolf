@@ -74,12 +74,12 @@ export interface SSEEvent {
     data?: unknown
   }
   /** 前几轮执行结果 */
-  previous_results?: Array<{
+  previous_results?: {
     tool: string
     success: boolean
     message?: string
     data?: unknown
-  }>
+  }[]
 
   // ========== Workflow 相关字段 ==========
 

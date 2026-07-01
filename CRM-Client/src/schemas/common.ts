@@ -22,7 +22,7 @@ export const PaginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema: T) =
     pageSize: z.number().int().positive()
   })
 
-export type PaginatedResponse<T> = {
+export interface PaginatedResponse<T> {
   data: T[]
   total: number
   page: number

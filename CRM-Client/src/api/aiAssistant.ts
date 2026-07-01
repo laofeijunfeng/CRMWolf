@@ -90,19 +90,19 @@ export interface ContextSummary {
   entity_type: string
   entity_id: number
   basic_info: Record<string, unknown>
-  related_entities: Array<{
+  related_entities: {
     type: string
     id: number
     name: string
     status?: string
     amount?: number
-  }>
-  recent_activities: Array<{
+  }[]
+  recent_activities: {
     type: string
     content?: string
     method?: string
     date?: string
-  }>
+  }[]
 }
 
 export interface AIAssistantSSEEvent {

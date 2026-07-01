@@ -50,14 +50,14 @@ export interface ProcurementAICreateResult {
       code: string
       description?: string
     }
-    stages: Array<{
+    stages: {
       id: number
       stage_name: string
       template_code: string
       win_probability: number
       sort_order: number
       is_default_start: boolean
-    }>
+    }[]
   }
 }
 

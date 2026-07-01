@@ -8,7 +8,7 @@ export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserResponse | null>(null)
 
   // 用户角色类型定义
-  type UserRole = { id: number; name: string; code: string }
+  interface UserRole { id: number; name: string; code: string }
   const loading = ref(false)
 
   const setToken = (newToken: string) => {

@@ -125,12 +125,12 @@ export interface ExecutionStep {
   riskLevel?: 'low' | 'medium' | 'high'
 
   /** 候选列表（V2 格式） */
-  options?: Array<{
+  options?: {
     id: number
     name: string
     entity_info_inline?: string
     entity_info_detail?: Record<string, string>
-  }>
+  }[]
 }
 
 /**

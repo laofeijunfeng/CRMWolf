@@ -366,7 +366,7 @@ const handleDelete = (record: UserResponse) => {
 
 const fetchAllRoles = async () => {
   try {
-    const data = await
+    const data = await roleApi.getRoles()
     allRoles.value = data
   } catch (error: unknown) {
     console.error('获取角色列表失败', error)

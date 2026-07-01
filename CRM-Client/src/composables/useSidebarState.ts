@@ -198,7 +198,7 @@ export function useSidebarState() {
    * @param count - 获取数量（默认最近10条）
    * @returns 状态转换事件数组
    */
-  function getRecentTransitions(count: number = 10): StateTransitionEvent[] {
+  function getRecentTransitions(count = 10): StateTransitionEvent[] {
     return transitionHistory.value.slice(-count)
   }
 

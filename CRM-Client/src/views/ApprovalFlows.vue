@@ -239,7 +239,7 @@ const fetchApprovalFlows = async () => {
       params.is_active = filterStatus.value
     }
 
-    const data = await
+    const data = await approvalFlowApi.getApprovalFlows(params)
 
     let flows = Array.isArray(data) ? data : []
 
@@ -289,7 +289,7 @@ const handleCreate = () => {
 
 const handleView = async (flow: ApprovalFlowDetail) => {
   try {
-    const data = await
+    const data = await approvalFlowApi.getApprovalFlowDetail(flow.id)
     currentFlow.value = data
     detailVisible.value = true
   } catch (error: unknown) {

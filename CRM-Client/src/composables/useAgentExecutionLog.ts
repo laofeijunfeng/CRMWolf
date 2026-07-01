@@ -623,7 +623,7 @@ export function useAgentExecutionLog() {
    *
    * @param executionSteps - 从 Store 获取的执行步骤数组（timestamp 可能是 string）
    */
-  function setStepsDirectly(executionSteps: Array<{
+  function setStepsDirectly(executionSteps: {
     id: string
     type: string
     title: string
@@ -645,13 +645,13 @@ export function useAgentExecutionLog() {
     detail_params?: Record<string, { value: string; isEntity?: boolean }>
     confirmationType?: 'disambiguation' | 'confirmation' | 'info_gap'
     riskLevel?: 'low' | 'medium' | 'high'
-    options?: Array<{
+    options?: {
       id: number
       name: string
       entity_info_inline?: string
       entity_info_detail?: Record<string, string>
-    }>
-  }>): void {
+    }[]
+  }[]): void {
     console.log('[AgentExecutionLog] setStepsDirectly - INPUT:', {
       stepsCount: executionSteps.length,
       firstStep: executionSteps[0]?.title || 'NO FIRST STEP',

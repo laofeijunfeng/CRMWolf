@@ -225,7 +225,7 @@ const fetchRoles = async () => {
       limit: pagination.pageSize
     }
 
-    const data = await
+    const data = await roleApi.getRoles(params)
     tableData.value = data
     pagination.total = data.length
   } catch (error: unknown) {

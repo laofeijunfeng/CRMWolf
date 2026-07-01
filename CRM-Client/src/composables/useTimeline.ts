@@ -98,7 +98,7 @@ export function useTimeline(options: UseTimelineOptions = {}) {
     return result
   })
 
-  const fetchLogs = async (page: number = 1, append: boolean = false) => {
+  const fetchLogs = async (page = 1, append = false) => {
     if (loading.value) return
 
     loading.value = true

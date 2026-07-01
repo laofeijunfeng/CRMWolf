@@ -270,13 +270,13 @@ const displayParams = computed(() => {
 
 // 可编辑字段配置
 const editableFields = computed(() => {
-  const fields: Array<{
+  const fields: {
     key: string
     label: string
     type: string
     placeholder?: string
     options?: { label: string; value: unknown }[]
-  }> = []
+  }[] = []
 
   for (const [key, value] of Object.entries(props.params)) {
     // 确定字段类型

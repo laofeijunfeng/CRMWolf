@@ -382,7 +382,7 @@ const customerApi = {
     return request.get<CustomerStatistics>('/v1/customers/statistics/summary')
   },
 
-  getTrend: (days: number = 30) => {
+  getTrend: (days = 30) => {
     return request.get<CustomerTrend[]>('/v1/customers/statistics/trend', {
       params: { days }
     })

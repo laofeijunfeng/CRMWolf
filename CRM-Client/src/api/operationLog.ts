@@ -23,9 +23,7 @@ export type EventType =
 
 export type EventAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'STATUS_CHANGE'
 
-export interface OperationLogContent {
-  [key: string]: unknown
-}
+export type OperationLogContent = Record<string, unknown>;
 
 export interface OperationLog {
   id: number

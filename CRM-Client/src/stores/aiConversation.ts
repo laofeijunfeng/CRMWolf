@@ -92,7 +92,7 @@ export const useAIConversationStore = defineStore('aiConversation', () => {
   /**
    * 获取历史对话列表
    */
-  async function fetchHistory(page: number = 1): Promise<void> {
+  async function fetchHistory(page = 1): Promise<void> {
     loading.value = true
     try {
       const response = await aiConversationApi.getHistory({
