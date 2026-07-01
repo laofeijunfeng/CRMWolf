@@ -8,6 +8,7 @@ from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.contract import contract_crud
 from app.crud.approval import approval_flow_crud, approval_crud
 from app.crud.role import role_crud
+from app.crud.user import user_crud
 from app.models.approval import ApprovalStatus, ApprovalAction
 from app.models.contract import ContractStatus
 from app.schemas.approval import (
@@ -15,6 +16,7 @@ from app.schemas.approval import (
     ApprovalSubmitRequest, ApprovalActionRequest, ApprovalDetailResponse, ApprovalListResponse,
     ApprovalRecordResponse, MessageResponse
 )
+from app.services.notification import notification_service_factory
 
 
 router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
@@ -282,18 +284,20 @@ async def submit_contract_approval(
             str(current_user.id),
             current_user.name
         )
-        
-        from app.services.feishu import feishu_service
+
+        notification_service = notification_service_factory(db, team_id)
         if approval.current_node:
             approvers = get_approvers_by_role(db, approval.current_node.approve_role)
             for approver in approvers:
-                await feishu_service.notify_approval_pending(
-                    approver.feishu_open_id,
-                    contract.contract_name,
-                    flow.flow_name,
-                    approval.current_node.node_name
+                await notification_service.notify_approval_pending(
+                    contract_name=contract.contract_name,
+                    flow_name=flow.flow_name,
+                    node_name=approval.current_node.node_name,
+                    approver_open_id=approver.feishu_open_id or "",
+                    approver_name=approver.name,
+                    contract_id=contract_id
                 )
-        
+
         db.refresh(approval)
         return approval
         
@@ -393,31 +397,41 @@ async def approve_contract(
             str(current_user.id),
             current_user.name
         )
-        
-        from app.services.feishu import feishu_service
-        
+
+        notification_service = notification_service_factory(db, team_id)
+
         if action_request.action.value == ApprovalAction.APPROVE:
             if approval.status == ApprovalStatus.APPROVED:
-                await feishu_service.notify_approval_approved(
-                    approval.submitter_id,
-                    contract.contract_name
+                # 获取提交人的 feishu_open_id
+                submitter = user_crud.get_by_id(db, int(approval.submitter_id))
+                submitter_open_id = submitter.feishu_open_id if submitter else ""
+                await notification_service.notify_approval_approved(
+                    submitter_open_id=submitter_open_id,
+                    contract_name=contract.contract_name,
+                    contract_id=contract_id
                 )
             elif approval.current_node:
                 approvers = get_approvers_by_role(db, approval.current_node.approve_role)
                 for approver in approvers:
-                    await feishu_service.notify_approval_pending(
-                        approver.feishu_open_id,
-                        contract.contract_name,
-                        approval.flow.flow_name if approval.flow else "",
-                        approval.current_node.node_name
+                    await notification_service.notify_approval_pending(
+                        contract_name=contract.contract_name,
+                        flow_name=approval.flow.flow_name if approval.flow else "",
+                        node_name=approval.current_node.node_name,
+                        approver_open_id=approver.feishu_open_id or "",
+                        approver_name=approver.name,
+                        contract_id=contract_id
                     )
         elif action_request.action.value == ApprovalAction.REJECT:
-            await feishu_service.notify_approval_rejected(
-                approval.submitter_id,
-                contract.contract_name,
-                action_request.comment or "无"
+            # 获取提交人的 feishu_open_id
+            submitter = user_crud.get_by_id(db, int(approval.submitter_id))
+            submitter_open_id = submitter.feishu_open_id if submitter else ""
+            await notification_service.notify_approval_rejected(
+                submitter_open_id=submitter_open_id,
+                contract_name=contract.contract_name,
+                reject_reason=action_request.comment or "无",
+                contract_id=contract_id
             )
-        
+
         db.refresh(approval)
         return approval
         

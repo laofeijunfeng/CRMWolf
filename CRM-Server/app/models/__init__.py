@@ -19,6 +19,7 @@ from app.models.conversation_log import ConversationLog
 from app.models.ai_skill import AISkill, AISkillAction, AICRUDMapping, AIEnumMapping
 from app.models.email_verification_code import EmailVerificationCode, VerificationPurpose
 from app.models.ai_conversation_history import AIConversationHistory
+from app.models.system_config import SystemConfig, ConfigType
 
 __all__ = [
     "User", "UserStatus",
@@ -42,5 +43,6 @@ __all__ = [
     "ConversationLog",
     "AISkill", "AISkillAction", "AICRUDMapping", "AIEnumMapping",
     "EmailVerificationCode", "VerificationPurpose",
-    "AIConversationHistory"
+    "AIConversationHistory",
+    "SystemConfig", "ConfigType"
 ]

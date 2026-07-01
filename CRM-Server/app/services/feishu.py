@@ -1,9 +1,11 @@
+import logging
 import httpx
 from typing import Optional, Dict, Any
 from app.core.config import get_settings
 from app.schemas.user import FeishuTokenResponse, FeishuUserInfo
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 class FeishuService:
@@ -440,8 +442,222 @@ class FeishuService:
 **拒绝原因**: {reject_reason}
 
 请根据审批意见修改后重新提交。"""
-        
+
         return await self.send_message_card(user_id, title, content)
+
+    # ========== Webhook 群聊通知方法 ==========
+
+    async def send_webhook_message(
+        self,
+        webhook_url: str,
+        title: str,
+        content: str,
+        button_url: Optional[str] = None
+    ) -> bool:
+        """通过飞书群聊机器人 Webhook 发送消息卡片
+
+        Args:
+            webhook_url: 飞书群聊机器人 Webhook URL
+            title: 消息卡片标题
+            content: 消息卡片内容（支持 lark_md 格式）
+            button_url: 可选按钮跳转链接
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        try:
+            elements = [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": content
+                    }
+                }
+            ]
+
+            # 添加按钮（如果有）
+            if button_url:
+                elements.append({
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": "查看详情"
+                            },
+                            "url": button_url,
+                            "type": "primary"
+                        }
+                    ]
+                })
+
+            card = {
+                "config": {
+                    "wide_screen_mode": True
+                },
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": title
+                    },
+                    "template": "blue"
+                },
+                "elements": elements
+            }
+
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    webhook_url,
+                    json={
+                        "msg_type": "interactive",
+                        "card": card
+                    },
+                    headers={
+                        "Content-Type": "application/json"
+                    },
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                if data.get("code") != 0:
+                    logger.warning(f"飞书 Webhook 发送失败: {data.get('msg')}")
+                    return False
+
+                return True
+        except Exception as e:
+            logger.error(f"飞书 Webhook 发送异常: {str(e)}")
+            return False
+
+    async def notify_approval_webhook(
+        self,
+        webhook_url: str,
+        contract_name: str,
+        flow_name: str,
+        node_name: str,
+        approver_name: str,
+        contract_id: int
+    ) -> bool:
+        """通过 Webhook 发送审批待处理通知
+
+        Args:
+            webhook_url: 飞书群聊机器人 Webhook URL
+            contract_name: 合同名称
+            flow_name: 审批流程名称
+            node_name: 当前审批节点名称
+            approver_name: 审批人姓名
+            contract_id: 合同 ID（用于生成跳转链接）
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        title = "📋 新的合同审批待处理"
+        content = f"""您有一个新的合同审批需要处理
+
+**合同名称**: {contract_name}
+**审批流程**: {flow_name}
+**当前节点**: {node_name}
+**审批人**: {approver_name}
+
+请及时处理，避免影响业务进度。"""
+
+        # 构造合同详情页跳转链接
+        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
+        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+
+        return await self.send_webhook_message(webhook_url, title, content, button_url)
+
+    async def notify_approval_approved_webhook(
+        self,
+        webhook_url: str,
+        contract_name: str,
+        contract_id: int
+    ) -> bool:
+        """通过 Webhook 发送审批通过通知
+
+        Args:
+            webhook_url: 飞书群聊机器人 Webhook URL
+            contract_name: 合同名称
+            contract_id: 合同 ID（用于生成跳转链接）
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        title = "✅ 合同审批已通过"
+        content = f"""您的合同审批已全部通过
+
+**合同名称**: {contract_name}
+
+合同状态已更新为"已签署"，可以进行后续操作。"""
+
+        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
+        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+
+        return await self.send_webhook_message(webhook_url, title, content, button_url)
+
+    async def notify_approval_rejected_webhook(
+        self,
+        webhook_url: str,
+        contract_name: str,
+        reject_reason: str,
+        contract_id: int
+    ) -> bool:
+        """通过 Webhook 发送审批拒绝通知
+
+        Args:
+            webhook_url: 飞书群聊机器人 Webhook URL
+            contract_name: 合同名称
+            reject_reason: 拒绝原因
+            contract_id: 合同 ID（用于生成跳转链接）
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        title = "❌ 合同审批被拒绝"
+        content = f"""您的合同审批被拒绝
+
+**合同名称**: {contract_name}
+**拒绝原因**: {reject_reason}
+
+请根据审批意见修改后重新提交。"""
+
+        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
+        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+
+        return await self.send_webhook_message(webhook_url, title, content, button_url)
+
+    async def notify_approval_cancelled_webhook(
+        self,
+        webhook_url: str,
+        contract_name: str,
+        submitter_name: str,
+        contract_id: int
+    ) -> bool:
+        """通过 Webhook 发送审批撤回通知
+
+        Args:
+            webhook_url: 飞书群聊机器人 Webhook URL
+            contract_name: 合同名称
+            submitter_name: 撤回人姓名
+            contract_id: 合同 ID（用于生成跳转链接）
+
+        Returns:
+            bool: 发送成功返回 True，失败返回 False
+        """
+        title = "🔄 审批已撤回"
+        content = f"""审批任务已取消
+
+**合同名称**: {contract_name}
+**撤回人**: {submitter_name}
+
+提交人已撤回审批，您无需继续处理此审批任务。"""
+
+        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
+        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+
+        return await self.send_webhook_message(webhook_url, title, content, button_url)
 
 
 feishu_service = FeishuService()
