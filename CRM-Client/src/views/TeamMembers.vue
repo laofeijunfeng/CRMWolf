@@ -320,7 +320,7 @@ const handleInviteUser = async (user: UserSearchResult) => {
     ElMessage.success(`${user.name} 已加入团队`)
     inviteDialogVisible.value = false
     fetchMembers()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('邀请失败', error)
     ElMessage.error(error.response?.data?.detail || '邀请失败')
   }
@@ -336,7 +336,7 @@ const handleRemoveMember = (member: TeamMemberResponse) => {
       await teamApi.removeMember(teamId.value!, member.id.toString()) as any
       ElMessage.success('成员已移除')
       fetchMembers()
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('移除失败', error)
       ElMessage.error(error.response?.data?.detail || '移除失败')
     }
@@ -349,7 +349,7 @@ const handleRegenerateCode = async () => {
     const response = await teamApi.regenerateInviteCode(teamId.value!) as any
     team.value = { ...team.value!, code: response.code }
     ElMessage.success('邀请码已重置')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('重置失败', error)
     ElMessage.error(error.response?.data?.detail || '重置失败')
   } finally {
@@ -395,7 +395,7 @@ const handleSaveRoles = async () => {
     ElMessage.success('角色已分配')
     roleDialogVisible.value = false
     fetchMembers()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('分配角色失败', error)
     ElMessage.error(error.response?.data?.detail || '分配角色失败')
   } finally {
@@ -453,7 +453,7 @@ const handleResetPassword = async () => {
     )
     ElMessage.success(`已重置 ${resetPasswordTargetUser.value.name} 的密码`)
     resetPasswordVisible.value = false
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('重置密码失败', error)
     ElMessage.error(error.response?.data?.detail || '重置密码失败')
   } finally {

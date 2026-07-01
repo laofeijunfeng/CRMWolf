@@ -225,10 +225,10 @@ const fetchRoles = async () => {
       limit: pagination.pageSize
     }
 
-    const data = await roleApi.getRoles(params) as any
+    const data = await
     tableData.value = data
     pagination.total = data.length
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取角色列表失败', error)
     showError(error, '获取角色列表')
   } finally {
@@ -282,7 +282,7 @@ const handleConfigPermissions = async (record: RoleResponse) => {
     selectedPermissionIds.value = roleData.permissions?.map((p: PermissionResponse) => p.id) || []
 
     permissionsModalVisible.value = true
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取角色权限失败', error)
     showError(error, '获取角色权限')
   }
@@ -371,7 +371,7 @@ const handleSavePermissions = async () => {
     await roleApi.updateRolePermissions(currentRole.value.id, selectedPermissionIds.value)
     showSuccess('保存', '权限配置')
     permissionsModalVisible.value = false
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('保存权限失败', error)
     showError(error, '保存权限配置')
   } finally {
@@ -397,7 +397,7 @@ const handleCreateModalOk = async () => {
 
     createModalVisible.value = false
     fetchRoles()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('操作失败', error)
     showError(error, isEditMode.value ? '更新角色' : '创建角色')
   }
@@ -417,7 +417,7 @@ const handleDelete = (record: RoleResponse) => {
       await roleApi.deleteRole(record.id)
       showSuccess('删除', '角色')
       fetchRoles()
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('删除失败', error)
       showError(error, '删除角色')
     }

@@ -230,7 +230,7 @@ const pagination = ref({
 const fetchApprovalFlows = async () => {
   loading.value = true
   try {
-    const params: any = {
+    const params: Record<string, unknown> = {
       skip: (pagination.value.current - 1) * pagination.value.pageSize,
       limit: pagination.value.pageSize
     }
@@ -239,20 +239,20 @@ const fetchApprovalFlows = async () => {
       params.is_active = filterStatus.value
     }
 
-    const data = await approvalFlowApi.getApprovalFlows(params) as any
+    const data = await
 
     let flows = Array.isArray(data) ? data : []
 
     if (searchText.value) {
       const keyword = searchText.value.toLowerCase()
-      flows = flows.filter((flow: any) =>
+      flows = flows.filter((flow: { status?: string }) =>
         flow.flow_name.toLowerCase().includes(keyword) ||
         flow.flow_code.toLowerCase().includes(keyword)
       )
     }
 
     if (filterLicenseType.value) {
-      flows = flows.filter((flow: any) => flow.license_type === filterLicenseType.value)
+      flows = flows.filter((flow: { status?: string }) => flow.license_type === filterLicenseType.value)
     }
 
     approvalFlows.value = flows
@@ -289,7 +289,7 @@ const handleCreate = () => {
 
 const handleView = async (flow: ApprovalFlowDetail) => {
   try {
-    const data = await approvalFlowApi.getApprovalFlowDetail(flow.id!) as any
+    const data = await
     currentFlow.value = data
     detailVisible.value = true
   } catch (error: unknown) {

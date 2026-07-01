@@ -345,7 +345,7 @@ const fetchRoles = async () => {
   try {
     const data = await roleApi.getRoles()
     roles.value = data
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取角色列表失败', error)
     ElMessage.error('获取角色列表失败')
   } finally {
@@ -376,7 +376,7 @@ const fetchFlowDetail = async () => {
     }
     
     nodeOrderCounter = Math.max(...form.value.nodes.map(n => n.node_order), 0)
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error('获取流程详情失败')
     console.error('获取流程详情失败', error)
   } finally {
@@ -464,7 +464,7 @@ const handleSubmit = async () => {
     }
 
     router.push('/approval-flows')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('保存失败', error)
     ElMessage.error(error.response?.data?.detail || '保存失败')
   } finally {

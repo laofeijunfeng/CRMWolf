@@ -238,7 +238,7 @@ const formatDate = (dateStr: string) => {
 const fetchUsers = async () => {
   loading.value = true
   try {
-    const params: any = {
+    const params: Record<string, unknown> = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize
     }
@@ -250,10 +250,10 @@ const fetchUsers = async () => {
       params.region = searchForm.region
     }
 
-    const data = await userApi.getUsers(params) as any
+    const data = await
     tableData.value = data
     pagination.total = data.length
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取用户列表失败', error)
     ElMessage.error('获取用户列表失败')
   } finally {
@@ -335,7 +335,7 @@ const handleCreateModalOk = async () => {
     
     createModalVisible.value = false
     fetchUsers()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('操作失败', error)
     ElMessage.error(error.response?.data?.detail || error.message || '操作失败')
   }
@@ -355,7 +355,7 @@ const handleDelete = (record: UserResponse) => {
       await userApi.deleteUser(record.id)
       ElMessage.success('删除成功')
       fetchUsers()
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('删除失败', error)
       ElMessage.error(error.response?.data?.detail || error.message || '删除失败')
     }
@@ -366,9 +366,9 @@ const handleDelete = (record: UserResponse) => {
 
 const fetchAllRoles = async () => {
   try {
-    const data = await roleApi.getRoles() as any
+    const data = await
     allRoles.value = data
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取角色列表失败', error)
   }
 }
@@ -418,7 +418,7 @@ const handleRoleModalOk = async () => {
     ElMessage.success('角色分配成功')
     roleModalVisible.value = false
     fetchUsers()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('角色分配失败', error)
     ElMessage.error(error.response?.data?.detail || error.message || '角色分配失败')
   }

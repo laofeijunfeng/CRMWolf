@@ -274,7 +274,7 @@ import {
   ArrowLeft,
   Plus
 } from '@element-plus/icons-vue'
-import { leadApi, type LeadDetail, type LeadUpdate, type LeadFollowUpCreate } from '@/api/lead'
+import { leadApi, type LeadDetail, type LeadUpdate, type LeadFollowUp, type LeadFollowUpCreate } from '@/api/lead'
 import { getLeadScore, getScoreIcon, getScoreColor, getScoreLevel, type ScoreDetail } from '@/api/score'
 import FollowUpList from '@/components/FollowUpList.vue'
 import { useUserStore } from '@/stores/user'
@@ -286,7 +286,7 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const leadData = ref<LeadDetail | null>(null)
-const followUps = ref<any[]>([])
+const followUps = ref<LeadFollowUp[]>([])
 
 // 热力值相关
 const showScoreDetails = ref(false)

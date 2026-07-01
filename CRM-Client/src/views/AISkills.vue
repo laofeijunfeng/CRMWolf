@@ -213,7 +213,7 @@ import { ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ArrowLeft, Plus, Edit, Delete, ArrowDown } from '@element-plus/icons-vue'
-import { aiSkillsApi, type Skill, type SkillAction } from '@/api/aiSkills'
+import { aiSkillsApi, type Skill, type SkillAction, type CRUDMapping, type EnumMapping } from '@/api/aiSkills'
 import SkillGeneratorDialog from '@/components/SkillGeneratorDialog.vue'
 
 const router = useRouter()
@@ -227,8 +227,8 @@ const expandedSkills = ref(new Set<number>())
 
 // 数据
 const skills = ref<Skill[]>([])
-const crudMappings = ref<any[]>([])
-const enumMappings = ref<any[]>([])
+const crudMappings = ref<CRUDMapping[]>([])
+const enumMappings = ref<EnumMapping[]>([])
 const handlerTypes = ref<string[]>([])
 
 // 弹窗

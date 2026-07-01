@@ -329,7 +329,7 @@ const fetchContractInfo = async () => {
     const data = await contractApi.getContract(Number(route.params.id))
     contractInfo.value = data
     console.log('合同详情数据:', data)
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取合同详情失败', error)
     showError(error, '获取合同详情')
   } finally {
@@ -347,9 +347,9 @@ const fetchApprovalDetail = async () => {
   
   try {
     const response = await approvalApi.getContractApprovalDetail(contractInfo.value.id)
-    const data = (response as any).data || response
+    const data = response.data || response
     approvalDetail.value = transformApprovalData(data as ApprovalDetailFromAPI)
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error.response?.status !== 404) {
       console.error('获取审批详情失败', error)
     }
@@ -541,7 +541,7 @@ const handleSubmitApproval = async () => {
     showSuccess('提交审批', '合同')
     await fetchContractInfo()
     await fetchApprovalDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('提交审批失败', error)
       showError(error, '提交审批')
@@ -568,7 +568,7 @@ const handleWithdrawApproval = async () => {
     showSuccess('撤回审批', '合同')
     await fetchContractInfo()
     approvalDetail.value = null
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('撤回失败', error)
       showError(error, '撤回审批')
@@ -595,7 +595,7 @@ const handleApprove = async () => {
     showSuccess('同意审批', '合同')
     await fetchContractInfo()
     await fetchApprovalDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('审批失败', error)
       showError(error, '审批合同')
@@ -626,7 +626,7 @@ const confirmReject = async () => {
     rejectForm.reason = ''
     await fetchContractInfo()
     await fetchApprovalDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('拒绝失败', error)
     showError(error, '拒绝审批')
   } finally {
@@ -649,7 +649,7 @@ const handleMarkEffective = async () => {
     await contractApi.updateContractStatus(contractInfo.value!.id, { status: 'EFFECTIVE' })
     showSuccess('标记生效', '合同')
     await fetchContractInfo()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       console.error('标记失败', error)
       showError(error, '标记生效')

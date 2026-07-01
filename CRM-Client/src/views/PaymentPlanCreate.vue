@@ -130,11 +130,22 @@ import { ArrowLeft, Plus, Delete } from '@element-plus/icons-vue'
 import contractApi from '@/api/contract'
 import paymentApi from '@/api/payment'
 
+interface CustomerInfo {
+  account_name: string
+}
+
+interface ContractInfo {
+  contract_name: string
+  contract_number: string
+  total_amount: number
+  customer_info?: CustomerInfo
+}
+
 const route = useRoute()
 const router = useRouter()
 
 const contractId = computed(() => Number(route.params.contractId))
-const contractInfo = ref<any>(null)
+const contractInfo = ref<ContractInfo | null>(null)
 const loading = ref(false)
 const submitting = ref(false)
 

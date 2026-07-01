@@ -208,7 +208,7 @@ const rules = {
 
 const fetchProcurementMethods = async () => {
   try {
-    const data = await procurementApi.getProcurementMethods() as any
+    const data = await
     procurementMethods.value = data.filter((m: ProcurementMethod) => m.is_active === 1)
       .sort((a: ProcurementMethod, b: ProcurementMethod) => a.sort_order - b.sort_order)
   } catch (error) {
@@ -218,7 +218,7 @@ const fetchProcurementMethods = async () => {
 
 const fetchCustomerOptions = async () => {
   try {
-    const data = await customerApi.getCustomers({ limit: 100 }) as unknown as any[]
+    const data = await[]
     customerOptions.value = data
   } catch (error) {
     console.error('获取客户列表失败', error)
@@ -228,7 +228,7 @@ const fetchCustomerOptions = async () => {
 const fetchCustomerInfo = async (id: string, setDefaults: boolean = false) => {
   loading.value = true
   try {
-    const data = await customerApi.getCustomerDetail(Number(id)) as any
+    const data = await
     customerInfo.value = data
 
     if (setDefaults) {
@@ -261,7 +261,7 @@ const fetchCustomerInfo = async (id: string, setDefaults: boolean = false) => {
 const fetchOpportunityDetail = async (id: string) => {
   loading.value = true
   try {
-    const data = await opportunityApi.getOpportunityDetail(Number(id)) as any
+    const data = await
     Object.assign(form, {
       opportunity_name: data.opportunity_name,
       customer_id: data.customer_id || 0,
@@ -332,7 +332,7 @@ const handleSubmit = async () => {
     }
 
     router.push(`/opportunities/${result.id}`)
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('提交失败', error)
 
     if (error.errors) {

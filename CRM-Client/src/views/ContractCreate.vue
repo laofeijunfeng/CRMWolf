@@ -175,27 +175,40 @@ import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import { type FormInstance, type FormRules } from 'element-plus'
 import { ArrowLeft, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue'
-import contractApi, { type ContractCreate } from '@/api/contract'
-import customerApi from '@/api/customer'
-import { opportunityApi, type Opportunity } from '@/api/opportunity'
+import contractApi, { type ContractCreate, type LicenseType } from '@/api/contract'
+import customerApi, { type CustomerResponse, type CustomerDetailResponse, type ContactResponse } from '@/api/customer'
+import { opportunityApi, type Opportunity, type OpportunityListResponse } from '@/api/opportunity'
+
+interface ContractFormData {
+  contract_name: string
+  customer_id: number
+  opportunity_id: number | undefined
+  signing_contact_id: number | undefined
+  user_count: number
+  total_amount: number
+  license_type: LicenseType
+  subscription_years: number | null
+  signing_date: string
+  effective_date: string
+}
 
 const router = useRouter()
 const route = useRoute()
 
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
-const customerList = ref<any[]>([])
-const opportunityList = ref<any[]>([])
-const contactList = ref<any[]>([])
+const customerList = ref<CustomerResponse[]>([])
+const opportunityList = ref<(Opportunity | OpportunityListResponse)[]>([])
+const contactList = ref<ContactResponse[]>([])
 const opportunityInfo = ref<Opportunity | null>(null)
-const customerInfo = ref<any>(null)
+const customerInfo = ref<CustomerDetailResponse | null>(null)
 
 const isFromOpportunity = computed(() => {
-  return !!route.query.opportunityId
+  return !!route.query['opportunityId']
 })
 
 const isFromCustomer = computed(() => {
-  return !!route.query.customerId
+  return !!route.query['customerId']
 })
 
 const pageTitle = computed(() => {
@@ -210,7 +223,7 @@ const pageTitle = computed(() => {
   }
 })
 
-const form = reactive<ContractCreate>({
+const form = reactive<ContractFormData>({
   contract_name: '',
   customer_id: 0,
   opportunity_id: undefined,
@@ -223,7 +236,7 @@ const form = reactive<ContractCreate>({
   effective_date: ''
 })
 
-const rules: FormRules<ContractCreate> = {
+const rules: FormRules<ContractFormData> = {
   contract_name: [{ required: true, message: '请输入合同名称' }],
   customer_id: [{ required: true, message: '请选择客户' }],
   opportunity_id: [{ required: true, message: '请选择商机' }],
@@ -233,7 +246,7 @@ const rules: FormRules<ContractCreate> = {
   license_type: [{ required: true, message: '请选择授权模式' }],
   subscription_years: [
     {
-      validator: (rule, value, callback) => {
+      validator: (_rule, value, callback) => {
         if (form.license_type === 'SUBSCRIPTION' && !value) {
           callback(new Error('订阅制时必须填写订阅年限'))
         } else {
@@ -256,8 +269,8 @@ const fetchCustomerList = async () => {
 
 const fetchOpportunityList = async () => {
   try {
-    const data = await opportunityApi.getOpportunities({ limit: 100 }) as unknown as Opportunity[]
-    opportunityList.value = data
+    const data = await opportunityApi.getOpportunities({ limit: 100 })
+    opportunityList.value = data as (Opportunity | OpportunityListResponse)[]
   } catch (error) {
     console.error('获取商机列表失败', error)
   }
@@ -266,7 +279,7 @@ const fetchOpportunityList = async () => {
 const fetchOpportunityListForCustomer = async (customerId: number) => {
   try {
     const data = await opportunityApi.getAvailableForContract(customerId)
-    opportunityList.value = data as unknown as Opportunity[]
+    opportunityList.value = data
   } catch (error) {
     console.error('获取客户商机列表失败', error)
   }
@@ -274,27 +287,27 @@ const fetchOpportunityListForCustomer = async (customerId: number) => {
 
 const fetchOpportunityInfo = async (opportunityId: string) => {
   try {
-    const data = await opportunityApi.getOpportunity(Number(opportunityId)) as unknown as Opportunity
+    const data = await opportunityApi.getOpportunity(Number(opportunityId))
     opportunityInfo.value = data
-    
+
     form.customer_id = data.customer_id
     form.opportunity_id = data.id
     form.total_amount = Number(data.total_amount)
     form.license_type = data.license_type
     form.subscription_years = data.subscription_years
-    
+
     form.user_count = data.user_count || 0
-    
+
     if (data.opportunity_name) {
       form.contract_name = `${data.opportunity_name}-合同`
     }
-    
+
     if (data.actual_closing_date) {
       form.signing_date = data.actual_closing_date
     } else if (data.expected_closing_date) {
       form.signing_date = data.expected_closing_date
     }
-    
+
     await fetchContacts(data.customer_id)
   } catch (error) {
     console.error('获取商机信息失败', error)
@@ -313,41 +326,29 @@ const fetchContacts = async (customerId: number) => {
 
 const handleSubmit = async () => {
   if (!formRef.value) return
-  
+
   try {
     await formRef.value.validate()
-    
+
     submitting.value = true
-    
-    const submitData: Record<string, unknown> = {
+
+    const submitData: ContractCreate = {
       contract_name: form.contract_name,
       customer_id: form.customer_id,
-      signing_contact_id: form.signing_contact_id,
+      opportunity_id: form.opportunity_id!,
+      signing_contact_id: form.signing_contact_id!,
       user_count: form.user_count,
       total_amount: form.total_amount,
-      license_type: form.license_type
+      license_type: form.license_type,
+      subscription_years: form.license_type === 'SUBSCRIPTION' ? form.subscription_years : null,
+      signing_date: form.signing_date || null,
+      effective_date: form.effective_date || null
     }
 
-    if (form.opportunity_id) {
-      submitData.opportunity_id = form.opportunity_id
-    }
-    
-    if (form.license_type === 'SUBSCRIPTION') {
-      submitData.subscription_years = form.subscription_years
-    }
-    
-    if (form.signing_date) {
-      submitData.signing_date = form.signing_date
-    }
-    
-    if (form.effective_date) {
-      submitData.effective_date = form.effective_date
-    }
-    
     if (isFromOpportunity.value) {
-      await contractApi.createContractFromOpportunity(form.opportunity_id, {
+      await contractApi.createContractFromOpportunity(form.opportunity_id!, {
         contract_name: form.contract_name,
-        signing_contact_id: form.signing_contact_id
+        signing_contact_id: form.signing_contact_id!
       })
     } else {
       await contractApi.createContract(submitData)
@@ -357,7 +358,7 @@ const handleSubmit = async () => {
     router.push('/contracts')
   } catch (error: unknown) {
     console.error('创建合同失败', error)
-    if (error.errors) {
+    if (error && typeof error === 'object' && 'errors' in error) {
       return
     }
     showError(error, '创建合同')
@@ -380,13 +381,13 @@ const handleBack = () => {
   router.back()
 }
 
-watch(() => form.opportunity_id, async (newOpportunityId: number) => {
+watch(() => form.opportunity_id, async (newOpportunityId: number | undefined) => {
   if (newOpportunityId && !isFromOpportunity.value) {
     const opportunity = opportunityList.value.find(opp => opp.id === newOpportunityId)
     if (opportunity) {
       form.total_amount = Number(opportunity.total_amount || 0)
       form.user_count = opportunity.user_count || 0
-      form.license_type = opportunity.license_type
+      form.license_type = opportunity.license_type as LicenseType
       form.subscription_years = opportunity.subscription_years
 
       if (opportunity.customer_id) {
@@ -399,10 +400,10 @@ watch(() => form.opportunity_id, async (newOpportunityId: number) => {
 
 onMounted(async () => {
   if (isFromOpportunity.value) {
-    const opportunityId = route.query.opportunityId as string
+    const opportunityId = route.query['opportunityId'] as string
     await fetchOpportunityInfo(opportunityId)
   } else if (isFromCustomer.value) {
-    const customerId = route.query.customerId as string
+    const customerId = route.query['customerId'] as string
     await fetchCustomerInfo(customerId)
     await fetchOpportunityListForCustomer(Number(customerId))
     await fetchContacts(Number(customerId))

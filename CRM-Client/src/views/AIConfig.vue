@@ -130,7 +130,7 @@ import { ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ArrowLeft, Check, Connection } from '@element-plus/icons-vue'
-import { aiConfigApi, type SSEEvent } from '@/api/aiConfig'
+import { aiConfigApi, type SSEEvent, type AIConfigResponse } from '@/api/aiConfig'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
@@ -140,8 +140,8 @@ const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 const formRef = ref<FormInstance>()
-const configInfo = ref<any>(null)
-const testResult = ref<any>(null)
+const configInfo = ref<AIConfigResponse | null>(null)
+const testResult = ref<{ success: boolean; message: string } | null>(null)
 const streamingContent = ref('')  // 流式响应内容
 
 const selectedProvider = ref('custom')
@@ -263,8 +263,8 @@ const handleTest = async () => {
           streamingContent.value += event.content || ''
         } else if (event.event === 'done') {
           testResult.value = {
-            success: event.success,
-            message: event.message
+            success: event.success ?? false,
+            message: event.message ?? ''
           }
           // ✅ P0: Copywriting - 具体化的成功提示
           showSuccess('连接测试', 'AI 服务')
@@ -272,7 +272,7 @@ const handleTest = async () => {
         } else if (event.event === 'error') {
           testResult.value = {
             success: false,
-            message: event.message
+            message: event.message ?? '连接失败'
           }
           // ✅ P0: Copywriting - 具体化的错误提示
           showError(new Error(event.message || '连接失败'), 'AI 连接测试')

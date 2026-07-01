@@ -167,8 +167,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import customerApi, { type CustomerCreate, type CustomerUpdate, type CustomerDetailResponse } from '@/api/customer'
-import procurementApi from '@/api/procurement'
+import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
+import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 
 const router = useRouter()
 const route = useRoute()
@@ -176,7 +176,7 @@ const route = useRoute()
 const loading = ref(false)
 const submitting = ref(false)
 const formRef = ref()
-const procurementMethodOptions = ref<any[]>([])
+const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
 
 const customerId = computed(() => Number(route.params.id))
 const isEdit = computed(() => !!customerId.value)
@@ -227,7 +227,7 @@ const fetchCustomerDetail = async () => {
 
   loading.value = true
   try {
-    const res = await customerApi.getCustomerDetail(customerId.value) as CustomerDetailResponse
+    const res = await customerApi.getCustomerDetail(customerId.value)
     Object.assign(form, {
       account_name: res.account_name || '',
       city: res.city || '',
