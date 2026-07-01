@@ -16,6 +16,10 @@
         </div>
       </div>
       <div class="user-actions">
+        <el-button size="small" @click="showChangePasswordDialog">
+          <el-icon><Key /></el-icon>
+          修改密码
+        </el-button>
         <el-button size="small" @click="handleLogout">
           <el-icon><SwitchButton /></el-icon>
           退出登录
@@ -115,15 +119,62 @@
         @reset="handleMyOperationsReset"
       />
     </div>
+
+    <!-- 修改密码对话框 -->
+    <el-dialog
+      v-model="changePasswordVisible"
+      title="修改密码"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="changePasswordFormRef"
+        :model="changePasswordForm"
+        :rules="changePasswordRules"
+        label-width="80px"
+      >
+        <el-form-item label="旧密码" prop="oldPassword">
+          <el-input
+            v-model="changePasswordForm.oldPassword"
+            type="password"
+            placeholder="请输入旧密码"
+            show-password
+          />
+        </el-form-item>
+        <el-form-item label="新密码" prop="newPassword">
+          <el-input
+            v-model="changePasswordForm.newPassword"
+            type="password"
+            placeholder="请输入新密码（6-50位）"
+            show-password
+          />
+        </el-form-item>
+        <el-form-item label="确认密码" prop="confirmPassword">
+          <el-input
+            v-model="changePasswordForm.confirmPassword"
+            type="password"
+            placeholder="请再次输入新密码"
+            show-password
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="changePasswordVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleChangePassword" :loading="changePasswordLoading">
+          确认修改
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { showSuccess } from '@/utils/errorMessages'
-import { SwitchButton, User, UserFilled, Document, ShoppingCart, Cpu, ArrowRight } from '@element-plus/icons-vue'
+import { SwitchButton, User, UserFilled, Document, ShoppingCart, Cpu, ArrowRight, Key } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
@@ -181,6 +232,65 @@ onMounted(() => {
   fetchUserRoles()
   myTimeline.fetchLogs()
 })
+
+// 修改密码相关状态
+const changePasswordVisible = ref(false)
+const changePasswordLoading = ref(false)
+const changePasswordFormRef = ref<FormInstance>()
+
+const changePasswordForm = reactive({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: '',
+})
+
+const validateConfirmPassword = (rule: any, value: string, callback: any) => {
+  if (value !== changePasswordForm.newPassword) {
+    callback(new Error('两次输入的密码不一致'))
+  } else {
+    callback()
+  }
+}
+
+const changePasswordRules: FormRules = {
+  oldPassword: [
+    { required: true, message: '请输入旧密码', trigger: 'blur' }
+  ],
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 6, max: 50, message: '密码长度为6-50个字符', trigger: 'blur' }
+  ],
+  confirmPassword: [
+    { required: true, message: '请确认新密码', trigger: 'blur' },
+    { validator: validateConfirmPassword, trigger: 'blur' }
+  ]
+}
+
+const showChangePasswordDialog = () => {
+  changePasswordForm.oldPassword = ''
+  changePasswordForm.newPassword = ''
+  changePasswordForm.confirmPassword = ''
+  changePasswordVisible.value = true
+}
+
+const handleChangePassword = async () => {
+  const valid = await changePasswordFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+
+  changePasswordLoading.value = true
+  try {
+    await authApi.changePassword({
+      old_password: changePasswordForm.oldPassword,
+      new_password: changePasswordForm.newPassword,
+    })
+    showSuccess('密码修改成功')
+    changePasswordVisible.value = false
+  } catch (error) {
+    console.error('修改密码失败', error)
+  } finally {
+    changePasswordLoading.value = false
+  }
+}
 
 const getStatusText = (status?: string): string => {
   const map: Record<string, string> = {
