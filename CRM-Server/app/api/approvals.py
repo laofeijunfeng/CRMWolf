@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.logging import get_logger, log_with_fields
 from app.crud.contract import contract_crud
 from app.crud.approval import approval_flow_crud, approval_crud
 from app.crud.role import role_crud
@@ -14,12 +15,69 @@ from app.models.contract import ContractStatus
 from app.schemas.approval import (
     ApprovalFlowCreate, ApprovalFlowUpdate, ApprovalFlowResponse, ApprovalFlowDetailResponse,
     ApprovalSubmitRequest, ApprovalActionRequest, ApprovalDetailResponse, ApprovalListResponse,
-    ApprovalRecordResponse, MessageResponse
+    ApprovalRecordResponse, MessageResponse, OverdueApprovalResponse, OverdueApprovalListResponse
 )
 from app.services.notification import notification_service_factory
 
 
 router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
+
+# 审批操作日志记录器
+logger = get_logger(__name__)
+
+
+def log_approval_operation(
+    operation: str,
+    approval_id: Optional[int] = None,
+    contract_id: Optional[int] = None,
+    flow_name: Optional[str] = None,
+    node_name: Optional[str] = None,
+    operator: Optional[str] = None,
+    next_node: Optional[str] = None,
+    flow_direction: Optional[str] = None,
+    notification_status: Optional[str] = None,
+    reason: Optional[str] = None,
+    level: int = 20  # INFO
+):
+    """
+    记录审批操作日志
+
+    Args:
+        operation: 操作类型（Submit/Approve/Reject/Cancel）
+        approval_id: 审批实例ID
+        contract_id: 合同ID
+        flow_name: 审批流程名称
+        node_name: 当前节点名称
+        operator: 操作人姓名
+        next_node: 下一节点名称
+        flow_direction: 流转方向（next_node/terminated/completed）
+        notification_status: 通知发送状态（success/failed/skipped）
+        reason: 拒绝/撤回原因
+        level: 日志级别（默认 INFO）
+    """
+    message = f"[Approval] {operation}"
+
+    fields = {}
+    if contract_id:
+        fields["contract_id"] = contract_id
+    if approval_id:
+        fields["approval_id"] = approval_id
+    if flow_name:
+        fields["flow"] = flow_name
+    if node_name:
+        fields["node"] = node_name
+    if operator:
+        fields["operator"] = operator
+    if next_node:
+        fields["next_node"] = next_node
+    if flow_direction:
+        fields["direction"] = flow_direction
+    if notification_status:
+        fields["notification"] = notification_status
+    if reason:
+        fields["reason"] = reason
+
+    log_with_fields(logger, level, message, **fields)
 
 
 @router.get("/flows", response_model=List[ApprovalFlowResponse], summary="获取审批流程列表", description="""
@@ -52,6 +110,73 @@ def get_approval_flows(
 ):
     flows, total = approval_flow_crud.get_multi(db, team_id, skip, limit, is_active)
     return flows
+
+
+@router.get("/overdue", response_model=OverdueApprovalListResponse, summary="获取超时审批列表", description="""
+获取所有超时的审批实例列表，供管理员进行应急处理。
+
+**功能说明：**
+- 查询所有状态为 PENDING 且超过指定小时数的审批
+- 默认查询超过 48 小时的审批
+- 支持按超时程度筛选（24h/48h/72h）
+- 超时时间最长的排在最前面
+
+**业务场景：**
+- 管理员查看超时审批进行应急处理
+- 批量发送催办通知
+- 介入处理卡住的审批流程
+
+**请求参数：**
+- min_hours: 最小超时小时数（默认48小时）
+- skip: 跳过记录数（默认0）
+- limit: 每页记录数（默认100）
+
+**返回字段：**
+- items: 超时审批列表
+  - approval_id: 审批实例ID
+  - contract_id: 合同ID
+  - contract_name: 合同名称
+  - contract_number: 合同编号
+  - current_node_name: 当前审批节点名称
+  - current_approver_name: 当前审批人姓名
+  - overdue_hours: 超时小时数
+  - submitter_name: 提交人姓名
+  - submit_time: 提交时间
+  - status: 审批状态
+- total: 总记录数
+
+**权限要求：**
+- 需要管理员权限或 approval:flow:view 权限
+""")
+def get_overdue_approvals(
+    min_hours: int = Query(48, ge=1, le=720, description="最小超时小时数，默认48小时，可选24/48/72"),
+    skip: int = Query(0, ge=0, description="跳过记录数"),
+    limit: int = Query(100, ge=1, le=100, description="每页记录数"),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    获取超时审批列表
+
+    管理员应急操作指南：
+    1. 查看超时审批列表，了解哪些审批卡住了
+    2. 批量发送催办通知给审批人
+    3. 或联系审批人/提交人进行处理
+    4. 必要时可撤回审批让提交人重新提交
+    """
+    overdue_list, total = approval_crud.get_overdue_approvals(
+        db,
+        team_id,
+        min_hours,
+        skip,
+        limit
+    )
+
+    return OverdueApprovalListResponse(
+        items=[OverdueApprovalResponse(**item) for item in overdue_list],
+        total=total
+    )
 
 
 @router.get("/flows/{flow_id}", response_model=ApprovalFlowDetailResponse, summary="获取审批流程详情", description="""
@@ -269,13 +394,41 @@ async def submit_contract_approval(
             detail="该合同已有审批流程，请等待审批完成"
         )
     
-    flow = approval_flow_crud.match_flow(db, contract, contract.team_id)
+    flow, error_msg = approval_flow_crud.match_flow(db, contract, contract.team_id)
     if not flow:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="未找到匹配的审批流程，请联系管理员配置"
+            detail=error_msg or "未找到匹配的审批流程，请联系管理员配置"
         )
-    
+
+    # 检查第一个审批节点是否有审批人
+    from app.models.approval import ApprovalNode
+    first_node = db.query(ApprovalNode).filter(
+        ApprovalNode.flow_id == flow.id,
+        ApprovalNode.node_order == 1
+    ).first()
+
+    if first_node:
+        has_approvers = approval_flow_crud.check_node_has_approvers(db, first_node.id, team_id)
+        if not has_approvers:
+            # 记录系统告警日志
+            log_with_fields(
+                logger,
+                level=30,  # WARNING
+                message="[Approval Config Error] 审批节点无审批人",
+                flow_id=flow.id,
+                flow_name=flow.flow_name,
+                node_id=first_node.id,
+                node_name=first_node.node_name,
+                approve_role=first_node.approve_role or "",
+                team_id=team_id,
+                contract_id=contract_id
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"审批流程配置错误：节点「{first_node.node_name}」无审批人，请联系管理员"
+            )
+
     try:
         approval = approval_crud.create_approval(
             db,
@@ -285,28 +438,74 @@ async def submit_contract_approval(
             current_user.name
         )
 
+        # 记录提交日志
+        log_approval_operation(
+            operation="Submit",
+            approval_id=approval.id,
+            contract_id=contract_id,
+            flow_name=flow.flow_name,
+            node_name=approval.current_node.node_name if approval.current_node else None,
+            operator=current_user.name,
+            flow_direction="submitted"
+        )
+
         notification_service = notification_service_factory(db, team_id)
+        notification_status = "skipped"
+
         if approval.current_node:
             approvers = get_approvers_by_role(db, approval.current_node.approve_role)
-            for approver in approvers:
-                await notification_service.notify_approval_pending(
-                    contract_name=contract.contract_name,
-                    flow_name=flow.flow_name,
-                    node_name=approval.current_node.node_name,
-                    approver_open_id=approver.feishu_open_id or "",
-                    approver_name=approver.name,
-                    contract_id=contract_id
+            try:
+                for approver in approvers:
+                    await notification_service.notify_approval_pending(
+                        contract_name=contract.contract_name,
+                        flow_name=flow.flow_name,
+                        node_name=approval.current_node.node_name,
+                        approver_open_id=approver.feishu_open_id or "",
+                        approver_name=approver.name,
+                        contract_id=contract_id
+                    )
+                notification_status = "success" if approvers else "skipped"
+            except Exception as notify_error:
+                notification_status = "failed"
+                logger.error(
+                    f"[Approval] Submit notification failed: contract_id={contract_id}, error={str(notify_error)}"
                 )
+
+            # 更新日志补充通知状态
+            log_approval_operation(
+                operation="Submit",
+                approval_id=approval.id,
+                contract_id=contract_id,
+                flow_name=flow.flow_name,
+                node_name=approval.current_node.node_name,
+                operator=current_user.name,
+                flow_direction="submitted",
+                notification_status=notification_status
+            )
 
         db.refresh(approval)
         return approval
-        
+
     except ValueError as e:
+        log_approval_operation(
+            operation="Submit",
+            contract_id=contract_id,
+            operator=current_user.name,
+            reason=str(e),
+            level=40  # ERROR
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
+        log_approval_operation(
+            operation="Submit",
+            contract_id=contract_id,
+            operator=current_user.name,
+            reason=str(e),
+            level=40  # ERROR
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"提交审批失败: {str(e)}"
@@ -388,7 +587,37 @@ async def approve_contract(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="您没有权限审批自己创建的合同"
             )
-    
+
+    # 如果是审批通过操作，检查下一节点是否有审批人
+    if action_request.action.value == ApprovalAction.APPROVE:
+        from app.models.approval import ApprovalNode
+        next_node = db.query(ApprovalNode).filter(
+            ApprovalNode.flow_id == approval.flow_id,
+            ApprovalNode.node_order == approval.current_node.node_order + 1
+        ).first()
+
+        if next_node:
+            has_approvers = approval_flow_crud.check_node_has_approvers(db, next_node.id, team_id)
+            if not has_approvers:
+                # 记录系统告警日志
+                log_with_fields(
+                    logger,
+                    level=30,  # WARNING
+                    message="[Approval Config Error] 审批节点无审批人",
+                    flow_id=approval.flow_id,
+                    flow_name=approval.flow.flow_name if approval.flow else "",
+                    node_id=next_node.id,
+                    node_name=next_node.node_name,
+                    approve_role=next_node.approve_role or "",
+                    team_id=team_id,
+                    contract_id=contract_id,
+                    current_node=approval.current_node.node_name
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"无法流转到下一节点：审批角色「{next_node.node_name}」无成员，系统已通知管理员"
+                )
+
     try:
         approval = approval_crud.approve(
             db,
@@ -434,8 +663,14 @@ async def approve_contract(
 
         db.refresh(approval)
         return approval
-        
+
     except ValueError as e:
+        # 乐观锁冲突返回 409
+        if "审批已被其他用户处理" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="该审批已被处理，请刷新页面查看最新状态"
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)

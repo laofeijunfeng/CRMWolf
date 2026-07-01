@@ -248,6 +248,10 @@ class ApprovalActionRequest(BaseModel):
         None,
         description="审批意见，必填，说明审批理由或意见"
     )
+    updated_time: Optional[datetime] = Field(
+        None,
+        description="审批实例最后更新时间，用于乐观锁冲突检测。前端提交审批时应传入当前审批实例的 updated_time，如果不匹配则返回 409 冲突错误"
+    )
 
 
 class ApprovalRecordResponse(BaseModel):
@@ -313,6 +317,26 @@ class ApprovalListResponse(BaseModel):
     )
     submitter_name: Optional[str] = Field(None, description="提交人姓名")
     created_time: datetime = Field(..., description="创建时间")
+
+
+class OverdueApprovalResponse(BaseModel):
+    """超时审批响应模型"""
+    approval_id: int = Field(..., description="审批实例ID")
+    contract_id: int = Field(..., description="合同ID")
+    contract_name: str = Field(..., description="合同名称")
+    contract_number: Optional[str] = Field(None, description="合同编号")
+    current_node_name: Optional[str] = Field(None, description="当前审批节点名称")
+    current_approver_name: Optional[str] = Field(None, description="当前审批人姓名")
+    overdue_hours: int = Field(..., description="超时小时数，当前时间减去提交时间")
+    submitter_name: Optional[str] = Field(None, description="提交人姓名")
+    submit_time: datetime = Field(..., description="提交时间")
+    status: str = Field(..., description="审批状态")
+
+
+class OverdueApprovalListResponse(BaseModel):
+    """超时审批列表响应模型"""
+    items: List[OverdueApprovalResponse] = Field(..., description="超时审批列表")
+    total: int = Field(..., description="总记录数")
 
 
 class MessageResponse(BaseModel):
