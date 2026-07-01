@@ -51,6 +51,10 @@ export interface AssignRolesRequest {
   role_ids: number[]
 }
 
+export interface ResetPasswordRequest {
+  new_password: string
+}
+
 export const teamApi = {
   createTeam: (data: TeamCreateRequest) => {
     return request.post<TeamResponse>('/v1/teams/', data)
@@ -109,5 +113,10 @@ export const teamApi = {
 
   getMemberRoles: (teamId: number, userId: string) => {
     return request.get<RoleSimpleResponse[]>(`/v1/teams/${teamId}/members/${userId}/roles`)
+  },
+
+  // 重置成员密码（新增）
+  resetMemberPassword: (teamId: number, userId: string, data: ResetPasswordRequest) => {
+    return request.post<{ message: string }>(`/v1/teams/${teamId}/members/${userId}/reset-password`, data)
   }
 }
