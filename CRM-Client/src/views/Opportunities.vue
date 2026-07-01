@@ -23,6 +23,12 @@
           @click="handleTabChange('lost')"
         >已输单</span>
       </div>
+      <div class="filter-actions">
+        <el-button v-if="canCreateOpportunity" type="primary" @click="router.push('/opportunities/create')">
+          <el-icon><Plus /></el-icon>
+          新建商机
+        </el-button>
+      </div>
     </div>
 
     <!-- 表格区 -->
@@ -192,7 +198,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
-import { Search, View, Edit, Delete } from '@element-plus/icons-vue'
+import { Search, View, Edit, Delete, Plus } from '@element-plus/icons-vue'
 import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
 import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
 import { opportunityApi, type Opportunity, type OpportunityListParams } from '@/api/opportunity'
@@ -227,6 +233,9 @@ const pagination = reactive({
 })
 
 // 权限计算属性
+const canCreateOpportunity = computed(() =>
+  permissionStore.hasPermission('opportunity:create')
+)
 const canEditAllOpportunity = computed(() =>
   permissionStore.hasPermission('opportunity:edit:all')
 )
