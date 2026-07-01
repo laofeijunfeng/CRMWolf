@@ -72,7 +72,7 @@ export const usePermissionStore = defineStore('permissions', () => {
     
     loading.value = true
     try {
-      const response = await permissionApi.getUserPermissions({ use_cache: false }) as any
+      const response = await permissionApi.getUserPermissions({ use_cache: false })
       permissions.value = response.permissions || []
       initialized.value = true
       

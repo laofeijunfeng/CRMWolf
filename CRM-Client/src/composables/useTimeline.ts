@@ -127,7 +127,7 @@ export function useTimeline(options: UseTimelineOptions = {}) {
         throw new Error('Either resourceType+resourceId or useMyLogs must be provided')
       }
 
-      const newData = (response as any).list
+      const newData = response.list
 
       if (append) {
         logs.value = [...logs.value, ...newData]
@@ -135,10 +135,10 @@ export function useTimeline(options: UseTimelineOptions = {}) {
         logs.value = newData
       }
 
-      total.value = (response as any).total
+      total.value = response.total
       currentPage.value = page
       hasMore.value = logs.value.length < total.value
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('获取操作记录失败', error)
       ElMessage.error(error.response?.data?.detail || '获取操作记录失败')
     } finally {
