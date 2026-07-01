@@ -41,9 +41,15 @@
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="handleCreate">
-            <el-icon><Plus /></el-icon>
-            新建流程
+          <!-- AI 创建按钮 -->
+          <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="showAIDialog = true">
+            <el-icon><MagicStick /></el-icon>
+            AI 创建流程
+          </el-button>
+          <!-- 手动创建按钮 -->
+          <el-button class="wolf-btn wolf-btn--default-sm" @click="handleManualCreate">
+            <el-icon><Edit /></el-icon>
+            手动创建
           </el-button>
         </el-form-item>
       </el-form>
@@ -195,6 +201,12 @@
         </el-descriptions-item>
       </el-descriptions>
     </el-dialog>
+
+    <!-- AI 快速创建对话框 -->
+    <ApprovalFlowAIDialog
+      v-model="showAIDialog"
+      @created="handleAICreated"
+    />
   </div>
 </template>
 
@@ -204,7 +216,8 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError, showSuccess, getEmptyStateMessage } from '@/utils/errorMessages'
 import WolfEmpty from '@/components/WolfEmpty.vue'
-import { Plus, Search, ArrowLeft } from '@element-plus/icons-vue'
+import { Plus, Search, ArrowLeft, MagicStick, Edit } from '@element-plus/icons-vue'
+import ApprovalFlowAIDialog from '@/components/ApprovalFlowAIDialog.vue'
 import approvalFlowApi, { type ApprovalFlow, type ApprovalFlowDetail } from '@/api/approvalFlow'
 
 const router = useRouter()
@@ -220,6 +233,7 @@ const filterStatus = ref<boolean | null>(null)
 const filterLicenseType = ref<string | null>(null)
 const detailVisible = ref(false)
 const currentFlow = ref<ApprovalFlowDetail | null>(null)
+const showAIDialog = ref(false)
 
 const pagination = ref({
   current: 1,
@@ -283,8 +297,15 @@ const handlePageSizeChange = (pageSize: number) => {
   fetchApprovalFlows()
 }
 
-const handleCreate = () => {
+// 手动创建（跳转到表单页）
+const handleManualCreate = () => {
   router.push('/approval-flows/create')
+}
+
+// AI 创建成功回调
+const handleAICreated = (data: { id: number; flow_name: string }) => {
+  // 刷新列表
+  fetchApprovalFlows()
 }
 
 const handleView = async (flow: ApprovalFlowDetail) => {
