@@ -1,8 +1,14 @@
 # 合同审批流程功能说明
 
-> **版本：v1.1（增强版）| 最后更新：2026-07-01**
+> **版本：v1.2（飞书通知架构版）| 最后更新：2026-07-01**
 >
 > 本文档提供 CRMWolf 系统审批流程功能的完整说明，包括流程全景图、用户旅程设计、边缘情况处理、飞书通知设计、故障排查手册、API 接口文档、权限模型和设计决策。
+>
+> **v1.2 新增内容：**
+> - 飞书通知架构：Webhook + API 双模式设计
+> - 系统配置管理方案
+> - 预留飞书开放 API 接口
+> - 实现路线图（Phase 1-3）
 >
 > **v1.1 新增内容：**
 > - 流程全景图（Mermaid 流程图）
@@ -855,28 +861,347 @@ graph TD
 
 ## 飞书通知设计
 
-审批流程的飞书通知是用户触达的关键渠道。以下是详细的飞书通知内容模板设计。
+审批流程的飞书通知是用户触达的关键渠道。系统支持两种通知方式：**Webhook（群聊通知）** 和 **飞书开放 API（用户私信）**，管理员可在系统配置中选择。
 
-### 通知类型一览
+### 通知架构设计
 
-| 通知类型 | 触发时机 | 接收对象 | 优先级 |
-|---------|---------|---------|--------|
-| 待审批通知 | 审批流转到新节点 | 当前节点审批人 | 高 |
-| 审批通过通知 | 全部节点通过 | 提交人 | 高 |
-| 审批拒绝通知 | 任一节点拒绝 | 提交人 | 高 |
-| 审批撤回通知 | 提交人撤回审批 | 原审批人 | 中 |
-| 催办通知 | 审批超时 | 审批人 + 提交人 | 中 |
-| 审批提醒 | 每日待审批汇总 | 审批人 | 低 |
+```
+通知方式选择：
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                        审批通知系统                              │
+  │                                                                 │
+  │   ┌─────────────────────┐    ┌─────────────────────┐           │
+  │   │   Webhook 方式       │    │  飞书开放 API 方式   │           │
+  │   │   （群聊通知）       │    │   （用户私信）        │           │
+  │   └─────────────────────┘    └─────────────────────┘           │
+  │            │                          │                         │
+  │            ▼                          ▼                         │
+  │   ┌─────────────────────┐    ┌─────────────────────┐           │
+  │   │ 飞书群聊机器人       │    │ 飞书应用            │           │
+  │   │ Webhook URL         │    │ App ID + Secret     │           │
+  │   └─────────────────────┘    └─────────────────────┘           │
+  │            │                          │                         │
+  │            ▼                          ▼                         │
+  │   ┌─────────────────────┐    ┌─────────────────────┐           │
+  │   │ 消息发送到群聊       │    │ 消息发送给用户      │           │
+  │   │ 所有成员可见         │    │ 只有审批人可见      │           │
+  │   └─────────────────────┘    └─────────────────────┘           │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+配置优先级：
+  1. 系统配置决定通知方式（Webhook 或 API）
+  2. 管理员配置通知参数（Webhook URL 或 App ID/Secret）
+  3. 审批流程触发时，根据配置选择通知渠道
+```
 
 ---
 
-### 一、待审批通知
+### 方式对比：Webhook vs 飞书开放 API
 
-**触发时机：** 审批流转到新节点时
+| 维度 | Webhook（群聊通知） | 飞书开放 API（用户私信） |
+|------|-------------------|----------------------|
+| **配置复杂度** | 低（只需一个 Webhook URL） | 高（需要 App ID + App Secret + 应用审批） |
+| **通知精度** | 群聊（所有成员可见） | 精准触达（只有审批人可见） |
+| **隐私性** | 公开通知（团队成员可见） | 私密通知（审批内容仅审批人看） |
+| **维护成本** | 低（URL 不变，用户变动不影响） | 中（需要维护飞书应用和用户授权） |
+| **适用场景** | 团队协作、监督审批进度 | 敏感审批、精准触达 |
+| **当前状态** | ✅ 已实现（推荐默认使用） | 🔜 预留接口（未来版本支持） |
 
-**接收对象：** 当前节点的审批人（可能有多个）
+**推荐方案：** 默认使用 Webhook 方式，适合大多数团队；可选飞书开放 API 用于敏感审批场景。
 
-#### 通知模板（详细版）
+---
+
+### 一、Webhook 方式（群聊通知）
+
+#### 实现原理
+
+```
+工作流程：
+  1. 管理员在飞书群聊中创建自定义机器人
+  2. 获取机器人的 Webhook URL
+  3. 在 CRMWolf 系统配置中填写 Webhook URL
+  4. 审批触发时，系统 POST JSON 到 Webhook URL
+  5. 飞书群聊显示审批通知卡片
+```
+
+#### Webhook URL 格式
+
+```
+https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx
+```
+
+#### 消息卡片格式
+
+飞书 Webhook 支持发送**消息卡片**（interactive），包含标题、内容、按钮等交互元素。
+
+**请求 JSON 结构：**
+
+```json
+{
+  "msg_type": "interactive",
+  "card": {
+    "config": {
+      "wide_screen_mode": true
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "📋 新的合同审批待处理"
+      },
+      "template": "blue"
+    },
+    "elements": [
+      {
+        "tag": "div",
+        "text": {
+          "tag": "lark_md",
+          "content": "**合同名称**: 华为云服务采购合同\n**审批流程**: 大额合同审批\n**当前节点**: 财务审批\n**审批人**: 李四\n\n请及时处理，避免影响业务进度。"
+        }
+      },
+      {
+        "tag": "action",
+        "actions": [
+          {
+            "tag": "button",
+            "text": {
+              "tag": "plain_text",
+              "content": "立即审批"
+            },
+            "url": "https://crm.example.com/contracts/123",
+            "type": "primary"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### 系统配置设计
+
+**配置存储位置：** 数据库 `crm_system_configs` 表
+
+```sql
+CREATE TABLE crm_system_configs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    team_id BIGINT NOT NULL,
+    config_key VARCHAR(100) NOT NULL,
+    config_value TEXT NOT NULL,
+    config_type VARCHAR(50) NOT NULL COMMENT 'notification | security | integration',
+    description VARCHAR(200),
+    created_time DATETIME NOT NULL DEFAULT NOW(),
+    updated_time DATETIME NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+    UNIQUE KEY uk_team_key (team_id, config_key)
+);
+```
+
+**配置项：**
+
+| 配置键 | 值类型 | 说明 | 示例值 |
+|-------|--------|------|-------|
+| `notification_method` | string | 通知方式 | `webhook` 或 `api` |
+| `feishu_webhook_url` | string | Webhook URL | `https://open.feishu.cn/open-apis/bot/v2/hook/xxx` |
+| `feishu_webhook_enabled` | boolean | 是否启用 Webhook | `true` |
+| `notification_group_name` | string | 通知群聊名称 | `CRMWolf 审批通知群` |
+| `feishu_app_id` | string | 飞书应用 ID（预留） | 空或 App ID |
+| `feishu_app_secret` | string | 飞书应用 Secret（预留） | 空或 Secret |
+| `feishu_api_enabled` | boolean | 是否启用 API（预留） | `false` |
+
+**配置管理 API：**
+
+```bash
+# 获取通知配置
+GET /v1/system/configs/notification
+
+# 更新通知配置
+PUT /v1/system/configs/notification
+{
+  "notification_method": "webhook",
+  "feishu_webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
+  "notification_group_name": "CRMWolf 审批通知群"
+}
+```
+
+#### 管理员配置流程
+
+```
+步骤1：创建飞书群聊机器人
+  → 在飞书群聊中点击「设置」→「群机器人」→「添加机器人」
+  → 选择「自定义机器人」
+  → 输入机器人名称：「CRMWolf 审批通知」
+  → 获取 Webhook URL
+
+步骤2：配置 CRMWolf 系统
+  → 登录 CRMWolf 系统管理员后台
+  → 进入「系统设置」→「通知配置」
+  → 选择通知方式：Webhook（群聊通知）
+  → 填写 Webhook URL
+  → 填写通知群聊名称
+  → 点击「保存」
+
+步骤3：测试通知
+  → 点击「发送测试消息」按钮
+  → 检查飞书群聊是否收到测试消息
+  → 确认配置成功
+```
+
+---
+
+### 二、飞书开放 API 方式（用户私信）- 预留接口
+
+> **状态：预留接口，未来版本实现**
+
+#### 实现原理
+
+```
+工作流程：
+  1. 管理员创建飞书应用并获取 App ID + App Secret
+  2. 飞书应用通过审批，获得发送消息权限
+  3. 在 CRMWolf 系统配置中填写 App ID + App Secret
+  4. 审批触发时，系统通过飞书开放 API 发送消息
+  5. 审批人收到私信消息卡片
+```
+
+#### 需要的飞书权限
+
+| 权限名称 | 权限码 | 用途 |
+|---------|--------|------|
+| 获取用户基本信息 | `contact:user.base:readonly` | 获取审批人 open_id |
+| 发送消息给用户 | `im:message` | 发送审批通知 |
+| 获取 tenant_access_token | `authen:tenant_access_token` | 应用认证 |
+
+#### 预留接口设计
+
+**FeishuService 扩展方法：**
+
+```python
+class FeishuService:
+    # ========== Webhook 方式（已实现）==========
+    
+    async def send_webhook_message(
+        self,
+        webhook_url: str,
+        title: str,
+        content: str,
+        button_url: Optional[str] = None
+    ) -> bool:
+        """通过飞书群聊机器人 Webhook 发送消息"""
+        # POST JSON 到 webhook_url
+        # 返回成功/失败状态
+        pass
+    
+    async def notify_approval_webhook(
+        self,
+        webhook_url: str,
+        contract_name: str,
+        flow_name: str,
+        node_name: str,
+        approver_name: str,
+        contract_id: int
+    ) -> bool:
+        """通过 Webhook 发送审批通知到群聊"""
+        pass
+    
+    # ========== 飞书开放 API 方式（预留接口）==========
+    
+    async def get_tenant_access_token(self) -> str:
+        """获取飞书应用 tenant_access_token（预留）"""
+        # POST https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal
+        # 返回 tenant_access_token
+        pass
+    
+    async def send_user_message_card(
+        self,
+        user_open_id: str,
+        title: str,
+        content: str,
+        button_url: Optional[str] = None,
+        tenant_access_token: Optional[str] = None
+    ) -> bool:
+        """通过飞书开放 API 发送消息卡片给用户（预留）"""
+        # POST https://open.feishu.cn/open-apis/message/v4/send
+        # receive_id_type: "open_id"
+        # 返回成功/失败状态
+        pass
+    
+    async def notify_approval_api(
+        self,
+        user_open_id: str,
+        contract_name: str,
+        flow_name: str,
+        node_name: str,
+        contract_id: int
+    ) -> bool:
+        """通过飞书开放 API 发送审批通知给用户（预留）"""
+        pass
+```
+
+**NotificationService 统一入口：**
+
+```python
+class NotificationService:
+    """审批通知服务 - 统一入口"""
+    
+    def __init__(self, config_service: ConfigService):
+        self.config = config_service.get_notification_config()
+        self.feishu = FeishuService()
+    
+    async def notify_approval_pending(
+        self,
+        contract_name: str,
+        flow_name: str,
+        node_name: str,
+        approver_open_id: str,
+        approver_name: str,
+        contract_id: int
+    ) -> bool:
+        """发送审批待处理通知"""
+        
+        if self.config.notification_method == "webhook":
+            # Webhook 方式：发送到群聊
+            return await self.feishu.notify_approval_webhook(
+                webhook_url=self.config.feishu_webhook_url,
+                contract_name=contract_name,
+                flow_name=flow_name,
+                node_name=node_name,
+                approver_name=approver_name,
+                contract_id=contract_id
+            )
+        
+        elif self.config.notification_method == "api":
+            # 飞书开放 API 方式：发送给用户私信
+            return await self.feishu.notify_approval_api(
+                user_open_id=approver_open_id,
+                contract_name=contract_name,
+                flow_name=flow_name,
+                node_name=node_name,
+                contract_id=contract_id
+            )
+        
+        else:
+            # 未配置通知方式，返回失败
+            return False
+```
+
+---
+
+### 通知类型一览（两种方式共用）
+
+以下通知类型适用于 Webhook 和飞书开放 API 两种方式，消息模板结构相同。
+
+| 通知类型 | 触发时机 | Webhook 接收对象 | API 接收对象 |
+|---------|---------|----------------|-------------|
+| 待审批通知 | 审批流转到新节点 | 群聊所有成员 | 当前审批人 |
+| 审批通过通知 | 全部节点通过 | 群聊所有成员 | 提交人 |
+| 审批拒绝通知 | 任一节点拒绝 | 群聊所有成员 | 提交人 |
+| 审批撤回通知 | 提交人撤回审批 | 群聊所有成员 | 原审批人 |
+| 催办通知 | 审批超时（48h） | 群聊所有成员 | 审批人 + 提交人 |
+| 每日审批提醒 | 每日早晨（9:00） | 群聊所有成员 | 有待审批任务的审批人 |
+
+---
+
+### Webhook 通知模板（详细版）
 
 ```
 【审批通知】您有新的审批任务
@@ -2321,6 +2646,140 @@ API 查询（待开发）：
 |------|------|---------|------|
 | v1.0 | 2026-06-30 | 初始版本：API + 数据模型 + 设计决策 | Claude Code |
 | v1.1 | 2026-07-01 | 增强版：流程图 + 用户旅程 + 边缘情况 + 通知设计 + 排查手册 | Claude Code |
+| v1.2 | 2026-07-01 | 补充飞书通知架构：Webhook + API 双模式 + 配置管理 + 实现路线图 | Claude Code |
+
+---
+
+## 飞书通知实现路线图
+
+### Phase 1：Webhook 方式实现（推荐首选）
+
+**目标：** 实现飞书群聊机器人 Webhook 通知，作为默认通知方式
+
+**工作量：** 约 2 天（后端开发 + 配置界面）
+
+**任务清单：**
+
+| 任务 | 优先级 | 状态 | 说明 |
+|------|--------|------|------|
+| 创建系统配置表 | P0 | 待实现 | `crm_system_configs` 表 |
+| 实现配置管理 API | P0 | 待实现 | GET/PUT `/v1/system/configs/notification` |
+| FeishuService 扩展 | P0 | 待实现 | `send_webhook_message` 方法 |
+| NotificationService 统一入口 | P0 | 待实现 | 根据 `notification_method` 选择通知渠道 |
+| 审批流程调用 NotificationService | P0 | 待实现 | 替换现有 `feishu_service` 直接调用 |
+| 管理员配置界面 | P1 | 待实现 | 「系统设置」→「通知配置」页面 |
+| 测试消息发送功能 | P1 | 待实现 | 配置保存后发送测试消息 |
+| 更新文档 | P1 | 已完成 | 本文档已补充 Webhook 设计 |
+
+**技术要点：**
+
+```
+1. 数据库迁移：创建 crm_system_configs 表
+2. API 实现：
+   - GET /v1/system/configs/notification
+   - PUT /v1/system/configs/notification
+3. FeishuService 新增方法：
+   - send_webhook_message(webhook_url, title, content, button_url)
+   - notify_approval_webhook(...)
+4. NotificationService：
+   - 统一入口，根据配置选择通知方式
+   - 通知失败时记录日志，不阻塞审批流程
+5. 前端配置页面：
+   - 通知方式选择（Webhook/API）
+   - Webhook URL 输入框
+   - 通知群聊名称输入框
+   - 测试消息发送按钮
+```
+
+---
+
+### Phase 2：飞书开放 API 方式实现（预留）
+
+**目标：** 实现飞书开放 API 用户私信通知，用于敏感审批场景
+
+**前置条件：**
+- 飞书应用审批通过
+- 获得 `im:message` 权限
+- 用户授权登录飞书（已有 `feishu_open_id`）
+
+**工作量：** 约 3 天（飞书应用配置 + API 开发 + 权限管理）
+
+**任务清单：**
+
+| 任务 | 优先级 | 状态 | 说明 |
+|------|--------|------|------|
+| 飞书应用创建与审批 | P0 | 待启动 | 需要飞书管理员配合 |
+| FeishuService 预留接口实现 | P0 | 待实现 | `send_user_message_card` 方法 |
+| NotificationService 扩展 | P0 | 待实现 | 支持 `notification_method: api` |
+| 用户飞书授权完善 | P1 | 已有基础 | 用户表已有 `feishu_open_id` |
+| 管理员配置界面扩展 | P1 | 待实现 | App ID/Secret 输入框 |
+| 权限校验 | P1 | 待实现 | 检查飞书应用权限是否满足 |
+| 测试与文档 | P1 | 待实现 | API 通知测试 + 文档更新 |
+
+**技术要点：**
+
+```
+1. 飞书应用配置：
+   - 创建飞书企业自建应用
+   - 申请权限：contact:user.base:readonly, im:message
+   - 应用审批通过后获取 App ID 和 App Secret
+
+2. API 实现：
+   - get_tenant_access_token()：获取应用访问令牌
+   - send_user_message_card()：发送消息卡片给用户
+
+3. NotificationService 扩展：
+   - 配置支持：notification_method = "api"
+   - 配置项：feishu_app_id, feishu_app_secret
+   - 通知时使用用户 feishu_open_id
+
+4. 权限校验：
+   - 启用 API 方式前检查飞书应用权限
+   - 用户必须有 feishu_open_id 才能收到私信
+```
+
+---
+
+### Phase 3：通知方式智能切换（未来优化）
+
+**目标：** 根据审批内容自动选择通知方式
+
+**场景：**
+- 普通审批 → Webhook（群聊通知）
+- 敏感审批（金额超过阈值） → API（用户私信）
+
+**工作量：** 约 1 天（配置扩展 + 逻辑实现）
+
+**任务清单：**
+
+| 任务 | 优先级 | 状态 | 说明 |
+|------|--------|------|------|
+| 配置扩展 | P0 | 待实现 | 新增 `sensitive_threshold` 配置 |
+| NotificationService 智能选择 | P0 | 待实现 | 根据金额阈值自动选择通知方式 |
+| 前端配置界面 | P1 | 待实现 | 敏感审批阈值配置 |
+| 文档更新 | P1 | 待实现 | 补充智能切换说明 |
+
+---
+
+### 实现优先级总结
+
+```
+推荐实现顺序：
+
+  Phase 1 (Webhook) ← 立即实现
+    ✅ 配置简单，适合大多数团队
+    ✅ 群聊通知，便于团队协作和监督
+    ✅ 工作量小（2天），快速上线
+
+  Phase 2 (飞书 API) ← 预留接口，未来实现
+    🔜 精准触达，用于敏感审批场景
+    🔜 需要飞书应用审批，配置复杂
+    🔜 工作量中等（3天），依赖飞书应用
+
+  Phase 3 (智能切换) ← 未来优化
+    🔜 根据审批内容自动选择通知方式
+    🔜 提升用户体验，降低配置负担
+```
 
 ---
 
