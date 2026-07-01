@@ -28,6 +28,10 @@
           <el-icon><MagicStick /></el-icon>
           AI 创建线索
         </el-button>
+        <el-button v-if="canCreateLead" @click="router.push('/leads/create')">
+          <el-icon><Edit /></el-icon>
+          手动创建
+        </el-button>
       </div>
     </div>
 
