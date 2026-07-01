@@ -19,7 +19,10 @@ from app.schemas.lead_ai import LeadAIFollowUpInfo
 
 
 # 系统提示词：用于从文本中提取跟进信息
-PARSE_FOLLOW_UP_SYSTEM_PROMPT = """你是 CRMWolf 系统的跟进信息解析助手。
+PARSE_FOLLOW_UP_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的跟进信息解析助手。
+
+【当前日期】
+今天是 {current_date}
 
 你的任务是从用户的描述中提取跟进记录相关信息。
 
@@ -46,14 +49,13 @@ PARSE_FOLLOW_UP_SYSTEM_PROMPT = """你是 CRMWolf 系统的跟进信息解析助
 
 **next_follow_time**: 下次跟进时间
 - 识别时间表达，**输出 YYYY-MM-DD 格式的具体日期**
-- 相对时间需要转换为具体日期：
+- 相对时间需要基于当前日期 {current_date} 转换为具体日期：
   - "下周一" → 计算下周一的具体日期
   - "下周三" → 计算下周三的具体日期
   - "三天后"/"3天后" → 当前日期+3天
   - "一周后"/"下周" → 当前日期+7天
-- 具体日期保持原样：
-  - "5月25日" → 2026-05-25
-  - "2024-05-25" → 2024-05-25
+- 具体日期保持原样（注意年份必须正确）：
+  - "5月25日" → 根据当前年份推断
 - 如果无法识别，返回 null
 
 ## 输出格式
@@ -80,7 +82,7 @@ PARSE_FOLLOW_UP_SYSTEM_PROMPT = """你是 CRMWolf 系统的跟进信息解析助
   "content": "客户反馈已经经过领导审批，后续会有采购来联系；先提供了报价方案",
   "method": "电话",
   "next_action": "如果采购还没有联系，再和客户对齐下采购联系的时间",
-  "next_follow_time": "2026-05-27"
+  "next_follow_time": "{next_week_example}"
 }
 ```
 
@@ -92,7 +94,7 @@ PARSE_FOLLOW_UP_SYSTEM_PROMPT = """你是 CRMWolf 系统的跟进信息解析助
   "content": "想做电商系统，预算50万左右",
   "method": "电话",
   "next_action": "推进POC部署试用",
-  "next_follow_time": "2026-05-27"
+  "next_follow_time": "{next_week_example}"
 }
 ```
 
@@ -104,7 +106,7 @@ PARSE_FOLLOW_UP_SYSTEM_PROMPT = """你是 CRMWolf 系统的跟进信息解析助
   "content": "客户对产品很感兴趣",
   "method": "微信",
   "next_action": "去拜访",
-  "next_follow_time": "2026-05-29"
+  "next_follow_time": "{next_week_example}"
 }
 ```
 
@@ -256,6 +258,21 @@ class FollowUpParserService:
             return int(match.group(1))
         return None
 
+    def _build_system_prompt(self) -> str:
+        """
+        构建带动态当前日期的系统提示词
+
+        Returns:
+            格式化后的系统提示词
+        """
+        current_date = datetime.now()
+        next_week_example = (current_date + timedelta(days=7)).strftime("%Y-%m-%d")
+
+        return PARSE_FOLLOW_UP_SYSTEM_PROMPT_TEMPLATE.format(
+            current_date=current_date.strftime("%Y-%m-%d"),
+            next_week_example=next_week_example
+        )
+
     async def parse_follow_up_info_stream(
         self,
         db: Session,
@@ -287,11 +304,14 @@ class FollowUpParserService:
         # 发送状态事件
         yield {"event": "status", "message": "正在解析跟进信息..."}
 
+        # 构建带动态日期的系统提示词
+        system_prompt = self._build_system_prompt()
+
         # 构建请求
         request_body = {
             "model": config.model_name,
             "messages": [
-                {"role": "system", "content": PARSE_FOLLOW_UP_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
             "temperature": 0.1,
@@ -409,11 +429,14 @@ class FollowUpParserService:
         if not api_key:
             return LeadAIFollowUpInfo()
 
+        # 构建带动态日期的系统提示词
+        system_prompt = self._build_system_prompt()
+
         # 构建请求（非流式）
         request_body = {
             "model": config.model_name,
             "messages": [
-                {"role": "system", "content": PARSE_FOLLOW_UP_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
             "temperature": 0.1,

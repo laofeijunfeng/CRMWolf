@@ -546,36 +546,102 @@ class CustomerCRUD:
 
 
 class ContactCRUD:
-    def get_by_id(self, db: Session, contact_id: int) -> Optional[Contact]:
-        return db.query(Contact).filter(Contact.id == contact_id).first()
+    def get_by_id(self, db: Session, contact_id: int, team_id: Optional[int] = None) -> Optional[Contact]:
+        """获取联系人详情
 
-    def get_by_customer_id(self, db: Session, customer_id: int) -> List[Contact]:
-        return db.query(Contact).filter(Contact.customer_id == customer_id).all()
+        Args:
+            db: 数据库 session
+            contact_id: 联系人 ID
+            team_id: 团队 ID（可选，用于团队隔离）
 
-    def get_primary_by_customer_id(self, db: Session, customer_id: int) -> Optional[Contact]:
-        return db.query(Contact).filter(
+        Returns:
+            联系人对象或 None
+        """
+        query = db.query(Contact).filter(Contact.id == contact_id)
+        if team_id is not None:
+            query = query.filter(Contact.team_id == team_id)
+        return query.first()
+
+    def get_by_customer_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> List[Contact]:
+        """获取客户下的联系人列表
+
+        Args:
+            db: 数据库 session
+            customer_id: 客户 ID
+            team_id: 团队 ID（可选，用于团队隔离）
+
+        Returns:
+            联系人列表
+        """
+        query = db.query(Contact).filter(Contact.customer_id == customer_id)
+        if team_id is not None:
+            query = query.filter(Contact.team_id == team_id)
+        return query.all()
+
+    def get_primary_by_customer_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[Contact]:
+        """获取客户的主联系人
+
+        Args:
+            db: 数据库 session
+            customer_id: 客户 ID
+            team_id: 团队 ID（可选，用于团队隔离）
+
+        Returns:
+            主联系人对象或 None
+        """
+        query = db.query(Contact).filter(
             and_(Contact.customer_id == customer_id, Contact.is_primary == 1)
-        ).first()
+        )
+        if team_id is not None:
+            query = query.filter(Contact.team_id == team_id)
+        return query.first()
 
-    def get_by_mobile(self, db: Session, mobile: str) -> Optional[Contact]:
-        return db.query(Contact).filter(Contact.mobile == mobile).first()
+    def get_by_mobile(self, db: Session, mobile: str, team_id: Optional[int] = None) -> Optional[Contact]:
+        """根据手机号获取联系人
+
+        Args:
+            db: 数据库 session
+            mobile: 手机号
+            team_id: 团队 ID（可选，用于团队隔离）
+
+        Returns:
+            联系人对象或 None
+        """
+        query = db.query(Contact).filter(Contact.mobile == mobile)
+        if team_id is not None:
+            query = query.filter(Contact.team_id == team_id)
+        return query.first()
 
     def create(
         self,
         db: Session,
         obj_in: ContactCreate,
         customer_id: int,
+        team_id: int,
         is_primary: bool = False
     ) -> Contact:
+        """创建联系人
+
+        Args:
+            db: 数据库 session
+            obj_in: 联系人创建 schema
+            customer_id: 客户 ID
+            team_id: 团队 ID
+            is_primary: 是否为主联系人
+
+        Returns:
+            创建的联系人对象
+        """
         contact_data = obj_in.model_dump()
         contact_data['customer_id'] = customer_id
+        contact_data['team_id'] = team_id
         contact_data['is_primary'] = 1 if is_primary else 0
-        
+
         if is_primary:
-            existing_primary = self.get_primary_by_customer_id(db, customer_id)
+            existing_primary = self.get_primary_by_customer_id(db, customer_id, team_id)
             if existing_primary:
                 existing_primary.is_primary = 0
-        
+
         db_obj = Contact(**contact_data)
         db.add(db_obj)
         db.commit()
@@ -584,23 +650,33 @@ class ContactCRUD:
 
     def update(self, db: Session, db_obj: Contact, obj_in: ContactUpdate) -> Contact:
         update_data = obj_in.model_dump(exclude_unset=True)
-        
+
         if update_data:
             for field, value in update_data.items():
                 setattr(db_obj, field, value)
-            
+
             db.commit()
             db.refresh(db_obj)
-        
+
         return db_obj
 
-    def set_primary(self, db: Session, contact: Contact) -> Contact:
+    def set_primary(self, db: Session, contact: Contact, team_id: Optional[int] = None) -> Contact:
+        """设置联系人为主联系人
+
+        Args:
+            db: 数据库 session
+            contact: 联系人对象
+            team_id: 团队 ID（可选，用于团队隔离）
+
+        Returns:
+            更新后的联系人对象
+        """
         customer_id = contact.customer_id
-        
-        existing_primary = self.get_primary_by_customer_id(db, customer_id)
+
+        existing_primary = self.get_primary_by_customer_id(db, customer_id, team_id)
         if existing_primary and existing_primary.id != contact.id:
             existing_primary.is_primary = 0
-        
+
         contact.is_primary = 1
         db.commit()
         db.refresh(contact)

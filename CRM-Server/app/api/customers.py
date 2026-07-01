@@ -898,7 +898,7 @@ def set_primary_contact(
             detail="联系人不存在"
         )
 
-    return contact_crud.set_primary(db, contact)
+    return contact_crud.set_primary(db, contact, team_id)
 
 
 @router.delete("/contacts/{contact_id}", response_model=MessageResponse, summary="删除联系人", description="删除联系人")
