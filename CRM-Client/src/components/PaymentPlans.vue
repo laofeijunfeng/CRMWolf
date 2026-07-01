@@ -226,7 +226,7 @@ const editingPlan = ref<PaymentPlanResponse | null>(null)
 const fetchPlans = async () => {
   loading.value = true
   try {
-    const response = await paymentApi.getPaymentPlans(props.contractId, statusFilter.value as PaymentPlanStatus) as any
+    const response = await paymentApi.getPaymentPlans(props.contractId, statusFilter.value as PaymentPlanStatus)
     plans.value = response.data || response
   } catch (error) {
     console.error('获取回款计划失败', error)
@@ -246,7 +246,7 @@ const getStatusText = (status: PaymentPlanStatus) => {
 }
 
 const getStatusType = (status: PaymentPlanStatus) => {
-  const typeMap: Record<PaymentPlanStatus, any> = {
+  const typeMap: Record<PaymentPlanStatus, string> = {
     'PENDING': '',
     'OVERDUE': 'danger',
     'PARTIAL': 'warning',
@@ -314,7 +314,7 @@ const handleCreatePayment = async () => {
       paymentModalVisible.value = false
       fetchPlans()
       emit('plan-updated')
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('登记回款失败', error)
       ElMessage.error(error.response?.data?.detail || '登记失败')
     }
@@ -356,7 +356,7 @@ const handleUpdatePlan = async () => {
     editModalVisible.value = false
     fetchPlans()
     emit('plan-updated')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('更新回款计划失败', error)
     ElMessage.error(error.response?.data?.detail || '更新失败')
   }
@@ -382,7 +382,7 @@ const deletePlan = (plan: PaymentPlanResponse) => {
       ElMessage.success('删除成功')
       fetchPlans()
       emit('plan-updated')
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('删除回款计划失败', error)
       ElMessage.error(error.response?.data?.detail || '删除失败')
     }

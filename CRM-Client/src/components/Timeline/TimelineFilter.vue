@@ -110,7 +110,7 @@ const eventTypeOptions = EVENT_TYPE_OPTIONS
 
 const customDateRange = ref<[string, string] | null>(null)
 
-const getTagType = (color: string): any => {
+const getTagType = (color: string): '' | 'success' | 'warning' | 'danger' | 'info' => {
   const colorMap: Record<string, string> = {
     '#1890FF': 'primary',
     '#52C41A': 'success',

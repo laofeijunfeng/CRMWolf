@@ -170,7 +170,7 @@ const handleStageClick = async (stage: OpportunityProcurementStageInfo) => {
         duration: 2000
       })
       await fetchOpportunityStages()
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('推进阶段失败', error)
       if (error?.response?.data?.detail) {
         ElMessage.error(error.response.data.detail)
@@ -189,7 +189,7 @@ const handleStageClick = async (stage: OpportunityProcurementStageInfo) => {
 const fetchOpportunityStages = async () => {
   loading.value = true
   try {
-    const stagesData = await procurementApi.getOpportunityProcurementStages(props.opportunityId) as any
+    const stagesData = await procurementApi.getOpportunityProcurementStages(props.opportunityId)
     allStages.value = stagesData || []
   } catch (error) {
     console.error('获取采购阶段失败', error)

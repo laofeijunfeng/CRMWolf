@@ -944,16 +944,16 @@ const dynamicPlaceholder = computed(() => {
 interface InlinePillData {
   actionType: string
   actionDisplayName: string
-  params: Record<string, any>
+  params: Record<string, unknown>
   riskLevel: 'low' | 'medium' | 'high'
   summaryText: string
-  detailedParams: Record<string, any>
-  recommendation?: any
+  detailedParams: Record<string, unknown>
+  recommendation?: { option: { id: number; name: string }; reason: string }
   undoTtl: number
 }
 
 interface WorkflowMiniMapData {
-  steps: any[]
+  steps: { id: string; name: string; status: string }[]
   currentStep: number
 }
 

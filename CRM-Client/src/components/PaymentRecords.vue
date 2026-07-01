@@ -29,9 +29,9 @@
                 查看凭证
               </el-link>
             </div>
-            <div v-if="(record as any).notes" class="detail-row">
+            <div v-if="record.notes" class="detail-row">
               <span class="label">备注：</span>
-              <span class="value">{{ (record as any).notes }}</span>
+              <span class="value">{{ record.notes }}</span>
             </div>
             <div class="detail-row">
               <span class="label">登记时间：</span>
@@ -126,7 +126,7 @@ const totalAmount = computed(() => {
 const fetchRecords = async () => {
   loading.value = true
   try {
-    const response = await paymentApi.getPaymentRecords(props.planId) as any
+    const response = await paymentApi.getPaymentRecords(props.planId)
     records.value = response.data || response
   } catch (error) {
     console.error('获取回款记录失败', error)
@@ -164,7 +164,7 @@ const editRecord = (record: PaymentRecordInfo) => {
     actual_amount: record.actual_amount,
     payment_date: record.payment_date,
     proof_attachment: record.proof_attachment,
-    notes: (record as any).notes
+    notes: record.notes
   }
   editModalVisible.value = true
 }

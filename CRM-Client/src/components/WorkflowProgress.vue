@@ -108,7 +108,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'continue', sessionId: string, userResponse: string): void
   (e: 'cancel', sessionId: string): void
-  (e: 'complete', summary: any): void
+  (e: 'complete', summary: string): void
   (e: 'error', message: string): void
 }>()
 

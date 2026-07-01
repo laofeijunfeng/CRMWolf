@@ -223,7 +223,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
-  (e: 'created', data: any): void
+  (e: 'created', data: { id: number; name: string }): void
 }>()
 
 // Store
@@ -320,7 +320,7 @@ const handleParse = async () => {
       },
       token
     )
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.message || 'AI 服务异常')
     stage.value = 'input'
   } finally {
@@ -406,7 +406,7 @@ const handleCreate = async () => {
     ElMessage.success(result.message)
     emit('created', result.data)
     handleClose()
-  } catch (error: any) {
+  } catch (error: unknown) {
     ElMessage.error(error.response?.data?.detail || error.message || '创建失败')
   } finally {
     isCreating.value = false

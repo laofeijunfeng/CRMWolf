@@ -143,13 +143,13 @@ interface Props {
   logs: OperationLog[]
   loading: boolean
   hasMore: boolean
-  filters: any
+  filters: { eventTypes: string[]; dateRange: string | null; customStartDate: string | null; customEndDate: string | null; keyword: string }
   showFilter?: boolean
 }
 
 interface Emits {
   (e: 'loadMore'): void
-  (e: 'filterChange', filters: any): void
+  (e: 'filterChange', filters: { eventTypes: EventType[]; dateRange: string | null; customStartDate: string | null; customEndDate: string | null; keyword: string }): void
   (e: 'reset'): void
 }
 

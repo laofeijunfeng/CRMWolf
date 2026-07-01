@@ -108,7 +108,7 @@ const progressColor = computed(() => {
 const fetchSummary = async () => {
   loading.value = true
   try {
-    const response = await paymentApi.getPaymentSummary(props.contractId) as any
+    const response = await paymentApi.getPaymentSummary(props.contractId)
     summary.value = response.data || response
   } catch (error) {
     console.error('获取回款汇总失败', error)
