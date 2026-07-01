@@ -140,7 +140,8 @@ export const approvalAiApi = {
 
       // 解析 SSE 数据
       const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
+      const lastLine = lines.pop()
+      buffer = lastLine !== undefined ? lastLine : ''
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -165,7 +166,8 @@ export const approvalAiApi = {
    * @param data 创建请求数据
    * @returns 创建结果
    */
-  createFromAI: (data: ApprovalAICreateRequest) => {
+  createFromAI: (data: ApprovalAICreateRequest): Promise<ApprovalAICreateResult> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<ApprovalAICreateResult>(
       '/v1/approval-ai/create',
       data
