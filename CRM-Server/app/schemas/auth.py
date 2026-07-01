@@ -41,3 +41,19 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class ChangePasswordRequest(BaseModel):
+    """修改密码请求"""
+    old_password: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="旧密码"
+    )
+    new_password: str = Field(
+        ...,
+        min_length=6,
+        max_length=50,
+        description="新密码（6-50位）"
+    )
