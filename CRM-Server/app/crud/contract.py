@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional, List, Tuple
 from decimal import Decimal
+from datetime import datetime
 
 from app.models.contract import Contract, ContractStatus
 from app.schemas.contract import ContractCreate, ContractUpdate, ContractStatusUpdate
@@ -28,7 +29,7 @@ class ApprovalService:
         - 撤回后合同回到草稿状态，可以修改后重新提交
         """
         from app.models.contract import Contract
-        from app.models.approval import ApprovalFlow, Approval, ApprovalStatus
+        from app.models.approval import ApprovalFlow, Approval, ApprovalStatus, ApprovalAction
         from app.crud.approval import approval_flow_crud, approval_crud
         from app.services.feishu import feishu_service
         
@@ -136,9 +137,35 @@ class ContractCRUD:
         keyword: Optional[str] = None,
         owner_id: Optional[str] = None,
         order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
+        order_dir: Optional[str] = None,
+        include_deleted: bool = False
     ) -> Tuple[List[Contract], int]:
+        """
+        查询合同列表
+
+        Args:
+            db: 数据库会话
+            team_id: 团队ID
+            skip: 跳过记录数
+            limit: 返回记录数上限
+            customer_id: 客户ID筛选
+            status: 合同状态筛选
+            contract_number: 合同编号筛选
+            license_type: 授权类型筛选
+            keyword: 关键词筛选
+            owner_id: 负责人ID筛选
+            order_by: 排序字段
+            order_dir: 排序方向
+            include_deleted: 是否包含已删除的合同（默认不包含）
+
+        Returns:
+            Tuple[List[Contract], int]: 合同列表和总数
+        """
         query = db.query(Contract).filter(Contract.team_id == team_id)
+
+        # 默认不包含已删除的合同
+        if not include_deleted:
+            query = query.filter(Contract.deleted_at.is_(None))
 
         if customer_id:
             query = query.filter(Contract.customer_id == customer_id)
@@ -347,14 +374,123 @@ class ContractCRUD:
         return db_obj
     
     def delete(self, db: Session, contract_id: int) -> bool:
+        """
+        删除合同（软删除）
+
+        业务规则：
+        1. 只能删除草稿状态的合同
+        2. 使用软删除（设置 deleted_at 时间戳）
+        3. 正在审批的合同删除后自动终止审批流程
+        4. 审批记录保留，不随合同删除
+
+        Args:
+            db: 数据库会话
+            contract_id: 合同ID
+
+        Returns:
+            bool: 是否成功删除
+
+        Raises:
+            ValueError: 合同状态不允许删除
+        """
+        from app.models.approval import Approval, ApprovalStatus, ApprovalAction
+        from app.crud.approval import approval_crud
+
         contract = self.get_by_id(db, contract_id)
-        if contract:
-            if contract.status != ContractStatus.DRAFT:
-                raise ValueError("只能删除草稿状态的合同")
-            db.delete(contract)
-            db.commit()
-            return True
-        return False
+        if not contract:
+            return False
+
+        if contract.deleted_at is not None:
+            raise ValueError("合同已被删除")
+
+        # 检查合同状态
+        if contract.status not in [ContractStatus.DRAFT, ContractStatus.PENDING_REVIEW]:
+            raise ValueError("只能删除草稿或审批中的合同")
+
+        # 如果合同正在审批中，终止审批流程
+        if contract.status == ContractStatus.PENDING_REVIEW:
+            approval = approval_crud.get_by_contract_id(db, contract_id)
+            if approval and approval.status == ApprovalStatus.PENDING:
+                # 终止审批流程：状态更新为 CANCELLED
+                approval.status = ApprovalStatus.CANCELLED
+                # 置空 contract_id（软删除不会触发外键 SET NULL，需手动处理）
+                approval.contract_id = None
+                # 记录删除原因（使用原生 SQL 避免 SQLite RETURNING 问题）
+                from sqlalchemy import text
+                # 查询最大 id 并 +1（兼容 SQLite）
+                max_id_result = db.execute(text("SELECT COALESCE(MAX(id), 0) + 1 FROM crm_contract_approval_records")).scalar()
+                db.execute(
+                    text(
+                        "INSERT INTO crm_contract_approval_records "
+                        "(id, team_id, approval_id, node_id, approver_id, approver_name, action, comment, created_time) "
+                        "VALUES (:id, :team_id, :approval_id, :node_id, :approver_id, :approver_name, :action, :comment, :created_time)"
+                    ),
+                    {
+                        "id": max_id_result,
+                        "team_id": approval.team_id,
+                        "approval_id": approval.id,
+                        "node_id": approval.current_node_id,
+                        "approver_id": contract.creator_id,
+                        "approver_name": "系统",
+                        "action": "SUBMIT",
+                        "comment": "合同已删除，审批流程终止",
+                        "created_time": datetime.now()
+                    }
+                )
+
+        # 软删除：设置 deleted_at 时间戳
+        contract.deleted_at = datetime.now()
+        contract.status = ContractStatus.DRAFT  # 合同状态回到草稿
+
+        db.commit()
+        return True
+
+    def get_deleted(
+        self,
+        db: Session,
+        team_id: int,
+        skip: int = 0,
+        limit: int = 100
+    ) -> Tuple[List[Contract], int]:
+        """
+        查询已删除的合同列表（管理员查询）
+
+        Args:
+            db: 数据库会话
+            team_id: 团队ID
+            skip: 跳过记录数
+            limit: 返回记录数上限
+
+        Returns:
+            Tuple[List[Contract], int]: 已删除合同列表和总数
+        """
+        query = db.query(Contract).filter(
+            Contract.team_id == team_id,
+            Contract.deleted_at.isnot(None)
+        )
+
+        total = query.count()
+        contracts = query.order_by(Contract.deleted_at.desc()).offset(skip).limit(limit).all()
+        return contracts, total
+
+    def restore(self, db: Session, contract_id: int) -> bool:
+        """
+        恢复已删除的合同（管理员操作）
+
+        Args:
+            db: 数据库会话
+            contract_id: 合同ID
+
+        Returns:
+            bool: 是否成功恢复
+        """
+        contract = self.get_by_id(db, contract_id)
+        if not contract or not contract.deleted_at:
+            return False
+
+        contract.deleted_at = None
+        db.commit()
+        return True
 
 
 contract_crud = ContractCRUD()

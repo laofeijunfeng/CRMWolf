@@ -50,9 +50,11 @@ class Contract(Base):
     created_time = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
     creator_id = Column(String(100), nullable=False, comment="创建人飞书用户ID")
     last_modified_time = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="最后修改时间")
+    deleted_at = Column(DateTime, nullable=True, comment="删除时间（软删除标记）")
 
     payment_plans = relationship("PaymentPlan", back_populates="contract", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="contract", cascade="all, delete-orphan")
+    approvals = relationship("Approval", back_populates="contract", foreign_keys="[Approval.contract_id]")
 
     __table_args__ = (
         Index('idx_contract_customer', 'customer_id'),

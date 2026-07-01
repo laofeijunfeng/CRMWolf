@@ -410,10 +410,83 @@ class ApprovalCRUD:
         return query.first()
 
     def get_by_contract_id(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> Optional[Approval]:
+        """
+        根据合同ID查询审批实例
+
+        注意：即使合同已删除（deleted_at != null），审批记录仍然可以查询
+        外键 contract_id 在合同删除后会置为 NULL，但审批记录保留
+
+        Args:
+            db: 数据库会话
+            contract_id: 合同ID
+            team_id: 团队ID（可选）
+
+        Returns:
+            Optional[Approval]: 审批实例
+        """
         query = db.query(Approval).filter(Approval.contract_id == contract_id)
         if team_id is not None:
             query = query.filter(Approval.team_id == team_id)
         return query.order_by(Approval.created_time.desc()).first()
+
+    def get_by_approval_id_include_deleted_contract(
+        self,
+        db: Session,
+        approval_id: int,
+        team_id: Optional[int] = None
+    ) -> Optional[Approval]:
+        """
+        根据审批ID查询审批实例（包含已删除合同的审批）
+
+        用途：管理员查询已删除合同的审批历史
+
+        Args:
+            db: 数据库会话
+            approval_id: 审批实例ID
+            team_id: 团队ID（可选）
+
+        Returns:
+            Optional[Approval]: 审批实例（合同可能已删除）
+        """
+        query = db.query(Approval).filter(Approval.id == approval_id)
+        if team_id is not None:
+            query = query.filter(Approval.team_id == team_id)
+        return query.first()
+
+    def get_approvals_for_deleted_contracts(
+        self,
+        db: Session,
+        team_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[str] = None
+    ) -> Tuple[List[Approval], int]:
+        """
+        查询已删除合同的审批记录列表（管理员查询）
+
+        用途：管理员查询已删除合同的审批历史
+
+        Args:
+            db: 数据库会话
+            team_id: 团队ID（团队隔离）
+            skip: 跳过记录数
+            limit: 返回记录数上限
+            status: 审批状态筛选（可选）
+
+        Returns:
+            Tuple[List[Approval], int]: 已删除合同的审批列表和总数
+        """
+        query = db.query(Approval).filter(
+            Approval.team_id == team_id,
+            Approval.contract_id.is_(None)  # 合同删除后 contract_id 置为 NULL
+        )
+
+        if status:
+            query = query.filter(Approval.status == status)
+
+        total = query.count()
+        approvals = query.order_by(Approval.updated_time.desc()).offset(skip).limit(limit).all()
+        return approvals, total
     
     def get_multi(self, db: Session, skip: int = 0, limit: int = 100, status: Optional[str] = None) -> Tuple[List[Approval], int]:
         query = db.query(Approval)

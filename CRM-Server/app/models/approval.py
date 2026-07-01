@@ -90,7 +90,7 @@ class Approval(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
-    contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='CASCADE'), nullable=False, comment="关联合同ID")
+    contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='SET NULL'), nullable=True, comment="关联合同ID（合同删除后置空，审批记录保留）")
     flow_id = Column(BigInteger, ForeignKey('crm_approval_flows.id', ondelete='SET NULL'), nullable=True, comment="审批流程模板ID")
     
     current_node_id = Column(BigInteger, ForeignKey('crm_approval_nodes.id', ondelete='SET NULL'), nullable=True, comment="当前审批节点ID")

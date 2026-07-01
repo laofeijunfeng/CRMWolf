@@ -262,10 +262,18 @@ class ApprovalRecordResponse(BaseModel):
     node_name: Optional[str] = Field(None, description="节点名称，如：部门经理审批")
     approver_id: str = Field(..., description="审批人ID，飞书用户ID")
     approver_name: Optional[str] = Field(None, description="审批人姓名")
+    approver_status: Optional[str] = Field(
+        None,
+        description="审批人状态：active（在职）、inactive（离职）、suspended（停用）"
+    )
+    approver_status_display: Optional[str] = Field(
+        None,
+        description="审批人状态显示，如：在职、已离职、已停用"
+    )
     action: str = Field(..., description="操作类型：APPROVE、REJECT")
     comment: Optional[str] = Field(None, description="审批意见，审批时填写的意见")
     created_time: datetime = Field(..., description="操作时间，审批操作的时间")
-    
+
     class Config:
         from_attributes = True
 
@@ -296,6 +304,14 @@ class ApprovalDetailResponse(ApprovalResponse):
     flow: Optional[ApprovalFlowDetailResponse] = Field(
         None,
         description="审批流程详情，包含流程配置和节点信息"
+    )
+    flow_is_active: Optional[bool] = Field(
+        None,
+        description="审批流程是否启用，True-启用，False-禁用。如果流程被禁用，已有审批实例继续执行，但新提交审批不会匹配该流程"
+    )
+    flow_disabled_warning: Optional[str] = Field(
+        None,
+        description="流程禁用提示信息。当流程被禁用时，显示提示：'审批流程已被管理员禁用，当前审批将继续执行，但新提交审批不会使用该流程'"
     )
     records: List[ApprovalRecordResponse] = Field(
         [],

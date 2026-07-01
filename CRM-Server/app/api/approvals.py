@@ -325,7 +325,45 @@ def update_approval_flow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="审批流程不存在"
         )
-    
+
+    # 记录禁用流程操作日志
+    if flow_data.is_active is not None:
+        old_is_active = flow.is_active
+        new_is_active = flow_data.is_active
+
+        # 禁用流程时记录日志
+        if old_is_active == 1 and new_is_active == 0:
+            log_with_fields(
+                logger,
+                level=20,  # INFO
+                message="[Approval Flow Disabled] 管理员禁用审批流程",
+                flow_id=flow_id,
+                flow_name=flow.flow_name,
+                flow_code=flow.flow_code,
+                operator=current_user.name,
+                operator_id=current_user.id,
+                team_id=team_id,
+                old_status="启用",
+                new_status="禁用",
+                note="已有审批实例继续执行，新提交审批不会匹配该流程"
+            )
+        # 启用流程时记录日志
+        elif old_is_active == 0 and new_is_active == 1:
+            log_with_fields(
+                logger,
+                level=20,  # INFO
+                message="[Approval Flow Enabled] 管理员启用审批流程",
+                flow_id=flow_id,
+                flow_name=flow.flow_name,
+                flow_code=flow.flow_code,
+                operator=current_user.name,
+                operator_id=current_user.id,
+                team_id=team_id,
+                old_status="禁用",
+                new_status="启用",
+                note="新提交审批立即可以使用该流程"
+            )
+
     try:
         updated_flow = approval_flow_crud.update(db, flow, flow_data)
         return updated_flow
@@ -619,6 +657,10 @@ async def approve_contract(
                 )
 
     try:
+        # 记录当前节点（审批前的状态）
+        current_node_name = approval.current_node.node_name if approval.current_node else ""
+        flow_name = approval.flow.flow_name if approval.flow else ""
+
         approval = approval_crud.approve(
             db,
             approval,
@@ -628,37 +670,97 @@ async def approve_contract(
         )
 
         notification_service = notification_service_factory(db, team_id)
+        notification_status = "skipped"
 
         if action_request.action.value == ApprovalAction.APPROVE:
             if approval.status == ApprovalStatus.APPROVED:
+                # 全部节点通过
+                flow_direction = "completed"
+                next_node = None
                 # 获取提交人的 feishu_open_id
                 submitter = user_crud.get_by_id(db, int(approval.submitter_id))
                 submitter_open_id = submitter.feishu_open_id if submitter else ""
-                await notification_service.notify_approval_approved(
-                    submitter_open_id=submitter_open_id,
-                    contract_name=contract.contract_name,
-                    contract_id=contract_id
-                )
-            elif approval.current_node:
-                approvers = get_approvers_by_role(db, approval.current_node.approve_role)
-                for approver in approvers:
-                    await notification_service.notify_approval_pending(
+                try:
+                    await notification_service.notify_approval_approved(
+                        submitter_open_id=submitter_open_id,
                         contract_name=contract.contract_name,
-                        flow_name=approval.flow.flow_name if approval.flow else "",
-                        node_name=approval.current_node.node_name,
-                        approver_open_id=approver.feishu_open_id or "",
-                        approver_name=approver.name,
                         contract_id=contract_id
                     )
+                    notification_status = "success"
+                except Exception as notify_error:
+                    notification_status = "failed"
+                    logger.error(
+                        f"[Approval] Approve notification failed: contract_id={contract_id}, error={str(notify_error)}"
+                    )
+            elif approval.current_node:
+                # 流转到下一节点
+                flow_direction = "next_node"
+                next_node = approval.current_node.node_name
+                approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+                try:
+                    for approver in approvers:
+                        await notification_service.notify_approval_pending(
+                            contract_name=contract.contract_name,
+                            flow_name=approval.flow.flow_name if approval.flow else "",
+                            node_name=approval.current_node.node_name,
+                            approver_open_id=approver.feishu_open_id or "",
+                            approver_name=approver.name,
+                            contract_id=contract_id
+                        )
+                    notification_status = "success" if approvers else "skipped"
+                except Exception as notify_error:
+                    notification_status = "failed"
+                    logger.error(
+                        f"[Approval] Approve notification failed: contract_id={contract_id}, error={str(notify_error)}"
+                    )
+            else:
+                flow_direction = "completed"
+                next_node = None
+
+            # 记录审批通过日志
+            log_approval_operation(
+                operation="Approve",
+                approval_id=approval.id,
+                contract_id=contract_id,
+                flow_name=flow_name,
+                node_name=current_node_name,
+                operator=current_user.name,
+                next_node=next_node,
+                flow_direction=flow_direction,
+                notification_status=notification_status
+            )
+
         elif action_request.action.value == ApprovalAction.REJECT:
+            # 拒绝审批
+            flow_direction = "terminated"
             # 获取提交人的 feishu_open_id
             submitter = user_crud.get_by_id(db, int(approval.submitter_id))
             submitter_open_id = submitter.feishu_open_id if submitter else ""
-            await notification_service.notify_approval_rejected(
-                submitter_open_id=submitter_open_id,
-                contract_name=contract.contract_name,
-                reject_reason=action_request.comment or "无",
-                contract_id=contract_id
+            try:
+                await notification_service.notify_approval_rejected(
+                    submitter_open_id=submitter_open_id,
+                    contract_name=contract.contract_name,
+                    reject_reason=action_request.comment or "无",
+                    contract_id=contract_id
+                )
+                notification_status = "success"
+            except Exception as notify_error:
+                notification_status = "failed"
+                logger.error(
+                    f"[Approval] Reject notification failed: contract_id={contract_id}, error={str(notify_error)}"
+                )
+
+            # 记录审批拒绝日志
+            log_approval_operation(
+                operation="Reject",
+                approval_id=approval.id,
+                contract_id=contract_id,
+                flow_name=flow_name,
+                node_name=current_node_name,
+                operator=current_user.name,
+                flow_direction=flow_direction,
+                notification_status=notification_status,
+                reason=action_request.comment or "无"
             )
 
         db.refresh(approval)
@@ -667,15 +769,39 @@ async def approve_contract(
     except ValueError as e:
         # 乐观锁冲突返回 409
         if "审批已被其他用户处理" in str(e):
+            log_approval_operation(
+                operation="Approve",
+                approval_id=approval.id if approval else None,
+                contract_id=contract_id,
+                operator=current_user.name,
+                reason="乐观锁冲突：审批已被其他用户处理",
+                level=40  # ERROR
+            )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="该审批已被处理，请刷新页面查看最新状态"
             )
+        log_approval_operation(
+            operation="Approve",
+            approval_id=approval.id if approval else None,
+            contract_id=contract_id,
+            operator=current_user.name,
+            reason=str(e),
+            level=40  # ERROR
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
+        log_approval_operation(
+            operation="Approve",
+            approval_id=approval.id if approval else None,
+            contract_id=contract_id,
+            operator=current_user.name,
+            reason=str(e),
+            level=40  # ERROR
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"审批操作失败: {str(e)}"
@@ -719,16 +845,48 @@ def cancel_approval(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="审批流程不存在"
         )
-    
+
+    # 记录撤回前的状态
+    current_node_name = approval.current_node.node_name if approval.current_node else ""
+    flow_name = approval.flow.flow_name if approval.flow else ""
+
     try:
         approval = approval_crud.cancel(db, approval, str(current_user.id))
+
+        # 记录撤回日志
+        log_approval_operation(
+            operation="Cancel",
+            approval_id=approval.id,
+            contract_id=contract_id,
+            flow_name=flow_name,
+            node_name=current_node_name,
+            operator=current_user.name,
+            flow_direction="cancelled"
+        )
+
         return MessageResponse(message="审批已撤回")
     except ValueError as e:
+        log_approval_operation(
+            operation="Cancel",
+            approval_id=approval.id if approval else None,
+            contract_id=contract_id,
+            operator=current_user.name,
+            reason=str(e),
+            level=40  # ERROR
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
+        log_approval_operation(
+            operation="Cancel",
+            approval_id=approval.id if approval else None,
+            contract_id=contract_id,
+            operator=current_user.name,
+            reason=str(e),
+            level=40  # ERROR
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"撤回审批失败: {str(e)}"
@@ -743,11 +901,14 @@ def cancel_approval(
 - 显示所有节点的审批记录
 - 显示当前审批进度和状态
 - 包含每个审批人的意见和操作时间
+- 显示审批流程是否被禁用的状态提示
+- 显示审批人是否离职的状态标记
 
 **业务场景：**
 - 审批人查看合同审批历史
 - 了解当前审批进度
 - 查看其他审批人的意见
+- 查看流程是否被禁用
 
 **路径参数：**
 - contract_id: 合同ID
@@ -755,10 +916,14 @@ def cancel_approval(
 **返回字段：**
 - 基本信息：审批ID、状态、提交时间等
 - flow: 审批流程信息
+- flow_is_active: 审批流程是否启用（True-启用，False-禁用）
+- flow_disabled_warning: 流程禁用提示信息（仅当流程被禁用时显示）
 - current_node: 当前待审批节点
 - records: 审批记录列表
   - node_name: 节点名称
-  - approver_name: 审批人姓名
+  - approver_name: 审批人姓名（离职人员显示「姓名（已离职）」）
+  - approver_status: 审批人状态（active/inactive/suspended）
+  - approver_status_display: 审批人状态显示（在职/已离职/已停用）
   - action: 审批动作（APPROVE/REJECT）
   - comment: 审批意见
   - created_at: 审批时间
@@ -768,6 +933,11 @@ def cancel_approval(
 - APPROVED: 已通过
 - REJECTED: 已拒绝
 - CANCELLED: 已撤回
+
+**流程禁用处理（场景六）：**
+- 已有审批实例继续执行现有流程（不受影响）
+- 新提交审批不匹配已禁用流程
+- 流程恢复启用后立即生效
 """)
 def get_approval_detail(
     contract_id: int,
@@ -775,14 +945,89 @@ def get_approval_detail(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    from app.models.user import User, UserStatus
+
     approval = approval_crud.get_by_contract_id(db, contract_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="审批流程不存在"
         )
-    
-    return approval
+
+    # 获取审批记录并填充审批人状态信息
+    records = approval_crud.get_records(db, approval.id)
+
+    # 收集所有审批人ID，批量查询用户状态
+    approver_ids = [int(r.approver_id) for r in records if r.approver_id]
+    users = {}
+    if approver_ids:
+        user_list = db.query(User).filter(User.id.in_(approver_ids)).all()
+        users = {str(u.id): u for u in user_list}
+
+    # 构建审批记录响应（含审批人状态）
+    record_responses = []
+    for record in records:
+        user = users.get(record.approver_id)
+        approver_status = None
+        approver_status_display = None
+        approver_name = record.approver_name
+
+        if user:
+            approver_status = user.status.value if user.status else None
+            # 状态显示：active=在职，inactive=已离职，suspended=已停用
+            status_display_map = {
+                UserStatus.ACTIVE: "在职",
+                UserStatus.INACTIVE: "已离职",
+                UserStatus.SUSPENDED: "已停用"
+            }
+            approver_status_display = status_display_map.get(user.status)
+            # 如果审批人已离职，显示姓名时添加「已离职」标记
+            if user.status == UserStatus.INACTIVE and approver_name:
+                approver_name = f"{approver_name}（已离职）"
+
+        record_responses.append(
+            ApprovalRecordResponse(
+                id=record.id,
+                approval_id=record.approval_id,
+                node_id=record.node_id,
+                node_name=record.node.node_name if record.node else None,
+                approver_id=record.approver_id,
+                approver_name=approver_name,
+                approver_status=approver_status,
+                approver_status_display=approver_status_display,
+                action=record.action,
+                comment=record.comment,
+                created_time=record.created_time
+            )
+        )
+
+    # 检查流程是否被禁用，添加提示信息
+    flow_is_active = None
+    flow_disabled_warning = None
+
+    if approval.flow:
+        flow_is_active = approval.flow.is_active == 1
+        if not flow_is_active:
+            flow_disabled_warning = "审批流程已被管理员禁用，当前审批将继续执行，但新提交审批不会使用该流程"
+
+    # 构建审批详情响应
+    return ApprovalDetailResponse(
+        id=approval.id,
+        contract_id=approval.contract_id,
+        flow_id=approval.flow_id,
+        flow_name=approval.flow.flow_name if approval.flow else None,
+        current_node_id=approval.current_node_id,
+        current_node_name=approval.current_node.node_name if approval.current_node else None,
+        status=approval.status,
+        submitter_id=approval.submitter_id,
+        submitter_name=approval.submitter_name,
+        created_time=approval.created_time,
+        updated_time=approval.updated_time,
+        flow=approval.flow,
+        flow_is_active=flow_is_active,
+        flow_disabled_warning=flow_disabled_warning,
+        records=record_responses
+    )
 
 
 def get_approvers_by_role(db: Session, role_code: str):
