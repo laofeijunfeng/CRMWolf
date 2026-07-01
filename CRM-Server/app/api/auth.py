@@ -5,7 +5,7 @@ from datetime import datetime
 
 from app.core.database import get_db
 from app.core.security import create_access_token, verify_password
-from app.core.deps import get_current_user, get_current_user_team_optional
+from app.core.deps import get_current_user, get_current_user_team_optional, get_current_active_user
 from app.core.config import get_settings
 from app.services.permission_service import permission_service
 from app.services.email_service import email_service
@@ -14,6 +14,7 @@ from app.crud.role import role_crud
 from app.crud.permission import permission_crud
 from app.crud.email_verification_code import email_verification_code_crud
 from app.models.email_verification_code import VerificationPurpose
+from app.models.user import User
 from app.schemas.user import UserResponse
 from app.schemas.role import RoleResponse
 from app.schemas.permission import UserPermissionResponse, UserPermissionsListResponse
@@ -23,7 +24,8 @@ from app.schemas.auth import (
     RegisterPasswordRequest,
     LoginCodeRequest,
     LoginPasswordRequest,
-    LoginResponse
+    LoginResponse,
+    ChangePasswordRequest
 )
 
 settings = get_settings()
@@ -314,3 +316,41 @@ async def get_current_user_permissions(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取用户权限失败: {str(e)}"
         )
+
+
+@router.post("/me/change-password", summary="修改密码", description="修改当前用户密码")
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    修改密码
+
+    验证旧密码后更新为新密码
+    """
+    # 验证用户是否设置了密码
+    if not current_user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="用户未设置密码，请通过其他方式设置密码"
+        )
+
+    # 验证旧密码
+    if not verify_password(request.old_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="旧密码不正确"
+        )
+
+    # 新密码不能与旧密码相同
+    if verify_password(request.new_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密码不能与旧密码相同"
+        )
+
+    # 更新密码（复用现有 CRUD 方法）
+    user_crud.set_password(db, current_user, request.new_password)
+
+    return {"message": "密码修改成功"}
