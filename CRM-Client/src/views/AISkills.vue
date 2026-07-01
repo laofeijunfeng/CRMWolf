@@ -287,7 +287,7 @@ const toggleExpand = async (skill: Skill) => {
       try {
         const response = await aiSkillsApi.getSkill(skill.id)
         skill.actions = response.data?.actions || []
-      } catch (error: any) {
+      } catch (error: unknown) {
         showError(error, '获取 Actions')
       }
     }
@@ -300,7 +300,7 @@ const fetchSkills = async () => {
   try {
     const response = await aiSkillsApi.getSkills()
     skills.value = response.data?.items || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '获取 Skills')
   } finally {
     loading.value = false
@@ -311,7 +311,7 @@ const fetchCRUDMappings = async () => {
   try {
     const response = await aiSkillsApi.getCRUDMappings()
     crudMappings.value = response.data?.items || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '获取 CRUD 映射')
   }
 }
@@ -320,7 +320,7 @@ const fetchEnumMappings = async () => {
   try {
     const response = await aiSkillsApi.getEnumMappings()
     enumMappings.value = response.data?.items || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '获取 Enum 映射')
   }
 }
@@ -329,7 +329,7 @@ const fetchHandlerTypes = async () => {
   try {
     const response = await aiSkillsApi.getHandlerTypes()
     handlerTypes.value = response.data?.handler_types || []
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '获取 Handler 类型')
   }
 }
@@ -351,7 +351,7 @@ const handleDeleteSkill = async (skill: Skill) => {
     showSuccess('删除', 'Skill')
     expandedSkills.value.delete(skill.id)
     await fetchSkills()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       showError(error, '删除 Skill')
     }
@@ -407,7 +407,7 @@ const handleSaveAction = async () => {
       selectedSkill.value.actions = response.data?.actions || []
     }
     await fetchSkills()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '保存 Action')
   } finally {
     saving.value = false
@@ -429,7 +429,7 @@ const handleDeleteAction = async (skill: Skill, action: SkillAction) => {
       skill.actions = response.data?.actions || []
     }
     await fetchSkills()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
       showError(error, '删除 Action')
     }

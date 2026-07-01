@@ -160,7 +160,7 @@ const fetchContractInfo = async () => {
   try {
     const data = await contractApi.getContract(contractId.value)
     contractInfo.value = data
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取合同信息失败', error)
     showError(error, '获取合同信息')
   } finally {
@@ -215,7 +215,7 @@ const handleSubmit = async () => {
     await paymentApi.createPaymentPlans(contractId.value, form.value)
     showSuccess('创建', '回款计划')
     router.back()
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('创建回款计划失败', error)
     showError(error, '创建回款计划')
   } finally {

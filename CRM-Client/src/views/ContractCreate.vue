@@ -213,8 +213,8 @@ const pageTitle = computed(() => {
 const form = reactive<ContractCreate>({
   contract_name: '',
   customer_id: 0,
-  opportunity_id: undefined as any,
-  signing_contact_id: undefined as any,
+  opportunity_id: undefined,
+  signing_contact_id: undefined,
   user_count: 0,
   total_amount: 0,
   license_type: 'SUBSCRIPTION',
@@ -247,7 +247,7 @@ const rules: FormRules<ContractCreate> = {
 
 const fetchCustomerList = async () => {
   try {
-    const data = await customerApi.getCustomers({ limit: 100 }) as unknown as any[]
+    const data = await customerApi.getCustomers({ limit: 100 })
     customerList.value = data
   } catch (error) {
     console.error('获取客户列表失败', error)
@@ -280,7 +280,7 @@ const fetchOpportunityInfo = async (opportunityId: string) => {
     form.customer_id = data.customer_id
     form.opportunity_id = data.id
     form.total_amount = Number(data.total_amount)
-    form.license_type = data.license_type as any
+    form.license_type = data.license_type
     form.subscription_years = data.subscription_years
     
     form.user_count = data.user_count || 0
@@ -304,7 +304,7 @@ const fetchOpportunityInfo = async (opportunityId: string) => {
 
 const fetchContacts = async (customerId: number) => {
   try {
-    const data = await customerApi.getContacts(customerId) as unknown as any[]
+    const data = await customerApi.getContacts(customerId)
     contactList.value = data.filter(contact => contact && contact.id > 0)
   } catch (error) {
     console.error('获取联系人列表失败', error)
@@ -319,7 +319,7 @@ const handleSubmit = async () => {
     
     submitting.value = true
     
-    const submitData: any = {
+    const submitData: Record<string, unknown> = {
       contract_name: form.contract_name,
       customer_id: form.customer_id,
       signing_contact_id: form.signing_contact_id,
@@ -355,7 +355,7 @@ const handleSubmit = async () => {
 
     showSuccess('创建', '合同')
     router.push('/contracts')
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('创建合同失败', error)
     if (error.errors) {
       return
@@ -368,7 +368,7 @@ const handleSubmit = async () => {
 
 const fetchCustomerInfo = async (customerId: string) => {
   try {
-    const data = await customerApi.getCustomerDetail(Number(customerId)) as any
+    const data = await customerApi.getCustomerDetail(Number(customerId))
     customerInfo.value = data
     form.customer_id = data.id
   } catch (error) {
@@ -386,7 +386,7 @@ watch(() => form.opportunity_id, async (newOpportunityId: number) => {
     if (opportunity) {
       form.total_amount = Number(opportunity.total_amount || 0)
       form.user_count = opportunity.user_count || 0
-      form.license_type = opportunity.license_type as any
+      form.license_type = opportunity.license_type
       form.subscription_years = opportunity.subscription_years
 
       if (opportunity.customer_id) {

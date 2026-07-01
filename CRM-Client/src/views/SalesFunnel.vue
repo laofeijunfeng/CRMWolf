@@ -198,20 +198,20 @@ import { opportunityApi, type SalesFunnelData, type StageDurationData } from '@/
 const loading = ref(false)
 const funnelData = ref<SalesFunnelData[]>([])
 const stageDurationData = ref<StageDurationData[]>([])
-const dateRange = ref<any[]>([])
+const dateRange = ref<string[]>([])
 
 const fetchSalesFunnel = async () => {
   loading.value = true
   try {
-    const params: any = {}
+    const params: Record<string, string> = {}
     if (dateRange.value && dateRange.value.length === 2) {
       params.start_date = new Date(dateRange.value[0]).toISOString().split('T')[0]
       params.end_date = new Date(dateRange.value[1]).toISOString().split('T')[0]
     }
     
-    const data = await opportunityApi.getSalesFunnel(params) as any
+    const data = await opportunityApi.getSalesFunnel(params)
     funnelData.value = data
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取销售漏斗数据失败', error)
     ElMessage.error('获取销售漏斗数据失败')
   } finally {
@@ -221,15 +221,15 @@ const fetchSalesFunnel = async () => {
 
 const fetchStageDuration = async () => {
   try {
-    const params: any = {}
+    const params: Record<string, string> = {}
     if (dateRange.value && dateRange.value.length === 2) {
       params.start_date = new Date(dateRange.value[0]).toISOString().split('T')[0]
       params.end_date = new Date(dateRange.value[1]).toISOString().split('T')[0]
     }
     
-    const data = await opportunityApi.getStageDuration(params) as any
+    const data = await opportunityApi.getStageDuration(params)
     stageDurationData.value = data
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('获取阶段耗时数据失败', error)
   }
 }

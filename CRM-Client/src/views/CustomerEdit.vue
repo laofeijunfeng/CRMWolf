@@ -242,7 +242,7 @@ const fetchCustomerDetail = async () => {
       project_background: res.project_background || ''
     })
     profileStatus.value = res.profile_status
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '获取客户详情')
     router.back()
   } finally {
@@ -253,7 +253,7 @@ const fetchCustomerDetail = async () => {
 const fetchOptions = async () => {
   try {
     const procurementRes = await procurementApi.getProcurementMethodOptions()
-    procurementMethodOptions.value = (procurementRes as any) || []
+    procurementMethodOptions.value = procurementRes || []
   } catch (error) {
     console.error('获取选项失败:', error)
   }
@@ -297,7 +297,7 @@ const handleSubmit = async () => {
       showSuccess('创建', '客户')
     }
     router.back()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, isEdit.value ? '更新客户' : '创建客户')
   } finally {
     submitting.value = false

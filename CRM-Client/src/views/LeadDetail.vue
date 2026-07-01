@@ -361,7 +361,7 @@ const formatDate = (dateStr: string) => {
 const fetchLeadDetail = async () => {
   loading.value = true
   try {
-    const res = await leadApi.getLeadDetail(leadId) as any
+    const res = await leadApi.getLeadDetail(leadId)
     leadData.value = res
     followUps.value = res.follow_ups?.reverse() || []
 
@@ -375,7 +375,7 @@ const fetchLeadDetail = async () => {
         scoreDetails.value = []
       }
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '获取线索详情')
   } finally {
     loading.value = false
@@ -406,7 +406,7 @@ const handleEditModalOk = async () => {
     showSuccess('更新', '线索')
     editModalVisible.value = false
     await fetchLeadDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '更新线索')
   }
 }
@@ -455,18 +455,18 @@ const handleFollowUpModalOk = async () => {
     followUpModalVisible.value = false
     // 刷新跟进记录
     await fetchLeadDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '添加跟进')
   }
 }
 
-const handleFollowUpDelete = async (followUp: any) => {
+const handleFollowUpDelete = async (followUp: { id: number }) => {
   try {
     await leadApi.deleteFollowUp(leadId, followUp['id'])
     showSuccess('删除', '跟进记录')
     // 刷新跟进记录
     await fetchLeadDetail()
-  } catch (error: any) {
+  } catch (error: unknown) {
     showError(error, '删除跟进')
   }
 }
