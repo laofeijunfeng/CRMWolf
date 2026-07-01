@@ -175,7 +175,7 @@ export const WORKFLOW_DEFINITIONS = {
 /**
  * 判断是否是 Workflow 事件
  */
-export function isWorkflowEvent(event: any): boolean {
+export function isWorkflowEvent(event: { event?: string }): boolean {
   return event?.event?.startsWith('workflow') ||
          event?.event?.startsWith('step') ||
          event?.event?.startsWith('decision') ||

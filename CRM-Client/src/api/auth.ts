@@ -45,6 +45,7 @@ export interface UserResponse {
   status: string
   created_at: string
   updated_at: string
+  roles?: RoleResponse[]
 }
 
 export interface RoleResponse {
@@ -69,41 +70,41 @@ export interface PermissionResponse {
 export const authApi = {
   // 发送验证码
   sendCode: (params: SendCodeParams) => {
-    return request.post<{ message: string }>('/auth/send-code', params)
+    return request.post<{ message: string }>('/v1/auth/send-code', params)
   },
 
   // 邮箱注册
   register: (data: RegisterRequest) => {
-    return request.post<LoginResponse>('/auth/register', data)
+    return request.post<LoginResponse>('/v1/auth/register', data)
   },
 
   // 验证码登录
   loginWithCode: (data: LoginCodeRequest) => {
-    return request.post<LoginResponse>('/auth/login', data)
+    return request.post<LoginResponse>('/v1/auth/login', data)
   },
 
   // 密码登录
   loginWithPassword: (data: LoginPasswordRequest) => {
-    return request.post<LoginResponse>('/auth/login-password', data)
+    return request.post<LoginResponse>('/v1/auth/login-password', data)
   },
 
   // 密码注册
   registerWithPassword: (data: RegisterPasswordRequest) => {
-    return request.post<LoginResponse>('/auth/register-password', data)
+    return request.post<LoginResponse>('/v1/auth/register-password', data)
   },
 
   // 获取当前用户信息
   getUserInfo: () => {
-    return request.get<UserResponse>('/auth/me')
+    return request.get<UserResponse>('/v1/auth/me')
   },
 
   // 获取当前用户角色
   getUserRoles: () => {
-    return request.get<RoleResponse[]>('/auth/me/roles')
+    return request.get<RoleResponse[]>('/v1/auth/me/roles')
   },
 
   // 获取当前用户权限
   getUserPermissions: (useCache = true) => {
-    return request.get<{ permissions: PermissionResponse[], total: number, cached: boolean }>('/auth/me/permissions', { params: { use_cache: useCache } })
+    return request.get<{ permissions: PermissionResponse[], total: number, cached: boolean }>('/v1/auth/me/permissions', { params: { use_cache: useCache } })
   }
 }

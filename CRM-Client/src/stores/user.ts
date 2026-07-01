@@ -6,6 +6,9 @@ import { usePermissionStore } from './permissions'
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>(localStorage.getItem('token') || '')
   const userInfo = ref<UserResponse | null>(null)
+
+  // 用户角色类型定义
+  type UserRole = { id: number; name: string; code: string }
   const loading = ref(false)
 
   const setToken = (newToken: string) => {
@@ -13,7 +16,7 @@ export const useUserStore = defineStore('user', () => {
     localStorage.setItem('token', newToken)
   }
 
-  const setUserInfo = (info: UserResponse & { roles?: { id: number; name: string; code: string }[] }) => {
+  const setUserInfo = (info: UserResponse) => {
     userInfo.value = info
   }
 

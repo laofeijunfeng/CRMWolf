@@ -109,21 +109,21 @@ const currentPath = computed(() => {
   return path
 })
 
-const handleMenuClick = (key: string) => {
+const handleMenuClick = (key: string): void => {
   router.push(key)
 }
 
-const getUserPosition = () => {
-  const userRoles = (userStore.userInfo as any)?.roles
-  if (!userRoles || !Array.isArray(userRoles) || userRoles.length === 0) {
+const getUserPosition = (): string => {
+  const userRoles = userStore.userInfo?.roles
+  if (!userRoles || userRoles.length === 0) {
     return ''
   }
 
-  const roleNames = userRoles.map((r: any) => r.name || r.code).filter(Boolean)
+  const roleNames = userRoles.map(r => r.name || r.code).filter(Boolean)
   return roleNames.join('、')
 }
 
-const handleUserProfile = () => {
+const handleUserProfile = (): void => {
   router.push('/settings')
 }
 
@@ -134,7 +134,7 @@ const handleLogout = () => {
   router.push('/login')
 }
 
-const handleSwitchTeam = async (teamId: number) => {
+const handleSwitchTeam = async (teamId: number): Promise<void> => {
   if (teamId === teamStore.currentTeam?.id) {
     showTeamSwitcher.value = false
     return
@@ -143,9 +143,8 @@ const handleSwitchTeam = async (teamId: number) => {
     await teamStore.switchTeam(teamId)
     showTeamSwitcher.value = false
     ElMessage.success('已切换团队')
-    // 刷新当前页面数据
     router.go(0)
-  } catch (error) {
+  } catch {
     ElMessage.error('切换团队失败')
   }
 }

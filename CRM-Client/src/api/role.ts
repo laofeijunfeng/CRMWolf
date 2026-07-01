@@ -58,41 +58,41 @@ export interface RolePermissionsUpdate {
 }
 
 const roleApi = {
-  getRoles: async (params?: RoleQueryParams) => {
-    const response = await request.get<RoleResponse[]>('/roles/', { params }) as any
-    return response.data || response
+  getRoles: async (params?: RoleQueryParams): Promise<RoleResponse[]> => {
+    const response = await request.get<RoleResponse[]>('/v1/roles/', { params })
+    return response
   },
 
   getRole: async (roleId: number) => {
-    const response = await request.get<RoleWithPermissions>(`/roles/${roleId}`)
+    const response = await request.get<RoleWithPermissions>(`/v1/roles/${roleId}`)
     return response
   },
 
   createRole: async (data: RoleCreate) => {
-    const response = await request.post<RoleResponse>('/roles/', data)
+    const response = await request.post<RoleResponse>('/v1/roles/', data)
     return response
   },
 
   updateRole: async (roleId: number, data: RoleUpdate) => {
-    const response = await request.put<RoleResponse>(`/roles/${roleId}`, data)
+    const response = await request.put<RoleResponse>(`/v1/roles/${roleId}`, data)
     return response
   },
 
   deleteRole: async (roleId: number) => {
-    const response = await request.delete<RoleResponse>(`/roles/${roleId}`)
+    const response = await request.delete<RoleResponse>(`/v1/roles/${roleId}`)
     return response
   },
 
   assignRoleToUser: (roleId: number, userId: number, teamId: number) => {
-    return request.post(`/roles/${roleId}/users`, { user_id: userId, role_id: roleId, team_id: teamId })
+    return request.post(`/v1/roles/${roleId}/users`, { user_id: userId, role_id: roleId, team_id: teamId })
   },
 
   removeRoleFromUser: (roleId: number, userId: number, teamId: number) => {
-    return request.delete(`/roles/${roleId}/users/${userId}`, { params: { team_id: teamId } })
+    return request.delete(`/v1/roles/${roleId}/users/${userId}`, { params: { team_id: teamId } })
   },
 
   updateRolePermissions: async (roleId: number, permissionIds: number[]): Promise<PermissionResponse[]> => {
-    const response = await request.put<PermissionResponse[]>(`/roles/${roleId}/permissions`, {
+    const response = await request.put<PermissionResponse[]>(`/v1/roles/${roleId}/permissions`, {
       permission_ids: permissionIds
     })
     return response

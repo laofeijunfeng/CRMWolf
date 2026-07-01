@@ -31,23 +31,23 @@ export interface GetUserPermissionsParams {
 
 const permissionApi = {
   getUserPermissions: async (params?: GetUserPermissionsParams) => {
-    const response = await request.get<UserPermissionsResponse>('/auth/me/permissions', { 
-      params: params || {} 
+    const response = await request.get<UserPermissionsResponse>('/v1/auth/me/permissions', {
+      params: params || {}
     })
     return response
   },
 
   getAllPermissions: async (params?: PermissionQueryParams) => {
-    const response = await request.get<PermissionResponse[]>('/permissions', { params })
+    const response = await request.get<PermissionResponse[]>('/v1/permissions', { params })
     return response
   },
 
   assignPermissionToRole: (permissionId: number, roleId: number) => {
-    return request.post(`/permissions/${permissionId}/roles`, { role_id: roleId })
+    return request.post(`/v1/permissions/${permissionId}/roles`, { role_id: roleId })
   },
 
   removePermissionFromRole: (permissionId: number, roleId: number) => {
-    return request.delete(`/permissions/${permissionId}/roles/${roleId}`)
+    return request.delete(`/v1/permissions/${permissionId}/roles/${roleId}`)
   }
 }
 

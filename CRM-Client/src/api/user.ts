@@ -61,27 +61,27 @@ export interface UserSearchResult {
 
 const userApi = {
   getUsers: async (params?: UserQueryParams) => {
-    const response = await request.get<UserResponse[]>('/users/', { params })
+    const response = await request.get<UserResponse[]>('/v1/users/', { params })
     return response
   },
 
   getUser: async (userId: number) => {
-    const response = await request.get<UserResponse>(`/users/${userId}`)
+    const response = await request.get<UserResponse>(`/v1/users/${userId}`)
     return response
   },
 
   createUser: async (data: UserCreate) => {
-    const response = await request.post<UserResponse>('/users/', data)
+    const response = await request.post<UserResponse>('/v1/users/', data)
     return response
   },
 
   updateUser: async (userId: number, data: UserUpdate) => {
-    const response = await request.put<UserResponse>(`/users/${userId}`, data)
+    const response = await request.put<UserResponse>(`/v1/users/${userId}`, data)
     return response
   },
 
   deleteUser: async (userId: number) => {
-    const response = await request.delete<UserResponse>(`/users/${userId}`)
+    const response = await request.delete<UserResponse>(`/v1/users/${userId}`)
     return response
   },
 
@@ -90,7 +90,7 @@ const userApi = {
     if (excludeTeamId) {
       params.exclude_team_id = excludeTeamId
     }
-    const response = await request.get<UserSearchResult[]>('/users/search', { params })
+    const response = await request.get<UserSearchResult[]>('/v1/users/search', { params })
     return response
   }
 }

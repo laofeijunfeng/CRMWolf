@@ -24,7 +24,7 @@ export type EventType =
 export type EventAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'STATUS_CHANGE'
 
 export interface OperationLogContent {
-  [key: string]: any
+  [key: string]: unknown
 }
 
 export interface OperationLog {
@@ -65,7 +65,7 @@ export interface GetMyLogsParams {
 
 const operationLogApi = {
   getResourceLogs: (params: GetResourceLogsParams) => {
-    const queryParams: any = {
+    const queryParams: Record<string, unknown> = {
       primary_resource_type: params.primary_resource_type,
       primary_resource_id: params.primary_resource_id,
       page_no: params.page_no || 1,

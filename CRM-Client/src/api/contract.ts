@@ -133,44 +133,53 @@ export interface ContractFromOpportunityParams {
 type ApiResponse<T> = Promise<T>
 
 const contractApi = {
-  createContract: (data: ContractCreate): ApiResponse<ContractResponse> => {
-    return request.post<ContractResponse>('/v1/contracts/', data) as any
+  createContract: async (data: ContractCreate): Promise<ContractResponse> => {
+    const response = await request.post<ContractResponse>('/v1/contracts/', data)
+    return response
   },
 
-  getContracts: (params?: ContractQueryParams): ApiResponse<ContractListResponse[]> => {
-    return request.get<ContractListResponse[]>('/v1/contracts/', { params }) as any
+  getContracts: async (params?: ContractQueryParams): Promise<ContractListResponse[]> => {
+    const response = await request.get<ContractListResponse[]>('/v1/contracts/', { params })
+    return response
   },
 
-  getContract: (contractId: number): ApiResponse<ContractResponse> => {
-    return request.get<ContractResponse>(`/v1/contracts/${contractId}`) as any
+  getContract: async (contractId: number): Promise<ContractResponse> => {
+    const response = await request.get<ContractResponse>(`/v1/contracts/${contractId}`)
+    return response
   },
 
-  updateContract: (contractId: number, data: ContractUpdate): ApiResponse<ContractResponse> => {
-    return request.put<ContractResponse>(`/v1/contracts/${contractId}`, data) as any
+  updateContract: async (contractId: number, data: ContractUpdate): Promise<ContractResponse> => {
+    const response = await request.put<ContractResponse>(`/v1/contracts/${contractId}`, data)
+    return response
   },
 
-  updateContractStatus: (contractId: number, data: ContractStatusUpdate): ApiResponse<ContractResponse> => {
-    return request.patch<ContractResponse>(`/v1/contracts/${contractId}/status`, data) as any
+  updateContractStatus: async (contractId: number, data: ContractStatusUpdate): Promise<ContractResponse> => {
+    const response = await request.patch<ContractResponse>(`/v1/contracts/${contractId}/status`, data)
+    return response
   },
 
-  deleteContract: (contractId: number): ApiResponse<{ message: string }> => {
-    return request.delete<{ message: string }>(`/v1/contracts/${contractId}`) as any
+  deleteContract: async (contractId: number): Promise<{ message: string }> => {
+    const response = await request.delete<{ message: string }>(`/v1/contracts/${contractId}`)
+    return response
   },
 
-  createContractFromOpportunity: (opportunityId: number, params: ContractFromOpportunityParams): ApiResponse<ContractResponse> => {
-    return request.post<ContractResponse>(`/v1/contracts/from-opportunity/${opportunityId}`, null, {
+  createContractFromOpportunity: async (opportunityId: number, params: ContractFromOpportunityParams): Promise<ContractResponse> => {
+    const response = await request.post<ContractResponse>(`/v1/contracts/from-opportunity/${opportunityId}`, null, {
       params
-    }) as any
+    })
+    return response
   },
 
-  getContractByOpportunity: (opportunityId: number): ApiResponse<ContractListResponse> => {
-    return request.get<ContractListResponse>(`/v1/contracts/opportunity/${opportunityId}`, {
+  getContractByOpportunity: async (opportunityId: number): Promise<ContractListResponse> => {
+    const response = await request.get<ContractListResponse>(`/v1/contracts/opportunity/${opportunityId}`, {
       skipErrorNotification: true
-    } as any) as any
+    })
+    return response
   },
 
-  getCustomerContracts: (customerId: number, params?: { skip?: number; limit?: number }): ApiResponse<ContractListResponse[]> => {
-    return request.get<ContractListResponse[]>(`/v1/customers/${customerId}/contracts`, { params }) as any
+  getCustomerContracts: async (customerId: number, params?: { skip?: number; limit?: number }): Promise<ContractListResponse[]> => {
+    const response = await request.get<ContractListResponse[]>(`/v1/customers/${customerId}/contracts`, { params })
+    return response
   }
 }
 

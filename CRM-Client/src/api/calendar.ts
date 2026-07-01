@@ -74,7 +74,7 @@ export interface FollowUpParseRequest {
 export interface ParsedAction {
   skill: string
   action: string
-  params: Record<string, any>
+  params: Record<string, unknown>
 }
 
 export interface FollowUpParseResponse {
@@ -90,7 +90,7 @@ export interface FollowUpExecuteRequest {
 export interface FollowUpExecuteResult {
   success: boolean
   message: string
-  data?: Record<string, any>
+  data?: Record<string, unknown>
 }
 
 export interface FollowUpExecuteResponse {
@@ -104,7 +104,7 @@ export interface TodoContextResponse {
   todo_id: number
   entity_type: string
   entity_id: number
-  entity_info: Record<string, any>
+  entity_info: Record<string, unknown>
   current_next_follow_time: string | null
   current_next_action: string | null
 }

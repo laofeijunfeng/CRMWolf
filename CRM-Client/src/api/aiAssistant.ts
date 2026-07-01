@@ -26,7 +26,7 @@ export interface ParamDefinition {
   required: boolean
   placeholder: string
   default_value?: string
-  options?: Array<{ value: string; label: string }>
+  options?: { value: string; label: string }[]
 }
 
 /**
