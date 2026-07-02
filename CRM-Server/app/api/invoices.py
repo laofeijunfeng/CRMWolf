@@ -12,7 +12,7 @@ from app.models.payment import PaymentPlan
 from app.schemas.invoice import (
     InvoiceTitleCreate, InvoiceTitleUpdate, InvoiceTitleResponse,
     InvoiceApplicationCreate, InvoiceApplicationUpdate, InvoiceApplicationResponse,
-    InvoiceApplicationSubmit, MessageResponse,
+    MessageResponse,
     InvoiceTitleListResponse, InvoiceApplicationListResponse, PaymentPlanInvoiceSummary
 )
 from app.crud.invoice import invoice_title_crud, invoice_application_crud
@@ -223,61 +223,6 @@ def update_invoice_application(
     try:
         updated_application = invoice_application_crud.update(db, application, application_data)
         return _populate_application_info(db, updated_application, team_id)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
-@invoice_router.post("/{application_id}/submit", response_model=InvoiceApplicationResponse, summary="提交发票申请审批", description="提交发票申请进行审批，状态变为待审批")
-def submit_invoice_application(
-    application_id: int,
-    submit_data: InvoiceApplicationSubmit = None,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    application = invoice_application_crud.get_by_id(db, application_id, team_id)
-    if not application:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="发票申请不存在"
-        )
-
-    try:
-        submitted_application = invoice_application_crud.submit(db, application_id)
-        return _populate_application_info(db, submitted_application, team_id)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
-@invoice_router.post("/{application_id}/withdraw", response_model=InvoiceApplicationResponse, summary="撤回发票申请", description="撤回已提交的发票申请，状态变为草稿")
-def withdraw_invoice_application(
-    application_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    application = invoice_application_crud.get_by_id(db, application_id, team_id)
-    if not application:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="发票申请不存在"
-        )
-
-    if application.applicant_id != str(current_user.id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="只能撤回自己提交的发票申请"
-        )
-
-    try:
-        withdrawn_application = invoice_application_crud.withdraw(db, application_id)
-        return _populate_application_info(db, withdrawn_application, team_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -254,19 +254,6 @@ class InvoiceApplicationCRUD:
         db.refresh(db_obj)
         return db_obj
     
-    def submit(self, db: Session, application_id: int) -> Optional[InvoiceApplication]:
-        application = self.get_by_id(db, application_id)
-        if not application:
-            return None
-
-        if application.status != InvoiceApplicationStatus.DRAFT:
-            raise ValueError("只有草稿状态的发票申请可以提交审批")
-
-        application.status = InvoiceApplicationStatus.PENDING_REVIEW
-        db.commit()
-        db.refresh(application)
-        return application
-
     def mark_issued(
         self,
         db: Session,
@@ -304,20 +291,7 @@ class InvoiceApplicationCRUD:
         db.commit()
         db.refresh(application)
         return application
-    
-    def withdraw(self, db: Session, application_id: int) -> Optional[InvoiceApplication]:
-        application = self.get_by_id(db, application_id)
-        if not application:
-            return None
-        
-        if application.status != InvoiceApplicationStatus.PENDING_REVIEW:
-            raise ValueError("只有待审批状态的发票申请可以撤回")
-        
-        application.status = InvoiceApplicationStatus.DRAFT
-        db.commit()
-        db.refresh(application)
-        return application
-    
+
     def delete(self, db: Session, application_id: int) -> bool:
         application = self.get_by_id(db, application_id)
         if not application:
