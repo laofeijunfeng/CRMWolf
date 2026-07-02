@@ -21,14 +21,26 @@ class ApprovalAIParsedNode(BaseModel):
 
 
 class ApprovalAIParsedFlow(BaseModel):
-    """AI 解析的审批流程"""
+    """AI 解析的审批流程
+
+    注意：min_amount/max_amount 使用 float 类型，
+    确保 JSON 序列化兼容性（不需要 SSEJsonEncoder）
+    """
     flow_name: str = Field(..., description="流程名称")
     flow_code: str = Field(..., description="流程编码")
     description: Optional[str] = Field(None, description="流程描述")
-    min_amount: Optional[Decimal] = Field(None, ge=0, description="最小金额（元）")
-    max_amount: Optional[Decimal] = Field(None, ge=0, description="最大金额（元）")
+    # 改为 float 类型（不再使用 Decimal），确保 SSE JSON 序列化兼容
+    min_amount: Optional[float] = Field(None, ge=0, description="最小金额（元）")
+    max_amount: Optional[float] = Field(None, ge=0, description="最大金额（元）")
     license_type: Optional[str] = Field(None, description="授权类型，如：STANDARD")
     nodes: List[ApprovalAIParsedNode] = Field(..., min_length=1, description="审批节点列表")
+
+    def to_sse_dict(self) -> dict:
+        """转换为 SSE 可序列化的字典
+
+        使用 model_dump(mode='json') 确保所有类型兼容 JSON
+        """
+        return self.model_dump(mode='json')
 
 
 class ApprovalAIParseRequest(BaseModel):
