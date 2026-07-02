@@ -2,6 +2,7 @@ from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Nume
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
+from app.constants.business_types import BusinessType
 
 
 class ApprovalStatus:
@@ -91,6 +92,8 @@ class Approval(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='SET NULL'), nullable=True, comment="关联合同ID（合同删除后置空，审批记录保留）")
+    business_type = Column(String(20), nullable=False, default=BusinessType.CONTRACT, comment="业务单据类型：CONTRACT/PAYMENT/INVOICE")
+    business_id = Column(BigInteger, nullable=True, index=True, comment="业务单据ID（与 business_type 联合定位单据）")
     flow_id = Column(BigInteger, ForeignKey('crm_approval_flows.id', ondelete='SET NULL'), nullable=True, comment="审批流程模板ID")
     
     current_node_id = Column(BigInteger, ForeignKey('crm_approval_nodes.id', ondelete='SET NULL'), nullable=True, comment="当前审批节点ID")
@@ -109,6 +112,7 @@ class Approval(Base):
     
     __table_args__ = (
         Index('idx_approval_contract', 'contract_id'),
+        Index('idx_approval_business', 'business_type', 'business_id'),
         Index('idx_approval_status', 'status'),
         Index('idx_approval_flow', 'flow_id'),
         Index('idx_approval_team_id', 'team_id'),
