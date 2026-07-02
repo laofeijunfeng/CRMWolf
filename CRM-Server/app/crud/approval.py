@@ -5,7 +5,8 @@ from decimal import Decimal
 import logging
 
 from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalStatus, ApprovalAction
-from app.models.contract import Contract, ContractStatus
+from app.models.contract import Contract
+from app.constants.business_types import BusinessType
 from app.schemas.approval import (
     ApprovalFlowCreate, ApprovalFlowUpdate,
     ApprovalSubmitRequest, ApprovalActionRequest
@@ -14,7 +15,7 @@ from app.schemas.approval import (
 logger = logging.getLogger(__name__)
 
 
-def calculate_flow_precision_score(flow: ApprovalFlow, contract: Contract) -> int:
+def calculate_flow_precision_score(flow: ApprovalFlow, amount, license_type: Optional[str]) -> int:
     """
     计算审批流程的精确度评分
 
@@ -35,9 +36,14 @@ def calculate_flow_precision_score(flow: ApprovalFlow, contract: Contract) -> in
        - 作为兜底策略，最早创建的流程得分高
        - 需要在多流程比较时使用
 
+    A5 重构：入参由 (flow, contract) 泛化为 (flow, amount, license_type)，
+    原合同语义保留——amount 即原 contract.total_amount，license_type 即原
+    contract.license_type。评分逻辑逐字不变（E1 合同回归契约）。
+
     Args:
         flow: 审批流程
-        contract: 合同
+        amount: 业务单据金额（合同为 total_amount，回款为 actual_amount，发票为 invoice_amount）
+        license_type: 授权类型（仅合同有值；回款/发票传 None）
 
     Returns:
         int: 精确度评分（0-100分）
@@ -53,7 +59,7 @@ def calculate_flow_precision_score(flow: ApprovalFlow, contract: Contract) -> in
         score += 50
         # 范围越窄额外加分（范围宽度越小，评分越高）
         # 计算范围宽度占合同金额的比例
-        contract_amount = float(contract.total_amount) if contract.total_amount else 0
+        contract_amount = float(amount) if amount else 0
         if contract_amount > 0:
             range_width = max_amount - min_amount
             # 范围宽度越小，加分越多（最多10分）
@@ -76,7 +82,7 @@ def calculate_flow_precision_score(flow: ApprovalFlow, contract: Contract) -> in
         # 有金额条件：10分
         score += 10
 
-    if flow.license_type is not None and contract.license_type == flow.license_type:
+    if flow.license_type is not None and license_type == flow.license_type:
         # 有授权类型条件且匹配：20分
         score += 20
 
@@ -171,20 +177,10 @@ class ApprovalFlowCRUD:
     
     def match_flow(self, db: Session, contract: Contract, team_id: Optional[int] = None) -> Tuple[Optional[ApprovalFlow], Optional[str]]:
         """
-        匹配审批流程
+        匹配审批流程（合同专用 thin wrapper，A5 解耦后保留以兼容现有调用方）
 
-        返回：(匹配的流程, 错误信息)
-        - 如果匹配成功，返回 (flow, None)
-        - 如果匹配失败，返回 (None, 错误信息)
-
-        特殊处理：
-        - 金额为 0 或 null 时，优先匹配无金额限制的流程（min_amount 和 max_amount 都为 null）
-        - 如果金额为空且无匹配流程，返回特定错误信息
-
-        当同一合同同时匹配多个审批流程时，选择精确度最高的流程：
-        1. 金额精确匹配优先（如 50-100万 > 50万以上）
-        2. 条件数量优先（金额 + 类型 > 仅金额）
-        3. 创建时间优先（最早创建的流程作为兜底）
+        语义与改造前逐字一致：直接委托 match_flow_generic('CONTRACT', team_id,
+        contract.total_amount, contract.license_type)。E1 合同回归契约由此保证。
 
         Args:
             db: 数据库会话
@@ -194,17 +190,70 @@ class ApprovalFlowCRUD:
         Returns:
             Tuple[Optional[ApprovalFlow], Optional[str]]: (匹配的审批流程, 错误信息)
         """
-        query = db.query(ApprovalFlow).filter(ApprovalFlow.is_active == 1)
+        return self.match_flow_generic(
+            db,
+            BusinessType.CONTRACT,
+            team_id,
+            contract.total_amount,
+            contract.license_type,
+        )
+
+    def match_flow_generic(
+        self,
+        db: Session,
+        business_type: str,
+        team_id: Optional[int],
+        amount,
+        license_type: Optional[str],
+    ) -> Tuple[Optional[ApprovalFlow], Optional[str]]:
+        """
+        通用审批流程匹配（A5：支持 CONTRACT/PAYMENT/INVOICE）
+
+        E1 合同回归契约（P0）：business_type='CONTRACT' 的匹配结果必须与改造前
+        match_flow(contract) 逐字一致——仅多 `ApprovalFlow.business_type == 'CONTRACT'`
+        一个过滤条件。team_id 隔离、金额范围比较、license_type 匹配、
+        calculate_flow_precision_score 评分、(-score, created_time) 排序逻辑全部沿用原代码。
+
+        决策1 语义（未匹配分支）：
+        - CONTRACT：沿用合同"未匹配=报错阻断"语义——金额为空时返回
+          "合同金额为空，无法匹配审批流程，请补充金额或让管理员创建默认流程"，
+          正常未匹配返回 "未找到匹配的审批流程，请联系管理员配置"（调用方报 400）。
+        - PAYMENT/INVOICE：未匹配返回 (None, None)（非报错，调用方判定 None=免审批直通）。
+
+        Args:
+            db: 数据库会话
+            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            team_id: 团队ID（可选，用于团队隔离）
+            amount: 单据金额（合同 total_amount / 回款 actual_amount / 发票 invoice_amount）
+            license_type: 授权类型（仅合同有值，回款/发票传 None）
+
+        Returns:
+            Tuple[Optional[ApprovalFlow], Optional[str]]: (匹配的审批流程, 错误信息)
+        """
+        query = db.query(ApprovalFlow).filter(
+            ApprovalFlow.is_active == 1,
+            ApprovalFlow.business_type == business_type,
+        )
 
         if team_id is not None:
             query = query.filter(ApprovalFlow.team_id == team_id)
 
-        # 检查合同金额是否为 0 或 null
-        total_amount = float(contract.total_amount) if contract.total_amount else 0
+        # 检查金额是否为 0 或 null
+        total_amount = float(amount) if amount else 0
         is_amount_empty = total_amount == 0
 
         # 查询所有启用的流程
         flows = query.all()
+
+        # 未匹配时按 business_type 分支决定"报错"还是"直通"
+        def _no_match() -> Tuple[Optional[ApprovalFlow], Optional[str]]:
+            if business_type == BusinessType.CONTRACT:
+                # 沿用合同原 match_flow 的两条错误信息（E1 逐字一致）
+                if is_amount_empty:
+                    return None, "合同金额为空，无法匹配审批流程，请补充金额或让管理员创建默认流程"
+                return None, "未找到匹配的审批流程，请联系管理员配置"
+            # PAYMENT/INVOICE：未配置流=免审批直通（决策1）
+            return None, None
 
         # 金额为空时，优先匹配无金额限制的流程
         if is_amount_empty:
@@ -213,10 +262,10 @@ class ApprovalFlowCRUD:
             matched_no_amount: List[Tuple[ApprovalFlow, int]] = []
             for flow in no_amount_flows:
                 # 检查授权类型
-                if flow.license_type and contract.license_type != flow.license_type:
+                if flow.license_type and license_type != flow.license_type:
                     continue
                 # 计算精确度评分（主要用于多流程匹配时的选择）
-                score = calculate_flow_precision_score(flow, contract)
+                score = calculate_flow_precision_score(flow, total_amount, license_type)
                 matched_no_amount.append((flow, score))
 
             if matched_no_amount:
@@ -236,8 +285,8 @@ class ApprovalFlowCRUD:
                 )
                 return selected_flow, None
 
-            # 无匹配流程，返回特定错误
-            return None, "合同金额为空，无法匹配审批流程，请补充金额或让管理员创建默认流程"
+            # 无匹配流程，按 business_type 分支返回
+            return _no_match()
 
         # 正常金额匹配逻辑
         # 收集所有匹配的流程
@@ -251,16 +300,16 @@ class ApprovalFlowCRUD:
                 continue
 
             # 检查授权类型匹配
-            if flow.license_type and contract.license_type != flow.license_type:
+            if flow.license_type and license_type != flow.license_type:
                 continue
 
             # 流程匹配成功，计算精确度评分
-            score = calculate_flow_precision_score(flow, contract)
+            score = calculate_flow_precision_score(flow, total_amount, license_type)
             matched_flows.append((flow, score))
 
-        # 如果没有匹配的流程，返回错误信息
+        # 如果没有匹配的流程，按 business_type 分支返回
         if not matched_flows:
-            return None, "未找到匹配的审批流程，请联系管理员配置"
+            return _no_match()
 
         # 如果只有一个匹配的流程，直接返回
         if len(matched_flows) == 1:
@@ -409,12 +458,36 @@ class ApprovalCRUD:
             query = query.filter(Approval.team_id == team_id)
         return query.first()
 
+    def get_by_entity(self, db: Session, business_type: str, business_id: int, team_id: Optional[int] = None) -> Optional[Approval]:
+        """
+        通用：按业务单据类型+ID+团队查询最新一条审批实例（A5）
+
+        Args:
+            db: 数据库会话
+            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            business_id: 业务单据ID
+            team_id: 团队ID（可选，团队隔离）
+
+        Returns:
+            Optional[Approval]: 最新一条审批实例，无则 None
+        """
+        query = db.query(Approval).filter(
+            Approval.business_type == business_type,
+            Approval.business_id == business_id,
+        )
+        if team_id is not None:
+            query = query.filter(Approval.team_id == team_id)
+        return query.order_by(Approval.created_time.desc()).first()
+
     def get_by_contract_id(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> Optional[Approval]:
         """
-        根据合同ID查询审批实例
+        根据合同ID查询审批实例（合同专用 thin wrapper，A5 解耦后保留以兼容现有调用方）
 
         注意：即使合同已删除（deleted_at != null），审批记录仍然可以查询
-        外键 contract_id 在合同删除后会置为 NULL，但审批记录保留
+        外键 contract_id 在合同删除后会置为 NULL，但审批记录保留。
+        本 wrapper 委托 get_by_entity(CONTRACT, contract_id, team_id)——
+        A3 迁移 012 已把旧审批行的 business_id 回填为 contract_id，
+        故 business_id == contract_id 的查询等价于原 contract_id 过滤。
 
         Args:
             db: 数据库会话
@@ -424,10 +497,7 @@ class ApprovalCRUD:
         Returns:
             Optional[Approval]: 审批实例
         """
-        query = db.query(Approval).filter(Approval.contract_id == contract_id)
-        if team_id is not None:
-            query = query.filter(Approval.team_id == team_id)
-        return query.order_by(Approval.created_time.desc()).first()
+        return self.get_by_entity(db, BusinessType.CONTRACT, contract_id, team_id)
 
     def get_by_approval_id_include_deleted_contract(
         self,
@@ -500,7 +570,54 @@ class ApprovalCRUD:
         return approvals, total
     
     def create_approval(self, db: Session, contract: Contract, flow: ApprovalFlow, submitter_id: str, submitter_name: str) -> Approval:
-        from app.models.approval import ApprovalNode
+        """
+        创建合同审批实例（合同专用 thin wrapper，A5 解耦后保留以兼容现有调用方）
+
+        委托 create_approval_generic(CONTRACT, contract.id, contract.team_id, ...)，
+        合同回归语义：CONTRACT 分支额外写 contract_id=business_id，兼容旧外键字段。
+        """
+        return self.create_approval_generic(
+            db, BusinessType.CONTRACT, contract.id, contract.team_id,
+            flow, submitter_id, submitter_name,
+        )
+
+    def create_approval_generic(
+        self,
+        db: Session,
+        business_type: str,
+        business_id: int,
+        team_id: int,
+        flow: ApprovalFlow,
+        submitter_id: str,
+        submitter_name: str,
+    ) -> Approval:
+        """
+        通用审批实例创建（A5：支持 CONTRACT/PAYMENT/INVOICE）
+
+        - 通过适配器 get_entity 取业务单据；不存在则 raise ValueError（防幻觉单据ID）
+        - 写 Approval.business_type/business_id；CONTRACT 额外写 contract_id=business_id 兼容旧字段
+        - adapter.on_submit 切单据状态（适配器自带 E4 None 守卫，此处 entity 已校验非 None）
+        - 创建首个 ApprovalRecord(SUBMIT)
+
+        Args:
+            db: 数据库会话
+            business_type: 业务单据类型
+            business_id: 业务单据ID
+            team_id: 团队ID
+            flow: 匹配到的审批流程
+            submitter_id: 提交人飞书用户ID
+            submitter_name: 提交人姓名
+
+        Returns:
+            Approval: 创建后的审批实例
+        """
+        from app.models.approval import ApprovalNode, ApprovalRecord
+        from app.services.approval_adapter import get_adapter
+
+        adapter = get_adapter(business_type)
+        entity = adapter.get_entity(db, business_id, team_id)
+        if entity is None:
+            raise ValueError("业务单据不存在")
 
         first_node = db.query(ApprovalNode).filter(
             ApprovalNode.flow_id == flow.id,
@@ -508,38 +625,38 @@ class ApprovalCRUD:
         ).first()
 
         db_approval = Approval(
-            contract_id=contract.id,
+            business_type=business_type,
+            business_id=business_id,
+            contract_id=business_id if business_type == BusinessType.CONTRACT else None,
             flow_id=flow.id,
-            team_id=contract.team_id,
+            team_id=team_id,
             current_node_id=first_node.id if first_node else None,
             status=ApprovalStatus.PENDING,
             submitter_id=submitter_id,
-            submitter_name=submitter_name
+            submitter_name=submitter_name,
         )
-        
+
         db.add(db_approval)
         db.flush()
-        
-        from app.models.approval import ApprovalRecord
-        record = ApprovalRecord(
+
+        db.add(ApprovalRecord(
             approval_id=db_approval.id,
             node_id=first_node.id if first_node else None,
             approver_id=submitter_id,
             approver_name=submitter_name,
             action=ApprovalAction.SUBMIT,
             comment=None,
-            team_id=db_approval.team_id
-        )
-        db.add(record)
-        
-        contract.status = ContractStatus.PENDING_REVIEW
-        
+            team_id=team_id,
+        ))
+        adapter.on_submit(db, entity)
+
         db.commit()
         db.refresh(db_approval)
         return db_approval
     
     def approve(self, db: Session, approval: Approval, action_request: ApprovalActionRequest, approver_id: str, approver_name: str) -> Approval:
         from app.models.approval import ApprovalNode
+        from app.services.approval_adapter import get_adapter
 
         # 乐观锁检查：防止并发审批冲突
         if action_request.updated_time is not None:
@@ -548,11 +665,11 @@ class ApprovalCRUD:
 
         if approval.status != ApprovalStatus.PENDING:
             raise ValueError(f"当前审批状态为 {approval.status}，无法进行审批操作")
-        
+
         current_node = approval.current_node
         if not current_node:
             raise ValueError("当前审批节点不存在")
-        
+
         record = ApprovalRecord(
             approval_id=approval.id,
             node_id=current_node.id,
@@ -563,47 +680,50 @@ class ApprovalCRUD:
             team_id=approval.team_id
         )
         db.add(record)
-        
+
+        # A5：经适配器回写单据状态；E4 守卫——单据已删则仅终结审批，不回写
+        adapter = get_adapter(approval.business_type)
+        entity = adapter.get_entity(db, approval.business_id, approval.team_id)
+
         if action_request.action.value == ApprovalAction.APPROVE:
             next_node = db.query(ApprovalNode).filter(
                 ApprovalNode.flow_id == approval.flow_id,
                 ApprovalNode.node_order == current_node.node_order + 1
             ).first()
-            
+
             if next_node:
                 approval.current_node_id = next_node.id
             else:
                 approval.status = ApprovalStatus.APPROVED
-                from app.models.contract import Contract
-                contract = db.query(Contract).filter(Contract.id == approval.contract_id).first()
-                if contract:
-                    contract.status = ContractStatus.SIGNED
-        
+                if entity is not None:
+                    adapter.on_approved(db, entity)
+
         elif action_request.action.value == ApprovalAction.REJECT:
             approval.status = ApprovalStatus.REJECTED
-            from app.models.contract import Contract
-            contract = db.query(Contract).filter(Contract.id == approval.contract_id).first()
-            if contract:
-                contract.status = ContractStatus.DRAFT
-        
+            if entity is not None:
+                adapter.on_rejected(db, entity)
+
         db.commit()
         db.refresh(approval)
         return approval
-    
+
     def cancel(self, db: Session, approval: Approval, user_id: str) -> Approval:
+        from app.services.approval_adapter import get_adapter
+
         if approval.status != ApprovalStatus.PENDING:
             raise ValueError("只能撤回审批中的审批流程")
-        
+
         if approval.submitter_id != user_id:
             raise ValueError("只有提交人可以撤回审批")
-        
+
         approval.status = ApprovalStatus.CANCELLED
-        
-        from app.models.contract import Contract
-        contract = db.query(Contract).filter(Contract.id == approval.contract_id).first()
-        if contract:
-            contract.status = ContractStatus.DRAFT
-        
+
+        # A5：经适配器回写单据状态；E4 守卫——单据已删则仅终结审批，不回写
+        adapter = get_adapter(approval.business_type)
+        entity = adapter.get_entity(db, approval.business_id, approval.team_id)
+        if entity is not None:
+            adapter.on_cancelled(db, entity)
+
         db.commit()
         db.refresh(approval)
         return approval

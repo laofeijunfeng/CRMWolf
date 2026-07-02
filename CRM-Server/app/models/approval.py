@@ -37,6 +37,9 @@ class ApprovalFlow(Base):
     max_amount = Column(Numeric(12, 2), nullable=True, comment="最大金额（条件）")
     license_type = Column(String(20), nullable=True, comment="授权类型（条件）")
 
+    # A5：流程适用单据类型，对齐 A3 迁移 012（crm_approval_flows.business_type）
+    business_type = Column(String(20), nullable=False, default=BusinessType.CONTRACT, comment="流程适用单据类型：CONTRACT/PAYMENT/INVOICE")
+
     is_active = Column(Integer, nullable=False, default=1, comment="是否启用：0:否, 1:是")
 
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
@@ -49,6 +52,7 @@ class ApprovalFlow(Base):
         Index('idx_flow_code', 'flow_code'),
         Index('idx_flow_active', 'is_active'),
         Index('idx_crm_approval_flows_team_id', 'team_id'),
+        Index('idx_flow_business_type', 'business_type'),
         {'comment': '审批流程模板表'}
     )
 
