@@ -6,14 +6,18 @@ from datetime import date
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
+from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.payment import payment_plan_crud, payment_record_crud
 from app.crud.contract import contract_crud
+from app.constants.business_types import BusinessType
 from app.models.payment import PaymentPlanStatus
 from app.schemas.payment import (
     PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate, PaymentPlanResponse,
     PaymentRecordCreate, PaymentRecordUpdate, PaymentRecordResponse,
+    PaymentRecordConfirm, PaymentRecordWithConfirmation,
     ContractPaymentSummary, PaymentReminder, PaginatedResponse
 )
+from app.services.approval_adapter import get_adapter
 
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
@@ -498,5 +502,123 @@ def get_overdue_payments(
             customer_name=customer_name,
             opportunity_name=opportunity_name
         ))
-    
+
     return reminders
+
+
+# ---------- B1: 回款审批提交 & 财务直确认 -----------------------------------
+#
+# 业务语义 sugar 端点（通用引擎 /v1/approvals/PAYMENT/{id}/submit 已可覆盖；
+# 本端点叠加 payment:submit 权限码 + E5 决策"未匹配流不建 Approval、回款保持
+# PENDING 由财务走 /confirm 直通确认"语义）。
+#
+# 决策1：match_flow_generic(PAYMENT) 未匹配返回 (None, None) —— 不报错。
+# E5：匹配到流→建 Approval 走审批；未匹配→不建 Approval，回款 confirmation_status
+# 保持 PENDING，由财务人员调 /confirm 直接确认入账（非自动 CONFIRMED）。
+
+
+@router.post(
+    "/records/{record_id}/submit-approval",
+    summary="提交回款审批",
+    description=(
+        "为指定回款记录提交审批。系统按回款金额匹配审批流程：匹配到流→建 Approval 走审批，"
+        "回款 confirmation_status 保持 PENDING；未匹配流（决策1 直通）→不建 Approval，"
+        "回款保持 PENDING 待财务确认。权限码：payment:submit。"
+    ),
+)
+def submit_payment_approval(
+    record_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(require_permission("payment:submit")),
+    db: Session = Depends(get_db),
+):
+    record = payment_record_crud.get_by_id(db, record_id, team_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="回款记录不存在"
+        )
+
+    # 决策1：PAYMENT 未匹配返 (None, None)，不报错
+    flow, _err = approval_flow_crud.match_flow_generic(
+        db, BusinessType.PAYMENT, team_id, record.actual_amount, None
+    )
+
+    if flow is None:
+        # E5：免审批直通财务确认，不建 Approval
+        return {
+            "approval_id": None,
+            "status": "NO_FLOW",
+            "message": "未配置回款审批流，已转为财务确认"
+        }
+
+    # 经适配器取提交人（PaymentRecordAdapter.get_submitter → creator_id, creator_name）
+    adapter = get_adapter(BusinessType.PAYMENT)
+    submitter_id, submitter_name = adapter.get_submitter(record)
+
+    approval = approval_crud.create_approval_generic(
+        db,
+        BusinessType.PAYMENT,
+        record.id,
+        record.team_id,
+        flow,
+        submitter_id,
+        submitter_name,
+    )
+
+    return {
+        "approval_id": approval.id,
+        "status": approval.status,
+        "message": "回款审批已提交"
+    }
+
+
+@router.post(
+    "/records/{record_id}/confirm",
+    response_model=PaymentRecordWithConfirmation,
+    summary="财务确认回款入账",
+    description=(
+        "财务人员直接确认回款入账（非审批路径）。action=confirm→CONFIRMED；"
+        "action=dispute→DISPUTED。权限码：payment:confirm。"
+        "对应 crud：payment_record_crud.confirm_payment（已存在但此前无 API 调用方）。"
+    ),
+)
+def confirm_payment_record(
+    record_id: int,
+    body: PaymentRecordConfirm,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(require_permission("payment:confirm")),
+    db: Session = Depends(get_db),
+):
+    record = payment_record_crud.get_by_id(db, record_id, team_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="回款记录不存在"
+        )
+
+    # confirm_payment 内部用 get_by_id(record_id) 二次取记录，已在上一步做 team 隔离 404，
+    # 因此此处不会跨 team 误确认；二次 None 守卫兜底。
+    try:
+        updated = payment_record_crud.confirm_payment(
+            db,
+            record_id,
+            str(current_user.id),
+            current_user.name,
+            body.action,
+            body.notes,
+            invoice_application_ids=body.invoice_application_ids,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="回款记录不存在"
+        )
+
+    return updated
