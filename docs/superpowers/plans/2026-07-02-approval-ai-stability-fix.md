@@ -904,6 +904,464 @@ git commit --allow-empty -m "verify: approval AI stability fixes verified workin
 
 ---
 
+## Task 7: Frontend SSE Event Handling Enhancement
+
+**Files:**
+- Modify: `CRM-Client/src/api/approvalAI.ts:52-59` (add done, progress events)
+- Modify: `CRM-Client/src/components/ApprovalFlowAIDialog.vue` (error actions, progress UI)
+- Test: `CRM-Client/tests/components/ApprovalFlowAIDialog.spec.ts`
+
+**Interfaces:**
+- Consumes: SSE events from Task 4 (done, progress, error with actions)
+- Produces: Enhanced frontend UI with progress bar, error recovery buttons, cancel mechanism
+
+- [ ] **Step 1: Update SSE event interface in approvalAI.ts**
+
+```typescript
+// api/approvalAI.ts (lines 52-70)
+
+/**
+ * SSE 事件类型（更新后）
+ */
+export interface ApprovalAIParseSSEEvent {
+  event: 'status' | 'content' | 'parsed' | 'error' | 'done' | 'progress'  // 新增 done, progress
+  message?: string
+  content?: string
+  flow?: ApprovalAIParsedFlow
+  thinking_process?: string
+  success?: boolean          // done 事件使用
+  percentage?: number        // progress 事件使用（新增）
+  stage?: 'analyzing' | 'generating' | 'validating'  // progress 阶段
+  recovery?: string          // error 事件恢复提示（新增）
+  actions?: ErrorAction[]    // error 事件可操作按钮（新增）
+  estimated_seconds?: number // status 事件预估时间（新增）
+  can_cancel?: boolean       // status 事件是否可取消（新增）
+}
+
+/**
+ * 错误恢复动作（新增）
+ */
+export interface ErrorAction {
+  type: 'retry' | 'simplify' | 'help'
+  label: string
+  suggestion?: string   // retry/simplify 时提供示例
+  url?: string          // help 时提供链接
+}
+```
+
+- [ ] **Step 2: Update SSE parsing logic to handle done event**
+
+```typescript
+// api/approvalAI.ts (lines 145-156)
+
+// Change from:
+// if (eventData.event === 'parsed' || eventData.event === 'error') {
+//   return
+// }
+
+// To:
+if (eventData.event === 'parsed' || eventData.event === 'error' || eventData.event === 'done') {
+  onEvent(eventData)  // Send done event to callback
+  return
+}
+```
+
+- [ ] **Step 3: Add new state variables in ApprovalFlowAIDialog.vue**
+
+```typescript
+// ApprovalFlowAIDialog.vue (script setup, after line 270)
+
+// 新增状态变量
+const progressPercentage = ref(0)
+const progressStage = ref<'analyzing' | 'generating' | 'validating' | 'complete'>('analyzing')
+const progressStatus = ref<'' | 'success' | 'warning' | 'exception'>('')
+const estimatedSeconds = ref<number | undefined>()
+const canCancel = ref(true)
+
+// 错误处理状态
+const errorMessage = ref('')
+const errorRecovery = ref('')
+const errorActions = ref<ErrorAction[]>([])
+
+// 计算属性：进度阶段标签
+const progressStageLabel = computed(() => {
+  const labels = {
+    analyzing: '正在理解您的需求',
+    generating: '正在生成审批流程配置',
+    validating: '正在验证角色编码',
+    complete: '配置生成完成'
+  }
+  return labels[progressStage.value]
+})
+```
+
+- [ ] **Step 4: Update parsing stage UI with progress bar**
+
+```vue
+<!-- ApprovalFlowAIDialog.vue (template, replace lines 42-53) -->
+
+<!-- 阶段 2：解析过程（优化版） -->
+<div v-if="stage === 'parsing'" class="parse-stage">
+  <!-- 进度条 -->
+  <div class="progress-section">
+    <el-progress
+      :percentage="progressPercentage"
+      :status="progressStatus"
+      :stroke-width="8"
+    />
+    <div class="progress-stage">
+      <span class="stage-label">{{ progressStageLabel }}</span>
+      <span v-if="estimatedSeconds" class="estimated-time">
+        预计 {{ estimatedSeconds }} 秒
+      </span>
+    </div>
+  </div>
+
+  <!-- 状态消息 -->
+  <div class="status-message">
+    <el-icon class="loading-icon"><Loading /></el-icon>
+    <span>{{ statusMessage }}</span>
+  </div>
+
+  <!-- 思考过程 -->
+  <div v-if="thinkingContent" class="thinking-section">
+    <div class="thinking-header">
+      <el-icon><ChatDotRound /></el-icon>
+      <span>AI 思考过程</span>
+    </div>
+    <div class="thinking-content typewriter">{{ thinkingContent }}</div>
+  </div>
+
+  <!-- 取消按钮 -->
+  <div class="parse-actions">
+    <el-button
+      type="danger"
+      plain
+      :disabled="!canCancel"
+      @click="handleCancel"
+    >
+      取消生成
+    </el-button>
+  </div>
+</div>
+```
+
+- [ ] **Step 5: Add error stage with actionable buttons**
+
+```vue
+<!-- ApprovalFlowAIDialog.vue (template, add after parsing stage) -->
+
+<!-- 阶段：错误状态 -->
+<div v-if="stage === 'error'" class="error-stage">
+  <div class="error-message">
+    <el-icon><WarningFilled /></el-icon>
+    <span>{{ errorMessage }}</span>
+  </div>
+
+  <!-- 恢复提示 -->
+  <div v-if="errorRecovery" class="error-recovery">
+    <span>建议：{{ errorRecovery }}</span>
+  </div>
+
+  <!-- 可操作按钮 -->
+  <div v-if="errorActions.length" class="error-actions">
+    <el-button
+      v-for="action in errorActions"
+      :key="action.type"
+      :type="action.type === 'retry' ? 'primary' : 'default'"
+      @click="handleErrorAction(action)"
+    >
+      {{ action.label }}
+    </el-button>
+  </div>
+
+  <!-- 返回按钮 -->
+  <div class="error-back">
+    <el-button @click="handleBackToInput">返回重新输入</el-button>
+  </div>
+</div>
+```
+
+- [ ] **Step 6: Add error action handler**
+
+```typescript
+// ApprovalFlowAIDialog.vue (script setup, add new method)
+
+const handleErrorAction = (action: ErrorAction): void => {
+  switch (action.type) {
+    case 'retry':
+      // 使用建议重新尝试
+      if (action.suggestion) {
+        inputText.value = action.suggestion
+      }
+      handleParse()
+      break
+    case 'simplify':
+      // 使用简化描述
+      if (action.suggestion) {
+        inputText.value = action.suggestion
+        handleParse()
+      }
+      break
+    case 'help':
+      // 打开帮助页面
+      if (action.url) {
+        window.open(action.url, '_blank')
+      }
+      break
+  }
+}
+
+const handleCancel = (): void => {
+  // 标记取消状态
+  canCancel.value = false
+  stage.value = 'input'
+  statusMessage.value = ''
+  thinkingContent.value = ''
+  ElMessage.info('已取消生成')
+}
+```
+
+- [ ] **Step 7: Update handleParse to handle new events**
+
+```typescript
+// ApprovalFlowAIDialog.vue (update handleParse method, lines 317-367)
+
+const handleParse = async (): Promise<void> => {
+  if (inputText.value.trim() === '') return
+
+  // 重置状态
+  stage.value = 'parsing'
+  isParsing.value = true
+  statusMessage.value = '正在连接 AI 服务...'
+  thinkingContent.value = ''
+  progressPercentage.value = 0
+  progressStage.value = 'analyzing'
+  progressStatus.value = ''
+  estimatedSeconds.value = undefined
+  canCancel.value = true
+
+  // 重置错误状态
+  errorMessage.value = ''
+  errorRecovery.value = ''
+  errorActions.value = []
+
+  try {
+    const token = userStore.token ?? ''
+    await approvalAiApi.parseSSE(
+      { content: inputText.value },
+      (event): void => {
+        switch (event.event) {
+          case 'status':
+            statusMessage.value = event.message ?? ''
+            if (event.estimated_seconds) {
+              estimatedSeconds.value = event.estimated_seconds
+            }
+            break
+
+          case 'progress':  // 新增
+            progressPercentage.value = event.percentage ?? 0
+            if (event.stage) {
+              progressStage.value = event.stage as 'analyzing' | 'generating' | 'validating'
+            }
+            statusMessage.value = event.message ?? ''
+            break
+
+          case 'content':
+            thinkingContent.value += event.content ?? ''
+            break
+
+          case 'parsed':
+            if (event.flow) {
+              // 更新进度到完成
+              progressPercentage.value = 100
+              progressStage.value = 'complete'
+              progressStatus.value = 'success'
+
+              // 填充表单
+              flowForm.value = {
+                flow_name: event.flow.flow_name,
+                flow_code: event.flow.flow_code,
+                description: event.flow.description ?? '',
+                min_amount: event.flow.min_amount,
+                max_amount: event.flow.max_amount,
+                license_type: event.flow.license_type ?? '',
+                nodes: event.flow.nodes.map(n => ({ ...n }))
+              }
+              stage.value = 'preview'
+            }
+            break
+
+          case 'error':  // 增强
+            errorMessage.value = event.message ?? '解析失败'
+            errorRecovery.value = event.recovery ?? ''
+            errorActions.value = event.actions ?? []
+            stage.value = 'error'
+            break
+
+          case 'done':  // 新增
+            canCancel.value = false
+            if (!event.success && stage.value === 'parsing') {
+              // done=false 但没有收到 parsed/error，说明中断了
+              errorMessage.value = 'AI 服务连接中断'
+              errorRecovery.value = '请检查网络连接后重试'
+              stage.value = 'error'
+            }
+            break
+        }
+      },
+      token
+    )
+  } catch (error: unknown) {
+    const err = error as Error
+    errorMessage.value = err.message ?? 'AI 服务异常'
+    errorRecovery.value = '请稍后重试'
+    stage.value = 'error'
+  } finally {
+    isParsing.value = false
+  }
+}
+```
+
+- [ ] **Step 8: Add CSS for new UI elements**
+
+```scss
+// ApprovalFlowAIDialog.vue (style, add after line 598)
+
+.error-stage {
+  padding: 20px;
+
+  .error-message {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: var(--el-color-danger-light-9);
+    border-radius: 4px;
+    color: var(--el-color-danger);
+    font-size: 14px;
+  }
+
+  .error-recovery {
+    padding: 12px 16px;
+    background: var(--el-fill-color-light);
+    border-radius: 4px;
+    margin-top: 12px;
+    color: var(--el-text-color-secondary);
+    font-size: 13px;
+  }
+
+  .error-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .error-back {
+    margin-top: 16px;
+    text-align: right;
+  }
+}
+
+.parse-stage {
+  .progress-section {
+    margin-bottom: 16px;
+
+    .progress-stage {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      font-size: 13px;
+
+      .estimated-time {
+        color: var(--el-text-color-secondary);
+      }
+    }
+  }
+
+  .parse-actions {
+    margin-top: 16px;
+    text-align: right;
+  }
+
+  .thinking-section {
+    margin-top: 16px;
+    padding: 12px;
+    background: #f5f7fa;
+    border-radius: 4px;
+
+    .thinking-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 4px;
+      color: white;
+      font-weight: 500;
+      font-size: 13px;
+    }
+
+    .thinking-content {
+      padding: 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+
+      &.typewriter {
+        animation: fadeIn 0.3s ease-out;
+        border-left: 3px solid #667eea;
+      }
+    }
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+```
+
+- [ ] **Step 9: Add WarningFilled icon import**
+
+```typescript
+// ApprovalFlowAIDialog.vue (imports, line 232)
+
+import {
+  InfoFilled,
+  MagicStick,
+  Loading,
+  SuccessFilled,
+  Plus,
+  WarningFilled,    // 新增
+  ChatDotRound      // 新增
+} from '@element-plus/icons-vue'
+```
+
+- [ ] **Step 10: Run frontend tests**
+
+Run: `cd CRM-Client && npm run test:unit -- ApprovalFlowAIDialog.spec.ts`
+
+Expected: PASS (or update tests if needed)
+
+- [ ] **Step 11: Manual frontend verification**
+
+1. Open approval flow creation dialog
+2. Enter natural language description
+3. Verify progress bar shows percentage
+4. Verify error case shows actionable buttons
+5. Verify cancel button works
+6. Verify done event closes stream properly
+
+- [ ] **Step 12: Commit frontend changes**
+
+```bash
+git add CRM-Client/src/api/approvalAI.ts CRM-Client/src/components/ApprovalFlowAIDialog.vue
+git commit -m "feat(frontend): enhance approval AI SSE event handling with progress, error actions, and cancel"
+```
+
+---
+
 ## Self-Review Checklist
 
 **1. Spec Coverage:**
@@ -915,6 +1373,10 @@ git commit --allow-empty -m "verify: approval AI stability fixes verified workin
 - [x] Explicit done event (Task 4)
 - [x] Error recovery hints (Task 5)
 - [x] Integration test (Task 6)
+- [x] Frontend SSE event handling (Task 7)
+- [x] Progress bar UI (Task 7)
+- [x] Error actionable buttons (Task 7)
+- [x] Cancel mechanism (Task 7)
 
 **2. Placeholder Scan:**
 - No "TBD", "TODO", "implement later" found
@@ -926,6 +1388,8 @@ git commit --allow-empty -m "verify: approval AI stability fixes verified workin
 - `to_sse_dict()` method (Task 2) → called in Task 3
 - `SSEJsonEncoder` import (Task 4) → used in Task 4
 - Error event structure with `recovery` (Task 5) → matches Task 4
+- `ApprovalAIParseSSEEvent` interface (Task 7) → matches backend events from Task 4
+- `ErrorAction` interface (Task 7) → matches error.actions structure from Task 5
 
 ---
 
