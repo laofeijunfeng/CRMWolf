@@ -11,7 +11,7 @@
 - POST /v1/approvals/INVOICE/{id}/cancel —— 仅提交人可撤回
 """
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -348,3 +348,74 @@ def test_bulk_approve_invalid_entity_type(client):
         json={"entity_type": "UNKNOWN", "ids": [1], "action": "APPROVE", "comment": ""},
     )
     assert r.status_code == 400
+
+
+def test_bulk_approve_optimistic_lock_conflict(
+    db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
+    seed_finance_role_and_link, current_user_rec,
+):
+    """E6 乐观锁冲突：审批已被他人处理 → failed reason='已被他人处理'。
+
+    构造一条 INVOICE 审批，先由"他人"直接 approve（updated_time 变化、status=APPROVED），
+    再用旧的 updated_time 调 bulk-approve → approval_crud.approve 检测 updated_time 不匹配，
+    raise ValueError("审批已被其他用户处理") → bulk 端点映射 reason="已被他人处理"。
+    """
+    from app.crud.approval import approval_crud
+    from app.schemas.approval import ApprovalActionRequest as _AAR
+    from app.models.approval import ApprovalAction as _AA
+
+    # 1. 提交发票审批
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+    ap = db_session.query(Approval).filter(
+        Approval.business_id == seed_invoice_draft.id,
+        Approval.business_type == BusinessType.INVOICE,
+    ).one()
+    original_updated_time = ap.updated_time
+
+    # 2. 模拟"他人先审了"：直接 approve（status=APPROVED）
+    req_other = _AAR(
+        action=_AA.APPROVE, comment="他人先审了",
+        updated_time=original_updated_time,
+    )
+    approval_crud.approve(
+        db_session, ap, req_other,
+        approver_id="other_user", approver_name="他人",
+    )
+    db_session.refresh(ap)
+    assert ap.status == ApprovalStatus.APPROVED
+
+    # SQLite 秒级精度下 onupdate 可能不产生新时间戳——手动 +1s 模拟真实 DB
+    # 的 updated_time 变化，保证 bulk-approve 传入的旧时间戳与当前值不匹配，
+    # 从而触发乐观锁冲突（approval_crud.approve 内的 updated_time 比对）。
+    if ap.updated_time == original_updated_time:
+        ap.updated_time = original_updated_time + timedelta(seconds=1)
+        db_session.commit()
+        db_session.refresh(ap)
+    assert ap.updated_time != original_updated_time
+
+    # 3. bulk-approve 仍用旧的 updated_time → 乐观锁冲突 → reason="已被他人处理"
+    r = client.post(
+        "/v1/approvals/bulk-approve",
+        json={
+            "entity_type": "INVOICE",
+            "ids": [seed_invoice_draft.id],
+            "action": "APPROVE",
+            "comment": "批量通过",
+            "updated_times": {
+                str(seed_invoice_draft.id): (
+                    original_updated_time.isoformat()
+                    if original_updated_time else ""
+                ),
+            },
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success_count"] == 0
+    assert len(body["failed"]) == 1
+    assert body["failed"][0]["id"] == seed_invoice_draft.id
+    assert body["failed"][0]["reason"] == "已被他人处理"

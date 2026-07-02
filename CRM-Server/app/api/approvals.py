@@ -632,56 +632,21 @@ async def approve_contract(
             detail="当前审批节点不存在"
         )
 
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-    
-    if approval.current_node.approve_role not in role_codes:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}"
-        )
-    
-    contract = contract_crud.get_by_id(db, contract_id, team_id)
-    if contract and contract.creator_id == str(current_user.id):
-        from app.crud.permission import permission_crud
-        user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
-        permission_codes = {p.code for p in user_permissions}
-        
-        if "contract:approve:own" not in permission_codes:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="您没有权限审批自己创建的合同"
-            )
+    _check_approve_permissions(
+        db, approval, current_user, team_id,
+        entity_type=BusinessType.CONTRACT, entity_id=contract_id,
+    )
 
     # 如果是审批通过操作，检查下一节点是否有审批人
     if action_request.action.value == ApprovalAction.APPROVE:
-        from app.models.approval import ApprovalNode
-        next_node = db.query(ApprovalNode).filter(
-            ApprovalNode.flow_id == approval.flow_id,
-            ApprovalNode.node_order == approval.current_node.node_order + 1
-        ).first()
-
-        if next_node:
-            has_approvers = approval_flow_crud.check_node_has_approvers(db, next_node.id, team_id)
-            if not has_approvers:
-                # 记录系统告警日志
-                log_with_fields(
-                    logger,
-                    level=30,  # WARNING
-                    message="[Approval Config Error] 审批节点无审批人",
-                    flow_id=approval.flow_id,
-                    flow_name=approval.flow.flow_name if approval.flow else "",
-                    node_id=next_node.id,
-                    node_name=next_node.node_name,
-                    approve_role=next_node.approve_role or "",
-                    team_id=team_id,
-                    contract_id=contract_id,
-                    current_node=approval.current_node.node_name
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"无法流转到下一节点：审批角色「{next_node.node_name}」无成员，系统已通知管理员"
-                )
+        _check_next_node_has_approvers(
+            db, approval, team_id,
+            detail_suffix="无成员，系统已通知管理员",
+            log_extra={
+                "contract_id": contract_id,
+                "current_node": approval.current_node.node_name,
+            },
+        )
 
     try:
         # 记录当前节点（审批前的状态）
@@ -1069,6 +1034,93 @@ def get_approvers_by_role(db: Session, role_code: str):
     return users
 
 
+def _check_approve_permissions(
+    db: Session,
+    approval: Approval,
+    current_user,
+    team_id: int,
+    *,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+) -> None:
+    """审批权限校验（旧 `/contracts/{id}/approve` 与新 generic approve 共用）。
+
+    - 角色校验：current_node.approve_role 不在 current_user 角色集 → 403
+    - CONTRACT 自审追加：current_user 是单据创建人时需 `contract:approve:own` 权限 → 403
+
+    旧合同端点传 entity_type=BusinessType.CONTRACT / entity_id=contract_id；
+    新通用端点传路由参数 entity_type / entity_id。
+    """
+    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
+    role_codes = {r.code for r in user_roles}
+
+    if approval.current_node.approve_role not in role_codes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}",
+        )
+
+    # CONTRACT 自审追加权限校验
+    if entity_type == BusinessType.CONTRACT and entity_id is not None:
+        contract = contract_crud.get_by_id(db, entity_id, team_id)
+        if contract and contract.creator_id == str(current_user.id):
+            from app.crud.permission import permission_crud
+            user_permissions = permission_crud.get_user_permissions(
+                db, current_user.id, team_id
+            )
+            permission_codes = {p.code for p in user_permissions}
+            if "contract:approve:own" not in permission_codes:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="您没有权限审批自己创建的合同",
+                )
+
+
+def _check_next_node_has_approvers(
+    db: Session,
+    approval: Approval,
+    team_id: int,
+    *,
+    detail_suffix: str = "无成员",
+    log_extra: Optional[dict] = None,
+) -> None:
+    """APPROVE 时检查下一节点是否有审批人（旧 `approve_contract` 与新 generic approve 共用）。
+
+    查询 node_order+1 的下一节点；若存在但无审批成员 → 记 WARNING 日志 + 400。
+    log_extra 用于补充两处调用方各自的上下文字段（旧端点写 contract_id/current_node，
+    新端点写 business_type/business_id）。
+    """
+    from app.models.approval import ApprovalNode
+
+    next_node = db.query(ApprovalNode).filter(
+        ApprovalNode.flow_id == approval.flow_id,
+        ApprovalNode.node_order == approval.current_node.node_order + 1,
+    ).first()
+
+    if not next_node:
+        return
+
+    if approval_flow_crud.check_node_has_approvers(db, next_node.id, team_id):
+        return
+
+    log_with_fields(
+        logger,
+        level=30,  # WARNING
+        message="[Approval Config Error] 审批节点无审批人",
+        flow_id=approval.flow_id,
+        flow_name=approval.flow.flow_name if approval.flow else "",
+        node_id=next_node.id,
+        node_name=next_node.node_name,
+        approve_role=next_node.approve_role or "",
+        team_id=team_id,
+        **(log_extra or {}),
+    )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"无法流转到下一节点：审批角色「{next_node.node_name}」{detail_suffix}",
+    )
+
+
 # ============================================================================
 # Task A6：通用审批 API 端点（CONTRACT / PAYMENT / INVOICE 统一入口）
 # ============================================================================
@@ -1299,59 +1351,19 @@ async def approve_generic_approval(
             detail="当前审批节点不存在",
         )
 
-    # 角色校验（复用既有 :611-619 逻辑）
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-    if approval.current_node.approve_role not in role_codes:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}",
-        )
+    # 角色校验 + CONTRACT 自审追加权限校验（与既有 approve_contract 共用 helper）
+    _check_approve_permissions(
+        db, approval, current_user, team_id,
+        entity_type=entity_type, entity_id=entity_id,
+    )
 
-    # 合同自审追加权限校验（与既有 approve_contract 一致）
-    if entity_type == BusinessType.CONTRACT:
-        contract = contract_crud.get_by_id(db, entity_id, team_id)
-        if contract and contract.creator_id == str(current_user.id):
-            from app.crud.permission import permission_crud
-            user_permissions = permission_crud.get_user_permissions(
-                db, current_user.id, team_id
-            )
-            permission_codes = {p.code for p in user_permissions}
-            if "contract:approve:own" not in permission_codes:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="您没有权限审批自己创建的合同",
-                )
-
-    # APPROVE 时检查下一节点是否有审批人（与既有 approve_contract 一致）
+    # APPROVE 时检查下一节点是否有审批人（与既有 approve_contract 共用 helper）
     if action_request.action.value == ApprovalAction.APPROVE:
-        from app.models.approval import ApprovalNode
-        next_node = db.query(ApprovalNode).filter(
-            ApprovalNode.flow_id == approval.flow_id,
-            ApprovalNode.node_order == approval.current_node.node_order + 1
-        ).first()
-        if next_node:
-            has_approvers = approval_flow_crud.check_node_has_approvers(
-                db, next_node.id, team_id
-            )
-            if not has_approvers:
-                log_with_fields(
-                    logger,
-                    level=30,
-                    message="[Approval Config Error] 审批节点无审批人",
-                    flow_id=approval.flow_id,
-                    flow_name=approval.flow.flow_name if approval.flow else "",
-                    node_id=next_node.id,
-                    node_name=next_node.node_name,
-                    approve_role=next_node.approve_role or "",
-                    team_id=team_id,
-                    business_type=entity_type,
-                    business_id=entity_id,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"无法流转到下一节点：审批角色「{next_node.node_name}」无成员",
-                )
+        _check_next_node_has_approvers(
+            db, approval, team_id,
+            detail_suffix="无成员",
+            log_extra={"business_type": entity_type, "business_id": entity_id},
+        )
 
     current_node_name = approval.current_node.node_name if approval.current_node else ""
     flow_name = approval.flow.flow_name if approval.flow else ""
@@ -1388,13 +1400,22 @@ async def approve_generic_approval(
     # approval_crud.approve 已调 InvoiceApplicationAdapter.on_approved/on_rejected
     # 写 invoice.status / reviewed_time；此处仅补 reviewer_id / review_comment 两字段。
     # 对 APPROVE 与 REJECT 都写：审批人即 reviewer，意见即 review_comment。
+    # D3 时序：approval_crud.approve 内部已 commit 落审批状态；此处是第二次 commit，
+    # 失败时仅记 ERROR 日志——审批已生效不可回滚，reviewer 是审计信息可后补。
     if entity_type == BusinessType.INVOICE:
         inv_adapter = get_adapter(BusinessType.INVOICE)
         invoice = inv_adapter.get_entity(db, approval.business_id, approval.team_id)
         if invoice is not None:
-            invoice.reviewer_id = str(current_user.id)
-            invoice.review_comment = action_request.comment
-            db.commit()
+            try:
+                invoice.reviewer_id = str(current_user.id)
+                invoice.review_comment = action_request.comment
+                db.commit()
+            except Exception as reviewer_err:
+                logger.error(
+                    "reviewer 回写失败 approval_id=%s: %s",
+                    approval.id, reviewer_err
+                )
+                db.rollback()
 
     flow_direction_str = ("completed" if approval.status == ApprovalStatus.APPROVED else
                      "next_node" if approval.current_node else "terminated")
@@ -1573,14 +1594,21 @@ async def bulk_approve(
                 db, approval, req, str(current_user.id), current_user.name
             )
 
-            # D3 端点回写（INVOICE）
+            # D3 端点回写（INVOICE）——审批已生效，reviewer 写失败仅记日志不影响成功计数
             if payload.entity_type == BusinessType.INVOICE:
                 inv_adapter = get_adapter(BusinessType.INVOICE)
                 invoice = inv_adapter.get_entity(db, approval.business_id, approval.team_id)
                 if invoice is not None:
-                    invoice.reviewer_id = str(current_user.id)
-                    invoice.review_comment = payload.comment
-                    db.commit()
+                    try:
+                        invoice.reviewer_id = str(current_user.id)
+                        invoice.review_comment = payload.comment
+                        db.commit()
+                    except Exception as reviewer_err:
+                        logger.error(
+                            "reviewer 回写失败 approval_id=%s: %s",
+                            approval.id, reviewer_err
+                        )
+                        db.rollback()
 
             success_count += 1
         except ValueError as e:
