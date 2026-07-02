@@ -463,7 +463,7 @@ class ApprovalAIParserService:
 
                         yield {
                             "event": "parsed",
-                            "flow": flow.model_dump(mode='json'),  # 使用 mode='json' 转换 Decimal 为 float
+                            "flow": flow.to_sse_dict(),  # 使用 to_sse_dict 确保 SSE JSON 序列化兼容
                             "thinking_process": parsed.get("thinking_process")
                         }
                     except json.JSONDecodeError as e:
