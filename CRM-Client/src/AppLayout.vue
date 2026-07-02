@@ -96,6 +96,9 @@
       </div>
     </aside>
     <main class="main-content">
+      <header class="top-bar">
+        <ApprovalNotificationCenter class="top-bar-bell" />
+      </header>
       <router-view />
     </main>
   </div>
@@ -111,6 +114,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
 import { ElMessage } from 'element-plus'
 import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound, Checked } from '@element-plus/icons-vue'
+import ApprovalNotificationCenter from '@/components/ApprovalNotificationCenter.vue'
 import { logger } from '@/utils/logger'
 
 const router = useRouter()
@@ -437,6 +441,25 @@ onMounted(async () => {
   overflow: auto;
   padding: 0;
   background: $wolf-bg-page;
+}
+
+// 顶栏：仅承载审批铃铛（C4），右对齐；与 C3 侧边栏徽章共存
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $wolf-space-md;
+  height: 48px;
+  padding: 0 $wolf-space-md;
+  border-bottom: 1px solid $wolf-border-default;
+  background: $wolf-bg-card;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.top-bar-bell {
+  margin-left: auto;
 }
 
 @media (max-width: 768px) {
