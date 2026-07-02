@@ -1,8 +1,8 @@
 ---
 status: active
 created: 2026-06-26
-updated: 2026-06-26
-version: 3.0
+updated: 2026-07-03
+version: 3.1
 architecture: LangGraph v1.0
 related_docs:
   - ../plans/AI-HUMAN-IN-THE-LOOP-DESIGN.md
@@ -11,8 +11,8 @@ related_docs:
 
 # AI Agent 技术架构
 
-> **版本：3.0 | LangGraph v1.0 架构**
-> **更新日期：2026-06-26**
+> **版本：3.1 | LangGraph v1.0 架构**
+> **更新日期：2026-07-03**
 > **状态：生产可用 ✅**
 
 ---
@@ -463,6 +463,30 @@ interface AIConversationState {
 | `/v1/ai/conversations/{id}` | GET | 对话详情 |
 | `/v1/ai/conversations` | POST | 创建新对话 |
 | `/v1/ai/conversations/{id}` | DELETE | 删除对话 |
+| `/v1/approval-ai/parse` | POST | AI 审批流程解析（支持 business_type 识别：回款→PAYMENT / 发票→INVOICE / 合同→CONTRACT） |
+| `/v1/approval-ai/create` | POST | 解析结果落库为审批流程 |
+
+### 6.2.1 AI 审批流解析器（business_type 识别，Task B3）
+
+**位置**：`CRM-Server/app/services/approval_ai_parser.py`
+
+AI 审批流解析器（ApprovalAIParserService）在 Task B3 中扩展为支持 `business_type` 识别，使用户可用自然语言为不同单据类型创建审批流程。
+
+**识别规则**（输出 `business_type` 字段，schema 层缺失/非法回退 CONTRACT）：
+
+| 用户描述关键词 | business_type | 说明 |
+|----------------|---------------|------|
+| 回款 / 收款 / 入账 / 回款登记 | `PAYMENT` | 回款类审批流程 |
+| 发票 / 开票 / 发票申请 / 增值税发票 | `INVOICE` | 发票类审批流程 |
+| 合同 / 签约 / 协议 / 未明确 | `CONTRACT` | 合同类审批流程（默认） |
+
+**关键约束**：
+1. 按用户描述的**单据类型**（而非审批角色，如"财务审批"）判定 `business_type`
+2. `business_type` 必须是 CONTRACT / PAYMENT / INVOICE 之一
+3. schema 校验器对缺失/非法值回退 CONTRACT
+4. 解析结果落库时由 `/v1/approval-ai/create` 写入 `ApprovalFlow.business_type`
+
+**与审批引擎的关系**：解析器只负责生成 `ApprovalFlow` 定义；运行时由通用审批 API `/v1/approvals/{entity_type}/{id}/...` 按 `business_type` 匹配流程（参见决策1：未配置流程，CONTRACT 报错、PAYMENT/INVOICE 免审批直通）。
 
 ### 6.3 SSE Wrapper 转换逻辑
 
@@ -751,5 +775,6 @@ ReAct 流程：
 > - v1.0（2026-04）：单工具模式
 > - v2.0（2026-05）：ReAct + Workflow + Control Plane 三层架构
 > - v3.0（2026-06）：LangGraph StateGraph + Redis Checkpointer
+> - v3.1（2026-07）：AI 审批流解析器支持 business_type 识别（CONTRACT/PAYMENT/INVOICE，Task B3）
 
 > **下一步**：持续优化 LangSmith Tracing、监控指标完善
