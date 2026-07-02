@@ -5,7 +5,6 @@ from typing import Optional
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, require_permission, get_current_user_team
 from app.models.user import User
-from app.models.invoice import InvoiceApplicationStatus
 from app.models.customer import Customer
 from app.models.contract import Contract
 from app.models.opportunity import Opportunity
@@ -13,7 +12,7 @@ from app.models.payment import PaymentPlan
 from app.schemas.invoice import (
     InvoiceTitleCreate, InvoiceTitleUpdate, InvoiceTitleResponse,
     InvoiceApplicationCreate, InvoiceApplicationUpdate, InvoiceApplicationResponse,
-    InvoiceApplicationSubmit, InvoiceApplicationReview, MessageResponse,
+    InvoiceApplicationSubmit, MessageResponse,
     InvoiceTitleListResponse, InvoiceApplicationListResponse, PaymentPlanInvoiceSummary
 )
 from app.crud.invoice import invoice_title_crud, invoice_application_crud
@@ -256,37 +255,6 @@ def submit_invoice_application(
         )
 
 
-@invoice_router.post("/{application_id}/review", response_model=InvoiceApplicationResponse, summary="财务审批发票申请", description="财务角色审批发票申请，可批准或拒绝")
-def review_invoice_application(
-    application_id: int,
-    review_data: InvoiceApplicationReview,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:approve")),
-    db: Session = Depends(get_db)
-):
-    application = invoice_application_crud.get_by_id(db, application_id, team_id)
-    if not application:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="发票申请不存在"
-        )
-
-    try:
-        reviewed_application = invoice_application_crud.review(
-            db,
-            application_id,
-            str(current_user.id),
-            review_data.action,
-            review_data.comment
-        )
-        return _populate_application_info(db, reviewed_application, team_id)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
 @invoice_router.post("/{application_id}/withdraw", response_model=InvoiceApplicationResponse, summary="撤回发票申请", description="撤回已提交的发票申请，状态变为草稿")
 def withdraw_invoice_application(
     application_id: int,
@@ -332,7 +300,7 @@ def mark_invoice_issued(
         )
 
     try:
-        issued_application = invoice_application_crud.mark_issued(db, application_id)
+        issued_application = invoice_application_crud.mark_issued(db, application_id, team_id=team_id)
         return _populate_application_info(db, issued_application, team_id)
     except ValueError as e:
         raise HTTPException(
