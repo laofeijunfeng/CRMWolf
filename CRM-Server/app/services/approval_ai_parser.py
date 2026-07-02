@@ -468,14 +468,30 @@ class ApprovalAIParserService:
                         }
                     except json.JSONDecodeError as e:
                         logger.error(f"AI 返回 JSON 解析失败: {e}, 内容: {clean_content[:200]}")
-                        yield {"event": "error", "message": f"AI 返回格式异常: {clean_content[:200]}"}
+                        yield {
+                            "event": "error",
+                            "message": "AI 返回格式异常",
+                            "detail": f"解析失败位置: 第 {e.pos} 字符",
+                            "recovery": "请尝试更明确的描述，例如：'创建一个销售总监审批的流程'"
+                        }
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"AI 服务 HTTP 错误: {e.response.status_code}, 详情: {e.response.text[:200]}")
-            yield {"event": "error", "message": f"AI 服务请求失败：{e.response.status_code} - {e.response.text[:100]}"}
+            error_detail = e.response.text[:200]
+            logger.error(f"AI 服务 HTTP 错误: {e.response.status_code}, 详情: {error_detail}")
+            yield {
+                "event": "error",
+                "message": f"AI 服务请求失败（{e.response.status_code}）",
+                "detail": error_detail,
+                "recovery": "请稍后重试，或简化您的描述"
+            }
         except Exception as e:
             logger.error(f"AI 服务异常: {type(e).__name__}: {str(e)}")
-            yield {"event": "error", "message": f"AI 服务异常：{str(e)}"}
+            yield {
+                "event": "error",
+                "message": f"AI 服务异常: {type(e).__name__}",
+                "detail": str(e),
+                "recovery": "请联系管理员检查日志"
+            }
 
     async def parse_approval_flow(
         self,
