@@ -229,12 +229,13 @@ def test_invoice_approval_data_migration_no_side_effects_on_non_target_states(
     本用例固化"对非目标态（ISSUED/REJECTED/DRAFT/PENDING_REVIEW-已回 DRAFT）
     零影响"——即使重跑 helper，也不会为这些态的发票补建 Approval 实例。
 
-    注：APPROVED 行二次跑会重复 INSERT Approval/Record（helper 不做幂等守卫，
-    这是预期一次性语义）。本用例只校验"不会把其它态的发票错误拉入引擎表"。
+    注：I-3 幂等守卫后，APPROVED 行二次跑不再重复 INSERT Approval/Record
+   （NOT EXISTS 守卫保护）。本用例校验"重跑不会把其它态的发票错误拉入引擎
+    表，也不会改变非目标态发票字段"。
     """
     seed = seed_legacy_invoices
     _run_backfill(db_session)  # 第一次跑：APPROVED×2 补建，pending 回 DRAFT
-    _run_backfill(db_session)  # 第二次跑：重复补建 APPROVED×2，但其它态不受影响
+    _run_backfill(db_session)  # 第二次跑：幂等守卫保护，不重复补建，其它态亦不受影响
 
     non_target_ids = [
         seed["issued"].id, seed["rejected"].id, seed["draft"].id,
@@ -253,3 +254,12 @@ def test_invoice_approval_data_migration_no_side_effects_on_non_target_states(
         InvoiceApplication.id == seed["pending"].id,
     ).one()
     assert pending_after.status == InvoiceApplicationStatus.DRAFT
+
+    # I-3：幂等守卫——二次跑后 APPROVED 仍只补建 2 条 Approval / 2 条 Record，
+    # 不应翻倍为 4/4（NOT EXISTS 守卫拦截重复补建）。
+    approval_cnt = db_session.query(Approval).filter(
+        Approval.business_type == BusinessType.INVOICE,
+    ).count()
+    assert approval_cnt == 2, f"幂等守卫失效：二次跑后 Approval 应为 2，实得 {approval_cnt}"
+    record_cnt = db_session.query(ApprovalRecord).count()
+    assert record_cnt == 2, f"幂等守卫失效：二次跑后 ApprovalRecord 应为 2，实得 {record_cnt}"

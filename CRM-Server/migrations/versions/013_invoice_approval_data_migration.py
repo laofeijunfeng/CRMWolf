@@ -35,14 +35,17 @@ logger = logging.getLogger("alembic.migration.013")
 def run_invoice_approval_data_migration(bind) -> None:
     """发票在途数据平迁到通用审批引擎。
 
-    幂等性：upgrade 仅在生产跑一次。本 helper 不做幂等守卫——历史在途一次性
-    迁移语义由调用方保证。E7 测试固化"对 ISSUED/REJECTED/DRAFT 态零影响"。
+    幂等性：APPROVED 补建 INSERT 带 `WHERE NOT EXISTS` 守卫——重跑不会重复
+    补建 Approval/ApprovalRecord（I-3）。PENDING_REVIEW→DRAFT 的 UPDATE 本身
+    幂等（二次跑命中 status='PENDING_REVIEW' 的行数为 0）。E7 测试固化"对
+    ISSUED/REJECTED/DRAFT 态零影响"。
 
     Args:
         bind: SQLAlchemy Engine / Connection（alembic op.get_bind() 或测试会话 bind）
     """
     # 1. APPROVED 旧发票 → 补建 Approval(INVOICE, APPROVED) 审计快照
     #    flow_id 留 NULL：历史数据无对应模板，仅作审计，不再驱动状态机。
+    #    I-3：NOT EXISTS 守卫防止重跑重复补建 Approval 实例。
     bind.execute(text(
         """
         INSERT INTO crm_contract_approvals
@@ -54,12 +57,17 @@ def run_invoice_approval_data_migration(bind) -> None:
             'APPROVED', applicant_id, NULL,
             created_time,
             COALESCE(reviewed_time, last_modified_time)
-        FROM crm_invoice_applications
-        WHERE status = 'APPROVED'
+        FROM crm_invoice_applications a
+        WHERE a.status = 'APPROVED'
+              AND NOT EXISTS (
+                  SELECT 1 FROM crm_contract_approvals a2
+                  WHERE a2.business_type = 'INVOICE' AND a2.business_id = a.id
+              )
         """
     ))
 
     # 2. 对应 ApprovalRecord(APPROVE) 一条，approver_id 取 reviewer_id（非空才补）
+    #    I-3：NOT EXISTS 守卫防止重跑为同一 Approval 重复补建 APPROVE 记录。
     bind.execute(text(
         """
         INSERT INTO crm_contract_approval_records
@@ -73,6 +81,10 @@ def run_invoice_approval_data_migration(bind) -> None:
           ON ap.business_type = 'INVOICE' AND ap.business_id = a.id
         WHERE a.status = 'APPROVED' AND a.reviewer_id IS NOT NULL
               AND a.reviewed_time IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM crm_contract_approval_records r2
+                  WHERE r2.approval_id = ap.id AND r2.action = 'APPROVE'
+              )
         """
     ))
 
