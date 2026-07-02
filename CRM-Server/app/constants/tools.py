@@ -389,6 +389,3 @@ TOOL_HANDLER_MAP: Dict[str, Dict[str, Any]] = {
         }
     },
 }
-
-
-    return TOOL_HANDLER_MAP.get(tool_name, {})
