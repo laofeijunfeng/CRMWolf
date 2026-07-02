@@ -12,7 +12,7 @@ import httpx
 
 from app.crud.ai_config import ai_config_crud
 from app.constants.approval_roles import ALLOWED_APPROVAL_ROLES, ROLE_DISPLAY_NAMES, ROLE_MAPPING_EXAMPLES
-from app.constants.business_types import BusinessType, is_valid_business_type
+from app.constants.business_types import BusinessType
 from app.schemas.approval_ai import (
     ApprovalAIParsedFlow,
     ApprovalAIParsedNode,
