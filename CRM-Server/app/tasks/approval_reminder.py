@@ -14,7 +14,6 @@ from typing import Optional, List, Dict, Any
 
 from app.core.database import SessionLocal
 from app.models.approval import Approval, ApprovalStatus, ApprovalNode
-from app.models.contract import Contract
 from app.models.user import User
 from app.models.role import Role
 from app.models.user_role import UserRole
@@ -23,6 +22,7 @@ from app.crud.approval import approval_crud
 from app.crud.role import role_crud
 from app.crud.team import team_crud
 from app.crud.system_config import system_config_crud
+from app.services.approval_adapter import get_adapter
 from app.services.notification import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -76,11 +76,28 @@ class ApprovalReminderScheduler:
                     # 计算等待时间（小时）
                     waiting_hours = (datetime.now() - approval.created_time).total_seconds() / 3600
 
-                    # 获取合同信息
-                    contract = db.query(Contract).filter(Contract.id == approval.contract_id).first()
-                    if not contract:
-                        logger.warning(f"审批实例 {approval.id} 关联的合同不存在")
+                    # 通过适配器按 business_type/business_id 取业务单据实体
+                    # （泛化后回款/发票审批 contract_id=None，不能再按合同查；
+                    #  ORPHAN/未知类型/单据被删 → 跳过，对齐原"合同不存在"语义）
+                    try:
+                        adapter = get_adapter(approval.business_type)
+                    except ValueError:
+                        logger.warning(
+                            f"审批实例 {approval.id} 业务类型 {approval.business_type} 不支持，跳过催办"
+                        )
                         continue
+
+                    entity = adapter.get_entity(db, approval.business_id, approval.team_id)
+                    if entity is None:
+                        logger.warning(
+                            f"审批实例 {approval.id} 关联的 {approval.business_type}"
+                            f"#{approval.business_id} 不存在，跳过催办"
+                        )
+                        continue
+
+                    entity_type = approval.business_type
+                    entity_name = adapter.get_name(entity)
+                    business_id = approval.business_id
 
                     # 获取当前审批节点
                     current_node = approval.current_node
@@ -101,7 +118,8 @@ class ApprovalReminderScheduler:
                     if waiting_hours >= REMINDER_THRESHOLDS["light"]:
                         if not self._has_sent_reminder(reminder_key, REMINDER_THRESHOLDS["light"]):
                             await self._send_light_reminder(
-                                db, approval, contract, current_node, approvers, waiting_hours
+                                db, approval, entity_type, entity_name, business_id,
+                                current_node, approvers, waiting_hours
                             )
                             self._mark_reminder_sent(reminder_key, REMINDER_THRESHOLDS["light"])
                             stats["light_reminders"] += 1
@@ -110,7 +128,8 @@ class ApprovalReminderScheduler:
                     if waiting_hours >= REMINDER_THRESHOLDS["medium"]:
                         if not self._has_sent_reminder(reminder_key, REMINDER_THRESHOLDS["medium"]):
                             await self._send_medium_reminder(
-                                db, approval, contract, current_node, approvers, waiting_hours
+                                db, approval, entity_type, entity_name, business_id,
+                                current_node, approvers, waiting_hours
                             )
                             self._mark_reminder_sent(reminder_key, REMINDER_THRESHOLDS["medium"])
                             stats["medium_reminders"] += 1
@@ -119,7 +138,8 @@ class ApprovalReminderScheduler:
                     if waiting_hours >= REMINDER_THRESHOLDS["strong"]:
                         if not self._has_sent_reminder(reminder_key, REMINDER_THRESHOLDS["strong"]):
                             await self._send_strong_reminder(
-                                db, approval, contract, current_node, approvers, waiting_hours
+                                db, approval, entity_type, entity_name, business_id,
+                                current_node, approvers, waiting_hours
                             )
                             self._mark_reminder_sent(reminder_key, REMINDER_THRESHOLDS["strong"])
                             stats["strong_reminders"] += 1
@@ -230,7 +250,9 @@ class ApprovalReminderScheduler:
         self,
         db,
         approval: Approval,
-        contract: Contract,
+        entity_type: str,
+        entity_name: str,
+        business_id,
         node: ApprovalNode,
         approvers: List[User],
         waiting_hours: float
@@ -240,7 +262,9 @@ class ApprovalReminderScheduler:
         Args:
             db: 数据库会话
             approval: 审批实例
-            contract: 合同
+            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            entity_name: 业务单据展示名
+            business_id: 业务单据ID
             node: 当前审批节点
             approvers: 审批人列表
             waiting_hours: 等待时间（小时）
@@ -256,10 +280,11 @@ class ApprovalReminderScheduler:
                 await notification_service.notify_approval_reminder(
                     approver_open_id=approver_open_id,
                     approver_name=approver_name,
-                    contract_name=contract.name or f"合同#{contract.id}",
+                    entity_type=entity_type,
+                    entity_name=entity_name,
                     waiting_hours=int(waiting_hours),
                     node_name=node.node_name,
-                    contract_id=contract.id,
+                    business_id=business_id,
                     reminder_level="light"
                 )
 
@@ -275,7 +300,9 @@ class ApprovalReminderScheduler:
         self,
         db,
         approval: Approval,
-        contract: Contract,
+        entity_type: str,
+        entity_name: str,
+        business_id,
         node: ApprovalNode,
         approvers: List[User],
         waiting_hours: float
@@ -285,7 +312,9 @@ class ApprovalReminderScheduler:
         Args:
             db: 数据库会话
             approval: 审批实例
-            contract: 合同
+            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            entity_name: 业务单据展示名
+            business_id: 业务单据ID
             node: 当前审批节点
             approvers: 审批人列表
             waiting_hours: 等待时间（小时）
@@ -301,10 +330,11 @@ class ApprovalReminderScheduler:
                 await notification_service.notify_approval_reminder(
                     approver_open_id=approver_open_id,
                     approver_name=approver_name,
-                    contract_name=contract.name or f"合同#{contract.id}",
+                    entity_type=entity_type,
+                    entity_name=entity_name,
                     waiting_hours=int(waiting_hours),
                     node_name=node.node_name,
-                    contract_id=contract.id,
+                    business_id=business_id,
                     reminder_level="medium"
                 )
 
@@ -340,11 +370,12 @@ class ApprovalReminderScheduler:
 
                 await notification_service.notify_approval_timeout_alert(
                     submitter_open_id=submitter_open_id,
-                    contract_name=contract.name or f"合同#{contract.id}",
+                    entity_type=entity_type,
+                    entity_name=entity_name,
                     node_name=node.node_name,
                     approver_name=approver_names_str,
                     waiting_hours=int(waiting_hours),
-                    contract_id=contract.id,
+                    business_id=business_id,
                     reminder_level="medium"
                 )
 
@@ -362,7 +393,9 @@ class ApprovalReminderScheduler:
         self,
         db,
         approval: Approval,
-        contract: Contract,
+        entity_type: str,
+        entity_name: str,
+        business_id,
         node: ApprovalNode,
         approvers: List[User],
         waiting_hours: float
@@ -372,7 +405,9 @@ class ApprovalReminderScheduler:
         Args:
             db: 数据库会话
             approval: 审批实例
-            contract: 合同
+            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            entity_name: 业务单据展示名
+            business_id: 业务单据ID
             node: 当前审批节点
             approvers: 审批人列表
             waiting_hours: 等待时间（小时）
@@ -388,10 +423,11 @@ class ApprovalReminderScheduler:
                 await notification_service.notify_approval_reminder(
                     approver_open_id=approver_open_id,
                     approver_name=approver_name,
-                    contract_name=contract.name or f"合同#{contract.id}",
+                    entity_type=entity_type,
+                    entity_name=entity_name,
                     waiting_hours=int(waiting_hours),
                     node_name=node.node_name,
-                    contract_id=contract.id,
+                    business_id=business_id,
                     reminder_level="strong"
                 )
 
@@ -423,11 +459,12 @@ class ApprovalReminderScheduler:
 
                 await notification_service.notify_approval_timeout_alert(
                     submitter_open_id=submitter_open_id,
-                    contract_name=contract.name or f"合同#{contract.id}",
+                    entity_type=entity_type,
+                    entity_name=entity_name,
                     node_name=node.node_name,
                     approver_name=approver_names_str,
                     waiting_hours=int(waiting_hours),
-                    contract_id=contract.id,
+                    business_id=business_id,
                     reminder_level="strong"
                 )
 
@@ -449,11 +486,12 @@ class ApprovalReminderScheduler:
 
                 await notification_service.notify_approval_timeout_alert(
                     submitter_open_id=admin_open_id,
-                    contract_name=contract.name or f"合同#{contract.id}",
+                    entity_type=entity_type,
+                    entity_name=entity_name,
                     node_name=node.node_name,
                     approver_name=approver_names_str if approvers else "未知",
                     waiting_hours=int(waiting_hours),
-                    contract_id=contract.id,
+                    business_id=business_id,
                     reminder_level="strong",
                     is_admin=True
                 )
