@@ -140,6 +140,8 @@ ALL_PERMISSIONS = [
 
     # 发票 - 补充完整权限集
     {"name": "审批发票申请", "code": "invoice:approve", "resource": "invoice", "action": "approve"},
+    {"name": "审批自己的发票", "code": "invoice:approve:own", "resource": "invoice", "action": "approve", "scope": "own"},
+    {"name": "审批所有发票", "code": "invoice:approve:all", "resource": "invoice", "action": "approve", "scope": "all"},
     {"name": "标记已开票", "code": "invoice:mark_issued", "resource": "invoice", "action": "mark_issued"},
     {"name": "编辑发票申请", "code": "invoice:edit:own", "resource": "invoice", "action": "edit", "scope": "own"},
     {"name": "删除发票申请", "code": "invoice:delete:own", "resource": "invoice", "action": "delete", "scope": "own"},
@@ -151,6 +153,11 @@ ALL_PERMISSIONS = [
     {"name": "撤回发票申请", "code": "invoice:withdraw", "resource": "invoice", "action": "withdraw"},
 
     # 回款 - 补充完整权限集
+    {"name": "提交回款审批", "code": "payment:submit", "resource": "payment", "action": "submit"},
+    {"name": "撤回回款审批", "code": "payment:withdraw", "resource": "payment", "action": "withdraw"},
+    {"name": "审批回款", "code": "payment:approve", "resource": "payment", "action": "approve"},
+    {"name": "审批自己的回款", "code": "payment:approve:own", "resource": "payment", "action": "approve", "scope": "own"},
+    {"name": "审批所有回款", "code": "payment:approve:all", "resource": "payment", "action": "approve", "scope": "all"},
     {"name": "编辑回款记录", "code": "payment:record:edit", "resource": "payment_record", "action": "edit"},
     {"name": "删除回款记录", "code": "payment:record:delete", "resource": "payment_record", "action": "delete"},
     {"name": "确认回款入账", "code": "payment:confirm", "resource": "payment", "action": "confirm"},
@@ -191,7 +198,9 @@ ROLE_PERMISSIONS_MAPPING = {
         "contract:edit:own", "contract:edit:all", "contract:delete:own", "contract:delete:all",
         "contract:submit", "contract:cancel", "contract:approve:own",
         "invoice:view:all", "invoice:view:own", "invoice:create",
+        "invoice:approve:own",  # ← 审自己提交的发票
         "payment:view:all", "payment:view:own", "payment:register",
+        "payment:approve:own",  # ← 审自己提交的回款
         "payment:plan:create", "payment:plan:edit", "payment:plan:delete", "payment:plan:view:all",
         "statistics:view", "report:view:own", "report:view:team",
         "score:config:view", "score:config:edit",
@@ -219,9 +228,11 @@ ROLE_PERMISSIONS_MAPPING = {
     "FINANCE": [
         "invoice:view:all", "invoice:view:own", "invoice:create",
         "invoice:approve", "invoice:mark_issued",  # ← 补充核心财务权限
+        "invoice:submit", "invoice:withdraw",  # ← 补充发票提交/撤回
         "invoice:title:create", "invoice:title:edit", "invoice:title:delete", "invoice:title:set_default",
         "payment:view:all", "payment:view:own", "payment:register",
         "payment:confirm",  # ← 补充回款确认权限
+        "payment:submit", "payment:approve",  # ← 补充回款提交/审批
         "payment:plan:view:all", "payment:plan:create", "payment:plan:edit", "payment:plan:delete",
         "contract:view:all", "contract:view:own",
         "finance:audit:view", "finance:receivables:view", "finance:reports:view",  # ← 补充财务报表权限
