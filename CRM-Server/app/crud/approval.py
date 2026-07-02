@@ -831,6 +831,217 @@ class ApprovalCRUD:
 
         return users
 
+    # ========================================================================
+    # Task C3：通用审批列表（GET /v1/approvals）
+    # ========================================================================
+    # E2 越权过滤（P0）——按 tab 切换查询主体：
+    #   pending  : status=PENDING AND team_id AND current_node.approve_role IN user_roles
+    #   processed: EXISTS(records WHERE approver_id=user_id AND action!=SUBMIT) AND team_id
+    #   submitted: submitter_id=user_id AND team_id
+    # E9 N+1 规避：审批行先取主体，再按 business_type 分组批量预取
+    #   Contract/PaymentRecord/InvoiceApplication 三表，内存 join 出
+    #   application_number / entity_name / entity_amount 三摘要字段。
+    # overdue_hours：Python 计算（now - created_time）/3600，DB 无关，与
+    #   get_overdue_approvals 同套路；非 PENDING 行也回传（前端按需展示）。
+    # pending_count：当前用户「待我审批」总数，任意 tab 都附给前端徽章。
+    # ========================================================================
+
+    def list_approvals(
+        self,
+        db: Session,
+        team_id: int,
+        user_id: int,
+        user_roles: List[str],
+        tab: str = "pending",
+        business_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Tuple[List[Dict[str, Any]], int, int]:
+        """通用审批列表查询（E2 越权过滤 + E9 摘要内存 join）。
+
+        Args:
+            db: 数据库会话
+            team_id: 团队ID（团队隔离）
+            user_id: 当前用户ID（int，用于 submitted/processed 过滤）
+            user_roles: 当前用户在 team_id 下的角色 code 列表（用于 pending 过滤）
+            tab: pending / processed / submitted
+            business_type: 可选业务类型过滤（CONTRACT / PAYMENT / INVOICE）
+            page: 页码（1-based）
+            page_size: 每页条数
+
+        Returns:
+            Tuple[List[Dict], int, int]: (items, total, pending_count)
+                items 每行对齐前端 ApprovalListItemSchema；
+                total 为当前 tab+business_type 过滤后的总数；
+                pending_count 为当前用户待我审批总数（任意 tab 都附）。
+        """
+        from datetime import datetime
+        from app.models.approval import ApprovalNode, ApprovalRecord, ApprovalAction
+
+        user_id_str = str(user_id)
+        skip = max(0, (page - 1) * page_size)
+
+        # ---- 主体查询：按 tab 构造过滤 ----
+        query = db.query(Approval).filter(Approval.team_id == team_id)
+
+        if business_type:
+            query = query.filter(Approval.business_type == business_type)
+
+        if tab == "pending":
+            # JOIN current_node 取 approve_role 过滤
+            query = (
+                query.join(ApprovalNode, Approval.current_node_id == ApprovalNode.id)
+                .filter(Approval.status == ApprovalStatus.PENDING)
+            )
+            if user_roles:
+                query = query.filter(ApprovalNode.approve_role.in_(user_roles))
+            else:
+                # 无任何角色 → 不返任何 pending 行（避免 IN () SQL 报错）
+                query = query.filter(ApprovalNode.approve_role.is_(None))
+        elif tab == "submitted":
+            query = query.filter(Approval.submitter_id == user_id_str)
+        elif tab == "processed":
+            # 我已处理：作为审批人留下过 APPROVE/REJECT 记录（排除 SUBMIT，否则
+            # 提交人会在 processed 里看到自己的提交）。用 EXISTS 子查询去重，
+            # 避免一条审批多条记录导致行重复。
+            processed_sub = (
+                db.query(ApprovalRecord.approval_id)
+                .filter(
+                    ApprovalRecord.approver_id == user_id_str,
+                    ApprovalRecord.action != ApprovalAction.SUBMIT,
+                )
+                .distinct()
+            )
+            query = query.filter(Approval.id.in_(processed_sub))
+        else:
+            raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted")
+
+        total = query.count()
+        rows = (
+            query.order_by(Approval.created_time.desc())
+            .offset(skip)
+            .limit(page_size)
+            .all()
+        )
+
+        # ---- E9：按 business_type 批量预取实体摘要，内存 join 避免 N+1 ----
+        summaries = self._batch_entity_summaries(db, rows, team_id)
+
+        # ---- 组装列表项 + overdue_hours Python 计算 ----
+        now = datetime.now()
+        items: List[Dict[str, Any]] = []
+        for ap in rows:
+            sum_key = (ap.business_type, ap.business_id) if ap.business_id else None
+            summary = summaries.get(sum_key) if sum_key else None
+            overdue_hours: Optional[int] = None
+            if ap.status == ApprovalStatus.PENDING and ap.created_time is not None:
+                overdue_hours = int((now - ap.created_time).total_seconds() // 3600)
+            items.append({
+                "id": ap.id,
+                "business_type": ap.business_type,
+                "business_id": ap.business_id if ap.business_id is not None else 0,
+                "application_number": summary["application_number"] if summary else f"{ap.business_type}-{ap.business_id}",
+                "entity_name": summary["entity_name"] if summary else None,
+                "entity_amount": summary["entity_amount"] if summary else None,
+                "submitter_id": ap.submitter_id,
+                "submitter_name": ap.submitter_name,
+                "status": ap.status,
+                "created_time": ap.created_time.isoformat() if ap.created_time else "",
+                "updated_time": ap.updated_time.isoformat() if ap.updated_time else "",
+                "overdue_hours": overdue_hours,
+            })
+
+        # ---- pending_count：当前用户待我审批总数，任意 tab 都附 ----
+        pending_count = self._count_pending_for_user(db, team_id, user_roles)
+
+        return items, total, pending_count
+
+    def _batch_entity_summaries(
+        self,
+        db: Session,
+        approvals: List[Approval],
+        team_id: int,
+    ) -> Dict[Tuple[str, int], Dict[str, Any]]:
+        """按 business_type 分组批量预取实体摘要（application_number/entity_name/entity_amount）。
+
+        - CONTRACT: contract_number / contract_name / total_amount
+        - INVOICE: application_number / invoice_title_text / invoice_amount
+        - PAYMENT: 合成 PAY-{id} / None / actual_amount（无单号字段，entity_name 暂空）
+
+        Returns:
+            Dict[(business_type, business_id), {application_number, entity_name, entity_amount}]
+        """
+        from app.models.contract import Contract
+        from app.models.invoice import InvoiceApplication
+        from app.models.payment import PaymentRecord
+
+        ids_by_type: Dict[str, List[int]] = {"CONTRACT": [], "INVOICE": [], "PAYMENT": []}
+        for ap in approvals:
+            if ap.business_id and ap.business_type in ids_by_type:
+                ids_by_type[ap.business_type].append(ap.business_id)
+
+        summaries: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+        # CONTRACT
+        if ids_by_type["CONTRACT"]:
+            for c in db.query(Contract).filter(
+                Contract.id.in_(ids_by_type["CONTRACT"]), Contract.team_id == team_id
+            ).all():
+                summaries[(BusinessType.CONTRACT, c.id)] = {
+                    "application_number": c.contract_number or f"CONTRACT-{c.id}",
+                    "entity_name": c.contract_name,
+                    "entity_amount": float(c.total_amount) if c.total_amount is not None else None,
+                }
+
+        # INVOICE
+        if ids_by_type["INVOICE"]:
+            for inv in db.query(InvoiceApplication).filter(
+                InvoiceApplication.id.in_(ids_by_type["INVOICE"]),
+                InvoiceApplication.team_id == team_id,
+            ).all():
+                summaries[(BusinessType.INVOICE, inv.id)] = {
+                    "application_number": inv.application_number or f"INVOICE-{inv.id}",
+                    "entity_name": inv.invoice_title_text,
+                    "entity_amount": float(inv.invoice_amount) if inv.invoice_amount is not None else None,
+                }
+
+        # PAYMENT（无单号字段，合成 PAY-{id}；entity_name 暂 None 避免多层 join plan→contract）
+        if ids_by_type["PAYMENT"]:
+            for pr in db.query(PaymentRecord).filter(
+                PaymentRecord.id.in_(ids_by_type["PAYMENT"]),
+                PaymentRecord.team_id == team_id,
+            ).all():
+                summaries[(BusinessType.PAYMENT, pr.id)] = {
+                    "application_number": f"PAY-{pr.id}",
+                    "entity_name": None,
+                    "entity_amount": float(pr.actual_amount) if pr.actual_amount is not None else None,
+                }
+
+        return summaries
+
+    def _count_pending_for_user(
+        self,
+        db: Session,
+        team_id: int,
+        user_roles: List[str],
+    ) -> int:
+        """当前用户「待我审批」总数（pending tab 的 total，任意 tab 响应都附给前端徽章）。"""
+        from app.models.approval import ApprovalNode
+
+        query = (
+            db.query(Approval)
+            .join(ApprovalNode, Approval.current_node_id == ApprovalNode.id)
+            .filter(
+                Approval.team_id == team_id,
+                Approval.status == ApprovalStatus.PENDING,
+            )
+        )
+        if user_roles:
+            query = query.filter(ApprovalNode.approve_role.in_(user_roles))
+        else:
+            query = query.filter(ApprovalNode.approve_role.is_(None))
+        return query.count()
+
 
 approval_flow_crud = ApprovalFlowCRUD()
 approval_crud = ApprovalCRUD()

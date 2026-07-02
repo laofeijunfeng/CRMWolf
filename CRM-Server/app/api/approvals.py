@@ -23,6 +23,8 @@ from app.schemas.approval_generic import (
     BulkApproveRequest,
     BulkApproveResponse,
     BulkApproveFailedItem,
+    ApprovalListItemResponse,
+    ApprovalGenericListResponse,
 )
 from app.constants.business_types import is_valid_business_type, BusinessType
 from app.services.approval_adapter import get_adapter
@@ -1721,3 +1723,86 @@ async def bulk_approve(
     )
 
     return BulkApproveResponse(success_count=success_count, failed=failed)
+
+
+# ============================================================================
+# Task C3：通用审批列表端点 GET /v1/approvals
+# ============================================================================
+# 设计要点：
+# - E2 越权过滤（P0）：tab=pending/processed/submitted 分别按角色/记录/提交人过滤，
+#   team_id 由 get_current_user_team 注入，前端无法跨 team 抓数据。
+# - 角色获取：复用既有 role_crud.get_user_roles(db, user_id, team_id) → 取 code 集合，
+#   传给 approval_crud.list_approvals 做 pending tab 的 IN 过滤。
+# - 权限：Depends(get_current_user_team) + get_current_active_user 即可，无需额外
+#   require_permission——能看到的都是自己相关（待我审批/我已处理/我提交的）。
+# - E9 N+1：approval_crud.list_approvals 内部分组批量预取实体摘要。
+# - 响应：{items, total, pending_count}（pending_count=pending tab total，任意 tab 附）。
+# ============================================================================
+
+
+@router.get(
+    "",
+    response_model=ApprovalGenericListResponse,
+    summary="获取审批列表（通用，Task C3）",
+    description="""
+按 tab 维度查询当前用户相关审批列表，团队隔离 + 角色驱动过滤。
+
+**功能说明：**
+- tab=pending：当前节点审批角色属于我的角色集 + 状态 PENDING
+- tab=processed：我作为审批人留下过 APPROVE/REJECT 记录的审批
+- tab=submitted：我提交的所有审批（含已通过/驳回/撤回）
+- 任意 tab 响应都附 `pending_count`（当前用户待我审批总数，供侧边栏徽章）
+
+**查询参数：**
+- tab: pending / processed / submitted
+- business_type: 可选 CONTRACT / PAYMENT / INVOICE 维度过滤
+- page / page_size: 分页
+
+**返回字段：**
+- items: 审批列表项，含按 business_type 内存 join 出的 application_number /
+  entity_name / entity_amount 三摘要（避免 N+1）
+- total: 当前 tab+business_type 过滤后的总数
+- pending_count: 当前用户待我审批总数（任意 tab 都附）
+""",
+)
+def list_approvals(
+    tab: str = Query("pending", description="过滤维度：pending/processed/submitted"),
+    business_type: Optional[str] = Query(None, description="业务类型过滤 CONTRACT/PAYMENT/INVOICE"),
+    page: int = Query(1, ge=1, description="页码，1-based"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    # 参数校验
+    if tab not in ("pending", "processed", "submitted"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"非法 tab: {tab}，仅支持 pending / processed / submitted",
+        )
+    if business_type is not None and not is_valid_business_type(business_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效的业务单据类型: {business_type}，仅支持 CONTRACT / PAYMENT / INVOICE",
+        )
+
+    # 当前用户在该 team 下的角色 code 集合（pending tab 过滤用）
+    user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
+    user_roles = [r.code for r in user_role_objs]
+
+    items, total, pending_count = approval_crud.list_approvals(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        user_roles=user_roles,
+        tab=tab,
+        business_type=business_type,
+        page=page,
+        page_size=page_size,
+    )
+
+    return ApprovalGenericListResponse(
+        items=[ApprovalListItemResponse(**item) for item in items],
+        total=total,
+        pending_count=pending_count,
+    )
