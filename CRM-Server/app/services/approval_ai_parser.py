@@ -275,10 +275,13 @@ class ApprovalAIParserService:
 
         Returns:
             格式化后的系统提示词
+
+        注意：使用字符串替换而非 .format()，因为模板包含 JSON 示例中的花括号
         """
         current_date = datetime.now().strftime("%Y-%m-%d")
-        return PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE.format(
-            current_date=current_date
+        # 使用简单替换，避免 JSON 示例中的 {} 被 format() 误解析
+        return PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE.replace(
+            "{current_date}", current_date
         )
 
     def _validate_roles(self, nodes: List[ApprovalAIParsedNode]) -> List[str]:
