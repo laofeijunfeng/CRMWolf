@@ -522,12 +522,13 @@ async def submit_contract_approval(
             try:
                 for approver in approvers:
                     await notification_service.notify_approval_pending(
-                        contract_name=contract.contract_name,
+                        entity_type=BusinessType.CONTRACT,
+                        entity_name=contract.contract_name,
                         flow_name=flow.flow_name,
                         node_name=approval.current_node.node_name,
                         approver_open_id=approver.feishu_open_id or "",
                         approver_name=approver.name,
-                        contract_id=contract_id
+                        business_id=contract_id,
                     )
                 notification_status = "success" if approvers else "skipped"
             except Exception as notify_error:
@@ -675,8 +676,9 @@ async def approve_contract(
                 try:
                     await notification_service.notify_approval_approved(
                         submitter_open_id=submitter_open_id,
-                        contract_name=contract.contract_name,
-                        contract_id=contract_id
+                        entity_type=BusinessType.CONTRACT,
+                        entity_name=contract.contract_name,
+                        business_id=contract_id,
                     )
                     notification_status = "success"
                 except Exception as notify_error:
@@ -692,12 +694,13 @@ async def approve_contract(
                 try:
                     for approver in approvers:
                         await notification_service.notify_approval_pending(
-                            contract_name=contract.contract_name,
+                            entity_type=BusinessType.CONTRACT,
+                            entity_name=contract.contract_name,
                             flow_name=approval.flow.flow_name if approval.flow else "",
                             node_name=approval.current_node.node_name,
                             approver_open_id=approver.feishu_open_id or "",
                             approver_name=approver.name,
-                            contract_id=contract_id
+                            business_id=contract_id,
                         )
                     notification_status = "success" if approvers else "skipped"
                 except Exception as notify_error:
@@ -731,9 +734,10 @@ async def approve_contract(
             try:
                 await notification_service.notify_approval_rejected(
                     submitter_open_id=submitter_open_id,
-                    contract_name=contract.contract_name,
+                    entity_type=BusinessType.CONTRACT,
+                    entity_name=contract.contract_name,
                     reject_reason=action_request.comment or "无",
-                    contract_id=contract_id
+                    business_id=contract_id,
                 )
                 notification_status = "success"
             except Exception as notify_error:
@@ -1308,8 +1312,42 @@ async def submit_generic_approval(
         business_id=entity_id,
     )
 
-    # TODO(A8): 通知泛化——当前 notify_approval_* 签名是合同专用（contract_name/contract_id），
-    # INVOICE/PAYMENT 单据名/ID 语义不同，A8 会重构通知层签名。本端点暂不发送通知。
+    # 通知泛化（A8）：按 entity_type 走适配器取展示名，分发给当前节点审批人
+    notification_service = notification_service_factory(db, team_id)
+    notification_status = "skipped"
+    if ap.current_node:
+        approvers = get_approvers_by_role(db, ap.current_node.approve_role)
+        try:
+            entity_name = adapter.get_name(entity)
+            for approver in approvers:
+                await notification_service.notify_approval_pending(
+                    entity_type=entity_type,
+                    entity_name=entity_name,
+                    flow_name=flow.flow_name,
+                    node_name=ap.current_node.node_name,
+                    approver_open_id=approver.feishu_open_id or "",
+                    approver_name=approver.name,
+                    business_id=entity_id,
+                )
+            notification_status = "success" if approvers else "skipped"
+        except Exception as notify_error:
+            notification_status = "failed"
+            logger.error(
+                f"[Approval] Submit notification failed: entity_type={entity_type}, "
+                f"business_id={entity_id}, error={str(notify_error)}"
+            )
+        log_approval_operation(
+            operation="Submit",
+            approval_id=ap.id,
+            flow_name=flow.flow_name,
+            node_name=ap.current_node.node_name,
+            operator=current_user.name,
+            flow_direction="submitted",
+            notification_status=notification_status,
+            business_type=entity_type,
+            business_id=entity_id,
+        )
+
     return GenericApprovalSubmitResponse(approval_id=ap.id, status=ap.status)
 
 
@@ -1419,6 +1457,57 @@ async def approve_generic_approval(
 
     flow_direction_str = ("completed" if approval.status == ApprovalStatus.APPROVED else
                      "next_node" if approval.current_node else "terminated")
+
+    # 通知泛化（A8）：按 entity_type 走适配器取展示名，分发 pending/approved/rejected
+    notification_service = notification_service_factory(db, team_id)
+    notification_status = "skipped"
+    adapter = get_adapter(entity_type)
+    entity = adapter.get_entity(db, approval.business_id, approval.team_id)
+    entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{entity_id}"
+    submitter = user_crud.get_by_id(db, int(approval.submitter_id)) if approval.submitter_id else None
+    submitter_open_id = submitter.feishu_open_id if submitter else ""
+
+    try:
+        if action_request.action.value == ApprovalAction.APPROVE:
+            if approval.status == ApprovalStatus.APPROVED:
+                # 全部节点通过：通知提交人
+                await notification_service.notify_approval_approved(
+                    submitter_open_id=submitter_open_id,
+                    entity_type=entity_type,
+                    entity_name=entity_name,
+                    business_id=entity_id,
+                )
+                notification_status = "success"
+            elif approval.current_node:
+                # 流转到下一节点：通知下一节点审批人
+                approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+                for approver in approvers:
+                    await notification_service.notify_approval_pending(
+                        entity_type=entity_type,
+                        entity_name=entity_name,
+                        flow_name=approval.flow.flow_name if approval.flow else "",
+                        node_name=approval.current_node.node_name,
+                        approver_open_id=approver.feishu_open_id or "",
+                        approver_name=approver.name,
+                        business_id=entity_id,
+                    )
+                notification_status = "success" if approvers else "skipped"
+        elif action_request.action.value == ApprovalAction.REJECT:
+            await notification_service.notify_approval_rejected(
+                submitter_open_id=submitter_open_id,
+                entity_type=entity_type,
+                entity_name=entity_name,
+                reject_reason=action_request.comment or "无",
+                business_id=entity_id,
+            )
+            notification_status = "success"
+    except Exception as notify_error:
+        notification_status = "failed"
+        logger.error(
+            f"[Approval] Generic notification failed: entity_type={entity_type}, "
+            f"business_id={entity_id}, error={str(notify_error)}"
+        )
+
     log_approval_operation(
         operation="Approve" if action_request.action.value == ApprovalAction.APPROVE else "Reject",
         approval_id=approval.id,
@@ -1426,11 +1515,10 @@ async def approve_generic_approval(
         node_name=current_node_name,
         operator=current_user.name,
         flow_direction=flow_direction_str,
+        notification_status=notification_status,
         business_type=entity_type,
         business_id=entity_id,
     )
-
-    # TODO(A8): 通知泛化——签名需按 business_type 分发，暂不发送
 
     db.refresh(approval)
     return _serialize_generic_approval(approval, db)

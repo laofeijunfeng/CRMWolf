@@ -1,11 +1,45 @@
 import logging
 import httpx
 from typing import Optional, Dict, Any
+from app.constants.business_types import BusinessType
 from app.core.config import get_settings
 from app.schemas.user import FeishuTokenResponse, FeishuUserInfo
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+
+# 单据类型展示名 —— 通知文案标题里 fallback 用，避免硬编码"合同"
+_ENTITY_TYPE_LABEL = {
+    BusinessType.CONTRACT: "合同",
+    BusinessType.PAYMENT: "回款登记",
+    BusinessType.INVOICE: "发票申请",
+}
+
+
+def _entity_label(entity_type: Optional[str]) -> str:
+    """取单据类型中文标签；未知类型回退 '单据'。"""
+    if not entity_type:
+        return "合同"
+    return _ENTITY_TYPE_LABEL.get(entity_type, "单据")
+
+
+def _resolve_entity(
+    entity_type: Optional[str],
+    entity_name: Optional[str],
+    business_id: Optional[int],
+    contract_name: Optional[str],
+    contract_id: Optional[int],
+) -> tuple[str, Optional[str], Optional[int]]:
+    """feishu_service 内部别名解析：contract_name/contract_id 回退到新签名，
+    entity_type 缺省视为 CONTRACT。"""
+    if entity_name is None and contract_name is not None:
+        entity_name = contract_name
+    if business_id is None and contract_id is not None:
+        business_id = contract_id
+    if entity_type is None:
+        entity_type = BusinessType.CONTRACT
+    return entity_type, entity_name, business_id
 
 
 class FeishuService:
@@ -400,45 +434,80 @@ class FeishuService:
     async def notify_approval_pending(
         self,
         user_id: str,
-        contract_name: str,
-        flow_name: str,
-        node_name: str
+        contract_name: Optional[str] = None,
+        flow_name: str = "",
+        node_name: str = "",
+        *,
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        business_id: Optional[int] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
-        title = "📋 新的合同审批待处理"
-        content = f"""您有一个新的合同审批需要处理
+        """通过飞书 API 发送审批待处理通知（A8 泛化）。
 
-**合同名称**: {contract_name}
+        旧合同调用方仍可按 `(user_id, contract_name, flow_name, node_name)`
+        位置参数调用；新调用方传 `entity_type / entity_name / business_id`
+        关键字参数。两种形式内部统一解析到泛化字段。
+        """
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
+        title = f"📋 新的{label}审批待处理"
+        content = f"""您有一个新的{label}审批需要处理
+
+**{label}名称**: {entity_name}
 **审批流程**: {flow_name}
 **当前节点**: {node_name}
 
 请及时处理，避免影响业务进度。"""
-        
+
         return await self.send_message_card(user_id, title, content)
-    
+
     async def notify_approval_approved(
         self,
         user_id: str,
-        contract_name: str
+        contract_name: Optional[str] = None,
+        *,
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        business_id: Optional[int] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
-        title = "✅ 合同审批已通过"
-        content = f"""您的合同审批已全部通过
+        """通过飞书 API 发送审批通过通知（A8 泛化）。"""
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
+        title = f"✅ {label}审批已通过"
+        content = f"""您的{label}审批已全部通过
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 
-合同状态已更新为"已签署"，可以进行后续操作。"""
-        
+{label}已审批通过，可以进行后续操作。"""
+
         return await self.send_message_card(user_id, title, content)
-    
+
     async def notify_approval_rejected(
         self,
         user_id: str,
-        contract_name: str,
-        reject_reason: str
+        contract_name: Optional[str] = None,
+        reject_reason: str = "",
+        *,
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        business_id: Optional[int] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
-        title = "❌ 合同审批被拒绝"
-        content = f"""您的合同审批被拒绝
+        """通过飞书 API 发送审批拒绝通知（A8 泛化）。"""
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
+        title = f"❌ {label}审批被拒绝"
+        content = f"""您的{label}审批被拒绝
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **拒绝原因**: {reject_reason}
 
 请根据审批意见修改后重新提交。"""
@@ -531,131 +600,199 @@ class FeishuService:
             logger.error(f"飞书 Webhook 发送异常: {str(e)}")
             return False
 
+    def _entity_detail_url(self, entity_type: str, business_id: Optional[int]) -> Optional[str]:
+        """构造业务单据详情页跳转链接。
+
+        旧合同沿用 `/contracts/{id}`；PAYMENT / INVOICE 走各自的模块路由。
+        business_id 缺省或前端基址未配 → 返回 None（无按钮）。
+        """
+        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
+        if not frontend_url or business_id is None:
+            return None
+        path_map = {
+            BusinessType.CONTRACT: "contracts",
+            BusinessType.PAYMENT: "payments",
+            BusinessType.INVOICE: "invoices",
+        }
+        segment = path_map.get(entity_type, "contracts")
+        return f"{frontend_url}/{segment}/{business_id}"
+
     async def notify_approval_webhook(
         self,
         webhook_url: str,
-        contract_name: str,
-        flow_name: str,
-        node_name: str,
-        approver_name: str,
-        contract_id: int
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        flow_name: str = "",
+        node_name: str = "",
+        approver_name: str = "",
+        business_id: Optional[int] = None,
+        *,
+        contract_name: Optional[str] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
         """通过 Webhook 发送审批待处理通知
 
+        泛化签名（A8）：entity_type / entity_name / business_id 替代
+        contract_name / contract_id（旧合同别名仍兼容）。
+
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            contract_name: 合同名称
+            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_name: 业务单据展示名
             flow_name: 审批流程名称
             node_name: 当前审批节点名称
             approver_name: 审批人姓名
-            contract_id: 合同 ID（用于生成跳转链接）
+            business_id: 业务单据ID（用于生成跳转链接）
+            contract_name: (已弃用) 旧合同别名
+            contract_id: (已弃用) 旧合同别名
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
         """
-        title = "📋 新的合同审批待处理"
-        content = f"""您有一个新的合同审批需要处理
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
+        title = f"📋 新的{label}审批待处理"
+        content = f"""您有一个新的{label}审批需要处理
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **审批流程**: {flow_name}
 **当前节点**: {node_name}
 **审批人**: {approver_name}
 
 请及时处理，避免影响业务进度。"""
 
-        # 构造合同详情页跳转链接
-        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
-        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+        button_url = self._entity_detail_url(entity_type, business_id)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
     async def notify_approval_approved_webhook(
         self,
         webhook_url: str,
-        contract_name: str,
-        contract_id: int
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        business_id: Optional[int] = None,
+        *,
+        contract_name: Optional[str] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
         """通过 Webhook 发送审批通过通知
 
+        泛化签名（A8）：entity_type / entity_name / business_id 替代
+        contract_name / contract_id（旧合同别名仍兼容）。
+
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            contract_name: 合同名称
-            contract_id: 合同 ID（用于生成跳转链接）
+            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_name: 业务单据展示名
+            business_id: 业务单据ID（用于生成跳转链接）
+            contract_name: (已弃用) 旧合同别名
+            contract_id: (已弃用) 旧合同别名
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
         """
-        title = "✅ 合同审批已通过"
-        content = f"""您的合同审批已全部通过
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
+        title = f"✅ {label}审批已通过"
+        content = f"""您的{label}审批已全部通过
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 
-合同状态已更新为"已签署"，可以进行后续操作。"""
+{label}已审批通过，可以进行后续操作。"""
 
-        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
-        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+        button_url = self._entity_detail_url(entity_type, business_id)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
     async def notify_approval_rejected_webhook(
         self,
         webhook_url: str,
-        contract_name: str,
-        reject_reason: str,
-        contract_id: int
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        reject_reason: str = "",
+        business_id: Optional[int] = None,
+        *,
+        contract_name: Optional[str] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
         """通过 Webhook 发送审批拒绝通知
 
+        泛化签名（A8）：entity_type / entity_name / business_id 替代
+        contract_name / contract_id（旧合同别名仍兼容）。
+
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            contract_name: 合同名称
+            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_name: 业务单据展示名
             reject_reason: 拒绝原因
-            contract_id: 合同 ID（用于生成跳转链接）
+            business_id: 业务单据ID（用于生成跳转链接）
+            contract_name: (已弃用) 旧合同别名
+            contract_id: (已弃用) 旧合同别名
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
         """
-        title = "❌ 合同审批被拒绝"
-        content = f"""您的合同审批被拒绝
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
+        title = f"❌ {label}审批被拒绝"
+        content = f"""您的{label}审批被拒绝
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **拒绝原因**: {reject_reason}
 
 请根据审批意见修改后重新提交。"""
 
-        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
-        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+        button_url = self._entity_detail_url(entity_type, business_id)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
     async def notify_approval_cancelled_webhook(
         self,
         webhook_url: str,
-        contract_name: str,
-        submitter_name: str,
-        contract_id: int
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        submitter_name: str = "",
+        business_id: Optional[int] = None,
+        *,
+        contract_name: Optional[str] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
         """通过 Webhook 发送审批撤回通知
 
+        泛化签名（A8）：entity_type / entity_name / business_id 替代
+        contract_name / contract_id（旧合同别名仍兼容）。
+
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            contract_name: 合同名称
+            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_name: 业务单据展示名
             submitter_name: 撤回人姓名
-            contract_id: 合同 ID（用于生成跳转链接）
+            business_id: 业务单据ID（用于生成跳转链接）
+            contract_name: (已弃用) 旧合同别名
+            contract_id: (已弃用) 旧合同别名
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
         """
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
         title = "🔄 审批已撤回"
         content = f"""审批任务已取消
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **撤回人**: {submitter_name}
 
 提交人已撤回审批，您无需继续处理此审批任务。"""
 
-        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
-        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+        button_url = self._entity_detail_url(entity_type, business_id)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
@@ -664,19 +801,26 @@ class FeishuService:
     async def notify_approval_reminder(
         self,
         user_id: str,
-        contract_name: str,
-        waiting_hours: int,
-        node_name: str,
-        reminder_level: str = "light"
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        waiting_hours: int = 0,
+        node_name: str = "",
+        reminder_level: str = "light",
+        *,
+        contract_name: Optional[str] = None,
     ) -> bool:
         """通过飞书 API 发送审批催办通知给审批人
 
+        泛化签名（A8）：entity_type / entity_name 替代 contract_name（旧别名仍兼容）。
+
         Args:
             user_id: 审批人 open_id
-            contract_name: 合同名称
+            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_name: 业务单据展示名
             waiting_hours: 已等待小时数
             node_name: 当前审批节点名称
             reminder_level: 提醒级别（light/medium/strong）
+            contract_name: (已弃用) 旧合同别名
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
@@ -695,10 +839,15 @@ class FeishuService:
         icon = level_icons.get(reminder_level, "⏰")
         level_text = level_texts.get(reminder_level, "提醒")
 
+        entity_type, entity_name, _ = _resolve_entity(
+            entity_type, entity_name, None, contract_name, None
+        )
+        label = _entity_label(entity_type)
+
         title = f"{icon} 审批催办通知（{level_text}）"
         content = f"""您有待处理的审批任务
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **当前节点**: {node_name}
 **已等待**: {waiting_hours}小时
 
@@ -709,23 +858,33 @@ class FeishuService:
     async def notify_approval_reminder_webhook(
         self,
         webhook_url: str,
-        contract_name: str,
-        waiting_hours: int,
-        node_name: str,
-        approver_name: str,
-        contract_id: int,
-        reminder_level: str = "light"
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        waiting_hours: int = 0,
+        node_name: str = "",
+        approver_name: str = "",
+        business_id: Optional[int] = None,
+        reminder_level: str = "light",
+        *,
+        contract_name: Optional[str] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
         """通过 Webhook 发送审批催办通知
 
+        泛化签名（A8）：entity_type / entity_name / business_id 替代
+        contract_name / contract_id（旧合同别名仍兼容）。
+
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            contract_name: 合同名称
+            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_name: 业务单据展示名
             waiting_hours: 已等待小时数
             node_name: 当前审批节点名称
             approver_name: 审批人姓名
-            contract_id: 合同 ID
+            business_id: 业务单据ID
             reminder_level: 提醒级别（light/medium/strong）
+            contract_name: (已弃用) 旧合同别名
+            contract_id: (已弃用) 旧合同别名
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
@@ -744,41 +903,52 @@ class FeishuService:
         icon = level_icons.get(reminder_level, "⏰")
         level_text = level_texts.get(reminder_level, "提醒")
 
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
+
         title = f"{icon} 审批催办通知（{level_text}）"
         content = f"""审批人 {approver_name} 有待处理的审批任务
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **当前节点**: {node_name}
 **审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
 
 请尽快处理或联系提交人说明情况。"""
 
-        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
-        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+        button_url = self._entity_detail_url(entity_type, business_id)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
     async def notify_approval_timeout_alert(
         self,
         user_id: str,
-        contract_name: str,
-        node_name: str,
-        approver_name: str,
-        waiting_hours: int,
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        node_name: str = "",
+        approver_name: str = "",
+        waiting_hours: int = 0,
         reminder_level: str = "medium",
-        is_admin: bool = False
+        is_admin: bool = False,
+        *,
+        contract_name: Optional[str] = None,
     ) -> bool:
         """通过飞书 API 发送审批超时告警给提交人或管理员
 
+        泛化签名（A8）：entity_type / entity_name 替代 contract_name（旧别名仍兼容）。
+
         Args:
             user_id: 提交人/管理员 open_id
-            contract_name: 合同名称
+            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_name: 业务单据展示名
             node_name: 当前审批节点名称
             approver_name: 当前审批人姓名
             waiting_hours: 已等待小时数
             reminder_level: 提醒级别（medium/strong）
             is_admin: 是否通知管理员
+            contract_name: (已弃用) 旧合同别名
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
@@ -795,11 +965,16 @@ class FeishuService:
         icon = level_icons.get(reminder_level, "⚠️")
         level_text = level_texts.get(reminder_level, "告警")
 
+        entity_type, entity_name, _ = _resolve_entity(
+            entity_type, entity_name, None, contract_name, None
+        )
+        label = _entity_label(entity_type)
+
         if is_admin:
             title = f"{icon} 审批超时告警（管理员）"
             content = f"""审批任务超时告警
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **当前节点**: {node_name}
 **当前审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
@@ -809,7 +984,7 @@ class FeishuService:
             title = f"{icon} 您的审批任务等待超时"
             content = f"""您的审批任务等待超时
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **当前节点**: {node_name}
 **当前审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
@@ -823,25 +998,35 @@ class FeishuService:
     async def notify_approval_timeout_webhook(
         self,
         webhook_url: str,
-        contract_name: str,
-        node_name: str,
-        approver_name: str,
-        waiting_hours: int,
-        contract_id: int,
+        entity_type: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        node_name: str = "",
+        approver_name: str = "",
+        waiting_hours: int = 0,
+        business_id: Optional[int] = None,
         reminder_level: str = "medium",
-        is_admin: bool = False
+        is_admin: bool = False,
+        *,
+        contract_name: Optional[str] = None,
+        contract_id: Optional[int] = None,
     ) -> bool:
         """通过 Webhook 发送审批超时告警
 
+        泛化签名（A8）：entity_type / entity_name / business_id 替代
+        contract_name / contract_id（旧合同别名仍兼容）。
+
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            contract_name: 合同名称
+            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_name: 业务单据展示名
             node_name: 当前审批节点名称
             approver_name: 当前审批人姓名
             waiting_hours: 已等待小时数
-            contract_id: 合同 ID
+            business_id: 业务单据ID
             reminder_level: 提醒级别（medium/strong）
             is_admin: 是否通知管理员
+            contract_name: (已弃用) 旧合同别名
+            contract_id: (已弃用) 旧合同别名
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
@@ -858,11 +1043,16 @@ class FeishuService:
         icon = level_icons.get(reminder_level, "⚠️")
         level_text = level_texts.get(reminder_level, "告警")
 
+        entity_type, entity_name, business_id = _resolve_entity(
+            entity_type, entity_name, business_id, contract_name, contract_id
+        )
+        label = _entity_label(entity_type)
+
         if is_admin:
             title = f"{icon} 审批超时告警（管理员 - {level_text}）"
             content = f"""审批任务超时告警，请管理员关注
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **当前节点**: {node_name}
 **当前审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
@@ -872,7 +1062,7 @@ class FeishuService:
             title = f"{icon} 审批超时通知（{level_text}）"
             content = f"""审批任务等待超时
 
-**合同名称**: {contract_name}
+**{label}名称**: {entity_name}
 **当前节点**: {node_name}
 **当前审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
@@ -881,8 +1071,7 @@ class FeishuService:
 → 联系审批人催办
 → 撤回审批，修改后重新提交"""
 
-        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
-        button_url = f"{frontend_url}/contracts/{contract_id}" if frontend_url else None
+        button_url = self._entity_detail_url(entity_type, business_id)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
