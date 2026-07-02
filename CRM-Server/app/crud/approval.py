@@ -742,7 +742,15 @@ class ApprovalCRUD:
         limit: int = 100
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        查询超时的审批实例列表
+        查询超时的审批实例列表（泛化覆盖 CONTRACT/PAYMENT/INVOICE 三类）。
+
+        I-1 修复：原实现 `JOIN Contract ON Approval.contract_id == Contract.id`
+        为 INNER JOIN，PAYMENT/INVOICE 审批 contract_id=NULL 被排除，导致回款/
+        发票超时审批在 /overdue 不可见。现去掉 Contract JOIN，按 Approval 基本
+        信息（business_type/business_id）返回；contract_id 仍透传（CONTRACT 类
+        非空、PAYMENT/INVOICE 为 None），实体名由调用方按需经适配器 get_entity
+        取（前端铃铛已走 list_approvals 不消费 /overdue，本端点仅作管理端应急，
+        泛化后覆盖三类即可）。保留 team_id 过滤与 overdue_hours 计算。
 
         Args:
             db: 数据库会话
@@ -759,9 +767,12 @@ class ApprovalCRUD:
         # 计算超时阈值时间点
         threshold_time = datetime.now() - timedelta(hours=min_hours)
 
-        # 查询超时的审批实例
+        # 查询超时的审批实例（不再 INNER JOIN Contract——PAYMENT/INVOICE
+        # contract_id=NULL，INNER JOIN 会把它们排除在外）
         query = db.query(
             Approval.id.label('approval_id'),
+            Approval.business_type,
+            Approval.business_id,
             Approval.contract_id,
             Approval.status,
             Approval.created_time.label('submit_time'),
@@ -769,10 +780,6 @@ class ApprovalCRUD:
             Approval.current_node_id,
             ApprovalNode.node_name.label('current_node_name'),
             ApprovalNode.approve_role,
-            Contract.contract_name,
-            Contract.contract_number
-        ).join(
-            Contract, Approval.contract_id == Contract.id
         ).outerjoin(
             ApprovalNode, Approval.current_node_id == ApprovalNode.id
         ).filter(
@@ -800,9 +807,11 @@ class ApprovalCRUD:
 
             overdue_list.append({
                 'approval_id': row.approval_id,
+                'business_type': row.business_type,
+                'business_id': row.business_id,
                 'contract_id': row.contract_id,
-                'contract_name': row.contract_name,
-                'contract_number': row.contract_number,
+                'contract_name': None,  # 实体名由调用方按需经适配器取
+                'contract_number': None,
                 'current_node_name': row.current_node_name,
                 'current_approver_name': current_approver_name,
                 'overdue_hours': overdue_hours,
