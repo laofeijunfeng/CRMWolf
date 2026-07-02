@@ -1,0 +1,153 @@
+/**
+ * 通用审批 Pinia Store
+ *
+ * 持有当前审批详情 `currentApprovalDetail`，封装通用审批 API 调用并在
+ * 响应上执行 Zod 校验。供 C2/C3 审批组件与 FinanceApprovalCenter 调用。
+ *
+ * 设计要点：
+ * - State 使用 `ref<Type>(...)` 显式类型，禁止 any；初始详情为 null
+ * - storeToRefs 解构读 State（响应性保留），Actions 内用 `.value` 赋值
+ * - 每个 action 用 try/finally 保证 loading 复位；Zod 校验失败时错误自然向上抛
+ *   （不吞错、不污染 detail），调用方自行 try/catch 处理
+ * - cancel 成功后清空 currentApprovalDetail（单据已回 DRAFT，详情失效）
+ */
+
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import approvalGenericApi, {
+  type UpdatedTimesMap
+} from '@/api/approvalGeneric'
+import {
+  ApprovalDetailSchema,
+  ApprovalSubmitResponseSchema,
+  MessageResponseSchema,
+  BulkApproveResponseSchema,
+  type EntityType,
+  type ApprovalAction,
+  type ApprovalDetail,
+  type ApprovalSubmitResponse,
+  type MessageResponse,
+  type BulkApproveResponse
+} from '@/schemas/approvalGeneric'
+
+export const useApprovalStore = defineStore('approvalGeneric', () => {
+  // ===== State =====
+  const currentApprovalDetail = ref<ApprovalDetail | null>(null)
+  const loading = ref<boolean>(false)
+
+  // ===== Actions =====
+
+  /**
+   * 拉取并校验审批详情，落入 currentApprovalDetail。
+   * Zod 校验失败抛错，detail 不被污染。
+   */
+  const fetchDetail = async (entityType: EntityType, entityId: number): Promise<ApprovalDetail> => {
+    loading.value = true
+    try {
+      const raw = await approvalGenericApi.getApprovalDetail(entityType, entityId)
+      const parsed = ApprovalDetailSchema.parse(raw)
+      currentApprovalDetail.value = parsed
+      return parsed
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 提交审批。返回 { approval_id, status }；PAYMENT/INVOICE 未匹配流程时
+   * 后端直通返回 approval_id=0, status=APPROVED。
+   */
+  const submitEntity = async (
+    entityType: EntityType,
+    entityId: number,
+    comment?: string
+  ): Promise<ApprovalSubmitResponse> => {
+    loading.value = true
+    try {
+      const raw = await approvalGenericApi.submitApproval(entityType, entityId, comment)
+      return ApprovalSubmitResponseSchema.parse(raw)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 审批通过/拒绝。后端返回最新审批详情；Zod 校验后落入 currentApprovalDetail。
+   * @param updatedTime iso8601 乐观锁时间戳（可选）
+   */
+  const approveEntity = async (
+    entityType: EntityType,
+    entityId: number,
+    action: ApprovalAction,
+    comment: string,
+    updatedTime?: string
+  ): Promise<ApprovalDetail> => {
+    loading.value = true
+    try {
+      const raw = await approvalGenericApi.approveEntity(
+        entityType, entityId, action, comment, updatedTime
+      )
+      const parsed = ApprovalDetailSchema.parse(raw)
+      currentApprovalDetail.value = parsed
+      return parsed
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 撤回审批。成功后清空 currentApprovalDetail（单据已回 DRAFT，旧详情失效）。
+   */
+  const cancelEntity = async (
+    entityType: EntityType,
+    entityId: number
+  ): Promise<MessageResponse> => {
+    loading.value = true
+    try {
+      const raw = await approvalGenericApi.cancelApproval(entityType, entityId)
+      const parsed = MessageResponseSchema.parse(raw)
+      currentApprovalDetail.value = null
+      return parsed
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * 批量审批（E6：逐条独立事务，部分成功汇总）。
+   * @param updatedTimes 可选乐观锁字典 { str(id): iso8601 }
+   */
+  const bulkApprove = async (
+    entityType: EntityType,
+    ids: number[],
+    action: ApprovalAction,
+    comment: string,
+    updatedTimes?: UpdatedTimesMap
+  ): Promise<BulkApproveResponse> => {
+    loading.value = true
+    try {
+      const raw = await approvalGenericApi.bulkApprove(
+        entityType, ids, action, comment, updatedTimes
+      )
+      return BulkApproveResponseSchema.parse(raw)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** 清空当前审批详情（离开审批页时调用） */
+  const clearDetail = (): void => {
+    currentApprovalDetail.value = null
+  }
+
+  return {
+    currentApprovalDetail,
+    loading,
+    fetchDetail,
+    submitEntity,
+    approveEntity,
+    cancelEntity,
+    bulkApprove,
+    clearDetail
+  }
+})
