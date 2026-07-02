@@ -203,7 +203,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
@@ -234,6 +234,8 @@ const formRules: FormRules = {
       validator: (_rule, value: string, callback: (error?: Error) => void): void => {
         if (formData.feishu_webhook_enabled && value.length === 0) {
           callback(new Error('请输入 Webhook URL'))
+        } else if (value && !value.includes('open.feishu.cn/open-apis/bot/v2/hook')) {
+          callback(new Error('URL 格式应为 https://open.feishu.cn/open-apis/bot/v2/hook/xxx'))
         } else {
           callback()
         }
@@ -277,7 +279,7 @@ const isValidWebhookUrl = (url: string): boolean => {
   if (!url) return false
   try {
     new URL(url)
-    return url.includes('open.feishu.cn')
+    return url.includes('open.feishu.cn/open-apis/bot/v2/hook')
   } catch {
     return false
   }
@@ -379,7 +381,7 @@ const copyWebhookExample = async (): Promise<void> => {
       copySuccess.value = false
     }, 3000)
   } catch {
-    // fallback - silently fail
+    ElMessage.warning('复制失败，请手动复制')
   }
 }
 
