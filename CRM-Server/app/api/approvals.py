@@ -286,7 +286,7 @@ def create_approval_flow(
 - 暂停/启用某个流程
 
 **权限要求：**
-- 需要权限：approval:flow:update
+- 需要 TEAM_ADMIN 角色 **或** approval:flow:edit 权限
 
 **路径参数：**
 - flow_id: 审批流程ID
@@ -306,9 +306,27 @@ def update_approval_flow(
     flow_id: int,
     flow_data: ApprovalFlowUpdate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("approval:flow:update")),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：TEAM_ADMIN 或 approval:flow:edit
+    from app.crud.role import role_crud
+    from app.crud.permission import permission_crud
+
+    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
+    role_codes = {r.code for r in user_roles}
+
+    # 检查是否为 TEAM_ADMIN
+    if "TEAM_ADMIN" not in role_codes:
+        # 检查是否有 approval:flow:edit 权限
+        user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+        permission_codes = {p.code for p in user_permissions}
+
+        if "approval:flow:edit" not in permission_codes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="您没有权限更新审批流程（需要 TEAM_ADMIN 角色或 approval:flow:edit 权限）"
+            )
     flow = approval_flow_crud.get_by_id(db, flow_id, team_id)
     if not flow:
         raise HTTPException(

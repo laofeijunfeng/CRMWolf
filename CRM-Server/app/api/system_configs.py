@@ -31,7 +31,7 @@ router = APIRouter(prefix="/v1/system/configs", tags=["系统配置管理"])
 - 配置审批通知发送方式
 
 **权限要求：**
-- 需要 TEAM_ADMIN 角色或 approval:flow:update 权限
+- 需要 TEAM_ADMIN 角色 **或** approval:flow:edit 权限
 
 **返回字段：**
 - id: 配置ID
@@ -52,7 +52,7 @@ def get_notification_config(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：TEAM_ADMIN 或 approval:flow:update
+    # 权限检查：TEAM_ADMIN 或 approval:flow:edit
     from app.crud.role import role_crud
     from app.crud.permission import permission_crud
 
@@ -61,11 +61,11 @@ def get_notification_config(
 
     # 检查是否为 TEAM_ADMIN
     if "TEAM_ADMIN" not in role_codes:
-        # 检查是否有 approval:flow:update 权限
+        # 检查是否有 approval:flow:edit 权限
         user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
         permission_codes = {p.code for p in user_permissions}
 
-        if "approval:flow:update" not in permission_codes:
+        if "approval:flow:edit" not in permission_codes:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="您没有权限访问通知配置"
@@ -99,7 +99,7 @@ def get_notification_config(
 - 配置通知群名称
 
 **权限要求：**
-- 需要 approval:flow:update 权限
+- 需要 TEAM_ADMIN 角色 **或** approval:flow:edit 权限
 
 **请求体字段：**
 - notification_method: 通知方式（webhook/api）
@@ -119,9 +119,27 @@ def get_notification_config(
 def update_notification_config(
     config_data: NotificationConfigUpdate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("approval:flow:update")),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：TEAM_ADMIN 或 approval:flow:edit
+    from app.crud.role import role_crud
+    from app.crud.permission import permission_crud
+
+    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
+    role_codes = {r.code for r in user_roles}
+
+    # 检查是否为 TEAM_ADMIN
+    if "TEAM_ADMIN" not in role_codes:
+        # 检查是否有 approval:flow:edit 权限
+        user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+        permission_codes = {p.code for p in user_permissions}
+
+        if "approval:flow:edit" not in permission_codes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="您没有权限更新通知配置（需要 TEAM_ADMIN 角色或 approval:flow:edit 权限）"
+            )
     # 准备更新数据（只包含非 None 的字段）
     update_dict: Dict[str, Any] = {}
     if config_data.notification_method is not None:
@@ -171,7 +189,7 @@ def update_notification_config(
 - 排查通知发送问题
 
 **权限要求：**
-- 需要 approval:flow:update 权限
+- 需要 TEAM_ADMIN 角色 **或** approval:flow:edit 权限
 
 **返回信息：**
 - success: 是否发送成功
@@ -184,9 +202,27 @@ def update_notification_config(
 )
 async def test_notification(
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("approval:flow:update")),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 权限检查：TEAM_ADMIN 或 approval:flow:edit
+    from app.crud.role import role_crud
+    from app.crud.permission import permission_crud
+
+    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
+    role_codes = {r.code for r in user_roles}
+
+    # 检查是否为 TEAM_ADMIN
+    if "TEAM_ADMIN" not in role_codes:
+        # 检查是否有 approval:flow:edit 权限
+        user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+        permission_codes = {p.code for p in user_permissions}
+
+        if "approval:flow:edit" not in permission_codes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="您没有权限测试通知配置（需要 TEAM_ADMIN 角色或 approval:flow:edit 权限）"
+            )
     # 获取通知配置
     config = system_config_crud.get_notification_config(db, team_id)
     if not config:
