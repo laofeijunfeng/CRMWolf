@@ -1,6 +1,7 @@
 /**
  * 通知配置 API
  */
+import type { AxiosRequestConfig } from 'axios'
 import request from '@/utils/request'
 
 export interface NotificationConfigResponse {
@@ -35,9 +36,12 @@ export interface NotificationTestResponse {
 export const notificationConfigApi = {
   /**
    * 获取通知配置
+   *
+   * 支持通过 config.skipErrorNotification 抑制拦截器的错误 toast，
+   * 用于首次访问时后端返回 404（配置不存在）的正常首态场景。
    */
-  getConfig: () => {
-    return request.get<NotificationConfigResponse>('/v1/system/configs/notification')
+  getConfig: (config?: AxiosRequestConfig & { skipErrorNotification?: boolean }) => {
+    return request.get<NotificationConfigResponse>('/v1/system/configs/notification', config)
   },
 
   /**

@@ -220,6 +220,8 @@ const formRef = ref<FormInstance>()
 const configInfo = ref<NotificationConfigResponse | null>(null)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
 const copySuccess = ref(false)
+// 已保存的 Webhook URL，用于判断测试按钮是否可用（后端测试的是已保存配置，而非输入框中的值）
+const savedUrl = ref('')
 
 const formData = reactive({
   feishu_webhook_enabled: false,
@@ -251,9 +253,11 @@ const formRules: FormRules = {
 }
 
 // 计算是否可测试
+// 后端测试的是已保存的配置，而非输入框中的值，因此要求 URL 必须与已保存值一致。
 const canTest = computed(() => {
-  return formData.feishu_webhook_enabled &&
-         formData.feishu_webhook_url &&
+  return Boolean(formData.feishu_webhook_enabled) &&
+         Boolean(formData.feishu_webhook_url) &&
+         formData.feishu_webhook_url === savedUrl.value &&
          isValidWebhookUrl(formData.feishu_webhook_url)
 })
 
@@ -264,6 +268,9 @@ const testDisabledReason = computed(() => {
   }
   if (!formData.feishu_webhook_url) {
     return '请先填写 Webhook URL'
+  }
+  if (formData.feishu_webhook_url !== savedUrl.value) {
+    return 'URL 已修改，请先保存后再测试'
   }
   if (!isValidWebhookUrl(formData.feishu_webhook_url)) {
     return 'Webhook URL 格式不正确'
@@ -289,15 +296,17 @@ const isValidWebhookUrl = (url: string): boolean => {
 const fetchConfig = async (): Promise<void> => {
   loading.value = true
   try {
-    const response = await notificationConfigApi.getConfig()
+    // 首次访问时后端返回 404（配置不存在）属正常首态，跳过拦截器的错误 toast
+    const response = await notificationConfigApi.getConfig({ skipErrorNotification: true })
     configInfo.value = response
     if (response !== null) {
       formData.feishu_webhook_enabled = response.feishu_webhook_enabled ?? false
       formData.feishu_webhook_url = response.feishu_webhook_url ?? ''
       formData.notification_group_name = response.notification_group_name ?? ''
+      savedUrl.value = response.feishu_webhook_url ?? ''
     }
   } catch (error) {
-    // 404 表示配置不存在，使用默认值
+    // 404 表示配置不存在，使用默认值（savedUrl 保持 ''）
     const err = error as { response?: { status?: number } }
     if (err.response?.status !== 404) {
       showError(error, '获取通知配置')
@@ -324,6 +333,8 @@ const handleSave = async (): Promise<void> => {
     })
 
     configInfo.value = response
+    // 保存成功后同步已保存的 URL，使测试按钮可用
+    savedUrl.value = formData.feishu_webhook_url
     showSuccess('保存', '通知配置')
     saving.value = false
 
