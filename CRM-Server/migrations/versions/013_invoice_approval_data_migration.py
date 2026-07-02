@@ -72,6 +72,7 @@ def run_invoice_approval_data_migration(bind) -> None:
         JOIN crm_contract_approvals ap
           ON ap.business_type = 'INVOICE' AND ap.business_id = a.id
         WHERE a.status = 'APPROVED' AND a.reviewer_id IS NOT NULL
+              AND a.reviewed_time IS NOT NULL
         """
     ))
 
