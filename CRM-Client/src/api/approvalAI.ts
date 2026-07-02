@@ -48,14 +48,31 @@ export interface ApprovalAIParsedFlow {
 }
 
 /**
+ * 错误恢复动作（error 事件可附带的可操作按钮）
+ */
+export interface ErrorAction {
+  type: 'retry' | 'simplify' | 'help'
+  label: string
+  suggestion?: string  // retry/simplify 时提供示例输入
+  url?: string         // help 时提供跳转链接
+}
+
+/**
  * SSE 事件类型
  */
 export interface ApprovalAIParseSSEEvent {
-  event: 'status' | 'content' | 'parsed' | 'error'
+  event: 'status' | 'content' | 'parsed' | 'error' | 'done' | 'progress'
   message?: string
   content?: string
   flow?: ApprovalAIParsedFlow
   thinking_process?: string
+  success?: boolean          // done 事件使用
+  percentage?: number        // progress 事件使用
+  stage?: 'analyzing' | 'generating' | 'validating'  // progress 阶段
+  recovery?: string          // error 事件恢复提示
+  actions?: ErrorAction[]    // error 事件可操作按钮
+  estimated_seconds?: number // status 事件预估时间
+  can_cancel?: boolean       // status 事件是否可取消
 }
 
 /**
@@ -149,8 +166,8 @@ export const approvalAiApi = {
             const eventData = JSON.parse(line.slice(6)) as ApprovalAIParseSSEEvent
             onEvent(eventData)
 
-            // 收到 parsed 或 error 事件后结束
-            if (eventData.event === 'parsed' || eventData.event === 'error') {
+            // 收到 parsed / error / done 事件后结束（done 为终端事件，含 success）
+            if (eventData.event === 'parsed' || eventData.event === 'error' || eventData.event === 'done') {
               return
             }
           } catch {
