@@ -4,6 +4,7 @@ AI 解析审批流程配置接口
 用于 AI 辅助创建审批流程功能
 """
 import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -15,9 +16,11 @@ from app.models.user import User
 from app.models.approval import ApprovalFlow, ApprovalNode
 from app.schemas.approval_ai import ApprovalAIParseRequest, ApprovalAICreateRequest
 from app.services.approval_ai_parser import approval_ai_parser_service
+from app.services.langgraph.sse_wrapper import SSEJsonEncoder
 from app.crud.approval import approval_flow_crud
 from app.constants.approval_roles import ALLOWED_APPROVAL_ROLES
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/approval-ai", tags=["AI 审批流程解析"])
 
@@ -35,19 +38,40 @@ async def parse_approval_flow(
     - status: 状态更新
     - content: AI 思考过程内容片段
     - parsed: 解析完成，返回结构化配置
-    - error: 错误信息
+    - error: 错误信息（含 recovery 提示）
+    - done: 流结束标记（必须发送，含 success 布尔）
+
+    稳定性保证：
+    - 所有异常都会 yield error 事件
+    - 所有流都会 yield done 事件
+    - 使用 SSEJsonEncoder 确保 JSON 序列化成功
     """
     async def generate_sse():
-        db = SessionLocal()
+        """生成 SSE 流（三层错误处理 + 显式 done 事件）"""
+        success = False
         try:
-            async for event in approval_ai_parser_service.parse_approval_flow_stream(
-                db=db,
-                user_message=request.content,
-                team_id=team_id
-            ):
-                yield f"data: {json.dumps(event)}\n\n"
+            db = SessionLocal()
+            try:
+                async for event in approval_ai_parser_service.parse_approval_flow_stream(
+                    db=db,
+                    user_message=request.content,
+                    team_id=team_id
+                ):
+                    try:
+                        yield f"data: {json.dumps(event, cls=SSEJsonEncoder, ensure_ascii=False)}\n\n"
+                        if event.get("event") == "parsed":
+                            success = True
+                    except Exception as serialize_error:
+                        logger.error(f"SSE 序列化失败: {serialize_error}")
+                        yield f"data: {json.dumps({'event': 'error', 'message': '响应序列化失败', 'recovery': '请稍后重试'}, ensure_ascii=False)}\n\n"
+                        break
+            finally:
+                db.close()
+        except Exception as outer_error:
+            logger.error(f"SSE 流异常: {outer_error}")
+            yield f"data: {json.dumps({'event': 'error', 'message': f'服务异常: {type(outer_error).__name__}', 'recovery': '请联系管理员检查日志'}, ensure_ascii=False)}\n\n"
         finally:
-            db.close()
+            yield f"data: {json.dumps({'event': 'done', 'success': success}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         generate_sse(),
