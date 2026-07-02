@@ -41,7 +41,8 @@ class ContractAdapter:
         return contract_crud.get_by_id(db, business_id, team_id)
 
     def get_submitter(self, entity):
-        return entity.creator_id, getattr(entity, "creator_name", None)
+        # Contract 模型只有 creator_id，无 creator_name 列；姓名非必须，通知层 A8 处理
+        return entity.creator_id, None
 
     def match_kwargs(self, entity):
         return {
@@ -66,7 +67,8 @@ class ContractAdapter:
         entity.status = ContractStatus.DRAFT
 
     def get_name(self, entity):
-        return getattr(entity, "name", None) or f"合同#{entity.id}"
+        # Contract 真实字段是 contract_name（非 name），否则 fallback 到 合同#{id}
+        return getattr(entity, "contract_name", None) or f"合同#{entity.id}"
 
 
 class PaymentRecordAdapter:
@@ -116,7 +118,8 @@ class InvoiceApplicationAdapter:
 
     # 发票提交人字段是 applicant_id（非 creator_id），见决策 3
     def get_submitter(self, entity):
-        return entity.applicant_id, getattr(entity, "applicant_name", None)
+        # InvoiceApplication 无 applicant_name 列，只有 applicant_id；姓名非必须
+        return entity.applicant_id, None
 
     def match_kwargs(self, entity):
         # 开票金额字段是 invoice_amount（非 amount），见决策 3
