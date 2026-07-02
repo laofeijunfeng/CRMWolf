@@ -63,7 +63,12 @@ async def parse_lead_info(
     async def generate_sse():
         db = SessionLocal()
         try:
-            async for event in lead_ai_parser_service.parse_lead_info_stream(
+            parser = EntityAIParserFactory.get_parser("lead")
+            if not parser:
+                yield f"data: {json.dumps({'event': 'error', 'message': '无法获取线索解析器'})}\n\n"
+                return
+
+            async for event in parser.parse_stream(
                 db=db,
                 user_message=request.content,
                 team_id=team_id
