@@ -185,7 +185,8 @@ async def create_approval_flow_from_ai(
                     "description": flow.description,
                     "min_amount": float(flow.min_amount) if flow.min_amount else None,
                     "max_amount": float(flow.max_amount) if flow.max_amount else None,
-                    "license_type": flow.license_type
+                    "license_type": flow.license_type,
+                    "business_type": flow.business_type
                 },
                 "nodes": [
                     {
