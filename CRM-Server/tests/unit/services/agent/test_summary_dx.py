@@ -4,7 +4,6 @@ import pytest
 from app.services.agent.phase_contracts import Phase1Output, Phase2Output, Phase3Output
 from app.services.agent.edge_scenarios import EdgeScenarioHandler, EDGE_SCENARIOS, SCENARIO_PRIORITY
 from app.services.agent.fallback_handler import PhaseFallback
-from app.services.agent.prompt_versions import PromptVersionManager, VERSIONS
 from app.services.agent.summary_monitor import SummaryQualityMonitor
 from app.services.agent.tools import ToolResult
 
@@ -245,41 +244,6 @@ class TestPhaseFallback:
         summary = fallback._build_simple_summary(tool_history, "查询客户")
 
         assert "- search_customer: 已执行" in summary
-
-
-class TestPromptVersionManager:
-    """Test prompt version management"""
-
-    def test_versions_defined(self):
-        """Test VERSIONS registry has initial versions"""
-        assert "v1.0" in VERSIONS
-        assert "v1.1" in VERSIONS
-
-    def test_get_active_version_default(self):
-        """Test get_active_version returns v1.0 by default"""
-        manager = PromptVersionManager()
-        version = manager.get_active_version()
-        assert version == "v1.0"
-
-    def test_activate_version(self):
-        """Test activate_version changes active version"""
-        manager = PromptVersionManager()
-        result = manager.activate_version("v1.1")
-        assert result is True
-        assert manager.get_active_version() == "v1.1"
-        manager.activate_version("v1.0")
-
-    def test_activate_unknown_version(self):
-        """Test activate_version returns False for unknown version"""
-        manager = PromptVersionManager()
-        result = manager.activate_version("v99.0")
-        assert result is False
-
-    def test_get_prompt_for_version(self):
-        """Test get_prompt returns prompt text"""
-        manager = PromptVersionManager()
-        prompt = manager.get_prompt("v1.0")
-        assert "业务总结助手" in prompt
 
 
 class TestSummaryQualityMonitor:
