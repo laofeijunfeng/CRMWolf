@@ -31,7 +31,9 @@ import {
   type ApprovalDetail,
   type ApprovalSubmitResponse,
   type MessageResponse,
-  type BulkApproveResponse
+  type BulkApproveResponse,
+  type ApprovalListResponse,
+  type ApprovalListQuery
 } from '@/schemas/approvalGeneric'
 
 // 乐观锁时间戳映射：{ str(business_id): iso8601 }，键为 id 字符串形式
@@ -127,12 +129,29 @@ function bulkApprove(
   return request.post<BulkApproveResponse>('/v1/approvals/bulk-approve', body)
 }
 
+/**
+ * FinanceApprovalCenter 列表查询（Task C3 / E2 越权过滤）。
+ *
+ * 后端按 tab 严格按角色过滤，team_id 由依赖注入携带（前端不传、不缓存）：
+ *   submitted → submitter_id == current_user
+ *   pending   → current_node.approve_role IN (user_roles) AND status=PENDING
+ *   processed → records.approver_id == current_user
+ * business_type 为可选维度过滤（INVOICE / PAYMENT / CONTRACT）。
+ *
+ * 注：后端 `GET /v1/approvals` 通用列表端点为 Task C3 前端调用所预期；若尚未
+ * 提供，前端照常传正确参数，后端过滤能力缺失由 Task C3 报告标注（不前端伪造过滤）。
+ */
+function listApprovals(query: ApprovalListQuery): Promise<ApprovalListResponse> {
+  return request.get<ApprovalListResponse>('/v1/approvals', { params: query })
+}
+
 const approvalGenericApi = {
   submitApproval,
   approveEntity,
   cancelApproval,
   getApprovalDetail,
-  bulkApprove
+  bulkApprove,
+  listApprovals
 }
 
 export default approvalGenericApi
@@ -141,5 +160,6 @@ export {
   approveEntity,
   cancelApproval,
   getApprovalDetail,
-  bulkApprove
+  bulkApprove,
+  listApprovals
 }

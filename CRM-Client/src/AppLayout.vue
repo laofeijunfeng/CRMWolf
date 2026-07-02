@@ -61,6 +61,22 @@
           <span class="item-text">回款管理</span>
           <el-icon class="item-arrow"><ArrowRight /></el-icon>
         </div>
+        <div
+          v-if="canSeeFinanceApproval"
+          class="menu-item"
+          :class="{ active: currentPath === '/finance/approvals' }"
+          @click="handleMenuClick('/finance/approvals')"
+        >
+          <el-icon class="item-icon"><Checked /></el-icon>
+          <span class="item-text">财务审批</span>
+          <el-badge
+            v-if="approvalPendingCount > 0"
+            :value="approvalPendingCount"
+            class="menu-badge"
+            type="primary"
+          />
+          <el-icon class="item-arrow"><ArrowRight /></el-icon>
+        </div>
         <div class="menu-item" :class="{ active: currentPath.startsWith('/invoices') }" @click="handleMenuClick('/invoices')">
           <el-icon class="item-icon"><Tickets /></el-icon>
           <span class="item-text">发票管理</span>
@@ -88,16 +104,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
+import { usePermissionStore } from '@/stores/permissions'
+import { useApprovalStore } from '@/stores/approval'
 import { ElMessage } from 'element-plus'
-import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound } from '@element-plus/icons-vue'
+import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound, Checked } from '@element-plus/icons-vue'
+import { logger } from '@/utils/logger'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const teamStore = useTeamStore()
+const permissionStore = usePermissionStore()
+const approvalStore = useApprovalStore()
+const { pendingCount: approvalPendingCount } = storeToRefs(approvalStore)
 const showTeamSwitcher = ref(false)
+
+// 财务审批中心菜单门控（C-DSG-5）：需持有 invoice:approve 或 payment:approve 之一
+const canSeeFinanceApproval = computed<boolean>(() =>
+  permissionStore.hasAnyPermission(['invoice:approve', 'payment:approve'])
+)
 
 const currentPath = computed(() => {
   const path = route.path
@@ -127,13 +155,6 @@ const handleUserProfile = (): void => {
   router.push('/settings')
 }
 
-const handleLogout = () => {
-  userStore.logout()
-  teamStore.clearTeam()
-  ElMessage.success('已退出登录')
-  router.push('/login')
-}
-
 const handleSwitchTeam = async (teamId: number): Promise<void> => {
   if (teamId === teamStore.currentTeam?.id) {
     showTeamSwitcher.value = false
@@ -161,13 +182,11 @@ onMounted(async () => {
       if (!teamStore.hasAnyTeam()) {
         await teamStore.fetchUserTeams()
       }
-      const { usePermissionStore } = await import('@/stores/permissions')
-      const permissionStore = usePermissionStore()
       if (!permissionStore.initialized) {
         await permissionStore.fetchPermissions()
       }
     } catch (error) {
-      console.error('初始化用户信息和权限失败', error)
+      logger.error('[AppLayout]', '初始化用户信息和权限失败', { error })
     }
   }
 })
@@ -331,6 +350,14 @@ onMounted(async () => {
   font-size: $wolf-font-size-body;
   font-weight: $wolf-font-weight-medium;
   flex: 1;
+}
+
+// 财务审批菜单徽章（待办数）
+.menu-badge {
+  margin-right: $wolf-space-xs;
+  :deep(.el-badge__content) {
+    font-size: $wolf-font-size-caption;
+  }
 }
 
 .item-arrow {

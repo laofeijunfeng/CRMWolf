@@ -1,3 +1,4 @@
+<!-- eslint-disable vue/multi-word-component-names -- 路由页面以资源名单词命名，重命名将破坏 router 注册与既有深链 -->
 <template>
   <div class="payments-page">
     <!-- 快捷筛选标签 -->
@@ -65,12 +66,12 @@
         <el-table-column prop="stage_name" label="回款阶段" min-width="120" />
         <el-table-column label="计划金额" min-width="120">
           <template #default="{ row }">
-            <span class="amount">¥{{ formatAmount(row.planned_amount) }}</span>
+            <span class="amount">{{ formatCurrency(row.planned_amount) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="已回款" min-width="120">
           <template #default="{ row }">
-            <span class="paid">¥{{ formatAmount(row.paid_amount || 0) }}</span>
+            <span class="paid">{{ formatCurrency(row.paid_amount || 0) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="计划日期" min-width="120">
@@ -91,7 +92,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="owner_name" label="负责人" min-width="100" />
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <div class="action-cell">
               <span class="action-link" @click="viewDetail(row)">查看</span>
@@ -100,6 +101,17 @@
                 class="action-link"
                 @click="handleRegisterPayment(row)"
               >登记回款</span>
+              <el-button
+                v-permission="paymentSubmitPermission"
+                data-testid="submit-approval-btn"
+                link
+                type="primary"
+                size="small"
+                :loading="submittingApprovalId === row.id"
+                :disabled="submittingApprovalId === row.id"
+                class="action-link"
+                @click="handleSubmitApproval(row)"
+              >提交审批</el-button>
             </div>
           </template>
         </el-table-column>
@@ -195,6 +207,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import { Search } from '@element-plus/icons-vue'
 import paymentApi, {
@@ -206,9 +219,19 @@ import paymentApi, {
   type PaymentPlanStatus
 } from '@/api/payment'
 import { usePermissionStore } from '@/stores/permissions'
+import { useApprovalStore } from '@/stores/approval'
+import { formatCurrency } from '@/utils/format'
+import { logger } from '@/utils/logger'
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
+const approvalStore = useApprovalStore()
+
+// v-permission 门控：仅 payment:submit 持有者见「提交审批」按钮
+const paymentSubmitPermission = 'payment:submit'
+
+// 正在提交审批的回款计划 ID（按钮 :loading + :disabled 防双提交）
+const submittingApprovalId = ref<number | null>(null)
 
 const activeTab = ref('pending')
 const searchForm = ref({
@@ -239,7 +262,7 @@ const paymentForm = ref<PaymentRecordCreate>({
 })
 const currentPlan = ref<PaymentPlanWithDetails | null>(null)
 
-const getOverdueDays = (dueDate: string) => {
+const getOverdueDays = (dueDate: string): number => {
   const today = new Date()
   const due = new Date(dueDate)
   const diffTime = today.getTime() - due.getTime()
@@ -247,13 +270,13 @@ const getOverdueDays = (dueDate: string) => {
   return diffDays > 0 ? diffDays : 0
 }
 
-const getUpcomingDate = (days: number) => {
+const getUpcomingDate = (days: number): string => {
   const date = new Date()
   date.setDate(date.getDate() + days)
   return date.toISOString().split('T')[0]
 }
 
-const fetchPaymentPlans = async () => {
+const fetchPaymentPlans = async (): Promise<void> => {
   loading.value = true
   try {
     const params: PaymentPlanListParams = {
@@ -262,7 +285,7 @@ const fetchPaymentPlans = async () => {
     }
 
     if (activeTab.value === 'pending') {
-      params.status = searchForm.value.status || 'PENDING'
+      params.status = searchForm.value.status === '' ? 'PENDING' : searchForm.value.status
     } else if (activeTab.value === 'completed') {
       params.status = 'COMPLETED'
     } else if (activeTab.value === 'upcoming') {
@@ -273,32 +296,31 @@ const fetchPaymentPlans = async () => {
       params.status = 'OVERDUE'
     }
 
-    const response = await paymentApi.listPaymentPlans(params)
-    const data = response.data || response
+    const data = await paymentApi.listPaymentPlans(params)
 
-    let filteredPlans = data.items || []
+    let filteredPlans: PaymentPlanWithDetails[] = data.items
 
-    if (searchForm.value.keyword) {
+    if (searchForm.value.keyword.length > 0) {
       filteredPlans = filteredPlans.filter((plan: PaymentPlanWithDetails) => {
         const keyword = searchForm.value.keyword.toLowerCase()
         return (
-          plan.contract_name?.toLowerCase().includes(keyword) ||
-          plan.customer_name?.toLowerCase().includes(keyword)
+          (plan.contract_name?.toLowerCase().includes(keyword) ?? false) ||
+          (plan.customer_name?.toLowerCase().includes(keyword) ?? false)
         )
       })
     }
 
     paymentPlans.value = filteredPlans
-    pagination.value.total = data.total || 0
+    pagination.value.total = data.total
   } catch (error) {
-    console.error('获取回款计划失败', error)
+    logger.error('[Payments]', '获取回款计划失败', { error })
     showError(error, '获取回款计划')
   } finally {
     loading.value = false
   }
 }
 
-const fetchPaymentRecords = async () => {
+const fetchPaymentRecords = async (): Promise<void> => {
   recordsLoading.value = true
   try {
     const params: PaymentRecordListParams = {
@@ -306,20 +328,19 @@ const fetchPaymentRecords = async () => {
       page_size: recordsPagination.value.pageSize
     }
 
-    const response = await paymentApi.listPaymentRecords(params)
-    const data = response.data || response
+    const data = await paymentApi.listPaymentRecords(params)
 
-    paymentRecords.value = data.items || []
-    recordsPagination.value.total = data.total || 0
+    paymentRecords.value = data.items
+    recordsPagination.value.total = data.total
   } catch (error) {
-    console.error('获取回款记录失败', error)
+    logger.error('[Payments]', '获取回款记录失败', { error })
     showError(error, '获取回款记录')
   } finally {
     recordsLoading.value = false
   }
 }
 
-const handleTabChange = (key: string) => {
+const handleTabChange = (key: string): void => {
   activeTab.value = key
   pagination.value.current = 1
   recordsPagination.value.current = 1
@@ -332,73 +353,73 @@ const handleTabChange = (key: string) => {
   }
 }
 
-const handleSearch = () => {
+const handleSearch = (): void => {
   pagination.value.current = 1
   fetchPaymentPlans()
 }
 
-const handleReset = () => {
+const handleReset = (): void => {
   searchForm.value.keyword = ''
   searchForm.value.status = ''
   pagination.value.current = 1
   fetchPaymentPlans()
 }
 
-const handlePageChange = (page: number) => {
+const handlePageChange = (page: number): void => {
   pagination.value.current = page
   fetchPaymentPlans()
 }
 
-const handlePageSizeChange = (pageSize: number) => {
+const handlePageSizeChange = (pageSize: number): void => {
   pagination.value.pageSize = pageSize
   pagination.value.current = 1
   fetchPaymentPlans()
 }
 
-const handleRecordsPageChange = (page: number) => {
+const handleRecordsPageChange = (page: number): void => {
   recordsPagination.value.current = page
   fetchPaymentRecords()
 }
 
-const handleRecordsPageSizeChange = (pageSize: number) => {
+const handleRecordsPageSizeChange = (pageSize: number): void => {
   recordsPagination.value.pageSize = pageSize
   recordsPagination.value.current = 1
   fetchPaymentRecords()
 }
 
-const getStatusText = (status: string) => {
+const getStatusText = (status: string): string => {
   const statusMap: Record<string, string> = {
     'PENDING': '待回款',
     'OVERDUE': '已逾期',
     'PARTIAL': '部分回款',
     'COMPLETED': '已完成'
   }
-  return statusMap[status] || status
+  return statusMap[status] ?? status
 }
 
-const getStatusClass = (status: string) => {
+const getStatusClass = (status: string): string => {
   const classMap: Record<string, string> = {
     'PENDING': 'status-default',
     'OVERDUE': 'status-danger',
     'PARTIAL': 'status-warning',
     'COMPLETED': 'status-success'
   }
-  return classMap[status] || 'status-default'
+  return classMap[status] ?? 'status-default'
 }
 
-const formatAmount = (amount: number) => {
+const formatAmount = (amount: number): string => {
   return amount.toLocaleString('zh-CN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })
 }
 
-const formatDate = (dateStr: string) => {
+const formatDate = (dateStr: string): string => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN')
 }
 
-const formatDateTime = (dateStr: string) => {
+const formatDateTime = (dateStr: string): string => {
   const date = new Date(dateStr)
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
@@ -409,13 +430,13 @@ const formatDateTime = (dateStr: string) => {
   })
 }
 
-const viewDetail = (plan: PaymentPlanWithDetails) => {
+const viewDetail = (plan: PaymentPlanWithDetails): void => {
   if (plan.contract_id) {
     router.push(`/contracts/${plan.contract_id}`)
   }
 }
 
-const handleRegisterPayment = (plan: PaymentPlanWithDetails) => {
+const handleRegisterPayment = (plan: PaymentPlanWithDetails): void => {
   currentPlan.value = plan
   paymentForm.value = {
     actual_amount: 0,
@@ -424,13 +445,13 @@ const handleRegisterPayment = (plan: PaymentPlanWithDetails) => {
   paymentModalVisible.value = true
 }
 
-const handleCreatePayment = async () => {
-  if (!paymentForm.value.actual_amount || paymentForm.value.actual_amount <= 0) {
+const handleCreatePayment = async (): Promise<void> => {
+  if (paymentForm.value.actual_amount === null || paymentForm.value.actual_amount <= 0) {
     ElMessage.error('请输入有效的回款金额')
     return
   }
 
-  if (!paymentForm.value.payment_date) {
+  if (paymentForm.value.payment_date.length === 0) {
     ElMessage.error('请选择回款日期')
     return
   }
@@ -442,9 +463,31 @@ const handleCreatePayment = async () => {
       paymentModalVisible.value = false
       fetchPaymentPlans()
     } catch (error: unknown) {
-      console.error('登记回款失败', error)
+      logger.error('[Payments]', '登记回款失败', { error })
       showError(error, '登记回款')
     }
+  }
+}
+
+// 提交审批（Phase C / Task C3）：调通用审批 store，PAYMENT 类型 + 计划 ID。
+// 后端 match_flow_generic(PAYMENT) 未匹配到流时直通（approval_id=0, APPROVED），
+// 此处按响应 toast；未配置流时提示「未配置审批流，已转为财务确认」。
+const handleSubmitApproval = async (plan: PaymentPlanWithDetails): Promise<void> => {
+  if (submittingApprovalId.value !== null) return
+  submittingApprovalId.value = plan.id
+  try {
+    const res = await approvalStore.submitEntity('PAYMENT', plan.id)
+    if (res.approval_id === 0) {
+      // E5：未配置审批流，后端直通财务确认
+      ElMessage.success('未配置审批流，已转为财务确认')
+    } else {
+      ElMessage.success('已提交审批，等待审批人处理')
+    }
+    fetchPaymentPlans()
+  } catch {
+    // 错误 toast 由 request 拦截器统一处理
+  } finally {
+    submittingApprovalId.value = null
   }
 }
 

@@ -11,10 +11,6 @@
         <el-button v-if="canEdit" type="primary" class="wolf-btn wolf-btn--primary" @click="handleEdit">
           编辑
         </el-button>
-        <el-button v-if="canSubmit" type="success" class="wolf-btn wolf-btn--primary" @click="handleSubmit" :loading="submitting">
-          <el-icon><Promotion /></el-icon>
-          提交审批
-        </el-button>
         <el-dropdown v-if="canDelete" @command="handleAction">
           <el-button class="wolf-btn wolf-btn--default">
             更多
@@ -26,17 +22,6 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-button v-if="canWithdraw" class="wolf-btn wolf-btn--default" @click="handleWithdraw" :loading="withdrawing">
-          撤回
-        </el-button>
-        <el-button v-if="canApprove" type="success" class="wolf-btn wolf-btn--primary" @click="handleApprove" :loading="approving">
-          <el-icon><CircleCheck /></el-icon>
-          同意
-        </el-button>
-        <el-button v-if="canApprove" type="danger" class="wolf-btn wolf-btn--danger" @click="handleReject">
-          <el-icon><CircleClose /></el-icon>
-          拒绝
-        </el-button>
         <el-button v-if="canMarkInvoiced" class="wolf-btn wolf-btn--primary" @click="handleMarkInvoiced">
           标记开票
         </el-button>
@@ -207,95 +192,23 @@
           <div class="card-header">
             <span class="card-title">审批进度</span>
           </div>
-          <div class="approval-timeline">
-              <div class="wolf-timeline">
-                <div class="wolf-timeline__item">
-                  <div class="wolf-timeline__line"></div>
-                  <div class="wolf-timeline__dot wolf-timeline__dot--primary">
-                    <el-icon :size="14"><Edit /></el-icon>
-                  </div>
-                  <div class="wolf-timeline__content">
-                    <div class="wolf-timeline__header">
-                      <span class="wolf-timeline__title">创建申请</span>
-                    </div>
-                    <div class="wolf-timeline__meta">
-                      <span class="wolf-timeline__user">{{ invoiceInfo?.applicant_name || '-' }}</span>
-                      <span class="wolf-timeline__time">{{ formatDateTime(invoiceInfo?.created_time) }}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="invoiceInfo?.status !== 'DRAFT'" class="wolf-timeline__item">
-                  <div class="wolf-timeline__line"></div>
-                  <div :class="['wolf-timeline__dot', getApprovalDotClass(invoiceInfo?.status)]">
-                    <el-icon :size="14">
-                      <CircleCheck v-if="invoiceInfo?.status === 'APPROVED' || invoiceInfo?.status === 'ISSUED'" />
-                      <Clock v-else-if="invoiceInfo?.status === 'PENDING_REVIEW'" />
-                      <CircleClose v-else-if="invoiceInfo?.status === 'REJECTED'" />
-                    </el-icon>
-                  </div>
-                  <div class="wolf-timeline__content">
-                    <div class="wolf-timeline__header">
-                      <span class="wolf-timeline__title">财务审批</span>
-                      <el-tag v-if="invoiceInfo?.status === 'PENDING_REVIEW'" class="wolf-tag wolf-tag--warning" size="small">待审批</el-tag>
-                      <el-tag v-else-if="invoiceInfo?.status === 'APPROVED' || invoiceInfo?.status === 'ISSUED'" class="wolf-tag wolf-tag--success" size="small">已通过</el-tag>
-                      <el-tag v-else-if="invoiceInfo?.status === 'REJECTED'" class="wolf-tag wolf-tag--danger" size="small">已拒绝</el-tag>
-                    </div>
-                    <div v-if="invoiceInfo?.status === 'PENDING_REVIEW'" class="wolf-timeline__meta">
-                      <span class="wolf-timeline__user">等待审批</span>
-                    </div>
-                    <div v-else class="wolf-timeline__meta">
-                      <span class="wolf-timeline__user">{{ invoiceInfo?.reviewer_name || '-' }}</span>
-                      <span v-if="invoiceInfo?.reviewed_time" class="wolf-timeline__time">{{ formatDateTime(invoiceInfo?.reviewed_time) }}</span>
-                    </div>
-                    <div v-if="invoiceInfo?.review_comment && invoiceInfo?.status === 'REJECTED'" class="wolf-timeline__result">
-                      <el-tag class="wolf-tag wolf-tag--danger" size="small">
-                        拒绝原因：{{ invoiceInfo?.review_comment }}
-                      </el-tag>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="invoiceInfo?.status === 'ISSUED'" class="wolf-timeline__item">
-                  <div class="wolf-timeline__dot wolf-timeline__dot--success">
-                    <el-icon :size="14"><Check /></el-icon>
-                  </div>
-                  <div class="wolf-timeline__content">
-                    <div class="wolf-timeline__header">
-                      <span class="wolf-timeline__title">已开票</span>
-                    </div>
-                    <div class="wolf-timeline__meta">
-                      <span class="wolf-timeline__user">发票号码：{{ invoiceInfo?.invoice_number }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+          <!-- Phase C / Task C3：嵌入通用审批组件 ApprovalProcessGeneric，
+               取代原合同专属 ApprovalProcess 的硬编码 timeline。
+               canApprove/isSubmitter 由当前发票状态 + 权限 + 申请人 ID 推导。 -->
+          <ApprovalProcessGeneric
+            v-if="invoiceInfo"
+            :entity-type="invoiceEntityType"
+            :entity-id="invoiceInfo.id"
+            :can-approve="canApproveGeneric"
+            :is-submitter="isSubmitterGeneric"
+            @submitted="fetchInvoiceDetail"
+            @approved="fetchInvoiceDetail"
+            @rejected="fetchInvoiceDetail"
+            @withdrawn="fetchInvoiceDetail"
+          />
         </div>
       </div>
     </div>
-
-    <el-dialog v-model="rejectModalVisible" title="拒绝审批" width="600px" :close-on-click-modal="false" class="wolf-modal">
-      <el-alert type="warning" :show-icon="true" style="margin-bottom: 16px" :closable="false">
-        您正在拒绝该发票申请，此操作不可撤销。
-      </el-alert>
-      <el-form :model="rejectForm" label-position="top">
-        <el-form-item label="拒绝原因" required>
-          <el-input
-            v-model="rejectForm.reason"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入拒绝原因"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button class="wolf-btn wolf-btn--default" @click="rejectModalVisible = false">取消</el-button>
-        <el-button type="danger" class="wolf-btn wolf-btn--danger" @click="confirmReject" :loading="rejecting">确认拒绝</el-button>
-      </template>
-    </el-dialog>
 
     <el-dialog v-model="invoicedModalVisible" title="标记开票" width="480px" :close-on-click-modal="false" class="wolf-modal">
       <el-form :model="invoicedForm" label-position="top">
@@ -314,13 +227,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import {
   ArrowLeft,
   ArrowDown,
-  CircleCheck,
-  CircleClose,
   User,
   Document,
   Clock,
@@ -332,75 +243,61 @@ import {
   CreditCard,
   Wallet,
   Location,
-  Phone,
-  Edit,
-  Check,
-  Promotion
+  Phone
 } from '@element-plus/icons-vue'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
+import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
+import { logger } from '@/utils/logger'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 
-const currentUserId = computed(() => userStore.userInfo?.id ? String(userStore.userInfo.id) : '')
+const currentUserId = computed<string>(() => userStore.userInfo?.id != null ? String(userStore.userInfo.id) : '')
+
+// 通用审批组件入参（Phase C / Task C3）
+const invoiceEntityType = 'INVOICE' as const
+const isSubmitterGeneric = computed<boolean>(() =>
+  invoiceInfo.value?.applicant_id === currentUserId.value
+)
+// canApproveGeneric：发票处于待审批状态 + 当前用户持有 invoice:approve
+// （草稿/已通过/已驳回/已开票态不再展示同意/驳回按钮，由 ApprovalProcessGeneric 内部按 detail.status 处理）
+const canApproveGeneric = computed<boolean>(() =>
+  invoiceInfo.value?.status === 'PENDING_REVIEW' &&
+  permissionStore.hasPermission('invoice:approve')
+)
 
 const invoiceInfo = ref<InvoiceApplicationResponse | null>(null)
 const loading = ref(false)
-const rejecting = ref(false)
-const withdrawing = ref(false)
-const approving = ref(false)
-const submitting = ref(false)
 const marking = ref(false)
-const rejectModalVisible = ref(false)
 const invoicedModalVisible = ref(false)
-
-const rejectForm = ref({
-  reason: ''
-})
 
 const invoicedForm = ref({
   invoice_number: ''
 })
 
-const canEdit = computed(() => {
+const canEdit = computed<boolean>(() => {
   if (!invoiceInfo.value) return false
   const status = invoiceInfo.value.status
   return (status === 'DRAFT' || status === 'REJECTED') &&
          invoiceInfo.value.applicant_id === currentUserId.value
 })
 
-const canDelete = computed(() => {
+const canDelete = computed<boolean>(() => {
   if (!invoiceInfo.value) return false
   const status = invoiceInfo.value.status
   return (status === 'DRAFT' || status === 'REJECTED') &&
          invoiceInfo.value.applicant_id === currentUserId.value
 })
 
-const canSubmit = computed(() => {
-  if (!invoiceInfo.value) return false
-  return invoiceInfo.value.status === 'DRAFT' &&
-         invoiceInfo.value.applicant_id === currentUserId.value
-})
-
-const canWithdraw = computed(() => {
-  return invoiceInfo.value?.status === 'PENDING_REVIEW' &&
-         invoiceInfo.value?.applicant_id === currentUserId.value
-})
-
-const canApprove = computed(() => {
-  return invoiceInfo.value?.status === 'PENDING_REVIEW' &&
-         permissionStore.hasPermission('invoice:approve')
-})
-
-const canMarkInvoiced = computed(() => {
+const canMarkInvoiced = computed<boolean>(() => {
   return invoiceInfo.value?.status === 'APPROVED'
 })
 
-const getStatusTagClass = (status: string | undefined) => {
+const getStatusTagClass = (status: string | undefined): string => {
   const statusMap: Record<string, string> = {
     'DRAFT': 'wolf-tag--gray',
     'PENDING_REVIEW': 'wolf-tag--warning',
@@ -408,10 +305,10 @@ const getStatusTagClass = (status: string | undefined) => {
     'REJECTED': 'wolf-tag--danger',
     'ISSUED': 'wolf-tag--primary'
   }
-  return statusMap[status || ''] || 'wolf-tag--gray'
+  return statusMap[status ?? ''] ?? 'wolf-tag--gray'
 }
 
-const getStatusText = (status: string | undefined) => {
+const getStatusText = (status: string | undefined): string => {
   const statusMap: Record<string, string> = {
     'DRAFT': '草稿',
     'PENDING_REVIEW': '待审批',
@@ -419,55 +316,48 @@ const getStatusText = (status: string | undefined) => {
     'REJECTED': '已拒绝',
     'ISSUED': '已开票'
   }
-  return statusMap[status || ''] || '未知'
+  return statusMap[status ?? ''] ?? '未知'
 }
 
-const getInvoiceTypeText = (type: string | undefined) => {
+const getInvoiceTypeText = (type: string | undefined): string => {
   const typeMap: Record<string, string> = {
     'VAT_SPECIAL': '增值税专用发票',
     'VAT_NORMAL': '普通发票'
   }
-  return typeMap[type || ''] || type || '未知'
+  return typeMap[type ?? ''] ?? type ?? '未知'
 }
 
-const getApprovalDotClass = (status: string | undefined) => {
-  if (status === 'APPROVED' || status === 'ISSUED') return 'wolf-timeline__dot--success'
-  if (status === 'PENDING_REVIEW') return 'wolf-timeline__dot--info'
-  if (status === 'REJECTED') return 'wolf-timeline__dot--danger'
-  return 'wolf-timeline__dot--gray'
-}
-
-const fetchInvoiceDetail = async () => {
+const fetchInvoiceDetail = async (): Promise<void> => {
   const invoiceId = route.params.id as string
   loading.value = true
   try {
     const data = await invoiceApi.getInvoiceApplication(Number(invoiceId))
     invoiceInfo.value = data
   } catch (error) {
-    console.error('获取发票申请详情失败', error)
+    logger.error('[InvoiceDetail]', '获取发票申请详情失败', { error })
     showError(error, '获取发票申请详情')
   } finally {
     loading.value = false
   }
 }
 
-const handleBack = () => {
+const handleBack = (): void => {
   router.back()
 }
 
-const handleEdit = () => {
+const handleEdit = (): void => {
   if (invoiceInfo.value) {
     router.push(`/invoices/edit/${invoiceInfo.value.id}`)
   }
 }
 
-const handleAction = (command: string) => {
+const handleAction = (command: string): void => {
   if (command === 'delete') {
     handleDelete()
   }
 }
 
-const handleDelete = async () => {
+const handleDelete = async (): Promise<void> => {
   if (!invoiceInfo.value) return
 
   try {
@@ -485,131 +375,18 @@ const handleDelete = async () => {
     router.push('/invoices')
   } catch (error: unknown) {
     if (error !== 'cancel') {
-      console.error('删除失败', error)
+      logger.error('[InvoiceDetail]', '删除失败', { error })
       showError(error, '删除发票申请')
     }
   }
 }
 
-const handleSubmit = async () => {
-  if (!invoiceInfo.value) return
-
-  try {
-    await ElMessageBox.confirm(
-      `确定要提交发票申请"${invoiceInfo.value.application_number}"进行审批吗？`,
-      '确认提交',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'info'
-      }
-    )
-    submitting.value = true
-    await invoiceApi.submitInvoiceApplication(invoiceInfo.value.id)
-    showSuccess('提交审批', '发票申请')
-    fetchInvoiceDetail()
-  } catch (error: unknown) {
-    if (error !== 'cancel') {
-      console.error('提交失败', error)
-      showError(error, '提交审批')
-    }
-  } finally {
-    submitting.value = false
-  }
-}
-
-const handleWithdraw = async () => {
-  if (!invoiceInfo.value) return
-
-  try {
-    await ElMessageBox.confirm(
-      `确定要撤回发票申请"${invoiceInfo.value.application_number}"吗？撤回后可以重新编辑。`,
-      '确认撤回',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    withdrawing.value = true
-    await invoiceApi.withdrawInvoiceApplication(invoiceInfo.value.id)
-    showSuccess('撤回审批', '发票申请')
-    fetchInvoiceDetail()
-  } catch (error: unknown) {
-    if (error !== 'cancel') {
-      console.error('撤回失败', error)
-      showError(error, '撤回审批')
-    }
-  } finally {
-    withdrawing.value = false
-  }
-}
-
-const handleApprove = async () => {
-  if (!invoiceInfo.value) return
-
-  try {
-    await ElMessageBox.confirm(
-      `确定要同意发票申请"${invoiceInfo.value.application_number}"吗？`,
-      '确认同意',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'success'
-      }
-    )
-    approving.value = true
-    await invoiceApi.financeApprovalInvoiceApplication(invoiceInfo.value.id, {
-      approved: true
-    })
-    showSuccess('审批通过', '发票申请')
-    fetchInvoiceDetail()
-  } catch (error: unknown) {
-    if (error !== 'cancel') {
-      console.error('审批失败', error)
-      showError(error, '审批发票申请')
-    }
-  } finally {
-    approving.value = false
-  }
-}
-
-const handleReject = () => {
-  rejectModalVisible.value = true
-}
-
-const confirmReject = async () => {
-  if (!rejectForm.value.reason.trim()) {
-    ElMessage.warning('请输入拒绝原因')
-    return
-  }
-
-  if (!invoiceInfo.value) return
-
-  try {
-    rejecting.value = true
-    await invoiceApi.financeApprovalInvoiceApplication(invoiceInfo.value.id, {
-      approved: false,
-      remark: rejectForm.value.reason
-    })
-    showSuccess('拒绝审批', '发票申请')
-    rejectModalVisible.value = false
-    rejectForm.value.reason = ''
-    fetchInvoiceDetail()
-  } catch (error) {
-    console.error('拒绝失败', error)
-    showError(error, '拒绝审批')
-  } finally {
-    rejecting.value = false
-  }
-}
-
-const handleMarkInvoiced = () => {
+const handleMarkInvoiced = (): void => {
   invoicedModalVisible.value = true
 }
 
-const handleConfirmInvoiced = async () => {
-  if (!invoicedForm.value.invoice_number.trim()) {
+const handleConfirmInvoiced = async (): Promise<void> => {
+  if (invoicedForm.value.invoice_number.trim().length === 0) {
     ElMessage.warning('请输入发票号码')
     return
   }
@@ -624,20 +401,20 @@ const handleConfirmInvoiced = async () => {
     invoicedForm.value.invoice_number = ''
     fetchInvoiceDetail()
   } catch (error) {
-    console.error('标记开票失败', error)
+    logger.error('[InvoiceDetail]', '标记开票失败', { error })
     showError(error, '标记开票')
   } finally {
     marking.value = false
   }
 }
 
-const formatAmount = (amount: number | string) => {
+const formatAmount = (amount: number | string): string => {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount
   return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-const formatDateTime = (dateStr: string | undefined) => {
-  if (!dateStr) return '-'
+const formatDateTime = (dateStr: string | undefined): string => {
+  if (dateStr === undefined || dateStr.length === 0) return '-'
   const date = new Date(dateStr)
   return date.toLocaleString('zh-CN', {
     year: 'numeric',

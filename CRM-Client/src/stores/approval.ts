@@ -22,18 +22,27 @@ import {
   ApprovalSubmitResponseSchema,
   MessageResponseSchema,
   BulkApproveResponseSchema,
+  ApprovalListResponseSchema,
   type EntityType,
   type ApprovalAction,
   type ApprovalDetail,
   type ApprovalSubmitResponse,
   type MessageResponse,
-  type BulkApproveResponse
+  type BulkApproveResponse,
+  type ApprovalListResponse,
+  type ApprovalListQuery,
+  type ApprovalListItem
 } from '@/schemas/approvalGeneric'
 
 export const useApprovalStore = defineStore('approvalGeneric', () => {
   // ===== State =====
   const currentApprovalDetail = ref<ApprovalDetail | null>(null)
   const loading = ref<boolean>(false)
+  // FinanceApprovalCenter 列表（Task C3）
+  const approvalList = ref<ApprovalListItem[]>([])
+  const approvalListTotal = ref<number>(0)
+  // 待我审批待办数（侧边栏徽章 + 待我审批 tab 徽章）
+  const pendingCount = ref<number>(0)
 
   // ===== Actions =====
 
@@ -140,14 +149,46 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
     currentApprovalDetail.value = null
   }
 
+  /**
+   * 拉取 FinanceApprovalCenter 列表（Task C3 / E2 越权过滤）。
+   * 后端按 tab+business_type 严格按角色过滤；Zod 校验后落入 approvalList。
+   * 同步更新 pendingCount（来自响应的 pending_count，供侧边栏徽章用）。
+   * tab==='pending' 查询时 pending_count 直接用 total；其他 tab 也回写最新
+   * 待办数（后端在任意 tab 响应中带 pending_count）。
+   */
+  const fetchList = async (query: ApprovalListQuery): Promise<ApprovalListResponse> => {
+    loading.value = true
+    try {
+      const raw = await approvalGenericApi.listApprovals(query)
+      const parsed = ApprovalListResponseSchema.parse(raw)
+      approvalList.value = parsed.items
+      approvalListTotal.value = parsed.total
+      pendingCount.value = parsed.pending_count
+      return parsed
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** 清空列表（离开审批中心时调用） */
+  const clearList = (): void => {
+    approvalList.value = []
+    approvalListTotal.value = 0
+  }
+
   return {
     currentApprovalDetail,
     loading,
+    approvalList,
+    approvalListTotal,
+    pendingCount,
     fetchDetail,
     submitEntity,
     approveEntity,
     cancelEntity,
     bulkApprove,
-    clearDetail
+    clearDetail,
+    fetchList,
+    clearList
   }
 })

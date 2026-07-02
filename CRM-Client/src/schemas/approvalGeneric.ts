@@ -98,3 +98,43 @@ export const BulkApproveResponseSchema = z.object({
 })
 
 export type BulkApproveResponse = z.infer<typeof BulkApproveResponseSchema>
+
+// ===== FinanceApprovalCenter 列表项（Task C3 / E2 角色过滤） =====
+// 后端列表端点按 tab+business_type 严格按角色过滤（E2）：
+//   submitted  → submitter_id == current_user AND team_id
+//   pending    → current_node.approve_role IN (user_roles) AND status=PENDING AND team_id
+//   processed  → records.approver_id == current_user AND team_id
+// 单号 / 实体摘要 / 金额由后端按 business_type 分组批量预取后内存 join（E9）。
+export const ApprovalTabSchema = z.enum(['pending', 'processed', 'submitted'])
+export type ApprovalTab = z.infer<typeof ApprovalTabSchema>
+
+export const ApprovalListItemSchema = z.object({
+  id: z.number().int().positive(),
+  business_type: EntityTypeSchema,
+  business_id: z.number().int().positive(),
+  application_number: z.string().min(1),
+  entity_name: z.string().nullable(),
+  entity_amount: z.number().nullable(),
+  submitter_id: z.string().min(1),
+  submitter_name: z.string().min(1),
+  status: ApprovalStatusEnum,
+  created_time: z.string().min(1),
+  updated_time: z.string().min(1),
+  overdue_hours: z.number().nullable()
+})
+export type ApprovalListItem = z.infer<typeof ApprovalListItemSchema>
+
+export const ApprovalListResponseSchema = z.object({
+  items: z.array(ApprovalListItemSchema),
+  total: z.number().int().nonnegative(),
+  pending_count: z.number().int().nonnegative()
+})
+export type ApprovalListResponse = z.infer<typeof ApprovalListResponseSchema>
+
+export const ApprovalListQuerySchema = z.object({
+  tab: ApprovalTabSchema,
+  business_type: EntityTypeSchema.optional(),
+  page: z.number().int().positive().default(1),
+  page_size: z.number().int().positive().default(20)
+})
+export type ApprovalListQuery = z.infer<typeof ApprovalListQuerySchema>
