@@ -4,6 +4,7 @@ AI 解析审批流程配置服务
 用于 AI 辅助创建审批流程功能，从自然语言中提取结构化配置
 """
 import json
+import logging
 from typing import AsyncGenerator, Dict, Any, List
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -16,6 +17,8 @@ from app.schemas.approval_ai import (
     ApprovalAIParsedNode,
     ApprovalAIParseResponse
 )
+
+logger = logging.getLogger(__name__)
 
 
 # System Prompt 模板（动态注入当前日期）
@@ -358,7 +361,7 @@ class ApprovalAIParserService:
         # 构建带动态日期的系统提示词
         system_prompt = self._build_system_prompt()
 
-        # 构建请求
+        # 构建请求（不使用 response_format，依赖提示词引导 JSON 输出）
         request_body = {
             "model": config.model_name,
             "messages": [
@@ -367,8 +370,9 @@ class ApprovalAIParserService:
             ],
             "temperature": 0.1,  # 低温度，保证输出稳定
             "max_tokens": 2048,
-            "stream": True,
-            "response_format": {"type": "json_object"}
+            "stream": True
+            # 注意：移除 response_format 参数，因为部分 AI 模型不支持此参数
+            # JSON 格式输出由系统提示词中的示例和格式说明保证
         }
 
         full_content = ""
@@ -461,12 +465,15 @@ class ApprovalAIParserService:
                             "flow": flow.model_dump(),
                             "thinking_process": parsed.get("thinking_process")
                         }
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
+                        logger.error(f"AI 返回 JSON 解析失败: {e}, 内容: {clean_content[:200]}")
                         yield {"event": "error", "message": f"AI 返回格式异常: {clean_content[:200]}"}
 
         except httpx.HTTPStatusError as e:
-            yield {"event": "error", "message": f"AI 服务请求失败：{e.response.status_code}"}
+            logger.error(f"AI 服务 HTTP 错误: {e.response.status_code}, 详情: {e.response.text[:200]}")
+            yield {"event": "error", "message": f"AI 服务请求失败：{e.response.status_code} - {e.response.text[:100]}"}
         except Exception as e:
+            logger.error(f"AI 服务异常: {type(e).__name__}: {str(e)}")
             yield {"event": "error", "message": f"AI 服务异常：{str(e)}"}
 
     async def parse_approval_flow(
@@ -504,7 +511,7 @@ class ApprovalAIParserService:
         # 构建带动态日期的系统提示词
         system_prompt = self._build_system_prompt()
 
-        # 构建请求（非流式）
+        # 构建请求（非流式，不使用 response_format）
         request_body = {
             "model": config.model_name,
             "messages": [
@@ -513,8 +520,8 @@ class ApprovalAIParserService:
             ],
             "temperature": 0.1,
             "max_tokens": 2048,
-            "stream": False,
-            "response_format": {"type": "json_object"}
+            "stream": False
+            # 注意：移除 response_format 参数，因为部分 AI 模型不支持此参数
         }
 
         try:
