@@ -281,6 +281,7 @@
           @rejected="onApprovalActionDone"
           @withdrawn="onApprovalActionDone"
           @submitted="onApprovalActionDone"
+          @resubmit="onResubmit"
         />
       </div>
     </el-drawer>
@@ -327,6 +328,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock } from '@element-plus/icons-vue'
 import { useApprovalStore } from '@/stores/approval'
@@ -342,6 +344,7 @@ type LoadError = null | 'error' | 'forbidden'
 
 const store = useApprovalStore()
 const { loading, pendingCount } = storeToRefs(store)
+const router = useRouter()
 
 // ===== State =====
 const activeTab = ref<Tab>('pending')
@@ -482,9 +485,12 @@ const onApprovalActionDone = (): void => {
 }
 
 // 条4：REJECTED 行修改并重新提交（先 update 回 DRAFT 再 submitApproval）
-// 注：update 回 DRAFT 由各实体编辑页负责；审批中心 entry 仅 toast 引导，
-// 避免审批中心耦合各实体的 update API（COMPONENTS.md「视图不直接发业务 update」
-// 亦不在此处内嵌多条合同/回款/发票的 update 调用，保持中心单一职责）。
+// 注：update 回 DRAFT 由各实体编辑页负责；审批中心 entry 仅 router.push 跳
+// 对应编辑页（PAYMENT 无独立编辑页，跳列表页 + info 提示），避免审批中心耦合
+// 各实体的 update API（COMPONENTS.md「视图不直接发业务 update」亦不在此处内嵌
+// 多条合同/回款/发票的 update 调用，保持中心单一职责）。
+// 修复（Important #1）：原 window.location.assign(`#...`) 在 createWebHistory 模式
+// 下不切 SPA 路由（仅改 hash 不导航）；改用 router.push 走真实 SPA 路由跳转。
 const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
   resubmitPendingId.value = row.id
   try {
@@ -496,15 +502,30 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     // 跳转到对应实体编辑页（route 由路由层声明，审批中心不内嵌 update 逻辑）
     const route: Record<EntityType, string> = {
       INVOICE: `/invoices/edit/${row.business_id}`,
-      PAYMENT: `/payments`,
-      CONTRACT: `/contracts/${row.business_id}`
+      CONTRACT: `/contracts/edit/${row.business_id}`,
+      // 回款无独立编辑页（/payments 为列表页）：跳列表页 + info 提示，
+      // 保证不白屏/不断旅程；用户在列表内修改后重新提交审批。
+      PAYMENT: `/payments`
     }
-    window.location.assign(`#${route[row.business_type]}`)
+    const target = route[row.business_type]
+    await router.push(target)
+    // PAYMENT 目标是列表页，无法直接进入驳回回款的编辑入口——补 info 引导，
+    // 旅程不断（比原 window.location.assign hash bug 强）。
+    if (row.business_type === 'PAYMENT') {
+      ElMessage.info('请修改回款记录后重新提交审批')
+    }
   } catch {
-    // 用户取消
+    // 用户取消（ElMessageBox reject）或 router.push 失败
   } finally {
     resubmitPendingId.value = null
   }
+}
+
+// 抽屉侧 ApprovalProcessGeneric REJECTED 态「修改并重新提交」CTA（Important #2）
+// 事件无 payload，目标行取 currentRow（抽屉当前展示行）。
+const onResubmit = (): void => {
+  if (currentRow.value == null) return
+  handleResubmit(currentRow.value)
 }
 
 // E6/E8：批量同意（逐条独立事务，部分成功汇总 toast）

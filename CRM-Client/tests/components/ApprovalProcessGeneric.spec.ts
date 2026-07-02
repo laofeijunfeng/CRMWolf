@@ -294,4 +294,48 @@ describe('ApprovalProcessGeneric', () => {
     expect(w.text()).toContain('审批信息加载失败')
     expect(w.find('[data-testid="reload-detail-btn"]').exists()).toBe(true)
   })
+
+  // ---------- C-DSG-7 条4：抽屉侧 REJECTED 态「修改并重新提交」CTA (Important #2) ----------
+
+  it('shows 修改并重新提交 CTA for submitter when REJECTED + emits resubmit', async () => {
+    api.getApprovalDetail.mockResolvedValue(buildDetail({ status: 'REJECTED' }))
+    const w = mountComp({
+      entityType: 'INVOICE',
+      entityId: 9,
+      canApprove: false,
+      isSubmitter: true
+    })
+    await flushPromises()
+    const btn = w.find('[data-testid="resubmit-btn"]')
+    expect(btn.exists()).toBe(true)
+    expect(btn.text()).toContain('修改并重新提交')
+    await btn.trigger('click')
+    await flushPromises()
+    expect(w.emitted('resubmit')).toBeTruthy()
+    expect(w.emitted('resubmit')!.length).toBe(1)
+  })
+
+  it('hides resubmit CTA from non-submitter when REJECTED', async () => {
+    api.getApprovalDetail.mockResolvedValue(buildDetail({ status: 'REJECTED' }))
+    const w = mountComp({
+      entityType: 'INVOICE',
+      entityId: 9,
+      canApprove: false,
+      isSubmitter: false
+    })
+    await flushPromises()
+    expect(w.find('[data-testid="resubmit-btn"]').exists()).toBe(false)
+  })
+
+  it('hides resubmit CTA when status is not REJECTED', async () => {
+    api.getApprovalDetail.mockResolvedValue(buildDetail({ status: 'APPROVED' }))
+    const w = mountComp({
+      entityType: 'INVOICE',
+      entityId: 9,
+      canApprove: false,
+      isSubmitter: true
+    })
+    await flushPromises()
+    expect(w.find('[data-testid="resubmit-btn"]').exists()).toBe(false)
+  })
 })

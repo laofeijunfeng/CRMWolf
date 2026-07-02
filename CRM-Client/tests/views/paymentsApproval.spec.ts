@@ -43,12 +43,15 @@ vi.mock('@/api/payment', () => ({
 }))
 
 // ===== Mock permission store：payment:submit 命中 =====
+// Minor #1：用 hoisted 可重置 mock，第 3 个测试改为真正测 negative
+// （hasPermission 返回 false → 真实 v-permission 指令移除按钮）。
+const permissionMock = vi.hoisted(() => ({
+  hasPermission: vi.fn((code: string) => code === 'payment:submit'),
+  hasAnyPermission: vi.fn(() => true),
+  hasAllPermissions: vi.fn(() => true)
+}))
 vi.mock('@/stores/permissions', () => ({
-  usePermissionStore: vi.fn(() => ({
-    hasPermission: vi.fn((code: string) => code === 'payment:submit'),
-    hasAnyPermission: vi.fn(() => true),
-    hasAllPermissions: vi.fn(() => true)
-  }))
+  usePermissionStore: () => permissionMock
 }))
 vi.mock('@/stores/user', () => ({
   useUserStore: vi.fn(() => ({
@@ -59,6 +62,9 @@ vi.mock('@/stores/user', () => ({
 }))
 
 import Payments from '@/views/Payments.vue'
+// 用真实 v-permission 指令（导入后注册到 mount global.directives），
+// 让权限门控真正生效——negative 测试才能断言按钮被指令移除。
+import permissionDirective from '@/directives/permission'
 
 const mockPlan = (overrides: Record<string, unknown> = {}) => ({
   id: 11,
@@ -87,6 +93,10 @@ describe('Payments approval integration', () => {
     api.submitApproval.mockResolvedValue({ approval_id: 5, status: 'PENDING' })
     vi.spyOn(ElMessage, 'success').mockImplementation(() => ({}) as never)
     vi.spyOn(ElMessage, 'error').mockImplementation(() => ({}) as never)
+    // 默认：payment:submit 命中（其他权限也放行，避免误隐藏无关按钮影响断言）
+    permissionMock.hasPermission.mockImplementation((code: string) => true)
+    permissionMock.hasAnyPermission.mockImplementation(() => true)
+    permissionMock.hasAllPermissions.mockImplementation(() => true)
   })
 
   const mountPayments = () =>
@@ -94,7 +104,8 @@ describe('Payments approval integration', () => {
       global: {
         plugins: [ElementPlus],
         directives: {
-          permission: { mounted: () => undefined, updated: () => undefined },
+          // 真实指令：hasPermission=false 时移除元素（negative 测试依赖此行为）
+          permission: permissionDirective,
           'any-permission': { mounted: () => undefined, updated: () => undefined }
         }
       }
@@ -115,12 +126,12 @@ describe('Payments approval integration', () => {
     expect(ElMessage.success).toHaveBeenCalled()
   })
 
-  it('renders action button only when permission store lacks payment:submit', async () => {
-    // 本测试用例 mock 已固定 hasPermission('payment:submit')=true；此处仅断言门控点
-    // 存在：按钮带 data-testid，便于上层指令在不授权时移除。
+  it('hides 提交审批 button when permission store lacks payment:submit', async () => {
+    // Minor #1 修复：真正测 negative —— mock hasPermission('payment:submit') 返回 false，
+    // 真实 v-permission 指令在 mounted 时移除按钮，断言按钮不存在。
+    permissionMock.hasPermission.mockImplementation((code: string) => code !== 'payment:submit')
     const w = mountPayments()
     await flushPromises()
-    const btn = w.find('[data-testid="submit-approval-btn"]')
-    expect(btn.exists()).toBe(true)
+    expect(w.find('[data-testid="submit-approval-btn"]').exists()).toBe(false)
   })
 })

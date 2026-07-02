@@ -90,6 +90,7 @@ const emit = defineEmits<{
   approved: []
   rejected: []
   withdrawn: []
+  resubmit: []
 }>()
 
 const store = useApprovalStore()
@@ -109,6 +110,8 @@ const detail = computed<ApprovalDetail | null>(() => currentApprovalDetail.value
 
 const status = computed<ApprovalDetail['status'] | undefined>(() => detail.value?.status)
 const isPending = computed<boolean>(() => status.value === 'PENDING')
+// C-DSG-7 条4：REJECTED 态提交人可见「修改并重新提交」CTA（抽屉侧入口）
+const isRejected = computed<boolean>(() => status.value === 'REJECTED')
 // 冲突重载后启用提交
 const isLocked = computed<boolean>(() => conflictNotice.value.length > 0)
 
@@ -244,6 +247,15 @@ const handleWithdraw = async (): Promise<void> => {
   }
 }
 
+// C-DSG-7 条4：REJECTED 态提交人「修改并重新提交」CTA（抽屉侧入口）
+// 组件本身不导航（COMPONENTS.md「组件禁直接调 API/禁导航」），仅 emit resubmit
+// 由父视图（FinanceApprovalCenter）据 currentRow 走 router.push 跳对应编辑页。
+const handleResubmit = (): void => {
+  if (actionPending.value || isLocked.value || !isRejected.value) return
+  if (!props.isSubmitter) return
+  emit('resubmit')
+}
+
 const setupResponsive = (): void => {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     isWide.value = true
@@ -372,6 +384,16 @@ onMounted(async (): Promise<void> => {
           @click="handleWithdraw"
         >
           撤回审批
+        </el-button>
+        <el-button
+          v-if="isSubmitter && isRejected"
+          data-testid="resubmit-btn"
+          type="primary"
+          :loading="actionPending"
+          :disabled="actionPending || isLocked"
+          @click="handleResubmit"
+        >
+          修改并重新提交
         </el-button>
         <el-button
           v-if="canApprove && isPending"

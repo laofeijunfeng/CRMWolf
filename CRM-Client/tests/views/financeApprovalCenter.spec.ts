@@ -54,6 +54,12 @@ vi.mock('@/stores/user', () => ({
   }))
 }))
 
+// ===== Mock vue-router：useRouter 返回带 push spy 的 stub（Important #1 修复验证）=====
+const routerPush = vi.hoisted(() => vi.fn())
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush })
+}))
+
 import FinanceApprovalCenter from '@/views/FinanceApprovalCenter.vue'
 import type {
   ApprovalListResponse,
@@ -149,7 +155,9 @@ describe('FinanceApprovalCenter', () => {
     vi.spyOn(ElMessage, 'success').mockImplementation(() => ({}) as never)
     vi.spyOn(ElMessage, 'warning').mockImplementation(() => ({}) as never)
     vi.spyOn(ElMessage, 'error').mockImplementation(() => ({}) as never)
+    vi.spyOn(ElMessage, 'info').mockImplementation(() => ({}) as never)
     vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm' as never)
+    routerPush.mockReset()
   })
 
   it('renders three role-driven tabs with unread badge on pending', async () => {
@@ -305,5 +313,81 @@ describe('FinanceApprovalCenter', () => {
     await flushPromises()
     // 404 → ErrorState forbidden OR 草稿空态（任一即可：不应崩溃）
     expect(w.text()).toBeTruthy()
+  })
+
+  it('resubmit uses router.push (not window.location) with correct entity edit path (Important #1)', async () => {
+    // INVOICE 行 REJECTED + submitted tab → resubmit 应 router.push 到 /invoices/edit/:id
+    api.listApprovals.mockImplementation((query: { tab: string }) => {
+      if (query.tab === 'submitted') {
+        return Promise.resolve(buildListResponse([
+          buildRow({
+            id: 30, status: 'REJECTED', business_type: 'INVOICE',
+            business_id: 100, application_number: 'INV-0030'
+          })
+        ], 0))
+      }
+      return Promise.resolve(emptyResponse)
+    })
+    const w = mountCenter()
+    await flushPromises()
+    await w.find('[data-testid="tab-submitted"]').trigger('click')
+    await flushPromises()
+    await w.find('[data-testid="resubmit-btn"]').trigger('click')
+    await flushPromises()
+    // ElMessageBox.confirm 默认 resolve（beforeEach 已 mock）→ 应 router.push
+    expect(routerPush).toHaveBeenCalledWith('/invoices/edit/100')
+  })
+
+  it('resubmit PAYMENT pushes /payments + info toast (Important #1)', async () => {
+    api.listApprovals.mockImplementation((query: { tab: string }) => {
+      if (query.tab === 'submitted') {
+        return Promise.resolve(buildListResponse([
+          buildRow({
+            id: 31, status: 'REJECTED', business_type: 'PAYMENT',
+            business_id: 200, application_number: 'PAY-200'
+          })
+        ], 0))
+      }
+      return Promise.resolve(emptyResponse)
+    })
+    const w = mountCenter()
+    await flushPromises()
+    await w.find('[data-testid="tab-submitted"]').trigger('click')
+    await flushPromises()
+    await w.find('[data-testid="resubmit-btn"]').trigger('click')
+    await flushPromises()
+    expect(routerPush).toHaveBeenCalledWith('/payments')
+    expect(ElMessage.info).toHaveBeenCalledWith('请修改回款记录后重新提交审批')
+  })
+
+  it('drawer REJECTED CTA emits resubmit → router.push (Important #2)', async () => {
+    // 抽屉侧 ApprovalProcessGeneric REJECTED 态应渲染「修改并重新提交」CTA，
+    // 点击 emit resubmit → FinanceApprovalCenter 调 router.push。
+    // 注意：抽屉 isSubmitter = activeTab==='submitted'，须切到 submitted tab
+    // 才会渲染 CTA；用 .drawer-approval 作用域选择器区分表格行 resubmit-btn。
+    api.listApprovals.mockImplementation((query: { tab: string }) => {
+      if (query.tab === 'submitted') {
+        return Promise.resolve(buildListResponse([
+          buildRow({ id: 32, status: 'REJECTED', business_type: 'INVOICE', business_id: 101 })
+        ], 0))
+      }
+      return Promise.resolve(emptyResponse)
+    })
+    api.getApprovalDetail.mockResolvedValue(detailFor(
+      buildRow({ id: 32, status: 'REJECTED', business_type: 'INVOICE', business_id: 101 })
+    ))
+    const w = mountCenter()
+    await flushPromises()
+    await w.find('[data-testid="tab-submitted"]').trigger('click')
+    await flushPromises()
+    // 开抽屉
+    await w.find('[data-testid="detail-btn"]').trigger('click')
+    await flushPromises()
+    // 抽屉内应存在 resubmit CTA（ApprovalProcessGeneric 渲染，作用域 .drawer-approval）
+    const drawerBtn = w.find('.drawer-approval [data-testid="resubmit-btn"]')
+    expect(drawerBtn.exists()).toBe(true)
+    await drawerBtn.trigger('click')
+    await flushPromises()
+    expect(routerPush).toHaveBeenCalledWith('/invoices/edit/101')
   })
 })
