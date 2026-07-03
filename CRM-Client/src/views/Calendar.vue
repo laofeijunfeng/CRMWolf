@@ -1,10 +1,5 @@
 <template>
   <div class="calendar-container">
-    <!-- ✅ P1: Typography - 页面标题使用性格化字体 -->
-    <div class="page-title-wrapper">
-      <h1 class="wolf-page-title">我的日历</h1>
-    </div>
-
     <!-- 日历控制头部 -->
     <div class="calendar-header">
       <!-- 左侧：【今天】按钮 + 左右切换 + 年月展示 -->
@@ -107,6 +102,10 @@ import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { Solar } from 'lunar-javascript'
 import { calendarApi, type TodoCount, type CalendarDateDetailResponse } from '@/api/calendar'
 import CalendarDayDrawer from '@/components/CalendarDayDrawer.vue'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+// 自动从 route.meta.title 设置页面标题
+usePageTitle()
 
 const currentDate = ref(new Date())
 const todos = ref<Record<string, TodoCount>>({})
@@ -279,17 +278,6 @@ onMounted(() => {
   padding: $wolf-page-padding;
   background: $wolf-bg-page;
   min-height: calc(100vh - 48px);
-}
-
-.page-title {
-  margin-bottom: $wolf-section-gap;
-
-  .title {
-    font-size: $wolf-font-size-title;
-    font-weight: $wolf-font-weight-semibold;
-    color: $wolf-text-primary;
-    margin: 0;
-  }
 }
 
 .calendar-header {
