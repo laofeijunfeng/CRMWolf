@@ -2,10 +2,9 @@
   <div class="invoice-detail-container">
     <div class="page-header">
       <div class="page-header__left">
-        <el-button class="wolf-btn wolf-btn--back" @click="handleBack">
+        <el-button class="wolf-btn wolf-btn--back" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ invoiceInfo?.application_number || '发票申请详情' }}</h1>
       </div>
       <div class="page-header__right">
         <el-button v-if="canEdit" type="primary" class="wolf-btn wolf-btn--primary" @click="handleEdit">
@@ -250,6 +249,9 @@ import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import { logger } from '@/utils/logger'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+const { setTitle } = usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
@@ -333,6 +335,8 @@ const fetchInvoiceDetail = async (): Promise<void> => {
   try {
     const data = await invoiceApi.getInvoiceApplication(Number(invoiceId))
     invoiceInfo.value = data
+    // 设置动态标题
+    setTitle(data.application_number || '发票申请详情')
   } catch (error) {
     logger.error('[InvoiceDetail]', '获取发票申请详情失败', { error })
     showError(error, '获取发票申请详情')

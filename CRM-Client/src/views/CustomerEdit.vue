@@ -3,10 +3,9 @@
     <!-- 页面标题栏 -->
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleGoBack">
+        <el-button class="back-btn" @click="handleGoBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ isEdit ? '编辑客户' : '新建客户' }}</h1>
       </div>
     </div>
 
@@ -169,6 +168,9 @@ import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
