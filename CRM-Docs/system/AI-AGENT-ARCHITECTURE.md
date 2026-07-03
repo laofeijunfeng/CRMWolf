@@ -1,19 +1,27 @@
 ---
-status: active
+status: 规划态（磁盘未落地）
 created: 2026-06-26
 updated: 2026-07-03
 version: 3.1
-architecture: LangGraph v1.0
+architecture: LangGraph v1.0（规划，磁盘未落地）
 related_docs:
   - ../plans/AI-HUMAN-IN-THE-LOOP-DESIGN.md
   - ../requirements/AI-ASSISTANT-PAGE-REQUIREMENTS.md
 ---
 
+> ⚠ **本文档描述的 LangGraph StateGraph 三层架构尚未在代码中编译落地**：
+> `app/services/langgraph/` 已于 2026-07-02 整合清理中删除（StateGraph 从未编译，
+> checkpointer/state/nodes/sse_wrapper 零 live 引用，`langgraph` PyPI 依赖已移除）。
+> **当前生产路径**：ReAct agent `POST /v1/agent/chat`（`app/services/agent/core.py`）。
+> **整合方向**：收敛到 Glue DialogueEngine 单路径，详见
+> `docs/superpowers/plans/2026-07-02-ai-assistant-consolidation-plan.md`。
+> 本文档保留作架构规划参考，勿据其在代码中定位真实组件。
+
 # AI Agent 技术架构
 
-> **版本：3.1 | LangGraph v1.0 架构**
+> **版本：3.1 | LangGraph v1.0 架构（规划，磁盘未落地）**
 > **更新日期：2026-07-03**
-> **状态：生产可用 ✅**
+> **状态：规划态 ⚠（StateGraph 从未编译，当前生产路径为 ReAct agent）**
 
 ---
 
