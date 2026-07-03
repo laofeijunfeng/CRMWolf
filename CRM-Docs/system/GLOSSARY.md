@@ -84,7 +84,9 @@ status: active
 | `invoice:create` | 创建发票申请 | 新建申请 |
 | `invoice:edit:own` | 编辑发票申请 | 编辑申请（仅草稿） |
 | `invoice:delete:own` | 删除发票申请 | 删除申请（仅草稿） |
-| `invoice:approve` | 审批发票申请 | 财务审批 |
+| `invoice:approve` | 审批发票申请 | 财务审批（flat，保留兼容） |
+| `invoice:approve:own` | 审批自己的发票 | 审自己提交的发票申请 |
+| `invoice:approve:all` | 审批所有发票 | 审批所有发票申请 |
 | `invoice:mark_issued` | 标记已开票 | 标记开票完成 |
 | `invoice:submit` | 提交审批 | 提交发票审批申请 |
 | `invoice:withdraw` | 撤回申请 | 撤回发票申请 |
@@ -97,6 +99,11 @@ status: active
 | `payment:view:all` | 查看所有回款 | 看全部回款 |
 | `payment:register` | 登记回款 | 登记回款记录 |
 | `payment:confirm` | 确认回款入账 | 财务确认 |
+| `payment:submit` | 提交回款审批 | 提交回款审批申请 |
+| `payment:withdraw` | 撤回回款审批 | 撤回回款审批申请 |
+| `payment:approve` | 审批回款 | 审批回款（flat） |
+| `payment:approve:own` | 审批自己的回款 | 审自己提交的回款 |
+| `payment:approve:all` | 审批所有回款 | 审批所有回款 |
 | `payment:plan:create` | 创建回款计划 | 新建回款计划 |
 | `payment:plan:edit` | 编辑回款计划 | 编辑回款计划 |
 | `payment:plan:delete` | 删除回款计划 | 删除回款计划 |

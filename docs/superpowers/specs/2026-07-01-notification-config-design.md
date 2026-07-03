@@ -1602,7 +1602,7 @@ onMounted(() => {
 
 | 项目 | 验收要求 |
 |------|----------|
-| 入口显示 | 有 `approval:flow:create` 或 `approval:flow:update` 权限的用户能看到入口 |
+| 入口显示 | 有 `approval:flow:create` 或 `approval:flow:edit` 权限的用户能看到入口 |
 | 入口隐藏 | 无权限用户看不到入口项 |
 
 ---

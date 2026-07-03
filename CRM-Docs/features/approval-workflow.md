@@ -1917,7 +1917,7 @@ POST /v1/approvals/flows
 PUT /v1/approvals/flows/{flow_id}
 ```
 
-**权限要求：** `approval:flow:update`
+**权限要求：** `approval:flow:edit`
 
 **请求体：**（所有字段可选）
 
@@ -2204,7 +2204,7 @@ POST /v1/approval-ai/create
 | 权限码 | 说明 | 所属角色 |
 |--------|------|---------|
 | approval:flow:create | 创建审批流程 | TEAM_ADMIN |
-| approval:flow:update | 更新审批流程 | TEAM_ADMIN |
+| approval:flow:edit | 更新审批流程 | TEAM_ADMIN |
 | approval:flow:delete | 删除审批流程（暂未实现） | TEAM_ADMIN |
 | approval:flow:view | 查看审批流程配置 | 所有团队成员 |
 | approval:record:view | 查看审批记录历史 | 所有团队成员 |

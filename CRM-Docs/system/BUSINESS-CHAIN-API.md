@@ -122,10 +122,11 @@ NEW → CONTACTED → QUALIFIED → CONVERTED（转化成功）
 | **回款记录** | 实际收到的回款 |
 | **回款状态** | PENDING（待回款）、OVERDUE（已逾期）、PARTIAL（部分回款）、COMPLETED（已完成） |
 | **回款汇总** | 合同的整体回款进度 |
+| **回款审批叠加** | 团队若配置 PAYMENT 类型审批流程，回款登记后可经 `/v1/payments/records/{id}/submit-approval` 提交多级审批；**未配置流程=免审批直通财务确认**（决策1） |
 
 **回款流程**：
 ```
-合同生效 → 创建回款计划 → 登记回款 → 更新计划状态 → 更新合同回款状态
+合同生效 → 创建回款计划 → 登记回款 → (可选)提交多级审批 → 财务确认入账 → 更新合同回款状态
 ```
 
 ### 2.6 发票模块（Invoice）
@@ -135,6 +136,7 @@ NEW → CONTACTED → QUALIFIED → CONVERTED（转化成功）
 | **发票抬头** | 客户的开票信息，可设置默认抬头 |
 | **发票申请** | 基于回款计划申请开票 |
 | **发票类型** | VAT_SPECIAL（增值税专用发票）、VAT_NORMAL（普通发票） |
+| **发票审批** | 走统一多级审批引擎（`business_type=INVOICE`），通过 `/v1/approvals/INVOICE/{id}/submit\|approve\|cancel\|detail` 操作；旧版单步 `/review` 端点已废弃删除 |
 | **申请状态** | DRAFT（草稿）、PENDING_REVIEW（待审批）、APPROVED（已批准）、REJECTED（已拒绝）、ISSUED（已开票） |
 
 ---
@@ -233,6 +235,8 @@ NEW → CONTACTED → QUALIFIED → CONVERTED（转化成功）
 | PUT | `/payment-records/{record_id}` | 更新回款记录 |
 | DELETE | `/payment-records/{record_id}` | 删除回款记录 |
 | GET | `/payment-records` | 查询回款记录列表 |
+| POST | `/records/{record_id}/submit-approval` | 提交回款审批（未配置流=免审批直通财务确认） |
+| POST | `/records/{record_id}/confirm` | 财务确认回款入账（action=confirm/dispute） |
 | GET | `/reminders/upcoming` | 即将到期回款提醒 |
 | GET | `/reminders/overdue` | 逾期回款提醒 |
 
@@ -257,12 +261,37 @@ NEW → CONTACTED → QUALIFIED → CONVERTED（转化成功）
 | GET | `` | 查询发票申请列表 |
 | GET | `/{application_id}` | 获取发票申请详情 |
 | PUT | `/{application_id}` | 修改发票申请（仅草稿） |
-| POST | `/{application_id}/submit` | 提交审批 |
-| POST | `/{application_id}/review` | 财务审批 |
+| POST | `/{application_id}/submit` | 提交审批（进入统一审批引擎） |
 | POST | `/{application_id}/withdraw` | 撤回申请 |
 | POST | `/{application_id}/mark-issued` | 标记已开票 |
 | DELETE | `/{application_id}` | 删除发票申请 |
 | GET | `/payment-plans/{plan_id}/invoices` | 回款计划关联发票 |
+
+> ⚠️ **已废弃删除**：`POST /invoice-applications/{application_id}/review`（单步财务审批）。发票审批改走统一多级审批引擎 `/v1/approvals/INVOICE/{application_id}/submit|approve|cancel|detail`。
+
+### 3.7 审批流程接口（/api/v1/approvals）
+
+通用多级审批引擎统一入口，按 `business_type` 路由（CONTRACT / PAYMENT / INVOICE）。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/{entity_type}/{entity_id}/submit` | 提交审批（通用）；CONTRACT 未配置流报错，PAYMENT/INVOICE 未配置=免审批直通 |
+| POST | `/{entity_type}/{entity_id}/approve` | 审批通过/拒绝（通用，含角色校验） |
+| POST | `/{entity_type}/{entity_id}/cancel` | 撤回审批（仅提交人） |
+| GET | `/{entity_type}/{entity_id}/detail` | 获取审批详情（含审批节点、记录、流程禁用提示） |
+| POST | `/bulk-approve` | 批量审批（逐条独立事务，部分成功汇总，不整体回滚） |
+| GET | `/?tab={pending\|processed\|submitted}&business_type=...` | 审批列表（按 tab + business_type + 角色过滤） |
+| GET | `/flows` | 审批流程列表 |
+| GET | `/flows/{flow_id}` | 审批流程详情 |
+| POST | `/flows` | 创建审批流程（含 business_type） |
+| PUT | `/flows/{flow_id}` | 更新审批流程 |
+| GET | `/overdue` | 超时审批列表 |
+| POST | `/contracts/{contract_id}/submit\|approve\|cancel` | 合同旧端点（保留为通用端点 wrapper，回归契约） |
+| GET | `/contracts/{contract_id}/detail` | 合同审批详情（旧 wrapper） |
+
+**AI 流程解析**：`POST /api/v1/approval-ai/parse` 支持识别 `business_type`（回款关键词→PAYMENT、发票→INVOICE、合同/默认→CONTRACT），返回结构化流程定义供 `/approval-ai/create` 落库。
+
+> **未配置流程=免审批语义（决策1/5）**：团队未为某 `business_type` 配置审批流程时，CONTRACT 提交报错；PAYMENT、INVOICE 不报错，单据直接进入下一业务环节（回款待财务确认、发票待开票），不创建 Approval 实例。
 
 ---
 
@@ -550,6 +579,8 @@ POST /invoice-applications
 
 ---
 
-**文档版本**：v1.0
-**更新日期**：2026-04-23
+**文档版本**：v1.1
+**更新日期**：2026-07-03
 **维护者**：CRMWolf 开发团队
+
+> v1.1 更新：审批引擎泛化——新增 `/v1/approvals` 通用审批端点（CONTRACT/PAYMENT/INVOICE 统一入口、bulk-approve、列表过滤）；回款新增 `submit-approval`/`confirm`；发票废弃 `/review` 改走统一多级审批引擎；未配置流程=免审批直通语义（决策1）。

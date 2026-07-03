@@ -301,23 +301,30 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Calendar.vue'),
         meta: { requiresAuth: true }
       },
+      // 财务审批中心（Phase C / Task C3）：取代自写按钮的
+      // FinanceInvoiceApprovals / FinancePaymentConfirmations，INVOICE 与 PAYMENT
+      // 合一指向 FinanceApprovalCenter，business_type 筛选分流。
+      {
+        path: 'finance/approvals',
+        name: 'FinanceApprovalCenter',
+        component: () => import('@/views/FinanceApprovalCenter.vue'),
+        meta: { requiresAuth: true }
+      },
+      // 向后兼容旧深链：finance/invoice-approvals、finance/payment-confirmations
+      // 重定向到统一审批中心。
+      {
+        path: 'finance/invoice-approvals',
+        redirect: '/finance/approvals'
+      },
+      {
+        path: 'finance/payment-confirmations',
+        redirect: '/finance/approvals'
+      },
       // TODO: 财务管理模块 - 等待后端接口实现后启用
       // {
       //   path: 'finance/dashboard',
       //   name: 'FinanceDashboard',
       //   component: () => import('@/views/FinanceDashboard.vue'),
-      //   meta: { requiresAuth: true }
-      // },
-      // {
-      //   path: 'finance/invoice-approvals',
-      //   name: 'FinanceInvoiceApprovals',
-      //   component: () => import('@/views/FinanceInvoiceApprovals.vue'),
-      //   meta: { requiresAuth: true }
-      // },
-      // {
-      //   path: 'finance/payment-confirmations',
-      //   name: 'FinancePaymentConfirmations',
-      //   component: () => import('@/views/FinancePaymentConfirmations.vue'),
       //   meta: { requiresAuth: true }
       // },
       // {

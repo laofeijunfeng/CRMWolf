@@ -338,9 +338,11 @@ class ApprovalListResponse(BaseModel):
 class OverdueApprovalResponse(BaseModel):
     """超时审批响应模型"""
     approval_id: int = Field(..., description="审批实例ID")
-    contract_id: int = Field(..., description="合同ID")
-    contract_name: str = Field(..., description="合同名称")
-    contract_number: Optional[str] = Field(None, description="合同编号")
+    business_type: str = Field(..., description="业务单据类型：CONTRACT/PAYMENT/INVOICE")
+    business_id: Optional[int] = Field(None, description="业务单据ID（与 business_type 联合定位单据）")
+    contract_id: Optional[int] = Field(None, description="关联合同ID（仅 CONTRACT 类非空，PAYMENT/INVOICE 为 None）")
+    contract_name: Optional[str] = Field(None, description="合同名称（仅 CONTRACT 类由调用方按需填充）")
+    contract_number: Optional[str] = Field(None, description="合同编号（仅 CONTRACT 类由调用方按需填充）")
     current_node_name: Optional[str] = Field(None, description="当前审批节点名称")
     current_approver_name: Optional[str] = Field(None, description="当前审批人姓名")
     overdue_hours: int = Field(..., description="超时小时数，当前时间减去提交时间")

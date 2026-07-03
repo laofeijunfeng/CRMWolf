@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import Optional, List, Tuple
-from datetime import datetime, date
+from datetime import date
 
 from app.models.invoice import InvoiceTitle, InvoiceApplication, InvoiceApplicationStatus, InvoiceType
 from app.models.payment import PaymentPlan, PaymentRecord
@@ -254,75 +254,44 @@ class InvoiceApplicationCRUD:
         db.refresh(db_obj)
         return db_obj
     
-    def submit(self, db: Session, application_id: int) -> Optional[InvoiceApplication]:
-        application = self.get_by_id(db, application_id)
-        if not application:
-            return None
-        
-        if application.status != InvoiceApplicationStatus.DRAFT:
-            raise ValueError("只有草稿状态的发票申请可以提交审批")
-        
-        application.status = InvoiceApplicationStatus.PENDING_REVIEW
-        db.commit()
-        db.refresh(application)
-        return application
-    
-    def review(
+    def mark_issued(
         self,
         db: Session,
         application_id: int,
-        reviewer_id: str,
-        action: str,
-        comment: Optional[str] = None
+        team_id: Optional[int] = None,
     ) -> Optional[InvoiceApplication]:
-        application = self.get_by_id(db, application_id)
+        """将已通过通用审批引擎审批的发票申请标记为已开票。
+
+        B2 改判定源：原 `application.status == APPROVED` 直接判定改为查
+        `approval_crud.get_by_entity(INVOICE, application_id, team_id).status == APPROVED`。
+        原因：发票审批已迁通用引擎（A6 submit_generic_approval / approve_generic_approval），
+        状态机由适配器 on_approved 回写——本方法不再读 InvoiceApplication.status，
+        改为以 Approval.status 为权威源，避免单据表与审批表不一致时误开票。
+
+        Args:
+            db: 数据库会话
+            application_id: 发票申请 ID
+            team_id: 团队 ID（团队隔离；从端点注入，避免误跨团队开票）
+        """
+        from app.crud.approval import approval_crud
+        from app.constants.business_types import BusinessType
+        from app.models.approval import ApprovalStatus
+
+        application = self.get_by_id(db, application_id, team_id)
         if not application:
             return None
-        
-        if application.status != InvoiceApplicationStatus.PENDING_REVIEW:
-            raise ValueError("只有待审批状态的发票申请可以审批")
-        
-        if action == "approve":
-            application.status = InvoiceApplicationStatus.APPROVED
-        elif action == "reject":
-            application.status = InvoiceApplicationStatus.REJECTED
-        else:
-            raise ValueError("无效的审批操作")
-        
-        application.reviewer_id = reviewer_id
-        application.review_comment = comment
-        application.reviewed_time = datetime.now()
-        
-        db.commit()
-        db.refresh(application)
-        return application
-    
-    def mark_issued(self, db: Session, application_id: int) -> Optional[InvoiceApplication]:
-        application = self.get_by_id(db, application_id)
-        if not application:
-            return None
-        
-        if application.status != InvoiceApplicationStatus.APPROVED:
-            raise ValueError("只有已批准状态的发票申请可以标记为已开票")
-        
+
+        approval = approval_crud.get_by_entity(
+            db, BusinessType.INVOICE, application_id, team_id,
+        )
+        if not approval or approval.status != ApprovalStatus.APPROVED:
+            raise ValueError("发票未通过审批，不可开票")
+
         application.status = InvoiceApplicationStatus.ISSUED
         db.commit()
         db.refresh(application)
         return application
-    
-    def withdraw(self, db: Session, application_id: int) -> Optional[InvoiceApplication]:
-        application = self.get_by_id(db, application_id)
-        if not application:
-            return None
-        
-        if application.status != InvoiceApplicationStatus.PENDING_REVIEW:
-            raise ValueError("只有待审批状态的发票申请可以撤回")
-        
-        application.status = InvoiceApplicationStatus.DRAFT
-        db.commit()
-        db.refresh(application)
-        return application
-    
+
     def delete(self, db: Session, application_id: int) -> bool:
         application = self.get_by_id(db, application_id)
         if not application:

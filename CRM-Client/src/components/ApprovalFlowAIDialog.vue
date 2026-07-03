@@ -38,17 +38,71 @@
       </div>
     </div>
 
-    <!-- 阶段 2：解析过程 -->
+    <!-- 阶段 2：解析过程（进度 + 思考 + 取消） -->
     <div v-if="stage === 'parsing'" class="parse-stage">
+      <div class="progress-section">
+        <el-progress
+          :percentage="progressPercentage"
+          :status="progressStatus"
+          :stroke-width="8"
+        />
+        <div class="progress-stage">
+          <span class="stage-label">{{ progressStageLabel }}</span>
+          <span v-if="estimatedSeconds" class="estimated-time">
+            预计 {{ estimatedSeconds }} 秒
+          </span>
+        </div>
+      </div>
+
       <div class="status-message">
         <el-icon class="loading-icon"><Loading /></el-icon>
         <span>{{ statusMessage }}</span>
       </div>
+
       <div v-if="thinkingContent" class="thinking-section">
         <div class="thinking-header">
+          <el-icon><ChatDotRound /></el-icon>
           <span>AI 思考过程</span>
         </div>
-        <div class="thinking-content">{{ thinkingContent }}</div>
+        <div class="thinking-content typewriter">{{ thinkingContent }}</div>
+      </div>
+
+      <div class="parse-actions">
+        <el-button
+          type="danger"
+          plain
+          :disabled="!canCancel"
+          @click="handleCancel"
+        >
+          取消生成
+        </el-button>
+      </div>
+    </div>
+
+    <!-- 阶段：错误状态 -->
+    <div v-if="stage === 'error'" class="error-stage">
+      <div class="error-message">
+        <el-icon><WarningFilled /></el-icon>
+        <span>{{ errorMessage }}</span>
+      </div>
+
+      <div v-if="errorRecovery" class="error-recovery">
+        <span>建议：{{ errorRecovery }}</span>
+      </div>
+
+      <div v-if="errorActions.length" class="error-actions">
+        <el-button
+          v-for="action in errorActions"
+          :key="action.type"
+          :type="action.type === 'retry' ? 'primary' : 'default'"
+          @click="handleErrorAction(action)"
+        >
+          {{ action.label }}
+        </el-button>
+      </div>
+
+      <div class="error-back">
+        <el-button @click="handleBackToInput">返回重新输入</el-button>
       </div>
     </div>
 
@@ -233,14 +287,17 @@ import {
   MagicStick,
   Loading,
   SuccessFilled,
-  Plus
+  Plus,
+  WarningFilled,
+  ChatDotRound
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import {
   approvalAiApi,
   ALLOWED_APPROVAL_ROLES,
   ROLE_DISPLAY_NAMES,
-  type ApprovalAIParsedNode
+  type ApprovalAIParsedNode,
+  type ErrorAction
 } from '@/api/approvalAI'
 
 // Props & Emits
@@ -262,12 +319,35 @@ const visible = computed({
   set: (val) => emit('update:modelValue', val)
 })
 
-const stage = ref<'input' | 'parsing' | 'preview'>('input')
+const stage = ref<'input' | 'parsing' | 'preview' | 'error'>('input')
 const inputText = ref('')
 const isParsing = ref(false)
 const isCreating = ref(false)
 const statusMessage = ref('')
 const thinkingContent = ref('')
+
+// 进度状态
+const progressPercentage = ref<number>(0)
+const progressStage = ref<'analyzing' | 'generating' | 'validating' | 'complete'>('analyzing')
+const progressStatus = ref<'' | 'success' | 'warning' | 'exception'>('')
+const estimatedSeconds = ref<number | undefined>(undefined)
+const canCancel = ref<boolean>(true)
+
+// 错误状态
+const errorMessage = ref('')
+const errorRecovery = ref('')
+const errorActions = ref<ErrorAction[]>([])
+
+// 计算属性：进度阶段标签
+const progressStageLabel = computed(() => {
+  const labels = {
+    analyzing: '正在理解您的需求',
+    generating: '正在生成审批流程配置',
+    validating: '正在验证角色编码',
+    complete: '配置生成完成'
+  }
+  return labels[progressStage.value]
+})
 
 // 表单
 const flowFormRef = ref<FormInstance>()
@@ -317,10 +397,19 @@ const isFormValid = computed(() => {
 const handleParse = async (): Promise<void> => {
   if (inputText.value.trim() === '') return
 
+  // 重置状态
   stage.value = 'parsing'
   isParsing.value = true
-  statusMessage.value = '正在分析审批流程配置...'
+  statusMessage.value = '正在连接 AI 服务...'
   thinkingContent.value = ''
+  progressPercentage.value = 0
+  progressStage.value = 'analyzing'
+  progressStatus.value = ''
+  estimatedSeconds.value = undefined
+  canCancel.value = true
+  errorMessage.value = ''
+  errorRecovery.value = ''
+  errorActions.value = []
 
   try {
     const token = userStore.token ?? ''
@@ -330,13 +419,26 @@ const handleParse = async (): Promise<void> => {
         switch (event.event) {
           case 'status':
             statusMessage.value = event.message ?? ''
+            if (event.estimated_seconds !== undefined) {
+              estimatedSeconds.value = event.estimated_seconds
+            }
+            break
+          case 'progress':
+            progressPercentage.value = event.percentage ?? 0
+            if (event.stage !== undefined) {
+              progressStage.value = event.stage
+            }
+            statusMessage.value = event.message ?? ''
             break
           case 'content':
             thinkingContent.value += event.content ?? ''
             break
           case 'parsed':
             if (event.flow) {
-              // 填充表单
+              // 进度完成 + 填充表单
+              progressPercentage.value = 100
+              progressStage.value = 'complete'
+              progressStatus.value = 'success'
               flowForm.value = {
                 flow_name: event.flow.flow_name,
                 flow_code: event.flow.flow_code,
@@ -350,8 +452,19 @@ const handleParse = async (): Promise<void> => {
             }
             break
           case 'error':
-            ElMessage.error(event.message ?? '解析失败')
-            stage.value = 'input'
+            errorMessage.value = event.message ?? '解析失败'
+            errorRecovery.value = event.recovery ?? ''
+            errorActions.value = event.actions ?? []
+            stage.value = 'error'
+            break
+          case 'done':
+            canCancel.value = false
+            // done=false 且未收到 parsed/error → 连接中断
+            if (event.success === false && stage.value === 'parsing') {
+              errorMessage.value = 'AI 服务连接中断'
+              errorRecovery.value = '请检查网络连接后重试'
+              stage.value = 'error'
+            }
             break
         }
       },
@@ -359,8 +472,9 @@ const handleParse = async (): Promise<void> => {
     )
   } catch (error: unknown) {
     const err = error as Error
-    ElMessage.error(err.message ?? 'AI 服务异常')
-    stage.value = 'input'
+    errorMessage.value = err.message ?? 'AI 服务异常'
+    errorRecovery.value = '请稍后重试'
+    stage.value = 'error'
   } finally {
     isParsing.value = false
   }
@@ -374,6 +488,36 @@ const handleReset = (): void => {
   stage.value = 'input'
   inputText.value = ''
   thinkingContent.value = ''
+}
+
+const handleErrorAction = (action: ErrorAction): void => {
+  switch (action.type) {
+    case 'retry':
+      if (action.suggestion !== undefined && action.suggestion !== '') {
+        inputText.value = action.suggestion
+      }
+      void handleParse()
+      break
+    case 'simplify':
+      if (action.suggestion !== undefined && action.suggestion !== '') {
+        inputText.value = action.suggestion
+        void handleParse()
+      }
+      break
+    case 'help':
+      if (action.url !== undefined && action.url !== '') {
+        window.open(action.url, '_blank')
+      }
+      break
+  }
+}
+
+const handleCancel = (): void => {
+  canCancel.value = false
+  stage.value = 'input'
+  statusMessage.value = ''
+  thinkingContent.value = ''
+  ElMessage.info('已取消生成')
 }
 
 const handleAddNode = (): void => {
@@ -505,6 +649,21 @@ watch(visible, (val): void => {
   }
 
   .parse-stage {
+    .progress-section {
+      margin-bottom: 16px;
+
+      .progress-stage {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
+        font-size: 13px;
+
+        .estimated-time {
+          color: var(--el-text-color-secondary);
+        }
+      }
+    }
+
     .status-message {
       display: flex;
       align-items: center;
@@ -525,17 +684,69 @@ watch(visible, (val): void => {
       border-radius: 4px;
 
       .thinking-header {
-        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 4px;
+        color: #fff;
         font-weight: 500;
-        color: var(--el-text-color-secondary);
-        margin-bottom: 8px;
+        font-size: 13px;
       }
 
       .thinking-content {
+        margin-top: 8px;
+        padding: 16px;
         font-size: 13px;
         line-height: 1.6;
         white-space: pre-wrap;
+
+        &.typewriter {
+          animation: fadeIn 0.3s ease-out;
+          border-left: 3px solid #667eea;
+        }
       }
+    }
+
+    .parse-actions {
+      margin-top: 16px;
+      text-align: right;
+    }
+  }
+
+  .error-stage {
+    padding: 20px;
+
+    .error-message {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      background: var(--el-color-danger-light-9);
+      border-radius: 4px;
+      color: var(--el-color-danger);
+      font-size: 14px;
+    }
+
+    .error-recovery {
+      padding: 12px 16px;
+      background: var(--el-fill-color-light);
+      border-radius: 4px;
+      margin-top: 12px;
+      color: var(--el-text-color-secondary);
+      font-size: 13px;
+    }
+
+    .error-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .error-back {
+      margin-top: 16px;
+      text-align: right;
     }
   }
 
@@ -593,6 +804,17 @@ watch(visible, (val): void => {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 </style>

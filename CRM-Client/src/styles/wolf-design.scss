@@ -76,6 +76,16 @@
   --wolf-page-padding: #{$wolf-page-padding};
   --wolf-card-padding: #{$wolf-card-padding};
   --wolf-button-gap: #{$wolf-button-gap};
+
+  // 审批状态语义色（C-DSG-1，唯一引用源——供非 SCSS 场景读 CSS 变量）
+  --wolf-approval-pending-text:   #{$wolf-approval-pending-text};
+  --wolf-approval-pending-bg:     #{$wolf-approval-pending-bg};
+  --wolf-approval-approved-text:  #{$wolf-approval-approved-text};
+  --wolf-approval-approved-bg:    #{$wolf-approval-approved-bg};
+  --wolf-approval-rejected-text:  #{$wolf-approval-rejected-text};
+  --wolf-approval-rejected-bg:    #{$wolf-approval-rejected-bg};
+  --wolf-approval-cancelled-text: #{$wolf-approval-cancelled-text};
+  --wolf-approval-cancelled-bg:   #{$wolf-approval-cancelled-bg};
 }
 
 // ==================== 全局基础样式 ====================

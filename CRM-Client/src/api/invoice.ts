@@ -170,10 +170,6 @@ const invoiceApi = {
     return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/submit`)
   },
 
-  withdrawInvoiceApplication: (applicationId: number) => {
-    return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/withdraw`)
-  },
-
   financeApprovalInvoiceApplication: (applicationId: number, data: FinanceApprovalRequest) => {
     return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/finance-approval`, data)
   },

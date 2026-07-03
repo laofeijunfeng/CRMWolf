@@ -201,6 +201,7 @@ import invoiceApi, {
   type InvoiceApplicationQueryParams
 } from '@/api/invoice'
 import customerApi from '@/api/customer'
+import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 
 const router = useRouter()
@@ -332,7 +333,7 @@ const handleWithdraw = async (record: InvoiceApplicationResponse) => {
       cancelButtonText: '取消',
       type: 'warning'
     })
-    await invoiceApi.withdrawInvoiceApplication(record.id)
+    await approvalGenericApi.cancelApproval('INVOICE', record.id)
     showSuccess('撤回审批', '发票申请')
     fetchInvoiceApplications()
   } catch (error: unknown) {

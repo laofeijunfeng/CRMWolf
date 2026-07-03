@@ -197,7 +197,7 @@ const rolesLoading = ref(false)
 
 const canManageUsers = computed(() => permissionStore.hasPermission('user:manage'))
 const canManageRoles = computed(() => permissionStore.hasPermission('role:manage'))
-const canManageApprovalFlows = computed(() => permissionStore.hasAnyPermission(['approval:flow:create', 'approval:flow:update']))
+const canManageApprovalFlows = computed(() => permissionStore.hasAnyPermission(['approval:flow:create', 'approval:flow:edit']))
 const canManageProcurementMethods = computed(() => permissionStore.hasPermission('procurement_method:view'))
 const canManageAIConfig = computed(() => permissionStore.hasAnyPermission(['system:config', 'ai:manage']))
 const canManageTeam = computed(() => userRoles.value?.some(r => r.code === 'TEAM_ADMIN') ?? false)

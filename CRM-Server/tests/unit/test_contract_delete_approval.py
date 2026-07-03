@@ -69,6 +69,8 @@ def db_session():
         Column('min_amount', Numeric(12, 2), nullable=True),
         Column('max_amount', Numeric(12, 2), nullable=True),
         Column('license_type', String(20), nullable=True),
+        # A3/A5：流程适用单据类型，对齐迁移 012 与 ApprovalFlow 模型
+        Column('business_type', String(20), nullable=False, default='CONTRACT'),
         Column('is_active', Integer, nullable=False, default=1),
         Column('created_time', DateTime, nullable=False),
         Column('last_modified_time', DateTime, nullable=False),
@@ -95,6 +97,9 @@ def db_session():
         Column('id', BigInteger, primary_key=True, autoincrement=True),
         Column('team_id', BigInteger, nullable=False),
         Column('contract_id', BigInteger, ForeignKey('crm_contracts.id'), nullable=True),
+        # A2/A5：通用业务单据列，对齐迁移 012 与 Approval 模型
+        Column('business_type', String(20), nullable=False, default='CONTRACT'),
+        Column('business_id', BigInteger, nullable=True),
         Column('flow_id', BigInteger, ForeignKey('crm_approval_flows.id'), nullable=True),
         Column('current_node_id', BigInteger, ForeignKey('crm_approval_nodes.id'), nullable=True),
         Column('status', String(20), nullable=False, default='PENDING'),
@@ -187,6 +192,9 @@ def sample_approval(db_session, sample_contract, sample_approval_flow):
         id=1,
         team_id=1,
         contract_id=sample_contract.id,
+        # A5：通用业务列，对齐迁移 012 回填语义（business_id = contract_id）
+        business_type="CONTRACT",
+        business_id=sample_contract.id,
         flow_id=sample_approval_flow.id,
         current_node_id=1,
         status=ApprovalStatus.PENDING,
