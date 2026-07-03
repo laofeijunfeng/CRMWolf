@@ -1,8 +1,5 @@
 <template>
   <div class="leads-page">
-    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
-    <h1 class="wolf-page-title">线索管理</h1>
-
     <!-- 快捷筛选标签 + 操作按钮 -->
     <div class="filter-tabs-bar">
       <div class="filter-tabs">
@@ -320,6 +317,10 @@ import { leadApi, type Lead, type LeadListParams } from '@/api/lead'
 import userApi, { type UserResponse } from '@/api/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+// 自动从 route.meta.title 设置页面标题
+usePageTitle()
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
