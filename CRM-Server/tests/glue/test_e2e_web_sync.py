@@ -1,11 +1,12 @@
-"""Task 2.7: Glue web 同步路径端到端验证。
+"""Task 2.7 / Task 3.3: Glue web 同步路径端到端验证。
 
 验证 Glue 核心路径能端到端跑通：
-1. Happy path: IDLE → PREVIEW → CONFIRM → EXECUTE（无 500/TypeError）
-2. Entity resolution path: IDLE → RESOLVING_ENTITY → PREVIEW（无 500）
+1. Happy path (HIGH risk): IDLE → PREVIEW → CONFIRM → EXECUTING（无 500/TypeError）
+2. Auto-exec path (LOW risk): IDLE → EXECUTE（跳过 PREVIEW）
+3. Entity resolution path: IDLE → RESOLVING_ENTITY → PREVIEW（无 500）
 
-由于 HTTP endpoint 测试需要大量 mock（Redis/DB/UserMapper），本测试直接验证 DialogueEngine
-的核心路径逻辑，确保状态流转正确且不崩溃。
+Task 3.3 后，LOW/MEDIUM + 高置信度会跳过 PREVIEW 直接执行。
+本测试使用 HIGH 风险意图验证 PREVIEW → CONFIRM → EXECUTE 流程。
 """
 from unittest.mock import MagicMock, AsyncMock
 import pytest
@@ -37,23 +38,23 @@ def idle_session():
 
 
 @pytest.mark.asyncio
-async def test_e2e_happy_path_preview_then_execute(engine, idle_session, monkeypatch):
-    """E2E happy path: IDLE → PREVIEW(带快照) → EXECUTE(成功)。
+async def test_e2e_high_risk_preview_then_execute(engine, idle_session, monkeypatch):
+    """E2E HIGH risk path: IDLE → PREVIEW(带快照) → EXECUTING(确认后执行)。
 
-    模拟用户说"创建跟进"，进入 PREVIEW，然后确认执行。
+    Task 3.3: HIGH 风险(win_opportunity) 强制 PREVIEW，用户确认后进入 EXECUTING。
     """
     # ===== 第一轮: IDLE → PREVIEW =====
 
-    # Mock intent_detector.detect_multi 返回意图（槽位齐全）
+    # Mock intent_detector.detect_multi 返回 HIGH 风险意图
     async def fake_detect_multi_round1(text, session, auth_token=None):
         return MultiIntentResult(
             is_multi=False,
             intents=[
                 IntentResult(
-                    intent="create_follow_up",
+                    intent="win_opportunity",  # HIGH 风险
                     confidence=0.9,
-                    reasoning="用户明确表示要跟进",
-                    slots={"customer_id": 1, "content": "跟进内容"},
+                    reasoning="用户确认赢单",
+                    slots={"opportunity_id": 1},
                     missing_fields=[],
                     missing_slots=[],
                     needs_entity_resolution=False,
@@ -68,33 +69,34 @@ async def test_e2e_happy_path_preview_then_execute(engine, idle_session, monkeyp
     async def fake_preview(pending):
         return PreviewResult(
             success=True,
-            message="将创建跟进记录",
+            message="即将标记为赢单",
             action_id="action-123",
-            preview_data={"changes": [{"field": "content", "old": None, "new": "跟进内容"}]},
+            preview_data={"changes": [{"field": "status", "old": "negotiation", "new": "won"}]},
             requires_confirmation=True,
         )
 
     monkeypatch.setattr(engine.action_executor, "preview", fake_preview)
 
-    # 第一轮: 进入 PREVIEW
-    result1 = await engine.dispatch(idle_session, "创建跟进记录")
+    # 第一轮: 进入 PREVIEW（HIGH 风险强制确认）
+    result1 = await engine.dispatch(idle_session, "确认赢单")
 
     # 验证 PREVIEW 状态
     assert result1.action == DialogueAction.PREVIEW_ACTION
     assert result1.next_mode == SessionMode.PREVIEW
     assert result1.data.get("preview_snapshot") is not None
     assert result1.success is True
+    assert result1.data.get("outcome_type") == "win"
 
     # 更新 session 为 PREVIEW 模式
     idle_session.mode = SessionMode.PREVIEW
     idle_session.pending = PendingAction(
         action_id="action-123",
-        intent_type="create_follow_up",
-        slots={"customer_id": 1, "content": "跟进内容"},
+        intent_type="win_opportunity",
+        slots={"opportunity_id": 1},
         preview_snapshot=result1.data.get("preview_snapshot"),
     )
 
-    # ===== 第二轮: PREVIEW → EXECUTE =====
+    # ===== 第二轮: PREVIEW → EXECUTING =====
 
     # Mock cancel_detector 首先返回不是取消（_handle_preview 先检查 cancel）
     async def fake_detect_cancel_round2(text):
@@ -108,20 +110,10 @@ async def test_e2e_happy_path_preview_then_execute(engine, idle_session, monkeyp
 
     monkeypatch.setattr(engine.confirm_detector, "detect", fake_detect_confirm)
 
-    # Mock execute 返回成功
-    async def fake_execute(pending, action_id):
-        return ExecutionResult(
-            success=True,
-            message="跟进记录已创建",
-            action_id=action_id,
-        )
-
-    monkeypatch.setattr(engine.action_executor, "execute", fake_execute)
-
-    # 第二轮: 确认执行
+    # 第二轮: 确认后进入 EXECUTING
     result2 = await engine.dispatch(idle_session, "确认")
 
-    # 验证确认后进入 EXECUTE/EXECUTING
+    # 验证确认后进入 EXECUTING
     assert result2.action == DialogueAction.EXECUTE_ACTION
     assert result2.success is True
     assert result2.next_mode == SessionMode.EXECUTING
@@ -130,28 +122,76 @@ async def test_e2e_happy_path_preview_then_execute(engine, idle_session, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_e2e_entity_resolution_path(engine, idle_session, monkeypatch):
-    """E2E entity resolution path: IDLE → RESOLVING_ENTITY → PREVIEW（无 500）。
+async def test_e2e_low_risk_auto_execute(engine, idle_session, monkeypatch):
+    """E2E LOW risk path: IDLE → EXECUTE（跳过 PREVIEW）。
 
-    模拟用户说"跟进张三"，需要实体消解，消解成功后进入 PREVIEW。
+    Task 3.3: LOW 风险(create_follow_up) + 高置信度 → 直接执行。
     """
-    # ===== 第一轮: IDLE → RESOLVING_ENTITY =====
+    execute_called = {}
 
-    # Mock intent 需要实体消解
+    # Mock intent_detector.detect_multi 返回 LOW 风险意图
     async def fake_detect_multi(text, session, auth_token=None):
         return MultiIntentResult(
             is_multi=False,
             intents=[
                 IntentResult(
-                    intent="create_follow_up",
+                    intent="create_follow_up",  # LOW 风险
+                    confidence=0.9,  # 高置信度
+                    reasoning="用户明确要跟进",
+                    slots={"customer_id": 1, "content": "跟进内容"},
+                    missing_fields=[],
+                    missing_slots=[],
+                    needs_entity_resolution=False,
+                )
+            ],
+            reasoning="单意图",
+        )
+
+    monkeypatch.setattr(engine.intent_detector, "detect_multi", fake_detect_multi)
+
+    # Mock execute 返回成功
+    async def fake_execute(pending, action_id=None):
+        execute_called["called"] = True
+        return ExecutionResult(
+            success=True,
+            message="跟进记录已创建",
+            action_id="create_follow_up",
+        )
+
+    monkeypatch.setattr(engine.action_executor, "execute", fake_execute)
+
+    result = await engine.dispatch(idle_session, "创建跟进记录")
+
+    # LOW + 高置信度应直接执行
+    assert result.action == DialogueAction.EXECUTE_ACTION
+    assert result.success is True
+    assert result.next_mode == SessionMode.IDLE  # 执行完成后回到 IDLE
+    assert execute_called.get("called") is True
+
+
+@pytest.mark.asyncio
+async def test_e2e_entity_resolution_path(engine, idle_session, monkeypatch):
+    """E2E entity resolution path (HIGH risk): IDLE → RESOLVING_ENTITY → PREVIEW（无 500）。
+
+    Task 3.3: LOW 风险实体消解后会直接执行，所以用 HIGH 风险测试 PREVIEW 流程。
+    """
+    # ===== 第一轮: IDLE → RESOLVING_ENTITY =====
+
+    # Mock intent 需要实体消解（HIGH 风险）
+    async def fake_detect_multi(text, session, auth_token=None):
+        return MultiIntentResult(
+            is_multi=False,
+            intents=[
+                IntentResult(
+                    intent="win_opportunity",  # HIGH 风险
                     confidence=0.9,
-                    reasoning="用户要跟进客户",
-                    slots={"content": "跟进内容"},
+                    reasoning="用户确认赢单",
+                    slots={},  # 需要 opportunity_id
                     missing_fields=[],
                     missing_slots=[],
                     needs_entity_resolution=True,
-                    entity_type_hint="Customer",
-                    entity_keyword="张三",
+                    entity_type_hint="Opportunity",
+                    entity_keyword="那个商机",
                 )
             ],
             reasoning="单意图",
@@ -160,7 +200,7 @@ async def test_e2e_entity_resolution_path(engine, idle_session, monkeypatch):
     monkeypatch.setattr(engine.intent_detector, "detect_multi", fake_detect_multi)
 
     # 第一轮: 进入 RESOLVING_ENTITY
-    result1 = await engine.dispatch(idle_session, "跟进张三")
+    result1 = await engine.dispatch(idle_session, "确认那个商机赢单")
 
     # 验证进入实体消解
     assert result1.action == DialogueAction.RESOLVE_ENTITY
@@ -169,11 +209,11 @@ async def test_e2e_entity_resolution_path(engine, idle_session, monkeypatch):
 
     # 更新 session
     idle_session.mode = SessionMode.RESOLVING_ENTITY
-    idle_session.entity_resolution_context = {"entity_type": "Customer", "keyword": "张三"}
+    idle_session.entity_resolution_context = {"entity_type": "Opportunity", "keyword": "那个商机"}
     idle_session.pending = PendingAction(
         action_id="action-456",
-        intent_type="create_follow_up",
-        slots={"content": "跟进内容"},
+        intent_type="win_opportunity",
+        slots={},
     )
 
     # ===== 第二轮: RESOLVING_ENTITY → PREVIEW =====
@@ -192,22 +232,22 @@ async def test_e2e_entity_resolution_path(engine, idle_session, monkeypatch):
     async def fake_preview(pending):
         return PreviewResult(
             success=True,
-            message="将为张三创建跟进",
+            message="即将标记为赢单",
             action_id="action-456",
-            preview_data={"changes": [{"field": "content", "old": None, "new": "跟进内容"}]},
+            preview_data={"changes": [{"field": "status", "old": "negotiation", "new": "won"}]},
             requires_confirmation=True,
         )
 
     monkeypatch.setattr(engine.action_executor, "preview", fake_preview)
 
-    # 第二轮: 消解后进入 PREVIEW
-    result2 = await engine.dispatch(idle_session, "跟进张三")
+    # 第二轮: 消解后进入 PREVIEW（HIGH 风险强制确认）
+    result2 = await engine.dispatch(idle_session, "确认那个商机赢单")
 
-    # 验证不 500，进入 PREVIEW
+    # 验证不 500，进入 PREVIEW（HIGH 风险强制确认）
     assert result2.action != DialogueAction.ERROR, f"不应 ERROR: {result2.message}"
     assert result2.success is True
-    # 应该进入 PREVIEW 或 COLLECTING（如果还有缺失槽位）
-    assert result2.next_mode in (SessionMode.PREVIEW, SessionMode.COLLECTING)
+    assert result2.action == DialogueAction.PREVIEW_ACTION, f"HIGH 风险应进入 PREVIEW，实际 {result2.action}"
+    assert result2.next_mode == SessionMode.PREVIEW
 
 
 @pytest.mark.asyncio

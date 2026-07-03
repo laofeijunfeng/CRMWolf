@@ -23,6 +23,7 @@ from app.glue.core.cancel import CancelDetector, CancelResult
 from app.glue.core.confirm import ConfirmationDetector, ConfirmationResult
 from app.glue.core.ambiguity import AmbiguityResolver, AmbiguityResult
 from app.glue.core.executor import ActionExecutor, ExecutionResult, PreviewResult
+from app.glue.core.safety import SafetyGateway  # Task 3.3: 接入 SafetyGateway
 
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,9 @@ class DialogueEngine:
 
         # 初始化执行器（需要 user_id）
         self.action_executor = ActionExecutor(db, tenant_id, user_id)
+
+        # Task 3.3: 接入 SafetyGateway（风险分级门）
+        self.safety = SafetyGateway()
 
     async def dispatch(
         self,
@@ -286,6 +290,7 @@ class DialogueEngine:
         # 识别到意图，创建 pending action
         pending = PendingAction(
             action_id=intent_result.skill_id or intent_result.intent,
+            intent_type=intent_result.intent,  # Task 3.3: 存储意图类型供 SafetyGateway 使用
             skill_name=intent_result.skill_name,
             slots=intent_result.slots or {},
             missing_slots=intent_result.missing_slots or [],
@@ -322,7 +327,41 @@ class DialogueEngine:
                 next_mode=SessionMode.COLLECTING,
             )
 
-        # B5: 槽位完整，调用 preview() 生成真实快照
+        # Task 3.3: 槽位完整，使用 SafetyGateway 进行风险分级决策
+        # 获取风险分级结果
+        risk_decision = await self.safety.assess(
+            intent_type=intent_result.intent,
+            confidence=intent_result.confidence,
+        )
+
+        # 根据风险分级决定执行路径
+        if risk_decision.auto_execute:
+            # LOW/MEDIUM + 高置信度：直接执行，跳过确认
+            exec_result = await self.action_executor.execute(pending, pending.action_id)
+            if exec_result.success:
+                session.pending = None  # 清除 pending
+                return DialogueResult(
+                    action=DialogueAction.EXECUTE_ACTION,
+                    success=True,
+                    message=exec_result.message or "操作已完成。",
+                    data={
+                        "action_id": exec_result.action_id,
+                        "intent_type": pending.intent_type,
+                        "outcome_type": risk_decision.outcome_type,
+                        "result_data": exec_result.data,
+                    },
+                    next_mode=SessionMode.IDLE,
+                )
+            else:
+                return DialogueResult(
+                    action=DialogueAction.ERROR,
+                    success=False,
+                    message=exec_result.message or "执行失败。",
+                    data={"error": exec_result.error},
+                    next_mode=SessionMode.IDLE,
+                )
+
+        # HIGH 或低置信度：需要确认，生成预览
         preview_result = await self.action_executor.preview(pending)
         if not preview_result.success:
             return DialogueResult(
@@ -341,7 +380,7 @@ class DialogueEngine:
         if preview_result.action_id:
             pending.action_id = preview_result.action_id
 
-        # 返回 PREVIEW 结果（带真实快照）
+        # 返回 PREVIEW 结果（带真实快照 + outcome_type）
         return DialogueResult(
             action=DialogueAction.PREVIEW_ACTION,
             success=True,
@@ -351,6 +390,7 @@ class DialogueEngine:
                 "slots": pending.slots,
                 "preview_snapshot": pending.preview_snapshot,
                 "requires_confirmation": preview_result.requires_confirmation,
+                "outcome_type": risk_decision.outcome_type,  # Task 3.3: outcome_type 供前端分态染色
             },
             next_mode=SessionMode.PREVIEW,
         )

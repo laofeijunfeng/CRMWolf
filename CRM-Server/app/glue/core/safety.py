@@ -6,7 +6,7 @@
 参见: CRM-Docs/plans/AI-GLUE-IMPLEMENTATION-PLAN.md Phase 3.3
 """
 
-from typing import Dict, Any, Optional  # B4: 加 Optional
+from typing import Dict, Any, Optional, Literal  # B4: 加 Optional
 from dataclasses import dataclass
 import httpx
 
@@ -19,6 +19,19 @@ class SafetyResult:
     reason: str  # 原因说明
     allowed: bool  # 是否允许执行
     risk_level: Optional[str] = None  # 风险等级
+
+
+@dataclass
+class RiskDecision:
+    """风险分级决策结果
+
+    Task 3.3: 用于 DialogueEngine 决定是否跳过确认直接执行。
+    """
+
+    level: str  # LOW / MEDIUM / HIGH / CRITICAL
+    confidence: float  # 置信度
+    outcome_type: Literal["win", "lose", "generic"]  # 结果类型（前端染色用）
+    auto_execute: bool  # 是否可自动执行（跳过确认）
 
 
 class SafetyGateway:
@@ -115,6 +128,50 @@ class SafetyGateway:
             risk_level=risk_level,
         )
 
+    async def assess(
+        self, intent_type: str, confidence: float
+    ) -> RiskDecision:
+        """风险分级决策
+
+        Task 3.3: 用于 DialogueEngine 决定是否跳过确认直接执行。
+
+        Args:
+            intent_type: 意图类型（create_follow_up, win_opportunity, ...)
+            confidence: 置信度 0.0-1.0
+
+        Returns:
+            RiskDecision: 含 level, confidence, outcome_type, auto_execute
+        """
+        # 1. 获取风险等级
+        risk_level = self.INTENT_RISK_MAP.get(intent_type, "MEDIUM")
+        config = self.RISK_CONFIG.get(risk_level, self.RISK_CONFIG["MEDIUM"])
+
+        # 2. 计算 outcome_type（前端分态染色）
+        if intent_type == "win_opportunity":
+            outcome_type = "win"
+        elif intent_type == "lose_opportunity":
+            outcome_type = "lose"
+        else:
+            outcome_type = "generic"
+
+        # 3. 判断是否可自动执行
+        auto_threshold = config.get("auto_threshold", 0.9)
+        force_confirm = config.get("force_confirm", False)
+
+        # HIGH 强制确认，不自动执行
+        if force_confirm:
+            auto_execute = False
+        else:
+            # LOW/MEDIUM: 置信度达标即可自动执行
+            auto_execute = confidence >= auto_threshold
+
+        return RiskDecision(
+            level=risk_level,
+            confidence=confidence,
+            outcome_type=outcome_type,
+            auto_execute=auto_execute,
+        )
+
     async def fetch_rules(self) -> Dict[str, Any]:
         """获取业务规则"""
         try:
@@ -128,5 +185,6 @@ class SafetyGateway:
 
 __all__ = [
     "SafetyResult",
+    "RiskDecision",
     "SafetyGateway",
 ]
