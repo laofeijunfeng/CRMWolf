@@ -6,7 +6,7 @@
 参见: CRM-Docs/plans/AI-GLUE-IMPLEMENTATION-PLAN.md Phase 3.3
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional  # B4: 加 Optional
 from dataclasses import dataclass
 import httpx
 
