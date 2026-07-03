@@ -3,10 +3,9 @@
     <!-- 页面头部 -->
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ pageTitle }}</h1>
       </div>
     </div>
 
@@ -178,6 +177,9 @@ import { ArrowLeft, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vu
 import contractApi, { type ContractCreate, type LicenseType } from '@/api/contract'
 import customerApi, { type CustomerResponse, type CustomerDetailResponse, type ContactResponse } from '@/api/customer'
 import { opportunityApi, type Opportunity, type OpportunityListResponse } from '@/api/opportunity'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 interface ContractFormData {
   contract_name: string

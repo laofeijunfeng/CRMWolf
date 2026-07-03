@@ -3,10 +3,9 @@
     <!-- 页面标题栏 -->
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ isEdit ? '编辑线索' : '新建线索' }}</h1>
       </div>
     </div>
 
@@ -127,6 +126,9 @@ import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { leadApi } from '@/api/lead'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const route = useRoute()

@@ -3,10 +3,9 @@
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ isEdit ? '编辑商机' : '新建商机' }}</h1>
       </div>
     </div>
 
@@ -172,6 +171,9 @@ import { opportunityApi, PurchaseType, LicenseType, type Opportunity } from '@/a
 import customerApi, { type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
 import procurementApi, { type ProcurementMethod } from '@/api/procurement'
 import { useUserStore } from '@/stores/user'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
