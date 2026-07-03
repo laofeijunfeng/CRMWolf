@@ -3,10 +3,9 @@
     <!-- 页面标题栏 -->
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ isEdit ? '编辑采购方式' : '新增采购方式' }}</h1>
       </div>
     </div>
 
@@ -293,6 +292,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Plus, ArrowUp, ArrowDown, Delete, RefreshLeft } from '@element-plus/icons-vue'
 import procurementApi from '../api/procurement'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const route = useRoute()
 const router = useRouter()

@@ -3,13 +3,9 @@
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="page-header-left">
-        <el-button type="text" class="back-btn" @click="handleBack">
+        <el-button type="text" class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <div class="page-title-group">
-          <h1 class="wolf-page-title">{{ methodName }} - 阶段模板管理</h1>
-          <p class="page-desc">配置采购流程的各个阶段</p>
-        </div>
       </div>
       <el-button type="primary" class="primary-btn" @click="handleCreate">
         <el-icon><Plus /></el-icon>
@@ -187,6 +183,9 @@ import procurementApi, {
   type ProcurementStageTemplateCreate,
   type ProcurementStageTemplateUpdate
 } from '@/api/procurement'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
