@@ -322,14 +322,35 @@ class DialogueEngine:
                 next_mode=SessionMode.COLLECTING,
             )
 
-        # 槽位完整，直接预览
+        # B5: 槽位完整，调用 preview() 生成真实快照
+        preview_result = await self.action_executor.preview(pending)
+        if not preview_result.success:
+            return DialogueResult(
+                action=DialogueAction.ERROR,
+                success=False,
+                message=preview_result.message or "生成预览失败",
+                data={"error": preview_result.error},
+                next_mode=SessionMode.IDLE,
+            )
+
+        # 填充 preview_snapshot
+        pending.preview_snapshot = {
+            "changes": preview_result.preview_data.get("changes", []) if preview_result.preview_data else [],
+            "message": preview_result.message,
+        }
+        if preview_result.action_id:
+            pending.action_id = preview_result.action_id
+
+        # 返回 PREVIEW 结果（带真实快照）
         return DialogueResult(
             action=DialogueAction.PREVIEW_ACTION,
             success=True,
-            message="正在生成预览...",
+            message=preview_result.message or "预览已生成，请确认后执行。",
             data={
                 "intent": intent_result.intent,
                 "slots": pending.slots,
+                "preview_snapshot": pending.preview_snapshot,
+                "requires_confirmation": preview_result.requires_confirmation,
             },
             next_mode=SessionMode.PREVIEW,
         )
