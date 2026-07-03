@@ -3,12 +3,19 @@
 Redis 存储对话状态，包括 pending action、recent_entities、history。
 
 参见: CRM-Docs/requirements/AI-GLUE-REQUIREMENTS.md 七、Session 数据契约
+
+Task 3.2: 统一 Session API 为 uuid 寻址
+- key 从 ai:glue:session:{tenant}:{user} 改为 ai:glue:session:{session_id}
+- GlueSession 增加 session_id 字段（uuid4）
+- load/save/clear 改为 session_id 入参
+- 保留 (tenant_id, crm_user_id) 作为 session 内字段用于权限校验
 """
 
 import json
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
+from uuid import uuid4
 import redis.asyncio as redis
 
 from app.glue.config import GlueConfig, SessionMode
@@ -63,6 +70,7 @@ class HistoryEntry:
 class GlueSession:
     """胶水层 Session"""
 
+    session_id: str = ""  # UUID，唯一标识 session
     v: int = 1  # 版本号
     tenant_id: str = ""
     crm_user_id: int = 0
@@ -81,6 +89,8 @@ class GlueSession:
     ambiguity_context: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
+        if self.session_id == "":
+            self.session_id = str(uuid4())
         if self.history_last_n is None:
             self.history_last_n = []
         if self.pending_queue is None:
@@ -99,14 +109,36 @@ class SessionManager:
         self.redis = redis_client
         self.config = GlueConfig()
 
-    def _session_key(self, tenant_id: str, crm_user_id: int) -> str:
-        """生成 session key"""
-        return f"{self.config.SESSION_KEY_PREFIX}:{tenant_id}:{crm_user_id}"
+    def _session_key(self, session_id: str) -> str:
+        """生成 session key
+
+        Task 3.2: key 从 ai:glue:session:{tenant}:{user} 改为 ai:glue:session:{session_id}
+        """
+        return f"{self.config.SESSION_KEY_PREFIX}:{session_id}"
+
+    async def create(self, tenant_id: str, crm_user_id: int) -> str:
+        """创建新 session 并返回 session_id
+
+        Args:
+            tenant_id: 租户 ID
+            crm_user_id: CRM 用户 ID
+
+        Returns:
+            session_id: UUID 格式的 session 标识
+        """
+        session = GlueSession(
+            tenant_id=tenant_id,
+            crm_user_id=crm_user_id,
+            mode=SessionMode.IDLE,
+        )
+        await self.save(session)
+        return session.session_id
 
     def _serialize(self, session: GlueSession) -> str:
         """序列化 session"""
         data = {
             "v": session.v,
+            "session_id": session.session_id,
             "tenant_id": session.tenant_id,
             "crm_user_id": session.crm_user_id,
             "mode": session.mode,
@@ -180,6 +212,7 @@ class SessionManager:
 
         return GlueSession(
             v=obj.get("v", 1),
+            session_id=obj.get("session_id", ""),
             tenant_id=obj.get("tenant_id", ""),
             crm_user_id=obj.get("crm_user_id", 0),
             mode=obj.get("mode", SessionMode.IDLE),
@@ -192,12 +225,16 @@ class SessionManager:
             ambiguity_context=obj.get("ambiguity_context"),
         )
 
-    async def load(self, tenant_id: str, crm_user_id: int) -> GlueSession:
+    async def load(self, session_id: str) -> Optional[GlueSession]:
         """加载 session
 
-        不存在时返回新 session。
+        Args:
+            session_id: UUID 格式的 session 标识
+
+        Returns:
+            GlueSession 或 None（不存在时）
         """
-        key = self._session_key(tenant_id, crm_user_id)
+        key = self._session_key(session_id)
         data = await self.redis.get(key)
 
         if data:
@@ -205,25 +242,35 @@ class SessionManager:
             await self.redis.expire(key, self.config.SESSION_TTL)
             return self._deserialize(data)
 
-        # 返回新 session
-        return GlueSession(
-            tenant_id=tenant_id,
-            crm_user_id=crm_user_id,
-            mode=SessionMode.IDLE,
-        )
+        # 不存在时返回 None
+        return None
 
     async def save(self, session: GlueSession) -> bool:
-        """保存 session"""
-        key = self._session_key(session.tenant_id, session.crm_user_id)
+        """保存 session
+
+        Args:
+            session: GlueSession 实例（必须包含 session_id）
+
+        Returns:
+            True 表示成功
+        """
+        key = self._session_key(session.session_id)
         session.updated_at = int(datetime.now().timestamp())
         data = self._serialize(session)
 
         await self.redis.set(key, data, ex=self.config.SESSION_TTL)
         return True
 
-    async def clear(self, tenant_id: str, crm_user_id: int) -> bool:
-        """清空 session"""
-        key = self._session_key(tenant_id, crm_user_id)
+    async def clear(self, session_id: str) -> bool:
+        """清空 session
+
+        Args:
+            session_id: UUID 格式的 session 标识
+
+        Returns:
+            True 表示成功
+        """
+        key = self._session_key(session_id)
         await self.redis.delete(key)
         return True
 

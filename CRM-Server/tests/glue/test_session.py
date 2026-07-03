@@ -1,6 +1,8 @@
 """Session Manager 单元测试
 
 参见: CRM-Docs/plans/AI-GLUE-IMPLEMENTATION-PLAN.md Phase 6.3
+
+Task 3.2: 更新为 session_id 寻址
 """
 
 import pytest
@@ -32,40 +34,42 @@ class TestSessionManager:
         return SessionManager(redis_client)
 
     @pytest.mark.asyncio
-    async def test_load_new_session(self, session_manager, redis_client):
-        """测试加载新 session（不存在）"""
+    async def test_load_nonexistent_session_returns_none(self, session_manager, redis_client):
+        """测试加载不存在的 session 返回 None"""
         redis_client.get = AsyncMock(return_value=None)
 
-        session = await session_manager.load("tenant_001", 123)
+        session = await session_manager.load("nonexistent-session-id")
 
-        assert session.tenant_id == "tenant_001"
-        assert session.crm_user_id == 123
-        assert session.mode == SessionMode.IDLE
-        assert session.pending is None
+        assert session is None
 
     @pytest.mark.asyncio
     async def test_load_existing_session(self, session_manager, redis_client):
         """测试加载已存在的 session"""
-        mock_data = """
-        {
+        import json
+        mock_data = json.dumps({
             "v": 1,
+            "session_id": "550e8400-e29b-41d4-a716-446655440000",
             "tenant_id": "tenant_001",
             "crm_user_id": 123,
             "mode": "preview",
             "updated_at": 1719220000,
-            "pending": null,
+            "pending": None,
+            "pending_queue": [],
             "recent_entities": {
                 "customer_id": 101,
                 "opportunity_id": 456
             },
-            "history_last_n": []
-        }
-        """
+            "history_last_n": [],
+            "entity_resolution_context": None,
+            "ambiguity_context": None,
+        })
         redis_client.get = AsyncMock(return_value=mock_data)
         redis_client.expire = AsyncMock()
 
-        session = await session_manager.load("tenant_001", 123)
+        session = await session_manager.load("550e8400-e29b-41d4-a716-446655440000")
 
+        assert session is not None
+        assert session.session_id == "550e8400-e29b-41d4-a716-446655440000"
         assert session.tenant_id == "tenant_001"
         assert session.crm_user_id == 123
         assert session.mode == "preview"
@@ -92,7 +96,7 @@ class TestSessionManager:
         """测试清空 session"""
         redis_client.delete = AsyncMock()
 
-        result = await session_manager.clear("tenant_001", 123)
+        result = await session_manager.clear("550e8400-e29b-41d4-a716-446655440000")
 
         assert result is True
         redis_client.delete.assert_called_once()
@@ -107,7 +111,7 @@ class TestSessionManager:
         )
         pending = PendingAction(
             action_id="act_xxx",
-            intent="update_amount",
+            intent_type="update_amount",
             slots={"opportunity_id": 456, "amount": 350000},
             preview_snapshot={},
         )
@@ -148,7 +152,7 @@ class TestPendingAction:
         """测试 pending 未过期"""
         pending = PendingAction(
             action_id="act_xxx",
-            intent="update_amount",
+            intent_type="update_amount",
             slots={},
             preview_snapshot={},
             expires_at=9999999999,  # 未来时间
@@ -160,7 +164,7 @@ class TestPendingAction:
         """测试 pending 已过期"""
         pending = PendingAction(
             action_id="act_xxx",
-            intent="update_amount",
+            intent_type="update_amount",
             slots={},
             preview_snapshot={},
             expires_at=1000000000,  # 过去时间

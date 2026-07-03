@@ -15,7 +15,7 @@ class GlueConfig:
 
     # Session 存储
     SESSION_KEY_PREFIX = "ai:glue:session"
-    # 格式: ai:glue:session:{tenant_id}:{crm_user_id}
+    # 格式: ai:glue:session:{session_id}（Task 3.2: uuid 寻址）
 
     # Action 锁（幂等性）
     ACTION_LOCK_KEY_PREFIX = "ai:glue:action_lock"
