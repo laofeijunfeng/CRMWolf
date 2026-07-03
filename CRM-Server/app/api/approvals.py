@@ -1040,6 +1040,53 @@ def get_approvers_by_role(db: Session, role_code: str):
     return users
 
 
+# 自审追加权限校验失败文案（按 entity_type 分发）。
+# CONTRACT 文案与改造前逐字一致（E1 合同回归）；PAYMENT/INVOICE 按 M-3 规范。
+_SELF_APPROVE_DENY_MSG = {
+    BusinessType.CONTRACT: "您没有权限审批自己创建的合同",
+    BusinessType.PAYMENT: "您没有权限审批自己创建的回款",
+    BusinessType.INVOICE: "您没有权限审批自己创建的发票",
+}
+
+
+def _check_self_approval_permission(
+    db: Session,
+    current_user,
+    team_id: int,
+    entity_type: str,
+    entity_id: int,
+) -> None:
+    """自审追加权限校验：审批人 == 单据提交人时需 `<resource>:approve:own` 权限码。
+
+    泛化自原 CONTRACT 自审校验（contract.creator_id + contract:approve:own），
+    按 entity_type 分发到 A4 适配器取实体 / 提交人，避免在 API 层硬编码各模型
+    字段名（CONTRACT/PAYMENT→creator_id，INVOICE→applicant_id）。
+
+    - entity 为 None（单据已删 / 跨 team）时跳过（对齐原 `if contract and ...` 语义）
+    - 提交人 id == str(current_user.id) 视为自审，查用户权限码，
+      缺 `<resource>:approve:own`（contract/payment/invoice）→ 403
+    - 重复查 DB（approve 端点已取过 entity）可接受——审批非高频，留 M-1 一并优化
+    """
+    adapter = get_adapter(entity_type)
+    entity = adapter.get_entity(db, entity_id, team_id)
+    if entity is None:
+        return
+    submitter_id, _ = adapter.get_submitter(entity)
+    if submitter_id != str(current_user.id):
+        return
+    from app.crud.permission import permission_crud
+    user_permissions = permission_crud.get_user_permissions(
+        db, current_user.id, team_id
+    )
+    permission_codes = {p.code for p in user_permissions}
+    required_code = f"{entity_type.lower()}:approve:own"
+    if required_code not in permission_codes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_SELF_APPROVE_DENY_MSG[entity_type],
+        )
+
+
 def _check_approve_permissions(
     db: Session,
     approval: Approval,
@@ -1052,7 +1099,8 @@ def _check_approve_permissions(
     """审批权限校验（旧 `/contracts/{id}/approve` 与新 generic approve 共用）。
 
     - 角色校验：current_node.approve_role 不在 current_user 角色集 → 403
-    - CONTRACT 自审追加：current_user 是单据创建人时需 `contract:approve:own` 权限 → 403
+    - 自审追加：current_user 是单据提交人时需 `<resource>:approve:own` 权限 → 403
+      （CONTRACT/PAYMENT/INVOICE 均校验，泛化自原 CONTRACT-only 逻辑，M-3）
 
     旧合同端点传 entity_type=BusinessType.CONTRACT / entity_id=contract_id；
     新通用端点传路由参数 entity_type / entity_id。
@@ -1066,20 +1114,11 @@ def _check_approve_permissions(
             detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}",
         )
 
-    # CONTRACT 自审追加权限校验
-    if entity_type == BusinessType.CONTRACT and entity_id is not None:
-        contract = contract_crud.get_by_id(db, entity_id, team_id)
-        if contract and contract.creator_id == str(current_user.id):
-            from app.crud.permission import permission_crud
-            user_permissions = permission_crud.get_user_permissions(
-                db, current_user.id, team_id
-            )
-            permission_codes = {p.code for p in user_permissions}
-            if "contract:approve:own" not in permission_codes:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="您没有权限审批自己创建的合同",
-                )
+    # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE 通用，M-3 泛化）
+    if entity_type is not None and entity_id is not None:
+        _check_self_approval_permission(
+            db, current_user, team_id, entity_type, entity_id
+        )
 
 
 def _check_next_node_has_approvers(
@@ -1652,17 +1691,15 @@ async def bulk_approve(
             if approval.current_node.approve_role not in role_codes:
                 raise ValueError(f"需要角色: {approval.current_node.approve_role}")
 
-            # 合同自审追加权限校验
-            if payload.entity_type == BusinessType.CONTRACT:
-                contract = contract_crud.get_by_id(db, bid, team_id)
-                if contract and contract.creator_id == str(current_user.id):
-                    from app.crud.permission import permission_crud
-                    user_permissions = permission_crud.get_user_permissions(
-                        db, current_user.id, team_id
-                    )
-                    permission_codes = {p.code for p in user_permissions}
-                    if "contract:approve:own" not in permission_codes:
-                        raise ValueError("无权审批自己创建的合同")
+            # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE 通用，M-3 泛化）
+            # 复用 _check_self_approval_permission；helper 抛 HTTPException，
+            # 这里转 ValueError 由 bulk 失败汇总逻辑计入 failed（reason=detail 文案）。
+            try:
+                _check_self_approval_permission(
+                    db, current_user, team_id, payload.entity_type, bid
+                )
+            except HTTPException as e:
+                raise ValueError(str(e.detail)) from None
 
             # 取该条的乐观锁时间戳
             ut_raw = None

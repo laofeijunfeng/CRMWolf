@@ -1,4 +1,4 @@
-"""Task A6：通用审批 API 端点单元测试。
+"""Task A6 / M-3：通用审批 API 端点单元测试。
 
 覆盖：
 - POST /v1/approvals/INVOICE/{id}/submit —— 发票提交审批 → 200 + status=PENDING
@@ -9,9 +9,15 @@
 - POST /v1/approvals/bulk-approve —— 逐条独立事务，部分成功汇总
 - GET  /v1/approvals/INVOICE/{id}/detail —— 返回审批实例
 - POST /v1/approvals/INVOICE/{id}/cancel —— 仅提交人可撤回
+
+M-3：payment/invoice 的 :approve:own 自审校验真正生效。
+- PAYMENT 自审：submitter==approver 无 payment:approve:own → 403；有 → 通过
+- INVOICE 自审：applicant==approver 无 invoice:approve:own → 403；有 → 通过
+- 非自审（submitter!=approver）→ 不需 :approve:own，角色校验通过即可
+- bulk-approve 自审 403 → failed 条目 reason=detail 文案
 """
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -43,9 +49,12 @@ from app.models.contract import Contract, ContractStatus
 from app.models.invoice import (
     InvoiceApplication, InvoiceApplicationStatus, InvoiceType,
 )
+from app.models.payment import PaymentRecord, PaymentConfirmationStatus
 from app.models.user import User, UserStatus
 from app.models.role import Role
 from app.models.user_role import UserRole
+from app.models.permission import Permission
+from app.models.role_permission import RolePermission
 
 
 # ---------- DB fixtures ---------------------------------------------------
@@ -67,8 +76,11 @@ def db_session():
         User.__table__,
         Role.__table__,
         UserRole.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
         Contract.__table__,
         InvoiceApplication.__table__,
+        PaymentRecord.__table__,
         ApprovalFlow.__table__,
         ApprovalNode.__table__,
         Approval.__table__,
@@ -162,6 +174,33 @@ def seed_finance_role_and_link(db_session, current_user_rec):
     return role
 
 
+def _grant_perm_code(db, role, code, *, resource="x", action="approve", scope="own"):
+    """给角色授予一个权限码（建 Permission + RolePermission 行）。
+
+    permission_crud.get_user_permissions 通过 UserRole -> RolePermission -> Permission
+    联表取用户权限码，所以必须同时建 Permission 行与 RolePermission 关联。
+    """
+    perm = Permission(name=code, code=code, resource=resource, action=action, scope=scope)
+    db.add(perm)
+    db.flush()
+    db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+    db.commit()
+    return perm
+
+
+@pytest.fixture
+def grant_invoice_approve_own(seed_finance_role_and_link, db_session):
+    """给 FINANCE 角色授予 invoice:approve:own —— 让自审批能通过。
+
+    既有 D3 reviewer 回写 / bulk 自审 / 乐观锁冲突等用例的发票 applicant
+    都是 current_user，M-3 后自审需 :approve:own，故这些用例需此 fixture。
+    """
+    return _grant_perm_code(
+        db_session, seed_finance_role_and_link, "invoice:approve:own",
+        resource="invoice", action="approve", scope="own",
+    )
+
+
 @pytest.fixture
 def seed_invoice_draft(db_session, current_user_rec):
     """一条 DRAFT 发票申请，applicant=当前用户。"""
@@ -183,6 +222,106 @@ def seed_invoice_draft(db_session, current_user_rec):
     db_session.add(inv)
     db_session.commit()
     return inv
+
+
+@pytest.fixture
+def seed_invoice_draft_other_submitter(db_session):
+    """一条 DRAFT 发票申请，applicant=他人（非 current_user）—— 用于非自审用例。
+
+    applicant_id 用数字字符串（"9999"）以兼容通知层 int(submitter_id) 转换；
+    与 current_user.id（=1）不同即可触发"非自审"路径。
+    """
+    inv = InvoiceApplication(
+        team_id=1,
+        application_number="INV-2026-OTHER",
+        customer_id=1,
+        contract_id=1,
+        opportunity_id=1,
+        payment_plan_id=1,
+        invoice_amount=Decimal("5000"),
+        invoice_type=InvoiceType.VAT_NORMAL,
+        status=InvoiceApplicationStatus.DRAFT,
+        applicant_id="9999",
+        invoice_title_type="COMPANY",
+        invoice_title_text="测试公司",
+        invoice_taxpayer_id="91110000XXXXXXX",
+    )
+    db_session.add(inv)
+    db_session.commit()
+    return inv
+
+
+# ---------- PAYMENT fixtures（M-3） ---------------------------------------
+
+@pytest.fixture
+def seed_payment_flow_with_director_node(db_session):
+    """PAYMENT 类型审批流程 + 1 个 SALES_DIRECTOR 节点。"""
+    flow = ApprovalFlow(
+        team_id=1,
+        flow_name="回款审批",
+        flow_code="PAYMENT_FLOW",
+        business_type=BusinessType.PAYMENT,
+        is_active=1,
+    )
+    db_session.add(flow)
+    db_session.flush()
+    node = ApprovalNode(
+        team_id=1,
+        flow_id=flow.id,
+        node_name="销售总监审批",
+        node_code="SALES_DIRECTOR",
+        node_order=1,
+        approve_role="SALES_DIRECTOR",
+        is_required=1,
+    )
+    db_session.add(node)
+    db_session.commit()
+    return flow, node
+
+
+@pytest.fixture
+def seed_sales_director_role_and_link(db_session, current_user_rec):
+    """创建 SALES_DIRECTOR 角色并把 current_user 关联到 team_id=1（不授任何权限码）。"""
+    role = Role(name="销售总监", code="SALES_DIRECTOR")
+    db_session.add(role)
+    db_session.flush()
+    db_session.add(UserRole(user_id=current_user_rec.id, role_id=role.id, team_id=1))
+    db_session.commit()
+    return role
+
+
+@pytest.fixture
+def seed_payment_record_self(db_session, current_user_rec):
+    """一条 PENDING 回款登记，creator=当前用户（自审场景）。"""
+    pr = PaymentRecord(
+        team_id=1,
+        payment_plan_id=1,
+        actual_amount=Decimal("5000"),
+        payment_date=date(2026, 7, 1),
+        creator_id=str(current_user_rec.id),
+        creator_name="财务张",
+        confirmation_status=PaymentConfirmationStatus.PENDING,
+    )
+    db_session.add(pr)
+    db_session.commit()
+    return pr
+
+
+@pytest.fixture
+def seed_payment_record_other(db_session):
+    """一条 PENDING 回款登记，creator=他人（非自审场景）。"""
+    pr = PaymentRecord(
+        team_id=1,
+        payment_plan_id=1,
+        actual_amount=Decimal("5000"),
+        payment_date=date(2026, 7, 1),
+        creator_id="other_user",
+        creator_name="他人",
+        confirmation_status=PaymentConfirmationStatus.PENDING,
+    )
+    db_session.add(pr)
+    db_session.commit()
+    return pr
 
 
 # ---------- Step 1: submit invoice approval + invalid entity_type ----------
@@ -207,7 +346,7 @@ def test_invalid_entity_type_rejected(client):
 
 def test_approve_invoice_writes_reviewer_via_endpoint(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
-    seed_finance_role_and_link, current_user_rec,
+    seed_finance_role_and_link, grant_invoice_approve_own, current_user_rec,
 ):
     # 先提交
     r = client.post(
@@ -307,7 +446,7 @@ def test_detail_not_found(client):
 
 def test_bulk_approve_partial_success(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
-    seed_finance_role_and_link, current_user_rec,
+    seed_finance_role_and_link, grant_invoice_approve_own, current_user_rec,
 ):
     """逐条独立事务：一条成功 + 一条不存在汇总失败。"""
     # 第 1 条：提交一份发票
@@ -352,7 +491,7 @@ def test_bulk_approve_invalid_entity_type(client):
 
 def test_bulk_approve_optimistic_lock_conflict(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
-    seed_finance_role_and_link, current_user_rec,
+    seed_finance_role_and_link, grant_invoice_approve_own, current_user_rec,
 ):
     """E6 乐观锁冲突：审批已被他人处理 → failed reason='已被他人处理'。
 
@@ -419,3 +558,183 @@ def test_bulk_approve_optimistic_lock_conflict(
     assert len(body["failed"]) == 1
     assert body["failed"][0]["id"] == seed_invoice_draft.id
     assert body["failed"][0]["reason"] == "已被他人处理"
+
+
+# ---------- M-3: payment/invoice :approve:own 自审校验真正生效 ---------------
+
+def test_approve_invoice_self_without_own_perm_403(
+    db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
+    seed_finance_role_and_link,
+):
+    """INVOICE 自审：applicant==approver 且无 invoice:approve:own → 403。
+
+    FINANCE 角色校验通过，但发票 applicant_id == current_user.id 触发自审，
+    缺 invoice:approve:own 权限码 → 403「您没有权限审批自己创建的发票」。
+    """
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/approve",
+        json={"action": "APPROVE", "comment": "同意", "updated_time": None},
+    )
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "您没有权限审批自己创建的发票"
+
+
+def test_approve_invoice_self_with_own_perm_passes(
+    db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
+    seed_finance_role_and_link, grant_invoice_approve_own,
+):
+    """INVOICE 自审：applicant==approver 且有 invoice:approve:own → 200。"""
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+    ap = db_session.query(Approval).filter(
+        Approval.business_id == seed_invoice_draft.id,
+        Approval.business_type == BusinessType.INVOICE,
+    ).one()
+
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/approve",
+        json={
+            "action": "APPROVE",
+            "comment": "同意开票",
+            "updated_time": ap.updated_time.isoformat() if ap.updated_time else None,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "APPROVED"
+
+
+def test_approve_payment_self_without_own_perm_403(
+    db_session, client, seed_payment_record_self,
+    seed_payment_flow_with_director_node, seed_sales_director_role_and_link,
+):
+    """PAYMENT 自审：creator==approver 且无 payment:approve:own → 403。
+
+    SALES_DIRECTOR 角色校验通过，但回款 creator_id == current_user.id 触发自审，
+    缺 payment:approve:own 权限码 → 403「您没有权限审批自己创建的回款」。
+    """
+    r = client.post(
+        f"/v1/approvals/PAYMENT/{seed_payment_record_self.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = client.post(
+        f"/v1/approvals/PAYMENT/{seed_payment_record_self.id}/approve",
+        json={"action": "APPROVE", "comment": "同意", "updated_time": None},
+    )
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "您没有权限审批自己创建的回款"
+
+
+def test_approve_payment_self_with_own_perm_passes(
+    db_session, client, seed_payment_record_self,
+    seed_payment_flow_with_director_node, seed_sales_director_role_and_link,
+):
+    """PAYMENT 自审：creator==approver 且有 payment:approve:own → 200。"""
+    # 授予 payment:approve:own
+    _grant_perm_code(
+        db_session, seed_sales_director_role_and_link, "payment:approve:own",
+        resource="payment", action="approve", scope="own",
+    )
+
+    r = client.post(
+        f"/v1/approvals/PAYMENT/{seed_payment_record_self.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+    ap = db_session.query(Approval).filter(
+        Approval.business_id == seed_payment_record_self.id,
+        Approval.business_type == BusinessType.PAYMENT,
+    ).one()
+
+    r = client.post(
+        f"/v1/approvals/PAYMENT/{seed_payment_record_self.id}/approve",
+        json={
+            "action": "APPROVE",
+            "comment": "确认入账",
+            "updated_time": ap.updated_time.isoformat() if ap.updated_time else None,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "APPROVED"
+
+
+def test_approve_non_self_no_own_perm_passes(
+    db_session, client, seed_invoice_draft_other_submitter,
+    seed_invoice_flow_with_finance_node, seed_finance_role_and_link,
+):
+    """非自审：submitter!=approver → 不需 :approve:own，角色校验通过即可 → 200。
+
+    发票 applicant_id="other_user" != current_user.id，不触发自审校验，
+    即便没有 invoice:approve:own 也能审批（沿用既有角色校验）。
+    """
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft_other_submitter.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+    ap = db_session.query(Approval).filter(
+        Approval.business_id == seed_invoice_draft_other_submitter.id,
+        Approval.business_type == BusinessType.INVOICE,
+    ).one()
+
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft_other_submitter.id}/approve",
+        json={
+            "action": "APPROVE",
+            "comment": "同意开票",
+            "updated_time": ap.updated_time.isoformat() if ap.updated_time else None,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "APPROVED"
+
+
+def test_bulk_approve_payment_self_without_own_perm_fails(
+    db_session, client, seed_payment_record_self,
+    seed_payment_flow_with_director_node, seed_sales_director_role_and_link,
+):
+    """bulk-approve PAYMENT 自审无 payment:approve:own → failed 条目 reason=detail 文案。
+
+    验证 bulk_approve 泛化自审校验：helper 抛 HTTPException → 转 ValueError →
+    计入 failed，reason 为「您没有权限审批自己创建的回款」。
+    """
+    r = client.post(
+        f"/v1/approvals/PAYMENT/{seed_payment_record_self.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+    ap = db_session.query(Approval).filter(
+        Approval.business_id == seed_payment_record_self.id,
+        Approval.business_type == BusinessType.PAYMENT,
+    ).one()
+
+    r = client.post(
+        "/v1/approvals/bulk-approve",
+        json={
+            "entity_type": "PAYMENT",
+            "ids": [seed_payment_record_self.id],
+            "action": "APPROVE",
+            "comment": "批量通过",
+            "updated_times": {
+                str(seed_payment_record_self.id): (
+                    ap.updated_time.isoformat() if ap.updated_time else ""
+                ),
+            },
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success_count"] == 0
+    assert len(body["failed"]) == 1
+    assert body["failed"][0]["id"] == seed_payment_record_self.id
+    assert body["failed"][0]["reason"] == "您没有权限审批自己创建的回款"
