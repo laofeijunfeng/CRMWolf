@@ -434,11 +434,11 @@ class DialogueEngine:
                 next_mode=SessionMode.IDLE,
             )
 
-        # 调用 EntityResolver
+        # 调用 EntityResolver（B1 修复：对齐 resolve(text, entity_type, session) 签名）
         resolve_result = await self.entity_resolver.resolve(
             text,
-            entity_type_hint=context.get("entity_type"),
-            keyword=context.get("keyword"),
+            entity_type=context.get("entity_type"),
+            session=session,
         )
 
         # AI 服务不可用
