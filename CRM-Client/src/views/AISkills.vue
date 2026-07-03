@@ -6,7 +6,6 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">AI Skill 配置</h1>
       </div>
       <div class="page-header-right">
         <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="showGeneratorDialog">
@@ -215,6 +214,9 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ArrowLeft, Plus, Edit, Delete, ArrowDown } from '@element-plus/icons-vue'
 import { aiSkillsApi, type Skill, type SkillAction, type CRUDMapping, type EnumMapping } from '@/api/aiSkills'
 import SkillGeneratorDialog from '@/components/SkillGeneratorDialog.vue'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 
@@ -505,13 +507,6 @@ onMounted(async () => {
   &:hover {
     background: $wolf-bg-hover !important;
   }
-}
-
-.page-title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
 }
 
 // 内容区

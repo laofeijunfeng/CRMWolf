@@ -1,8 +1,5 @@
 <template>
   <div class="opportunities-page">
-    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
-    <h1 class="wolf-page-title">商机管理</h1>
-
     <!-- 快捷筛选标签 + 操作按钮 -->
     <div class="filter-tabs-bar">
       <div class="filter-tabs">
@@ -205,6 +202,9 @@ import { opportunityApi, type Opportunity, type OpportunityListParams } from '@/
 import customerApi from '@/api/customer'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const permissionStore = usePermissionStore()

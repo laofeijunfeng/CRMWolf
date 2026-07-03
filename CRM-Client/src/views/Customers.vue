@@ -1,8 +1,5 @@
 <template>
   <div class="customers-page">
-    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
-    <h1 class="wolf-page-title">客户管理</h1>
-
     <!-- 快捷筛选标签 + 操作按钮 -->
     <div class="filter-tabs-bar">
       <div class="filter-tabs">
@@ -375,6 +372,9 @@ import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
 import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const userStore = useUserStore()

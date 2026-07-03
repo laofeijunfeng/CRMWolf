@@ -5,8 +5,6 @@
         <el-button class="back-btn" @click="handleBack">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <!-- ✅ P1: Typography - 页面标题使用性格化字体 -->
-        <h1 class="wolf-page-title">AI 配置</h1>
       </div>
     </div>
 
@@ -132,6 +130,9 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ArrowLeft, Check, Connection } from '@element-plus/icons-vue'
 import { aiConfigApi, type SSEEvent, type AIConfigResponse } from '@/api/aiConfig'
 import { useUserStore } from '@/stores/user'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -343,13 +344,6 @@ onMounted(() => {
   &:hover {
     background: $wolf-bg-hover !important;
   }
-}
-
-.page-title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
 }
 
 .config-card,
