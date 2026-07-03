@@ -12,7 +12,7 @@ def test_sse_json_encoder_used():
     """SSEJsonEncoder 可导入：处理 LangChain BaseMessage，普通 dict 正常序列化。"""
     from langchain_core.messages import HumanMessage
 
-    from app.services.langgraph.sse_wrapper import SSEJsonEncoder
+    from app.utils.sse_encoder import SSEJsonEncoder
 
     assert isinstance(SSEJsonEncoder(), json.JSONEncoder)
 
