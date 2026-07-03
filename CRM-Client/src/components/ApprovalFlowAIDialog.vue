@@ -135,6 +135,17 @@
           <el-input v-model="flowForm.description" placeholder="一句话描述适用场景" />
         </el-form-item>
 
+        <el-form-item label="适用单据" prop="business_type">
+          <el-radio-group v-model="flowForm.business_type">
+            <el-radio value="CONTRACT">合同</el-radio>
+            <el-radio value="PAYMENT">回款登记</el-radio>
+            <el-radio value="INVOICE">发票申请</el-radio>
+          </el-radio-group>
+          <div style="color: var(--el-text-color-secondary); font-size: 12px; margin-top: 4px;">
+            AI 识别结果，可手动修改
+          </div>
+        </el-form-item>
+
         <div class="form-grid">
           <el-form-item label="最小金额（元）">
             <el-input-number
@@ -358,6 +369,7 @@ const flowForm = ref<{
   min_amount: number | undefined
   max_amount: number | undefined
   license_type: string
+  business_type: 'CONTRACT' | 'PAYMENT' | 'INVOICE'
   nodes: ApprovalAIParsedNode[]
 }>({
   flow_name: '',
@@ -366,6 +378,7 @@ const flowForm = ref<{
   min_amount: undefined,
   max_amount: undefined,
   license_type: '',
+  business_type: 'CONTRACT',
   nodes: []
 })
 
@@ -446,6 +459,7 @@ const handleParse = async (): Promise<void> => {
                 min_amount: event.flow.min_amount,
                 max_amount: event.flow.max_amount,
                 license_type: event.flow.license_type ?? '',
+                business_type: event.flow.business_type ?? 'CONTRACT',
                 nodes: event.flow.nodes.map(n => ({ ...n }))
               }
               stage.value = 'preview'
@@ -579,6 +593,7 @@ const handleCreate = async (): Promise<void> => {
     if (flowForm.value.min_amount !== undefined) requestData.min_amount = flowForm.value.min_amount
     if (flowForm.value.max_amount !== undefined) requestData.max_amount = flowForm.value.max_amount
     if (flowForm.value.license_type !== '') requestData.license_type = flowForm.value.license_type
+    if (flowForm.value.business_type !== 'CONTRACT') requestData.business_type = flowForm.value.business_type
 
     const result = await approvalAiApi.createFromAI(requestData)
 
@@ -607,6 +622,7 @@ const handleClose = (): void => {
     min_amount: undefined,
     max_amount: undefined,
     license_type: '',
+    business_type: 'CONTRACT',
     nodes: []
   }
 }

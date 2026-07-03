@@ -44,6 +44,7 @@ export interface ApprovalAIParsedFlow {
   min_amount?: number  // Decimal → number
   max_amount?: number
   license_type?: string
+  business_type?: 'CONTRACT' | 'PAYMENT' | 'INVOICE'
   nodes: ApprovalAIParsedNode[]  // min_length=1
 }
 
@@ -85,6 +86,7 @@ export interface ApprovalAICreateRequest {
   min_amount?: number
   max_amount?: number
   license_type?: string
+  business_type?: 'CONTRACT' | 'PAYMENT' | 'INVOICE'
   nodes: ApprovalAIParsedNode[]  // 与 ApprovalNodeCreate 字段一致
 }
 
