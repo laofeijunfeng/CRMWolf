@@ -128,13 +128,10 @@ async def inbound(
     auth_token = request.session_token
 
     if async_delivery:
-        # IM 异步：推队列处理
-        # TODO: 实现队列推送
-        reply_token = f"rp_{request.message_id}"
-        return InboundResponse(
-            ok=True,
-            delivery="async",
-            reply_token=reply_token,
+        # IM 异步队列尚未实现，诚实返回 503
+        raise HTTPException(
+            status_code=503,
+            detail="IM 异步投递队列尚未实现，请使用 web 同步渠道或联系管理员",
         )
     else:
         # 网页同步：对话引擎处理
