@@ -65,3 +65,23 @@ def test_approval_flow_create_invalid_business_type_fallback():
 
     # validator 应回退为 CONTRACT
     assert schema.business_type == BusinessType.CONTRACT
+
+
+def test_approval_flow_update_has_optional_business_type():
+    """ApprovalFlowUpdate 必须有可选 business_type 字段"""
+    from app.schemas.approval import ApprovalFlowUpdate
+
+    schema = ApprovalFlowUpdate(business_type="PAYMENT")
+    assert schema.business_type == "PAYMENT"
+
+    schema_empty = ApprovalFlowUpdate()
+    assert schema_empty.business_type is None
+
+
+def test_approval_flow_response_has_business_type():
+    """ApprovalFlowResponse 必须返回 business_type"""
+    from app.schemas.approval import ApprovalFlowResponse
+    from datetime import datetime
+
+    fields = ApprovalFlowResponse.model_fields
+    assert "business_type" in fields
