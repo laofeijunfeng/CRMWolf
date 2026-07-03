@@ -301,24 +301,31 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Calendar.vue'),
         meta: { requiresAuth: true }
       },
-      // 财务审批中心（Phase C / Task C3）：取代自写按钮的
+      // 审批中心（Phase C / Task C3）：取代自写按钮的
       // FinanceInvoiceApprovals / FinancePaymentConfirmations，INVOICE 与 PAYMENT
-      // 合一指向 FinanceApprovalCenter，business_type 筛选分流。
+      // 合一指向 ApprovalCenter，business_type 筛选分流。
+      //
+      // 审批入口优化（2026-07-03）：路由改为 /approvals（不是 /finance/approvals）
+      // 详见：.claude/plans/jolly-frolicking-shell.md
       {
-        path: 'finance/approvals',
-        name: 'FinanceApprovalCenter',
-        component: () => import('@/views/FinanceApprovalCenter.vue'),
+        path: 'approvals',
+        name: 'ApprovalCenter',
+        component: () => import('@/views/ApprovalCenter.vue'),
         meta: { requiresAuth: true }
       },
       // 向后兼容旧深链：finance/invoice-approvals、finance/payment-confirmations
       // 重定向到统一审批中心。
       {
+        path: 'finance/approvals',
+        redirect: '/approvals'
+      },
+      {
         path: 'finance/invoice-approvals',
-        redirect: '/finance/approvals'
+        redirect: '/approvals'
       },
       {
         path: 'finance/payment-confirmations',
-        redirect: '/finance/approvals'
+        redirect: '/approvals'
       },
       // TODO: 财务管理模块 - 等待后端接口实现后启用
       // {
