@@ -61,22 +61,9 @@
           <span class="item-text">回款管理</span>
           <el-icon class="item-arrow"><ArrowRight /></el-icon>
         </div>
-        <div
-          v-if="canSeeFinanceApproval"
-          class="menu-item"
-          :class="{ active: currentPath === '/finance/approvals' }"
-          @click="handleMenuClick('/finance/approvals')"
-        >
-          <el-icon class="item-icon"><Checked /></el-icon>
-          <span class="item-text">财务审批</span>
-          <el-badge
-            v-if="approvalPendingCount > 0"
-            :value="approvalPendingCount"
-            class="menu-badge"
-            type="primary"
-          />
-          <el-icon class="item-arrow"><ArrowRight /></el-icon>
-        </div>
+        <!-- 审批入口优化（2026-07-03）：移除左侧菜单「财务审批」入口 -->
+        <!-- Header ApprovalIcon 作为唯一轻量入口 -->
+        <!-- 详见：.claude/plans/jolly-frolicking-shell.md -->
         <div class="menu-item" :class="{ active: currentPath.startsWith('/invoices') }" @click="handleMenuClick('/invoices')">
           <el-icon class="item-icon"><Tickets /></el-icon>
           <span class="item-text">发票管理</span>
@@ -97,7 +84,7 @@
     </aside>
     <main class="main-content">
       <header class="top-bar">
-        <ApprovalNotificationCenter class="top-bar-bell" />
+        <ApprovalIcon class="top-bar-action" />
       </header>
       <router-view />
     </main>
@@ -107,14 +94,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
-import { useApprovalStore } from '@/stores/approval'
 import { ElMessage } from 'element-plus'
-import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound, Checked } from '@element-plus/icons-vue'
-import ApprovalNotificationCenter from '@/components/ApprovalNotificationCenter.vue'
+import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound } from '@element-plus/icons-vue'
+import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import { logger } from '@/utils/logger'
 
 const router = useRouter()
@@ -122,14 +107,7 @@ const route = useRoute()
 const userStore = useUserStore()
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
-const approvalStore = useApprovalStore()
-const { pendingCount: approvalPendingCount } = storeToRefs(approvalStore)
 const showTeamSwitcher = ref(false)
-
-// 财务审批中心菜单门控（C-DSG-5）：需持有 invoice:approve 或 payment:approve 之一
-const canSeeFinanceApproval = computed<boolean>(() =>
-  permissionStore.hasAnyPermission(['invoice:approve', 'payment:approve'])
-)
 
 const currentPath = computed(() => {
   const path = route.path
@@ -458,8 +436,10 @@ onMounted(async () => {
   z-index: 10;
 }
 
-.top-bar-bell {
+.top-bar-action {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
 }
 
 @media (max-width: 768px) {
