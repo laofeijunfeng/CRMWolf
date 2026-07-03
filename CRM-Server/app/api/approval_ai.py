@@ -16,7 +16,7 @@ from app.models.user import User
 from app.models.approval import ApprovalFlow, ApprovalNode
 from app.schemas.approval_ai import ApprovalAIParseRequest, ApprovalAICreateRequest
 from app.services.approval_ai_parser import approval_ai_parser_service
-from app.services.langgraph.sse_wrapper import SSEJsonEncoder
+from app.utils.sse_encoder import SSEJsonEncoder
 from app.crud.approval import approval_flow_crud
 from app.constants.approval_roles import ALLOWED_APPROVAL_ROLES
 
