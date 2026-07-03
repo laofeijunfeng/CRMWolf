@@ -93,8 +93,8 @@
         </el-form>
       </div>
 
-      <!-- 表格 -->
-      <div class="table-card">
+      <!-- 表格（桌面端） -->
+      <div class="table-card" v-if="!isMobile">
         <div class="card-header">
           <div class="card-title-group">
             <span class="card-title">审批列表</span>
@@ -232,6 +232,115 @@
           />
         </div>
       </div>
+
+      <!-- 移动端卡片列表 -->
+      <div class="mobile-card-list" v-else>
+        <div v-if="rows.length > 0">
+          <div
+            v-for="(row, $index) in rows"
+            :key="row.id"
+            class="approval-card"
+            :class="{ 'has-overdue': row.overdue_hours != null && row.overdue_hours >= 48 }"
+          >
+            <!-- 卡片头部：单号 + 状态徽章 -->
+            <div class="card-header-row">
+              <span
+                class="number-cell mobile"
+                data-testid="copy-number-mobile"
+                @click="copyNumber(row.application_number)"
+              >{{ row.application_number }}</span>
+              <ApprovalStatusBadge :status="row.status" size="small" />
+            </div>
+
+            <!-- 卡片主体：客户 + 金额 -->
+            <div class="card-body-row">
+              <span class="entity-name">{{ row.entity_name || '-' }}</span>
+              <span class="amount mobile">{{ formatCurrency(row.entity_amount) }}</span>
+            </div>
+
+            <!-- 卡片次要信息：提交人 + 时间 -->
+            <div class="card-meta-row">
+              <span class="submitter">{{ row.submitter_name }} 提交</span>
+              <span class="time">{{ formatDateRelative(row.created_time) }}</span>
+            </div>
+
+            <!-- 超时提示（如有） -->
+            <div
+              v-if="row.overdue_hours != null && row.overdue_hours >= 48"
+              class="card-overdue-row"
+            >
+              <span class="overdue-badge mobile" role="status" :aria-label="`超时 ${row.overdue_hours} 小时`">
+                <el-icon :size="12"><Clock /></el-icon>
+                超时 {{ row.overdue_hours }} 小时
+              </span>
+            </div>
+
+            <!-- 分割线 -->
+            <div class="card-divider"></div>
+
+            <!-- 操作按钮：同意 / 驳回 / 详情（全宽） -->
+            <div class="card-actions-row" v-if="activeTab === 'pending'">
+              <el-button
+                type="primary"
+                size="default"
+                data-testid="mobile-approve-btn"
+                @click="handleQuickApprove(row)"
+              >同意</el-button>
+              <el-button
+                type="danger"
+                size="default"
+                data-testid="mobile-reject-btn"
+                @click="handleQuickReject(row)"
+              >驳回</el-button>
+              <el-button
+                type="default"
+                size="default"
+                data-testid="mobile-detail-btn"
+                @click="openDetail(row, $index)"
+              >详情</el-button>
+            </div>
+            <div class="card-actions-row" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED'">
+              <el-button
+                type="primary"
+                size="default"
+                data-testid="mobile-resubmit-btn"
+                :loading="resubmitPendingId === row.id"
+                @click="handleResubmit(row)"
+              >修改并重新提交</el-button>
+            </div>
+            <div class="card-actions-row" v-else>
+              <el-button
+                type="default"
+                size="default"
+                data-testid="mobile-detail-btn"
+                @click="openDetail(row, $index)"
+              >详情</el-button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 移动端空态 -->
+        <WolfEmpty
+          v-else
+          title="暂无待审批事项"
+          description="所有回款与发票申请都已处理完毕"
+        />
+
+        <!-- 移动端分页（简化版） -->
+        <div v-if="rows.length > 0" class="mobile-pagination">
+          <span class="total-text">共 {{ total }} 条</span>
+          <el-pagination
+            v-model:current-page="page"
+            v-model:page-size="pageSize"
+            :total="total"
+            :page-sizes="[10, 20, 50]"
+            layout="prev, pager, next"
+            small
+            @current-change="fetchList"
+            @size-change="fetchList"
+          />
+        </div>
+      </div>
     </template>
 
     <!-- 详情抽屉：①el-descriptions 决策字段 ②ApprovalProcessGeneric（含 timeline）③操作吸底 -->
@@ -322,6 +431,39 @@
         >确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 移动端快速驳回弹窗 -->
+    <el-dialog
+      v-model="quickRejectVisible"
+      data-testid="quick-reject-dialog"
+      title="驳回审批"
+      width="90%"
+    >
+      <el-alert
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 12px"
+      >
+        请填写驳回理由，提交人将据此修改。
+      </el-alert>
+      <el-input
+        v-model="quickRejectReason"
+        data-testid="quick-reject-reason"
+        type="textarea"
+        :rows="4"
+        placeholder="请填写驳回理由"
+        maxlength="500"
+        show-word-limit
+      />
+      <template #footer>
+        <el-button @click="quickRejectVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          data-testid="quick-reject-confirm-btn"
+          @click="confirmQuickReject"
+        >确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -369,6 +511,19 @@ const resubmitPendingId = ref<number | null>(null)
 
 // ===== 计算属性 =====
 const drawerSize = computed<string>(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : '480px'))
+
+// 移动端检测（响应式）
+const isMobile = ref<boolean>(false)
+const checkMobile = (): void => {
+  isMobile.value = typeof window !== 'undefined' && window.innerWidth < 768
+}
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', checkMobile)
+})
 
 // ===== 方法 =====
 const isAxiosStatus = (err: unknown, code: number): boolean => {
@@ -521,6 +676,64 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
   }
 }
 
+// 移动端快速审批：同意（单条，无抽屉）
+const handleQuickApprove = async (row: ApprovalListItem): Promise<void> => {
+  try {
+    await ElMessageBox.confirm(
+      '确定同意该审批？',
+      '快速审批',
+      { type: 'success' }
+    )
+    // 调 store.approveEntity（单条审批，updated_time 用当前行）
+    await store.approveEntity(
+      row.business_type,
+      row.business_id,
+      'APPROVE',
+      '审批通过',
+      row.updated_time
+    )
+    ElMessage.success('已同意')
+    // 刷新列表（移除该行）
+    fetchList()
+  } catch {
+    // 用户取消或审批失败（拦截器已 toast）
+  }
+}
+
+// 移动端快速审批：驳回（单条，弹窗输入理由）
+const quickRejectReason = ref<string>('')
+const quickRejectRow = ref<ApprovalListItem | null>(null)
+const quickRejectVisible = ref<boolean>(false)
+
+const handleQuickReject = (row: ApprovalListItem): void => {
+  quickRejectReason.value = ''
+  quickRejectRow.value = row
+  quickRejectVisible.value = true
+}
+
+const confirmQuickReject = async (): Promise<void> => {
+  const reason = quickRejectReason.value.trim()
+  if (!reason) {
+    ElMessage.warning('请填写驳回理由，提交人将据此修改')
+    return
+  }
+  if (!quickRejectRow.value) return
+  try {
+    await store.approveEntity(
+      quickRejectRow.value.business_type,
+      quickRejectRow.value.business_id,
+      'REJECT',
+      reason,
+      quickRejectRow.value.updated_time
+    )
+    ElMessage.success('已驳回，申请人可修改后重新提交')
+    quickRejectVisible.value = false
+    fetchList()
+  } catch {
+    // 审批失败（拦截器已 toast）
+  }
+}
+
 // 抽屉侧 ApprovalProcessGeneric REJECTED 态「修改并重新提交」CTA（Important #2）
 // 事件无 payload，目标行取 currentRow（抽屉当前展示行）。
 const onResubmit = (): void => {
@@ -544,9 +757,9 @@ const handleBulkApprove = async (): Promise<void> => {
   try {
     const firstRow = selectedRows.value[0]
     if (!firstRow) return
-    const ids = selectedRows.value.map(r => r.id)
+    const ids = selectedRows.value.map(r => r.business_id)
     const updatedTimes: Record<string, string> = {}
-    selectedRows.value.forEach(r => { updatedTimes[String(r.id)] = r.updated_time })
+    selectedRows.value.forEach(r => { updatedTimes[String(r.business_id)] = r.updated_time })
     const res = await store.bulkApprove(
       firstRow.business_type,
       ids,
@@ -581,9 +794,9 @@ const confirmBulkReject = async (): Promise<void> => {
   try {
     const firstRow = selectedRows.value[0]
     if (!firstRow) return
-    const ids = selectedRows.value.map(r => r.id)
+    const ids = selectedRows.value.map(r => r.business_id)
     const updatedTimes: Record<string, string> = {}
-    selectedRows.value.forEach(r => { updatedTimes[String(r.id)] = r.updated_time })
+    selectedRows.value.forEach(r => { updatedTimes[String(r.business_id)] = r.updated_time })
     const res = await store.bulkApprove(
       firstRow.business_type,
       ids,
@@ -840,6 +1053,128 @@ watch(rows, async () => {
 @media (max-width: 768px) {
   .finance-approval-center {
     padding: $wolf-space-md;
+  }
+
+  // 移动端卡片列表样式
+  .mobile-card-list {
+    margin-top: $wolf-space-md;
+  }
+
+  .approval-card {
+    background: $wolf-bg-card;
+    border-radius: $wolf-radius-md;
+    padding: $wolf-space-md;
+    margin-bottom: $wolf-space-md;
+    box-shadow: $wolf-shadow-card;
+
+    &.has-overdue {
+      border: 1px solid $wolf-warning-border;
+    }
+  }
+
+  .card-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: $wolf-space-sm;
+  }
+
+  .card-body-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: $wolf-space-sm;
+
+    .entity-name {
+      font-size: $wolf-font-size-title;
+      color: $wolf-text-primary;
+      font-weight: $wolf-font-weight-medium;
+      max-width: 60%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .card-meta-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: $wolf-font-size-auxiliary;
+    color: $wolf-text-secondary;
+    margin-bottom: $wolf-space-sm;
+
+    .submitter {
+      max-width: 50%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .card-overdue-row {
+    margin-bottom: $wolf-space-sm;
+  }
+
+  .card-divider {
+    height: 1px;
+    background: $wolf-border-light;
+    margin: $wolf-space-sm 0;
+  }
+
+  .card-actions-row {
+    display: flex;
+    gap: $wolf-button-gap;
+    padding-top: $wolf-space-sm;
+
+    // 按钮全宽（移动端审批入口优化）
+    .el-button {
+      flex: 1;
+      min-height: 44px; // touch-target ≥ 44pt
+    }
+  }
+
+  // 移动端单号样式
+  .number-cell.mobile {
+    font-size: $wolf-font-size-body;
+  }
+
+  // 移动端金额样式（突出）
+  .amount.mobile {
+    font-size: $wolf-font-size-title;
+    font-weight: $wolf-font-weight-semibold;
+  }
+
+  // 移动端超时徽章
+  .overdue-badge.mobile {
+    font-size: $wolf-font-size-auxiliary;
+  }
+
+  // 移动端分页
+  .mobile-pagination {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: $wolf-space-sm;
+    padding: $wolf-space-md 0;
+    padding-bottom: env(safe-area-inset-bottom, 0); // 安全区
+
+    .el-pagination {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
+  // 移动端抽屉全屏（已通过 drawerSize computed 实现）
+  // 移动端筛选区简化（隐藏次要筛选）
+  .filter-card {
+    .el-form-item {
+      margin-bottom: $wolf-space-sm;
+    }
+  }
+
+  // 移动端 Tab 简化（Badge 位置调整）
+  .tab-badge {
+    margin-left: 4px;
   }
 }
 </style>
