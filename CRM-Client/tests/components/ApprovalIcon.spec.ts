@@ -71,6 +71,9 @@ describe('ApprovalIcon', () => {
   })
 
   it('shows badge when pendingCount > 0', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
     const permissionStore = usePermissionStore()
     permissionStore.permissionSet = new Set(['invoice:approve'])
 
@@ -79,7 +82,7 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [createPinia()],
+        plugins: [pinia],
       },
     })
 
@@ -89,6 +92,9 @@ describe('ApprovalIcon', () => {
   })
 
   it('hides badge when pendingCount === 0', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
     const permissionStore = usePermissionStore()
     permissionStore.permissionSet = new Set(['invoice:approve'])
 
@@ -97,14 +103,15 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [createPinia()],
+        plugins: [pinia],
       },
     })
 
     // Badge 应该隐藏（hidden 属性）
     const badge = wrapper.find('[data-testid="approval-badge"]')
     expect(badge.exists()).toBe(true)
-    expect(badge.attributes('hidden')).toBe('true')
+    // Element Plus badge 的 hidden 是 boolean attribute，值为 ''（存在）或不存在
+    expect(badge.attributes('hidden')).toBeDefined() // hidden attribute 存在
   })
 
   it('navigates to /approvals when clicked', async () => {
@@ -128,6 +135,9 @@ describe('ApprovalIcon', () => {
   })
 
   it('has aria-label with pending count', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
     const permissionStore = usePermissionStore()
     permissionStore.permissionSet = new Set(['invoice:approve'])
 
@@ -136,7 +146,7 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [createPinia()],
+        plugins: [pinia],
       },
     })
 
@@ -146,6 +156,9 @@ describe('ApprovalIcon', () => {
   })
 
   it('has aria-label with "无待办" when pendingCount === 0', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
     const permissionStore = usePermissionStore()
     permissionStore.permissionSet = new Set(['invoice:approve'])
 
@@ -154,7 +167,7 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [createPinia()],
+        plugins: [pinia],
       },
     })
 
@@ -164,6 +177,9 @@ describe('ApprovalIcon', () => {
   })
 
   it('includes all approval permissions in check', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
     // 验证权限列表包含 contract:approve:*（关键修复）
     const ALL_APPROVAL_PERMISSIONS = [
       'contract:approve:own',
@@ -182,7 +198,7 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [createPinia()],
+        plugins: [pinia],
       },
     })
 
