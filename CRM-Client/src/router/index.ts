@@ -41,7 +41,7 @@ const routes: RouteRecordRaw[] = [
         path: 'leads',
         name: 'Leads',
         component: () => import('@/views/Leads.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '线索管理' }
       },
       {
         path: 'leads/create',
@@ -65,13 +65,13 @@ const routes: RouteRecordRaw[] = [
         path: 'leads/public',
         name: 'PublicLeads',
         component: () => import('@/views/PublicLeads.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '公海线索' }
       },
       {
         path: 'leads/my',
         name: 'MyLeads',
         component: () => import('@/views/MyLeads.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '我的线索' }
       },
       {
         path: 'leads/reminder',
@@ -95,7 +95,7 @@ const routes: RouteRecordRaw[] = [
         path: 'customers',
         name: 'Customers',
         component: () => import('@/views/Customers.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '客户管理' }
       },
       {
         path: 'customers/create',
@@ -125,7 +125,7 @@ const routes: RouteRecordRaw[] = [
         path: 'opportunities',
         name: 'Opportunities',
         component: () => import('@/views/Opportunities.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '商机管理' }
       },
       {
         path: 'opportunities/create',
@@ -155,7 +155,7 @@ const routes: RouteRecordRaw[] = [
         path: 'contracts',
         name: 'Contracts',
         component: () => import('@/views/Contracts.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '合同管理' }
       },
       {
         path: 'contracts/create',
@@ -221,13 +221,13 @@ const routes: RouteRecordRaw[] = [
         path: 'payments',
         name: 'Payments',
         component: () => import('@/views/Payments.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '回款管理' }
       },
       {
         path: 'invoices',
         name: 'Invoices',
         component: () => import('@/views/Invoices.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '发票管理' }
       },
       {
         path: 'invoices/create',
@@ -299,7 +299,7 @@ const routes: RouteRecordRaw[] = [
         path: 'calendar',
         name: 'Calendar',
         component: () => import('@/views/Calendar.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '我的日历' }
       },
       // 审批中心（Phase C / Task C3）：取代自写按钮的
       // FinanceInvoiceApprovals / FinancePaymentConfirmations，INVOICE 与 PAYMENT
@@ -311,7 +311,7 @@ const routes: RouteRecordRaw[] = [
         path: 'approvals',
         name: 'ApprovalCenter',
         component: () => import('@/views/ApprovalCenter.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: '财务审批' }
       },
       // 向后兼容旧深链：finance/invoice-approvals、finance/payment-confirmations
       // 重定向到统一审批中心。
@@ -344,7 +344,7 @@ const routes: RouteRecordRaw[] = [
         path: 'ai-assistant',
         name: 'AIAssistant',
         component: () => import('@/views/AIAssistant.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, title: 'AI 助手' }
       }
     ]
   }
