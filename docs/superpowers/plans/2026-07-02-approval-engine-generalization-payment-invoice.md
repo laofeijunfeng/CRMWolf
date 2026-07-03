@@ -75,7 +75,7 @@
 | # | conf | 隐患 | 落地 |
 |---|------|------|------|
 | **E1** | 9/10 | **合同审批回归风险**：`match_flow`→`match_flow_generic(CONTRACT)` 改造后，合同旧 flow 多了 `business_type='CONTRACT'` 过滤条件。实现若遗漏 team_id+business_type 联合过滤，原本匹配的合同流会匹配不到，合同审批静默失效。 | Task A5：`match_flow_generic` 的 CONTRACT 分支**必须保持原 `match_flow` 匹配结果不变**（仅多加 business_type='CONTRACT' 条件，其余 team_id/金额/license_type/评分逻辑逐字沿用）；Task D2：新增"合同提交→匹配同一 flow→状态切换不变"端到端回归测试 `tests/unit/test_contract_approval_regression.py`。 |
-| **E2** | 9/10 | **越权风险**（prior-learning 命中）：FinanceApprovalCenter 列表若不按 `submitter_id==current_user`/当前节点角色过滤，全 team 数据可见。客户/合同/线索列表已有此前科（`leads.py`/`customers.py`/`opportunities.py`）。 | Task C3：FinanceApprovalCenter 三 tab 严格过滤——"我提交的" `WHERE submitter_id=:uid AND team_id=:tid`；"待我审批" `WHERE current_node.approve_role IN (user_roles) AND status=PENDING AND team_id=:tid`；"我已处理"按 `ApprovalRecord.approver_id=:uid`。**禁止**仅按 team_id 拉全量。 |
+| **E2** | 9/10 | **越权风险**（prior-learning 命中）：ApprovalCenter 列表若不按 `submitter_id==current_user`/当前节点角色过滤，全 team 数据可见。客户/合同/线索列表已有此前科（`leads.py`/`customers.py`/`opportunities.py`）。 | Task C3：ApprovalCenter 三 tab 严格过滤——"我发起的" `WHERE submitter_id=:uid AND team_id=:tid`；"待处理" `WHERE current_node.approve_role IN (user_roles) AND status=PENDING AND team_id=:tid`；"已完成"按 `ApprovalRecord.approver_id=:uid`。**禁止**仅按 team_id 拉全量。 |
 | **E3** | 9/10 | **合同回归测试缺失**：`match_flow_generic` 改造无专项端到端回归。 | Task D2：见 E1 的回归测试，断言"同一合同+同一 flow 配置下，改造前后 match 结果与状态切换完全一致"，含金额边界/license_type 匹配/多 flow 评分排序三场景。 |
 
 ### P1 — 应该补
@@ -84,16 +84,16 @@
 |---|------|------|------|
 | **E4** | 8/10 | 适配器 `on_approved/on_rejected/on_cancelled` 缺 entity None 守卫：业务单据被软删/跨 team 时 `get_entity` 返 None，`None.status` AttributeError。现有合同代码 `crud/approval.py:578/585` 有 `if contract:` 守卫，泛化后丢失。 | Task A4/A5：所有适配器 `on_*` 方法首行 `if entity is None: return`；`approve/cancel` 内 `entity = adapter.get_entity(...)` 后判 None 跳过状态回写（与现有合同 `if contract:` 行为对齐）。 |
 | **E5** | 7/10 | `match_flow_generic` 未匹配=None 时调用方契约未定：回款"提交审批"按钮在无 PAYMENT 流时该走免审批直通还是灰掉——UX/架构交界方案未明确。 | **【替你拍板】** Task B1/C3：回款登记后端点先调 `match_flow_generic(PAYMENT,...)`；匹配到流→建 Approval 走审批；未匹配→**不建 Approval，回款记录保持 `confirmation_status=PENDING` 待财务 `confirm`**（决策1的免审批直通=沿用现有财务确认路径，非自动 CONFIRMED）。前端 Payments.vue 回款记录行始终显示"提交审批"按钮——若后端返回"未配置审批流，已转为财务确认"则 toast 提示并隐藏审批入口。这样小额回款不被强制审批，大额配了流才走审批。如不合意可改为"未匹配=报错要求配流"。 |
-| **E6** | 8/10 | 批量审批事务/部分失败策略未定：N 条逐条乐观锁，第 k 条被他人审批失败时前 k-1 条已 commit 还是回滚。 | **【替你拍板】** Task C3/A6：批量审批采用**逐条独立事务 + 部分成功汇总**（非整体事务，避免一条失败全回滚让审批人白做）。每条 try/except，失败行收集原因，结束后 toast "成功 N 条，失败 M 条" + 失败行列表可重试。乐观锁冲突行单列"已被他人处理"。如不合意可改为"整体事务全或全不"。 |
+| **E6** | 8/10 | 批量审批事务/部分失败策略未定：N 条逐条乐观锁，第 k 条被他人审批失败时前 k-1 条已 commit 还是回滚。 | **【替你拍板】** Task C3/A6：批量审批采用**逐条独立事务 + 部分成功汇总**（非整体事务，避免一条失败全回滚让审批人白做）。每条 try/except，失败行收集原因，结束后 **不依赖 toast**（toast 是辅助）：成功行实时从列表移除（动画过渡）；失败行保留在列表 + 红色徽章"审批失败"；失败弹窗显示失败原因 + "重试"按钮。乐观锁冲突行单列"已被他人处理"。如不合意可改为"整体事务全或全不"。符合 §8 error-recovery：错误包含清晰恢复路径。 |
 | **E7** | 8/10 | 在途数据平迁测试缺失：B2 `INSERT INTO crm_contract_approvals` 补建 APPROVED 发票审批记录无平迁正确性测试。 | Task B2：补 `tests/unit/test_invoice_data_migration.py`，seed 旧 APPROVED/PENDING_REVIEW/ISSUED/REJECTED 发票，跑迁移后断言：APPROVED 行数==补建 Approval 行数且 status=APPROVED/business_type=INVOICE；PENDING_REVIEW 全回退 DRAFT；ISSUED/REJECTED 不动。 |
 | **E8** | 8/10 | 批量审批部分失败测试缺失（与 E6 配对）。 | Task C3：补 `tests/unit/test_bulk_approval_partial_failure.spec.ts`，mock 第 3 条乐观锁冲突，断言前 2 条成功、第 3 条标失败、toast 汇总正确。 |
-| **E9** | 7/10 | FinanceApprovalCenter 列表 N+1：每行查 overdue_hours + 当前节点审批人 + 实体摘要，逐行查则 N+1。 | Task C3：列表查询用 joinedload 预加载 `Approval.current_node`、`Approval.flow`、`Approval.records`；overdue_hours 在 SQL 层算（`EXTRACT(EPOCH FROM now()-created_time)/3600`）而非 Python；实体摘要（客户名/合同号）按 business_type 批量预取后内存 join。 |
+| **E9** | 7/10 | ApprovalCenter 列表 N+1：每行查 overdue_hours + 当前节点审批人 + 实体摘要，逐行查则 N+1。 | Task C3：列表查询用 joinedload 预加载 `Approval.current_node`、`Approval.flow`、`Approval.records`；overdue_hours 在 SQL 层算（`EXTRACT(EPOCH FROM now()-created_time)/3600`）而非 Python；实体摘要（客户名/合同号）按 business_type 批量预取后内存 join。 |
 
 ### P2 — 锦上添花
 
 | # | conf | 隐患 | 落地 |
 |---|------|------|------|
-| **E10** | 7/10 | 通知铃铛 60s 轮询无退避/后台 tab 暂停，N 在线审批人持续打 /overdue。 | Task C4：轮询用 `document.visibilitychange`——后台 tab 暂停轮询，前台恢复；失败指数退避（60→120→240s 封顶 5min）；可见时立即拉一次。 |
+| **E10** | 7/10 | 通知铃铛 60s 轮询无退避/后台 tab 暂停，N 在线审批人持续打 /overdue。 | **【已对齐审批入口优化 plan】** Task C4：审批入口改为 Header Icon（唯一轻量入口），点击直接跳转 `/approvals`（无下拉预览）。轮询优化：`document.visibilitychange`——后台 tab 暂停轮询，前台恢复；失败指数退避（60→120→240s 封顶 5min）；可见时立即拉一次。参见：`.claude/plans/jolly-frolicking-shell.md` |
 
 ---
 
@@ -1009,7 +1009,7 @@ git commit -m "refactor(invoice): hard-deprecate /review, migrate approval to en
 
 **主题/受众/页面职责**：内部财务+销售审批工作流；受众 = FINANCE / SALES_DIRECTOR / TEAM_ADMIN（审批人）与 SALES_MEMBER（提交人）；页面职责 = 看到待办、做出决定、留下可审计痕迹。这是 B2B 内部工具，**没有营销 hero**，签名元素是**统一的审批状态语言**。
 
-#### C-DSG-1 审批状态语义 Token（签名元素，修复现有不一致债）
+#### C-DSG-1 审批状态语义 Token + 状态徽章动画（签名元素）
 
 **现状问题**（设计债）：3 个现有组件对 PENDING/APPROVED/REJECTED 各自映射——`ApprovalTimeline.vue` 用 success/primary/info，`ApprovalProgressCompact.vue` 用 warning/success/danger/info，`FinanceInvoiceApprovals.vue` 又是另一套 `statusMap`。同一审批状态在不同界面颜色不同，违背"可调试的品味"原则（不一致可追溯到缺规范状态语言）。
 
@@ -1029,7 +1029,26 @@ $wolf-approval-cancelled-bg:   $wolf-bg-hover;       // #F5F5F5
 
 并新建 **`ApprovalStatusBadge.vue`**（唯一状态徽章组件）：props `status: 'PENDING'|'APPROVED'|'REJECTED'|'CANCELLED'`，渲染 `el-tag` + 图标（Clock/CircleCheckFilled/CircleCloseFilled/Minus）+ 中文文案，颜色取上述 token。**取代**散落的三处 `statusMap/getStatusType`。Task C2、C3 所有状态展示统一用此组件。同时追加 `:root` CSS 变量映射层（对齐现有 `--wolf-*` 模式）供非 SCSS 场景。
 
-> 这是对 frontend-design 技能"在一点上投入大胆，其余保持克制"的应用：签名元素 = 统一状态语言；其余全部复用现有 token 与组件，不添新色。
+**签名元素视觉强化（frontend-design 审查新增）**：
+
+ApprovalStatusBadge 增加状态语义动画（**动画有目的，不是装饰**）：
+- **PENDING**：琥珀色 + 微妙的呼吸动画（pulse，2s infinite，强调"需关注"）
+  - 动画意图："等待你处理"，引导审批人注意到待处理项
+  - CSS：`animation: pulse-warning 2s ease-in-out infinite;`
+  
+- **APPROVED**：绿色 + 短暂的成功动画（scale + fade，300ms once，强调"已完成")
+  - 动画意图："闭环确认"，成功反馈
+  - CSS：`animation: success-pop 300ms ease-out;`（仅在状态变更时触发，非持续）
+  
+- **REJECTED**：红色 + 静态（强调"需修改"，不动画避免焦虑）
+  
+- **CANCELLED**：灰色 + 较小字号（font-size: 12px，强调"中性终态"，降低视觉权重）
+
+**prefers-reduced-motion 降级**：
+- 系统偏好 `prefers-reduced-motion: reduce` 时，所有动画禁用（`animation: none;`）
+- 状态徽章仅靠颜色 + 图标区分（符合无障碍规范）
+
+> 这是 frontend-design 技能"在一点上投入大胆，其余保持克制"的应用：签名元素 = 统一状态语言 + 状态语义动画；其余全部复用现有 token 与组件，不添新色。动画服务于状态语义，不是装饰。
 
 #### C-DSG-2 排版与材质
 
@@ -1068,18 +1087,18 @@ $wolf-approval-cancelled-bg:   $wolf-bg-hover;       // #F5F5F5
 | **Success** | `ElMessage.success`（已有） | 见 C-DSG-3 |
 | **并发冲突**（乐观锁，审批独有） | `updated_time` 不匹配 → warning toast + 自动 `getApprovalDetail` 重载 | 见 C-DSG-3 |
 
-#### C-DSG-5 组件构成与线框（ASCII，DESIGN_NOT_AVAILABLE 故文本线框）
+#### C-DSG-5 组件构成与线框（ASCII，文本线框）
 
 **ApprovalProcessGeneric.vue**（嵌入详情页的审批区，通用化 ApprovalProcess.vue）：
 
 ```
-┌─ 审批进度 ────────────── [待审批] ●─┐   ← header: 标题 + ApprovalStatusBadge
+┌─ 审批进度 ────────────── [待处理●] ─┐   ← header: 标题 + ApprovalStatusBadge（呼吸动画）
 │  ① 销售提交   ② 财务审批   ③ 总监审批 │   ← ApprovalTimeline 水平（宽屏）
 │  ✓ eddie 06/28   ● 当前     ○ 待处理  │      窄屏降级 ApprovalProgressCompact 垂直
 │  ─────────────────────────────────── │
 │  节点意见：请尽快审批                 │   ← 当前节点意见（comment）
 │                                       │
-│  [  撤回审批  ]        [  拒绝  ][  同意  ] │   ← 按角色显隐：提交人见撤回，审批人见同意/驳回
+│  [  撤回审批  ]        [  驳回  ][  同意  ] │   ← 按角色显隐：提交人见撤回，审批人见同意/驳回
 └───────────────────────────────────────┘
 ```
 
@@ -1088,30 +1107,129 @@ $wolf-approval-cancelled-bg:   $wolf-bg-hover;       // #F5F5F5
 - 宽屏 `>1024px` 用水平 timeline，`≤1024px` 自动切 `ApprovalProgressCompact` 垂直（响应式）。
 - 无审批单时（草稿态，未提交）显示 `WolfEmpty`：title「尚未提交审批」+ action「提交审批」按钮（`v-permission="payment:submit|invoice:submit"`）。
 
-**FinanceApprovalCenter.vue**（启用被注释的 finance 路由后的统一审批中心，取代自写按钮的 FinanceInvoiceApprovals/FinancePaymentConfirmations）：
+**ApprovalCenter.vue**（审批中心路由后的统一入口，取代自写按钮的 FinanceInvoiceApprovals/FinancePaymentConfirmations）：
+
+> ⚠️ **审批入口优化（2026-07-03）**：
+> 根据「审批入口优化 plan（方案 A）」，审批入口改为 **Header Icon + Badge** 作为唯一轻量入口，
+> 左侧菜单移除「财务审批」入口，路由改为 `/approvals`（不是 `/finance/approvals`）。
+> 详见：`.claude/plans/jolly-frolicking-shell.md`
 
 ```
-┌─ 财务审批中心 ───────────────────────────────────────┐
-│ [ 待我审批 3 ] [ 我已处理 ] [ 我提交的 ]                │   ← el-tabs，徽章显示待办数
+┌─ 审批中心 ───────────────────────────────────────┐
+│ [ 待处理 ③ ] [ 已完成 ] [ 我发起的 ]                │   ← el-tabs，动词导向命名，徽章显示待办数
 │ ┌筛选──────────────────────────────────────────────┐ │
-│ │ 类型[回款▼] 客户[____] 金额[__]~[__] 提交日期[____] │ │   ← el-form inline
+│ │ 类型[全部▼] 客户[搜索___] 金额[___]~[___] 提交日期[___] │ │   ← el-form inline，完整筛选能力
+│ │                    [ 高级筛选 ▼ ]                  │ │   ← 渐进式披露，高级筛选含超时状态/审批节点
 │ └───────────────────────────────────────────────────┘ │
 │ ┌table──────────────────────────────────────────────┐ │
-│ │ 单号         类型 客户   金额      提交人 状态   操作 │ │
-│ │ INV-0231     发票 XX公司 ¥58,000 eddie  待审批 详情 │ │   ← 状态列用 ApprovalStatusBadge
-│ │ PAY-0042     回款 YY公司 ¥120,000 fin   待审批 详情 │ │
-│ │ ...                                                 │ │
+│ │ 单号(mono)  类型 客户(bold) 金额(primary) 提交人 状态(signature) 操作 │ │ ← 视觉分层标注
+│ │ INV-0231    发票 XX公司      ¥58,000    eddie  [待处理●pulse] [同意][驳回][详情] │ │
+│ │ PAY-0042    回款 YY公司      ¥120,000   fin   [待处理●pulse] │ │ ← 快速审批：hover显示按钮
+│ │ ...                                                 │ │ ← 超时徽章在状态旁
 │ └───────────────────────────────────────────────────┘ │
 │ 共 12 条                              < 1 2 3 >       │   ← el-pagination
+└───────────────────────────────────────────────────────┘
+```
+
+**表格视觉分层设计（frontend-design 审查新增）**：
+
+- **主列**（一眼看到，审批人关注）：
+  - **类型**：字号 16px，颜色 `$wolf-text-primary`
+  - **客户**：字号 16px，颜色 `$wolf-text-primary`，font-weight: 500，限制宽度（ellipsis + tooltip）
+  - **金额**：字号 18px（突出），颜色 `$wolf-primary`（蓝色），font-weight: 600
+  - **状态**：ApprovalStatusBadge（签名元素，呼吸动画）
+
+- **次列**（需要细看）：
+  - **单号**：字号 14px mono，颜色 `$wolf-text-tertiary`（技术 vernacular）
+  - **提交人**：字号 14px，颜色 `$wolf-text-secondary`
+  - **提交日期**：字号 14px，颜色 `$wolf-text-secondary`
+
+- **操作列**：
+  - 固定右侧，hover 显示快速审批按钮（淡入动画，150ms）
+  - 快速审批按钮：小尺寸（`el-button size="small"`），同意 `$wolf-success`，驳回 `$wolf-danger`
+  - 详情按钮：标准尺寸，文字"详情"
+
+**抽屉三段视觉设计（frontend-design 审查新增）**：
+
+```
+┌─ 审批详情 ──────────────────────────────┐
+│ ┌决策字段───────────────────────────┐   │ ← 背景色 `$wolf-bg-hover`（浅灰，区隔）
+│ │ 开票金额：¥58,000 (蓝色/18px/600) │   │ ← 金额突出（审批人核心关注）
+│ │ 抬头：XX公司科技发票抬头           │   │
+│ │ 关联合同：CON-2026-001            │   │
+│ └────────────────────────────────────┘   │
+│                                          │
+│ ┌Timeline───────────────────────────┐   │ ← 无背景色，融入抽屉
+│ │ ① 销售提交 ✓ eddie 06/28          │   │
+│ │ ② 财务审批 ● 当前                 │   │
+│ │ ③ 总监审批 ○                      │   │
+│ └────────────────────────────────────┘   │
+│ ────────────────────────(分割线)──────   │ ← 分割线区隔操作区
+│ [ 撤回 ]              [ 驳回 ][ 同意 ]   │ ← 吸底 + 背景色 `$wolf-bg-card`（白色）
+└──────────────────────────────────────────┘
+```
+
+- **①决策字段**：`el-descriptions` + 背景色 `$wolf-bg-hover`，金额字号 18px + 蓝色
+- **②timeline**：无背景色，融入抽屉主体
+- **③操作区**：吸底 + 分割线 + 白色背景 `$wolf-bg-card`，强调"可操作"
+
+**筛选区视觉设计（frontend-design 审查新增）**：
+
+- 基础筛选：inline form + 浅灰背景 `$wolf-bg-hover`
+- 高级筛选：`el-collapse` 折叠面板 + 点击展开
+- 筛选条件激活指示：筛选区上方显示小徽章（如 "类型: 回款 | 金额: 10万+"）
+- 清除筛选：徽章右侧"清除"按钮（X 图标）
+
+**移动端卡片式列表（frontend-design 审查新增）**：
+
+```
+┌─ 卡片 ─────────────────────────────┐
+│ INV-0231 (mono)        [待处理●]     │ ← 单号 + 状态徽章
+│ XX公司   ¥58,000                   │ ← 客户 + 金额（18px/蓝色）
+│ eddie 提交 2小时前                  │ ← 提交人 + 时间（次要）
+│ ────────────────────────────────  │ ← 分割线
+│ [同意] [驳回] [详情]               │ ← 按钮全宽
+└───────────────────────────────────┘
+```
+
+- 卡片间距：`margin-bottom: $wolf-space-md`（16px）
+- 金额突出：字号 18px + `$wolf-primary`
+- 按钮排列：同意/驳回左右分布（`display: flex; justify-content: space-between`），详情右上角图标
+
+**空态邀请性设计（frontend-design 审查新增）**：
+
+```
+┌─ 空态 ─────────────────────────────┐
+│      [Clock 图标 96px 浅灰]        │ ← 大图标，微妙的摇摆动画（invitation）
+│                                    │
+│  暂无待审批事项                     │ ← 字号 16px
+│  所有回款与发票申请都已处理完毕      │ ← 描述（字号 14px）
+│                                    │
+│  [ 查看已处理记录 ]                 │ ← 行动按钮（invitation to act）
+└───────────────────────────────────┘
+```
+
+- 图标：Clock 96px + `$wolf-text-tertiary` + 微妙摇摆动画（3s ease-in-out infinite）
+- 文案："暂无待审批事项" + "所有回款与发票申请都已处理完毕"
+- 行动按钮："查看已处理记录"（`$wolf-primary`）
+- prefers-reduced-motion 时禁用摇摆动画
+
+> frontend-design 原则："An empty screen is an invitation to act." 空态不是"暂无数据"，而是邀请用户行动。
+
+- 三个 tab 由权限驱动，动词导向命名：`待处理`（`v-any-permission` 含审批权限，Badge 显示待办数）、`已完成`、`我发起的`。
+- 筛选保留完整能力：类型（business_type）+ 客户 + 金额范围 + 提交日期 + 高级筛选（超时状态/审批节点）。
+- 详情用 **el-drawer 右抽屉**（非整页跳转），审批完留在列表上下文，减少跳转摩擦。
+- 快速审批：列表行内"同意"、"驳回"按钮（hover 显示），高频审批不强制打开抽屉。
 └───────────────────────────────────────────────────────┘
    行「详情」→ 右侧 el-drawer 抽屉：实体摘要(el-descriptions) + ApprovalProcessGeneric
 ```
 
-- 三个 tab 由权限驱动：`待我审批`（`v-any-permission="['payment:approve','invoice:approve']"`，含待办徽章数）、`我已处理`、`我提交的`。
-- 筛选"类型"维度（回款/发票/合同）正是 `business_type` 泛化的前端收益。
+- 三个 tab 由权限驱动，动词导向命名：`待处理`（`v-any-permission` 含审批权限，Badge 显示待办数）、`已完成`、`我发起的`。
+- 筛选保留完整能力：类型（business_type）+ 客户 + 金额范围 + 提交日期 + 高级筛选（超时状态/审批节点）。
 - 详情用 **el-drawer 右抽屉**（非整页跳转），审批完留在列表上下文，减少跳转摩擦。
+- 快速审批：列表行内"同意"、"驳回"按钮（hover 显示），高频审批不强制打开抽屉。
 
-#### C-DSG-6 响应式与无障碍
+#### C-DSG-6 响应式与无障碍 + 动画设计
 
 **响应式**：
 - `≥1024px`：表格列全显 + 水平 timeline + 抽屉宽度 480px。
@@ -1124,29 +1242,137 @@ $wolf-approval-cancelled-bg:   $wolf-bg-hover;       // #F5F5F5
 - 审批按钮 `type="button"`，`v-permission` 隐藏时确保 Tab 顺序连贯（指令 removeChild 后不留 focus 陷阱）。
 - 驳回弹窗 `ElMessageBox` 已内置焦点陷阱；确保 ESC 可取消。
 - 表格行支持键盘上下导航（el-table 原生），"详情"操作可回车触发。
-- `prefers-reduced-motion`：timeline 连接线无动画，ElMessage 不滑动（项目已遵循）。
+- `prefers-reduced-motion`：timeline 连接线无动画，ElMessage 不滑动，ApprovalStatusBadge 状态动画禁用（项目已遵循）。
 
-#### C-DSG-7 高频审批交互（zhom-ui-ux-pro-max 交互审查产出，14 条全纳入）
+**动画设计规范（frontend-design 审查新增）**：
+
+> frontend-design 原则："Leverage motion deliberately. An orchestrated moment usually lands harder than scattered effects."
+> 动画服务于状态语义和交互反馈，不是装饰。
+
+**动画清单**：
+
+| 动画 | 触发时机 | 持续时间 | 目的 | CSS |
+|------|---------|---------|------|-----|
+| **PENDING 呼吸** | 状态徽章显示时 | 2s infinite | "等待你处理"，引导注意 | `animation: pulse-warning 2s ease-in-out infinite;` |
+| **APPROVED 成功弹** | 状态变更为 APPROVED 时 | 300ms once | "闭环确认"，成功反馈 | `animation: success-pop 300ms ease-out;` |
+| **快速审批按钮淡入** | 行 hover 时 | 150ms | 揭示操作，不打断阅读 | `opacity: 0 → 1, transition: opacity 150ms;` |
+| **行移除过渡** | 审批成功后行移除时 | 200ms | 平滑过渡，避免跳动 | `opacity: 1 → 0 + transform: translateX(-10px);` |
+| **抽屉开/关** | 抽屉打开/关闭时 | 300ms | 空间连续性（shared element） | Element Plus 默认 |
+| **空态图标摇摆** | 空态显示时 | 3s infinite | "等待"，invitation to act | `animation: clock-swing 3s ease-in-out infinite;` |
+| **筛选折叠展开** | 高级筛选展开时 | 200ms | 渐进式披露 | `el-collapse` 默认 |
+
+**prefers-reduced-motion 降级**：
+- 所有无限循环动画（PENDING 呼吸、空态摇摆）禁用（`animation: none;`）
+- 状态变更动画（APPROVED 成功弹）保留（300ms 短暂，不会引起焦虑）
+- 过渡动画（淡入、移除、折叠）保留（200ms，符合 WCAG 动画阈值）
+
+**CSS animation 定义示例**：
+
+```scss
+// PENDING 呼吸动画（琥珀色徽章）
+@keyframes pulse-warning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
+}
+
+// APPROVED 成功弹动画
+@keyframes success-pop {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+// 空态图标摇摆动画
+@keyframes clock-swing {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-5deg); }
+  75% { transform: rotate(5deg); }
+}
+
+// prefers-reduced-motion 降级
+@media (prefers-reduced-motion: reduce) {
+  .approval-badge-pending,
+  .empty-clock-icon {
+    animation: none;
+  }
+}
+```
+
+**动画原则**：
+- ✅ **有目的**：每个动画都表达状态语义或交互反馈
+- ✅ **短暂**：微交互 150-300ms，符合 UI/UX Pro Max §7
+- ✅ **克制**：签名元素（PENDING 呼吸）是唯一持续动画
+- ✅ **降级**：prefers-reduced-motion 时禁用持续动画
+
+#### C-DSG-7 高频审批交互（ui-ux-pro-max 交互审查产出，18 条全纳入）
 
 > 本节由交互审查补入，锁定审批人真实工作流的交互效率。每条标注落地 Task。
+> 2026-07-03 更新：新增快速审批模式、筛选增强、移动端优化、Tab 命名优化。
 
 **P0 必补（不补会回归/旅程断裂）**
 
-1. **批量审批保留**（→Task C3）：`FinanceApprovalCenter` 表格保留 `el-table-column type="selection"`，表头工具栏对选中行提供"批量同意 / 批量拒绝"（仅对当前用户可作为当前节点审批人的选中行启用，其余禁用并 tooltip 说明）。批量拒绝走统一"驳回理由"弹窗，理由对全部选中行应用。**不得因抽屉化单条审批而丢失现有 `FinanceInvoiceApprovals.vue:43` 的批量能力**。
+1. **批量审批保留**（→Task C3）：`ApprovalCenter` 表格保留 `el-table-column type="selection"`，表头工具栏对选中行提供"批量同意 / 批量拒绝"（仅对当前用户可作为当前节点审批人的选中行启用，其余禁用并 tooltip 说明）。批量拒绝走统一"驳回理由"弹窗，理由对全部选中行应用。**不得因抽屉化单条审批而丢失现有 `FinanceInvoiceApprovals.vue:43` 的批量能力**。
 2. **驳回强制理由 / 同意可选（对称破缺）**（→Task C2）：`ApprovalProcessGeneric` 的驳回弹窗 `rejectForm.reason` 必填 + `el-form` rule；同意 `comment` 可空。沿用现有 `ApprovalTimeline.vue:122` 约定。文案 C-DSG-3 追加驳回弹窗提示："请填写驳回理由，提交人将据此修改"。
 3. **防双击/重复提交**（→Task C2/C3）：同意/驳回/撤回/批量审批按钮在 store action pending 期间 `:loading` + `:disabled`；驳回表单 `submit` 期间禁重复提交。后端乐观锁（`crud/approval.py:544`）是最后一道防线，前端按钮态是第一道。
-4. **驳回→修改→重新提交回流**（→Task C3）：`FinanceApprovalCenter` "我提交的" tab 对 REJECTED 行显示"修改并重新提交"按钮（先调实体 `update` 回 DRAFT，再 `submitApproval`）；抽屉 REJECTED 态同样提供此入口。用户旅程闭环：提交→驳回→改→重提，不补旅程断在 REJECTED。
+4. **驳回→修改→重新提交回流**（→Task C3）：`ApprovalCenter` "我发起的" tab 对 REJECTED 行显示"修改并重新提交"按钮（先调实体 `update` 回 DRAFT，再 `submitApproval`）；抽屉 REJECTED 态同样提供此入口。用户旅程闭环：提交→驳回→改→重提，不补旅程断在 REJECTED。
 
-**P1 应补（后端能力已就绪，纯前端复用债）**
+**P1 应补（高频交互增强）**
 
-5. **超时/SLA 指示**（→Task C3）：复用后端 `GET /v1/approvals/overdue`（`approvals.py:115`，返回 `overdue_hours`）。待审批行对 `overdue_hours >= 48` 显示琥珀徽章"超时 N 小时"（用 `$wolf-warning-*` token，图标 Clock）；"待我审批" tab 默认按 `overdue_hours` 降序排（积压最久顶）。超时行可选"催办"次要操作。
-6. **应用内通知徽章**（→Task C3 + 新 Task C5）：AppLayout 侧边栏"财务审批"菜单徽章 = `pendingCount`；顶栏加全局铃铛下拉，列最近 N 条"待你审批"，点击直跳抽屉。后端用 `/overdue` + 待审批列表聚合。**不依赖飞书**——不盯飞书的审批人在 CRM 内即可发现待办。
-7. **抽屉信息层级固化**（→Task C3）：详情抽屉结构三段固定：①决策关键字段置顶（发票：开票金额/抬头/关联合同/回款状态；回款：入账金额/回款计划/合同回款进度），用 `el-descriptions`；②`ApprovalProcessGeneric` 审批 timeline；③操作区吸底（同意/驳回/撤回）。**审批人不该翻到底才看到关键金额**。
-8. **乐观锁冲突保留输入**（→Task C2）：C-DSG-4 的"冲突→重载"修正为：冲突时不强制关弹窗、不清空已输入的驳回理由；toast "该审批已被他人处理，你的填写已保留" + 重载 detail；若重载后该审批已非 PENDING（已被他人终结），则禁用提交按钮并提示"该审批已由他人处理，无需重复操作"。
+5. **快速审批模式（新增，→Task C3）**：列表行内右侧增加"同意"、"驳回"按钮（hover 显示，无抽屉）：
+   - 点击"同意"：ElMessageBox.confirm("确定同意该审批？") → 确认后直接提交 + toast "已同意" + 行从列表实时移除（动画过渡）
+   - 点击"驳回"：弹窗输入理由 + 提交后行从列表移除
+   - 仅对当前用户可作为当前节点审批人的行显示
+   - 详情审批（打开抽屉）作为补充入口，高频审批不强制打开抽屉
+   - 符合 §2 hover-vs-tap：Click/tap 作为主要交互，不需要打开抽屉也能审批
+
+6. **超时/SLA 指示**（→Task C3）：复用后端 `GET /v1/approvals`（返回 `overdue_hours`）。待审批行对 `overdue_hours >= 48` 显示琥珀徽章"超时 N 小时"（用 `$wolf-warning-*` token，图标 Clock）；"待处理" tab 默认按 `overdue_hours` 降序排（积压最久顶）。**催办功能暂不实施**。
+
+7. **审批入口对齐（更新，→Task C3）**：
+   - ❌ 移除侧边栏"财务审批"菜单入口（对齐审批入口优化 plan 方案 A）
+   - ✅ Header 增加审批 Icon + Badge（唯一轻量入口）
+   - ✅ Badge 显示 `pendingCount`（待处理数量）
+   - ✅ 点击 Icon 直接跳转 `/approvals`（无下拉预览）
+   - ❌ 铃铛下拉预览暂不实施（简化交互，直接跳转页面）
+   - 参见：`.claude/plans/jolly-frolicking-shell.md`
+
+8. **筛选功能增强（新增，→Task C3）**：
+   - 基础筛选：类型（全部/回款/发票/合同）、客户（搜索下拉）、金额范围、提交日期范围
+   - 高级筛选（渐进式披露）：超时状态（overdue_hours >= 48）、当前审批节点、提交人
+   - 筛选持久化：localStorage 保存筛选偏好，下次打开恢复
+   - 符合 §8 progressive-disclosure：默认简单筛选，点击"高级筛选"展开更多
+
+9. **抽屉信息层级固化**（→Task C3）：详情抽屉结构三段固定：①决策关键字段置顶（发票：开票金额/抬头/关联合同/回款状态；回款：入账金额/回款计划/合同回款进度），用 `el-descriptions`；②`ApprovalProcessGeneric` 审批 timeline；③操作区吸底（同意/驳回/撤回）。**审批人不该翻到底才看到关键金额**。
+
+10. **乐观锁冲突保留输入**（→Task C2）：C-DSG-4 的"冲突→重载"修正为：冲突时不强制关弹窗、不清空已输入的驳回理由；toast "该审批已被他人处理，你的填写已保留" + 重载 detail；若重载后该审批已非 PENDING（已被他人终结），则禁用提交按钮并提示"该审批已由他人处理，无需重复操作"。
 
 **P2 可选（效率增强）**
 
-9. **键盘快捷键**（→Task C3）：审批中心表格 J/K 上下行、A 同意、R 驳回、Enter 开抽屉、Esc 关抽屉。配 `el-tooltip` 提示；`v-permission` 无审批权时不绑 A/R。`prefers-reduced-motion` 下禁用任何过渡。
+11. **键盘快捷键**（→Task C3）：审批中心表格 J/K 上下行、A 同意、R 驳回、Enter 开抽屉、Esc 关抽屉。配 `el-tooltip` 提示；`v-permission` 无审批权时不绑 A/R。`prefers-reduced-motion` 下禁用任何过渡。
+
+12. **金额/日期格式化**（→Task C2/C3）：金额用 `Intl.NumberFormat('zh-CN', { style:'currency', currency:'CNY' })`（线框里的 `¥58,000` 不手拼字符串）；日期近用相对（"2 小时前"，<24h）、远用绝对（`YYYY-MM-DD HH:mm`）。建议抽 `src/utils/format.ts` 两个纯函数并配单测。
+
+13. **移动端审批优化（新增，→Task C3）**：
+   - 移动端审批入口：Header Icon 放大（touch-target ≥ 44pt）或 Bottom Tab Bar 增加"审批" Tab
+   - 移动端列表：卡片式列表（不是表格），每卡片含"同意"、"驳回"、"详情"按钮
+   - 移动端抽屉：驳回理由输入弹键盘时，操作区用 `position: sticky; bottom: 0` 吸底 + 安全区 `padding-bottom: env(safe-area-inset-bottom)`
+   - 符合 §5 adaptive-navigation：移动端用 bottom nav 或放大的 Header Icon
+
+14. **403 权限态 / deep link 兜底**（→Task C2 ErrorState 扩展）：`ErrorState.vue` 支持 `variant: 'error'|'forbidden'`，forbidden 用 `Lock` 图标 + "你没有该审批的操作权限"；深链直达被拒时显示此态，不白屏。
+
+15. **抽屉关闭后焦点回归**（→Task C3）：审批完关抽屉，焦点回到触发行（或下一行），键盘用户不被甩到页首。Element Plus drawer `@closed` 钩子里 `rowRef.focus()`。
+
+16. **单号点击复制**（→Task C3）：mono 字体的 `application_number`/回款单号单元格 `@click` 复制到剪贴板 + `ElMessage.success` "已复制单号"；用 `navigator.clipboard.writeText`，降级 `document.execCommand`。
+
+17. **Tab 命名优化（新增，→Task C3）**：
+   - 「待我审批」 → **「待处理」**（动词导向，符合收件箱心智模型）
+   - 「我已处理」 → **「已完成」**（闭环状态）
+   - 「我提交的」 → **「我发起的」**（主动视角）
+   - Badge 显示：「待处理 ③」
+
+18. **审批历史/审计追踪（新增，→Task C3）**：
+   - "我发起的" tab 增加"历史记录"筛选（已完成的审批）
+   - 或增加"审批记录"页面（审计追踪，查看所有审批历史）
+   - 符合 §9 breadcrumb-web：深层页面需要面包屑导航
 10. **金额/日期格式化**（→Task C2/C3）：金额用 `Intl.NumberFormat('zh-CN', { style:'currency', currency:'CNY' })`（线框里的 `¥58,000` 不手拼字符串）；日期近用相对（"2 小时前"，<24h）、远用绝对（`YYYY-MM-DD HH:mm`）。建议抽 `src/utils/format.ts` 两个纯函数并配单测。
 11. **移动端抽屉操作区吸底**（→Task C3）：C-DSG-6 移动端补充：驳回理由输入弹键盘时，操作区用 `position: sticky; bottom: 0` 吸底 + 安全区 `padding-bottom: env(safe-area-inset-bottom)`，避免按钮被键盘遮挡。
 12. **403 权限态 / deep link 兜底**（→Task C2 ErrorState 扩展）：`ErrorState.vue` 支持 `variant: 'error'|'forbidden'`，forbidden 用 `Lock` 图标 + "你没有该审批的操作权限"；深链直达被拒时显示此态，不白屏。
@@ -1275,7 +1501,7 @@ git commit -m "feat(client): approval status tokens, badge, generic ApprovalProc
 - Test: `CRM-Client/tests/unit/views/financeApprovalCenter.spec.ts`、`tests/unit/views/paymentsApproval.spec.ts`
 
 **Interfaces:**
-- Produces: `FinanceApprovalCenter` 三 tab（待我审批/我已处理/我提交的）+ 类型筛选（business_type）+ 表格 + 详情抽屉内嵌 `ApprovalProcessGeneric`，全状态走 `ApprovalStatusBadge`。
+- Produces: `ApprovalCenter` 三 tab（待处理/已完成/我发起的）+ 筛选（类型/客户/金额/日期/高级筛选）+ 表格 + 详情抽屉内嵌 `ApprovalProcessGeneric` + 快速审批（行内按钮），全状态走 `ApprovalStatusBadge`。
 - Consumes: Task C1 store、Task C2 `ApprovalProcessGeneric` + `ApprovalStatusBadge` + `ErrorState`。
 
 - [ ] **Step 1: Write failing tests**
