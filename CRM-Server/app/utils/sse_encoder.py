@@ -1,24 +1,22 @@
-"""SSE JSON 编码器（从 langgraph/sse_wrapper.py 迁出，仅保留 SSEJsonEncoder）。
+"""SSE JSON 编码器
 
-迁移自 app/services/langgraph/sse_wrapper.py 的 SSEJsonEncoder，仅依赖
-langchain_core.messages.BaseMessage，不依赖 langgraph/Pregel。其余 LangGraph
-SSE 包装逻辑（build_*_event / stream_sse_events 等）随 sse_wrapper.py 整体删除。
+用于 SSE 流式响应的 JSON 编码器，处理特殊类型序列化。
+已移除对 langchain_core 的依赖（该库已不在 requirements.txt 中）。
 """
 import json
 from typing import Any
 
-from langchain_core.messages import BaseMessage
-
 
 class SSEJsonEncoder(json.JSONEncoder):
-    """Custom JSON encoder for SSE events that handles LangChain message objects."""
+    """Custom JSON encoder for SSE events."""
 
     def default(self, obj: Any) -> Any:
-        """Convert LangChain messages to JSON-serializable dicts."""
-        if isinstance(obj, BaseMessage):
-            return {
-                "type": obj.type,
-                "content": obj.content,
-                "additional_kwargs": obj.additional_kwargs,
-            }
-        return super().default(obj)
+        """Handle special types for JSON serialization."""
+        # 处理 datetime 对象
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        # 处理其他无法序列化的对象
+        try:
+            return str(obj)
+        except Exception:
+            return super().default(obj)
