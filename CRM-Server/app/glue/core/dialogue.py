@@ -729,15 +729,15 @@ class DialogueEngine:
                 next_mode=SessionMode.IDLE,
             )
 
-        # 调用 ActionExecutor 执行
-        exec_result = await self.action_executor.execute(pending)
+        # 调用 ActionExecutor 执行（传入 action_id 用于审计归因）
+        exec_result = await self.action_executor.execute(pending, pending.action_id)
 
         if exec_result.success:
             # 执行成功
             message = exec_result.message or "操作已完成。"
             if exec_result.data:
                 # 有业务数据，可以构建更详细的回执
-                message = self._build_receipt_message(exec_result)
+                message = self._build_receipt_message(exec_result, pending)
 
             # 检查是否有多意图队列中的下一个
             if session.pending_queue and len(session.pending_queue) > 1:
@@ -797,8 +797,7 @@ class DialogueEngine:
                 message=message,
                 data={
                     "action_id": exec_result.action_id,
-                    "skill_name": exec_result.skill_name,
-                    "action_name": exec_result.action_name,
+                    "intent_type": pending.intent_type,  # B3: 用 pending.intent_type 替代 exec_result.skill_name
                     "result_data": exec_result.data,
                 },
                 next_mode=SessionMode.IDLE,
@@ -813,29 +812,20 @@ class DialogueEngine:
                 next_mode=SessionMode.IDLE,
             )
 
-    def _build_receipt_message(self, exec_result: ExecutionResult) -> str:
-        """构建执行回执消息"""
-        skill_name = exec_result.skill_name or "操作"
-        action_name = exec_result.action_name or ""
+    def _build_receipt_message(self, exec_result: ExecutionResult, pending: PendingAction) -> str:
+        """构建执行回执消息
 
-        # 根据 action 类型构建消息
-        action_messages = {
-            "create": f"已创建 {skill_name} 记录",
-            "update": f"已更新 {skill_name} 信息",
-            "delete": f"已删除 {skill_name} 记录",
-            "follow_up": "已添加跟进记录",
-            "amount": "已更新金额",
-            "stage": "已更新阶段",
-            "win": "已标记赢单",
-            "lose": "已标记输单",
-        }
+        Args:
+            exec_result: 执行结果（只含 success/message/action_id/data/error）
+            pending: 待执行动作（含 intent_type）
 
-        # 匹配 action 关键词
-        for key, msg in action_messages.items():
-            if key in action_name.lower():
-                return msg
-
-        return exec_result.message or f"{skill_name} 操作已完成"
+        Returns:
+            回执消息
+        """
+        # B3: ExecutionResult 无 skill_name/action_name，用 intent_type + message
+        intent_label = pending.intent_type or "操作"
+        exec_msg = exec_result.message or ("成功" if exec_result.success else "失败")
+        return f"{intent_label}: {exec_msg}"
 
     def _format_missing_slots(self, missing_slots: list) -> str:
         """格式化缺失槽位提示"""
