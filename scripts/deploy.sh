@@ -103,8 +103,9 @@ fi
 
 # 4. 重启服务
 echo "[重启] 重启 Docker 服务..."
-docker-compose down || true
-docker-compose up -d
+# 使用新版 Docker 内置 compose 命令（docker compose 而非 docker-compose）
+docker compose down || true
+docker compose up -d
 
 # 5. 等待服务启动
 echo "[等待] 等待服务启动..."
