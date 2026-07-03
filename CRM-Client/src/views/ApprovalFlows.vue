@@ -41,6 +41,19 @@
           </el-select>
         </el-form-item>
         <el-form-item>
+          <el-select
+            v-model="filterBusinessType"
+            placeholder="单据类型"
+            clearable
+            style="width: 120px"
+            @change="handleSearch"
+          >
+            <el-option value="CONTRACT" label="合同" />
+            <el-option value="PAYMENT" label="回款登记" />
+            <el-option value="INVOICE" label="发票申请" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
           <!-- AI 创建按钮 -->
           <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="showAIDialog = true">
             <el-icon><MagicStick /></el-icon>
@@ -84,6 +97,20 @@
               <el-tag v-if="row.license_type === 'SUBSCRIPTION'" class="wolf-tag wolf-tag--info" size="small">订阅</el-tag>
               <el-tag v-else-if="row.license_type === 'PERPETUAL'" class="wolf-tag wolf-tag--success" size="small">买断</el-tag>
               <span v-else class="text-gray">不限</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="单据类型" width="120">
+            <template #default="{ row }">
+              <el-tag v-if="row.business_type === 'CONTRACT'" type="primary" size="small">
+                合同
+              </el-tag>
+              <el-tag v-else-if="row.business_type === 'PAYMENT'" type="warning" size="small">
+                回款登记
+              </el-tag>
+              <el-tag v-else-if="row.business_type === 'INVOICE'" type="info" size="small">
+                发票申请
+              </el-tag>
+              <span v-else class="text-gray">-</span>
             </template>
           </el-table-column>
           <el-table-column label="节点数" width="100">
@@ -231,6 +258,7 @@ const approvalFlows = ref<ApprovalFlowDetail[]>([])
 const searchText = ref('')
 const filterStatus = ref<boolean | null>(null)
 const filterLicenseType = ref<string | null>(null)
+const filterBusinessType = ref<string | undefined>(undefined)
 const detailVisible = ref(false)
 const currentFlow = ref<ApprovalFlowDetail | null>(null)
 const showAIDialog = ref(false)
@@ -267,6 +295,10 @@ const fetchApprovalFlows = async () => {
 
     if (filterLicenseType.value) {
       flows = flows.filter((flow: { status?: string }) => flow.license_type === filterLicenseType.value)
+    }
+
+    if (filterBusinessType.value) {
+      flows = flows.filter((flow: { business_type?: string }) => flow.business_type === filterBusinessType.value)
     }
 
     approvalFlows.value = flows
