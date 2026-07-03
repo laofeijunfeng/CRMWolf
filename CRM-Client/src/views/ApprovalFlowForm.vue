@@ -63,6 +63,19 @@
                 </el-radio-group>
               </el-form-item>
 
+              <el-form-item label="适用单据" prop="business_type">
+                <el-radio-group v-model="form.business_type">
+                  <el-radio value="CONTRACT">合同</el-radio>
+                  <el-radio value="PAYMENT">回款登记</el-radio>
+                  <el-radio value="INVOICE">发票申请</el-radio>
+                </el-radio-group>
+                <div class="form-item-extra">
+                  <div style="color: var(--el-text-color-secondary); font-size: 12px;">
+                    选择该流程适用的业务单据类型
+                  </div>
+                </div>
+              </el-form-item>
+
               <el-form-item label="金额范围" prop="amount_range">
                 <div class="amount-range">
                   <el-input-number
