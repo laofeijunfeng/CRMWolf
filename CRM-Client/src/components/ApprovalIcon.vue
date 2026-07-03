@@ -17,8 +17,11 @@
   参见：docs/superpowers/plans/2026-07-02-approval-engine-generalization-payment-invoice.md C-DSG-7 条7
 -->
 <template>
+  <!-- 响应式权限检查：v-if 替代 v-any-permission 指令 -->
+  <!-- 指令在 mounted 时移除元素后无法恢复，导致权限加载后入口消失 -->
+  <!-- 改用 v-if + permissionStore.hasAnyPermission() 确保响应式 -->
   <div
-    v-any-permission="ALL_APPROVAL_PERMISSIONS"
+    v-if="permissionStore.hasAnyPermission(ALL_APPROVAL_PERMISSIONS)"
     class="approval-icon"
     data-testid="approval-icon"
   >
@@ -48,6 +51,7 @@ import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { Checked } from '@element-plus/icons-vue'
 import { useApprovalStore } from '@/stores/approval'
+import { usePermissionStore } from '@/stores/permissions'
 
 /**
  * 所有审批权限（修正当前缺失的 contract:approve:*）
@@ -72,6 +76,7 @@ const ALL_APPROVAL_PERMISSIONS = [
 
 const router = useRouter()
 const store = useApprovalStore()
+const permissionStore = usePermissionStore()
 const { pendingCount } = storeToRefs(store)
 
 /**
