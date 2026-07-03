@@ -2,10 +2,9 @@
   <div class="payment-plan-create-container">
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">创建回款计划</h1>
       </div>
     </div>
 
@@ -129,6 +128,9 @@ import { showError, showSuccess } from '@/utils/errorMessages'
 import { ArrowLeft, Plus, Delete } from '@element-plus/icons-vue'
 import contractApi from '@/api/contract'
 import paymentApi from '@/api/payment'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 interface CustomerInfo {
   account_name: string

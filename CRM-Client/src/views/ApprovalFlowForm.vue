@@ -2,11 +2,9 @@
   <div class="approval-flow-form-container">
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <!-- ✅ P1: Typography - 页面标题使用性格化字体 -->
-        <h1 class="wolf-page-title">{{ isEdit ? '编辑审批流程' : '新建审批流程' }}</h1>
       </div>
     </div>
 
@@ -307,6 +305,9 @@ import {
 } from '@element-plus/icons-vue'
 import approvalFlowApi, { type ApprovalFlow, type ApprovalFlowDetail, type ApprovalNode } from '@/api/approvalFlow'
 import roleApi, { type RoleResponse } from '@/api/role'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const route = useRoute()

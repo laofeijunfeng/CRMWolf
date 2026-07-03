@@ -2,10 +2,9 @@
   <div class="invoice-form-container">
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ isEditing ? '编辑发票申请' : '创建发票申请' }}</h1>
       </div>
     </div>
 
@@ -203,6 +202,9 @@ import invoiceApi, {
 import customerApi from '@/api/customer'
 import contractApi from '@/api/contract'
 import paymentApi from '@/api/payment'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const route = useRoute()

@@ -3,10 +3,9 @@
     <!-- 页面标题栏 -->
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="handleGoBack">
+        <el-button class="back-btn" @click="handleGoBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">线索转化为客户</h1>
       </div>
       <div class="page-header-right">
         <el-button @click="handleGoBack">取消</el-button>
@@ -154,6 +153,9 @@ import {
 import { leadApi, type LeadDetail } from '@/api/lead'
 import customerApi from '@/api/customer'
 import procurementApi from '@/api/procurement'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
