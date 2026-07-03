@@ -4,6 +4,8 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
+from app.constants.business_types import BusinessType, is_valid_business_type
+
 
 class ApprovalStatusEnum(str, Enum):
     """审批状态枚举"""
@@ -163,11 +165,23 @@ class ApprovalFlowCreate(BaseModel):
         None,
         description="授权类型，如：STANDARD、PROFESSIONAL、ENTERPRISE，用于匹配流程"
     )
+    business_type: str = Field(
+        default=BusinessType.CONTRACT,
+        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE"
+    )
     nodes: List[ApprovalNodeCreate] = Field(
         ...,
         min_items=1,
         description="审批节点列表，至少包含一个节点，按node_order顺序流转"
     )
+
+    @field_validator("business_type")
+    @classmethod
+    def validate_business_type(cls, v):
+        """校验 business_type 合法性，非法值回退默认"""
+        if not v or not is_valid_business_type(v):
+            return BusinessType.CONTRACT
+        return v
 
 
 class ApprovalFlowUpdate(BaseModel):
