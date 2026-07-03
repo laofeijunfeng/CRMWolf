@@ -4,6 +4,8 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
+from app.constants.business_types import BusinessType, is_valid_business_type
+
 
 class ApprovalStatusEnum(str, Enum):
     """审批状态枚举"""
@@ -163,11 +165,23 @@ class ApprovalFlowCreate(BaseModel):
         None,
         description="授权类型，如：STANDARD、PROFESSIONAL、ENTERPRISE，用于匹配流程"
     )
+    business_type: str = Field(
+        default=BusinessType.CONTRACT,
+        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE"
+    )
     nodes: List[ApprovalNodeCreate] = Field(
         ...,
         min_items=1,
         description="审批节点列表，至少包含一个节点，按node_order顺序流转"
     )
+
+    @field_validator("business_type")
+    @classmethod
+    def validate_business_type(cls, v):
+        """校验 business_type 合法性，非法值回退默认"""
+        if not v or not is_valid_business_type(v):
+            return BusinessType.CONTRACT
+        return v
 
 
 class ApprovalFlowUpdate(BaseModel):
@@ -202,10 +216,24 @@ class ApprovalFlowUpdate(BaseModel):
         le=1,
         description="是否启用，1-启用，0-禁用"
     )
+    business_type: Optional[str] = Field(
+        None,
+        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE"
+    )
     nodes: Optional[List[ApprovalNodeUpdate]] = Field(
         None,
         description="审批节点列表，更新时会完全替换原有节点"
     )
+
+    @field_validator("business_type")
+    @classmethod
+    def validate_business_type(cls, v):
+        """校验 business_type 合法性"""
+        if v is None:
+            return v  # 更新时允许不修改
+        if not is_valid_business_type(v):
+            return BusinessType.CONTRACT
+        return v
 
 
 class ApprovalFlowResponse(BaseModel):
@@ -218,6 +246,7 @@ class ApprovalFlowResponse(BaseModel):
     max_amount: Optional[Decimal] = Field(None, description="最大金额（元）")
     license_type: Optional[str] = Field(None, description="授权类型")
     is_active: int = Field(..., description="是否启用，1-启用，0-禁用")
+    business_type: str = Field(..., description="流程适用单据类型")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     
