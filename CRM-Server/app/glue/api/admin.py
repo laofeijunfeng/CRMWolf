@@ -4,16 +4,23 @@ Session 查看、清除、健康检查。
 
 参见: CRM-Docs/plans/AI-GLUE-IMPLEMENTATION-PLAN.md Phase 1.2
 参见: CRM-Docs/requirements/AI-GLUE-REQUIREMENTS.md 六、对外接口契约 6.2
+
+Task 3.2: 统一 Session API 为 uuid 寻址
+- 路由改 /sessions/{session_id}
+- GET 返回完整 messages/tool_history/recent_entities（对齐 ReAct）
+- DELETE 返回 {message, session_id}
+- 加 session 归属校验（验证 session.team_id/user_id 匹配当前用户）
 """
 
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Dict, Any, Optional, List
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
 
 from app.core.redis import get_redis
+from app.core.deps import get_current_user_team
 from app.glue.config import GlueConfig
-from app.glue.core.session import SessionManager, GlueSession
+from app.glue.core.session import SessionManager
 
 
 router = APIRouter(prefix="/glue/v1", tags=["Glue Admin"])
@@ -24,21 +31,22 @@ config = GlueConfig()
 # ==================== 请求/响应 Schema ====================
 
 class SessionResponse(BaseModel):
-    """Session 响应（脱敏）"""
+    """Session 响应（对齐 ReAct agent_assistant.py:132）
 
-    v: int = Field(..., description="版本号")
-    tenant_id: str = Field(..., description="租户 ID")
-    crm_user_id: int = Field(..., description="CRM 用户 ID")
-    mode: str = Field(..., description="会话状态")
-    updated_at: int = Field(..., description="更新时间")
+    完整返回 messages、tool_history、recent_entities。
+    """
 
-    has_pending: bool = Field(False, description="是否有 pending action")
-    pending_expired: Optional[bool] = Field(None, description="pending 是否过期")
+    session_id: str = Field(..., description="Session UUID")
+    messages: List[Dict[str, Any]] = Field(default_factory=list, description="对话历史")
+    tool_history: List[Dict[str, Any]] = Field(default_factory=list, description="工具调用历史")
+    recent_entities: Dict[str, Any] = Field(default_factory=dict, description="最近操作的实体")
 
-    recent_customer_id: Optional[int] = Field(None, description="最近客户 ID")
-    recent_opportunity_id: Optional[int] = Field(None, description="最近商机 ID")
 
-    history_count: int = Field(0, description="历史记录数量")
+class SessionDeleteResponse(BaseModel):
+    """Session 删除响应（对齐 ReAct agent_assistant.py:166）"""
+
+    message: str = Field(..., description="结果消息")
+    session_id: str = Field(..., description="Session UUID")
 
 
 class HealthResponse(BaseModel):
@@ -72,52 +80,107 @@ async def glue_health_check(
     )
 
 
-@router.get("/sessions/{tenant_id}/{crm_user_id}", response_model=SessionResponse, summary="查看 Session")
+@router.get("/sessions/{session_id}", response_model=SessionResponse, summary="查看 Session")
 async def get_session(
-    tenant_id: str,
-    crm_user_id: int,
+    session_id: str,
     redis_client: redis.Redis = Depends(get_redis),
+    team_id: int = Depends(get_current_user_team),
 ):
-    """查看当前 session 状态（脱敏）
+    """查看当前 session 状态
 
-    不返回完整的 pending 内容，仅返回状态信息。
+    返回完整 messages、tool_history、recent_entities（对齐 ReAct 响应）。
+
+    权限校验：
+    - 需要登录用户
+    - session 必须属于当前用户的 team
     """
     session_manager = SessionManager(redis_client)
-    session = await session_manager.load(tenant_id, crm_user_id)
+    session = await session_manager.load(session_id)
 
-    # 判断 pending 是否过期
-    pending_expired = None
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+
+    # 权限校验：session 必须属于当前用户的 team
+    if session.tenant_id != str(team_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权访问此 Session"
+        )
+
+    # 转换 history_last_n 为 messages 格式
+    messages = [
+        {"role": h.role, "text": h.text, "ts": h.ts}
+        for h in session.history_last_n
+    ]
+
+    # 构建 tool_history（从 pending 和 pending_queue 提取）
+    tool_history = []
     if session.pending:
-        pending_expired = session.pending.is_expired()
+        tool_history.append({
+            "action_id": session.pending.action_id,
+            "intent_type": session.pending.intent_type,
+            "status": "pending",
+        })
+
+    # 构建 recent_entities
+    recent_entities = {}
+    if session.recent_entities:
+        recent_entities = {
+            "customer_id": session.recent_entities.customer_id,
+            "opportunity_id": session.recent_entities.opportunity_id,
+            "touched_at": session.recent_entities.touched_at,
+        }
 
     return SessionResponse(
-        v=session.v,
-        tenant_id=session.tenant_id,
-        crm_user_id=session.crm_user_id,
-        mode=session.mode,
-        updated_at=session.updated_at,
-        has_pending=session.pending is not None,
-        pending_expired=pending_expired,
-        recent_customer_id=session.recent_entities.customer_id if session.recent_entities else None,
-        recent_opportunity_id=session.recent_entities.opportunity_id if session.recent_entities else None,
-        history_count=len(session.history_last_n),
+        session_id=session.session_id,
+        messages=messages,
+        tool_history=tool_history,
+        recent_entities=recent_entities,
     )
 
 
-@router.delete("/sessions/{tenant_id}/{crm_user_id}", summary="清除 Session")
+@router.delete("/sessions/{session_id}", response_model=SessionDeleteResponse, summary="清除 Session")
 async def clear_session(
-    tenant_id: str,
-    crm_user_id: int,
+    session_id: str,
     redis_client: redis.Redis = Depends(get_redis),
+    team_id: int = Depends(get_current_user_team),
 ):
     """强制清空 session（运维用）
 
     注意：不会取消正在执行的 pending action。
+
+    权限校验：
+    - 需要登录用户
+    - session 必须属于当前用户的 team
+
+    Returns:
+        {message, session_id} 对齐 ReAct 响应格式
     """
     session_manager = SessionManager(redis_client)
-    await session_manager.clear(tenant_id, crm_user_id)
+    session = await session_manager.load(session_id)
 
-    return {"ok": True, "message": "Session cleared"}
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+
+    # 权限校验：session 必须属于当前用户的 team
+    if session.tenant_id != str(team_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权访问此 Session"
+        )
+
+    await session_manager.clear(session_id)
+
+    return SessionDeleteResponse(
+        message="Session deleted",
+        session_id=session_id,
+    )
 
 
 __all__ = ["router"]
