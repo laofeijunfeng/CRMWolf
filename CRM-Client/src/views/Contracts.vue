@@ -1,8 +1,5 @@
 <template>
   <div class="contracts-page">
-    <!-- P1: Typography - 页面标题（IBM Plex Sans） -->
-    <h1 class="wolf-page-title">合同管理</h1>
-
     <!-- 快捷筛选标签 + 操作按钮 -->
     <div class="filter-tabs-bar">
       <div class="filter-tabs">
@@ -201,6 +198,9 @@ import type { FilterValue, SortState } from '@/components/FilterTableHeader/type
 import contractApi, { type ContractListResponse, type ContractQueryParams } from '@/api/contract'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+usePageTitle()  // 自动从 route.meta.title 设置标题
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
