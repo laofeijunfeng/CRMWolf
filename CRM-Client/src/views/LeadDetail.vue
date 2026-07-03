@@ -3,10 +3,9 @@
     <!-- 页面标题栏 -->
     <div class="page-header">
       <div class="page-header-left">
-        <el-button class="back-btn" @click="router.back()">
+        <el-button class="back-btn" @click="router.back()" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ leadData?.lead_name || '线索详情' }}</h1>
       </div>
       <div class="page-header-right">
         <el-button type="primary" @click="handleEdit">编辑</el-button>
@@ -278,6 +277,9 @@ import { leadApi, type LeadDetail, type LeadUpdate, type LeadFollowUp, type Lead
 import { getLeadScore, getScoreIcon, getScoreColor, getScoreLevel, type ScoreDetail } from '@/api/score'
 import FollowUpList from '@/components/FollowUpList.vue'
 import { useUserStore } from '@/stores/user'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+const { setTitle } = usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
@@ -364,6 +366,8 @@ const fetchLeadDetail = async () => {
     const res = await leadApi.getLeadDetail(leadId)
     leadData.value = res
     followUps.value = res.follow_ups?.reverse() || []
+    // 设置动态标题
+    setTitle(res.lead_name || '线索详情')
 
     // 获取热力值明细
     if (res.score !== null) {

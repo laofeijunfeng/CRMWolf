@@ -3,10 +3,9 @@
     <!-- 页面头部 -->
     <div class="page-header-bar">
       <div class="header-left">
-        <el-button type="text" class="back-btn" @click="handleBack">
+        <el-button type="text" class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ contractInfo?.contract_name || '合同详情' }}</h1>
       </div>
       <div class="header-right">
         <el-button v-if="canEditContract" type="primary" class="primary-btn" @click="handleEdit">
@@ -203,6 +202,9 @@ import ApprovalProgressCompact from '@/components/ApprovalProgressCompact.vue'
 import PaymentPlans from '@/components/PaymentPlans.vue'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+const { setTitle } = usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
@@ -328,6 +330,8 @@ const fetchContractInfo = async () => {
   try {
     const data = await contractApi.getContract(Number(route.params.id))
     contractInfo.value = data
+    // 设置动态标题
+    setTitle(data.contract_name || '合同详情')
     console.log('合同详情数据:', data)
   } catch (error: unknown) {
     console.error('获取合同详情失败', error)

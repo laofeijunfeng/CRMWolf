@@ -3,10 +3,9 @@
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="header-left">
-        <el-button class="back-btn" @click="handleBack">
+        <el-button class="back-btn" @click="handleBack" aria-label="返回">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="wolf-page-title">{{ opportunity?.opportunity_name || '商机详情' }}</h1>
       </div>
       <div class="header-right">
         <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="success" size="small" @click="handleShowWinModal">
@@ -277,6 +276,9 @@ import { opportunityApi, type Opportunity, type OpportunityWinRequest, type Oppo
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import ProcurementStageFlow from '@/components/ProcurementStageFlow.vue'
 import { usePermissionStore } from '@/stores/permissions'
+import { usePageTitle } from '@/composables/usePageTitle'
+
+const { setTitle } = usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
@@ -316,6 +318,8 @@ const fetchOpportunityDetail = async () => {
     const id = Number(route.params.id)
     const data = await opportunityApi.getOpportunity(id)
     opportunity.value = data
+    // 设置动态标题
+    setTitle(data.opportunity_name || '商机详情')
     await fetchRelatedContract()
   } catch (error: unknown) {
     console.error('获取商机详情失败', error)
