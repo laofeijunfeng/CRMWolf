@@ -145,8 +145,13 @@ $wolf-card-padding-sm: 16px;
 $wolf-card-padding-xs: 12px;
 $wolf-section-gap: 24px;
 $wolf-form-item-gap: 16px;
-$wolf-header-height: 48px;
+$wolf-header-height: 56px;  // Desktop Header 高度（8dp grid: 8×7）
+$wolf-header-height-mobile: 48px;  // Mobile Header 高度（8dp grid: 8×6）
 $wolf-button-gap: 8px;
+
+// ==================== Header 过渡时间 Token ====================
+$wolf-transition-title: 0.15s;  // 标题切换过渡时间（Material Design）
+$wolf-transition-press: 0.15s;  // Press feedback 过渡时间
 
 // ==================== 表格尺寸 ====================
 // 极简中性风：无竖分割线、自适应行高、柔和色差

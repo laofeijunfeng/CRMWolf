@@ -84,7 +84,30 @@
     </aside>
     <main class="main-content">
       <header class="top-bar">
-        <ApprovalIcon class="top-bar-action" />
+        <!-- 左侧 slot：返回按钮（详情页使用） -->
+        <div class="header-left">
+          <slot name="header-left"></slot>
+        </div>
+
+        <!-- 中间：页面标题（统一渲染 + 空状态处理） -->
+        <div class="header-center">
+          <!-- 标题切换过渡动画 -->
+          <transition name="title-fade" mode="out-in">
+            <h1
+              class="wolf-page-title"
+              :key="pageTitle"
+              :class="{ 'title-empty': !pageTitle }"
+            >
+              {{ pageTitle || 'CRMWolf' }}
+            </h1>
+          </transition>
+        </div>
+
+        <!-- 右侧：页面操作 slot + 固定通知铃铛 -->
+        <div class="header-right">
+          <slot name="header-right"></slot>
+          <ApprovalIcon class="header-bell" />
+        </div>
       </header>
       <router-view />
     </main>
@@ -94,9 +117,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
+import { usePageTitleStore } from '@/stores/pageTitle'
 import { ElMessage } from 'element-plus'
 import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound } from '@element-plus/icons-vue'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
@@ -107,6 +132,8 @@ const route = useRoute()
 const userStore = useUserStore()
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
+const pageTitleStore = usePageTitleStore()
+const { title: pageTitle } = storeToRefs(pageTitleStore)
 const showTeamSwitcher = ref(false)
 
 const currentPath = computed(() => {
@@ -421,25 +448,104 @@ onMounted(async () => {
   background: $wolf-bg-page;
 }
 
-// 顶栏：仅承载审批铃铛（C4），右对齐；与 C3 侧边栏徽章共存
+// 顶栏：三段式布局（左侧 slot + 中间标题 + 右侧 slot + 铃铛）
 .top-bar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: $wolf-space-md;
-  height: 48px;
+  justify-content: space-between;  // 三段式布局
+  height: $wolf-header-height;  // 使用 Design Token (56px)
   padding: 0 $wolf-space-md;
   border-bottom: 1px solid $wolf-border-default;
   background: $wolf-bg-card;
   position: sticky;
   top: 0;
   z-index: 10;
+
+  // Mobile 适配
+  @media (max-width: 768px) {
+    height: $wolf-header-height-mobile;  // 48px
+  }
 }
 
-.top-bar-action {
-  margin-left: auto;
-  display: inline-flex;
+.header-left {
+  display: flex;
   align-items: center;
+  min-width: 48px;  // Touch target minimum (48px)
+  min-height: 48px;
+}
+
+.header-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;  // 标题居中
+
+  // 标题样式增强（视觉层次）
+  .wolf-page-title {
+    // 继承 typography.scss 的 20px + IBM Plex Sans
+    // 增强视觉权重
+    font-size: $wolf-font-size-title;
+    font-weight: $wolf-font-weight-semibold;
+    letter-spacing: -0.02em;  // 轻微收紧字距，增加紧凑感
+    color: $wolf-text-primary;
+    margin: 0;
+    transition: opacity $wolf-transition-title ease;  // 过渡动画
+    position: relative;
+
+    // 空状态处理
+    &.title-empty {
+      opacity: 0.6;  // 空标题显示品牌名，降低视觉权重
+    }
+  }
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;  // Touch spacing minimum (8px)
+  min-width: 48px;  // 操作区预留空间
+}
+
+.header-bell {
+  // Icon Button 样式
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: $wolf-radius-sm;
+  cursor: pointer;
+  transition: opacity $wolf-transition-press ease;  // Press feedback timing
+
+  &:active {
+    opacity: 0.7;  // Press feedback
+  }
+}
+
+// 标题切换过渡动画
+.title-fade-enter-active,
+.title-fade-leave-active {
+  transition: opacity $wolf-transition-title ease;
+}
+
+.title-fade-enter-from,
+.title-fade-leave-to {
+  opacity: 0;
+}
+
+// Header 内所有按钮的通用样式
+.header-button {
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: $wolf-radius-sm;
+  cursor: pointer;
+  transition: opacity $wolf-transition-press ease;
+
+  &:active {
+    opacity: 0.7;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;  // Focus ring for accessibility
+    outline-offset: 2px;
+  }
 }
 
 @media (max-width: 768px) {
