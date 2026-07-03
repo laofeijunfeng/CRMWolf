@@ -324,6 +324,7 @@ const form = ref<ApprovalFlow & { nodes: NodeWithRequired[] }>({
   min_amount: null,
   max_amount: null,
   license_type: '',
+  business_type: 'CONTRACT',
   is_active: 1,
   nodes: []
 })
