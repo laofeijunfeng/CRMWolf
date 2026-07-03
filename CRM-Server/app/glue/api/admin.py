@@ -13,13 +13,14 @@ Task 3.2: 统一 Session API 为 uuid 寻址
 """
 
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
 
 from app.core.redis import get_redis
+from app.core.deps import get_current_user_team
 from app.glue.config import GlueConfig
-from app.glue.core.session import SessionManager, GlueSession
+from app.glue.core.session import SessionManager
 
 
 router = APIRouter(prefix="/glue/v1", tags=["Glue Admin"])
@@ -83,16 +84,31 @@ async def glue_health_check(
 async def get_session(
     session_id: str,
     redis_client: redis.Redis = Depends(get_redis),
+    team_id: int = Depends(get_current_user_team),
 ):
     """查看当前 session 状态
 
     返回完整 messages、tool_history、recent_entities（对齐 ReAct 响应）。
+
+    权限校验：
+    - 需要登录用户
+    - session 必须属于当前用户的 team
     """
     session_manager = SessionManager(redis_client)
     session = await session_manager.load(session_id)
 
     if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+
+    # 权限校验：session 必须属于当前用户的 team
+    if session.tenant_id != str(team_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权访问此 Session"
+        )
 
     # 转换 history_last_n 为 messages 格式
     messages = [
@@ -130,15 +146,35 @@ async def get_session(
 async def clear_session(
     session_id: str,
     redis_client: redis.Redis = Depends(get_redis),
+    team_id: int = Depends(get_current_user_team),
 ):
     """强制清空 session（运维用）
 
     注意：不会取消正在执行的 pending action。
 
+    权限校验：
+    - 需要登录用户
+    - session 必须属于当前用户的 team
+
     Returns:
         {message, session_id} 对齐 ReAct 响应格式
     """
     session_manager = SessionManager(redis_client)
+    session = await session_manager.load(session_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+
+    # 权限校验：session 必须属于当前用户的 team
+    if session.tenant_id != str(team_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权访问此 Session"
+        )
+
     await session_manager.clear(session_id)
 
     return SessionDeleteResponse(
