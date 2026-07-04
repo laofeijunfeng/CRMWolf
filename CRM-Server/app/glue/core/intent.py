@@ -143,6 +143,7 @@ MULTI_INTENT_PARSE_PROMPT = """你是一个多意图识别助手。
     "intents": [
         {
             "intent": "意图类型",
+            "confidence": 0.0-1.0,
             "slots": {
                 "amount": 提取的金额数值（如有）,
                 "amount_unit": 金额单位（万/千等）,
@@ -364,7 +365,7 @@ class IntentDetector:
 
                 intents.append(IntentResult(
                     intent=intent_type,
-                    confidence=0.85,  # 多意图统一置信度
+                    confidence=raw_intent.get("confidence", 0.85),  # Task 4.6: 使用 LLM 返回的 confidence
                     reasoning=reasoning,
                     slots=slots,
                     missing_fields=missing_fields,
