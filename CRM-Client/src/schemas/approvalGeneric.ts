@@ -138,3 +138,13 @@ export const ApprovalListQuerySchema = z.object({
   page_size: z.number().int().positive().default(20)
 })
 export type ApprovalListQuery = z.infer<typeof ApprovalListQuerySchema>
+
+// ===== 发票文件上传审批响应（Task 5） =====
+export const ApproveWithFileResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string().min(1),
+  file_path: z.string().min(1),
+  invoice_number: z.string().nullable(),
+  new_status: z.string().min(1)
+})
+export type ApproveWithFileResponse = z.infer<typeof ApproveWithFileResponseSchema>
