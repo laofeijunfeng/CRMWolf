@@ -75,71 +75,8 @@ describe('ExpandedView.vue (V2)', () => {
     expect(view.attributes('aria-live')).toBe('polite')
   })
 
-  it('handles disambiguation waiting_for_user type', () => {
-    const disambiguationStep: ExecutionStep = {
-      id: 'step-3',
-      type: ExecutionStepType.WAITING_FOR_USER,
-      title: '请选择目标客户',
-      timestamp: new Date('2026-01-01T10:00:30'),
-      round: 3,
-      confirmationType: 'disambiguation',
-      options: [
-        { id: 16, name: '光大证券股份有限公司', entity_info_inline: 'ID:16 · 金融 · 活跃' },
-        { id: 17, name: '光大银行', entity_info_inline: 'ID:17 · 金融 · 活跃' }
-      ]
-    }
-
-    const wrapper = mount(ExpandedView, {
-      props: { steps: [...mockSteps, disambiguationStep] }
-    })
-
-    // V2: 使用 InlineCandidate 组件
-    const candidates = wrapper.findAll('.candidate-inline')
-    expect(candidates.length).toBeGreaterThan(0)
-  })
-
-  it('handles confirmation waiting_for_user type', () => {
-    const confirmationStep: ExecutionStep = {
-      id: 'step-4',
-      type: ExecutionStepType.WAITING_FOR_USER,
-      title: '创建跟进记录',
-      timestamp: new Date('2026-01-01T10:00:40'),
-      round: 4,
-      confirmationType: 'confirmation',
-      riskLevel: 'low',
-      detail_params: {
-        '客户': { value: '光大证券股份有限公司', isEntity: true },
-        '内容': { value: '项目立项阶段', isEntity: false }
-      }
-    }
-
-    const wrapper = mount(ExpandedView, {
-      props: { steps: [...mockSteps, confirmationStep] }
-    })
-
-    // V2: 使用 CompactConfirmSummary 组件
-    expect(wrapper.find('.confirmation-summary').exists()).toBe(true)
-  })
-
-  it('handles info_gap waiting_for_user type', () => {
-    const infoGapStep: ExecutionStep = {
-      id: 'step-5',
-      type: ExecutionStepType.WAITING_FOR_USER,
-      title: '创建跟进记录',
-      timestamp: new Date('2026-01-01T10:00:50'),
-      round: 5,
-      confirmationType: 'info_gap',
-      summary_params: { '客户': '光大证券' },
-      error: '缺少必填字段：跟进内容'
-    }
-
-    const wrapper = mount(ExpandedView, {
-      props: { steps: [...mockSteps, infoGapStep] }
-    })
-
-    // V2: 使用 CompactInfoGap 组件
-    expect(wrapper.find('.info-gap-summary').exists()).toBe(true)
-  })
+  // Task 5.11: 删除 confirmationType 分支测试（已删除死码）
+  // 原 3 个测试（disambiguation/confirmation/info_gap）已过时
 
   it('shows scroll container when content exceeds max-height', () => {
     // 创建多个步骤测试滚动

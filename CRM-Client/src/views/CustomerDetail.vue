@@ -1,20 +1,5 @@
 <template>
   <div class="customer-detail-page">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="header-left">
-        <el-button class="back-btn" @click="handleBack">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-        <h1 class="wolf-page-title">{{ customerDetail?.account_name || '客户详情' }}</h1>
-      </div>
-      <div class="header-right">
-        <el-button type="primary" size="small" @click="handleEditCustomer">
-          编辑
-        </el-button>
-      </div>
-    </div>
-
     <div v-loading="loading" class="detail-content">
       <div v-if="!customerDetail" class="empty-state">
         <el-empty description="客户信息加载失败，请刷新页面或稍后重试" />
@@ -901,10 +886,9 @@
   </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft,
   Plus,
   CircleCheck,
   CircleClose,
@@ -927,10 +911,21 @@ import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import invoiceApi from '@/api/invoice'
 import { getCustomerScore, getScoreIcon, getScoreColor, getScoreLevel, type ScoreDetail } from '@/api/score'
 import { useUserStore } from '@/stores/user'
+import { useHeaderStore } from '@/stores/header'
+import type { HeaderAction } from '@/stores/header'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true, '/customers')
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const customerId = ref<number>(parseInt(route.params['id'] as string))
 const customerDetail = ref<CustomerDetailResponse | null>(null)
