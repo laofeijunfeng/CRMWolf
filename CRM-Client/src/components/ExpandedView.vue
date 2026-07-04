@@ -5,9 +5,6 @@
 import { ref, computed } from 'vue'
 import { ArrowUp } from '@element-plus/icons-vue'
 import InlineStep from './InlineStep.vue'
-import InlineCandidate from './InlineCandidate.vue'
-import CompactConfirmSummary from './CompactConfirmSummary.vue'
-import CompactInfoGap from './CompactInfoGap.vue'
 import type { ExecutionStep } from '@/types/agentExecution'
 import { ExecutionStepType } from '@/types/agentExecution'
 
@@ -90,7 +87,6 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 }
 
-// 将 detail_params 转换为 CompactConfirmSummary 的 params 格式
 const convertDetailParams = (step: ExecutionStep) => {
   if (!step.detail_params) return {}
   const result: Record<string, { value: string; isEntity?: boolean }> = {}
@@ -127,60 +123,6 @@ const convertDetailParams = (step: ExecutionStep) => {
           :status="getStepStatus(step, index)"
         />
 
-        <!-- waiting_for_user 类型处理 -->
-        <template v-if="step.type === ExecutionStepType.WAITING_FOR_USER">
-
-          <!-- InlineCandidate: 候选选择（消歧） -->
-          <template v-if="step.confirmationType === 'disambiguation' && step.options?.length > 0">
-            <InlineCandidate
-              v-for="candidate in step.options"
-              :key="candidate.id"
-              :candidate="candidate"
-              :selected="selectedCandidate === candidate.id"
-              @select="handleSelectCandidate(candidate.id)"
-              @cancel="handleCancel"
-            />
-
-            <!-- 按钮容器 -->
-            <div class="action-buttons-inline">
-              <button class="btn-sm btn-confirm" @click="handleConfirm(step.id)">确认选择</button>
-              <button class="btn-sm btn-cancel" @click="handleCancel">取消</button>
-            </div>
-          </template>
-
-          <!-- CompactConfirmSummary: 操作确认 -->
-          <template v-else-if="step.confirmationType === 'confirmation'">
-            <CompactConfirmSummary
-              :round="step.round"
-              :title="step.title"
-              :params="convertDetailParams(step)"
-              :risk-level="step.riskLevel"
-              @confirm="handleConfirm(step.id)"
-              @cancel="handleCancel"
-            />
-          </template>
-
-          <!-- CompactInfoGap: 信息补全 -->
-          <template v-else-if="step.confirmationType === 'info_gap'">
-            <CompactInfoGap
-              :round="step.round"
-              :title="step.title"
-              :filled-params="step.summary_params"
-              :missing-field="step.error?.replace('缺少必填字段：', '') || '未知字段'"
-              @submit="handleSubmit"
-              @cancel="handleCancel"
-            />
-          </template>
-
-          <!-- 默认：无 confirmationType 的等待用户 -->
-          <template v-else>
-            <InlineStep
-              :step="step"
-              :round="step.round"
-              :status="getStepStatus(step, index)"
-            />
-          </template>
-        </template>
       </template>
     </div>
   </div>
