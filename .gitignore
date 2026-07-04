@@ -48,6 +48,9 @@ docs-site/
 
 # ===== 上传文件 =====
 CRM-Server/uploads/**.tar
+# Ignore all uploaded files except .gitkeep
+uploads/*
+!uploads/.gitkeep
 
 # ===== Claude 配置 =====
 # 上传团队共享的规则和技能，不上传用户特定配置
