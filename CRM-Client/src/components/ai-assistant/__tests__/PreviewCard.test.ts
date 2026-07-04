@@ -14,7 +14,8 @@ describe('PreviewCard', () => {
           name: '张三公司',
           phone: '13812345678',
           email: 'test@example.com'
-        }
+        },
+        riskLevel: 'LOW'  // Task 5.9: 从后端传入
       }
     })
 
@@ -29,7 +30,8 @@ describe('PreviewCard', () => {
         params: {
           opportunity_name: '大单商机',
           amount: 500000
-        }
+        },
+        riskLevel: 'MEDIUM'  // Task 5.9: 从后端传入
       }
     })
 
@@ -44,7 +46,8 @@ describe('PreviewCard', () => {
         params: {
           customer_name: '测试客户',
           reason: '数据错误'
-        }
+        },
+        riskLevel: 'HIGH'  // Task 5.9: 从后端传入
       }
     })
 
@@ -58,7 +61,8 @@ describe('PreviewCard', () => {
         actionType: 'create_customer',
         params: {
           name: '张三公司'
-        }
+        },
+        riskLevel: 'LOW'
       }
     })
 
@@ -74,7 +78,8 @@ describe('PreviewCard', () => {
         actionType: 'create_customer',
         params: {
           name: '张三公司'
-        }
+        },
+        riskLevel: 'LOW'
       }
     })
 
@@ -90,6 +95,7 @@ describe('PreviewCard', () => {
         params: {
           name: '张三公司'
         },
+        riskLevel: 'LOW',
         loading: true
       }
     })
@@ -108,7 +114,8 @@ describe('PreviewCard', () => {
           phone: '13812345678',
           email: 'test@example.com',
           address: '北京市'
-        }
+        },
+        riskLevel: 'LOW'
       }
     })
 
@@ -120,7 +127,8 @@ describe('PreviewCard', () => {
     const wrapper = mount(PreviewCard, {
       props: {
         actionType: 'create_customer',
-        params: { name: '测试' }
+        params: { name: '测试' },
+        riskLevel: 'LOW'
       },
       global: {
         stubs: {
