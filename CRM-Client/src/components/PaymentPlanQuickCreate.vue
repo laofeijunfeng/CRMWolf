@@ -583,4 +583,214 @@ const handleSubmit = async (): Promise<void> => {
     gap: $wolf-space-sm;
   }
 }
+
+// ==================== P0: Modal 动画 ====================
+// 进入动画：200ms ease-out（符合 Material Design 标准）
+.el-dialog {
+  animation: modal-enter 200ms ease-out;
+}
+
+// 退出动画：更快（120ms），避免用户等待
+.el-dialog.is-close {
+  animation: modal-exit 120ms ease-in;
+}
+
+@keyframes modal-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes modal-exit {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(-20px);
+  }
+}
+
+// P0: 支持 prefers-reduced-motion（WCAG 2.1 AA）
+@media (prefers-reduced-motion: reduce) {
+  .el-dialog,
+  .el-dialog.is-close {
+    animation: none;
+  }
+}
+
+// ==================== P2: 微交互状态 ====================
+// 快速分配按钮微交互（克制的 Wolf 风格）
+.quick-allocate {
+  .el-button {
+    transition: all 150ms ease-out;
+
+    // Hover: 轻微提升
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+
+    // Active: 回弹（更快，80ms）
+    &:active {
+      transform: translateY(0);
+      transition-duration: 80ms;
+    }
+
+    // Focus-visible: 保持可见性（WCAG 2.1 AA）
+    &:focus-visible {
+      outline: 2px solid $wolf-primary;
+      outline-offset: 2px;
+    }
+  }
+}
+
+// 批量模式卡片 hover
+.batch-plan-item {
+  transition: all 150ms ease-out;
+
+  &:hover {
+    border-color: $wolf-border-hover;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  }
+}
+
+// ==================== P2: 响应式布局 ====================
+// 平板（768px）
+@media (max-width: 768px) {
+  .el-dialog {
+    width: 90% !important;
+    max-width: 600px;
+    margin: 5vh auto;
+  }
+
+  .contract-summary {
+    :deep(.el-descriptions) {
+      .el-descriptions-item {
+        display: block;
+        width: 100%;
+        margin-bottom: $wolf-space-xs;
+      }
+    }
+  }
+
+  .quick-form {
+    .el-form-item {
+      :deep(.el-form-item__label) {
+        width: 100px !important;
+        text-align: left;
+      }
+
+      :deep(.el-form-item__content) {
+        flex: 1;
+      }
+    }
+
+    .el-input-number,
+    .el-date-picker {
+      width: 100% !important;
+      max-width: 200px;
+    }
+
+    .quick-allocate {
+      flex-wrap: wrap;
+      gap: $wolf-space-xs;
+
+      .el-button {
+        flex: 1 1 calc(50% - 4px);
+        min-width: 70px;
+      }
+    }
+  }
+
+  .batch-form {
+    .batch-plan-item {
+      padding: $wolf-space-sm;
+
+      .el-row {
+        flex-direction: column;
+        gap: $wolf-space-sm;
+
+        .el-col {
+          width: 100%;
+        }
+      }
+    }
+  }
+}
+
+// 小手机（375px）
+@media (max-width: 375px) {
+  .el-dialog {
+    width: 100% !important;
+    max-width: 100%;
+    margin: 0;
+    border-radius: 0;
+    min-height: 100vh;
+
+    :deep(.el-dialog__header) {
+      padding: $wolf-space-md;
+      border-bottom: 1px solid $wolf-border-light;
+    }
+
+    :deep(.el-dialog__body) {
+      padding: $wolf-space-md;
+    }
+
+    :deep(.el-dialog__footer) {
+      padding: $wolf-space-md;
+      border-top: 1px solid $wolf-border-light;
+    }
+  }
+
+  .contract-summary {
+    padding: $wolf-space-sm;
+    background: $wolf-bg-page;
+    border-radius: 0;
+  }
+
+  .mode-switch {
+    margin-bottom: $wolf-space-sm;
+
+    :deep(.el-radio-button__inner) {
+      padding: 8px 12px;
+      font-size: $wolf-font-size-small;
+    }
+  }
+
+  .quick-form,
+  .batch-form {
+    min-height: auto;
+  }
+
+  .dialog-footer {
+    flex-direction: column-reverse;
+    gap: $wolf-space-sm;
+
+    .footer-hints {
+      order: 1;
+      width: 100%;
+      justify-content: center;
+      font-size: $wolf-font-size-caption;
+    }
+
+    .footer-actions {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: $wolf-space-sm;
+
+      .el-button {
+        width: 100%;
+        margin: 0;
+      }
+    }
+  }
+}
 </style>
