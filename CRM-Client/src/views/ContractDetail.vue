@@ -1,19 +1,5 @@
 <template>
   <div class="contract-detail-page">
-    <!-- 页面头部 -->
-    <div class="page-header-bar">
-      <div class="header-left">
-        <el-button type="text" class="back-btn" @click="handleBack" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <div class="header-right">
-        <el-button v-if="canEditContract" type="primary" class="primary-btn" @click="handleEdit">
-          编辑
-        </el-button>
-      </div>
-    </div>
-
     <!-- 内容区 -->
     <div class="detail-content">
       <div v-loading="loading" class="content-wrapper">
@@ -183,12 +169,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import {
-  ArrowLeft,
   Ticket,
   User,
   TrendCharts,
@@ -204,6 +189,7 @@ import PaymentPlans from '@/components/PaymentPlans.vue'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 const { setTitle } = usePageTitle()
 
@@ -211,6 +197,7 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
+const headerStore = useHeaderStore()
 const currentUserId = userStore.userInfo?.id ? String(userStore.userInfo.id) : ''
 
 const contractInfo = ref<ContractResponse | null>(null)
@@ -521,10 +508,6 @@ const transformApprovalData = (apiData: ApprovalDetailFromAPI): TransformedAppro
   return transformed
 }
 
-const handleBack = () => {
-  router.back()
-}
-
 const handleEdit = () => {
   router.push(`/contracts/edit/${contractInfo.value?.id}`)
 }
@@ -687,9 +670,27 @@ const getApprovalPlaceholderText = () => {
   return statusTextMap[contractInfo.value.status] || '暂无审批信息'
 }
 
+// Configure header on mount
 onMounted(async () => {
+  headerStore.setBack(true)
   await fetchContractInfo()
   await fetchApprovalDetail()
+})
+
+// Watch canEditContract to update actions
+watch(canEditContract, (canEdit) => {
+  if (canEdit) {
+    headerStore.setActions([
+      { id: 'edit', label: '编辑', type: 'primary', handler: handleEdit }
+    ])
+  } else {
+    headerStore.setActions([])
+  }
+}, { immediate: true })
+
+// Clear header on unmount
+onUnmounted(() => {
+  headerStore.clear()
 })
 </script>
 

@@ -1,25 +1,5 @@
 <template>
   <div class="opportunity-detail-page">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="header-left">
-        <el-button class="back-btn" @click="handleBack" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <div class="header-right">
-        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="success" size="small" @click="handleShowWinModal">
-          赢单
-        </el-button>
-        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="danger" size="small" @click="handleShowLoseModal">
-          输单
-        </el-button>
-        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="primary" size="small" @click="handleEdit">
-          编辑
-        </el-button>
-      </div>
-    </div>
-
     <!-- 商机信息卡片 -->
     <div class="info-card">
       <div v-loading="loading">
@@ -268,21 +248,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, reactive } from 'vue'
+import { ref, onMounted, onUnmounted, computed, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import { opportunityApi, type Opportunity, type OpportunityWinRequest, type OpportunityLossRequest } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import ProcurementStageFlow from '@/components/ProcurementStageFlow.vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 const { setTitle } = usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
 const permissionStore = usePermissionStore()
+const headerStore = useHeaderStore()
 
 const loading = ref(false)
 const opportunity = ref<Opportunity | null>(null)
@@ -344,10 +325,6 @@ const fetchRelatedContract = async () => {
   } finally {
     contractLoading.value = false
   }
-}
-
-const handleBack = () => {
-  router.back()
 }
 
 const handleEdit = () => {
@@ -499,8 +476,28 @@ const handleLoseModalOk = async () => {
   }
 }
 
+// Configure header on mount
 onMounted(() => {
+  headerStore.setBack(true)
   fetchOpportunityDetail()
+})
+
+// Watch opportunity status to update actions
+watch([opportunity, canEditOpportunity], () => {
+  if (opportunity.value?.status === 0 && canEditOpportunity.value) {
+    headerStore.setActions([
+      { id: 'win', label: '赢单', type: 'success', handler: handleShowWinModal },
+      { id: 'lose', label: '输单', type: 'danger', handler: handleShowLoseModal },
+      { id: 'edit', label: '编辑', type: 'primary', handler: handleEdit }
+    ])
+  } else {
+    headerStore.setActions([])
+  }
+}, { immediate: true })
+
+// Clear header on unmount
+onUnmounted(() => {
+  headerStore.clear()
 })
 </script>
 
@@ -511,53 +508,6 @@ onMounted(() => {
   padding: 0;
   background: $wolf-bg-page;
   min-height: calc(100vh - 48px);
-}
-
-// 页面标题（sticky）
-.page-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: $wolf-bg-card;
-  border-bottom: 1px solid $wolf-border-default;
-  height: $wolf-header-height;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 $wolf-page-padding;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-
-.back-btn {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: $wolf-radius-md !important;
-  background: transparent !important;
-  border: none !important;
-
-  &:hover {
-    background: $wolf-bg-hover !important;
-  }
-}
-
-.page-title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
 }
 
 // 内容区域

@@ -1,32 +1,5 @@
 <template>
   <div class="invoice-detail-container">
-    <div class="page-header">
-      <div class="page-header__left">
-        <el-button class="wolf-btn wolf-btn--back" @click="handleBack" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <div class="page-header__right">
-        <el-button v-if="canEdit" type="primary" class="wolf-btn wolf-btn--primary" @click="handleEdit">
-          编辑
-        </el-button>
-        <el-dropdown v-if="canDelete" @command="handleAction">
-          <el-button class="wolf-btn wolf-btn--default">
-            更多
-            <el-icon><ArrowDown /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="delete">删除</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <el-button v-if="canMarkInvoiced" class="wolf-btn wolf-btn--primary" @click="handleMarkInvoiced">
-          标记开票
-        </el-button>
-      </div>
-    </div>
-
     <div v-loading="loading" class="invoice-content">
       <div v-if="!invoiceInfo" class="invoice-info-card">
         <el-empty description="发票信息加载失败" />
@@ -224,13 +197,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import {
-  ArrowLeft,
-  ArrowDown,
   User,
   Document,
   Clock,
@@ -250,6 +221,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import { logger } from '@/utils/logger'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 const { setTitle } = usePageTitle()
 
@@ -257,6 +229,7 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
+const headerStore = useHeaderStore()
 
 const currentUserId = computed<string>(() => userStore.userInfo?.id != null ? String(userStore.userInfo.id) : '')
 
@@ -345,19 +318,9 @@ const fetchInvoiceDetail = async (): Promise<void> => {
   }
 }
 
-const handleBack = (): void => {
-  router.back()
-}
-
 const handleEdit = (): void => {
   if (invoiceInfo.value) {
     router.push(`/invoices/edit/${invoiceInfo.value.id}`)
-  }
-}
-
-const handleAction = (command: string): void => {
-  if (command === 'delete') {
-    handleDelete()
   }
 }
 
@@ -429,61 +392,37 @@ const formatDateTime = (dateStr: string | undefined): string => {
   })
 }
 
+// Configure header on mount
 onMounted(() => {
+  headerStore.setBack(true)
   fetchInvoiceDetail()
+})
+
+// Watch invoiceInfo to update actions
+watch(invoiceInfo, () => {
+  const actions: Array<{ id: string; label: string; type?: 'primary' | 'success' | 'danger' | 'default'; handler: () => void }> = []
+
+  if (canEdit.value) {
+    actions.push({ id: 'edit', label: '编辑', type: 'primary', handler: handleEdit })
+  }
+  if (canDelete.value) {
+    actions.push({ id: 'delete', label: '删除', type: 'danger', handler: handleDelete })
+  }
+  if (canMarkInvoiced.value) {
+    actions.push({ id: 'mark-invoiced', label: '标记开票', type: 'primary', handler: handleMarkInvoiced })
+  }
+
+  headerStore.setActions(actions)
+}, { immediate: true })
+
+// Clear header on unmount
+onUnmounted(() => {
+  headerStore.clear()
 })
 </script>
 
 <style scoped lang="scss">
 @use '@/styles/variables.scss' as *;
-
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: $wolf-space-md;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-card-padding;
-  box-shadow: $wolf-shadow-card;
-}
-
-.page-header__left,
-.page-header__right {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.page-header__left {
-  flex: 1;
-  min-width: 0;
-}
-
-.page-header__right {
-  flex-shrink: 0;
-}
-
-.page-header__title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
-}
-
-.wolf-btn--back {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: $wolf-radius-md !important;
-  background: $wolf-purple-bg !important;
-  border: none !important;
-  color: $wolf-text-secondary !important;
-}
-
-.wolf-btn--back:hover {
-  background: $wolf-bg-hover !important;
-}
 
 .invoice-detail-container {
   padding: 0;

@@ -1,20 +1,5 @@
 <template>
   <div class="ai-skills-container">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <div class="page-header-right">
-        <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="showGeneratorDialog">
-          <el-icon><Plus /></el-icon>
-          新建 Skill
-        </el-button>
-      </div>
-    </div>
-
     <!-- Skill 列表 -->
     <div class="skills-section">
       <el-tabs v-model="activeTab">
@@ -206,19 +191,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
-import { ArrowLeft, Plus, Edit, Delete, ArrowDown } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, ArrowDown } from '@element-plus/icons-vue'
 import { aiSkillsApi, type Skill, type SkillAction, type CRUDMapping, type EnumMapping } from '@/api/aiSkills'
 import SkillGeneratorDialog from '@/components/SkillGeneratorDialog.vue'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 usePageTitle()
 
-const router = useRouter()
+const headerStore = useHeaderStore()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -438,10 +423,6 @@ const handleDeleteAction = async (skill: Skill, action: SkillAction) => {
   }
 }
 
-const handleBack = () => {
-  router.back()
-}
-
 // AI 辅助生成
 const showGeneratorDialog = () => {
   generatorDialogVisible.value = true
@@ -451,13 +432,23 @@ const handleGeneratorSuccess = async () => {
   await fetchSkills()
 }
 
+// Configure header on mount
 onMounted(async () => {
+  headerStore.setBack(true)
+  headerStore.setActions([
+    { id: 'create-skill', label: '新建 Skill', type: 'primary', icon: Plus, handler: showGeneratorDialog }
+  ])
   await Promise.all([
     fetchSkills(),
     fetchCRUDMappings(),
     fetchEnumMappings(),
     fetchHandlerTypes()
   ])
+})
+
+// Clear header on unmount
+onUnmounted(() => {
+  headerStore.clear()
 })
 </script>
 
@@ -468,45 +459,6 @@ onMounted(async () => {
   padding: 0;
   background: $wolf-bg-page;
   min-height: calc(100vh - 48px);
-}
-
-// 页面头部
-.page-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: $wolf-bg-card;
-  border-bottom: 1px solid $wolf-border-default;
-  height: $wolf-header-height;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 $wolf-page-padding;
-}
-
-.page-header-left {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.page-header-right {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.back-btn {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: $wolf-radius-md !important;
-  background: transparent !important;
-  border: none !important;
-
-  &:hover {
-    background: $wolf-bg-hover !important;
-  }
 }
 
 // 内容区
