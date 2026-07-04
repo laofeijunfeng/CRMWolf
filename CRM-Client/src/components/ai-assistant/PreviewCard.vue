@@ -65,7 +65,6 @@ import PreviewField from './PreviewField.vue'
 import {
   getActionConfig,
   formatFieldValue,
-  RISK_LEVEL_CONFIG,
   type FieldConfig
 } from '@/config/previewFieldConfig'
 
@@ -81,6 +80,11 @@ const props = defineProps({
   params: {
     type: Object as PropType<Record<string, unknown>>,
     required: true
+  },
+  /** 风险等级（Task 5.9: 从后端传入） */
+  riskLevel: {
+    type: String as PropType<'LOW' | 'MEDIUM' | 'HIGH'>,
+    default: 'LOW'
   },
   /** 加载状态 */
   loading: {
@@ -117,21 +121,22 @@ const title = computed(() => {
   return titleText
 })
 
-/** 风险等级 */
-const riskLevel = computed(() => {
-  return actionConfig.value?.riskLevel || 'low'
-})
-
-/** 风险标签样式 */
+/** 风险标签样式（Task 5.9: 简化映射） */
 const tagClass = computed(() => {
-  const config = RISK_LEVEL_CONFIG[riskLevel.value]
-  return config.bgClass
+  switch (props.riskLevel) {
+    case 'HIGH': return 'preview-card__tag--danger'
+    case 'MEDIUM': return 'preview-card__tag--warning'
+    default: return 'preview-card__tag--success'
+  }
 })
 
 /** 风险标签文本 */
 const riskLabel = computed(() => {
-  const config = RISK_LEVEL_CONFIG[riskLevel.value]
-  return config.label
+  switch (props.riskLevel) {
+    case 'HIGH': return '高风险'
+    case 'MEDIUM': return '中风险'
+    default: return '低风险'
+  }
 })
 
 /** 操作图标组件 */

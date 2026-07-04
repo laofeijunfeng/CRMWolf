@@ -192,6 +192,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -203,7 +204,20 @@ import { useHeaderStore } from '@/stores/header'
 
 usePageTitle()
 
+const router = useRouter()
 const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true, '/ai-assistant')
+  headerStore.setActions([
+    { id: 'create', label: '新建 Skill', type: 'primary', handler: showGeneratorDialog }
+  ])
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
+>>>>>>> ai-assistant-consolidation
 
 const loading = ref(false)
 const saving = ref(false)

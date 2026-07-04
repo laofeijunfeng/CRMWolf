@@ -1,14 +1,5 @@
 <template>
   <div class="customer-edit-page">
-    <!-- 页面标题栏 -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="handleGoBack" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-    </div>
-
     <!-- 表单内容 -->
     <div class="form-container" v-loading="loading">
       <!-- 基本信息卡片 -->
@@ -162,18 +153,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
+const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true)
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -329,46 +329,6 @@ onMounted(async () => {
   padding: 0;
   background: $wolf-bg-page;
   min-height: calc(100vh - 48px);
-}
-
-// 页面标题（sticky）
-.page-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: $wolf-bg-card;
-  border-bottom: 1px solid $wolf-border-default;
-  height: $wolf-header-height;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 $wolf-page-padding;
-}
-
-.page-header-left {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.back-btn {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: $wolf-radius-md !important;
-  background: transparent !important;
-  border: none !important;
-
-  &:hover {
-    background: $wolf-bg-hover !important;
-  }
-}
-
-.page-title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
 }
 
 // 表单容器（撑满页面宽度）

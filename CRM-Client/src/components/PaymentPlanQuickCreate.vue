@@ -14,7 +14,7 @@
     <div class="contract-summary">
       <el-descriptions :column="2" border size="small">
         <el-descriptions-item label="合同金额">
-          ¥{{ formatAmount(contractInfo?.total_amount || 0) }}
+          ¥{{ formatAmount(contractInfo?.total_amount ?? 0) }}
         </el-descriptions-item>
         <el-descriptions-item label="已规划金额">
           <span :class="{ 'warning': existingPlansTotal > 0 }">
@@ -59,7 +59,7 @@
               :value="preset.value"
             >
               <span>{{ preset.label }}</span>
-              <span v-if="preset.suggestedPercentage" class="preset-hint">
+              <span v-if="preset.suggestedPercentage !== undefined" class="preset-hint">
                 (建议 {{ preset.suggestedPercentage }}%)
               </span>
             </el-option>
@@ -119,7 +119,7 @@
             value-format="YYYY-MM-DD"
             :disabled-date="disabledDate"
           />
-          <span v-if="suggestedDate" class="date-hint">
+          <span v-if="suggestedDate !== ''" class="date-hint">
             建议: {{ suggestedDate }}
           </span>
         </el-form-item>
@@ -223,7 +223,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import paymentApi, { type PaymentPlanResponse } from '@/api/payment'
-import { STAGE_PRESETS, suggestNextStage } from '@/constants/payment-stage-presets'
+import { STAGE_PRESETS, suggestNextStage, type StagePreset } from '@/constants/payment-stage-presets'
 import { showError, showSuccess } from '@/utils/errorMessages'
 
 // Props
@@ -251,9 +251,9 @@ const emit = defineEmits<{
 
 // 对话框可见性
 const dialogVisible = computed({
-  get: () => props.visible,
-  set: (val) => {
-    if (!val) emit('close')
+  get: (): boolean => props.visible,
+  set: (val: boolean): void => {
+    if (val === false) emit('close')
   }
 })
 
@@ -261,7 +261,7 @@ const dialogVisible = computed({
 const mode = ref<'quick' | 'batch'>('quick')
 
 // 快速模式表单
-const quickFormRef = ref<FormInstance>()
+const quickFormRef = ref<FormInstance | undefined>(undefined)
 const quickForm = ref({
   stage_name: '',
   planned_amount: 0,
@@ -290,102 +290,108 @@ const batchForm = ref<{ plans: BatchPlanItem[] }>({
 })
 
 // 计算属性
-const existingPlansTotal = computed(() => {
-  return props.existingPlans?.reduce((sum, p) => sum + Number(p.planned_amount), 0) || 0
+const existingPlansTotal = computed((): number => {
+  const plans = props.existingPlans ?? []
+  return plans.reduce((sum: number, p): number => sum + Number(p.planned_amount), 0)
 })
 
-const remainingAmount = computed(() => {
-  return (props.contractInfo?.total_amount || 0) - existingPlansTotal.value
+const remainingAmount = computed((): number => {
+  const total = props.contractInfo?.total_amount ?? 0
+  return total - existingPlansTotal.value
 })
 
-const percentageHint = computed(() => {
-  if (!props.contractInfo?.total_amount) return ''
-  const pct = (quickForm.value.planned_amount / props.contractInfo.total_amount) * 100
+const percentageHint = computed((): string => {
+  const total = props.contractInfo?.total_amount
+  if (total === undefined || total === 0) return ''
+  const pct = (quickForm.value.planned_amount / total) * 100
   return `(${pct.toFixed(1)}%)`
 })
 
-const suggestedDate = computed(() => {
-  const baseDate = props.contractInfo?.effective_date || props.contractInfo?.signing_date
-  if (!baseDate) return ''
+const suggestedDate = computed((): string => {
+  const baseDate = props.contractInfo?.effective_date ?? props.contractInfo?.signing_date
+  if (baseDate === undefined || baseDate === '') return ''
 
-  const stageIndex = props.existingPlans?.length || 0
-  const daysToAdd = [30, 90, 180][stageIndex] || 30
+  const stageIndex = props.existingPlans?.length ?? 0
+  const daysToAdd = [30, 90, 180][stageIndex] ?? 30
 
   const date = new Date(baseDate)
   date.setDate(date.getDate() + daysToAdd)
-  return date.toISOString().split('T')[0]
+return date.toISOString().split('T')[0] ?? ''
 })
 
-const batchTotalAmount = computed(() => {
-  return batchForm.value.plans.reduce((sum, p) => sum + (p.planned_amount || 0), 0)
+const batchTotalAmount = computed((): number => {
+  return batchForm.value.plans.reduce((sum: number, p): number => sum + (p.planned_amount ?? 0), 0)
 })
 
-const batchPercentage = computed(() => {
-  if (!props.contractInfo?.total_amount) return '0'
-  return ((batchTotalAmount.value / props.contractInfo.total_amount) * 100).toFixed(1)
+const batchPercentage = computed((): string => {
+  const total = props.contractInfo?.total_amount
+  if (total === undefined || total === 0) return '0'
+  return ((batchTotalAmount.value / total) * 100).toFixed(1)
 })
 
 // 提交状态
-const submitting = ref(false)
+const submitting = ref<boolean>(false)
 
 // 格式化函数
-const formatAmount = (amount: number) => {
+const formatAmount = (amount: number): string => {
   return amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 // 禁用过去日期
-const disabledDate = (date: Date) => {
+const disabledDate = (date: Date): boolean => {
   return date < new Date(new Date().setHours(0, 0, 0, 0))
 }
 
 // 快速分配百分比
-const quickAllocate = (percentage: number) => {
-  if (!props.contractInfo?.total_amount) return
-  quickForm.value.planned_amount = props.contractInfo.total_amount * percentage / 100
+const quickAllocate = (percentage: number): void => {
+  const total = props.contractInfo?.total_amount
+  if (total === undefined) return
+  quickForm.value.planned_amount = total * percentage / 100
 }
 
 // 添加批量阶段
-const addBatchPlan = () => {
+const addBatchPlan = (): void => {
   batchForm.value.plans.push({ stage_name: '', planned_amount: 0, due_date: '' })
 }
 
 // 删除批量阶段
-const removeBatchPlan = (index: number) => {
+const removeBatchPlan = (index: number): void => {
   batchForm.value.plans.splice(index, 1)
 }
 
 // 智能预填充
-const initQuickForm = () => {
-  const existingStages = props.existingPlans?.map(p => p.stage_name) || []
-  const suggested = suggestNextStage(existingStages)
+const initQuickForm = (): void => {
+  const existingStages: string[] = props.existingPlans?.map((p): string => p.stage_name) ?? []
+  const suggested: StagePreset = suggestNextStage(existingStages)
 
   // 1. 阶段名称
   quickForm.value.stage_name = suggested.value
 
   // 2. 金额
-  if (suggested.suggestedPercentage && props.contractInfo?.total_amount) {
-    quickForm.value.planned_amount = Math.min(
-      remainingAmount.value,
-      props.contractInfo.total_amount * suggested.suggestedPercentage / 100
-    )
+  const suggestedPct = suggested.suggestedPercentage
+  const total = props.contractInfo?.total_amount
+  if (suggestedPct !== undefined && total !== undefined) {
+    const calculated = total * suggestedPct / 100
+    quickForm.value.planned_amount = Math.min(remainingAmount.value, calculated)
   } else {
     quickForm.value.planned_amount = remainingAmount.value > 0 ? remainingAmount.value : 0
   }
 
   // 3. 日期
-  quickForm.value.due_date = suggestedDate.value || ''
+  const suggestedDt = suggestedDate.value
+  quickForm.value.due_date = suggestedDt !== '' ? suggestedDt : ''
 }
 
 // 监听 visible 变化，初始化表单
-watch(() => props.visible, (val) => {
-  if (val) {
+watch(() => props.visible, (val: boolean): void => {
+  if (val === true) {
     initQuickForm()
     batchForm.value.plans = [{ stage_name: '', planned_amount: 0, due_date: '' }]
   }
 })
 
 // 键盘快捷键（应用 ENG Review 和 P1 改进）
-const handleKeydown = (e: KeyboardEvent) => {
+const handleKeydown = (e: KeyboardEvent): void => {
   // Ctrl+Enter 或 Cmd+Enter（Mac）快速提交
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault()
@@ -408,20 +414,21 @@ onUnmounted(() => {
 })
 
 // 关闭对话框
-const handleClose = () => {
+const handleClose = (): void => {
   emit('close')
 }
 
 // 提交表单（应用 ENG Review D2：提前设置 submitting 防双击）
-const handleSubmit = async () => {
+const handleSubmit = async (): Promise<void> => {
   // D2: 立即设置 submitting 防止双击
   submitting.value = true
 
   try {
     if (mode.value === 'quick') {
       // 快速模式验证
-      const valid = await quickFormRef.value?.validate().catch(() => false)
-      if (!valid) {
+      const formRef = quickFormRef.value
+      const valid = formRef !== undefined ? await formRef.validate().catch(() => false) : false
+      if (valid === false) {
         submitting.value = false
         return
       }
@@ -434,17 +441,17 @@ const handleSubmit = async () => {
       emit('close')
     } else {
       // 批量模式验证（应用 ENG Review D1：前端校验总金额）
-      const valid = batchForm.value.plans.every(p =>
-        p.stage_name && p.planned_amount > 0 && p.due_date
+      const isValid = batchForm.value.plans.every((p): boolean =>
+        p.stage_name !== '' && p.planned_amount > 0 && p.due_date !== ''
       )
-      if (!valid) {
+      if (isValid === false) {
         ElMessage.error('请填写完整的计划信息')
         submitting.value = false
         return
       }
 
       // D1: 校验总金额不超过合同金额
-      const contractTotalAmount = props.contractInfo?.total_amount || 0
+      const contractTotalAmount = props.contractInfo?.total_amount ?? 0
       if (batchTotalAmount.value > contractTotalAmount) {
         ElMessage.error('计划总金额超过合同金额，无法创建')
         submitting.value = false
@@ -457,7 +464,6 @@ const handleSubmit = async () => {
       emit('close')
     }
   } catch (error: unknown) {
-    console.error('创建回款计划失败', error)
     showError(error, '创建回款计划')
     submitting.value = false
   }
@@ -575,6 +581,216 @@ const handleSubmit = async () => {
   .footer-actions {
     display: flex;
     gap: $wolf-space-sm;
+  }
+}
+
+// ==================== P0: Modal 动画 ====================
+// 进入动画：200ms ease-out（符合 Material Design 标准）
+.el-dialog {
+  animation: modal-enter 200ms ease-out;
+}
+
+// 退出动画：更快（120ms），避免用户等待
+.el-dialog.is-close {
+  animation: modal-exit 120ms ease-in;
+}
+
+@keyframes modal-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes modal-exit {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(-20px);
+  }
+}
+
+// P0: 支持 prefers-reduced-motion（WCAG 2.1 AA）
+@media (prefers-reduced-motion: reduce) {
+  .el-dialog,
+  .el-dialog.is-close {
+    animation: none;
+  }
+}
+
+// ==================== P2: 微交互状态 ====================
+// 快速分配按钮微交互（克制的 Wolf 风格）
+.quick-allocate {
+  .el-button {
+    transition: all 150ms ease-out;
+
+    // Hover: 轻微提升
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+
+    // Active: 回弹（更快，80ms）
+    &:active {
+      transform: translateY(0);
+      transition-duration: 80ms;
+    }
+
+    // Focus-visible: 保持可见性（WCAG 2.1 AA）
+    &:focus-visible {
+      outline: 2px solid $wolf-primary;
+      outline-offset: 2px;
+    }
+  }
+}
+
+// 批量模式卡片 hover
+.batch-plan-item {
+  transition: all 150ms ease-out;
+
+  &:hover {
+    border-color: $wolf-border-hover;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  }
+}
+
+// ==================== P2: 响应式布局 ====================
+// 平板（768px）
+@media (max-width: 768px) {
+  .el-dialog {
+    width: 90% !important;
+    max-width: 600px;
+    margin: 5vh auto;
+  }
+
+  .contract-summary {
+    :deep(.el-descriptions) {
+      .el-descriptions-item {
+        display: block;
+        width: 100%;
+        margin-bottom: $wolf-space-xs;
+      }
+    }
+  }
+
+  .quick-form {
+    .el-form-item {
+      :deep(.el-form-item__label) {
+        width: 100px !important;
+        text-align: left;
+      }
+
+      :deep(.el-form-item__content) {
+        flex: 1;
+      }
+    }
+
+    .el-input-number,
+    .el-date-picker {
+      width: 100% !important;
+      max-width: 200px;
+    }
+
+    .quick-allocate {
+      flex-wrap: wrap;
+      gap: $wolf-space-xs;
+
+      .el-button {
+        flex: 1 1 calc(50% - 4px);
+        min-width: 70px;
+      }
+    }
+  }
+
+  .batch-form {
+    .batch-plan-item {
+      padding: $wolf-space-sm;
+
+      .el-row {
+        flex-direction: column;
+        gap: $wolf-space-sm;
+
+        .el-col {
+          width: 100%;
+        }
+      }
+    }
+  }
+}
+
+// 小手机（375px）
+@media (max-width: 375px) {
+  .el-dialog {
+    width: 100% !important;
+    max-width: 100%;
+    margin: 0;
+    border-radius: 0;
+    min-height: 100vh;
+
+    :deep(.el-dialog__header) {
+      padding: $wolf-space-md;
+      border-bottom: 1px solid $wolf-border-light;
+    }
+
+    :deep(.el-dialog__body) {
+      padding: $wolf-space-md;
+    }
+
+    :deep(.el-dialog__footer) {
+      padding: $wolf-space-md;
+      border-top: 1px solid $wolf-border-light;
+    }
+  }
+
+  .contract-summary {
+    padding: $wolf-space-sm;
+    background: $wolf-bg-page;
+    border-radius: 0;
+  }
+
+  .mode-switch {
+    margin-bottom: $wolf-space-sm;
+
+    :deep(.el-radio-button__inner) {
+      padding: 8px 12px;
+      font-size: $wolf-font-size-small;
+    }
+  }
+
+  .quick-form,
+  .batch-form {
+    min-height: auto;
+  }
+
+  .dialog-footer {
+    flex-direction: column-reverse;
+    gap: $wolf-space-sm;
+
+    .footer-hints {
+      order: 1;
+      width: 100%;
+      justify-content: center;
+      font-size: $wolf-font-size-caption;
+    }
+
+    .footer-actions {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: $wolf-space-sm;
+
+      .el-button {
+        width: 100%;
+        margin: 0;
+      }
+    }
   }
 }
 </style>

@@ -1,15 +1,5 @@
 <template>
   <div class="notification-config-container">
-    <!-- 页面头部（sticky） -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-        <h1 class="page-title">通知配置</h1>
-      </div>
-    </div>
-
     <!-- 配置卡片 -->
     <el-card class="config-card" v-loading="loading">
       <template #header>
@@ -201,17 +191,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
 import {
-  ArrowLeft, Check, Promotion, Warning, CopyDocument
+  Check, Promotion, Warning, CopyDocument
 } from '@element-plus/icons-vue'
 import { notificationConfigApi, type NotificationConfigResponse } from '@/api/notificationConfig'
+import { useHeaderStore } from '@/stores/header'
 
 const router = useRouter()
+const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true, '/ai-assistant')
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const loading = ref(false)
 const saving = ref(false)

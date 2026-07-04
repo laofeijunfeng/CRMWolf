@@ -1,14 +1,5 @@
 <template>
   <div class="lead-form">
-    <!-- 页面标题栏 -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-    </div>
-
     <!-- 表单内容 -->
     <div class="form-content">
       <div class="form-card">
@@ -121,17 +112,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import { leadApi } from '@/api/lead'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
+const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true)
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const isEdit = ref(false)
 const leadId = ref<string>('')
@@ -235,38 +235,6 @@ const handleBack = () => {
   padding: 0;
   background: $wolf-bg-page;
   min-height: calc(100vh - 48px);
-}
-
-.page-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: $wolf-bg-card;
-  border-bottom: 1px solid $wolf-border-default;
-  height: $wolf-header-height;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 $wolf-page-padding;
-}
-
-.page-header-left {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.back-btn {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: $wolf-radius-md !important;
-  background: transparent !important;
-  border: none !important;
-
-  &:hover {
-    background: $wolf-bg-hover !important;
-  }
 }
 
 .page-title {

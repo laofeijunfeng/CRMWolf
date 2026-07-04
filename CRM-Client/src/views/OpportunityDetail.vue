@@ -257,6 +257,7 @@ import ProcurementStageFlow from '@/components/ProcurementStageFlow.vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useHeaderStore } from '@/stores/header'
+import type { HeaderAction } from '@/stores/header'
 
 const { setTitle } = usePageTitle()
 
@@ -264,6 +265,26 @@ const router = useRouter()
 const route = useRoute()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
+
+// Back button: immediate
+onMounted(() => {
+  headerStore.setBack(true, '/opportunities')
+})
+
+// Action buttons: after data loads
+watch(opportunity, () => {
+  const actions: HeaderAction[] = []
+  if (opportunity.value?.status === 0 && canEditOpportunity.value) {
+    actions.push({ id: 'win', label: '赢单', type: 'success', handler: handleShowWinModal })
+    actions.push({ id: 'lose', label: '输单', type: 'danger', handler: handleShowLoseModal })
+    actions.push({ id: 'edit', label: '编辑', type: 'primary', handler: handleEdit })
+  }
+  headerStore.setActions(actions)
+}, { immediate: true })
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const loading = ref(false)
 const opportunity = ref<Opportunity | null>(null)
