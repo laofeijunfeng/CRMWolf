@@ -316,7 +316,7 @@ const suggestedDate = computed((): string => {
 
   const date = new Date(baseDate)
   date.setDate(date.getDate() + daysToAdd)
-  return date.toISOString().split('T')[0]
+  return date.toISOString().split('T')[0] ?? ''
 })
 
 const batchTotalAmount = computed((): number => {
