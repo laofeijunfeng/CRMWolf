@@ -703,60 +703,6 @@ onUnmounted(() => {
   min-height: calc(100vh - 48px);
 }
 
-// 页面头部
-.page-header-bar {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: $wolf-bg-card;
-  border-bottom: 1px solid $wolf-border-color;
-  height: $wolf-header-height;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 $wolf-page-padding;
-}
-
-.header-left,
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.header-left {
-  flex: 1;
-  min-width: 0;
-}
-
-.header-right {
-  flex-shrink: 0;
-}
-
-
-.header-title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.back-btn {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: $wolf-radius-md !important;
-  color: $wolf-text-tertiary;
-
-  &:hover {
-    background: $wolf-bg-hover !important;
-    color: $wolf-text-secondary;
-  }
-}
-
 .primary-btn {
   background: $wolf-primary;
   color: $wolf-text-inverse;
@@ -1069,14 +1015,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .page-header-bar {
-    padding: $wolf-space-sm $wolf-page-padding;
-  }
-
-  .header-title {
-    font-size: $wolf-font-size-card-title;
-  }
-
   .info-bottom {
     .attributes-grid {
       grid-template-columns: 1fr;

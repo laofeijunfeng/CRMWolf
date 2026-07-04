@@ -829,18 +829,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .page-header__left {
-    gap: $wolf-space-sm;
-  }
-
-  .page-header__title {
-    font-size: $wolf-font-size-body;
-  }
-
-  .page-header__right {
-    gap: $wolf-space-sm;
-  }
-
   .info-bottom {
     .attributes-grid {
       grid-template-columns: 1fr;

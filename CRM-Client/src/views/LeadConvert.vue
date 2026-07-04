@@ -270,58 +270,6 @@ onMounted(async () => {
   min-height: calc(100vh - 48px);
 }
 
-.page-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: $wolf-bg-card;
-  border-bottom: 1px solid $wolf-border-default;
-  height: $wolf-header-height;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 $wolf-page-padding;
-}
-
-.page-header-left,
-.page-header-right {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.page-header-left {
-  flex: 1;
-  min-width: 0;
-}
-
-.page-header-right {
-  flex-shrink: 0;
-}
-
-.back-btn {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: $wolf-radius-md !important;
-  background: transparent !important;
-  border: none !important;
-
-  &:hover {
-    background: $wolf-bg-hover !important;
-  }
-}
-
-.page-title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .convert-content {
   padding: $wolf-page-padding;
   display: flex;
