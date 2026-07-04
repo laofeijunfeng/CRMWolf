@@ -608,13 +608,13 @@ defineExpose({
   text-align: center;
   padding: $wolf-space-lg;
   color: $wolf-text-tertiary;
-  background: $wolf-fill-light;
+  background: $wolf-bg-hover;
   border-radius: $wolf-radius-sm;
   border: 1px dashed $wolf-border-light;
 
   .empty-icon {
     font-size: 48px;
-    color: $wolf-text-quaternary;
+    color: $wolf-text-tertiary;
     margin-bottom: $wolf-space-md;
   }
 
@@ -706,9 +706,9 @@ defineExpose({
     .optional-tag {
       font-size: $wolf-font-size-caption;
       color: $wolf-text-tertiary;
-      background: $wolf-fill-light;
+      background: $wolf-bg-hover;
       padding: 2px 6px;
-      border-radius: $wolf-radius-xs;
+      border-radius: $wolf-radius-sm;
       font-weight: $wolf-font-weight-normal;
     }
 

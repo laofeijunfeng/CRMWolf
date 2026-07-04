@@ -217,7 +217,6 @@ onMounted(() => {
 onUnmounted(() => {
   headerStore.clear()
 })
->>>>>>> ai-assistant-consolidation
 
 const loading = ref(false)
 const saving = ref(false)

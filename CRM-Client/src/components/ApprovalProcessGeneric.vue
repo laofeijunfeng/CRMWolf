@@ -670,7 +670,7 @@ onMounted(async (): Promise<void> => {
 
 // Task 6: 已上传文件显示区域样式
 .approval-process-generic__file-section {
-  background: $wolf-fill-light;
+  background: $wolf-bg-hover;
   border-radius: $wolf-radius-sm;
   padding: $wolf-space-md;
   margin-bottom: $wolf-space-md;

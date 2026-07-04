@@ -825,7 +825,7 @@ onUnmounted(() => {
     align-items: center;
     gap: $wolf-space-md;
     padding: $wolf-space-md;
-    background: $wolf-fill-light;
+    background: $wolf-bg-hover;
     border-radius: $wolf-radius-sm;
   }
 

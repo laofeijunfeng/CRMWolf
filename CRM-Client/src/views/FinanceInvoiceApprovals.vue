@@ -630,7 +630,7 @@ onMounted(() => {
 // Task 6: 已上传文件显示区域样式
 .uploaded-file-info {
   margin-top: $wolf-space-md;
-  background: $wolf-fill-light;
+  background: $wolf-bg-hover;
   border-radius: $wolf-radius-sm;
   padding: $wolf-space-md;
 

@@ -476,7 +476,7 @@ const handleSubmit = async (): Promise<void> => {
 .contract-summary {
   margin-bottom: $wolf-space-md;
   padding: $wolf-space-sm;
-  background: $wolf-bg-soft;
+  background: $wolf-bg-elevated;
   border-radius: $wolf-radius-md;
 
   .warning {
@@ -574,7 +574,7 @@ const handleSubmit = async (): Promise<void> => {
   .footer-hints {
     display: flex;
     gap: $wolf-space-sm;
-    font-size: $wolf-font-size-xs;
+    font-size: $wolf-font-size-caption;
     color: $wolf-text-tertiary;
   }
 
