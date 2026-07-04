@@ -335,6 +335,28 @@ $wolf-approval-rejected-bg:    $wolf-danger-bg;      // #FCECEC
 $wolf-approval-cancelled-text: $wolf-text-tertiary;  // #636363 已撤回：中性灰，终态但不强警示
 $wolf-approval-cancelled-bg:   $wolf-bg-hover;       // #F5F5F5
 
+// ==================== AI phase 语义别名（指向既有功能色，不新增色相）====================
+// Task 5.8: AI Assistant 阶段状态视觉契约
+// 设计原则：已完成=主色、待介入=琥珀警示、未到达=占位灰
+$wolf-phase-done:    $wolf-text-secondary;   // 已完成节点（#3A3A3A）
+$wolf-phase-active:  $wolf-warning-text;     // 待用户介入 = 暂停关注 = 琥珀（#7A4F1E）
+$wolf-phase-pending: $wolf-text-placeholder; // 未到达节点（#7A7A7A）
+
+// ==================== deal outcome 语义（对齐既有审批状态约定）====================
+// Task 5.8: win/lose 执行结果分态染色
+// 设计原则：赢单=成功绿 climax、输单=中性灰终态（非错误）、通用高风险=危险红
+// 参见：审批状态 CANCELLED = 中性灰终态约定
+$wolf-outcome-win:      $wolf-success-text;  // 赢单 #2B633C
+$wolf-outcome-win-bg:   $wolf-success-bg;    // #EDF7EF
+$wolf-outcome-lose:     $wolf-text-tertiary; // 输单 #636363（中性灰终态）
+$wolf-outcome-lose-bg:  $wolf-bg-hover;      // #F5F5F5
+$wolf-outcome-risk:     $wolf-danger-text;   // 通用高风险 #7A2828
+$wolf-outcome-risk-bg:  $wolf-danger-bg;     // #FCECEC
+
+// ==================== 数字等宽特性（防 layout shift）====================
+// Task 5.8: 金额/日期字段 tabular-nums
+$wolf-numeric: tabular-nums lining-nums;
+
 // ==================== Typography 统一样式导入 ====================
 // 必须在所有变量定义之后导入
 @import '_typography.scss';
