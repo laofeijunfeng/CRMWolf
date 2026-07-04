@@ -172,7 +172,7 @@ describe('ApprovalProcessGeneric', () => {
   it('reject requires reason (synchronous guard before action)', async () => {
     api.getApprovalDetail.mockResolvedValue(buildDetail({ status: 'PENDING' }))
     const w = mountComp({
-      entityType: 'INVOICE',
+      entityType: 'PAYMENT',  // INVOICE 会触发 InvoiceFileUpload UI，隐藏按钮
       entityId: 1,
       canApprove: true,
       isSubmitter: false
@@ -204,7 +204,7 @@ describe('ApprovalProcessGeneric', () => {
     )
 
     const w = mountComp({
-      entityType: 'INVOICE',
+      entityType: 'PAYMENT',  // INVOICE 会触发 InvoiceFileUpload UI，隐藏按钮
       entityId: 1,
       canApprove: true,
       isSubmitter: false
@@ -230,7 +230,7 @@ describe('ApprovalProcessGeneric', () => {
     api.approveEntity.mockRejectedValueOnce(makeAxios409())
 
     const w = mountComp({
-      entityType: 'INVOICE',
+      entityType: 'PAYMENT',  // INVOICE 会触发 InvoiceFileUpload UI，隐藏按钮
       entityId: 1,
       canApprove: true,
       isSubmitter: false
@@ -247,7 +247,7 @@ describe('ApprovalProcessGeneric', () => {
     // C-DSG-7 条8：保留已输入理由（弹窗未关闭 + reason 未清空）
     expect(ElMessage.warning).toHaveBeenCalledWith('该审批已被他人处理，你的填写已保留')
     expect(api.approveEntity).toHaveBeenCalledWith(
-      'INVOICE', 1, 'REJECT', '请补充材料', '2026-07-01T10:00:00'
+      'PAYMENT', 1, 'REJECT', '请补充材料', '2026-07-01T10:00:00'
     )
     // reload：getApprovalDetail 至少 2 次（初始 + 冲突重载）
     expect(api.getApprovalDetail).toHaveBeenCalledTimes(2)
@@ -264,7 +264,7 @@ describe('ApprovalProcessGeneric', () => {
     api.approveEntity.mockRejectedValueOnce(makeAxios409())
 
     const w = mountComp({
-      entityType: 'INVOICE',
+      entityType: 'PAYMENT',  // INVOICE 会触发 InvoiceFileUpload UI，隐藏按钮
       entityId: 1,
       canApprove: true,
       isSubmitter: false
