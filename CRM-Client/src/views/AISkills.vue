@@ -1,20 +1,5 @@
 <template>
   <div class="ai-skills-container">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <div class="page-header-right">
-        <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="showGeneratorDialog">
-          <el-icon><Plus /></el-icon>
-          新建 Skill
-        </el-button>
-      </div>
-    </div>
-
     <!-- Skill 列表 -->
     <div class="skills-section">
       <el-tabs v-model="activeTab">
@@ -206,19 +191,32 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
-import { ArrowLeft, Plus, Edit, Delete, ArrowDown } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, ArrowDown } from '@element-plus/icons-vue'
 import { aiSkillsApi, type Skill, type SkillAction, type CRUDMapping, type EnumMapping } from '@/api/aiSkills'
 import SkillGeneratorDialog from '@/components/SkillGeneratorDialog.vue'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 usePageTitle()
 
 const router = useRouter()
+const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true, '/ai-assistant')
+  headerStore.setActions([
+    { id: 'create', label: '新建 Skill', type: 'primary', handler: showGeneratorDialog }
+  ])
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const loading = ref(false)
 const saving = ref(false)
