@@ -132,6 +132,7 @@
               v-if="contractInfo && ['SIGNED', 'EFFECTIVE', 'EXPIRED'].includes(contractInfo.status || '')"
               :contract-id="contractInfo.id"
               :contract-status="contractInfo.status"
+              :contract-info="contractInfo"
               @plan-updated="handlePaymentPlanUpdated"
               ref="paymentPlansRef"
             />
