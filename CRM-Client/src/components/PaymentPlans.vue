@@ -170,7 +170,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus,
@@ -227,7 +227,7 @@ const fetchPlans = async () => {
   loading.value = true
   try {
     const response = await paymentApi.getPaymentPlans(props.contractId, statusFilter.value as PaymentPlanStatus)
-    plans.value = response.data || response
+    plans.value = response
   } catch (error) {
     console.error('获取回款计划失败', error)
   } finally {
@@ -255,11 +255,6 @@ const getStatusType = (status: PaymentPlanStatus) => {
   return typeMap[status] || 'info'
 }
 
-const getPlanProgress = (plan: PaymentPlanResponse) => {
-  if (!plan.paid_amount || plan.planned_amount === 0) return 0
-  return Math.round((plan.paid_amount / plan.planned_amount) * 100)
-}
-
 const formatAmount = (amount: number) => {
   return amount.toLocaleString('zh-CN', {
     minimumFractionDigits: 2,
@@ -272,25 +267,15 @@ const formatDate = (dateStr: string) => {
   return date.toLocaleDateString('zh-CN')
 }
 
-const getLatestPaymentDate = (plan: PaymentPlanResponse) => {
-  if (!plan.payment_records || plan.payment_records.length === 0) return ''
-  
-  const sortedRecords = [...plan.payment_records].sort((a, b) => 
-    new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime()
-  )
-  
-  return sortedRecords[0].payment_date
-}
-
 const showCreateModal = () => {
   router.push(`/contracts/${props.contractId}/payment-plans/create`)
 }
 
 const showPaymentModal = (plan: PaymentPlanResponse) => {
   currentPlan.value = plan
-  const today = new Date().toISOString().split('T')[0]
+  const today = new Date().toISOString().split('T')[0] ?? ''
   paymentForm.value = {
-    actual_amount: plan.remaining_amount || plan.planned_amount,
+    actual_amount: plan.remaining_amount ?? plan.planned_amount,
     payment_date: today
   }
   paymentModalVisible.value = true
@@ -337,7 +322,7 @@ const editPlan = (plan: PaymentPlanResponse) => {
     stage_name: plan.stage_name,
     planned_amount: plan.planned_amount,
     due_date: plan.due_date,
-    notes: plan.notes
+    notes: plan.notes ?? undefined
   }
   editModalVisible.value = true
 }
