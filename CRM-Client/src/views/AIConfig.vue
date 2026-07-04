@@ -1,13 +1,5 @@
 <template>
   <div class="ai-config-container">
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-    </div>
-
     <el-card class="config-card" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -122,20 +114,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import type { FormInstance, FormRules } from 'element-plus'
-import { ArrowLeft, Check, Connection } from '@element-plus/icons-vue'
+import { Check, Connection } from '@element-plus/icons-vue'
 import { aiConfigApi, type SSEEvent, type AIConfigResponse } from '@/api/aiConfig'
 import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 usePageTitle()
 
 const router = useRouter()
 const userStore = useUserStore()
+const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true, '/ai-assistant')
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const loading = ref(false)
 const saving = ref(false)
