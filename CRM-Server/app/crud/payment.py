@@ -180,14 +180,14 @@ class PaymentPlanCRUD:
         db.refresh(db_obj)
         return db_obj
     
-    def delete(self, db: Session, plan_id: int) -> bool:
-        plan = self.get_by_id(db, plan_id)
+    def delete(self, db: Session, plan_id: int, team_id: int) -> bool:
+        plan = self.get_by_id(db, plan_id, team_id)  # 使用 team_id 进行团队隔离验证
         if not plan:
             return False
-        
+
         if plan.payment_records:
             raise ValueError("存在关联的回款记录，无法删除")
-        
+
         db.delete(plan)
         db.commit()
         return True
@@ -447,21 +447,21 @@ class PaymentRecordCRUD:
         db.refresh(db_obj)
         return db_obj
     
-    def delete(self, db: Session, record_id: int) -> bool:
-        record = self.get_by_id(db, record_id)
+    def delete(self, db: Session, record_id: int, team_id: int) -> bool:
+        record = self.get_by_id(db, record_id, team_id)  # 使用 team_id 进行团队隔离验证
         if not record:
             return False
-        
+
         plan_id = record.payment_plan_id
         db.delete(record)
         db.flush()
-        
+
         from app.crud.payment import payment_plan_crud
         plan = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id).first()
         if plan:
             payment_plan_crud.update_status(db, plan)
             self._update_contract_payment_status(db, plan.contract_id)
-        
+
         db.commit()
         return True
     
