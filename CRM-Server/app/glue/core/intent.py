@@ -66,18 +66,17 @@ INTENT_PARSE_PROMPT = """你是一个意图识别助手。
 
 支持的意图类型：
 - create_follow_up: 创建跟进记录
-- init_opportunity: 创建新商机
+- create_opportunity: 创建新商机
 - update_opportunity: 更新商机信息
-- update_amount: 更新商机金额
-- update_stage: 更新/推进商机阶段
+- advance_stage: 推进商机阶段
 - win_opportunity: 赢单/成交
 - lose_opportunity: 输单/失败
 - convert_lead: 转化线索
 - set_reminder: 设置提醒/跟进时间
 - query_info: 查询信息
-- cancel: 取消操作
-- confirm: 确认操作
-- correction: 修正/修改参数
+- cancel: 取消操作（交互控制）
+- confirm: 确认操作（交互控制）
+- correction: 修正/修改参数（交互控制）
 
 输出 JSON 格式：
 {
@@ -122,10 +121,9 @@ MULTI_INTENT_PARSE_PROMPT = """你是一个多意图识别助手。
 
 支持的意图类型：
 - create_follow_up: 创建跟进记录
-- init_opportunity: 创建新商机
+- create_opportunity: 创建新商机
 - update_opportunity: 更新商机信息
-- update_amount: 更新商机金额
-- update_stage: 更新/推进商机阶段
+- advance_stage: 推进商机阶段
 - win_opportunity: 赢单/成交
 - lose_opportunity: 输单/失败
 - convert_lead: 转化线索

@@ -270,7 +270,7 @@ class ActionExecutor:
                 preview=True,
             )
 
-        elif intent_type == "init_opportunity":
+        elif intent_type == "create_opportunity":
             return entry.init_opportunity(
                 customer_id=slots.get("customer_id"),
                 opportunity_name=slots.get("opportunity_name"),
@@ -278,15 +278,7 @@ class ActionExecutor:
                 preview=True,
             )
 
-        elif intent_type == "update_amount":
-            return entry.update_amount(
-                opportunity_id=slots.get("opportunity_id"),
-                amount=float(slots.get("amount", 0)),
-                user_count=slots.get("user_count"),
-                preview=True,
-            )
-
-        elif intent_type == "update_stage":
+        elif intent_type == "advance_stage":
             return entry.update_stage(
                 opportunity_id=slots.get("opportunity_id"),
                 target_stage_template_id=slots.get("target_stage_template_id"),
@@ -356,7 +348,7 @@ class ActionExecutor:
                 action_id=action_id,
             )
 
-        elif intent_type == "init_opportunity":
+        elif intent_type == "create_opportunity":
             return entry.init_opportunity(
                 customer_id=slots.get("customer_id"),
                 opportunity_name=slots.get("opportunity_name"),
@@ -365,16 +357,7 @@ class ActionExecutor:
                 action_id=action_id,
             )
 
-        elif intent_type == "update_amount":
-            return entry.update_amount(
-                opportunity_id=slots.get("opportunity_id"),
-                amount=float(slots.get("amount", 0)),
-                user_count=slots.get("user_count"),
-                preview=False,
-                action_id=action_id,
-            )
-
-        elif intent_type == "update_stage":
+        elif intent_type == "advance_stage":
             return entry.update_stage(
                 opportunity_id=slots.get("opportunity_id"),
                 target_stage_template_id=slots.get("target_stage_template_id"),
