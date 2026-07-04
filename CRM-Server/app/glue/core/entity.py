@@ -167,12 +167,12 @@ class EntityResolver:
                 candidates=candidates,
             )
 
-        # 0 结果 → 返回错误（R-ST-04）
+        # 0 结果 → 返回 actionable 错误（Task 4.3）
         return EntityResolveResult(
             entity_id=None,
             entity_type=entity_type,
             confidence=0.0,
-            error=f"未找到匹配的{entity_type}",
+            error=f"未找到匹配的{entity_type}。可尝试：1) 用更完整的名称（如'光大证券股份有限公司'） 2) 用 #ID 引用（如'#123'） 3) 描述更多特征",
         )
 
     def _extract_keyword(self, text: str) -> str:
