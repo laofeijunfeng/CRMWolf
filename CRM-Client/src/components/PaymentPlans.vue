@@ -171,8 +171,8 @@
     <PaymentPlanQuickCreate
       v-model:visible="quickCreateVisible"
       :contract-id="contractId"
-      :contract-info="contractInfo"
-      :existing-plans="plans"
+      :contract-info="contractInfo ?? undefined"
+      :existing-plans="plans ?? undefined"
       @close="quickCreateVisible = false"
       @success="handleQuickCreateSuccess"
     />
@@ -324,7 +324,8 @@ const handleCreatePayment = async () => {
       emit('plan-updated')
     } catch (error: unknown) {
       console.error('登记回款失败', error)
-      ElMessage.error(error.response?.data?.detail || '登记失败')
+      const err = error as Error
+      ElMessage.error(err.message || '登记失败')
     }
   }
 }
@@ -345,7 +346,7 @@ const editPlan = (plan: PaymentPlanResponse) => {
     stage_name: plan.stage_name,
     planned_amount: plan.planned_amount,
     due_date: plan.due_date,
-    notes: plan.notes ?? undefined
+    notes: plan.notes ?? undefined ?? undefined
   }
   editModalVisible.value = true
 }
@@ -366,7 +367,8 @@ const handleUpdatePlan = async () => {
     emit('plan-updated')
   } catch (error: unknown) {
     console.error('更新回款计划失败', error)
-    ElMessage.error(error.response?.data?.detail || '更新失败')
+    const err = error as Error
+    ElMessage.error(err.message || '更新失败')
   }
 }
 
