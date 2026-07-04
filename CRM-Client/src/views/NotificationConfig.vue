@@ -1,15 +1,5 @@
 <template>
   <div class="notification-config-container">
-    <!-- 页面头部（sticky） -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="handleBack">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-        <h1 class="page-title">通知配置</h1>
-      </div>
-    </div>
-
     <!-- 配置卡片 -->
     <el-card class="config-card" v-loading="loading">
       <template #header>
