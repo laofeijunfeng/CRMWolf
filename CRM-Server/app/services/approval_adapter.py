@@ -9,7 +9,7 @@ E4 守卫规则（强制）：所有 on_submit/on_approved/on_rejected/on_cancel
 `if entity is None: return`——业务单据被软删/跨 team 时 get_entity 返 None，
 避免 `None.status` AttributeError（对齐现有合同 crud/approval.py 的 `if contract:` 守卫）。
 """
-from typing import Protocol, Any
+from typing import Protocol, Any, Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -133,6 +133,29 @@ class InvoiceApplicationAdapter:
         if entity is None: return  # E4 守卫
         # 引擎终态回写快照，InvoiceDetail.vue 仍读这三字段，见决策 2(c)
         entity.status = InvoiceApplicationStatus.APPROVED
+        entity.reviewed_time = func.now()
+
+    def on_approved_with_file(
+        self,
+        db,
+        entity,
+        file_path: str,
+        invoice_number: Optional[str] = None,
+    ):
+        """审批通过 + 上传发票文件——状态直接变为 ISSUED
+
+        Args:
+            db: 数据库会话
+            entity: InvoiceApplication 实例
+            file_path: 发票文件相对路径
+            invoice_number: 发票号码（可选，财务可从文件中查看）
+        """
+        if entity is None: return  # E4 守卫
+
+        entity.status = InvoiceApplicationStatus.ISSUED
+        entity.invoice_file_path = file_path
+        entity.invoice_number = invoice_number  # 可选字段
+        entity.issued_time = func.now()
         entity.reviewed_time = func.now()
 
     def on_rejected(self, db, entity):
