@@ -76,7 +76,12 @@ class InvoiceApplication(Base):
     invoice_bank_account = Column(String(100), comment="开户账号（开票时的快照）")
     invoice_address = Column(String(500), comment="开票地址（开票时的快照）")
     invoice_phone = Column(String(50), comment="电话（开票时的快照）")
-    
+
+    # Task 2: 发票文件上传字段
+    invoice_file_path = Column(String(500), comment="发票文件路径（相对路径）")
+    invoice_number = Column(String(100), comment="发票号码（可选，便于后续查询）")
+    issued_time = Column(DateTime, comment="开票时间（上传发票文件时间）")
+
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
     last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
 
