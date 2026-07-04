@@ -117,10 +117,12 @@
             placeholder="选择计划回款日期"
             style="width: 200px"
             value-format="YYYY-MM-DD"
-            :disabled-date="disabledDate"
           />
           <span v-if="suggestedDate !== ''" class="date-hint">
             建议: {{ suggestedDate }}
+          </span>
+          <span v-if="isPastDate" class="date-warning" aria-live="polite">
+            ⚠️ 过去日期：请确认是否为补录历史回款计划
           </span>
         </el-form-item>
 
@@ -220,7 +222,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import paymentApi, { type PaymentPlanResponse } from '@/api/payment'
 import { STAGE_PRESETS, suggestNextStage, type StagePreset } from '@/constants/payment-stage-presets'
@@ -319,6 +321,14 @@ const suggestedDate = computed((): string => {
 return date.toISOString().split('T')[0] ?? ''
 })
 
+// 检测是否为过去日期（用于补录场景警告提示）
+const isPastDate = computed((): boolean => {
+  if (quickForm.value.due_date === '') return false
+  const selectedDate = new Date(quickForm.value.due_date)
+  const today = new Date(new Date().setHours(0, 0, 0, 0))
+  return selectedDate < today
+})
+
 const batchTotalAmount = computed((): number => {
   return batchForm.value.plans.reduce((sum: number, p): number => sum + (p.planned_amount ?? 0), 0)
 })
@@ -335,11 +345,6 @@ const submitting = ref<boolean>(false)
 // 格式化函数
 const formatAmount = (amount: number): string => {
   return amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-// 禁用过去日期
-const disabledDate = (date: Date): boolean => {
-  return date < new Date(new Date().setHours(0, 0, 0, 0))
 }
 
 // 快速分配百分比
@@ -431,6 +436,24 @@ const handleSubmit = async (): Promise<void> => {
       if (valid === false) {
         submitting.value = false
         return
+      }
+
+      // 业务校验：过去日期补录场景确认（符合 UX §8 Forms: error-recovery）
+      if (isPastDate.value) {
+        const confirmed = await ElMessageBox.confirm(
+          '计划日期为过去日期，请确认是否为补录历史回款计划？',
+          '日期确认',
+          {
+            confirmButtonText: '确认提交',
+            cancelButtonText: '修改日期',
+            type: 'warning'
+          }
+        ).catch(() => false)
+
+        if (confirmed === false) {
+          submitting.value = false
+          return
+        }
       }
 
       await paymentApi.createPaymentPlans(props.contractId, {
@@ -525,6 +548,19 @@ const handleSubmit = async (): Promise<void> => {
     color: $wolf-text-tertiary;
     font-size: $wolf-font-size-small;
     margin-left: $wolf-space-xs;
+  }
+}
+
+// 过去日期警告动画
+@keyframes warning-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+// 支持 prefers-reduced-motion（符合 UX §1 Accessibility: reduced-motion）
+@media (prefers-reduced-motion: reduce) {
+  .date-warning {
+    animation: none;
   }
 }
 
