@@ -39,8 +39,8 @@ class PaymentPlan(Base):
     )
 
     def __repr__(self):
-        # 简化 __repr__ 避免 DetachedInstanceError（只显示 id）
-        return f"<PaymentPlan(id={self.id})>"
+        # 完全不访问属性，避免 DetachedInstanceError
+        return f"<PaymentPlan>"
 
 
 class PaymentRecord(Base):

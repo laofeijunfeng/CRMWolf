@@ -111,16 +111,17 @@ class PaymentPlanCRUD:
         from app.crud.customer import customer_crud
         from app.models.payment import PaymentPlan
         from app.services.operation_log_service import operation_log_service
-        
+        from app.schemas.payment import PaymentPlanResponse  # 导入 Pydantic schema
+
         total_planned = sum(p.planned_amount for p in plans_data)
-        
+
         contract = db.query(Contract).filter(Contract.id == contract_id).first()
         if not contract:
             raise ValueError("合同不存在")
-        
+
         if total_planned > float(contract.total_amount):
             raise ValueError(f"回款计划总额({total_planned})不能超过合同总额({contract.total_amount})")
-        
+
         plans = []
         for plan_data in plans_data:
             db_plan = PaymentPlan(
@@ -130,16 +131,23 @@ class PaymentPlanCRUD:
             )
             db.add(db_plan)
             plans.append(db_plan)
-        
+
         db.commit()
+
+        # 刷新对象并确保所有字段加载（避免延迟加载）
         for plan in plans:
             db.refresh(plan)
+            # 显式加载关系字段（如有）
+            # db.expunge(plan)  # 将对象从 Session分离，但保持属性可访问
+
+        # 转换为 Pydantic schema（避免 detached 对象问题）
+        plan_responses = [PaymentPlanResponse.model_validate(plan) for plan in plans]
         
         operator = user_crud.get_by_id(db, int(creator_id))
         operator_name = operator.name if operator else None
-        
+
         customer = customer_crud.get_by_id(db, contract.customer_id)
-        
+
         operation_log_service.log(
             db=db,
             event_type="PAYMENT_PLAN_CREATED",
@@ -159,9 +167,9 @@ class PaymentPlanCRUD:
                 "customerName": customer.account_name if customer else None
             }
         )
-        
-        return plans
-    
+
+        return plan_responses  # 返回 Pydantic schema 列表，而非 ORM 对象
+
     def update(self, db: Session, db_obj: PaymentPlan, obj_in: PaymentPlanUpdate) -> PaymentPlan:
         update_data = obj_in.model_dump(exclude_unset=True)
         
