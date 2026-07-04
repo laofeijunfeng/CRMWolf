@@ -1,17 +1,5 @@
 <template>
   <div class="lead-detail">
-    <!-- 页面标题栏 -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="router.back()" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <div class="page-header-right">
-        <el-button type="primary" @click="handleEdit">编辑</el-button>
-      </div>
-    </div>
-
     <!-- 内容区 -->
     <div v-loading="loading" class="detail-content">
       <div v-if="!leadData" class="empty-state">
@@ -266,11 +254,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import {
-  ArrowLeft,
   Plus
 } from '@element-plus/icons-vue'
 import { leadApi, type LeadDetail, type LeadUpdate, type LeadFollowUp, type LeadFollowUpCreate } from '@/api/lead'
@@ -278,6 +265,7 @@ import { getLeadScore, getScoreIcon, getScoreColor, getScoreLevel, type ScoreDet
 import FollowUpList from '@/components/FollowUpList.vue'
 import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 const { setTitle } = usePageTitle()
 
@@ -285,6 +273,7 @@ const router = useRouter()
 const route = useRoute()
 const leadId = Number(route.params['id'])
 const userStore = useUserStore()
+const headerStore = useHeaderStore()
 
 const loading = ref(false)
 const leadData = ref<LeadDetail | null>(null)
@@ -386,10 +375,6 @@ const fetchLeadDetail = async () => {
   }
 }
 
-const handleEdit = () => {
-  router.push(`/leads/${leadId}/edit`)
-}
-
 const handleEditModalOk = async () => {
   try {
     await editFormRef.value?.validate()
@@ -475,6 +460,33 @@ const handleFollowUpDelete = async (followUp: { id: number }) => {
   }
 }
 
+// 配置返回按钮（立即执行）
+onMounted(() => {
+  headerStore.setBack(true)
+})
+
+// 数据加载后配置操作按钮
+watch(leadData, (data) => {
+  if (data) {
+    try {
+      headerStore.setActions([
+        {
+          id: 'edit',
+          label: '编辑',
+          type: 'primary',
+          handler: () => router.push(`/leads/${leadId}/edit`)
+        }
+      ])
+    } catch (error) {
+      console.error('Failed to configure header actions:', error)
+    }
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  headerStore.clear()
+})
+
 onMounted(() => {
   fetchLeadDetail()
 })
@@ -487,59 +499,6 @@ onMounted(() => {
   padding: 0;
   background: $wolf-bg-page;
   min-height: calc(100vh - 48px);
-}
-
-.page-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: $wolf-bg-card;
-  border-bottom: 1px solid $wolf-border-default;
-  height: $wolf-header-height;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 $wolf-page-padding;
-}
-
-.page-header-left,
-.page-header-right {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.page-header-left {
-  flex: 1;
-  min-width: 0;
-}
-
-.page-header-right {
-  flex-shrink: 0;
-}
-
-
-.back-btn {
-  width: 32px !important;
-  height: 32px !important;
-  padding: 0 !important;
-  border-radius: $wolf-radius-md !important;
-  background: transparent !important;
-  border: none !important;
-
-  &:hover {
-    background: $wolf-bg-hover !important;
-  }
-}
-
-.page-title {
-  font-size: $wolf-font-size-title;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .detail-content {
