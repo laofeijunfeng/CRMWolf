@@ -1,18 +1,5 @@
 <template>
   <div class="stage-templates-page">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button type="text" class="back-btn" @click="handleBack" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <el-button type="primary" class="primary-btn" @click="handleCreate">
-        <el-icon><Plus /></el-icon>
-        新增阶段模板
-      </el-button>
-    </div>
-
     <!-- 表格区 -->
     <div class="table-card">
       <el-table
@@ -174,21 +161,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Plus } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import procurementApi, {
   type ProcurementStageTemplate,
   type ProcurementStageTemplateCreate,
   type ProcurementStageTemplateUpdate
 } from '@/api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
+import type { HeaderAction } from '@/stores/header'
 
 usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
+const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true)
+  headerStore.setActions([
+    { id: 'create', label: '新增阶段模板', type: 'primary', handler: handleCreate }
+  ])
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const methodId = computed(() => Number(route.params.methodId))
 const methodName = computed(() => (route.query.methodName as string) || '采购方式')
