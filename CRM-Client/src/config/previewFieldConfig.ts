@@ -130,25 +130,6 @@ export const ACTION_CONFIGS: Record<string, ActionConfig> = {
   }
 }
 
-/** 风险等级样式配置 */
-export const RISK_LEVEL_CONFIG = {
-  low: {
-    label: '低风险',
-    bgClass: 'preview-card__tag--success',
-    textClass: 'preview-card__tag--success'
-  },
-  medium: {
-    label: '中风险',
-    bgClass: 'preview-card__tag--warning',
-    textClass: 'preview-card__tag--warning'
-  },
-  high: {
-    label: '高风险',
-    bgClass: 'preview-card__tag--danger',
-    textClass: 'preview-card__tag--danger'
-  }
-}
-
 /** 获取操作配置 */
 export function getActionConfig(actionType: string): ActionConfig | undefined {
   return ACTION_CONFIGS[actionType]
