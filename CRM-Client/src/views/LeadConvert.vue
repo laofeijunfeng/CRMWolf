@@ -1,17 +1,5 @@
 <template>
   <div class="lead-convert">
-    <!-- 页面标题栏 -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <el-button class="back-btn" @click="handleGoBack" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <div class="page-header-right">
-        <el-button @click="handleGoBack">取消</el-button>
-      </div>
-    </div>
-
     <!-- 内容区 -->
     <div class="convert-content">
       <template v-if="leadData">
@@ -143,22 +131,34 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import {
-  ArrowLeft,
   CircleCheck
 } from '@element-plus/icons-vue'
 import { leadApi, type LeadDetail } from '@/api/lead'
 import customerApi from '@/api/customer'
 import procurementApi from '@/api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
 
 usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
+const headerStore = useHeaderStore()
+
+onMounted(() => {
+  headerStore.setBack(true)
+  headerStore.setActions([
+    { id: 'cancel', label: '取消', type: 'default', handler: handleGoBack }
+  ])
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 const leadId = Number(route.params.id || route.query.lead_id)
 
 const loading = ref(false)
