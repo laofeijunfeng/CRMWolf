@@ -266,6 +266,12 @@ const route = useRoute()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
 
+// Data refs - MUST be defined before watch
+const loading = ref(false)
+const opportunity = ref<Opportunity | null>(null)
+const relatedContract = ref<ContractListResponse | null>(null)
+const contractLoading = ref(false)
+
 // Back button: immediate
 onMounted(() => {
   headerStore.setBack(true, '/opportunities')
@@ -285,11 +291,6 @@ watch(opportunity, () => {
 onUnmounted(() => {
   headerStore.clear()
 })
-
-const loading = ref(false)
-const opportunity = ref<Opportunity | null>(null)
-const relatedContract = ref<ContractListResponse | null>(null)
-const contractLoading = ref(false)
 
 // Win/Lose dialogs
 const winModalVisible = ref(false)
