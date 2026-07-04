@@ -62,26 +62,19 @@ export interface ExecutedResult {
 /**
  * SSE 事件类型（扩展支持 ReAct 循环 + Human-in-the-Loop）
  */
+/**
+ * Glue SSE 事件类型（Task 5.2：对齐 GlueSSEStreamer）
+ * 替代原有 ReAct 专有事件枚举
+ */
 export type SSEEventType =
-  | 'status'
-  | 'start'            // 会话启动
-  | 'content'
-  | 'context_summary'  // 上下文汇总展示
-  | 'react_start'      // ReAct 循环开始
-  | 'round_start'      // 轮次开始
-  | 'tool_call'        // 工具调用
-  | 'tool_result'      // 工具结果
-  | 'parsed'
-  | 'parsed_multi'
-  | 'waiting_for_user' // 等待用户回复（关键：Human-in-the-Loop）
-  | 'disambiguation_required'
-  | 'awaiting_confirmation'
-  | 'react_complete'   // ReAct 循环完成
-  | 'round_completed'
-  | 'max_rounds_reached'
-  | 'result'
-  | 'complete'         // Agent 完成
-  | 'error'
+  | 'start'           // 会话启动
+  | 'intent'          // 意图识别
+  | 'entity'          // 实体消解
+  | 'preview'         // 预览生成
+  | 'execute'         // 执行动作
+  | 'result'          // 最终结果
+  | 'complete'        // 会话完成
+  | 'error'           // 错误
 
 /**
  * 上下文汇总信息
@@ -268,173 +261,5 @@ export const aiAssistantApi = {
         }
       }
     }
-  },
-
-  /**
-   * 继续 ReAct 循环（SSE 流式响应）
-   * 在用户确认执行后，调用此方法继续后续分析
-   *
-   * ⚠️ 注意：此方法已废弃，新 Agent API 使用 session_id 自动恢复
-   * 请使用 chatSSE 方法，传入 session_id 参数
-   *
-   * @deprecated 使用 chatSSE({ content, session_id }) 替代
-   */
-  continueReactSSE: async (
-    data: ContinueReactRequest,
-    onEvent: (event: AIAssistantSSEEvent) => void,
-    token: string
-  ): Promise<void> => {
-    // ⚠️ 旧端点可能已失效，建议使用 chatSSE
-    const url = '/api/v1/assistant/continue-react'  // ❌ 已废弃
-    console.warn('[AIAssistant] continueReactSSE is deprecated, use chatSSE instead')
-    console.log('[AIAssistant] continueReactSSE request URL:', url)
-    console.log('[AIAssistant] continueReactSSE request data:', data)
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(data)
-    })
-
-    console.log('[AIAssistant] continueReactSSE response status:', response.status)
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('[AIAssistant] continueReactSSE error response:', errorText)
-      throw new Error(`HTTP error: ${response.status} - ${errorText}`)
-    }
-
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('No response body')
-    }
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const eventData = JSON.parse(line.slice(6)) as AIAssistantSSEEvent
-            onEvent(eventData)
-
-            if (eventData.event === 'result' || eventData.event === 'error' || eventData.event === 'max_rounds_reached') {
-              return
-            }
-          } catch {
-            // 忽略解析错误
-          }
-        }
-      }
-    }
-  },
-
-  /**
-   * 用户回复后继续 ReAct 循环（新接口）
-   * 用于处理 waiting_for_user 事件后的用户回复
-   */
-  continueReactWithUserResponse: async (
-    sessionId: string,
-    userResponse: string,
-    onEvent: (event: AIAssistantSSEEvent) => void,
-    token: string
-  ): Promise<void> => {
-    const url = '/api/v1/customers/ai/react/continue'
-    console.log('[AIAssistant] continueReactWithUserResponse request URL:', url)
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        session_id: sessionId,
-        user_response: userResponse
-      })
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('[AIAssistant] continueReactWithUserResponse error:', errorText)
-      throw new Error(`HTTP error: ${response.status} - ${errorText}`)
-    }
-
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('No response body')
-    }
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        // 解析 SSE 格式：event: xxx\ndata: xxx
-        if (line.startsWith('event: ')) {
-          const eventMatch = line.match(/^event: (\S+)\ndata: (.+)$/s)
-          if (eventMatch) {
-            try {
-              const eventData = JSON.parse(eventMatch[2]) as AIAssistantSSEEvent
-              eventData.event = eventMatch[1] as SSEEventType
-              onEvent(eventData)
-
-              if (eventData.event === 'result' || eventData.event === 'error' || eventData.event === 'react_complete') {
-                return
-              }
-            } catch {
-              // 忽略解析错误
-            }
-          }
-        }
-      }
-    }
-  },
-
-  /**
-   * 获取 ReAct 会话状态
-   */
-  getReactSessionStatus: async (
-    sessionId: string,
-    token: string
-  ): Promise<{
-    status: string
-    session_id: string
-    round_num: number
-    execution_history: ExecutedResult[]
-    entity_context?: Record<string, unknown>
-  }> => {
-    const url = `/api/v1/customers/ai/react/session/${sessionId}`
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`)
-    }
-
-    return response.json()
   }
 }
