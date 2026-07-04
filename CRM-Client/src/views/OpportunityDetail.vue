@@ -1,25 +1,5 @@
 <template>
   <div class="opportunity-detail-page">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="header-left">
-        <el-button class="back-btn" @click="handleBack" aria-label="返回">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-      </div>
-      <div class="header-right">
-        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="success" size="small" @click="handleShowWinModal">
-          赢单
-        </el-button>
-        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="danger" size="small" @click="handleShowLoseModal">
-          输单
-        </el-button>
-        <el-button v-if="opportunity?.status === 0 && canEditOpportunity" type="primary" size="small" @click="handleEdit">
-          编辑
-        </el-button>
-      </div>
-    </div>
-
     <!-- 商机信息卡片 -->
     <div class="info-card">
       <div v-loading="loading">
@@ -268,21 +248,43 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, reactive } from 'vue'
+import { ref, onMounted, onUnmounted, computed, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showError, showSuccess } from '@/utils/errorMessages'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import { opportunityApi, type Opportunity, type OpportunityWinRequest, type OpportunityLossRequest } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import ProcurementStageFlow from '@/components/ProcurementStageFlow.vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useHeaderStore } from '@/stores/header'
+import type { HeaderAction } from '@/stores/header'
 
 const { setTitle } = usePageTitle()
 
 const router = useRouter()
 const route = useRoute()
 const permissionStore = usePermissionStore()
+const headerStore = useHeaderStore()
+
+// Back button: immediate
+onMounted(() => {
+  headerStore.setBack(true, '/opportunities')
+})
+
+// Action buttons: after data loads
+watch(opportunity, () => {
+  const actions: HeaderAction[] = []
+  if (opportunity.value?.status === 0 && canEditOpportunity.value) {
+    actions.push({ id: 'win', label: '赢单', type: 'success', handler: handleShowWinModal })
+    actions.push({ id: 'lose', label: '输单', type: 'danger', handler: handleShowLoseModal })
+    actions.push({ id: 'edit', label: '编辑', type: 'primary', handler: handleEdit })
+  }
+  headerStore.setActions(actions)
+}, { immediate: true })
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 const loading = ref(false)
 const opportunity = ref<Opportunity | null>(null)
