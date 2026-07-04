@@ -125,7 +125,8 @@ import { ElMessageBox, ElMessage } from 'element-plus'
 import { useAIConversationStore } from '@/stores/aiConversation'
 import { useUserStore } from '@/stores/user'
 import { aiAssistantApi, type AIAssistantSSEEvent } from '@/api/aiAssistant'
-import { useAgentExecutionLog } from '@/composables/useAgentExecutionLog'
+import { useGluePhases } from '@/composables/useGluePhases'  // Task 5.10: Glue 替代 ReAct
+import type { GlueSSEEvent, EntityCandidate, PreviewSnapshot } from '@/types/aiAssistant'  // Task 5.1 类型
 import { logger } from '@/utils/logger'
 import AgentExecutionLog from '@/components/AgentExecutionLog.vue'
 import { Operation } from '@element-plus/icons-vue'
@@ -134,6 +135,12 @@ import WelcomeScreen from '@/components/ai-assistant/WelcomeScreen.vue'
 import ChatInput from '@/components/ai-assistant/ChatInput.vue'
 import ChatBubble from '@/components/ai-assistant/ChatBubble.vue'
 import PreviewCard from '@/components/ai-assistant/PreviewCard.vue'
+// Task 5.10: 导入新 Glue 组件
+import PhaseSummary from '@/components/ai-assistant/PhaseSummary.vue'
+import ErrorCard from '@/components/ai-assistant/ErrorCard.vue'
+import EntityPicker from '@/components/ai-assistant/EntityPicker.vue'
+import DangerConfirmCard from '@/components/ai-assistant/DangerConfirmCard.vue'
+import SlotFillForm from '@/components/ai-assistant/SlotFillForm.vue'
 
 // ========== Store ==========
 
@@ -143,17 +150,25 @@ const userStore = useUserStore()
 // ✅ 使用统一状态源（Store 的 messages computed）
 const { historyGroups, currentId, loading, messages } = storeToRefs(store)
 
-// ========== Agent Execution Log Composable ==========
+// ========== Task 5.10: Glue Phases Composable ==========
 
-const agentLog = useAgentExecutionLog()
+const conversationId = computed(() => String(currentId.value))
+const gluePhases = useGluePhases(conversationId)
 const {
-  steps: executionSteps,
-  expanded: executionLogExpanded,
-  isExecutionComplete,
-  autoCollapseCountdown,
-  handleToggleExpand,
-  cancelAutoCollapse
-} = agentLog
+  phases,
+  collapsed: phasesCollapsed,
+  handleSSEEvent: handleGlueSSEEvent,
+  clear: clearPhases,
+  loadFromStorage: loadPhasesFromStorage
+} = gluePhases
+
+// 交互状态（EntityPicker/DangerConfirmCard/SlotFillForm）
+const awaitingInteraction = ref<'entity_pick' | 'danger_confirm' | 'slot_fill' | null>(null)
+const currentCandidates = ref<EntityCandidate[]>([])
+const currentPreviewSnapshot = ref<PreviewSnapshot | undefined>()
+const currentOutcomeType = ref<'win' | 'lose' | 'generic'>('generic')
+const currentIntentType = ref('')
+const currentMissingFields = ref([])
 
 // ========== Task 17: 步骤 ID 与消息 ID 映射 ==========
 
@@ -416,7 +431,7 @@ async function handleSendMessage(message: string): Promise<void> {
   }
 }
 
-/** 处理 SSE 事件 */
+/** 处理 SSE 事件（Task 5.10: Glue 事件契约） */
 function handleSSEEvent(event: AIAssistantSSEEvent): void {
   console.log('[AIAssistant] SSE event:', event.event, event)
 
@@ -425,96 +440,72 @@ function handleSSEEvent(event: AIAssistantSSEEvent): void {
     sessionId.value = event.session_id
   }
 
-  // ✅ 使用 Agent Execution Log composable 处理 Agent 执行事件
-  // 这些事件类型：react_start, round_start, tool_call, tool_result, round_completed, react_complete
-  if (['react_start', 'round_start', 'tool_call', 'tool_result', 'round_completed',
-       'react_complete', 'waiting_for_user', 'disambiguation_required',
-       'awaiting_confirmation', 'max_rounds_reached', 'error'].includes(event.event ?? '')) {
-    agentLog.handleSSEEvent(event)
-  }
+  // ✅ Task 5.10: 使用 Glue Phases composable 处理语义阶段事件
+  // Glue 事件类型：start, intent, entity, preview, execute, result, complete, error
+  const glueEvent = event as GlueSSEEvent
+  handleGlueSSEEvent(glueEvent)
 
   switch (event.event) {
-    case 'status':
-      // 状态事件 - 不追加内容（已通过 startAIMessage 创建空消息）
+    case 'start':
+      // 会话启动 - 清空旧状态
+      clearPhases()
+      awaitingInteraction.value = null
+      break
+
+    case 'intent':
+      // 意图识别 - 无需特殊处理（已由 composable 记录）
+      break
+
+    case 'entity':
+      // 实体消解 - 处理歧义选择
+      if (event.candidates && event.candidates.length > 0) {
+        currentCandidates.value = event.candidates
+        awaitingInteraction.value = 'entity_pick'
+      }
+      break
+
+    case 'preview':
+      // 预览生成 - 处理危险确认
+      if (event.requires_confirmation) {
+        currentPreviewSnapshot.value = event.preview_snapshot
+        currentOutcomeType.value = event.outcome_type || 'generic'
+        currentIntentType.value = event.intent_type || ''
+        awaitingInteraction.value = 'danger_confirm'
+      }
+      break
+
+    case 'execute':
+      // 执行完成 - 清空交互状态
+      awaitingInteraction.value = null
       break
 
     case 'content':
       // ✅ 内容事件 - 流式追加并实时保存
-      // 🔍 DEBUG: 追踪 content 事件
-      logger.info('[AIAssistant]', 'sse_content_event', {
-        hasContent: !!event.content,
-        contentLength: event.content?.length || 0,
-        contentPreview: event.content?.slice(0, 50) || 'NO CONTENT',
-        isStreaming: isStreamingAIMessage.value
-      })
-
       if (event.content && isStreamingAIMessage.value) {
         store.appendAIMessageContent(event.content)
-      } else {
-        // 🔍 DEBUG: 记录跳过的原因
-        logger.warn('[AIAssistant]', 'sse_content_skipped', {
-          reason: !event.content ? 'NO EVENT.CONTENT' : 'NOT STREAMING'
-        })
-      }
-      break
-
-    case 'parsed':
-    case 'awaiting_confirmation':
-      // 解析完成 - 显示预览卡片
-      if (event.tool && event.params) {
-        currentPreviewData.value = {
-          actionType: event.tool,
-          params: event.params
-        }
       }
       break
 
     case 'result':
-      // 执行结果 - 清空预览卡片，追加最终答案
-      currentPreviewData.value = null
-      if (event.content && isStreamingAIMessage.value) {
-        store.appendAIMessageContent(event.content)
-      }
-      break
-
     case 'complete':
-      // Agent 完成 - 检查是否有 answer 字段
+      // 执行结果/完成 - 追加最终答案
       if (event.answer && isStreamingAIMessage.value) {
         store.appendAIMessageContent(event.answer)
       }
-      break
-
-    case 'react_complete':
-      // ✅ 新增：Agent 执行完成，如果没有 content，生成默认回复
-      // 🔍 DEBUG: 追踪 react_complete 时的 content 状态
-      const lastAIMessage = messages.value.filter(m => m.role === 'assistant').pop()
-      logger.info('[AIAssistant]', 'react_complete_event', {
-        hasLastAIMessage: !!lastAIMessage,
-        contentLength: lastAIMessage?.content?.length || 0,
-        contentPreview: lastAIMessage?.content?.slice(0, 50) || 'NO CONTENT',
-        isStreaming: isStreamingAIMessage.value,
-        willGenerateDefault: lastAIMessage?.content === '' && isStreamingAIMessage.value
-      })
-
-      // 如果 AI 消息内容为空，根据执行步骤生成默认回复
-      if (lastAIMessage && lastAIMessage.content === '' && isStreamingAIMessage.value) {
-        // 生成默认回复：执行已完成
-        const defaultReply = '操作已成功执行完成。'
-        store.appendAIMessageContent(defaultReply)
-        console.log('[AIAssistant] Generated default reply for empty content')
-      }
+      awaitingInteraction.value = null
       break
 
     case 'error':
-      const errorMsg = event.message || '发生错误'
-      if (isStreamingAIMessage.value) {
-        store.appendAIMessageContent(errorMsg)
-      }
+      // 错误 - 已由 composable 记录
       break
 
     default:
-      if (event.message && isStreamingAIMessage.value) {
-        store.appendAIMessageContent(event.message)
+      // 兼容旧事件（临时保留）
+      if (['react_start', 'round_start', 'tool_call', 'tool_result', 'round_completed',
+           'react_complete', 'waiting_for_user', 'disambiguation_required',
+           'awaiting_confirmation', 'parsed', 'parsed_multi', 'max_rounds_reached'].includes(event.event ?? '')) {
+        // ⚠️ 旧 ReAct 事件 - 不再处理（Task 5.10）
+        console.warn('[AIAssistant] Legacy ReAct event ignored:', event.event)
       }
   }
 }
