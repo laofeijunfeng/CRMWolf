@@ -166,6 +166,16 @@
         <el-button type="primary" class="wolf-btn wolf-btn--primary" @click="handleUpdatePlan">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 快速创建 Modal -->
+    <PaymentPlanQuickCreate
+      v-model:visible="quickCreateVisible"
+      :contract-id="contractId"
+      :contract-info="contractInfo"
+      :existing-plans="plans"
+      @close="quickCreateVisible = false"
+      @success="handleQuickCreateSuccess"
+    />
   </el-card>
 </template>
 
@@ -183,22 +193,30 @@ import {
   Clock,
   Calendar
 } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
-import paymentApi, { type PaymentPlanResponse, type PaymentPlanCreate, type PaymentPlanStatus, type PaymentRecordCreate } from '@/api/payment'
+import paymentApi, { type PaymentPlanResponse, type PaymentPlanStatus, type PaymentRecordCreate } from '@/api/payment'
 import PaymentRecords from './PaymentRecords.vue'
+import PaymentPlanQuickCreate from './PaymentPlanQuickCreate.vue'
 
 interface Props {
   contractId: number
   contractStatus?: string
+  contractInfo?: {
+    contract_name: string
+    contract_number: string
+    total_amount: number
+    customer_info?: { account_name: string }
+    effective_date?: string
+    signing_date?: string
+  }
 }
 
 const props = defineProps<Props>()
 const emit = defineEmits(['plan-updated'])
 
-const router = useRouter()
 const loading = ref(false)
 const plans = ref<PaymentPlanResponse[]>([])
 const statusFilter = ref<string>('')
+const quickCreateVisible = ref(false)
 
 const paymentModalVisible = ref(false)
 const paymentForm = ref<PaymentRecordCreate>({
@@ -283,7 +301,12 @@ const getLatestPaymentDate = (plan: PaymentPlanResponse) => {
 }
 
 const showCreateModal = () => {
-  router.push(`/contracts/${props.contractId}/payment-plans/create`)
+  quickCreateVisible.value = true
+}
+
+const handleQuickCreateSuccess = () => {
+  fetchPlans()
+  emit('plan-updated')
 }
 
 const showPaymentModal = (plan: PaymentPlanResponse) => {
