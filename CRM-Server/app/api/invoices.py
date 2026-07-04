@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.orm import Session
 from typing import Optional
+import os
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, require_permission, get_current_user_team
@@ -16,6 +17,7 @@ from app.schemas.invoice import (
     InvoiceTitleListResponse, InvoiceApplicationListResponse, PaymentPlanInvoiceSummary
 )
 from app.crud.invoice import invoice_title_crud, invoice_application_crud
+from app.services.file_storage import file_storage_service, FileStorageError
 
 router = APIRouter(prefix="/invoice-titles", tags=["开票抬头管理"])
 
@@ -274,6 +276,112 @@ def delete_invoice_application(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+
+
+# ============================================================================
+# Task 4: 发票文件下载端点（GET /invoice-applications/{application_id}/file）
+# ============================================================================
+# 设计要点：
+# - application_id: 发票申请 ID
+# - 权限：get_current_active_user（登录用户即可，发票文件无敏感信息）
+# - 安全校验：FileStorageService.get_full_path 防路径穿越
+# - 文件存在检查：os.path.exists
+# - Content-Type 映射：按扩展名设置正确的 MIME 类型
+# - Content-Disposition：attachment，文件名用 invoice_number 或 application_id
+# ============================================================================
+
+
+@invoice_router.get(
+    "/{application_id}/file",
+    summary="下载发票文件（Task 4）",
+    description="""
+下载已上传的发票文件。
+
+**功能说明：**
+- 仅已开票状态（ISSUED）的发票可下载
+- 自动设置正确的 Content-Type（PDF/JPG/PNG/OFD）
+- 文件名使用发票号码或申请 ID
+
+**路径参数：**
+- application_id: 发票申请 ID
+
+**返回：**
+- 文件内容（二进制流）
+- Content-Type: application/pdf / image/jpeg / image/png / application/octet-stream
+- Content-Disposition: attachment
+
+**错误情况：**
+- 发票申请不存在：404
+- 未上传文件：404
+- 文件不存在：404
+- 文件路径非法：400
+""",
+)
+async def download_invoice_file(
+    application_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """下载发票文件"""
+
+    application = invoice_application_crud.get_by_id(db, application_id, team_id)
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="发票申请不存在",
+        )
+
+    if not application.invoice_file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该发票未上传文件",
+        )
+
+    # 获取文件完整路径（含安全校验）
+    try:
+        full_path = file_storage_service.get_full_path(application.invoice_file_path)
+    except FileStorageError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="文件路径非法",
+        )
+
+    # 检查文件是否存在
+    if not os.path.exists(full_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文件不存在",
+        )
+
+    # 读取文件内容
+    with open(full_path, "rb") as f:
+        content = f.read()
+
+    # 根据扩展名设置 Content-Type
+    ext = os.path.splitext(application.invoice_file_path)[1].lower()
+    content_type_map = {
+        ".pdf": "application/pdf",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".ofd": "application/octet-stream",
+    }
+    content_type = content_type_map.get(ext, "application/octet-stream")
+
+    # 文件名：优先使用发票号码，否则用申请 ID
+    filename = application.invoice_number or f"invoice_{application_id}"
+    # 确保文件名有扩展名
+    if not filename.endswith(ext):
+        filename = f"{filename}{ext}"
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\""
+        },
+    )
 
 
 @invoice_router.get("/payment-plans/{payment_plan_id}/invoices", response_model=PaymentPlanInvoiceSummary, summary="获取回款计划关联发票", description="查询指定回款计划关联的所有发票申请及状态")

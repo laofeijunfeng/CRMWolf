@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 from typing import List, Optional
 
 from app.core.database import get_db
@@ -10,8 +10,10 @@ from app.crud.contract import contract_crud
 from app.crud.approval import approval_flow_crud, approval_crud
 from app.crud.role import role_crud
 from app.crud.user import user_crud
-from app.models.approval import Approval, ApprovalStatus, ApprovalAction
+from app.models.approval import Approval, ApprovalStatus, ApprovalAction, ApprovalRecord
 from app.models.contract import ContractStatus
+from app.models.invoice import InvoiceApplicationStatus
+from app.models.user import User
 from app.schemas.approval import (
     ApprovalFlowCreate, ApprovalFlowUpdate, ApprovalFlowResponse, ApprovalFlowDetailResponse,
     ApprovalSubmitRequest, ApprovalActionRequest, ApprovalDetailResponse, ApprovalListResponse,
@@ -29,6 +31,7 @@ from app.schemas.approval_generic import (
 from app.constants.business_types import is_valid_business_type, BusinessType
 from app.services.approval_adapter import get_adapter
 from app.services.notification import notification_service_factory
+from app.services.file_storage import file_storage_service, FileStorageError
 from datetime import datetime as _datetime
 
 
@@ -1843,3 +1846,150 @@ def list_approvals(
         total=total,
         pending_count=pending_count,
     )
+
+
+# ============================================================================
+# Task 4: 发票审批上传文件端点（POST /v1/approvals/INVOICE/{entity_id}/approve-with-file）
+# ============================================================================
+# 设计要点：
+# - 仅支持 INVOICE 类型，其他类型返回 400
+# - entity_id 是发票申请 ID（InvoiceApplication.id）
+# - file: UploadFile（发票文件 PDF/JPG/PNG/OFD）
+# - invoice_number: Optional[str]（发票号码，财务可从文件中查看）
+# - comment: Optional[str]（审批意见）
+# - 权限：invoice:approve（require_permission）
+# - 安全校验：FileStorageService 防路径穿越 + 白名单扩展名
+# - 状态检查：entity.status == PENDING_REVIEW 才可审批
+# - 调用适配器：InvoiceApplicationAdapter.on_approved_with_file
+# - 审批记录：创建 ApprovalRecord（action="approve_with_file")
+# ============================================================================
+
+
+@router.post(
+    "/{entity_type}/{entity_id}/approve-with-file",
+    summary="审批通过并上传发票文件（Task 4）",
+    description="""
+审批发票时上传发票文件，审批通过后自动变为已开票状态。
+
+**功能说明：**
+- 仅支持 INVOICE 类型（其他类型返回 400）
+- 财务人员审批发票时上传发票文件（PDF/JPG/PNG/OFD）
+- 审批通过后自动变为 ISSUED（已开票）状态
+- 发票号码可选（财务可从上传的文件中查看）
+
+**路径参数：**
+- entity_type: INVOICE（仅支持发票类型）
+- entity_id: 发票申请 ID
+
+**请求体（multipart/form-data）：**
+- file: 发票文件（必填）
+- invoice_number: 发票号码（可选）
+- comment: 审批意见（可选）
+
+**权限要求：**
+- invoice:approve 权限
+
+**业务规则：**
+- 发票状态必须为 PENDING_REVIEW（待审批）
+- 文件大小限制：10MB
+- 文件类型限制：PDF/JPG/PNG/OFD
+""",
+)
+async def approve_with_file(
+    entity_type: str,
+    entity_id: int,
+    file: UploadFile = File(..., description="发票文件（PDF/JPG/PNG/OFD）"),
+    invoice_number: Optional[str] = Form(None, description="发票号码（可选，财务可从文件中查看）"),
+    comment: Optional[str] = Form(None, description="审批意见"),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(require_permission("invoice:approve")),
+    db: Session = Depends(get_db),
+):
+    """审批发票时上传文件——仅支持 INVOICE 类型"""
+
+    # 只支持发票类型
+    if entity_type != BusinessType.INVOICE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅发票类型支持上传文件审批",
+        )
+
+    # 获取适配器和实体
+    adapter = get_adapter(entity_type)
+    entity = adapter.get_entity(db, entity_id, team_id)
+
+    if not entity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{entity_type} 实体不存在",
+        )
+
+    # 检查状态
+    if entity.status != InvoiceApplicationStatus.PENDING_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"发票状态为 {entity.status}，无法审批",
+        )
+
+    # 读取文件内容
+    file_content = await file.read()
+
+    # 保存文件
+    try:
+        file_path = file_storage_service.save_invoice_file(
+            team_id=team_id,
+            invoice_id=entity_id,
+            filename=file.filename or "invoice.pdf",
+            content=file_content,
+        )
+    except FileStorageError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    # 调用适配器的 on_approved_with_file
+    adapter.on_approved_with_file(db, entity, file_path, invoice_number)
+
+    # 获取审批实例
+    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
+
+    # 更新审批状态为通过
+    if approval:
+        approval.status = ApprovalStatus.APPROVED
+        approval.current_node_id = None
+
+        # 创建审批操作记录
+        record = ApprovalRecord(
+            approval_id=approval.id,
+            node_id=approval.current_node_id if approval else None,
+            approver_id=str(current_user.id),
+            approver_name=current_user.name,
+            action="approve_with_file",
+            comment=comment or f"审批通过，发票号码：{invoice_number or '未填写'}",
+            created_time=func.now(),
+        )
+        db.add(record)
+
+    # 记录日志
+    log_approval_operation(
+        operation="ApproveWithFile",
+        approval_id=approval.id if approval else None,
+        flow_name=approval.flow.flow_name if approval and approval.flow else None,
+        node_name=approval.current_node.node_name if approval and approval.current_node else None,
+        operator=current_user.name,
+        flow_direction="completed",
+        business_type=entity_type,
+        business_id=entity_id,
+        reason=f"file_path={file_path}, invoice_number={invoice_number}",
+    )
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "审批成功，发票已上传",
+        "file_path": file_path,
+        "invoice_number": invoice_number,
+        "new_status": InvoiceApplicationStatus.ISSUED,
+    }
