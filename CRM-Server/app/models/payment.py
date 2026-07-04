@@ -39,7 +39,8 @@ class PaymentPlan(Base):
     )
 
     def __repr__(self):
-        return f"<PaymentPlan(id={self.id}, contract_id={self.contract_id}, stage_name={self.stage_name}, planned_amount={self.planned_amount})>"
+        # 简化 __repr__ 避免 DetachedInstanceError（只显示 id）
+        return f"<PaymentPlan(id={self.id})>"
 
 
 class PaymentRecord(Base):

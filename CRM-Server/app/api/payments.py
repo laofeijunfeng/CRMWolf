@@ -46,7 +46,7 @@ def create_payment_plans(
         )
 
     try:
-        plans = payment_plan_crud.batch_create(db, contract_id, plans_data.plans, str(current_user.id))
+        plans = payment_plan_crud.batch_create(db, contract_id, plans_data.plans, str(current_user.id), team_id)
         return plans
     except ValueError as e:
         raise HTTPException(
