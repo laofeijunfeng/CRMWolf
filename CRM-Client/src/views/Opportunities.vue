@@ -204,7 +204,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
 
-usePageTitle()
+usePageTitle()  // 自动从 route.meta.title 设置标题
 
 const router = useRouter()
 const permissionStore = usePermissionStore()

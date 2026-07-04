@@ -902,7 +902,7 @@ import {
   Loading,
   WarningFilled
 } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import FollowUpList from '@/components/FollowUpList.vue'
 import customerApi, { type CustomerDetailResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
