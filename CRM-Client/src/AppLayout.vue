@@ -84,14 +84,23 @@
     </aside>
     <main class="main-content">
       <header class="top-bar">
-        <!-- 左侧 slot：返回按钮（详情页使用） -->
+        <!-- 左侧：返回按钮（slot 或 store 默认） -->
         <div class="header-left">
-          <slot name="header-left"></slot>
+          <slot name="header-left">
+            <el-button
+              v-if="headerStore.showBack"
+              class="header-back-btn"
+              circle
+              :aria-label="headerStore.backRoute ? '返回上一页' : '返回'"
+              @click="handleHeaderBack"
+            >
+              <el-icon><ArrowLeft /></el-icon>
+            </el-button>
+          </slot>
         </div>
 
-        <!-- 中间：页面标题（统一渲染 + 空状态处理） -->
+        <!-- 中间：页面标题 -->
         <div class="header-center">
-          <!-- 标题切换过渡动画 -->
           <transition name="title-fade" mode="out-in">
             <h1
               class="wolf-page-title"
@@ -103,10 +112,27 @@
           </transition>
         </div>
 
-        <!-- 右侧：页面操作 slot + 固定通知铃铛 -->
+        <!-- 右侧：页面操作 + 审批中心（固定最右） -->
         <div class="header-right">
-          <slot name="header-right"></slot>
-          <ApprovalIcon class="header-bell" />
+          <!-- 页面操作区（从 headerStore 渲染） -->
+          <template v-for="action in headerStore.actions" :key="action.id">
+            <el-button
+              v-if="action.visible !== false"
+              :type="action.type || 'default'"
+              :disabled="action.disabled"
+              size="small"
+              @click="action.handler"
+            >
+              <el-icon v-if="action.icon"><component :is="action.icon" /></el-icon>
+              {{ action.label }}
+            </el-button>
+          </template>
+
+          <!-- 分隔线（当有页面操作时） -->
+          <div v-if="headerStore.hasActions" class="header-divider"></div>
+
+          <!-- 审批中心（固定在最右，永不移动） -->
+          <ApprovalIcon class="header-approval" />
         </div>
       </header>
       <router-view />
@@ -123,9 +149,10 @@ import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
 import { usePageTitleStore } from '@/stores/pageTitle'
 import { ElMessage } from 'element-plus'
-import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound } from '@element-plus/icons-vue'
+import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound, ArrowLeft } from '@element-plus/icons-vue'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import { logger } from '@/utils/logger'
+import { useHeaderStore } from '@/stores/header'
 
 const router = useRouter()
 const route = useRoute()
@@ -133,6 +160,7 @@ const userStore = useUserStore()
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
 const pageTitleStore = usePageTitleStore()
+const headerStore = useHeaderStore()
 const { title: pageTitle } = storeToRefs(pageTitleStore)
 const showTeamSwitcher = ref(false)
 
@@ -176,6 +204,15 @@ const handleSwitchTeam = async (teamId: number): Promise<void> => {
     router.go(0)
   } catch {
     ElMessage.error('切换团队失败')
+  }
+}
+
+const handleHeaderBack = (): void => {
+  const route = headerStore.backRoute
+  if (route !== null && route !== undefined) {
+    router.push(route)
+  } else {
+    router.back()
   }
 }
 
@@ -506,17 +543,36 @@ onMounted(async () => {
   min-width: 48px;  // 操作区预留空间
 }
 
-.header-bell {
-  // Icon Button 样式
-  min-width: 48px;
-  min-height: 48px;
-  border-radius: $wolf-radius-sm;
-  cursor: pointer;
-  transition: opacity $wolf-transition-press ease;  // Press feedback timing
+.header-back-btn {
+  width: 40px;
+  height: 40px;
+  padding: 8px;
 
-  &:active {
-    opacity: 0.7;  // Press feedback
+  .el-icon {
+    font-size: 20px;
+    color: $wolf-text-secondary;
+    transition: color 0.15s ease;
   }
+
+  &:hover .el-icon {
+    color: $wolf-primary;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+    outline-offset: 2px;
+  }
+}
+
+.header-divider {
+  width: 1px;
+  height: 24px;
+  background: $wolf-border-default;
+  margin: 0 $wolf-space-sm;
+}
+
+.header-approval {
+  flex-shrink: 0;
 }
 
 // 标题切换过渡动画
