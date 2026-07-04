@@ -2,11 +2,7 @@
 
 import os
 import hashlib
-from pathlib import Path
-from typing import Optional
 from datetime import datetime
-
-from app.schemas.file_upload import FileUploadResponse
 
 
 class FileStorageError(Exception):
