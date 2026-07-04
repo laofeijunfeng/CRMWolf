@@ -78,6 +78,13 @@ INTENT_PARSE_PROMPT = """你是一个意图识别助手。
 - confirm: 确认操作（交互控制）
 - correction: 修正/修改参数（交互控制）
 
+各意图必填字段（Task 4.2）：
+- create_follow_up: entity_reference(客户名/商机名), content(跟进内容)
+- create_opportunity: entity_reference(客户名), amount(金额，可选)
+- advance_stage: entity_reference(商机名), stage(目标阶段: 需求确认/方案沟通/报价谈判/合同签订)
+- win_opportunity / lose_opportunity: entity_reference(商机名)
+- set_reminder: date(提醒时间), content(提醒内容，可选)
+
 输出 JSON 格式：
 {
     "intent": "意图类型",
@@ -98,14 +105,14 @@ INTENT_PARSE_PROMPT = """你是一个意图识别助手。
 输入："给#456加个跟进：客户说下周反馈"
 输出：{"intent": "create_follow_up", "confidence": 0.9, "reasoning": "包含跟进关键词和商机ID引用", "slots": {"content": "客户说下周反馈", "entity_reference": "#ID", "entity_keyword": "456"}}
 
-输入："这个商机的金额改成35万"
-输出：{"intent": "update_amount", "confidence": 0.9, "reasoning": "包含金额更新关键词", "slots": {"amount": 35, "amount_unit": "万", "entity_reference": "代词"}}
+输入："创建一个商机，金额35万"
+输出：{"intent": "create_opportunity", "confidence": 0.9, "reasoning": "包含创建商机关键词", "slots": {"amount": 35, "amount_unit": "万", "entity_reference": "代词"}}
 
 输入："跟进一下张三客户"
 输出：{"intent": "create_follow_up", "confidence": 0.85, "reasoning": "跟进意图+客户名称引用", "slots": {"entity_reference": "名称", "entity_keyword": "张三"}}
 
 输入："推进到谈判阶段"
-输出：{"intent": "update_stage", "confidence": 0.85, "reasoning": "阶段推进关键词", "slots": {"stage": "谈判"}}
+输出：{"intent": "advance_stage", "confidence": 0.85, "reasoning": "阶段推进关键词", "slots": {"stage": "谈判"}}
 
 注意：
 1. 如果输入包含 #数字，entity_reference 应为 "#ID"，entity_keyword 为数字本身
@@ -559,13 +566,12 @@ class IntentDetector:
 
         根据 intent 类型判断必填字段是否缺失。
         """
-        # 必填字段定义
+        # 必填字段定义（Task 4.2: 与 IntentType 对齐）
         required_fields = {
             "create_follow_up": ["customer_id", "content"],
-            "init_opportunity": ["customer_id"],
+            "create_opportunity": ["customer_id"],
             "update_opportunity": ["opportunity_id"],
-            "update_amount": ["opportunity_id", "amount"],
-            "update_stage": ["opportunity_id", "stage_description"],
+            "advance_stage": ["opportunity_id", "stage_description"],
             "win_opportunity": ["opportunity_id"],
             "lose_opportunity": ["opportunity_id"],
             "convert_lead": ["lead_id"],
