@@ -177,7 +177,25 @@
             @approved="fetchInvoiceDetail"
             @rejected="fetchInvoiceDetail"
             @withdrawn="fetchInvoiceDetail"
+            @uploaded="fetchInvoiceDetail"
           />
+        </div>
+
+        <!-- Task 6: 已上传发票文件显示 -->
+        <div v-if="invoiceInfo?.invoice_file_path" class="invoice-file-section section-card">
+          <div class="card-header">
+            <span class="card-title">发票文件</span>
+          </div>
+          <div class="file-info">
+            <el-icon class="file-icon"><Document /></el-icon>
+            <span v-if="invoiceInfo?.invoice_number" class="invoice-number">
+              发票号码：{{ invoiceInfo.invoice_number }}
+            </span>
+            <el-button link type="primary" size="small" @click="downloadInvoiceFile">
+              <el-icon><Download /></el-icon>
+              下载发票文件
+            </el-button>
+          </div>
         </div>
       </div>
     </div>
@@ -213,7 +231,8 @@ import {
   CreditCard,
   Wallet,
   Location,
-  Phone
+  Phone,
+  Download
 } from '@element-plus/icons-vue'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import { useUserStore } from '@/stores/user'
@@ -222,6 +241,7 @@ import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import { logger } from '@/utils/logger'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useHeaderStore } from '@/stores/header'
+import { getInvoiceFileUrl } from '@/api/fileUpload'
 
 const { setTitle } = usePageTitle()
 
@@ -390,6 +410,13 @@ const formatDateTime = (dateStr: string | undefined): string => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+// Task 6: 发票文件下载
+const downloadInvoiceFile = (): void => {
+  if (!invoiceInfo.value) return
+  const url = getInvoiceFileUrl(invoiceInfo.value.id)
+  window.open(url, '_blank')
 }
 
 // Configure header on mount
@@ -789,6 +816,29 @@ onUnmounted(() => {
   background-color: $wolf-info-bg !important;
   border-color: $wolf-info-border !important;
   color: $wolf-info !important;
+}
+
+// Task 6: 发票文件显示区域样式
+.invoice-file-section {
+  .file-info {
+    display: flex;
+    align-items: center;
+    gap: $wolf-space-md;
+    padding: $wolf-space-md;
+    background: $wolf-fill-light;
+    border-radius: $wolf-radius-sm;
+  }
+
+  .file-icon {
+    font-size: 24px;
+    color: $wolf-primary;
+  }
+
+  .invoice-number {
+    font-size: $wolf-font-size-body;
+    color: $wolf-text-secondary;
+    font-weight: $wolf-font-weight-medium;
+  }
 }
 
 @media (max-width: 1200px) {

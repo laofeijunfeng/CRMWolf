@@ -63,7 +63,11 @@ export const ApprovalDetailSchema = z.object({
   updated_time: z.string().min(1),
   flow_is_active: z.boolean().nullable(),
   flow_disabled_warning: z.string().nullable(),
-  records: z.array(ApprovalRecordSchema)
+  records: z.array(ApprovalRecordSchema),
+  // Task 6: 发票文件上传字段（仅 INVOICE 类型）
+  invoice_file_path: z.string().nullable().optional(),
+  invoice_number: z.string().nullable().optional(),
+  issued_time: z.string().nullable().optional()
 })
 
 export type ApprovalDetail = z.infer<typeof ApprovalDetailSchema>

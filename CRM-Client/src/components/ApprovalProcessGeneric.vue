@@ -30,7 +30,9 @@ import {
   Promotion,
   CircleCheckFilled,
   CircleCloseFilled,
-  RefreshLeft
+  RefreshLeft,
+  Download,
+  Document
 } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { useApprovalStore } from '@/stores/approval'
@@ -42,6 +44,8 @@ import type {
 import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
 import ErrorState from './ErrorState.vue'
 import WolfEmpty from './WolfEmpty.vue'
+import InvoiceFileUpload from './InvoiceFileUpload.vue'
+import { getInvoiceFileUrl } from '@/api/fileUpload'
 
 interface RecordVisual {
   icon: typeof Promotion
@@ -91,6 +95,8 @@ const emit = defineEmits<{
   rejected: []
   withdrawn: []
   resubmit: []
+  // Task 6: 发票文件上传事件
+  uploaded: [file_path: string, invoice_number: string]
 }>()
 
 const store = useApprovalStore()
@@ -104,6 +110,8 @@ const rejectDialogVisible = ref<boolean>(false)
 const rejectForm = ref<{ reason: string }>({ reason: '' })
 const isWide = ref<boolean>(true)
 const conflictNotice = ref<string>('')
+// Task 6: 发票文件上传组件 ref
+const invoiceFileUploadRef = ref<InstanceType<typeof InvoiceFileUpload>>()
 
 // ===== 计算属性（必须返回类型）=====
 const detail = computed<ApprovalDetail | null>(() => currentApprovalDetail.value)
@@ -121,6 +129,21 @@ const submitPermissionCode = computed<string>(() => SUBMIT_PERMISSION[props.enti
 
 const rejectFormRule = computed<{ required: boolean; message: string; trigger: string }[]>(
   () => [{ required: true, message: '请填写驳回理由，提交人将据此修改', trigger: 'blur' }]
+)
+
+// Task 6: 发票审批时是否显示文件上传组件
+// 条件：entityType === 'INVOICE' && canApprove && status === 'PENDING_REVIEW'
+const showInvoiceFileUpload = computed<boolean>(() =>
+  props.entityType === 'INVOICE' &&
+  props.canApprove &&
+  status.value === 'PENDING' // PENDING 对应后端的 PENDING_REVIEW
+)
+
+// Task 6: 发票是否已上传文件（用于显示下载链接）
+const hasInvoiceFile = computed<boolean>(() =>
+  props.entityType === 'INVOICE' &&
+  detail.value?.invoice_file_path != null &&
+  detail.value.invoice_file_path.length > 0
 )
 
 // ===== 错误识别：仅匹配 axios 风格 error.response.status，不用 any =====
@@ -256,6 +279,25 @@ const handleResubmit = (): void => {
   emit('resubmit')
 }
 
+// Task 6: 发票文件上传成功处理
+const handleFileUploaded = (file_path: string, invoice_number: string): void => {
+  emit('uploaded', file_path, invoice_number)
+  // 刷新详情以获取最新状态
+  loadDetail()
+}
+
+// Task 6: 发票文件上传错误处理
+const handleUploadError = (message: string): void => {
+  ElMessage.error(message.length > 0 ? message : '文件上传失败')
+}
+
+// Task 6: 发票文件下载
+const downloadInvoiceFile = (): void => {
+  if (detail.value == null) return
+  const url = getInvoiceFileUrl(props.entityId)
+  window.open(url, '_blank')
+}
+
 const setupResponsive = (): void => {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     isWide.value = true
@@ -342,6 +384,23 @@ onMounted(async (): Promise<void> => {
         <span class="approval-process-generic__current-node-value">{{ detail.current_node_name }}</span>
       </div>
 
+      <!-- Task 6: 已上传发票文件显示（仅 INVOICE 类型） -->
+      <div v-if="hasInvoiceFile" class="approval-process-generic__file-section">
+        <div class="file-header">
+          <el-icon><Document /></el-icon>
+          <span class="file-title">发票文件</span>
+        </div>
+        <div class="file-info">
+          <span v-if="detail?.invoice_number" class="invoice-number">
+            发票号码：{{ detail.invoice_number }}
+          </span>
+          <el-button link type="primary" size="small" @click="downloadInvoiceFile">
+            <el-icon><Download /></el-icon>
+            下载发票文件
+          </el-button>
+        </div>
+      </div>
+
       <!-- timeline（响应式：宽屏水平 / 窄屏垂直） -->
       <ul
         class="approval-process-generic__timeline"
@@ -376,45 +435,61 @@ onMounted(async (): Promise<void> => {
 
       <!-- 操作区 -->
       <div class="approval-process-generic__actions">
-        <el-button
-          v-if="isSubmitter && isPending"
-          data-testid="withdraw-btn"
-          :loading="actionPending"
-          :disabled="actionPending || isLocked"
-          @click="handleWithdraw"
-        >
-          撤回审批
-        </el-button>
-        <el-button
-          v-if="isSubmitter && isRejected"
-          data-testid="resubmit-btn"
-          type="primary"
-          :loading="actionPending"
-          :disabled="actionPending || isLocked"
-          @click="handleResubmit"
-        >
-          修改并重新提交
-        </el-button>
-        <el-button
-          v-if="canApprove && isPending"
-          data-testid="approve-btn"
-          type="primary"
-          :loading="actionPending"
-          :disabled="actionPending || isLocked"
-          @click="handleApprove"
-        >
-          同意
-        </el-button>
-        <el-button
-          v-if="canApprove && isPending"
-          data-testid="reject-btn"
-          type="danger"
-          :loading="actionPending"
-          :disabled="actionPending || isLocked"
-          @click="openRejectDialog"
-        >
-          驳回
-        </el-button>
+        <!-- Task 6: 发票审批时的文件上传区域（替代原有同意/驳回按钮） -->
+        <div v-if="showInvoiceFileUpload" class="invoice-file-upload-wrapper">
+          <InvoiceFileUpload
+            ref="invoiceFileUploadRef"
+            :invoice-id="entityId"
+            :approval-status="status"
+            @uploaded="handleFileUploaded"
+            @error="handleUploadError"
+            @rejected="() => { emit('rejected'); loadDetail() }"
+            @status-changed="loadDetail"
+          />
+        </div>
+
+        <!-- 原有操作按钮（非 INVOICE 或非审批状态时显示） -->
+        <template v-if="!showInvoiceFileUpload">
+          <el-button
+            v-if="isSubmitter && isPending"
+            data-testid="withdraw-btn"
+            :loading="actionPending"
+            :disabled="actionPending || isLocked"
+            @click="handleWithdraw"
+          >
+            撤回审批
+          </el-button>
+          <el-button
+            v-if="isSubmitter && isRejected"
+            data-testid="resubmit-btn"
+            type="primary"
+            :loading="actionPending"
+            :disabled="actionPending || isLocked"
+            @click="handleResubmit"
+          >
+            修改并重新提交
+          </el-button>
+          <el-button
+            v-if="canApprove && isPending"
+            data-testid="approve-btn"
+            type="primary"
+            :loading="actionPending"
+            :disabled="actionPending || isLocked"
+            @click="handleApprove"
+          >
+            同意
+          </el-button>
+          <el-button
+            v-if="canApprove && isPending"
+            data-testid="reject-btn"
+            type="danger"
+            :loading="actionPending"
+            :disabled="actionPending || isLocked"
+            @click="openRejectDialog"
+          >
+            驳回
+          </el-button>
+        </template>
       </div>
 
       <!-- 驳回弹窗：reason 必填 + el-form rule，C-DSG-7 条2 -->
@@ -586,5 +661,42 @@ onMounted(async (): Promise<void> => {
   margin-top: $wolf-space-lg;
   padding-top: $wolf-space-md;
   border-top: 1px solid $wolf-border-light;
+}
+
+// Task 6: 发票文件上传区域样式
+.invoice-file-upload-wrapper {
+  width: 100%;
+}
+
+// Task 6: 已上传文件显示区域样式
+.approval-process-generic__file-section {
+  background: $wolf-fill-light;
+  border-radius: $wolf-radius-sm;
+  padding: $wolf-space-md;
+  margin-bottom: $wolf-space-md;
+
+  .file-header {
+    display: flex;
+    align-items: center;
+    gap: $wolf-space-xs;
+    margin-bottom: $wolf-space-sm;
+    color: $wolf-text-secondary;
+    font-weight: $wolf-font-weight-medium;
+  }
+
+  .file-title {
+    font-size: $wolf-font-size-body;
+  }
+
+  .file-info {
+    display: flex;
+    align-items: center;
+    gap: $wolf-space-md;
+
+    .invoice-number {
+      font-size: $wolf-font-size-caption;
+      color: $wolf-text-tertiary;
+    }
+  }
 }
 </style>

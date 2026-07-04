@@ -84,6 +84,9 @@ export interface InvoiceApplicationResponse {
   invoice_address: string | null
   invoice_phone: string | null
   invoice_number: string | null
+  // Task 6: 新增字段（发票文件上传）
+  invoice_file_path: string | null
+  issued_time: string | null
   created_time: string
   last_modified_time: string
   customer_name: string | null

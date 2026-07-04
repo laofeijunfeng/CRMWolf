@@ -166,9 +166,34 @@
 
         <el-divider />
 
+        <!-- Task 6: 已上传发票文件显示 -->
+        <div v-if="currentRecord.invoice_file_path" class="uploaded-file-info">
+          <div class="file-header">
+            <el-icon><Document /></el-icon>
+            <span>发票文件</span>
+          </div>
+          <div class="file-content">
+            <span v-if="currentRecord.invoice_number" class="invoice-number">
+              发票号码：{{ currentRecord.invoice_number }}
+            </span>
+            <el-button link type="primary" size="small" @click="downloadDrawerFile">
+              <el-icon><Download /></el-icon>
+              下载发票文件
+            </el-button>
+          </div>
+        </div>
+
+        <!-- Task 6: 审批操作区域替换为文件上传审批 -->
         <div v-if="currentRecord.status === 'PENDING_REVIEW'" class="approval-actions">
-          <el-button size="small" :icon="Check" @click="handleApprove(currentRecord)">同意</el-button>
-          <el-button size="small" :icon="Close" @click="handleReject(currentRecord)">拒绝</el-button>
+          <InvoiceFileUpload
+            ref="drawerFileUploadRef"
+            :invoice-id="currentRecord.id"
+            :approval-status="currentRecord.status"
+            @uploaded="handleDrawerFileUploaded"
+            @error="handleDrawerUploadError"
+            @rejected="handleDrawerRejected"
+            @status-changed="handleDrawerFileUploaded"
+          />
         </div>
       </div>
     </el-drawer>
@@ -201,8 +226,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Search, Check, Close } from '@element-plus/icons-vue'
+import { Refresh, Search, Check, Close, Document, Download } from '@element-plus/icons-vue'
 import invoiceApi, { type InvoiceApplicationResponse, type InvoiceApplicationQueryParams } from '@/api/invoice'
+import InvoiceFileUpload from '@/components/InvoiceFileUpload.vue'
+import { getInvoiceFileUrl } from '@/api/fileUpload'
 
 const router = useRouter()
 
@@ -212,6 +239,8 @@ const selectedRowKeys = ref<number[]>([])
 const drawerVisible = ref(false)
 const currentRecord = ref<InvoiceApplicationResponse | null>(null)
 const rejectModalVisible = ref(false)
+// Task 6: drawer 中的文件上传组件 ref
+const drawerFileUploadRef = ref<InstanceType<typeof InvoiceFileUpload>>()
 const rejectForm = reactive({
   reason: '',
   currentIds: [] as number[]
@@ -435,6 +464,31 @@ const formatAmount = (amount: number) => {
   })
 }
 
+// Task 6: 发票文件下载
+const downloadDrawerFile = (): void => {
+  if (!currentRecord.value) return
+  const url = getInvoiceFileUrl(currentRecord.value.id)
+  window.open(url, '_blank')
+}
+
+// Task 6: 处理文件上传成功
+const handleDrawerFileUploaded = (): void => {
+  drawerVisible.value = false
+  fetchData()
+}
+
+// Task 6: 处理文件上传错误
+const handleDrawerUploadError = (message: string): void => {
+  ElMessage.error(message.length > 0 ? message : '文件上传失败')
+}
+
+// Task 6: 处理拒绝审批（由 InvoiceFileUpload 触发）
+const handleDrawerRejected = (): void => {
+  // InvoiceFileUpload 组件已处理拒绝逻辑，刷新数据即可
+  drawerVisible.value = false
+  fetchData()
+}
+
 onMounted(() => {
   fetchData()
 })
@@ -571,5 +625,33 @@ onMounted(() => {
   display: flex;
   gap: $wolf-button-gap;
   justify-content: flex-end;
+}
+
+// Task 6: 已上传文件显示区域样式
+.uploaded-file-info {
+  margin-top: $wolf-space-md;
+  background: $wolf-fill-light;
+  border-radius: $wolf-radius-sm;
+  padding: $wolf-space-md;
+
+  .file-header {
+    display: flex;
+    align-items: center;
+    gap: $wolf-space-xs;
+    margin-bottom: $wolf-space-sm;
+    color: $wolf-text-secondary;
+    font-weight: $wolf-font-weight-medium;
+  }
+
+  .file-content {
+    display: flex;
+    align-items: center;
+    gap: $wolf-space-md;
+
+    .invoice-number {
+      font-size: $wolf-font-size-caption;
+      color: $wolf-text-tertiary;
+    }
+  }
 }
 </style>
