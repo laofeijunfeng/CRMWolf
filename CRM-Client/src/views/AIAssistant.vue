@@ -1,34 +1,12 @@
 /**
  * AI 助手独立页面
  *
- * 布局：Header + 侧边栏（历史对话） + 对话区 + 输入区
+ * 布局：侧边栏（历史对话） + 对话区 + 输入区
  * 设计模式：对齐 ChatGPT 网页版 - 实时保存、单一状态源、刷新恢复
+ * Header：使用统一 Header（AppLayout），通过 headerStore 配置左侧切换按钮和右侧操作
  */
 <template>
   <div class="ai-assistant-page">
-    <!-- Header -->
-    <header class="ai-assistant-page__header">
-      <div class="ai-assistant-page__header-left">
-        <button
-          class="ai-assistant-page__toggle-btn"
-          :class="{ active: !sidebarCollapsed }"
-          @click="toggleSidebar"
-        >
-          <el-icon class="ai-assistant-page__toggle-icon"><Operation /></el-icon>
-        </button>
-        <h1 class="ai-assistant-page__title">
-          AI 助手
-        </h1>
-      </div>
-      <button
-        class="ai-assistant-page__new-btn"
-        :disabled="loading || store.saving"
-        @click="handleNewConversation"
-      >
-        新对话
-      </button>
-    </header>
-
     <!-- Main -->
     <main class="ai-assistant-page__main">
       <!-- Sidebar - 历史对话列表 -->
@@ -114,11 +92,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { useAIConversationStore } from '@/stores/aiConversation'
 import { useUserStore } from '@/stores/user'
+import { useHeaderStore } from '@/stores/header'
+import { usePageTitle } from '@/composables/usePageTitle'
 import { aiAssistantApi, type AIAssistantSSEEvent } from '@/api/aiAssistant'
 import { useGluePhases, type Phase } from '@/composables/useGluePhases'  // Task 5.10: Glue 替代 ReAct
 import type { GlueSSEEvent, EntityCandidate, PreviewSnapshot } from '@/types/aiAssistant'  // Task 5.1 类型
@@ -131,11 +111,14 @@ import ChatBubble from '@/components/ai-assistant/ChatBubble.vue'
 import PreviewCard from '@/components/ai-assistant/PreviewCard.vue'
 // Task 5.10: 导入新 Glue 组件
 import PhaseSummary from '@/components/ai-assistant/PhaseSummary.vue'
-// TODO: 后续功能使用
-// import ErrorCard from '@/components/ai-assistant/ErrorCard.vue'
-// import EntityPicker from '@/components/ai-assistant/EntityPicker.vue'
-// import DangerConfirmCard from '@/components/ai-assistant/DangerConfirmCard.vue'
-// import SlotFillForm from '@/components/ai-assistant/SlotFillForm.vue'
+
+// ========== Unified Header Setup ==========
+
+// 设置页面标题
+usePageTitle()
+
+// Header Store - 配置左侧切换按钮和右侧操作
+const headerStore = useHeaderStore()
 
 // ========== Store ==========
 
@@ -205,7 +188,31 @@ const hasMessages = computed(() => {
 
 // ========== Lifecycle ==========
 
+// 配置统一 Header（左侧切换按钮 + 右侧"新对话"按钮）
+function setupHeader(): void {
+  headerStore.configure({
+    leftAction: {
+      icon: Operation,
+      handler: toggleSidebar,
+      active: !sidebarCollapsed.value,
+      ariaLabel: '切换侧边栏'
+    },
+    actions: [
+      {
+        id: 'new-conversation',
+        label: '新对话',
+        type: 'primary',
+        handler: handleNewConversation,
+        disabled: loading.value || store.saving
+      }
+    ]
+  })
+}
+
 onMounted(async () => {
+  // 配置统一 Header
+  setupHeader()
+
   // 加载历史对话列表
   await store.fetchHistory()
 
@@ -234,6 +241,21 @@ watch(messages, () => {
     scrollToBottom()
   })
 }, { deep: true })
+
+// 监听侧边栏折叠状态，更新 Header leftAction.active
+watch(sidebarCollapsed, () => {
+  setupHeader()
+})
+
+// 监听加载状态，更新"新对话"按钮禁用状态
+watch([loading, () => store.saving], () => {
+  setupHeader()
+})
+
+// 清理 Header Store
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 // ========== Methods ==========
 
@@ -608,96 +630,6 @@ function getSpecificErrorMessage(error: unknown): string {
   height: 100vh;
   background-color: $wolf-bg-page;
 
-  // ========== Header ==========
-
-  .ai-assistant-page__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 56px;
-    padding: 0 $wolf-page-padding;
-    background-color: $wolf-bg-card;
-    border-bottom: 1px solid $wolf-border-divider;
-  }
-
-  .ai-assistant-page__header-left {
-    display: flex;
-    align-items: center;
-    gap: $wolf-space-sm;
-  }
-
-  .ai-assistant-page__toggle-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    color: $wolf-text-tertiary;
-    background-color: transparent;
-    border: none;
-    border-radius: $wolf-radius-sm;
-    cursor: pointer;
-    transition: all 0.2s ease;
-
-    &:hover {
-      background-color: $wolf-bg-hover;
-      color: $wolf-text-secondary;
-    }
-
-    &.active {
-      color: $wolf-primary;
-    }
-
-    // 小屏隐藏（侧边栏默认隐藏）
-    @media (min-width: 768px) {
-      display: none;
-    }
-  }
-
-  .ai-assistant-page__toggle-icon {
-    font-size: 18px;
-  }
-
-  .ai-assistant-page__title {
-    // ← Signature: IBM Plex Sans（页面主标题的唯一性格化字体）
-    font-family: $wolf-font-display;
-    font-size: $wolf-font-size-title;
-    font-weight: $wolf-font-weight-semibold;
-    color: $wolf-text-primary;
-    margin: 0;
-  }
-
-  .ai-assistant-page__new-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: $wolf-button-height-md;
-    padding: $wolf-button-padding-md;
-    font-size: $wolf-font-size-body;
-    font-weight: $wolf-font-weight-normal;
-    color: $wolf-btn-text;
-    background-color: $wolf-btn-bg;
-    border: 1px solid $wolf-border-default;
-    border-radius: $wolf-button-radius-sm;
-    cursor: pointer;
-    transition: all 0.2s ease;
-
-    &:hover:not(:disabled) {
-      background-color: $wolf-btn-bg-hover;
-      color: $wolf-btn-text-hover;
-      border-color: $wolf-border-hover;
-    }
-
-    &:active:not(:disabled) {
-      background-color: $wolf-btn-bg-active;
-    }
-
-    &:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  }
-
   // ========== Main ==========
 
   .ai-assistant-page__main {
@@ -840,27 +772,7 @@ function getSpecificErrorMessage(error: unknown): string {
       }
     }
 
-    .ai-assistant-page__header {
-      padding: 0 $wolf-space-md;
-    }
-
-    .ai-assistant-page__header-left {
-      gap: $wolf-space-xs;
-    }
-
-    .ai-assistant-page__toggle-btn {
-      display: inline-flex;
-    }
-
-    .ai-assistant-page__title {
-      font-size: $wolf-font-size-body;
-    }
-
-    .ai-assistant-page__new-btn {
-      padding: $wolf-button-padding-sm;
-    }
-
-    .ai-assistant-page__messages {
+.ai-assistant-page__messages {
       padding: $wolf-space-sm;
     }
 

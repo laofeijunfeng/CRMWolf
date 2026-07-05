@@ -83,13 +83,24 @@
       </div>
     </aside>
     <main class="main-content">
-      <!-- Unified header (hidden for special pages like AI Assistant) -->
-      <header v-if="!hideHeader" class="top-bar">
-        <!-- 左侧：返回按钮（slot 或 store 默认） -->
+      <header class="top-bar">
+        <!-- 左侧：返回按钮或自定义左侧按钮 -->
         <div class="header-left">
           <slot name="header-left">
+            <!-- 自定义左侧按钮（如 AI Assistant 的侧边栏切换） -->
             <el-button
-              v-if="headerStore.showBack"
+              v-if="headerStore.leftAction"
+              class="header-left-btn"
+              circle
+              :class="{ active: headerStore.leftAction.active }"
+              :aria-label="headerStore.leftAction.ariaLabel || '操作'"
+              @click="headerStore.leftAction.handler"
+            >
+              <el-icon><component :is="headerStore.leftAction.icon" /></el-icon>
+            </el-button>
+            <!-- 默认返回按钮 -->
+            <el-button
+              v-else-if="headerStore.showBack"
               class="header-back-btn"
               circle
               :aria-label="headerStore.backRoute ? '返回上一页' : '返回'"
@@ -142,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/stores/user'
@@ -173,18 +184,6 @@ const currentPath = computed(() => {
   if (path.startsWith('/leads/') && path.match(/\/leads\/\d+/)) return '/leads'
   if (path.startsWith('/opportunities/') && path.match(/\/opportunities\/\d+/)) return '/opportunities'
   return path
-})
-
-// Check if route meta specifies hideHeader (for pages with custom headers like AI Assistant)
-const hideHeader = computed(() => {
-  return route.meta?.['hideHeader'] === true
-})
-
-// Clear headerStore when entering a hideHeader page (like AI Assistant)
-watch(hideHeader, (shouldHide) => {
-  if (shouldHide) {
-    headerStore.clear()
-  }
 })
 
 const handleMenuClick = (key: string): void => {
@@ -568,6 +567,33 @@ onMounted(async () => {
   }
 
   &:hover .el-icon {
+    color: $wolf-primary;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+    outline-offset: 2px;
+  }
+}
+
+// 左侧自定义按钮样式（如 AI Assistant 侧边栏切换）
+.header-left-btn {
+  width: 40px;
+  height: 40px;
+  padding: 8px;
+
+  .el-icon {
+    font-size: 20px;
+    color: $wolf-text-secondary;
+    transition: color 0.15s ease;
+  }
+
+  &:hover .el-icon {
+    color: $wolf-primary;
+  }
+
+  // 激活状态（如侧边栏展开）
+  &.active .el-icon {
     color: $wolf-primary;
   }
 

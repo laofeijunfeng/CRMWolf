@@ -10,6 +10,18 @@ import { mount } from '@vue/test-utils'
 import AIAssistant from '@/views/AIAssistant.vue'
 import { createPinia, setActivePinia } from 'pinia'
 
+// Mock vue-router for usePageTitle and useHeaderStore
+vi.mock('vue-router', () => ({
+  useRoute: vi.fn(() => ({
+    meta: { title: 'AI 助手' },
+    params: {}
+  })),
+  useRouter: vi.fn(() => ({
+    push: vi.fn(),
+    back: vi.fn()
+  }))
+}))
+
 // Mock API
 vi.mock('@/api/aiAssistant', () => ({
   aiAssistantApi: {
@@ -46,7 +58,7 @@ vi.mock('@/api/aiConversation', () => ({
 
 // Mock useAgentExecutionLog composable
 vi.mock('@/composables/useAgentExecutionLog', () => ({
-  useAgentExecutionLog: () => ({
+  useAgentExecutionLog: (): object => ({
     executionSteps: [
       {
         id: 'step-1',

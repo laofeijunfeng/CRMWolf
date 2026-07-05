@@ -347,7 +347,7 @@ const routes: RouteRecordRaw[] = [
         path: 'ai-assistant',
         name: 'AIAssistant',
         component: () => import('@/views/AIAssistant.vue'),
-        meta: { requiresAuth: true, title: 'AI 助手', hideHeader: true }
+        meta: { requiresAuth: true, title: 'AI 助手' }
       }
     ]
   }
