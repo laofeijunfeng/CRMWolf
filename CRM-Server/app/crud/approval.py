@@ -619,6 +619,16 @@ class ApprovalCRUD:
         if entity is None:
             raise ValueError("业务单据不存在")
 
+        # 获取 contract_id：CONTRACT 类型直接用 business_id，INVOICE/PAYMENT 从实体获取
+        contract_id = None
+        if business_type == BusinessType.CONTRACT:
+            contract_id = business_id
+        elif business_type == BusinessType.INVOICE:
+            contract_id = entity.contract_id
+        elif business_type == BusinessType.PAYMENT:
+            # PAYMENT 关联 payment_plan -> contract
+            contract_id = getattr(entity, 'contract_id', None)
+
         first_node = db.query(ApprovalNode).filter(
             ApprovalNode.flow_id == flow.id,
             ApprovalNode.node_order == 1
@@ -627,7 +637,7 @@ class ApprovalCRUD:
         db_approval = Approval(
             business_type=business_type,
             business_id=business_id,
-            contract_id=business_id if business_type == BusinessType.CONTRACT else None,
+            contract_id=contract_id,
             flow_id=flow.id,
             team_id=team_id,
             current_node_id=first_node.id if first_node else None,

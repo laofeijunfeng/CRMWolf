@@ -386,7 +386,9 @@ class IntentDetector:
             )
 
         except Exception as e:
-            logger.error(f"LLM 多意图解析失败: {e}")
+            logger.error(f"LLM 多意图解析失败: {e}", exc_info=True)
+            logger.error(f"LLM 多意图解析异常类型: {type(e).__name__}")
+            logger.error(f"LLM 多意图解析异常详情: {str(e)}")
             return MultiIntentResult(
                 is_multi=False,
                 intents=[],
@@ -459,7 +461,9 @@ class IntentDetector:
             )
 
         except Exception as e:
-            logger.error(f"LLM 意图解析失败: {e}")
+            logger.error(f"LLM 意图解析失败: {e}", exc_info=True)
+            logger.error(f"LLM 意图解析异常类型: {type(e).__name__}")
+            logger.error(f"LLM 意图解析异常详情: {str(e)}")
             return self._LLMIntentResult(
                 intent="unknown",
                 confidence=0.0,
