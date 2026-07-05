@@ -4,25 +4,26 @@
     <!-- 快捷筛选标签 -->
     <div class="filter-tabs">
       <span
-        :class="['filter-tab', { active: activeTab === 'pending' }]"
-        @click="handleTabChange('pending')"
-      >待处理回款</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'upcoming' }]"
-        @click="handleTabChange('upcoming')"
-      >即将到期</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'overdue' }]"
-        @click="handleTabChange('overdue')"
-      >已逾期</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'all' }]"
-        @click="handleTabChange('all')"
-      >全部计划</span>
-      <span
-        :class="['filter-tab', { active: activeTab === 'records' }]"
-        @click="handleTabChange('records')"
-      >回款记录</span>
+        v-for="tab in tabs"
+        :key="tab.key"
+        :class="['filter-tab', { active: activeTab === tab.key }]"
+        @click="handleTabChange(tab.key)"
+      >
+        <el-icon><component :is="tab.icon" /></el-icon>
+        {{ tab.label }}
+        <el-badge v-if="tabBadgeCounts[tab.key as keyof typeof tabBadgeCounts] > 0" :value="tabBadgeCounts[tab.key as keyof typeof tabBadgeCounts]" />
+      </span>
+    </div>
+
+    <!-- 审批状态筛选器 -->
+    <div class="approval-status-filter">
+      <el-radio-group v-model="approvalStatusFilter">
+        <el-radio-button label="all">全部</el-radio-button>
+        <el-radio-button label="pending_submit">待提交审批</el-radio-button>
+        <el-radio-button label="pending_approval">审批中</el-radio-button>
+        <el-radio-button label="confirmed">已确认</el-radio-button>
+        <el-radio-button label="rejected">已驳回</el-radio-button>
+      </el-radio-group>
     </div>
 
     <!-- 搜索筛选区 -->
@@ -51,8 +52,7 @@
     <!-- 表格区 -->
     <div class="table-card">
       <el-table
-        v-if="activeTab !== 'records'"
-        :data="paymentPlans"
+        :data="filteredPaymentPlans"
         v-loading="loading"
         stripe
         style="width: 100%"
@@ -117,39 +117,10 @@
         </el-table-column>
       </el-table>
 
-      <el-table
-        v-else
-        :data="paymentRecords"
-        v-loading="recordsLoading"
-        stripe
-        style="width: 100%"
-      >
-        <el-table-column prop="contract_name" label="合同名称" min-width="180" />
-        <el-table-column prop="stage_name" label="回款阶段" min-width="120" />
-        <el-table-column label="回款金额" min-width="120">
-          <template #default="{ row }">
-            <span class="amount">¥{{ formatAmount(row.actual_amount) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="回款日期" min-width="120">
-          <template #default="{ row }">
-            {{ formatDate(row.payment_date) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="creator_name" label="登记人" min-width="100" />
-        <el-table-column prop="notes" label="备注" min-width="150" />
-        <el-table-column label="登记时间" min-width="160">
-          <template #default="{ row }">
-            {{ formatDateTime(row.created_time) }}
-          </template>
-        </el-table-column>
-      </el-table>
-
       <!-- 分页 -->
       <div class="pagination-bar">
-        <span class="total-text">共 {{ activeTab !== 'records' ? pagination.total : recordsPagination.total }} 条</span>
+        <span class="total-text">共 {{ pagination.total }} 条</span>
         <el-pagination
-          v-if="activeTab !== 'records'"
           v-model:current-page="pagination.current"
           v-model:page-size="pagination.pageSize"
           :page-sizes="[10, 20, 50, 100]"
@@ -157,16 +128,6 @@
           layout="sizes, prev, pager, next, jumper"
           @current-change="handlePageChange"
           @size-change="handlePageSizeChange"
-        />
-        <el-pagination
-          v-else
-          v-model:current-page="recordsPagination.current"
-          v-model:page-size="recordsPagination.pageSize"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="recordsPagination.total"
-          layout="sizes, prev, pager, next, jumper"
-          @current-change="handleRecordsPageChange"
-          @size-change="handleRecordsPageSizeChange"
         />
       </div>
     </div>
@@ -211,16 +172,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
-import { Search } from '@element-plus/icons-vue'
+import { Search, EditPen, Wallet, Warning, Clock, List } from '@element-plus/icons-vue'
 import paymentApi, {
   type PaymentPlanWithDetails,
-  type PaymentRecordWithDetails,
   type PaymentPlanListParams,
-  type PaymentRecordListParams,
   type PaymentRecordCreate,
   type PaymentPlanStatus
 } from '@/api/payment'
@@ -239,13 +198,21 @@ const paymentSubmitPermission = 'payment:submit'
 // 正在提交审批的回款计划 ID（按钮 :loading + :disabled 防双提交）
 const submittingApprovalId = ref<number | null>(null)
 
+// 标签定义（移除"回款记录"标签）
+const tabs = [
+  { key: 'pending', label: '待登记', icon: EditPen },
+  { key: 'partial', label: '部分回款', icon: Wallet },
+  { key: 'overdue', label: '已逾期', icon: Warning },
+  { key: 'upcoming', label: '即将到期', icon: Clock },
+  { key: 'all', label: '全部计划', icon: List }
+]
+
 const activeTab = ref('pending')
 const searchForm = ref({
   keyword: '',
   status: '' as PaymentPlanStatus | ''
 })
 const loading = ref(false)
-const recordsLoading = ref(false)
 
 const paymentPlans = ref<PaymentPlanWithDetails[]>([])
 const pagination = ref({
@@ -254,12 +221,17 @@ const pagination = ref({
   total: 0
 })
 
-const paymentRecords = ref<PaymentRecordWithDetails[]>([])
-const recordsPagination = ref({
-  current: 1,
-  pageSize: 20,
-  total: 0
+// Badge 数量（占位：Task 4 创建 Store 后连接）
+const tabBadgeCounts = ref({
+  pending: 0,      // 未登记的计划数
+  partial: 0,      // 部分回款的计划数
+  overdue: 0,      // 逾期计划数
+  upcoming: 0,     // 即将到期不显示 Badge
+  all: 0           // 全部计划不显示 Badge
 })
+
+// 审批状态筛选器
+const approvalStatusFilter = ref('all')
 
 const paymentModalVisible = ref(false)
 const paymentForm = ref<PaymentRecordCreate>({
@@ -294,22 +266,24 @@ const fetchPaymentPlans = async (): Promise<void> => {
       page_size: pagination.value.pageSize
     }
 
+    // 根据标签设置筛选参数
     if (activeTab.value === 'pending') {
-      params.status = searchForm.value.status === '' ? 'PENDING' : searchForm.value.status
-    } else if (activeTab.value === 'completed') {
-      params.status = 'COMPLETED'
+      params.status = 'PENDING'
+    } else if (activeTab.value === 'partial') {
+      params.status = 'PARTIAL'
+    } else if (activeTab.value === 'overdue') {
+      params.status = 'OVERDUE'
     } else if (activeTab.value === 'upcoming') {
       const upcomingDate = getUpcomingDate(7)
       params.due_date_end = upcomingDate
-      params.status = 'PENDING'
-    } else if (activeTab.value === 'overdue') {
-      params.status = 'OVERDUE'
     }
+    // 'all' 不设置任何筛选参数
 
     const data = await paymentApi.listPaymentPlans(params)
 
     let filteredPlans: PaymentPlanWithDetails[] = data.items
 
+    // 关键词搜索筛选
     if (searchForm.value.keyword.length > 0) {
       filteredPlans = filteredPlans.filter((plan: PaymentPlanWithDetails) => {
         const keyword = searchForm.value.keyword.toLowerCase()
@@ -330,37 +304,57 @@ const fetchPaymentPlans = async (): Promise<void> => {
   }
 }
 
-const fetchPaymentRecords = async (): Promise<void> => {
-  recordsLoading.value = true
-  try {
-    const params: PaymentRecordListParams = {
-      page: recordsPagination.value.current,
-      page_size: recordsPagination.value.pageSize
-    }
+// 筛选后的回款计划列表（按审批状态筛选）
+const filteredPaymentPlans = computed(() => {
+  let plans = paymentPlans.value
 
-    const data = await paymentApi.listPaymentRecords(params)
+  // 按审批状态筛选（占位逻辑：Task 4 完成后 Store 将提供完整实现）
+  if (approvalStatusFilter.value !== 'all') {
+    plans = plans.filter(plan => {
+      // 使用可选链，避免类型定义不完整导致的错误
+      // 后端 PaymentRecord 有 confirmation_status 和 approval 关系，但前端类型未定义
+      // Task 4: 更新 PaymentRecordInfo 类型 + Store 实现
+      const latestRecord = plan.payment_records?.[plan.payment_records.length - 1] as Record<string, unknown> | undefined
 
-    paymentRecords.value = data.items
-    recordsPagination.value.total = data.total
-  } catch (error) {
-    logger.error('[Payments]', '获取回款记录失败', { error })
-    showError(error, '获取回款记录')
-  } finally {
-    recordsLoading.value = false
+      if (latestRecord === undefined) {
+        // 待登记：无回款记录，仅当筛选"待提交审批"时显示
+        return approvalStatusFilter.value === 'pending_submit'
+      }
+
+      // 使用括号访问（TypeScript index signature 要求）
+      const confirmationStatus = latestRecord['confirmation_status'] as string | undefined
+      const approvalId = latestRecord['approval_id'] as number | undefined
+      const approval = latestRecord['approval'] as Record<string, unknown> | undefined
+      const approvalStatus = approval?.['status'] as string | undefined
+
+      switch (approvalStatusFilter.value) {
+        case 'pending_submit':
+          // 待提交审批：confirmation_status=PENDING 且无 approval_id
+          return confirmationStatus === 'PENDING' && approvalId === undefined
+        case 'pending_approval':
+          // 审批中：confirmation_status=PENDING 且有 approval_id 且 approval.status=PENDING
+          return confirmationStatus === 'PENDING' && approvalId !== undefined && approvalStatus === 'PENDING'
+        case 'confirmed':
+          // 已确认：confirmation_status=CONFIRMED
+          return confirmationStatus === 'CONFIRMED'
+        case 'rejected':
+          // 已驳回：confirmation_status=PENDING 且 approval.status=REJECTED
+          return confirmationStatus === 'PENDING' && approvalStatus === 'REJECTED'
+        default:
+          return true
+      }
+    })
   }
-}
+
+  return plans
+})
 
 const handleTabChange = (key: string): void => {
   activeTab.value = key
   pagination.value.current = 1
-  recordsPagination.value.current = 1
   searchForm.value.status = ''
-
-  if (key === 'records') {
-    fetchPaymentRecords()
-  } else {
-    fetchPaymentPlans()
-  }
+  approvalStatusFilter.value = 'all'
+  fetchPaymentPlans()
 }
 
 const handleSearch = (): void => {
@@ -384,17 +378,6 @@ const handlePageSizeChange = (pageSize: number): void => {
   pagination.value.pageSize = pageSize
   pagination.value.current = 1
   fetchPaymentPlans()
-}
-
-const handleRecordsPageChange = (page: number): void => {
-  recordsPagination.value.current = page
-  fetchPaymentRecords()
-}
-
-const handleRecordsPageSizeChange = (pageSize: number): void => {
-  recordsPagination.value.pageSize = pageSize
-  recordsPagination.value.current = 1
-  fetchPaymentRecords()
 }
 
 const getStatusText = (status: string): string => {
@@ -427,17 +410,6 @@ const formatAmount = (amount: number): string => {
 const formatDate = (dateStr: string): string => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN')
-}
-
-const formatDateTime = (dateStr: string): string => {
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
 }
 
 const viewDetail = (plan: PaymentPlanWithDetails): void => {
@@ -518,11 +490,15 @@ onMounted(() => {
 // 快捷筛选标签
 .filter-tabs {
   display: flex;
+  align-items: center;
   gap: $wolf-space-xs;
   margin-bottom: $wolf-space-md;
 }
 
 .filter-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 8px $wolf-space-md;
   font-size: $wolf-font-size-auxiliary;
   font-weight: $wolf-font-weight-normal;
@@ -542,6 +518,14 @@ onMounted(() => {
     color: $wolf-text-secondary;
     font-weight: $wolf-font-weight-medium;
   }
+}
+
+// 审批状态筛选器
+.approval-status-filter {
+  margin-bottom: $wolf-space-md;
+  padding: $wolf-space-sm $wolf-space-md;
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-sm;
 }
 
 // 筛选区
