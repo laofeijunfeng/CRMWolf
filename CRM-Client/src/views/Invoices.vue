@@ -77,12 +77,12 @@
         </el-table-column>
         <el-table-column label="客户名称" min-width="150">
           <template #default="{ row }">
-            {{ row.customer_info?.account_name || '-' }}
+            {{ row.customer_name || '-' }}
           </template>
         </el-table-column>
         <el-table-column label="合同名称" min-width="180">
           <template #default="{ row }">
-            {{ row.contract_info?.contract_name || '-' }}
+            {{ row.contract_name || '-' }}
           </template>
         </el-table-column>
         <el-table-column label="发票类型" width="150">
@@ -94,12 +94,12 @@
         </el-table-column>
         <el-table-column label="开票金额" width="130">
           <template #default="{ row }">
-            <span class="amount">¥{{ formatAmount(row.amount) }}</span>
+            <span class="amount">¥{{ formatAmount(row.invoice_amount) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="开票抬头" min-width="200">
           <template #default="{ row }">
-            {{ row.invoice_title_info?.title || '-' }}
+            {{ row.invoice_title_text || '-' }}
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -111,7 +111,7 @@
         </el-table-column>
         <el-table-column label="申请人" width="110">
           <template #default="{ row }">
-            {{ row.creator_info?.name || '-' }}
+            {{ row.applicant_name || '-' }}
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
