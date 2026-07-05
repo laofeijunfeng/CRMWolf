@@ -58,7 +58,7 @@ export const ApprovalDetailSchema = z.object({
   current_node_name: z.string().nullable(),
   status: ApprovalStatusEnum,
   submitter_id: z.string().min(1),
-  submitter_name: z.string().min(1),
+  submitter_name: z.string().nullable(),  // 允许 null（发票/回款申请人无姓名字段）
   created_time: z.string().min(1),
   updated_time: z.string().min(1),
   flow_is_active: z.boolean().nullable(),

@@ -292,14 +292,14 @@ class InvoiceApplicationCRUD:
         db.refresh(application)
         return application
 
-    def delete(self, db: Session, application_id: int) -> bool:
-        application = self.get_by_id(db, application_id)
+    def delete(self, db: Session, application_id: int, team_id: int) -> bool:
+        application = self.get_by_id(db, application_id, team_id)
         if not application:
             return False
-        
+
         if application.status not in [InvoiceApplicationStatus.DRAFT, InvoiceApplicationStatus.REJECTED]:
             raise ValueError("只有草稿或已拒绝状态的发票申请可以删除")
-        
+
         db.delete(application)
         db.commit()
         return True
