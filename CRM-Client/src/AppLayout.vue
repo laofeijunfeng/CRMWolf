@@ -83,7 +83,8 @@
       </div>
     </aside>
     <main class="main-content">
-      <header class="top-bar">
+      <!-- Unified header (hidden for special pages like AI Assistant) -->
+      <header v-if="!hideHeader" class="top-bar">
         <!-- 左侧：返回按钮（slot 或 store 默认） -->
         <div class="header-left">
           <slot name="header-left">
@@ -141,7 +142,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/stores/user'
@@ -172,6 +173,18 @@ const currentPath = computed(() => {
   if (path.startsWith('/leads/') && path.match(/\/leads\/\d+/)) return '/leads'
   if (path.startsWith('/opportunities/') && path.match(/\/opportunities\/\d+/)) return '/opportunities'
   return path
+})
+
+// Check if route meta specifies hideHeader (for pages with custom headers like AI Assistant)
+const hideHeader = computed(() => {
+  return route.meta?.['hideHeader'] === true
+})
+
+// Clear headerStore when entering a hideHeader page (like AI Assistant)
+watch(hideHeader, (shouldHide) => {
+  if (shouldHide) {
+    headerStore.clear()
+  }
 })
 
 const handleMenuClick = (key: string): void => {
