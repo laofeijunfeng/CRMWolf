@@ -76,16 +76,39 @@ def migrate_invoice_approvals(db: Session, team_id: int = None):
             # 检查是否已有 Approval 记录
             existing_approval = db.query(Approval).filter(
                 Approval.business_type == BusinessType.INVOICE,
-                Approval.business_id == invoice.id
+                Approval.business_id == invoice.id,
+                Approval.status == ApprovalStatus.PENDING  # 只处理 PENDING 状态
             ).first()
 
+            adapter = get_adapter(BusinessType.INVOICE)
+
             if existing_approval:
-                logger.info(f"发票 {invoice.id} 已有 Approval 记录，跳过")
+                # 已有 Approval，检查是否需要发送通知
+                if existing_approval.current_node:
+                    notification_service = notification_service_factory(db, invoice.team_id)
+                    approvers = get_approvers_by_role(db, existing_approval.current_node.approve_role)
+                    flow = db.query(ApprovalFlow).filter(ApprovalFlow.id == existing_approval.flow_id).first()
+
+                    for approver in approvers:
+                        try:
+                            asyncio.run(notification_service.notify_approval_pending(
+                                entity_type=BusinessType.INVOICE,
+                                entity_name=adapter.get_name(invoice) or invoice.application_number,
+                                flow_name=flow.flow_name if flow else "发票审批",
+                                node_name=existing_approval.current_node.node_name,
+                                approver_open_id=approver.feishu_open_id or "",
+                                approver_name=approver.name,
+                                business_id=invoice.id,
+                            ))
+                            logger.info(f"发票 {invoice.id} 通知已发送给审批人 {approver.name}")
+                        except Exception as notify_error:
+                            logger.warning(f"发票 {invoice.id} 通知发送失败: {str(notify_error)}")
+
+                logger.info(f"发票 {invoice.id} 已有 Approval 记录，通知已发送")
                 skip_count += 1
                 continue
 
             # 匹配审批流程
-            adapter = get_adapter(BusinessType.INVOICE)
             flow, err = approval_flow_crud.match_flow_generic(
                 db,
                 BusinessType.INVOICE,
@@ -138,7 +161,6 @@ def migrate_invoice_approvals(db: Session, team_id: int = None):
             if approval.current_node:
                 notification_service = notification_service_factory(db, invoice.team_id)
                 approvers = get_approvers_by_role(db, approval.current_node.approve_role)
-                adapter = get_adapter(BusinessType.INVOICE)
 
                 for approver in approvers:
                     try:
