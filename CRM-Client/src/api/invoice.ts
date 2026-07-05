@@ -169,10 +169,6 @@ const invoiceApi = {
     return request.delete<{ message: string }>(`/v1/invoice-applications/${applicationId}`)
   },
 
-  submitInvoiceApplication: (applicationId: number) => {
-    return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/submit`)
-  },
-
   financeApprovalInvoiceApplication: (applicationId: number, data: FinanceApprovalRequest) => {
     return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/finance-approval`, data)
   },

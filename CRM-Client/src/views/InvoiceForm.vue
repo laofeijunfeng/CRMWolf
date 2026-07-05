@@ -183,6 +183,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import invoiceApi, {
   type InvoiceApplicationCreate,
@@ -190,6 +191,7 @@ import invoiceApi, {
   type InvoiceType,
   type InvoiceApplicationResponse
 } from '@/api/invoice'
+import approvalGenericApi from '@/api/approvalGeneric'
 import customerApi from '@/api/customer'
 import contractApi from '@/api/contract'
 import paymentApi from '@/api/payment'
@@ -416,12 +418,31 @@ const handleSubmit = async () => {
     if (isEditing.value) {
       await invoiceApi.updateInvoiceApplication(Number(invoiceId.value), submitData)
       showSuccess('更新', '发票申请')
+      router.push('/invoices')
     } else {
-      await invoiceApi.createInvoiceApplication(submitData)
-      showSuccess('创建', '发票申请')
-    }
+      // 创建发票申请（status=DRAFT）
+      const invoice = await invoiceApi.createInvoiceApplication(submitData)
 
-    router.push('/invoices')
+      // 自动提交审批（创建 Approval 记录 + 发送飞书通知）
+      try {
+        const result = await approvalGenericApi.submitApproval('INVOICE', invoice.id)
+
+        if (result.approval_id === 0 && result.status === 'APPROVED') {
+          // 免审批直通场景（未配置审批流程）
+          showSuccess('发票申请已创建并自动批准', '发票申请')
+        } else {
+          // 正常审批流程
+          showSuccess('发票申请已创建并提交审批', '发票申请')
+        }
+      } catch (error) {
+        // 审批提交失败（发票已创建成功）
+        console.error('提交审批失败', error)
+        showError(error, '提交审批')
+        ElMessage.warning('发票创建成功，但审批提交失败，请在发票管理页面手动提交')
+      }
+
+      router.push('/invoices')
+    }
   } catch (error: unknown) {
     showError(error, isEditing.value ? '更新发票申请' : '创建发票申请')
   } finally {

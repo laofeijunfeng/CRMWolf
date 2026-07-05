@@ -166,7 +166,10 @@ class InvoiceTitleListResponse(BaseModel):
 
 
 class InvoiceApplicationListResponse(BaseModel):
-    invoice_applications: List[InvoiceApplicationResponse] = Field(..., description="发票申请列表")
+    items: List[InvoiceApplicationResponse] = Field(..., description="发票申请列表")
+    total: int = Field(..., description="总数")
+    page: int = Field(default=1, description="当前页码")
+    page_size: int = Field(default=100, description="每页记录数")
 
 
 class PaymentPlanInvoiceSummary(BaseModel):

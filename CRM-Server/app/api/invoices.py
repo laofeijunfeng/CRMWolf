@@ -186,8 +186,16 @@ def list_invoice_applications(
     )
 
     populated_applications = [_populate_application_info(db, app, team_id) for app in applications]
-    
-    return {"invoice_applications": populated_applications}
+
+    # 计算页码（skip/limit + 1）
+    current_page = skip // limit + 1 if limit > 0 else 1
+
+    return {
+        "items": populated_applications,
+        "total": total,
+        "page": current_page,
+        "page_size": limit
+    }
 
 
 @invoice_router.get("/{application_id}", response_model=InvoiceApplicationResponse, summary="获取发票申请详情", description="获取指定发票申请的完整信息及关联业务数据")

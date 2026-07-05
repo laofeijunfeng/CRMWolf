@@ -317,8 +317,16 @@ const handleEdit = (record: InvoiceApplicationResponse) => {
 
 const handleSubmitApproval = async (record: InvoiceApplicationResponse) => {
   try {
-    await invoiceApi.submitInvoiceApplicationForApproval(record.id)
-    showSuccess('提交审批', '发票申请')
+    const result = await approvalGenericApi.submitApproval('INVOICE', record.id)
+
+    if (result.approval_id === 0 && result.status === 'APPROVED') {
+      // 免审批直通场景
+      showSuccess('发票申请已自动批准', '提交审批')
+    } else {
+      // 正常审批流程
+      showSuccess('提交审批', '发票申请')
+    }
+
     fetchInvoiceApplications()
   } catch (error) {
     console.error('提交审批失败', error)
