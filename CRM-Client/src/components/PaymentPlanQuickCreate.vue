@@ -318,7 +318,11 @@ const suggestedDate = computed((): string => {
 
   const date = new Date(baseDate)
   date.setDate(date.getDate() + daysToAdd)
-return date.toISOString().split('T')[0] ?? ''
+  // Use local timezone (toISOString converts to UTC causing date offset in China)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 })
 
 // 检测是否为过去日期（用于补录场景警告提示）

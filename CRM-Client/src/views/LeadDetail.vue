@@ -406,14 +406,16 @@ const showFollowUpModal = () => {
     const lastNextTime = new Date(followUps.value[0].next_follow_time)
     const today = new Date()
     if (lastNextTime > today) {
-      nextFollowTime = lastNextTime.toISOString().split('T')[0]
+      // Use local timezone (toISOString converts to UTC causing date offset in China)
+      nextFollowTime = `${lastNextTime.getFullYear()}-${String(lastNextTime.getMonth() + 1).padStart(2, '0')}-${String(lastNextTime.getDate()).padStart(2, '0')}`
     }
   }
 
   if (!nextFollowTime) {
     const threeDaysLater = new Date()
     threeDaysLater.setDate(threeDaysLater.getDate() + 3)
-    nextFollowTime = threeDaysLater.toISOString().split('T')[0]
+    // Use local timezone (toISOString converts to UTC causing date offset in China)
+    nextFollowTime = `${threeDaysLater.getFullYear()}-${String(threeDaysLater.getMonth() + 1).padStart(2, '0')}-${String(threeDaysLater.getDate()).padStart(2, '0')}`
   }
 
   Object.assign(followUpForm, {

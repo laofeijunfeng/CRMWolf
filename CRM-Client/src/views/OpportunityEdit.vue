@@ -354,12 +354,16 @@ const handleSubmit = async () => {
     const data = {
       opportunity_name: form.opportunity_name,
       customer_id: fromCustomer.value ? Number(customerId.value) : form.customer_id,
-      total_amount: form.total_amount!,
-      user_count: form.user_count!,
+      total_amount: form.total_amount ?? 0,
+      user_count: form.user_count ?? 1,
       license_type: form.license_type,
       subscription_years: form.license_type === 'SUBSCRIPTION' ? form.subscription_years : null,
       purchase_type: form.purchase_type,
-      expected_closing_date: new Date(form.expected_closing_date).toISOString().split('T')[0],
+      // Use local timezone (toISOString converts to UTC causing date offset in China)
+      expected_closing_date: (() => {
+        const d = new Date(form.expected_closing_date)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      })(),
       procurement_method_id: form.procurement_method_id,
       owner_id: form.owner_id
     }

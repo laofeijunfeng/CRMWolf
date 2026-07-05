@@ -205,8 +205,11 @@ const fetchSalesFunnel = async () => {
   try {
     const params: Record<string, string> = {}
     if (dateRange.value && dateRange.value.length === 2) {
-      params.start_date = new Date(dateRange.value[0]).toISOString().split('T')[0]
-      params.end_date = new Date(dateRange.value[1]).toISOString().split('T')[0]
+      // Use local timezone (toISOString converts to UTC causing date offset in China)
+      const startDate = new Date(dateRange.value[0])
+      const endDate = new Date(dateRange.value[1])
+      params.start_date = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`
+      params.end_date = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
     }
     
     const data = await opportunityApi.getSalesFunnel(params)
@@ -223,8 +226,11 @@ const fetchStageDuration = async () => {
   try {
     const params: Record<string, string> = {}
     if (dateRange.value && dateRange.value.length === 2) {
-      params.start_date = new Date(dateRange.value[0]).toISOString().split('T')[0]
-      params.end_date = new Date(dateRange.value[1]).toISOString().split('T')[0]
+      // Use local timezone (toISOString converts to UTC causing date offset in China)
+      const startDate = new Date(dateRange.value[0])
+      const endDate = new Date(dateRange.value[1])
+      params.start_date = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`
+      params.end_date = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
     }
     
     const data = await opportunityApi.getStageDuration(params)

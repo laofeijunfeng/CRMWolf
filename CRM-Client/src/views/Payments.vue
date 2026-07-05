@@ -187,7 +187,13 @@
           </div>
         </el-form-item>
         <el-form-item label="回款日期" required>
-          <el-date-picker v-model="paymentForm.payment_date" placeholder="请选择回款日期" style="width: 100%" />
+          <el-date-picker
+            v-model="paymentForm.payment_date"
+            type="date"
+            placeholder="请选择回款日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="凭证附件">
           <el-input v-model="paymentForm.proof_attachment" placeholder="附件URL（可选）" />
@@ -273,7 +279,11 @@ const getOverdueDays = (dueDate: string): number => {
 const getUpcomingDate = (days: number): string => {
   const date = new Date()
   date.setDate(date.getDate() + days)
-  return date.toISOString().split('T')[0]
+  // Use local timezone, not UTC (toISOString() converts to UTC causing date offset in China)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 const fetchPaymentPlans = async (): Promise<void> => {

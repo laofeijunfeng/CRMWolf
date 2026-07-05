@@ -297,7 +297,11 @@ const winModalVisible = ref(false)
 const winFormRef = ref()
 const winForm = reactive<OpportunityWinRequest>({
   actual_amount: 0,
-  actual_closing_date: new Date().toISOString().split('T')[0] || ''
+  // Use local timezone (toISOString converts to UTC causing date offset in China)
+  actual_closing_date: (() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  })()
 })
 const winFormRules = {
   actual_amount: [{ required: true, message: '请输入实际金额', trigger: 'blur' }],
@@ -452,9 +456,12 @@ const getPurchaseTypeClass = (type: string) => {
 
 const handleShowWinModal = () => {
   if (!opportunity.value) return
+  // Use local timezone (toISOString converts to UTC causing date offset in China)
+  const now = new Date()
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   Object.assign(winForm, {
     actual_amount: opportunity.value.total_amount || 0,
-    actual_closing_date: new Date().toISOString().split('T')[0]
+    actual_closing_date: todayStr
   })
   winModalVisible.value = true
 }

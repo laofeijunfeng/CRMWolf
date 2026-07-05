@@ -115,7 +115,13 @@
           </template>
         </el-form-item>
         <el-form-item label="回款日期" required>
-          <el-date-picker v-model="paymentForm.payment_date" type="date" placeholder="请选择回款日期" style="width: 100%" />
+          <el-date-picker
+            v-model="paymentForm.payment_date"
+            type="date"
+            placeholder="请选择回款日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="凭证附件">
           <el-input v-model="paymentForm.proof_attachment" placeholder="附件URL（可选）" />
@@ -155,7 +161,13 @@
           </el-input-number>
         </el-form-item>
         <el-form-item label="计划日期" required>
-          <el-date-picker v-model="editForm.due_date" type="date" placeholder="计划回款日期" style="width: 100%" />
+          <el-date-picker
+            v-model="editForm.due_date"
+            type="date"
+            placeholder="计划回款日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="editForm.notes" type="textarea" placeholder="备注（可选）" :maxlength="200" show-word-limit />
@@ -296,10 +308,15 @@ const handleQuickCreateSuccess = () => {
 
 const showPaymentModal = (plan: PaymentPlanResponse) => {
   currentPlan.value = plan
-  const today = new Date().toISOString().split('T')[0] ?? ''
+  // Use local timezone, not UTC (toISOString() converts to UTC causing date offset in China)
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  const todayStr = `${year}-${month}-${day}`
   paymentForm.value = {
     actual_amount: plan.remaining_amount ?? plan.planned_amount,
-    payment_date: today
+    payment_date: todayStr
   }
   paymentModalVisible.value = true
 }
@@ -397,6 +414,7 @@ const deletePlan = (plan: PaymentPlanResponse) => {
       ElMessage.error(error.response?.data?.detail || '删除失败')
     }
   }).catch(() => {
+    // User cancelled the delete operation
   })
 }
 

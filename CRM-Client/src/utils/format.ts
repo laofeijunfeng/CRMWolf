@@ -26,6 +26,36 @@ export const formatCurrency = (value: number | string | null | undefined): strin
 
 const pad = (n: number): string => String(n).padStart(2, '0')
 
+/**
+ * 格式化日期为 YYYY-MM-DD（本地时区，非 UTC）。
+ * 解决 toISOString() 转换 UTC 导致中国时区日期偏移一天的问题。
+ * 入参可为 Date 实例；非法入参回退当前日期。
+ */
+export const formatLocalDate = (date: Date): string => {
+  if (date == null || Number.isNaN(date.getTime())) {
+    const now = new Date()
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  }
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+/**
+ * 获取当前日期 YYYY-MM-DD（本地时区）。
+ */
+export const getTodayLocalDate = (): string => {
+  const now = new Date()
+  return formatLocalDate(now)
+}
+
+/**
+ * 获取 N 天后的日期 YYYY-MM-DD（本地时区）。
+ */
+export const getDateAfterDays = (days: number): string => {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return formatLocalDate(date)
+}
+
 const toAbsolute = (d: Date): string =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
   `${pad(d.getHours())}:${pad(d.getMinutes())}`

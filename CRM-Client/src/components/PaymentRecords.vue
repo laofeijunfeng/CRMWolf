@@ -77,7 +77,13 @@
           </el-input-number>
         </el-form-item>
         <el-form-item label="回款日期" required>
-          <el-date-picker v-model="editForm.payment_date" type="date" placeholder="请选择回款日期" style="width: 100%" />
+          <el-date-picker
+            v-model="editForm.payment_date"
+            type="date"
+            placeholder="请选择回款日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="凭证附件">
           <el-input v-model="editForm.proof_attachment" placeholder="附件URL（可选）" />
