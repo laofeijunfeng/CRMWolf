@@ -629,6 +629,12 @@ class ApprovalCRUD:
             # PAYMENT 关联 payment_plan -> contract
             contract_id = getattr(entity, 'contract_id', None)
 
+        # 补充 submitter_name（INVOICE/PAYMENT 可能无姓名字段）
+        if submitter_name is None and submitter_id:
+            from app.crud.user import user_crud
+            user = user_crud.get_by_id(db, int(submitter_id))
+            submitter_name = user.name if user else None
+
         first_node = db.query(ApprovalNode).filter(
             ApprovalNode.flow_id == flow.id,
             ApprovalNode.node_order == 1
@@ -653,7 +659,7 @@ class ApprovalCRUD:
             approval_id=db_approval.id,
             node_id=first_node.id if first_node else None,
             approver_id=submitter_id,
-            approver_name=submitter_name,
+            approver_name=submitter_name,  # 同样使用补充后的 submitter_name
             action=ApprovalAction.SUBMIT,
             comment=None,
             team_id=team_id,
