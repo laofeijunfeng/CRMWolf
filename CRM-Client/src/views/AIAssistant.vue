@@ -78,22 +78,17 @@
             </template>
           </ChatBubble>
 
-          <!-- Agent 执行过程（执行中和执行完成后都可见，支持展开查看详细过程） -->
-          <AgentExecutionLog
-            v-if="executionSteps.length > 0"
-            :steps="executionSteps"
-            :expanded="executionLogExpanded"
-            :is-execution-complete="isExecutionComplete"
-            :auto-collapse-countdown="autoCollapseCountdown"
-            :step-to-message-map="stepToMessageMap"
-            @toggle-expand="handleToggleExpand"
-            @cancel-auto-collapse="cancelAutoCollapse"
-            @navigate-to-message="handleNavigateToMessage"
+          <!-- Task 5.10: Glue Phases（语义阶段） -->
+          <PhaseSummary
+            v-for="phase in phases"
+            :key="phase.id"
+            :phase="phase"
+            @expand="handlePhaseExpand"
           />
 
-          <!-- 加载指示器（仅在无执行步骤时显示） -->
+          <!-- 加载指示器（仅在无 phases 时显示） -->
           <div
-            v-if="sending && executionSteps.length === 0"
+            v-if="sending && phases.length === 0"
             class="ai-assistant-page__loading"
           >
             <span class="ai-assistant-page__loading-text">AI 正在思考...</span>
@@ -125,10 +120,9 @@ import { ElMessageBox, ElMessage } from 'element-plus'
 import { useAIConversationStore } from '@/stores/aiConversation'
 import { useUserStore } from '@/stores/user'
 import { aiAssistantApi, type AIAssistantSSEEvent } from '@/api/aiAssistant'
-import { useGluePhases } from '@/composables/useGluePhases'  // Task 5.10: Glue 替代 ReAct
+import { useGluePhases, type Phase } from '@/composables/useGluePhases'  // Task 5.10: Glue 替代 ReAct
 import type { GlueSSEEvent, EntityCandidate, PreviewSnapshot } from '@/types/aiAssistant'  // Task 5.1 类型
 import { logger } from '@/utils/logger'
-import AgentExecutionLog from '@/components/AgentExecutionLog.vue'
 import { Operation } from '@element-plus/icons-vue'
 import HistoryList from '@/components/ai-assistant/HistoryList.vue'
 import WelcomeScreen from '@/components/ai-assistant/WelcomeScreen.vue'
@@ -137,10 +131,11 @@ import ChatBubble from '@/components/ai-assistant/ChatBubble.vue'
 import PreviewCard from '@/components/ai-assistant/PreviewCard.vue'
 // Task 5.10: 导入新 Glue 组件
 import PhaseSummary from '@/components/ai-assistant/PhaseSummary.vue'
-import ErrorCard from '@/components/ai-assistant/ErrorCard.vue'
-import EntityPicker from '@/components/ai-assistant/EntityPicker.vue'
-import DangerConfirmCard from '@/components/ai-assistant/DangerConfirmCard.vue'
-import SlotFillForm from '@/components/ai-assistant/SlotFillForm.vue'
+// TODO: 后续功能使用
+// import ErrorCard from '@/components/ai-assistant/ErrorCard.vue'
+// import EntityPicker from '@/components/ai-assistant/EntityPicker.vue'
+// import DangerConfirmCard from '@/components/ai-assistant/DangerConfirmCard.vue'
+// import SlotFillForm from '@/components/ai-assistant/SlotFillForm.vue'
 
 // ========== Store ==========
 
@@ -156,7 +151,6 @@ const conversationId = computed(() => String(currentId.value))
 const gluePhases = useGluePhases(conversationId)
 const {
   phases,
-  collapsed: phasesCollapsed,
   handleSSEEvent: handleGlueSSEEvent,
   clear: clearPhases,
   loadFromStorage: loadPhasesFromStorage
@@ -168,25 +162,8 @@ const currentCandidates = ref<EntityCandidate[]>([])
 const currentPreviewSnapshot = ref<PreviewSnapshot | undefined>()
 const currentOutcomeType = ref<'win' | 'lose' | 'generic'>('generic')
 const currentIntentType = ref('')
-const currentMissingFields = ref([])
-
-// ========== Task 17: 步骤 ID 与消息 ID 映射 ==========
-
-const stepToMessageMap = computed(() => {
-  const map: Record<string, number> = {}
-
-  // 遍历所有消息，建立映射关系
-  for (const message of messages.value) {
-    if (message.role === 'assistant' && message.executionSteps) {
-      for (const step of message.executionSteps) {
-        // 每个 step 关联到对应的 message
-        map[step.id] = message.id
-      }
-    }
-  }
-
-  return map
-})
+// TODO: 后续功能使用
+// const currentMissingFields = ref([])
 
 // ========== State ==========
 
@@ -239,28 +216,14 @@ onMounted(async () => {
     if (recentConversation) {
       await store.loadConversation(recentConversation.id)
 
-      // ← Task 6: 使用 logger 追踪恢复流程
-      const executionSteps = store.getLastAIMessageExecutionSteps()
+      // Task 5.10: 从 localStorage 恢复 Glue phases
+      loadPhasesFromStorage()
 
       logger.info('[AIAssistant]', 'restore_start', {
         recentConversationId: recentConversation.id,
         storeCurrentId: currentId.value,
-        executionStepsCount: executionSteps.length
+        phasesCount: phases.value.length
       })
-
-      if (executionSteps.length > 0) {
-        // ✅ 修复：直接设置步骤，避免不必要的 localStorage 中间步骤
-        agentLog.setStepsDirectly(executionSteps)
-
-        logger.info('[AIAssistant]', 'restore_success', {
-          stepsCount: executionSteps.length,
-          lastStep: executionSteps[executionSteps.length - 1]?.title
-        })
-      } else {
-        logger.warn('[AIAssistant]', 'restore_empty', {
-          reason: 'No execution steps to restore'
-        })
-      }
     }
   }
 })
@@ -289,8 +252,8 @@ async function handleNewConversation(): Promise<void> {
   sessionId.value = null
   isStreamingAIMessage.value = false
 
-  // ✅ 清空执行步骤（composable 会自动重置 expanded 状态）
-  agentLog.clear()
+  // Task 5.10: 清空 Glue phases
+  clearPhases()
 
   // ✅ Copywriting: 具体化的成功提示（不是 generic）
   ElMessage.success('已创建新对话，可以开始输入')
@@ -306,21 +269,8 @@ async function handleSelectConversation(id: number): Promise<void> {
   sessionId.value = null
   isStreamingAIMessage.value = false
 
-  // ✅ 恢复最后一条 AI 消息的 executionSteps（修复刷新后消失的问题）
-  const executionSteps = store.getLastAIMessageExecutionSteps()
-  if (executionSteps.length > 0) {
-    // ✅ 修复：直接设置步骤，避免 localStorage round-trip
-    agentLog.setStepsDirectly(executionSteps)
-
-    logger.info('[AIAssistant]', 'restore_from_conversation', {
-      conversationId: id,
-      stepsCount: executionSteps.length,
-      lastStep: executionSteps[executionSteps.length - 1]?.title
-    })
-  } else {
-    // 无执行步骤时，清空 agentLog 状态
-    agentLog.clear()
-  }
+  // Task 5.10: 从 localStorage 恢复 Glue phases
+  loadPhasesFromStorage()
 
   logger.info('[AIAssistant]', 'selected_conversation', { conversationId: id })
 }
@@ -385,8 +335,8 @@ async function handleSendMessage(message: string): Promise<void> {
   currentPreviewData.value = null
   isStreamingAIMessage.value = false
 
-  // ✅ 清空旧的执行步骤（每次发送新消息重新开始）
-  agentLog.clear()
+  // Task 5.10: 清空 Glue phases（每次发送新消息重新开始）
+  clearPhases()
 
   // ✅ 开始新的 AI 消息（用于流式输出）
   store.startAIMessage()
@@ -429,6 +379,15 @@ async function handleSendMessage(message: string): Promise<void> {
     const title = message.slice(0, 50)
     await store.updateConversationTitle(title)
   }
+}
+
+/** Task 5.10: Phase 展开事件处理 */
+function handlePhaseExpand(phase: Phase): void {
+  logger.info('[AIAssistant]', 'phase_expand', {
+    phaseId: phase.id,
+    phaseType: phase.type,
+    phaseSummary: phase.summary
+  })
 }
 
 /** 处理 SSE 事件（Task 5.10: Glue 事件契约） */
@@ -591,27 +550,6 @@ async function handleCancelPreview(): Promise<void> {
 function scrollToBottom(): void {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-  }
-}
-
-/** Task 17: 跳转到消息并高亮 */
-function handleNavigateToMessage(messageId: number): void {
-  const messageElement = document.getElementById(`message-${messageId}`)
-
-  if (messageElement) {
-    // 滚动到对应消息位置
-    messageElement.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center'
-    })
-
-    // 高亮消息（2秒）
-    messageElement.classList.add('highlighted')
-    setTimeout(() => {
-      messageElement.classList.remove('highlighted')
-    }, 2000)
-
-    console.log('[Navigation] Scrolled to message:', messageId)
   }
 }
 
@@ -929,23 +867,6 @@ function getSpecificErrorMessage(error: unknown): string {
     .ai-assistant-page__input {
       padding: $wolf-space-sm $wolf-space-md;
     }
-  }
-
-  // ========== Task 17: 高亮消息样式 ==========
-
-  .ai-assistant-page__messages [id^="message-"].highlighted {
-    background: rgba($wolf-primary, 0.1);
-    border-left: 3px solid $wolf-primary;
-    transition: background 0.3s ease, border-left 0.3s ease;
-    padding-left: $wolf-space-sm;
-    margin-left: -$wolf-space-sm;
-    border-radius: $wolf-radius-sm;
-  }
-
-  .ai-assistant-page__messages [id^="message-"]:not(.highlighted) {
-    background: transparent;
-    border-left: none;
-    transition: background 0.3s ease, border-left 0.3s ease;
   }
 }
 </style>
