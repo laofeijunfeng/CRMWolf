@@ -175,6 +175,9 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ContractCreate.vue'),
         meta: { requiresAuth: true }
       },
+      // 回款计划创建页面 - 高级批量模式
+      // 推荐：在合同详情页使用 PaymentPlanQuickCreate Modal（快速模式）
+      // 此路由保留用于需要复杂批量规划的高级场景
       {
         path: 'contracts/:contractId/payment-plans/create',
         name: 'PaymentPlanCreate',
@@ -344,7 +347,7 @@ const routes: RouteRecordRaw[] = [
         path: 'ai-assistant',
         name: 'AIAssistant',
         component: () => import('@/views/AIAssistant.vue'),
-        meta: { requiresAuth: true, title: 'AI 助手' }
+        meta: { requiresAuth: true, title: 'AI 助手', hideHeader: true }
       }
     ]
   }
