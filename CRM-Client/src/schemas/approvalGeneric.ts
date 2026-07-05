@@ -120,7 +120,7 @@ export const ApprovalListItemSchema = z.object({
   entity_name: z.string().nullable(),
   entity_amount: z.number().nullable(),
   submitter_id: z.string().min(1),
-  submitter_name: z.string().min(1),
+  submitter_name: z.string().nullable(),  // 允许 null（发票/回款申请人无姓名字段）
   status: ApprovalStatusEnum,
   created_time: z.string().min(1),
   updated_time: z.string().min(1),

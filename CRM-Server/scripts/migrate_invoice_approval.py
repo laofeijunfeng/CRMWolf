@@ -16,6 +16,7 @@
 
 import sys
 import os
+import asyncio
 from datetime import datetime
 
 # 添加项目根目录到 Python 路径
@@ -30,6 +31,7 @@ from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.invoice import invoice_application_crud
 from app.services.approval_adapter import get_adapter
 from app.services.notification import notification_service_factory
+from app.api.approvals import get_approvers_by_role
 import logging
 
 # 配置日志
@@ -131,6 +133,28 @@ def migrate_invoice_approvals(db: Session, team_id: int = None):
             ))
 
             db.commit()
+
+            # 发送飞书通知给审批人
+            if approval.current_node:
+                notification_service = notification_service_factory(db, invoice.team_id)
+                approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+                adapter = get_adapter(BusinessType.INVOICE)
+
+                for approver in approvers:
+                    try:
+                        # 使用 asyncio 运行异步通知方法
+                        asyncio.run(notification_service.notify_approval_pending(
+                            entity_type=BusinessType.INVOICE,
+                            entity_name=adapter.get_name(invoice) or invoice.application_number,
+                            flow_name=flow.flow_name,
+                            node_name=approval.current_node.node_name,
+                            approver_open_id=approver.feishu_open_id or "",
+                            approver_name=approver.name,
+                            business_id=invoice.id,
+                        ))
+                        logger.info(f"发票 {invoice.id} 通知已发送给审批人 {approver.name}")
+                    except Exception as notify_error:
+                        logger.warning(f"发票 {invoice.id} 通知发送失败: {str(notify_error)}")
 
             logger.info(f"发票 {invoice.id} Approval 记录创建成功（Approval ID: {approval.id})")
             success_count += 1
