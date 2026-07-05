@@ -292,7 +292,8 @@ def create_payment_record(
             plan_id,
             record_data,
             str(current_user.id),
-            current_user.name
+            current_user.name,
+            team_id  # CRUD 红线：所有 CRUD 操作必须传入 team_id
         )
         return record
     except ValueError as e:
