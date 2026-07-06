@@ -122,12 +122,16 @@ def list_payment_plans(
             if hasattr(plan, 'contract') and plan.contract:
                 plan.contract_name = plan.contract.contract_name
                 plan.creator_id = plan.contract.creator_id
+                # 负责人：通过合同关联商机获取
+                if hasattr(plan.contract, 'opportunity') and plan.contract.opportunity:
+                    plan.owner_id = plan.contract.opportunity.owner_id
+                    # 查询负责人姓名
+                    from app.crud.user import user_crud
+                    owner = user_crud.get_by_id(db, int(plan.contract.opportunity.owner_id)) if plan.contract.opportunity.owner_id else None
+                    plan.owner_name = owner.name if owner else None
                 if hasattr(plan.contract, 'customer') and plan.contract.customer:
                     plan.customer_id = plan.contract.customer.id
                     plan.customer_name = plan.contract.customer.account_name
-                if hasattr(plan.contract, 'opportunity') and plan.contract.opportunity:
-                    plan.opportunity_id = plan.contract.opportunity.id
-                    plan.opportunity_name = plan.contract.opportunity.opportunity_name
         
         total_pages = (total + page_size - 1) // page_size if total > 0 else 0
         

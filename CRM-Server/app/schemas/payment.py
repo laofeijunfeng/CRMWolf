@@ -94,6 +94,8 @@ class PaymentPlanResponse(PaymentPlanBase):
     customer_name: Optional[str] = Field(None, description="客户名称")
     opportunity_id: Optional[int] = Field(None, description="商机ID")
     opportunity_name: Optional[str] = Field(None, description="商机名称")
+    owner_id: Optional[str] = Field(None, description="负责人ID（商机负责人）")
+    owner_name: Optional[str] = Field(None, description="负责人姓名")
     is_invoiced: bool = Field(False, description="是否已开票")
     invoice_count: int = Field(0, description="开票数量")
     invoiced_amount: Optional[float] = Field(None, description="已开票金额")

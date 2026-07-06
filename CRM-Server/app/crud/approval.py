@@ -627,7 +627,9 @@ class ApprovalCRUD:
             contract_id = entity.contract_id
         elif business_type == BusinessType.PAYMENT:
             # PAYMENT 关联 payment_plan -> contract
-            contract_id = getattr(entity, 'contract_id', None)
+            from app.models.payment import PaymentPlan
+            payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == entity.payment_plan_id).first()
+            contract_id = payment_plan.contract_id if payment_plan else None
 
         # 补充 submitter_name（INVOICE/PAYMENT 可能无姓名字段）
         if submitter_name is None and submitter_id:
