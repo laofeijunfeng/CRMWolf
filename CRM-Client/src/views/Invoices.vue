@@ -599,45 +599,6 @@ onMounted(() => {
   }
 }
 
-// 申请单号单元格
-.application-number-cell {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-// 下载徽章
-.download-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  background: $wolf-primary-light;
-  color: $wolf-primary;
-  border-radius: $wolf-radius-sm;
-  font-size: $wolf-font-size-caption;
-  cursor: pointer;
-  transition: all 0.2s ease-in-out;
-
-  &:hover {
-    background: $wolf-primary;
-    color: #fff;
-  }
-
-  &:focus-visible {
-    outline: 2px solid $wolf-primary;
-    outline-offset: 2px;
-  }
-}
-
-.download-icon {
-  font-size: 14px;
-}
-
-.download-link {
-  font-weight: $wolf-font-weight-medium;
-}
-
 // 状态标签（浅底色 + 同色系文字）
 .status-tag {
   display: inline-flex;
