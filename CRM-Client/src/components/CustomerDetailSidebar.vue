@@ -92,8 +92,8 @@ const navItems = [
 
 // 快捷操作定义（✅ P0: 使用 SVG 图标替代文字）
 const quickActions = [
-  { key: 'addFollowUp', label: '跟进', emitKey: 'show-add-follow-up' },
-  { key: 'addContact', label: '联系人', emitKey: 'show-add-contact' },
+  { key: 'addFollowUp', label: '跟进', emitKey: 'show-add-follow-up' as const },
+  { key: 'addContact', label: '联系人', emitKey: 'show-add-contact' as const },
   { key: 'createOpportunity', label: '商机', route: `/customers/${props.customerId}/opportunities/create` },
   { key: 'createContract', label: '合同', route: `/contracts/create?customerId=${props.customerId}` }
 ]
@@ -105,10 +105,10 @@ function handleNavClick(navKey: string): void {
 }
 
 // 快捷操作点击（✅ P0: 简化逻辑）
-function handleActionClick(action: { emitKey?: string; route?: string }): void {
+function handleActionClick(action: { emitKey?: 'show-add-follow-up' | 'show-add-contact'; route?: string }): void {
   if (action.route !== undefined && action.route !== '') {
     router.push(action.route)
-  } else if (action.emitKey !== undefined && action.emitKey !== '') {
+  } else if (action.emitKey !== undefined) {
     emit(action.emitKey)
   }
 }

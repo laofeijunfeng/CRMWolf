@@ -1,9 +1,19 @@
 <template>
   <div class="customer-detail-page">
-    <div v-loading="loading" class="detail-content">
-      <div v-if="!customerDetail" class="empty-state">
-        <el-empty description="客户信息加载失败，请刷新页面或稍后重试" />
-      </div>
+    <div v-loading="loading" class="detail-layout">
+      <!-- 左侧导航 -->
+      <CustomerDetailSidebar
+        :customer-id="customerId"
+        @nav-change="handleNavChange"
+        @show-add-follow-up="showAddFollowUpModal"
+        @show-add-contact="showAddContactModal"
+      />
+
+      <!-- 右侧内容区 -->
+      <div class="detail-content">
+        <div v-if="!customerDetail" class="empty-state">
+          <el-empty description="客户信息加载失败，请刷新页面或稍后重试" />
+        </div>
 
       <div v-else>
         <!-- 客户信息卡片 -->
@@ -240,23 +250,10 @@
           </div>
         </div>
 
-        <!-- 标签页卡片 -->
-        <div class="tabs-card">
-          <div class="tabs-header">
-            <div
-              v-for="tab in tabs"
-              :key="tab.key"
-              class="tabs-item"
-              :class="{ 'is-active': activeTab === tab.key }"
-              @click="activeTab = tab.key"
-            >
-              {{ tab.label }}
-            </div>
-          </div>
-
-          <div class="tabs-content">
-            <!-- 客户跟进（操作时间线） -->
-              <div v-show="activeTab === 'followup'" class="tab-panel">
+        <!-- 内容面板区 -->
+        <div class="content-panels">
+          <!-- 客户跟进（操作时间线） -->
+          <div v-show="activeTab === 'followup'" class="content-panel">
                 <div class="follow-up-summary" v-if="followUps.length > 0 && lastFollowUp">
                   <div class="summary-item">
                     <div class="summary-label">最后跟进</div>
@@ -299,8 +296,8 @@
                 />
               </div>
 
-              <!-- 联系人 -->
-              <div v-show="activeTab === 'contacts'" class="tab-panel">
+          <!-- 联系人 -->
+          <div v-show="activeTab === 'contacts'" class="content-panel">
                 <div class="panel-header">
                   <span>联系人</span>
                   <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="showAddContactModal">
@@ -367,8 +364,8 @@
                 </el-table>
               </div>
 
-              <!-- 商机 -->
-              <div v-show="activeTab === 'opportunities'" class="tab-panel">
+          <!-- 商机 -->
+          <div v-show="activeTab === 'opportunities'" class="content-panel">
                 <div class="panel-header">
                   <span>商机列表</span>
                   <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="handleCreateOpportunity">
@@ -412,8 +409,8 @@
                 </div>
               </div>
 
-              <!-- 合同 -->
-              <div v-show="activeTab === 'contracts'" class="tab-panel">
+          <!-- 合同 -->
+          <div v-show="activeTab === 'contracts'" class="content-panel">
                 <div class="panel-header">
                   <span>合同列表</span>
                   <el-button type="primary" class="wolf-btn wolf-btn--primary-sm" @click="handleCreateContract">
@@ -468,8 +465,8 @@
                 </div>
               </div>
 
-              <!-- 回款 -->
-              <div v-show="activeTab === 'payments'" class="tab-panel">
+          <!-- 回款 -->
+          <div v-show="activeTab === 'payments'" class="content-panel">
                 <div class="panel-header">
                   <span>回款计划</span>
                   <el-button type="primary" class="wolf-btn wolf-btn--primary-sm">
@@ -533,8 +530,8 @@
                 </div>
               </div>
 
-              <!-- 发票 -->
-              <div v-show="activeTab === 'invoices'" class="tab-panel">
+          <!-- 发票 -->
+          <div v-show="activeTab === 'invoices'" class="content-panel">
                 <!-- 发票抬头列表 -->
                 <div class="invoice-titles-section">
                   <div class="section-title">
@@ -652,8 +649,6 @@
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -905,6 +900,7 @@ import {
 import { ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import FollowUpList from '@/components/FollowUpList.vue'
+import CustomerDetailSidebar from '@/components/CustomerDetailSidebar.vue'
 import customerApi, { type CustomerDetailResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
 import customerFollowUpApi, { type CustomerFollowUpCreate, type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
@@ -938,14 +934,11 @@ const showScoreDetails = ref(false)
 const scoreDetails = ref<ScoreDetail[]>([])
 
 const activeTab = ref('followup')
-const tabs = [
-  { key: 'followup', label: '客户跟进' },
-  { key: 'contacts', label: '联系人' },
-  { key: 'opportunities', label: '商机' },
-  { key: 'contracts', label: '合同' },
-  { key: 'payments', label: '回款' },
-  { key: 'invoices', label: '发票' }
-]
+
+// 导航切换处理
+const handleNavChange = (navKey: string): void => {
+  activeTab.value = navKey
+}
 
 const handleFollowUpDelete = async (followUp: { id: number }) => {
   try {
@@ -1859,12 +1852,62 @@ onMounted(async () => {
   color: $wolf-text-tertiary;
 }
 
-// 标签页卡片（撑满页面宽度）
-.tabs-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-space-md;
-  box-shadow: $wolf-shadow-card;
+// 双栏布局
+.detail-layout {
+  display: flex;
+  height: calc(100vh - $wolf-header-height);
+  background: $wolf-bg-page;
+}
+
+.detail-content {
+  flex: 1;
+  padding: $wolf-page-padding;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.customer-detail-page {
+  height: 100%;
+  background: $wolf-bg-page;
+}
+
+// 内容面板容器
+.content-panels {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-md;
+}
+
+.content-panel {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-md;
+}
+
+// 移动端：单栏布局
+@media (max-width: 768px) {
+  .detail-layout {
+    flex-direction: column;
+  }
+
+  .detail-content {
+    padding: $wolf-space-md;
+  }
+
+  .content-panels {
+    gap: $wolf-space-sm;
+  }
+}
+
+// 面板头部
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: $wolf-space-md;
+  font-size: $wolf-font-size-auxiliary;
+  font-weight: $wolf-font-weight-medium;
+  color: $wolf-text-secondary;
 }
 
 .info-content {
@@ -2034,59 +2077,10 @@ onMounted(async () => {
   color: $wolf-text-tertiary;
 }
 
-// 标签页卡片（与 LeadDetail.vue 的 follow-up-card 一致）
-.tabs-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-space-md;
-  box-shadow: $wolf-shadow-card;
-}
-
-.tabs-header {
+.info-content {
   display: flex;
-  gap: $wolf-space-md;
-  border-bottom: 1px solid $wolf-border-default;
-  margin-bottom: $wolf-space-md;
+  flex-direction: column;
 }
-
-.tabs-item {
-  padding: $wolf-space-sm 0;
-  font-size: $wolf-font-size-auxiliary;
-  color: $wolf-text-tertiary;
-  cursor: pointer;
-  position: relative;
-  transition: color 0.2s ease;
-
-  &:hover {
-    color: $wolf-text-secondary;
-  }
-
-  &.is-active {
-    color: $wolf-text-secondary;
-    font-weight: $wolf-font-weight-medium;
-
-    &::after {
-      content: '';
-      position: absolute;
-      bottom: -1px;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background: $wolf-primary;
-    }
-  }
-}
-
-.tabs-content {
-  min-height: 200px;
-}
-
-.tabs-content :deep(.follow-up-list-container) {
-  padding: 0;
-  background: transparent;
-}
-
-// 面板头部
 .panel-header {
   display: flex;
   justify-content: space-between;
