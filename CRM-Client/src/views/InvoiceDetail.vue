@@ -98,6 +98,36 @@
         </div>
       </div>
 
+      <!-- ISSUED 状态专属：已开票文件高亮区域 -->
+      <div
+        v-if="invoiceInfo?.status === 'ISSUED' && invoiceInfo?.invoice_file_path"
+        class="issued-file-highlight"
+      >
+        <div class="highlight-header">
+          <el-icon class="success-icon"><CircleCheckFilled /></el-icon>
+          <span class="highlight-title">已开票</span>
+          <span v-if="invoiceInfo?.invoice_number" class="invoice-number-badge">
+            {{ invoiceInfo.invoice_number }}
+          </span>
+        </div>
+        <div class="file-download-area">
+          <el-icon :class="['file-type-icon', getFileIconClass(invoiceInfo.invoice_file_path)]">
+            <Document v-if="isPdf(invoiceInfo.invoice_file_path)" />
+            <Picture v-else />
+          </el-icon>
+          <span class="file-type-label">{{ getFileTypeLabel(invoiceInfo.invoice_file_path) }}</span>
+          <el-button
+            type="primary"
+            class="download-btn"
+            aria-label="下载发票文件"
+            @click="handleDownloadWithFeedback"
+          >
+            <el-icon><Download /></el-icon>
+            下载发票文件
+          </el-button>
+        </div>
+      </div>
+
       <div class="core-section">
         <div class="invoice-title-section-card section-card">
           <div class="card-header">
@@ -232,7 +262,9 @@ import {
   Wallet,
   Location,
   Phone,
-  Download
+  Download,
+  CircleCheckFilled,
+  Picture
 } from '@element-plus/icons-vue'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import { useUserStore } from '@/stores/user'
@@ -419,6 +451,29 @@ const downloadInvoiceFile = (): void => {
   window.open(url, '_blank')
 }
 
+// Stub functions (Task 6 will implement full logic)
+const isPdf = (filePath: string | null | undefined): boolean => {
+  return filePath?.toLowerCase().endsWith('.pdf') ?? false
+}
+
+const getFileIconClass = (_filePath: string | null | undefined): string => {
+  return 'default-icon'
+}
+
+const getFileTypeLabel = (filePath: string | null | undefined): string => {
+  if (filePath === null || filePath === undefined || filePath.length === 0) return '发票文件'
+  const lower = filePath.toLowerCase()
+  if (lower.endsWith('.pdf')) return 'PDF 文件'
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'JPG 图片'
+  if (lower.endsWith('.png')) return 'PNG 图片'
+  return '发票文件'
+}
+
+const handleDownloadWithFeedback = (): void => {
+  // Task 6 will implement toast feedback
+  downloadInvoiceFile()
+}
+
 // Configure header on mount
 onMounted(() => {
   headerStore.setBack(true)
@@ -427,7 +482,7 @@ onMounted(() => {
 
 // Watch invoiceInfo to update actions
 watch(invoiceInfo, () => {
-  const actions: Array<{ id: string; label: string; type?: 'primary' | 'success' | 'danger' | 'default'; handler: () => void }> = []
+  const actions: { id: string; label: string; type?: 'primary' | 'success' | 'danger' | 'default'; handler: () => void }[] = []
 
   if (canEdit.value) {
     actions.push({ id: 'edit', label: '编辑', type: 'primary', handler: handleEdit })
