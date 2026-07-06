@@ -45,12 +45,13 @@
 - `src/api/licenseApplication.ts` - License 申请 API 调用
 - `src/schemas/deployment.ts` - DeploymentInfo Zod schemas
 - `src/schemas/licenseApplication.ts` - LicenseApplication Zod schemas
-- `src/components/DeploymentInfoCard.vue` - 部署信息卡片组件
-- `src/components/LicenseApplicationForm.vue` - License 申请表单组件
+- `src/components/LicenseManagement.vue` - License 管理合并组件（包含部署信息和 License 申请两个区域）
+- `src/components/LicenseApplicationDialog.vue` - License 申请创建/编辑对话框组件
+- `src/components/DeploymentDialog.vue` - 部署信息创建/编辑对话框组件
 - `src/components/LicenseApprovalDialog.vue` - License 审批对话框组件
 
 **前端修改文件**:
-- `src/views/CustomerDetail.vue` - 新增"部署信息"和"License 申请"两个 Tab
+- `src/views/CustomerDetail.vue` - 新增"License 管理" Tab（合并部署信息和 License 申请）
 - `src/views/ApprovalCenter.vue` - 新增 LICENSE 类型审批项
 
 **迁移文件**:
@@ -813,22 +814,21 @@ git commit -m "feat(api): add LicenseApplication endpoints and Word export servi
 
 ---
 
-## Phase 4: 前端界面（Task 9-11）
+## Phase 4: 前端界面（Task 9-10）
 
-### Task 9: 客户详情页新增部署信息和 License 申请 Tab
+### Task 9: 客户详情页新增 License 管理 Tab（合并部署信息和 License 申请）
 
 **Files:**
 - Create: `CRM-Client/src/api/deployment.ts`
 - Create: `CRM-Client/src/api/licenseApplication.ts`
 - Create: `CRM-Client/src/schemas/deployment.ts`
 - Create: `CRM-Client/src/schemas/licenseApplication.ts`
-- Create: `CRM-Client/src/components/DeploymentInfoCard.vue`
-- Create: `CRM-Client/src/components/LicenseApplicationForm.vue`
+- Create: `CRM-Client/src/components/LicenseManagement.vue` - 合并组件，包含部署信息和 License 申请两部分
 - Modify: `CRM-Client/src/views/CustomerDetail.vue`
 
 **Interfaces:**
 - Consumes: DeploymentInfo API, LicenseApplication API
-- Produces: 客户详情页新增两个 Tab，部署信息卡片组件，License 申请表单组件
+- Produces: 客户详情页新增一个 Tab（"License 管理"），包含部署信息管理区和 License 申请管理区
 
 - [ ] **Step 1: 创建前端 API 调用文件**
 
@@ -928,7 +928,7 @@ export type LicenseApplicationCreate = z.infer<typeof LicenseApplicationCreateSc
 export type LicenseApplicationUpdate = z.infer<typeof LicenseApplicationUpdateSchema>
 ```
 
-- [ ] **Step 3: 修改 CustomerDetail.vue，新增两个 Tab**
+- [ ] **Step 3: 修改 CustomerDetail.vue，新增 License 管理 Tab**
 
 在 CustomerDetail.vue 的 Tab 列表中新增：
 ```vue
@@ -939,15 +939,17 @@ export type LicenseApplicationUpdate = z.infer<typeof LicenseApplicationUpdateSc
   <el-tab-pane label="合同" name="contracts">...</el-tab-pane>
   <el-tab-pane label="回款" name="payments">...</el-tab-pane>
   <el-tab-pane label="发票" name="invoices">...</el-tab-pane>
-  <!-- 新增 -->
-  <el-tab-pane label="部署信息" name="deployments">
-    <DeploymentInfoList :customer-id="customerId" />
-  </el-tab-pane>
-  <el-tab-pane label="License申请" name="licenses">
-    <LicenseApplicationList :customer-id="customerId" />
+  <!-- 新增：合并部署信息和 License 申请到一个 Tab -->
+  <el-tab-pane label="License 管理" name="license-management">
+    <LicenseManagement :customer-id="customerId" />
   </el-tab-pane>
 </el-tabs>
 ```
+
+**设计说明**：
+- 部署信息和 License 申请属于同一个业务域，合并到一个 Tab 可以减少用户切换负担
+- LicenseManagement 组件内部分为两个区域：上方部署信息管理区，下方 License 申请管理区
+- 用户操作流程：先配置部署信息 → 再申请 License，一站式完成
 
 - [ ] **Step 4: Commit**
 
@@ -958,135 +960,189 @@ git commit -m "feat(frontend): add DeploymentInfo and LicenseApplication APIs, s
 
 ---
 
-### Task 10: 创建部署信息和 License 申请组件
+### Task 10: 创建 License 管理合并组件
 
 **Files:**
-- Create: `CRM-Client/src/components/DeploymentInfoList.vue`
-- Create: `CRM-Client/src/components/LicenseApplicationList.vue`
-- Create: `CRM-Client/src/components/LicenseApplicationDialog.vue`
+- Create: `CRM-Client/src/components/LicenseManagement.vue` - 合并部署信息和 License 申请管理
+- Create: `CRM-Client/src/components/LicenseApplicationDialog.vue` - License 申请创建/编辑对话框
 
 **Interfaces:**
 - Consumes: DeploymentInfo API, LicenseApplication API
-- Produces: 部署信息列表组件，License 申请列表组件，License 申请创建对话框组件
+- Produces: License 管理合并组件（上方部署信息区，下方 License 申请区），License 申请对话框组件
 
-- [ ] **Step 1: 创建 DeploymentInfoList.vue**
+- [ ] **Step 1: 创建 LicenseManagement.vue（合并组件）**
 
 ```vue
 <template>
   <div>
-    <el-button type="primary" @click="showCreateDialog">新增部署信息</el-button>
+    <!-- 上方区域：部署信息管理 -->
+    <el-divider content-position="left">
+      <el-icon><Server /></el-icon> 部署信息配置
+    </el-divider>
+    <el-button type="primary" size="small" @click="showDeploymentDialog">新增部署信息</el-button>
     <el-row :gutter="20" style="margin-top: 20px">
       <el-col :span="8" v-for="deployment in deployments" :key="deployment.id">
-        <el-card>
+        <el-card shadow="hover">
           <div slot="header">
             <span>{{ deployment.deployment_name }}</span>
-            <el-tag v-if="deployment.is_default" type="success" size="small">默认</el-tag>
+            <el-tag v-if="deployment.is_default" type="success" size="small" style="margin-left: 10px">默认</el-tag>
           </div>
           <div>
-            <p>服务器地址：{{ deployment.server_address }}</p>
-            <p>授权人数：{{ deployment.authorized_users }}</p>
+            <p><strong>服务器地址：</strong>{{ deployment.server_address }}</p>
+            <p><strong>授权人数：</strong>{{ deployment.authorized_users }}</p>
           </div>
-          <div slot="footer">
+          <div slot="footer" style="text-align: right">
             <el-button size="small" @click="editDeployment(deployment)">编辑</el-button>
             <el-button size="small" type="danger" @click="deleteDeployment(deployment.id)">删除</el-button>
-            <el-button size="small" type="success" @click="setDefault(deployment.id)">设为默认</el-button>
+            <el-button v-if="!deployment.is_default" size="small" type="success" @click="setDefault(deployment.id)">设为默认</el-button>
           </div>
         </el-card>
       </el-col>
     </el-row>
-  </div>
-</template>
 
-<script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { deploymentApi } from '@/api/deployment'
-import type { DeploymentInfo } from '@/schemas/deployment'
-
-const props = defineProps<{ customerId: number }>()
-const deployments = ref<DeploymentInfo[]>([])
-
-onMounted(async () => {
-  deployments.value = await deploymentApi.list(props.customerId)
-})
-
-const showCreateDialog = () => { /* TODO */ }
-const editDeployment = (deployment: DeploymentInfo) => { /* TODO */ }
-const deleteDeployment = async (id: number) => {
-  await deploymentApi.delete(id)
-  deployments.value = await deploymentApi.list(props.customerId)
-}
-const setDefault = async (id: number) => {
-  await deploymentApi.setDefault(id, props.customerId)
-  deployments.value = await deploymentApi.list(props.customerId)
-}
-</script>
-```
-
-- [ ] **Step 2: 创建 LicenseApplicationList.vue**
-
-```vue
-<template>
-  <div>
-    <el-button type="primary" @click="showCreateDialog">申请 License</el-button>
+    <!-- 下方区域：License 申请管理 -->
+    <el-divider content-position="left" style="margin-top: 40px">
+      <el-icon><Document /></el-icon> License 申请记录
+    </el-divider>
+    <el-button type="primary" size="small" @click="showLicenseDialog">申请 License</el-button>
     <el-table :data="applications" style="margin-top: 20px">
-      <el-table-column prop="application_number" label="申请单号" />
-      <el-table-column prop="license_type" label="类型">
+      <el-table-column prop="application_number" label="申请单号" width="150" />
+      <el-table-column prop="license_type" label="类型" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.license_type === 'TRIAL' ? 'warning' : 'success'">
+          <el-tag :type="row.license_type === 'TRIAL' ? 'warning' : 'success'" size="small">
             {{ row.license_type === 'TRIAL' ? '试用' : '正式' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="expiry_date" label="到期时间" />
-      <el-table-column prop="status" label="状态">
+      <el-table-column prop="expiry_date" label="到期时间" width="120" />
+      <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="getStatusType(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
+          <el-tag :type="getStatusType(row.status)" size="small">{{ getStatusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作">
+      <el-table-column prop="created_time" label="申请时间" width="180" />
+      <el-table-column label="操作" width="300">
         <template #default="{ row }">
           <el-button v-if="row.status === 'DRAFT'" size="small" @click="editApplication(row)">编辑</el-button>
-          <el-button v-if="row.status === 'DRAFT'" size="small" type="primary" @click="submitApplication(row.id)">提交</el-button>
-          <el-button v-if="row.status === 'ISSUED'" size="small" type="success" @click="exportLicense(row.id)">导出</el-button>
+          <el-button v-if="row.status === 'DRAFT'" size="small" type="primary" @click="submitApplication(row.id)">提交审批</el-button>
+          <el-button v-if="row.status === 'ISSUED'" size="small" type="success" @click="exportLicense(row.id)">导出文档</el-button>
           <el-button v-if="row.status === 'DRAFT'" size="small" type="danger" @click="deleteApplication(row.id)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 对话框：部署信息 -->
+    <DeploymentDialog
+      v-if="showDeploymentDialogVisible"
+      :visible="showDeploymentDialogVisible"
+      :customer-id="customerId"
+      :deployment="currentDeployment"
+      @close="closeDeploymentDialog"
+      @success="refreshDeployments"
+    />
+
+    <!-- 对话框：License 申请 -->
+    <LicenseApplicationDialog
+      v-if="showLicenseDialogVisible"
+      :visible="showLicenseDialogVisible"
+      :customer-id="customerId"
+      :application="currentApplication"
+      :deployments="deployments"
+      @close="closeLicenseDialog"
+      @success="refreshApplications"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Server, Document } from '@element-plus/icons-vue'
+import { deploymentApi } from '@/api/deployment'
 import { licenseApplicationApi } from '@/api/licenseApplication'
+import type { DeploymentInfo } from '@/schemas/deployment'
 import type { LicenseApplication } from '@/schemas/licenseApplication'
+import DeploymentDialog from './DeploymentDialog.vue'
+import LicenseApplicationDialog from './LicenseApplicationDialog.vue'
 
 const props = defineProps<{ customerId: number }>()
-const applications = ref<LicenseApplication[]>([])
 
+// 部署信息数据
+const deployments = ref<DeploymentInfo[]>([])
+const showDeploymentDialogVisible = ref(false)
+const currentDeployment = ref<DeploymentInfo | null>(null)
+
+// License 申请数据
+const applications = ref<LicenseApplication[]>([])
+const showLicenseDialogVisible = ref(false)
+const currentApplication = ref<LicenseApplication | null>(null)
+
+// 初始化加载
 onMounted(async () => {
-  applications.value = await licenseApplicationApi.list(props.customerId)
+  await Promise.all([refreshDeployments(), refreshApplications()])
 })
 
-const getStatusType = (status: string) => {
-  const types: Record<string, string> = { DRAFT: 'info', PENDING: 'warning', APPROVED: 'success', REJECTED: 'danger', ISSUED: 'success' }
-  return types[status] || 'info'
+// 部署信息操作
+const refreshDeployments = async () => {
+  deployments.value = await deploymentApi.list(props.customerId)
 }
 
-const getStatusLabel = (status: string) => {
-  const labels: Record<string, string> = { DRAFT: '草稿', PENDING: '待审批', APPROVED: '已批准', REJECTED: '已拒绝', ISSUED: '已发放' }
-  return labels[status] || status
+const showDeploymentDialog = () => {
+  currentDeployment.value = null
+  showDeploymentDialogVisible.value = true
 }
 
-const showCreateDialog = () => { /* TODO */ }
-const editApplication = (application: LicenseApplication) => { /* TODO */ }
+const editDeployment = (deployment: DeploymentInfo) => {
+  currentDeployment.value = deployment
+  showDeploymentDialogVisible.value = true
+}
+
+const deleteDeployment = async (id: number) => {
+  await ElMessageBox.confirm('确认删除该部署信息？', '提示', { type: 'warning' })
+  await deploymentApi.delete(id)
+  ElMessage.success('删除成功')
+  await refreshDeployments()
+}
+
+const setDefault = async (id: number) => {
+  await deploymentApi.setDefault(id, props.customerId)
+  ElMessage.success('已设置为默认部署')
+  await refreshDeployments()
+}
+
+const closeDeploymentDialog = () => {
+  showDeploymentDialogVisible.value = false
+}
+
+// License 申请操作
+const refreshApplications = async () => {
+  applications.value = await licenseApplicationApi.list(props.customerId)
+}
+
+const showLicenseDialog = () => {
+  currentApplication.value = null
+  showLicenseDialogVisible.value = true
+}
+
+const editApplication = (application: LicenseApplication) => {
+  currentApplication.value = application
+  showLicenseDialogVisible.value = true
+}
+
 const submitApplication = async (id: number) => {
+  await ElMessageBox.confirm('确认提交审批？', '提示', { type: 'info' })
   await licenseApplicationApi.submit(id)
-  applications.value = await licenseApplicationApi.list(props.customerId)
+  ElMessage.success('已提交审批')
+  await refreshApplications()
 }
+
 const deleteApplication = async (id: number) => {
+  await ElMessageBox.confirm('确认删除该申请？', '提示', { type: 'warning' })
   await licenseApplicationApi.delete(id)
-  applications.value = await licenseApplicationApi.list(props.customerId)
+  ElMessage.success('删除成功')
+  await refreshApplications()
 }
+
 const exportLicense = async (id: number) => {
   const blob = await licenseApplicationApi.export(id)
   const url = window.URL.createObjectURL(blob)
@@ -1094,15 +1150,56 @@ const exportLicense = async (id: number) => {
   link.href = url
   link.download = `License_${id}.docx`
   link.click()
+  window.URL.revokeObjectURL(url)
+  ElMessage.success('导出成功')
+}
+
+const closeLicenseDialog = () => {
+  showLicenseDialogVisible.value = false
+}
+
+// 状态映射
+const getStatusType = (status: string) => {
+  const types: Record<string, any> = {
+    DRAFT: 'info',
+    PENDING: 'warning',
+    APPROVED: 'success',
+    REJECTED: 'danger',
+    ISSUED: 'success'
+  }
+  return types[status] || 'info'
+}
+
+const getStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
+    DRAFT: '草稿',
+    PENDING: '待审批',
+    APPROVED: '已批准',
+    REJECTED: '已拒绝',
+    ISSUED: '已发放'
+  }
+  return labels[status] || status
 }
 </script>
+
+<style scoped>
+.el-divider {
+  margin: 20px 0;
+}
+</style>
 ```
 
-- [ ] **Step 3: Commit**
+**组件设计说明**：
+- 采用上下分区布局，符合"先配置部署信息 → 再申请 License"的操作流程
+- 上方区域展示部署信息卡片列表（可视化展示服务器地址、授权人数）
+- 下方区域展示 License 申请表格（包含申请单号、类型、状态、操作按钮）
+- 使用 el-divider 分隔两个区域，清晰区分不同功能块
+
+- [ ] **Step 2: Commit**
 
 ```bash
-git add CRM-Client/src/components/DeploymentInfoList.vue CRM-Client/src/components/LicenseApplicationList.vue
-git commit -m "feat(frontend): add DeploymentInfoList and LicenseApplicationList components"
+git add CRM-Client/src/components/LicenseManagement.vue CRM-Client/src/components/LicenseApplicationDialog.vue CRM-Client/src/components/DeploymentDialog.vue
+git commit -m "feat(frontend): add LicenseManagement merged component with deployment and application sections"
 ```
 
 ---
