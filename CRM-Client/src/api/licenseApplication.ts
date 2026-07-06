@@ -9,16 +9,23 @@ export interface LicenseApplicationCreate {
   contract_id?: number | null
   license_type: LicenseType
   expiry_date: string
+  remark?: string | null  // 补充需求：备注字段
 }
 
 export interface LicenseApplicationUpdate {
   deployment_info_id?: number | null
   contract_id?: number | null
   expiry_date?: string | null
+  remark?: string | null  // 补充需求：备注字段
 }
 
 export interface LicenseApplicationApprove {
   license_code: string
+}
+
+export interface LicenseApplicationApproveFull {
+  license_info: string
+  comment?: string | null
 }
 
 export interface LicenseApplicationResponse {
@@ -30,6 +37,13 @@ export interface LicenseApplicationResponse {
   contract_id: number | null
   expiry_date: string
   license_type: string
+  // 补充需求字段
+  enterprise_id: string | null
+  supported_modules: string | null
+  server_license_code: string | null
+  client_license_code: string | null
+  remark: string | null
+  // 原有字段
   license_code: string | null
   status: LicenseApplicationStatus
   applicant_id: string
@@ -73,8 +87,22 @@ const licenseApplicationApi = {
     return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/approve`, data)
   },
 
-  rejectApplication: (applicationId: number) => {
-    return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/reject`)
+  // 补充需求：完整审批版本（解析 License 信息）
+  approveApplicationFull: (applicationId: number, data: LicenseApplicationApproveFull) => {
+    return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/approve-full`, data)
+  },
+
+  rejectApplication: (applicationId: number, reason: string) => {
+    return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/reject`, null, {
+      params: { reason }
+    })
+  },
+
+  // 导出 Word 文档
+  exportDocument: (applicationId: number) => {
+    return request.get(`/v1/license-applications/${applicationId}/export`, {
+      responseType: 'blob'
+    })
   }
 }
 

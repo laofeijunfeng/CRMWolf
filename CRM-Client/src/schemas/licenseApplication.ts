@@ -34,7 +34,7 @@ export const LicenseTypeMap: Record<string, string> = {
   'OFFICIAL': '正式版'
 }
 
-// ===== License 申请基础类型 =====
+// ===== License 申请基础类型（含补充字段）=====
 export const LicenseApplicationSchema = z.object({
   id: z.number().int().positive(),
   team_id: z.number().int().positive(),
@@ -50,6 +50,13 @@ export const LicenseApplicationSchema = z.object({
       return date > today
     }, '到期时间必须晚于今天'),
   license_type: LicenseTypeSchema,
+  // 补充需求字段
+  enterprise_id: z.string().nullable(),
+  supported_modules: z.string().nullable(),
+  server_license_code: z.string().nullable(),
+  client_license_code: z.string().nullable(),
+  remark: z.string().nullable(),
+  // 原有字段
   license_code: z.string().nullable(),
   status: LicenseApplicationStatusSchema,
   applicant_id: z.string(),
@@ -65,11 +72,15 @@ export const LicenseApplicationSchema = z.object({
 
 export type LicenseApplication = z.infer<typeof LicenseApplicationSchema>
 
-// ===== License 申请创建请求 =====
+// ===== License 申请创建请求（含备注字段）=====
 export const LicenseApplicationCreateSchema = LicenseApplicationSchema.omit({
   id: true,
   team_id: true,
   application_number: true,
+  enterprise_id: true,
+  supported_modules: true,
+  server_license_code: true,
+  client_license_code: true,
   license_code: true,
   status: true,
   applicant_id: true,
@@ -82,7 +93,9 @@ export const LicenseApplicationCreateSchema = LicenseApplicationSchema.omit({
   contract_name: true
 }).extend({
   // 正式版必须关联合同（通过 refine 验证）
-  contract_id: z.number().int().nullable()
+  contract_id: z.number().int().nullable(),
+  // 补充需求：备注字段
+  remark: z.string().nullable()
 }).refine(
   (data) => {
     // 正式版必须关联合同
@@ -99,7 +112,7 @@ export const LicenseApplicationCreateSchema = LicenseApplicationSchema.omit({
 
 export type LicenseApplicationCreate = z.infer<typeof LicenseApplicationCreateSchema>
 
-// ===== License 申请更新请求 =====
+// ===== License 申请更新请求（含备注字段）=====
 export const LicenseApplicationUpdateSchema = z.object({
   deployment_info_id: z.number().int().nullable(),
   contract_id: z.number().int().nullable(),
@@ -111,14 +124,23 @@ export const LicenseApplicationUpdateSchema = z.object({
       today.setHours(0, 0, 0, 0)
       return date > today
     }, '到期时间必须晚于今天')
-    .nullable()
+    .nullable(),
+  remark: z.string().nullable()
 })
 
 export type LicenseApplicationUpdate = z.infer<typeof LicenseApplicationUpdateSchema>
 
-// ===== License 申请审批请求 =====
+// ===== License 申请审批请求（简化版本）=====
 export const LicenseApplicationApproveSchema = z.object({
   license_code: z.string().min(1, '授权码不能为空')
 })
 
 export type LicenseApplicationApprove = z.infer<typeof LicenseApplicationApproveSchema>
+
+// ===== License 申请审批请求（完整版本）=====
+export const LicenseApplicationApproveFullSchema = z.object({
+  license_info: z.string().min(1, 'License 信息不能为空'),
+  comment: z.string().nullable()
+})
+
+export type LicenseApplicationApproveFull = z.infer<typeof LicenseApplicationApproveFullSchema>
