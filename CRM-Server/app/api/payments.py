@@ -652,7 +652,7 @@ def delete_payment_record(
         )
 
 
-@router.get("/payment-records", response_model=PaginatedResponse[PaymentRecordResponse], summary="查询回款记录列表", description="支持按合同、计划、日期范围、金额等条件筛选并分页查询回款记录。返回记录详情及关联的客户、商机、合同、回款阶段信息。可用于前端表格渲染和回款历史查询。")
+@router.get("/payment-records", summary="查询回款记录列表", description="支持按合同、计划、日期范围、金额、审批状态等条件筛选并分页查询回款记录。返回记录详情及关联的客户、商机、合同、回款阶段信息、审批信息、待我审批数量。可用于前端表格渲染和回款历史查询。")
 def list_payment_records(
     contract_id: Optional[int] = Query(None, description="合同ID筛选"),
     payment_plan_id: Optional[int] = Query(None, description="回款计划ID筛选"),
@@ -661,6 +661,7 @@ def list_payment_records(
     min_amount: Optional[float] = Query(None, ge=0, description="最小回款金额"),
     creator_id: Optional[str] = Query(None, description="登记人飞书ID"),
     me: bool = Query(False, description="是否只查询当前用户登记的记录"),
+    approval_status: Optional[str] = Query(None, description="审批状态筛选: pending_submit(待提交), pending_approval(审批中), approved(已通过), rejected(已驳回)"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     team_id: int = Depends(get_current_user_team),
@@ -683,10 +684,30 @@ def list_payment_records(
             payment_date_end=payment_date_end,
             min_amount=min_amount,
             creator_id=creator_id,
-            current_user_id=current_user_id
+            current_user_id=current_user_id,
+            approval_status=approval_status
         )
-        
+
+        # Task 1.4: Calculate pending_approval_me_count
+        from app.crud.role import role_crud
+        from app.crud.payment import query_pending_approval_me
+
+        user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
+        user_roles = [r.code for r in user_role_objs]
+        pending_approval_me_count = query_pending_approval_me(db, team_id, user_roles)
+
+        # Build response with approval info
+        items = []
         for record in records:
+            # Enrich with contract/customer info
+            record.contract_id = None
+            record.contract_name = None
+            record.customer_id = None
+            record.customer_name = None
+            record.opportunity_id = None
+            record.opportunity_name = None
+            record.stage_name = None
+
             if hasattr(record, 'payment_plan') and record.payment_plan:
                 record.contract_id = record.payment_plan.contract_id
                 if hasattr(record.payment_plan, 'contract') and record.payment_plan.contract:
@@ -698,16 +719,79 @@ def list_payment_records(
                         record.opportunity_id = record.payment_plan.contract.opportunity.id
                         record.opportunity_name = record.payment_plan.contract.opportunity.opportunity_name
                 record.stage_name = record.payment_plan.stage_name
-        
+
+            # Build item dict with approval info
+            item_dict = {
+                "id": record.id,
+                "payment_plan_id": record.payment_plan_id,
+                "actual_amount": float(record.actual_amount),
+                "payment_date": record.payment_date.isoformat(),
+                "proof_attachment": record.proof_attachment,
+                "notes": record.notes,
+                "creator_id": record.creator_id,
+                "creator_name": record.creator_name,
+                "confirmation_status": record.confirmation_status,
+                "created_time": record.created_time.isoformat(),
+                "contract_id": record.contract_id,
+                "contract_name": record.contract_name,
+                "stage_name": record.stage_name,
+                "customer_id": record.customer_id,
+                "customer_name": record.customer_name,
+                "opportunity_id": record.opportunity_id,
+                "opportunity_name": record.opportunity_name,
+                "approval_id": record.approval_id,
+            }
+
+            # Task 1.4: Add approval info if exists
+            if record.approval_id and record.approval:
+                from app.models.approval import ApprovalRecord
+                approval_records = db.query(ApprovalRecord).filter(
+                    ApprovalRecord.approval_id == record.approval.id
+                ).order_by(ApprovalRecord.created_time).all()
+
+                # Get flow nodes
+                nodes_info = []
+                if record.approval.flow_id:
+                    flow_nodes = db.query(ApprovalNode).filter(
+                        ApprovalNode.flow_id == record.approval.flow_id
+                    ).order_by(ApprovalNode.node_order).all()
+
+                    for node in flow_nodes:
+                        node_record = next(
+                            (r for r in approval_records if r.node_id == node.id),
+                            None
+                        )
+                        nodes_info.append({
+                            "id": node.id,
+                            "node_order": node.node_order,
+                            "node_name": node.node_name,
+                            "approve_role": node.approve_role,
+                            "status": node_record.action if node_record else "PENDING",
+                            "approver_id": node_record.approver_id if node_record else None,
+                            "approver_name": node_record.approver_name if node_record else None,
+                            "comment": node_record.comment if node_record else None,
+                        })
+
+                item_dict["approval"] = {
+                    "id": record.approval.id,
+                    "status": record.approval.status,
+                    "current_approver_name": record.get_current_approver_name(),
+                    "nodes": nodes_info,
+                }
+
+            items.append(item_dict)
+
         total_pages = (total + page_size - 1) // page_size if total > 0 else 0
-        
-        return PaginatedResponse[PaymentRecordResponse](
-            items=records,
-            total=total,
-            page=page,
-            page_size=page_size,
-            total_pages=total_pages
-        )
+
+        # Task 1.4: Return response with pending_approval_me_count
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "pending_approval_me_count": pending_approval_me_count,
+        }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
