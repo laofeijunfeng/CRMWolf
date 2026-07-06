@@ -333,19 +333,36 @@ def get_payment_plan_detail(
 
     # 计算已回款金额和待回款金额
     paid_amount = sum(float(r.actual_amount) for r in plan.payment_records)
-    plan.paid_amount = paid_amount
-    plan.remaining_amount = float(plan.planned_amount) - paid_amount
+    remaining_amount = float(plan.planned_amount) - paid_amount
 
-    # 填充关联信息
-    if hasattr(plan, 'contract') and plan.contract:
-        plan.contract_name = plan.contract.contract_name
-        plan.creator_id = plan.contract.creator_id
-        if hasattr(plan.contract, 'customer') and plan.contract.customer:
-            plan.customer_id = plan.contract.customer.id
-            plan.customer_name = plan.contract.customer.account_name
-        if hasattr(plan.contract, 'opportunity') and plan.contract.opportunity:
-            plan.opportunity_id = plan.contract.opportunity.id
-            plan.opportunity_name = plan.contract.opportunity.opportunity_name
+    # 从关联对象获取信息（不修改 plan 对象）
+    contract_name = None
+    creator_id = None
+    customer_id = None
+    customer_name = None
+    opportunity_id = None
+    opportunity_name = None
+
+    # 确保 contract 已加载
+    if plan.contract:
+        contract_name = plan.contract.contract_name
+        creator_id = plan.contract.creator_id
+        customer_id = plan.contract.customer_id
+        opportunity_id = plan.contract.opportunity_id
+
+        # 手动查询 customer（Contract 没有 customer relationship）
+        if customer_id:
+            from app.crud.customer import customer_crud
+            customer = customer_crud.get_by_id(db, customer_id)
+            if customer:
+                customer_name = customer.account_name
+
+        # 手动查询 opportunity（Contract 没有 opportunity relationship）
+        if opportunity_id:
+            from app.crud.opportunity import opportunity_crud
+            opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
+            if opportunity:
+                opportunity_name = opportunity.opportunity_name
 
     # Task 8.2: 获取最新回款记录的审批信息
     latest_record = None
@@ -426,14 +443,16 @@ def get_payment_plan_detail(
             }
             for r in plan.payment_records
         ],
-        "contract_name": plan.contract_name,
-        "creator_id": plan.creator_id,
-        "customer_id": plan.customer_id,
-        "customer_name": plan.customer_name,
-        "opportunity_id": plan.opportunity_id,
-        "opportunity_name": plan.opportunity_name,
+        "contract_name": contract_name,
+        "creator_id": creator_id,
+        "customer_id": customer_id,
+        "customer_name": customer_name,
+        "opportunity_id": opportunity_id,
+        "opportunity_name": opportunity_name,
         "created_time": plan.created_time.isoformat(),
         "last_modified_time": plan.last_modified_time.isoformat(),
+        "paid_amount": paid_amount,
+        "remaining_amount": remaining_amount,
         # Task 8.2: 新增审批信息字段
         "latest_record_id": latest_record.id if latest_record else None,
         "latest_approval": latest_approval
