@@ -9,6 +9,7 @@
  * provides clear action suggestions.
  */
 
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Calendar, Wallet, Document } from '@element-plus/icons-vue'
 
@@ -63,8 +64,6 @@ const handleAction = (): void => {
     router.push(emptyConfig.value.actionPath)
   }
 }
-
-import { computed } from 'vue'
 </script>
 
 <template>
