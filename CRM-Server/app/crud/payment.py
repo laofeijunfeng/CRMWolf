@@ -400,14 +400,21 @@ class PaymentRecordCRUD:
         
         db.commit()
         db.refresh(db_record)
-        
+
+        # 填充关联对象，避免 DetachedInstanceError
+        db_record.payment_plan = plan
+        if plan.contract:
+            db_record.payment_plan.contract = plan.contract
+        # 重新获取 contract 以确保所有属性可用
         contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
         if contract:
+            db_record.payment_plan.contract = contract
+
             operator = user_crud.get_by_id(db, int(creator_id))
             operator_name_display = operator.name if operator else creator_name
-            
+
             customer = customer_crud.get_by_id(db, contract.customer_id)
-            
+
             operation_log_service.log(
                 db=db,
                 event_type="PAYMENT_RECEIVED",
@@ -427,7 +434,10 @@ class PaymentRecordCRUD:
                     "customerName": customer.account_name if customer else None
                 }
             )
-        
+
+        # 自动提交审批
+        self._auto_submit_approval(db, db_record, creator_id, creator_name)
+
         return db_record
     
     def update(self, db: Session, db_obj: PaymentRecord, obj_in: PaymentRecordUpdate) -> PaymentRecord:
@@ -545,6 +555,42 @@ class PaymentRecordCRUD:
                 contract.payment_status = PaymentStatus.UNPAID
         
         db.commit()
+
+    def _auto_submit_approval(self, db: Session, record: PaymentRecord, creator_id: str, creator_name: str):
+        """
+        登记回款后自动提交审批（Task: 登记回款自动提交审批）
+
+        流程：
+        1. 调用 match_flow_generic 匹配 PAYMENT 审批流程
+        2. 若未匹配 -> 免审批直通（返回，不报错）
+        3. 若匹配 -> create_approval_generic 创建审批实例
+        """
+        from app.crud.approval import approval_crud, approval_flow_crud
+        from app.models.approval import BusinessType
+
+        # 匹配 PAYMENT 审批流程（金额=回款金额）
+        flow, error_msg = approval_flow_crud.match_flow_generic(
+            db,
+            business_type=BusinessType.PAYMENT,
+            team_id=record.team_id,
+            amount=record.actual_amount,
+            license_type=None
+        )
+
+        # 未匹配 = 免审批直通（决策1）
+        if flow is None:
+            return
+
+        # 创建审批实例
+        approval_crud.create_approval_generic(
+            db,
+            business_type=BusinessType.PAYMENT,
+            business_id=record.id,
+            team_id=record.team_id,
+            flow=flow,
+            submitter_id=creator_id,
+            submitter_name=creator_name
+        )
 
 
 payment_plan_crud = PaymentPlanCRUD()

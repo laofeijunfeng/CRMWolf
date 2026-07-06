@@ -117,7 +117,15 @@ class LicenseApplication(Base):
     
     expiry_date = Column(Date, nullable=False, comment="到期时间")
     license_type = Column(String(20), nullable=False, comment="License 类型：TRIAL(试用), OFFICIAL(正式)")
-    license_code = Column(Text, nullable=True, comment="授权码（审批人回填）")
+    
+    # 审批人回填的 License 详细信息
+    enterprise_id = Column(String(50), nullable=True, comment="企业编号（审批人回填，如：15739）")
+    supported_modules = Column(String(500), nullable=True, comment="支持模块（审批人回填，如：desktop,web,branch）")
+    server_license_code = Column(Text, nullable=True, comment="服务端 License（审批人回填）")
+    client_license_code = Column(Text, nullable=True, comment="客户端 License（审批人回填）")
+    
+    # 申请人备注
+    remark = Column(Text, nullable=True, comment="备注（申请时填写，如：需要开通 desktop,web,branch）")
     
     status = Column(String(20), nullable=False, default=LicenseApplicationStatus.DRAFT, comment="申请状态")
     applicant_id = Column(String(100), nullable=False, comment="申请人飞书用户ID")
@@ -163,12 +171,14 @@ class LicenseType:
 ```python
 # 在 Customer 模型中新增字段
 license_expiry_date = Column(Date, nullable=True, comment="客户 License 最晚到期时间（自动更新）")
+license_type = Column(String(20), nullable=True, comment="客户 License 类型（自动更新）：TRIAL/OFFICIAL")
 ```
 
 **更新逻辑**：
-- License 申请审批通过后，系统自动更新 `license_expiry_date` 为所有已审批通过的 License 的最晚到期时间
+- License 申请审批通过后，系统自动更新 `license_expiry_date` 和 `license_type` 为所有已审批通过的 License 的最晚到期时间对应的类型
 - 如果新申请的到期时间早于现有到期时间，不更新
-- 如果新申请的到期时间晚于现有到期时间，更新为新时间
+- 如果新申请的到期时间晚于现有到期时间，更新为新时间和新类型
+- 如果还没有已发放的 License，两个字段都为空
 
 ---
 
@@ -246,7 +256,63 @@ license_expiry_date = Column(Date, nullable=True, comment="客户 License 最晚
 **审批通过请求示例**：
 ```json
 {
-  "license_code": "XXXXX-XXXXX-XXXXX-XXXXX",  // 授权码内容
+  "license_info": "企业编号: 15739\n企业名称: 青岛颂康泰国际旅行社有限公司\n客户端过期时间: 2026-07-17\n服务端过期时间: 2026-07-17\n设备数: 10\n支持模块: desktop,web,branch,scheduledTask,grpc,dubbo,ai\n服务器地址: http://10.197.236.112:8891\n\n服务器端 License: \niHE43m7q//cI+...\n\n客户端 License: \nNPR7aI2qGG1G...",
+  "comment": "已生成授权码"
+}
+```
+
+**审批流程逻辑**：
+- 审批人在审批页面填写完整的 License 信息（包含企业编号、支持模块、服务端 License、客户端 License）
+- 提交审批通过后，系统解析 License 信息并写入 LicenseApplication 表
+- 同时更新申请状态为 `ISSUED`
+- 更新客户表的 `license_expiry_date` 和 `license_type`
+- 发送飞书通知给申请人
+
+**License 信息解析函数**：
+```python
+def parse_license_info(license_text: str) -> dict:
+    """解析审批人回填的 License 信息"""
+    lines = license_text.strip().split('\n')
+    data = {}
+    
+    for i, line in enumerate(lines):
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip()
+            value = value.strip()
+            
+            if key == '企业编号':
+                data['enterprise_id'] = value
+            elif key == '支持模块':
+                data['supported_modules'] = value
+            elif key == '服务器端 License':
+                # 服务器端 License 可能是多行，收集后续所有行直到遇到"客户端 License"
+                server_license_lines = [value]
+                for j in range(i+1, len(lines)):
+                    next_line = lines[j].strip()
+                    if next_line.startswith('客户端 License'):
+                        break
+                    server_license_lines.append(next_line)
+                data['server_license_code'] = '\n'.join(server_license_lines)
+            elif key == '客户端 License':
+                # 客户端 License 可能是多行，收集后续所有行
+                client_license_lines = [value]
+                for j in range(i+1, len(lines)):
+                    next_line = lines[j].strip()
+                    client_license_lines.append(next_line)
+                data['client_license_code'] = '\n'.join(client_license_lines)
+    
+    return data
+```
+
+**字段映射**：
+- `enterprise_id` → 企业编号（如：15739）
+- `supported_modules` → 支持模块（如：desktop,web,branch）
+- `server_license_code` → 服务器端 License（完整加密字符串）
+- `client_license_code` → 客户端 License（完整加密字符串）
+- `expiry_date` → 已有字段（客户端/服务端过期时间相同）
+- `authorized_users` → 已有字段（从部署信息获取，与设备数一致）
+- `server_address` → 已有字段（从部署信息获取）
   "comment": "已生成授权码"  // 可选审批意见
 }
 ```
@@ -553,41 +619,73 @@ def update_customer_license_expiry(customer_id):
 
 **技术方案**：
 - 使用 `python-docx` 库生成 Word 文档
-- 文档模板定义（包含标题、表格、签名栏）
+- 文档模板定义（包含标题、信息列表、License 授权码）
 - 导出接口返回文件下载链接
+
+**导出内容格式（参照样例）**：
+
+```
+标题：Apifox私有化授权文件
+
+企业名称: {customer.account_name}
+企业编号: {application.enterprise_id}
+到期时间: {application.expiry_date}
+授权人数: {application.deployment_info.authorized_users}
+服务器: {application.deployment_info.server_address}
+支持模块: {application.supported_modules}
+
+{试用/正式} License（{authorized_users}人）
+
+服务端 License:
+{application.server_license_code}
+
+客户端 License:
+{application.client_license_code}
+```
+
+**文件名格式**：
+- `私有化{试用/正式}License-{客户名称}_{当前日期}.docx`
+- 例如：`私有化试用License-广东智通人才连锁股份有限公司_20260706.docx`
 
 **示例代码**：
 ```python
 from docx import Document
 from docx.shared import Pt, Inches
+from datetime import datetime
 
 def export_license_document(application):
     """导出 License 文档"""
     doc = Document()
     
     # 标题
-    title = doc.add_heading('软件授权许可证', 0)
+    title = doc.add_heading('Apifox私有化授权文件', 0)
     
-    # 信息表格
-    table = doc.add_table(rows=6, cols=2)
-    table.style = 'Table Grid'
+    # 企业信息
+    doc.add_paragraph(f"企业名称: {application.customer.account_name}")
+    doc.add_paragraph(f"企业编号: {application.enterprise_id}")
+    doc.add_paragraph(f"到期时间: {application.expiry_date.strftime('%Y-%m-%d')}")
+    doc.add_paragraph(f"授权人数: {application.deployment_info.authorized_users}")
+    doc.add_paragraph(f"服务器: {application.deployment_info.server_address}")
+    doc.add_paragraph(f"支持模块: {application.supported_modules}")
     
-    # 填充数据
-    rows_data = [
-        ('企业名称', application.customer.account_name),
-        ('服务器地址', application.deployment_info.server_address),
-        ('授权人数', application.deployment_info.authorized_users),
-        ('到期时间', application.expiry_date.strftime('%Y-%m-%d')),
-        ('License 类型', '试用' if application.license_type == LicenseType.TRIAL else '正式'),
-        ('授权码', application.license_code)
-    ]
+    # License 类型标题
+    license_type_text = '试用' if application.license_type == 'TRIAL' else '正式'
+    doc.add_paragraph()
+    doc.add_paragraph(f"{license_type_text} License（{application.deployment_info.authorized_users}人）")
     
-    for i, (label, value) in enumerate(rows_data):
-        table.rows[i].cells[0].text = label
-        table.rows[i].cells[1].text = str(value)
+    # 服务端 License
+    doc.add_paragraph()
+    doc.add_paragraph("服务端 License:")
+    doc.add_paragraph(application.server_license_code)
     
-    # 保存文件
-    file_name = f"License_{application.application_number}_{application.customer.account_name}.docx"
+    # 客户端 License
+    doc.add_paragraph()
+    doc.add_paragraph("客户端 License:")
+    doc.add_paragraph(application.client_license_code)
+    
+    # 文件名
+    current_date = datetime.now().strftime('%Y%m%d')
+    file_name = f"私有化{license_type_text}License-{application.customer.account_name}_{current_date}.docx"
     file_path = f"/tmp/{file_name}"
     doc.save(file_path)
     

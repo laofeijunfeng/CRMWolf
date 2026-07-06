@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRMWolf 客户详情页 - 方案C优化版（完整布局）</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.3.1/dist/index.css">
+  <style>
+    /* ==================== CRMWolf 设计系统 ==================== */
+    :root {
+      --wolf-bg-page: #F8F6F2;
+      --wolf-bg-card: #FFFFFF;
+      --wolf-bg-elevated: #FAF9F7;
+      --wolf-bg-hover: #F5F5F5;
+      --wolf-bg-active: #EAEAEA;
+      --wolf-bg-sidebar: #F2F0EB;
+
+      --wolf-text-primary: #1C1C1C;
+      --wolf-text-secondary: #3A3A3A;
+      --wolf-text-tertiary: #636363;
+      --wolf-text-placeholder: #7A7A7A;
+
+      --wolf-border-default: #E5E5E5;
+      --wolf-border-light: #F2F3F5;
+
+      --wolf-primary: #4A6FA5;
+      --wolf-primary-hover: #4065A0;
+      --wolf-primary-active: #365A95;
+      --wolf-primary-light: rgba(74, 111, 165, 0.1);
+
+      --wolf-success-text: #2B633C;
+      --wolf-success-bg: #EDF7EF;
+      --wolf-warning-text: #7A4F1E;
+      --wolf-warning-bg: #FFF6E8;
+      --wolf-danger-text: #7A2828;
+      --wolf-danger-bg: #FCECEC;
+
+      --wolf-font-size-title: 16px;
+      --wolf-font-size-body: 14px;
+      --wolf-font-size-auxiliary: 13px;
+      --wolf-font-size-caption: 12px;
+
+      --wolf-font-weight-normal: 400;
+      --wolf-font-weight-medium: 500;
+      --wolf-font-weight-semibold: 600;
+
+      --wolf-space-xs: 4px;
+      --wolf-space-sm: 8px;
+      --wolf-space-md: 16px;
+      --wolf-space-lg: 24px;
+      --wolf-space-xl: 32px;
+
+      --wolf-radius-sm: 4px;
+      --wolf-radius-md: 8px;
+      --wolf-radius-lg: 12px;
+      --wolf-radius-full: 9999px;
+
+      --wolf-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05);
+      --wolf-shadow-hover: 0 2px 8px rgba(74, 111, 165, 0.1);
+
+      --wolf-transition-fast: 0.15s ease;
+      --wolf-transition-normal: 0.2s ease;
+
+      --wolf-button-height: 32px;
+      --wolf-button-height-sm: 28px;
+      --wolf-page-padding: 24px;
+
+      --wolf-font-display: 'IBM Plex Sans', -apple-system, sans-serif;
+      --wolf-font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+
+      /* 🔧 优化：左侧导航栏宽度 */
+      --wolf-sidebar-width: 160px; /* 从200px优化到160px */
+      --wolf-sidebar-collapsed: 60px; /* 折叠状态宽度 */
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--wolf-font-family);
+      background: var(--wolf-bg-page);
+      color: var(--wolf-text-primary);
+      line-height: 1.6;
+      touch-action: manipulation;
+    }
+
+    /* ==================== 页面布局 ==================== */
+    .page-wrapper {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ==================== 左侧导航栏（优化版） ==================== */
+    .sidebar-nav {
+      width: var(--wolf-sidebar-width);
+      background: var(--wolf-bg-sidebar);
+      border-right: 1px solid var(--wolf-border-default);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    /* 导航头部 */
+    .sidebar-header {
+      padding: var(--wolf-space-md);
+      border-bottom: 1px solid var(--wolf-border-default);
+      background: var(--wolf-bg-card);
+    }
+
+    .sidebar-back {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-xs);
+      padding: var(--wolf-space-sm) var(--wolf-space-xs);
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+      cursor: pointer;
+      border-radius: var(--wolf-radius-sm);
+      transition: all var(--wolf-transition-normal);
+      outline: none;
+    }
+
+    .sidebar-back:hover {
+      background: var(--wolf-bg-hover);
+      color: var(--wolf-text-secondary);
+    }
+
+    .sidebar-back:focus-visible {
+      outline: 2px solid var(--wolf-primary);
+      outline-offset: 2px;
+    }
+
+    .sidebar-back-icon {
+      font-size: 14px;
+    }
+
+    /* 导航主体 */
+    .sidebar-body {
+      flex: 1;
+      padding: var(--wolf-space-sm);
+      overflow-y: auto;
+    }
+
+    .nav-section {
+      margin-bottom: var(--wolf-space-md);
+    }
+
+    .nav-section-title {
+      font-size: 10px;
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-placeholder);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: var(--wolf-space-xs) var(--wolf-space-sm);
+      margin-bottom: var(--wolf-space-xs);
+    }
+
+    /* 🔧 优化：导航项样式 */
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-sm);
+      padding: 10px var(--wolf-space-sm); /* 从12px优化到10px */
+      font-size: var(--wolf-font-size-caption); /* 从13px优化到12px */
+      color: var(--wolf-text-secondary);
+      cursor: pointer;
+      border-radius: var(--wolf-radius-sm);
+      margin-bottom: 2px;
+      transition: all var(--wolf-transition-normal);
+      outline: none;
+      position: relative;
+    }
+
+    .nav-item:hover {
+      background: var(--wolf-bg-hover);
+      color: var(--wolf-text-primary);
+    }
+
+    .nav-item.active {
+      background: var(--wolf-primary-light);
+      color: var(--wolf-primary);
+      font-weight: var(--wolf-font-weight-medium);
+    }
+
+    .nav-item.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 20px;
+      background: var(--wolf-primary);
+      border-radius: 0 2px 2px 0;
+    }
+
+    .nav-item:focus-visible {
+      outline: 2px solid var(--wolf-primary);
+      outline-offset: -2px;
+    }
+
+    .nav-icon {
+      font-size: 16px; /* 从18px优化到16px */
+      flex-shrink: 0;
+      width: 20px;
+      text-align: center;
+    }
+
+    .nav-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 导航分隔线 */
+    .nav-divider {
+      height: 1px;
+      background: var(--wolf-border-default);
+      margin: var(--wolf-space-sm) var(--wolf-space-xs);
+    }
+
+    /* 快捷操作 */
+    .nav-action {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-xs);
+      padding: 8px var(--wolf-space-sm);
+      font-size: 11px;
+      color: var(--wolf-primary);
+      cursor: pointer;
+      border-radius: var(--wolf-radius-sm);
+      transition: all var(--wolf-transition-normal);
+      outline: none;
+    }
+
+    .nav-action:hover {
+      background: var(--wolf-primary-light);
+      color: var(--wolf-primary-hover);
+    }
+
+    .nav-action:focus-visible {
+      outline: 2px solid var(--wolf-primary);
+      outline-offset: -2px;
+    }
+
+    .nav-action-icon {
+      font-size: 12px;
+      flex-shrink: 0;
+      width: 20px;
+      text-align: center;
+    }
+
+    /* ==================== 主内容区 ==================== */
+    .main-content {
+      flex: 1;
+      min-width: 0;
+      padding: var(--wolf-page-padding);
+      max-width: calc(100vw - var(--wolf-sidebar-width));
+      overflow-x: hidden;
+    }
+
+    .content-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* ==================== 客户信息卡片 ==================== */
+    .info-card {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      margin-bottom: var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-card);
+    }
+
+    .info-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: var(--wolf-space-lg);
+    }
+
+    .title-section {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-md);
+    }
+
+    .title-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--wolf-radius-full);
+      background: var(--wolf-primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: var(--wolf-font-weight-semibold);
+      font-family: var(--wolf-font-display);
+    }
+
+    .title-content {
+      display: flex;
+      flex-direction: column;
+      gap: var(--wolf-space-xs);
+    }
+
+    .title-name {
+      font-family: var(--wolf-font-display);
+      font-size: var(--wolf-font-size-title);
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-primary);
+    }
+
+    .title-tags {
+      display: flex;
+      gap: var(--wolf-space-xs);
+      flex-wrap: wrap;
+    }
+
+    .status-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      font-size: var(--wolf-font-size-caption);
+      border-radius: var(--wolf-radius-sm);
+    }
+
+    .status-tag-icon {
+      font-size: 12px;
+    }
+
+    .status-following {
+      background: var(--wolf-warning-bg);
+      color: var(--wolf-warning-text);
+    }
+
+    .status-info {
+      background: var(--wolf-bg-hover);
+      color: var(--wolf-text-tertiary);
+    }
+
+    .info-divider {
+      height: 1px;
+      background: var(--wolf-border-light);
+      margin: var(--wolf-space-md) 0;
+    }
+
+    .attributes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: var(--wolf-space-md);
+    }
+
+    .attribute-item {
+      display: flex;
+      flex-direction: column;
+      gap: var(--wolf-space-xs);
+    }
+
+    .attribute-label {
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+    }
+
+    .attribute-value {
+      font-size: var(--wolf-font-size-auxiliary);
+      color: var(--wolf-text-secondary);
+      font-weight: var(--wolf-font-weight-medium);
+    }
+
+    .attribute-value.not-filled {
+      color: var(--wolf-text-placeholder);
+      font-style: italic;
+    }
+
+    /* ==================== 热力值卡片 ==================== */
+    .score-card {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      margin-bottom: var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-card);
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-md);
+    }
+
+    .score-circle {
+      width: 60px;
+      height: 60px;
+      border-radius: var(--wolf-radius-full);
+      border: 4px solid var(--wolf-border-default);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .score-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: var(--wolf-radius-full);
+      border: 4px solid transparent;
+      border-top-color: var(--wolf-primary);
+      transform: rotate(calc(85 * 3.6deg));
+    }
+
+    .score-value {
+      font-size: var(--wolf-font-size-title);
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-primary);
+    }
+
+    .score-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .score-header {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-xs);
+      margin-bottom: var(--wolf-space-xs);
+    }
+
+    .score-icon {
+      font-size: 16px;
+    }
+
+    .score-level {
+      font-size: var(--wolf-font-size-caption);
+      background: var(--wolf-bg-page);
+      color: var(--wolf-text-tertiary);
+      padding: 2px var(--wolf-space-xs);
+      border-radius: var(--wolf-radius-sm);
+    }
+
+    .score-hint {
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+      margin-top: var(--wolf-space-xs);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .score-hint-icon {
+      font-size: 12px;
+      color: var(--wolf-primary);
+      cursor: help;
+    }
+
+    /* ==================== AI档案卡片 ==================== */
+    .profile-card {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      margin-bottom: var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-card);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--wolf-space-md);
+      padding-bottom: var(--wolf-space-sm);
+      border-bottom: 1px solid var(--wolf-border-light);
+    }
+
+    .card-title {
+      font-size: var(--wolf-font-size-auxiliary);
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-primary);
+    }
+
+    .profile-status {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-xs);
+    }
+
+    .status-badge {
+      padding: 4px 8px;
+      font-size: var(--wolf-font-size-caption);
+      border-radius: var(--wolf-radius-sm);
+      background: var(--wolf-success-bg);
+      color: var(--wolf-success-text);
+    }
+
+    .profile-section {
+      margin-bottom: var(--wolf-space-md);
+    }
+
+    .section-label {
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+      margin-bottom: var(--wolf-space-xs);
+    }
+
+    .section-content {
+      font-size: var(--wolf-font-size-body);
+      color: var(--wolf-text-secondary);
+      line-height: 1.6;
+    }
+
+    .section-content.not-filled {
+      color: var(--wolf-text-placeholder);
+      font-style: italic;
+    }
+
+    .link-value {
+      color: var(--wolf-primary);
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .link-value:hover {
+      color: var(--wolf-primary-hover);
+      text-decoration: underline;
+    }
+
+    /* ==================== 内容面板头部 ==================== */
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--wolf-space-md);
+    }
+
+    .panel-title {
+      font-family: var(--wolf-font-display);
+      font-size: var(--wolf-font-size-title);
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-primary);
+    }
+
+    .panel-actions {
+      display: flex;
+      gap: var(--wolf-space-sm);
+    }
+
+    /* ==================== 按钮 ==================== */
+    .wolf-btn {
+      height: var(--wolf-button-height);
+      padding: 0 var(--wolf-space-md);
+      border-radius: var(--wolf-radius-md);
+      font-size: var(--wolf-font-size-body);
+      font-weight: var(--wolf-font-weight-medium);
+      cursor: pointer;
+      transition: all var(--wolf-transition-normal);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--wolf-space-xs);
+      border: 1px solid transparent;
+      outline: none;
+    }
+
+    .wolf-btn:focus-visible {
+      outline: 2px solid var(--wolf-primary);
+      outline-offset: 2px;
+    }
+
+    .wolf-btn--primary {
+      background: var(--wolf-primary);
+      color: white;
+      border-color: var(--wolf-primary);
+    }
+
+    .wolf-btn--primary:hover {
+      background: var(--wolf-primary-hover);
+    }
+
+    .wolf-btn--primary:active {
+      background: var(--wolf-primary-active);
+    }
+
+    .wolf-btn--primary-sm {
+      height: var(--wolf-button-height-sm);
+      padding: 0 var(--wolf-space-sm);
+      font-size: var(--wolf-font-size-caption);
+    }
+
+    .wolf-btn--default {
+      background: var(--wolf-bg-card);
+      color: var(--wolf-text-secondary);
+      border-color: var(--wolf-border-default);
+    }
+
+    .wolf-btn--default:hover {
+      background: var(--wolf-bg-hover);
+      border-color: var(--wolf-border-hover);
+    }
+
+    /* ==================== 跟进时间线 ==================== */
+    .timeline-container {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-card);
+    }
+
+    .timeline-list {
+      position: relative;
+      padding-left: 20px;
+    }
+
+    .timeline-item {
+      position: relative;
+      padding-bottom: var(--wolf-space-md);
+      padding-left: var(--wolf-space-lg);
+    }
+
+    .timeline-tail {
+      position: absolute;
+      left: 0;
+      top: 12px;
+      height: calc(100% - 12px);
+      width: 2px;
+      background: var(--wolf-border-default);
+    }
+
+    .timeline-item:last-child .timeline-tail {
+      display: none;
+    }
+
+    .timeline-dot {
+      position: absolute;
+      left: -6px;
+      top: 0;
+      width: 14px;
+      height: 14px;
+      border-radius: var(--wolf-radius-full);
+      background: var(--wolf-bg-card);
+      border: 2px solid var(--wolf-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .timeline-card {
+      background: var(--wolf-bg-elevated);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-sm);
+      transition: background var(--wolf-transition-normal);
+      cursor: pointer;
+    }
+
+    .timeline-card:hover {
+      background: var(--wolf-bg-hover);
+    }
+
+    .timeline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--wolf-space-xs);
+    }
+
+    .timeline-time {
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+    }
+
+    .timeline-delete {
+      width: 24px;
+      height: 24px;
+      border-radius: var(--wolf-radius-sm);
+      background: transparent;
+      border: 1px solid var(--wolf-danger-text);
+      color: var(--wolf-danger-text);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      opacity: 0;
+      transition: all var(--wolf-transition-normal);
+    }
+
+    .timeline-card:hover .timeline-delete {
+      opacity: 1;
+    }
+
+    .timeline-delete:hover {
+      background: var(--wolf-danger-bg);
+    }
+
+    .timeline-tags {
+      display: flex;
+      gap: var(--wolf-space-xs);
+      margin-bottom: var(--wolf-space-sm);
+    }
+
+    .timeline-tag {
+      padding: 4px 8px;
+      font-size: var(--wolf-font-size-caption);
+      border-radius: var(--wolf-radius-sm);
+    }
+
+    .timeline-tag--type {
+      background: var(--wolf-primary-light);
+      color: var(--wolf-primary);
+      font-weight: var(--wolf-font-weight-medium);
+    }
+
+    .timeline-tag--method {
+      background: var(--wolf-bg-card);
+      color: var(--wolf-text-secondary);
+      border: 1px solid var(--wolf-border-default);
+    }
+
+    .timeline-content {
+      font-size: var(--wolf-font-size-body);
+      color: var(--wolf-text-secondary);
+      line-height: 1.6;
+    }
+
+    .timeline-plan {
+      margin-top: var(--wolf-space-sm);
+      padding: var(--wolf-space-sm);
+      background: var(--wolf-bg-page);
+      border-radius: var(--wolf-radius-sm);
+      display: flex;
+      flex-direction: column;
+      gap: var(--wolf-space-xs);
+    }
+
+    .plan-item {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--wolf-space-xs);
+      font-size: var(--wolf-font-size-caption);
+    }
+
+    .plan-label {
+      color: var(--wolf-text-tertiary);
+      min-width: 70px;
+      flex-shrink: 0;
+    }
+
+    .plan-value {
+      color: var(--wolf-text-secondary);
+      flex: 1;
+    }
+
+    /* ==================== 空状态 ==================== */
+    .empty-state {
+      padding: var(--wolf-space-lg);
+      text-align: center;
+      color: var(--wolf-text-tertiary);
+    }
+
+    .empty-icon {
+      font-size: 48px;
+      color: var(--wolf-text-placeholder);
+      margin-bottom: var(--wolf-space-md);
+    }
+
+    .empty-text {
+      font-size: var(--wolf-font-size-body);
+    }
+
+    /* ==================== Toast提示 ==================== */
+    .toast {
+      position: fixed;
+      top: var(--wolf-space-md);
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 300;
+      background: var(--wolf-bg-card);
+      border: 1px solid var(--wolf-border-default);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-sm) var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-hover);
+      font-size: var(--wolf-font-size-body);
+      color: var(--wolf-text-secondary);
+      animation: toastIn var(--wolf-transition-normal) ease;
+      border-left: 3px solid var(--wolf-success-text);
+      display: none;
+    }
+
+    .toast.show {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-xs);
+    }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translate(-50%, -16px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    /* ==================== 响应式 ==================== */
+    @media (max-width: 1024px) {
+      /* 左侧导航改为可折叠 */
+      .sidebar-nav {
+        width: var(--wolf-sidebar-collapsed);
+      }
+
+      .sidebar-nav.expanded {
+        width: var(--wolf-sidebar-width);
+      }
+
+      .nav-label,
+      .nav-section-title,
+      .sidebar-back-text {
+        display: none;
+      }
+
+      .sidebar-nav.expanded .nav-label,
+      .sidebar-nav.expanded .nav-section-title,
+      .sidebar-nav.expanded .sidebar-back-text {
+        display: block;
+      }
+
+      .sidebar-toggle {
+        display: flex;
+      }
+
+      .main-content {
+        max-width: calc(100vw - var(--wolf-sidebar-collapsed));
+      }
+    }
+
+    @media (max-width: 768px) {
+      /* 移动端：左侧导航改为顶部下拉 */
+      .page-wrapper {
+        flex-direction: column;
+      }
+
+      .sidebar-nav {
+        width: 100%;
+        height: auto;
+        position: relative;
+        border-right: none;
+        border-bottom: 1px solid var(--wolf-border-default);
+      }
+
+      .sidebar-header {
+        display: none;
+      }
+
+      .sidebar-body {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--wolf-space-xs);
+        padding: var(--wolf-space-sm);
+      }
+
+      .nav-section {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--wolf-space-xs);
+        margin-bottom: 0;
+      }
+
+      .nav-section-title {
+        display: none;
+      }
+
+      .nav-item {
+        flex: 1;
+        min-width: 80px;
+        justify-content: center;
+        padding: var(--wolf-space-sm);
+      }
+
+      .nav-item.active::before {
+        display: none;
+      }
+
+      .nav-divider,
+      .nav-action {
+        display: none;
+      }
+
+      .main-content {
+        max-width: 100vw;
+        padding: var(--wolf-space-md);
+      }
+
+      .attributes-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .info-top {
+        flex-direction: column;
+        gap: var(--wolf-space-md);
+      }
+    }
+
+    /* ==================== 减少动画支持 ==================== */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Toast提示 -->
+  <div class="toast" id="toast">
+    <span style="color: var(--wolf-success-text);">✓</span>
+    <span id="toastMessage">操作成功</span>
+  </div>
+
+  <div class="page-wrapper">
+    <!-- ==================== 左侧导航栏（优化版） ==================== -->
+    <aside class="sidebar-nav" id="sidebar">
+      <!-- 导航头部 -->
+      <div class="sidebar-header">
+        <div class="sidebar-back" onclick="showToast('返回客户列表')" tabindex="0">
+          <span class="sidebar-back-icon">←</span>
+          <span class="sidebar-back-text">返回列表</span>
+        </div>
+      </div>
+
+      <!-- 导航主体 -->
+      <div class="sidebar-body">
+        <!-- 核心导航 -->
+        <div class="nav-section">
+          <div class="nav-section-title">导航</div>
+
+          <div class="nav-item active" onclick="switchNav('followup')" tabindex="0" data-nav="followup">
+            <span class="nav-icon">📝</span>
+            <span class="nav-label">跟进</span>
+          </div>
+
+          <div class="nav-item" onclick="switchNav('contacts')" tabindex="0" data-nav="contacts">
+            <span class="nav-icon">👤</span>
+            <span class="nav-label">联系人</span>
+          </div>
+
+          <div class="nav-item" onclick="switchNav('opportunities')" tabindex="0" data-nav="opportunities">
+            <span class="nav-icon">🎯</span>
+            <span class="nav-label">商机</span>
+          </div>
+
+          <div class="nav-item" onclick="switchNav('contracts')" tabindex="0" data-nav="contracts">
+            <span class="nav-icon">📄</span>
+            <span class="nav-label">合同</span>
+          </div>
+
+          <div class="nav-item" onclick="switchNav('payments')" tabindex="0" data-nav="payments">
+            <span class="nav-icon">💳</span>
+            <span class="nav-label">回款</span>
+          </div>
+
+          <div class="nav-item" onclick="switchNav('invoices')" tabindex="0" data-nav="invoices">
+            <span class="nav-icon">🧾</span>
+            <span class="nav-label">发票</span>
+          </div>
+        </div>
+
+        <!-- 分隔线 -->
+        <div class="nav-divider"></div>
+
+        <!-- 快捷操作 -->
+        <div class="nav-section">
+          <div class="nav-section-title">快捷操作</div>
+
+          <div class="nav-action" onclick="showToast('添加跟进页面已打开')" tabindex="0">
+            <span class="nav-action-icon">+</span>
+            <span class="nav-label">跟进</span>
+          </div>
+
+          <div class="nav-action" onclick="showToast('添加联系人页面已打开')" tabindex="0">
+            <span class="nav-action-icon">+</span>
+            <span class="nav-label">联系人</span>
+          </div>
+
+          <div class="nav-action" onclick="showToast('创建商机页面已打开')" tabindex="0">
+            <span class="nav-action-icon">+</span>
+            <span class="nav-label">商机</span>
+          </div>
+
+          <div class="nav-action" onclick="showToast('创建合同页面已打开')" tabindex="0">
+            <span class="nav-action-icon">+</span>
+            <span class="nav-label">合同</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ==================== 主内容区 ==================== -->
+    <main class="main-content">
+      <div class="content-inner">
+        <!-- 客户信息卡片 -->
+        <div class="info-card">
+          <div class="info-top">
+            <div class="title-section">
+              <div class="title-avatar">阿</div>
+              <div class="title-content">
+                <h1 class="title-name">阿里巴巴集团</h1>
+                <div class="title-tags">
+                  <span class="status-tag status-following">
+                    <span class="status-tag-icon">⏱</span>
+                    跟进中
+                  </span>
+                  <span class="status-tag status-info">
+                    <span class="status-tag-icon">🏢</span>
+                    互联网
+                  </span>
+                  <span class="status-tag status-info">
+                    <span class="status-tag-icon">👥</span>
+                    500-1000人
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="stats-section">
+              <div style="text-align: right;">
+                <div style="font-size: var(--wolf-font-size-caption); color: var(--wolf-text-tertiary);">联系人数</div>
+                <div style="font-size: var(--wolf-font-size-body); font-weight: var(--wolf-font-weight-medium); color: var(--wolf-text-primary);">12 人</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="info-divider"></div>
+
+          <div class="attributes-grid">
+            <div class="attribute-item">
+              <div class="attribute-label">客户来源</div>
+              <span class="attribute-value">展会获客</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">所在城市</div>
+              <span class="attribute-value">杭州市</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">公司地址</div>
+              <span class="attribute-value">浙江省杭州市西湖区...</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">负责销售</div>
+              <span class="attribute-value">张伟</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">采购方式</div>
+              <span class="attribute-value">公开招标</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">创建时间</div>
+              <span class="attribute-value">2026-01-15</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">最后修改</div>
+              <span class="attribute-value">2026-07-05</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 热力值卡片 -->
+        <div class="score-card">
+          <div class="score-circle">
+            <div class="score-fill"></div>
+            <span class="score-value">85</span>
+          </div>
+          <div class="score-info">
+            <div class="score-header">
+              <span class="score-icon">🔥</span>
+              <span class="score-level">高活跃</span>
+            </div>
+            <div class="score-hint">
+              <span class="score-hint-icon" title="点击查看计算明细">💡</span>
+              <span>热力值反映客户活跃度（0-100），由跟进频率、商机进展等因素计算</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI档案卡片 -->
+        <div class="profile-card">
+          <div class="card-header">
+            <span class="card-title">客户档案</span>
+            <div class="profile-status">
+              <span class="status-badge">✓ 生成完成</span>
+            </div>
+          </div>
+
+          <div class="attributes-grid" style="margin-bottom: var(--wolf-space-md);">
+            <div class="attribute-item">
+              <div class="attribute-label">所属行业</div>
+              <span class="attribute-value">互联网科技</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">公司官网</div>
+              <span class="attribute-value">
+                <a class="link-value" href="https://www.alibaba.com" target="_blank">alibaba.com</a>
+              </span>
+            </div>
+          </div>
+
+          <div class="profile-section">
+            <div class="section-label">企业背景</div>
+            <div class="section-content">阿里巴巴集团是中国领先的电子商务和科技公司，成立于1999年，业务涵盖电商、金融、物流、云计算等多个领域。</div>
+          </div>
+
+          <div class="profile-section">
+            <div class="section-label">主营业务</div>
+            <div class="section-content">电商平台（淘宝、天猫）、云计算（阿里云）、数字媒体、本地生活服务（饿了么）</div>
+          </div>
+
+          <div class="profile-section">
+            <div class="section-label">同行业客户</div>
+            <div class="section-content" style="display: flex; gap: var(--wolf-space-xs); flex-wrap: wrap;">
+              <span style="padding: 4px 8px; background: var(--wolf-bg-hover); border-radius: var(--wolf-radius-sm); font-size: var(--wolf-font-size-caption); color: var(--wolf-text-secondary);">腾讯</span>
+              <span style="padding: 4px 8px; background: var(--wolf-bg-hover); border-radius: var(--wolf-radius-sm); font-size: var(--wolf-font-size-caption); color: var(--wolf-text-secondary);">字节跳动</span>
+              <span style="padding: 4px 8px; background: var(--wolf-bg-hover); border-radius: var(--wolf-radius-sm); font-size: var(--wolf-font-size-caption); color: var(--wolf-text-secondary);">美团</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 跟进时间线（默认显示） -->
+        <div id="panel-followup" class="content-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">跟进时间线</h2>
+            <div class="panel-actions">
+              <button class="wolf-btn wolf-btn--primary wolf-btn--primary-sm" onclick="showToast('添加跟进页面已打开')">
+                <span>+ 添加跟进</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="timeline-container">
+            <div class="timeline-list">
+              <!-- 跟进记录1 -->
+              <div class="timeline-item">
+                <div class="timeline-tail"></div>
+                <div class="timeline-dot"></div>
+                <div class="timeline-card">
+                  <div class="timeline-header">
+                    <span class="timeline-time">今天 14:30</span>
+                    <button class="timeline-delete" onclick="showToast('删除确认弹窗已打开')">🗑</button>
+                  </div>
+                  <div class="timeline-tags">
+                    <span class="timeline-tag timeline-tag--type">跟进记录</span>
+                    <span class="timeline-tag timeline-tag--method">📞 电话</span>
+                  </div>
+                  <div class="timeline-content">与客户技术总监沟通了系统对接方案，对方对API集成方案表示认可，下周安排技术团队对接测试。</div>
+                  <div class="timeline-plan">
+                    <div class="plan-item">
+                      <span class="plan-label">下次跟进</span>
+                      <span class="plan-value">2026-07-10 上午</span>
+                    </div>
+                    <div class="plan-item">
+                      <span class="plan-label">下一步动作</span>
+                      <span class="plan-value">发送API对接文档，确认测试时间</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 跟进记录2 -->
+              <div class="timeline-item">
+                <div class="timeline-tail"></div>
+                <div class="timeline-dot"></div>
+                <div class="timeline-card">
+                  <div class="timeline-header">
+                    <span class="timeline-time">昨天 16:00</span>
+                    <button class="timeline-delete" onclick="showToast('删除确认弹窗已打开')">🗑</button>
+                  </div>
+                  <div class="timeline-tags">
+                    <span class="timeline-tag timeline-tag--type">跟进记录</span>
+                    <span class="timeline-tag timeline-tag--method">💬 微信</span>
+                  </div>
+                  <div class="timeline-content">发送产品演示视频，客户反馈功能符合需求，询问价格方案。</div>
+                </div>
+              </div>
+
+              <!-- 跟进记录3 -->
+              <div class="timeline-item">
+                <div class="timeline-tail"></div>
+                <div class="timeline-dot"></div>
+                <div class="timeline-card">
+                  <div class="timeline-header">
+                    <span class="timeline-time">3天前</span>
+                    <button class="timeline-delete" onclick="showToast('删除确认弹窗已打开')">🗑</button>
+                  </div>
+                  <div class="timeline-tags">
+                    <span class="timeline-tag timeline-tag--type">跟进记录</span>
+                    <span class="timeline-tag timeline-tag--method">👥 拜访</span>
+                  </div>
+                  <div class="timeline-content">实地拜访客户总部，与采购负责人面谈，了解预算审批流程。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 联系人面板 -->
+        <div id="panel-contacts" class="content-panel" style="display: none;">
+          <div class="panel-header">
+            <h2 class="panel-title">联系人列表</h2>
+            <div class="panel-actions">
+              <button class="wolf-btn wolf-btn--primary wolf-btn--primary-sm" onclick="showToast('添加联系人页面已打开')">
+                <span>+ 添加联系人</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="timeline-container">
+            <div style="display: flex; flex-direction: column; gap: var(--wolf-space-sm);">
+              <div style="padding: var(--wolf-space-md); background: var(--wolf-bg-elevated); border-radius: var(--wolf-radius-md); display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                <div>
+                  <div style="font-weight: var(--wolf-font-weight-medium); color: var(--wolf-text-primary);">王总监</div>
+                  <div style="font-size: var(--wolf-font-size-caption); color: var(--wolf-text-tertiary);">技术总监 · 138****1234</div>
+                </div>
+                <span style="padding: 4px 8px; background: var(--wolf-success-bg); color: var(--wolf-success-text); border-radius: var(--wolf-radius-sm); font-size: var(--wolf-font-size-caption);">决策人</span>
+              </div>
+
+              <div style="padding: var(--wolf-space-md); background: var(--wolf-bg-elevated); border-radius: var(--wolf-radius-md); display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                <div>
+                  <div style="font-weight: var(--wolf-font-weight-medium); color: var(--wolf-text-primary);">李经理</div>
+                  <div style="font-size: var(--wolf-font-size-caption); color: var(--wolf-text-tertiary);">采购经理 · 139****5678</div>
+                </div>
+                <span style="font-size: var(--wolf-font-size-caption); color: var(--wolf-text-tertiary);">普通联系人</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 其他面板（空状态） -->
+        <div id="panel-opportunities" class="content-panel" style="display: none;">
+          <div class="panel-header">
+            <h2 class="panel-title">商机列表</h2>
+            <div class="panel-actions">
+              <button class="wolf-btn wolf-btn--primary wolf-btn--primary-sm" onclick="showToast('创建商机页面已打开')">
+                <span>+ 创建商机</span>
+              </button>
+            </div>
+          </div>
+          <div class="timeline-container">
+            <div class="empty-state">
+              <div class="empty-icon">📋</div>
+              <div class="empty-text">暂无商机，点击新建开始追踪销售进展</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="panel-contracts" class="content-panel" style="display: none;">
+          <div class="panel-header">
+            <h2 class="panel-title">合同列表</h2>
+            <div class="panel-actions">
+              <button class="wolf-btn wolf-btn--primary wolf-btn--primary-sm" onclick="showToast('创建合同页面已打开')">
+                <span>+ 创建合同</span>
+              </button>
+            </div>
+          </div>
+          <div class="timeline-container">
+            <div class="empty-state">
+              <div class="empty-icon">📄</div>
+              <div class="empty-text">暂无合同</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="panel-payments" class="content-panel" style="display: none;">
+          <div class="panel-header">
+            <h2 class="panel-title">回款计划</h2>
+          </div>
+          <div class="timeline-container">
+            <div class="empty-state">
+              <div class="empty-icon">💰</div>
+              <div class="empty-text">暂无回款计划</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="panel-invoices" class="content-panel" style="display: none;">
+          <div class="panel-header">
+            <h2 class="panel-title">发票管理</h2>
+          </div>
+          <div class="timeline-container">
+            <div class="empty-state">
+              <div class="empty-icon">🧾</div>
+              <div class="empty-text">暂无发票</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ==================== 导航切换 ====================
+    function switchNav(navKey) {
+      // 更新导航状态
+      document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.remove('active');
+      });
+      event.target.closest('.nav-item').classList.add('active');
+
+      // 更新面板显示
+      document.querySelectorAll('.content-panel').forEach(panel => {
+        panel.style.display = 'none';
+      });
+      document.getElementById(`panel-${navKey}`).style.display = 'block';
+    }
+
+    // ==================== Toast提示 ====================
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      const toastMessage = document.getElementById('toastMessage');
+
+      toastMessage.textContent = message;
+      toast.classList.add('show');
+
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2000);
+    }
+
+    // ==================== 键盘导航 ====================
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        showToast('返回客户列表');
+      }
+    });
+  </script>
+</body>
+</html>

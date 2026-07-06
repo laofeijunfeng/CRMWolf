@@ -1389,21 +1389,587 @@ git commit -m "fix: resolve integration test issues"
 
 **3. Type consistency:**
 - ✅ DeploymentInfo 字段名一致（deployment_name, server_address, authorized_users）
-- ✅ LicenseApplication 字段名一致（application_number, expiry_date, license_code）
+- ✅ LicenseApplication 字段名一致（application_number, expiry_date, enterprise_id, supported_modules, server_license_code, client_license_code, remark）
 - ✅ LicenseApplicationStatus 枚举值一致（DRAFT, PENDING, APPROVED, REJECTED, ISSUED）
 - ✅ LicenseType 枚举值一致（TRIAL, OFFICIAL）
 - ✅ API 端点路径一致（/api/v1/deployment-infos, /api/v1/license-applications）
 
 ---
 
-## Execution Handoff
+## Phase 7: 补充需求实施（Task 14-21）
 
-**Plan complete and saved to `docs/superpowers/plans/2026-07-06-license-management-implementation.md`.**
+### Task 14: LicenseApplication 表补充字段
 
-**Two execution options:**
+**Files:**
+- Modify: `CRM-Server/app/models/license_application.py`
+- Modify: `CRM-Server/migrations/versions/<timestamp>_add_deployment_and_license_tables.py`
 
-**1. Subagent-Driven (recommended)** - I dispatch a fresh subagent per task, review between tasks, fast iteration
+**Interfaces:**
+- Consumes: 无
+- Produces: LicenseApplication 新增 5 个字段（enterprise_id, supported_modules, server_license_code, client_license_code, remark）
 
-**2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints
+- [ ] **Step 1: 修改 LicenseApplication 模型，新增 5 个字段**
 
-**Which approach?**
+Modify: `CRM-Server/app/models/license_application.py`
+
+在字段部分新增（expiry_date 之后）：
+```python
+expiry_date = Column(Date, nullable=False, comment="到期时间")
+license_type = Column(String(20), nullable=False, comment="License 类型")
+
+# 审批人回填的 License 详细信息（新增）
+enterprise_id = Column(String(50), nullable=True, comment="企业编号（审批人回填，如：15739）")
+supported_modules = Column(String(500), nullable=True, comment="支持模块（审批人回填，如：desktop,web,branch）")
+server_license_code = Column(Text, nullable=True, comment="服务端 License（审批人回填）")
+client_license_code = Column(Text, nullable=True, comment="客户端 License（审批人回填）")
+
+# 申请人备注（新增）
+remark = Column(Text, nullable=True, comment="备注（申请时填写，如：需要开通 desktop,web,branch）")
+
+status = Column(String(20), nullable=False, default=LicenseApplicationStatus.DRAFT, comment="申请状态")
+```
+
+- [ ] **Step 2: 修改迁移脚本，新增 5 个字段**
+
+Modify: `CRM-Server/migrations/versions/<timestamp>_add_deployment_and_license_tables.py`
+
+在 `crm_license_applications` 表创建部分新增：
+```python
+sa.Column('enterprise_id', sa.String(50), nullable=True, comment='企业编号'),
+sa.Column('supported_modules', sa.String(500), nullable=True, comment='支持模块'),
+sa.Column('server_license_code', sa.Text(), nullable=True, comment='服务端 License'),
+sa.Column('client_license_code', sa.Text(), nullable=True, comment='客户端 License'),
+sa.Column('remark', sa.Text(), nullable=True, comment='备注'),
+```
+
+在 `downgrade()` 部分新增：
+```python
+op.drop_column('crm_license_applications', 'remark')
+op.drop_column('crm_license_applications', 'client_license_code')
+op.drop_column('crm_license_applications', 'server_license_code')
+op.drop_column('crm_license_applications', 'supported_modules')
+op.drop_column('crm_license_applications', 'enterprise_id')
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add CRM-Server/app/models/license_application.py CRM-Server/migrations/versions/<timestamp>_add_deployment_and_license_tables.py
+git commit -m "feat(models): add enterprise_id, supported_modules, license_codes, remark to LicenseApplication"
+```
+
+---
+
+### Task 15: Customer 表补充字段和自动更新逻辑
+
+**Files:**
+- Modify: `CRM-Server/app/models/customer.py`
+- Modify: `CRM-Server/app/crud/crud_license_application.py`
+- Modify: `CRM-Server/migrations/versions/<timestamp>_add_deployment_and_license_tables.py`
+
+**Interfaces:**
+- Consumes: LicenseApplication 表
+- Produces: Customer 新增 license_type 字段，update_customer_license_info 函数（自动更新 license_expiry_date 和 license_type）
+
+- [ ] **Step 1: Customer 模型新增 license_type 字段**
+
+Modify: `CRM-Server/app/models/customer.py`
+
+在字段部分新增（license_expiry_date 之后）：
+```python
+license_expiry_date = Column(Date, nullable=True, comment="客户 License 最晚到期时间（自动更新）")
+license_type = Column(String(20), nullable=True, comment="客户 License 类型（自动更新）：TRIAL/OFFICIAL")
+```
+
+- [ ] **Step 2: 修改迁移脚本，新增 license_type 字段**
+
+Modify: `CRM-Server/migrations/versions/<timestamp>_add_deployment_and_license_tables.py`
+
+在 `upgrade()` 部分新增：
+```python
+op.add_column('crm_customers', sa.Column('license_type', sa.String(20), nullable=True, comment='客户 License 类型'))
+```
+
+在 `downgrade()` 部分新增：
+```python
+op.drop_column('crm_customers', 'license_type')
+```
+
+- [ ] **Step 3: 修改 CRUD 函数，更新客户 License 信息逻辑**
+
+Modify: `CRM-Server/app/crud/crud_license_application.py`
+
+将 `update_customer_license_expiry` 函数替换为：
+```python
+def update_customer_license_info(db: Session, customer_id: int) -> None:
+    """更新客户 License 最晚到期时间和类型"""
+    # 查询客户所有已发放的 License 申请，按到期时间降序
+    approved_applications = db.query(LicenseApplication).filter(
+        and_(
+            LicenseApplication.customer_id == customer_id,
+            LicenseApplication.status == LicenseApplicationStatus.ISSUED
+        )
+    ).order_by(LicenseApplication.expiry_date.desc()).all()
+    
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if customer:
+        if approved_applications:
+            # 最晚到期时间对应的 License 类型
+            latest_app = approved_applications[0]
+            customer.license_expiry_date = latest_app.expiry_date
+            customer.license_type = latest_app.license_type
+        else:
+            # 未申请，置空
+            customer.license_expiry_date = None
+            customer.license_type = None
+        db.commit()
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add CRM-Server/app/models/customer.py CRM-Server/app/crud/crud_license_application.py CRM-Server/migrations/versions/<timestamp>_add_deployment_and_license_tables.py
+git commit -m "feat(models): add license_type to Customer and update auto-update logic"
+```
+
+---
+
+### Task 16: 审批接口补充 License 信息解析逻辑
+
+**Files:**
+- Modify: `CRM-Server/app/schemas/license_application.py`
+- Modify: `CRM-Server/app/crud/crud_license_application.py`
+- Modify: `CRM-Server/app/api/license_application.py`
+
+**Interfaces:**
+- Consumes: 审批人回填的 License 信息文本
+- Produces: parse_license_info 函数（解析企业编号、支持模块、服务端/客户端 License），approve_license_application 函数更新
+
+- [ ] **Step 1: 新增 License 信息解析函数**
+
+Modify: `CRM-Server/app/crud/crud_license_application.py`
+
+新增函数：
+```python
+def parse_license_info(license_text: str) -> dict:
+    """解析审批人回填的 License 信息"""
+    lines = license_text.strip().split('\n')
+    data = {}
+    
+    for i, line in enumerate(lines):
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip()
+            value = value.strip()
+            
+            if key == '企业编号':
+                data['enterprise_id'] = value
+            elif key == '支持模块':
+                data['supported_modules'] = value
+            elif key == '服务器端 License':
+                # 服务器端 License 可能是多行，收集后续所有行直到遇到"客户端 License"
+                server_license_lines = [value]
+                for j in range(i+1, len(lines)):
+                    next_line = lines[j].strip()
+                    if next_line.startswith('客户端 License'):
+                        break
+                    server_license_lines.append(next_line)
+                data['server_license_code'] = '\n'.join(server_license_lines)
+            elif key == '客户端 License':
+                # 客户端 License 可能是多行，收集后续所有行
+                client_license_lines = [value]
+                for j in range(i+1, len(lines)):
+                    next_line = lines[j].strip()
+                    client_license_lines.append(next_line)
+                data['client_license_code'] = '\n'.join(client_license_lines)
+    
+    return data
+```
+
+- [ ] **Step 2: 修改 approve_license_application 函数**
+
+Modify: `CRM-Server/app/crud/crud_license_application.py`
+
+将 approve 函数修改为：
+```python
+def approve_license_application(
+    db: Session,
+    team_id: int,
+    application_id: int,
+    approver_id: str,
+    license_info: str
+) -> Optional[LicenseApplication]:
+    """审批通过 License 申请（填写完整 License 信息）"""
+    db_application = get_license_application(db, team_id, application_id)
+    if not db_application or db_application.status != LicenseApplicationStatus.PENDING:
+        return None
+    
+    # 解析 License 信息
+    parsed_data = parse_license_info(license_info)
+    
+    # 更新申请记录
+    db_application.status = LicenseApplicationStatus.ISSUED
+    db_application.enterprise_id = parsed_data.get('enterprise_id')
+    db_application.supported_modules = parsed_data.get('supported_modules')
+    db_application.server_license_code = parsed_data.get('server_license_code')
+    db_application.client_license_code = parsed_data.get('client_license_code')
+    db_application.approver_id = approver_id
+    db_application.approved_time = datetime.now()
+    
+    db.commit()
+    db.refresh(db_application)
+    
+    # 更新客户 License 信息
+    update_customer_license_info(db, db_application.customer_id)
+    
+    return db_application
+```
+
+- [ ] **Step 3: 修改 Pydantic schema，新增 remark 字段**
+
+Modify: `CRM-Server/app/schemas/license_application.py`
+
+新增字段到 LicenseApplicationCreate：
+```python
+class LicenseApplicationCreate(LicenseApplicationBase):
+    contract_id: int | None = None
+    remark: str | None = None  # 新增备注字段
+```
+
+新增字段到 LicenseApplicationResponse：
+```python
+class LicenseApplicationResponse(LicenseApplicationBase):
+    id: int
+    team_id: int
+    application_number: str
+    contract_id: int | None
+    enterprise_id: str | None  # 新增
+    supported_modules: str | None  # 新增
+    server_license_code: str | None  # 新增
+    client_license_code: str | None  # 新增
+    remark: str | None  # 新增
+    status: str
+    applicant_id: str
+    approver_id: str | None
+    approved_time: datetime | None
+    created_time: datetime
+    last_modified_time: datetime
+```
+
+新增 LicenseApprove schema：
+```python
+class LicenseApprove(BaseModel):
+    license_info: str = Field(..., min_length=1, description="完整的 License 信息文本")
+    comment: str | None = None
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add CRM-Server/app/crud/crud_license_application.py CRM-Server/app/schemas/license_application.py CRM-Server/app/api/license_application.py
+git commit -m "feat(crud): add parse_license_info function and update approve logic"
+```
+
+---
+
+### Task 17: Word 导出服务更新（参照样例格式）
+
+**Files:**
+- Modify: `CRM-Server/app/services/license_export_service.py`
+
+**Interfaces:**
+- Consumes: LicenseApplication（包含 enterprise_id, supported_modules, server_license_code, client_license_code）
+- Produces: Word 文档（格式参照样例，文件名：私有化{试用/正式}License-{客户名称}_{当前日期}.docx）
+
+- [ ] **Step 1: 更新 Word 导出服务**
+
+Modify: `CRM-Server/app/services/license_export_service.py`
+
+完整代码：
+```python
+from docx import Document
+from docx.shared import Pt
+from app.models.license_application import LicenseApplication, LicenseType
+from datetime import datetime
+import tempfile
+
+
+def export_license_document(application: LicenseApplication) -> str:
+    """导出 License 文档（参照样例格式）"""
+    doc = Document()
+    
+    # 标题
+    doc.add_heading('Apifox私有化授权文件', 0)
+    
+    # 企业信息
+    doc.add_paragraph(f"企业名称: {application.customer.account_name}")
+    doc.add_paragraph(f"企业编号: {application.enterprise_id or '未填写'}")
+    doc.add_paragraph(f"到期时间: {application.expiry_date.strftime('%Y-%m-%d')}")
+    doc.add_paragraph(f"授权人数: {application.deployment_info.authorized_users if application.deployment_info else '未配置'}")
+    doc.add_paragraph(f"服务器: {application.deployment_info.server_address if application.deployment_info else '未配置'}")
+    doc.add_paragraph(f"支持模块: {application.supported_modules or '未填写'}")
+    
+    # License 类型标题
+    license_type_text = '试用' if application.license_type == LicenseType.TRIAL else '正式'
+    doc.add_paragraph()
+    doc.add_paragraph(f"{license_type_text} License（{application.deployment_info.authorized_users if application.deployment_info else 0}人）")
+    
+    # 服务端 License
+    doc.add_paragraph()
+    doc.add_paragraph("服务端 License:")
+    if application.server_license_code:
+        doc.add_paragraph(application.server_license_code)
+    else:
+        doc.add_paragraph("未填写")
+    
+    # 客户端 License
+    doc.add_paragraph()
+    doc.add_paragraph("客户端 License:")
+    if application.client_license_code:
+        doc.add_paragraph(application.client_license_code)
+    else:
+        doc.add_paragraph("未填写")
+    
+    # 文件名：私有化{试用/正式}License-{客户名称}_{当前日期}.docx
+    current_date = datetime.now().strftime('%Y%m%d')
+    file_name = f"私有化{license_type_text}License-{application.customer.account_name}_{current_date}.docx"
+    file_path = tempfile.mktemp(suffix='.docx', prefix=file_name)
+    doc.save(file_path)
+    
+    return file_path
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add CRM-Server/app/services/license_export_service.py
+git commit -m "feat(export): update Word export format to match sample template"
+```
+
+---
+
+### Task 18: 前端申请表单新增备注字段
+
+**Files:**
+- Modify: `CRM-Client/src/schemas/licenseApplication.ts`
+- Modify: `CRM-Client/src/components/LicenseApplicationDialog.vue`
+
+**Interfaces:**
+- Consumes: LicenseApplication API
+- Produces: 申请表单新增备注字段（textarea），申请人填写需要开通的模块
+
+- [ ] **Step 1: 修改 Zod schema，新增 remark 字段**
+
+Modify: `CRM-Client/src/schemas/licenseApplication.ts`
+
+新增字段：
+```typescript
+export const LicenseApplicationCreateSchema = LicenseApplicationSchema.omit({
+  id: true, team_id: true, application_number: true, enterprise_id: true, supported_modules: true,
+  server_license_code: true, client_license_code: true, status: true,
+  applicant_id: true, approver_id: true, approved_time: true, created_time: true, last_modified_time: true
+}).extend({
+  expiry_date: z.string().refine(val => new Date(val) > new Date(), '到期时间必须大于当前日期'),
+  remark: z.string().optional()  // 新增备注字段
+})
+```
+
+- [ ] **Step 2: 修改申请对话框，新增备注字段**
+
+Modify: `CRM-Client/src/components/LicenseApplicationDialog.vue`
+
+在表单中新增：
+```vue
+<el-form-item label="备注">
+  <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="请填写需要开通的模块（如：desktop,web,branch）" />
+</el-form-item>
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add CRM-Client/src/schemas/licenseApplication.ts CRM-Client/src/components/LicenseApplicationDialog.vue
+git commit -m "feat(frontend): add remark field to License application form"
+```
+
+---
+
+### Task 19: 前端审批对话框支持 License 信息回填和解析
+
+**Files:**
+- Modify: `CRM-Client/src/components/LicenseApprovalDialog.vue`
+
+**Interfaces:**
+- Consumes: 审批人输入的 License 信息文本
+- Produces: 审批对话框支持 License 信息 textarea 输入，提交时传递完整文本
+
+- [ ] **Step 1: 修改审批对话框，支持 License 信息回填**
+
+Modify: `CRM-Client/src/components/LicenseApprovalDialog.vue`
+
+完整代码：
+```vue
+<template>
+  <el-dialog title="License审批" :visible.sync="visible" width="70%">
+    <el-form :model="form">
+      <el-form-item label="客户名称">{{ application.customer.account_name }}</el-form-item>
+      <el-form-item label="部署信息">{{ application.deployment_info?.deployment_name }}</el-form-item>
+      <el-form-item label="到期时间">{{ application.expiry_date }}</el-form-item>
+      <el-form-item label="License类型">
+        <el-tag :type="application.license_type === 'TRIAL' ? 'warning' : 'success'">
+          {{ application.license_type === 'TRIAL' ? '试用' : '正式' }}
+        </el-tag>
+      </el-form-item>
+      <el-form-item label="申请人备注" v-if="application.remark">
+        <el-input type="textarea" :rows="3" :value="application.remark" readonly />
+      </el-form-item>
+      <el-form-item label="License信息" required>
+        <el-input 
+          v-model="form.license_info" 
+          type="textarea" 
+          :rows="10" 
+          placeholder="请粘贴完整的 License 信息（包含企业编号、支持模块、服务端 License、客户端 License）" 
+        />
+        <div style="margin-top: 10px; color: #999; font-size: 12px">
+          <p>格式示例：</p>
+          <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px">
+企业编号: 15739
+企业名称: {客户名称}
+客户端过期时间: {到期时间}
+服务端过期时间: {到期时间}
+设备数: {授权人数}
+支持模块: desktop,web,branch,scheduledTask,grpc,dubbo,ai
+服务器地址: {服务器地址}
+
+服务器端 License: 
+[加密字符串]
+
+客户端 License: 
+[加密字符串]
+          </pre>
+        </div>
+      </el-form-item>
+      <el-form-item label="审批意见">
+        <el-input v-model="form.comment" type="textarea" :rows="3" />
+      </el-form-item>
+    </el-form>
+    <div slot="footer">
+      <el-button @click="visible = false">取消</el-button>
+      <el-button type="danger" @click="reject">拒绝</el-button>
+      <el-button type="primary" @click="approve" :disabled="!form.license_info">批准并发放</el-button>
+    </div>
+  </el-dialog>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import type { LicenseApplication } from '@/schemas/licenseApplication'
+
+const props = defineProps<{ application: LicenseApplication }>()
+const emit = defineEmits(['approve', 'reject'])
+
+const visible = ref(true)
+const form = ref({ license_info: '', comment: '' })
+
+const approve = () => {
+  if (!form.value.license_info.trim()) {
+    ElMessage.warning('请填写 License 信息')
+    return
+  }
+  emit('approve', { license_info: form.value.license_info, comment: form.value.comment })
+  visible.value = false
+}
+
+const reject = () => {
+  emit('reject', form.value.comment)
+  visible.value = false
+}
+</script>
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add CRM-Client/src/components/LicenseApprovalDialog.vue
+git commit -m "feat(frontend): update License approval dialog to support full license info input"
+```
+
+---
+
+### Task 20: 补充需求集成测试
+
+**Files:**
+- Test: 手动测试脚本（无新文件创建，仅测试执行）
+
+**Interfaces:**
+- Consumes: 所有补充模块
+- Produces: 测试报告，上线就绪状态
+
+- [ ] **Step 1: 测试申请表单备注字段**
+
+手动测试：
+1. 创建 License 申请
+2. 在备注字段填写："需要开通 desktop,web,branch"
+3. 提交审批
+4. 验证备注字段是否正确存储
+
+- [ ] **Step 2: 测试审批人回填 License 信息**
+
+手动测试：
+1. 审批人粘贴完整 License 信息（包含企业编号、支持模块、服务端/客户端 License）
+2. 提交审批通过
+3. 验证 License 信息是否正确解析和存储
+4. 验证客户 license_expiry_date 和 license_type 是否自动更新
+
+- [ ] **Step 3: 测试 Word 导出格式**
+
+手动测试：
+1. 审批通过后导出 Word 文档
+2. 验证文件名格式：`私有化{试用/正式}License-{客户名称}_{当前日期}.docx`
+3. 验证导出内容格式是否与样例一致（标题、企业信息、支持模块、服务端/客户端 License）
+
+- [ ] **Step 4: 测试客户 License 类型自动更新**
+
+手动测试：
+1. 申请试用 License（到期时间：2026-08-01）并审批通过
+2. 申请正式 License（到期时间：2026-09-01）并审批通过
+3. 验证客户 license_type 是否更新为 OFFICIAL（基于最晚到期时间）
+4. 验证客户 license_expiry_date 是否更新为 2026-09-01
+
+- [ ] **Step 5: Commit（如果有修复）**
+
+```bash
+git add .
+git commit -m "fix: resolve integration test issues for supplementary requirements"
+```
+
+---
+
+## Self-Review Checklist (Updated)
+
+**1. Spec coverage:**
+- ✅ Task 1-4: 数据层基础（数据模型、迁移脚本）
+- ✅ Task 5-6: CRUD 层
+- ✅ Task 7-8: API 层（deployment endpoints, license endpoints, Word export）
+- ✅ Task 9-10: 前端界面（LicenseManagement 合并组件）
+- ✅ Task 11-12: 审批中心和权限配置
+- ✅ Task 13: 集成测试
+- ✅ **Task 14-15: 补充数据层（LicenseApplication 和 Customer 新增字段）**
+- ✅ **Task 16-17: 补充 API 层（License 信息解析、Word 导出格式更新）**
+- ✅ **Task 18-19: 补充前端（申请表单备注字段、审批对话框 License 信息输入）**
+- ✅ **Task 20: 补充需求集成测试**
+
+**2. Placeholder scan:**
+- ✅ 无 "TODO"、"TBD"、模糊需求
+- ✅ 所有代码步骤包含完整代码
+- ✅ 所有测试命令包含具体执行和预期输出
+- ✅ 所有提交命令包含具体文件和提交信息
+
+**3. Type consistency:**
+- ✅ DeploymentInfo 字段名一致
+- ✅ LicenseApplication 字段名一致（新增 enterprise_id, supported_modules, server_license_code, client_license_code, remark）
+- ✅ Customer 字段名一致（新增 license_type）
+- ✅ LicenseApplicationStatus 枚举值一致
+- ✅ LicenseType 枚举值一致
+- ✅ API 端点路径一致

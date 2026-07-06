@@ -1,0 +1,1686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CRMWolf 客户详情页 - 交互改进示例</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@element-plus/icons-vue@2.3.1/dist/index.css">
+  <style>
+    /* ==================== CRMWolf 极简中性风设计系统 ==================== */
+
+    /* 背景色规范 */
+    :root {
+      --wolf-bg-page: #F8F6F2;
+      --wolf-bg-card: #FFFFFF;
+      --wolf-bg-elevated: #FAF9F7;
+      --wolf-bg-hover: #F5F5F5;
+      --wolf-bg-active: #EAEAEA;
+
+      /* 中性色梯度 */
+      --wolf-text-primary: #1C1C1C;
+      --wolf-text-secondary: #3A3A3A;
+      --wolf-text-tertiary: #636363;
+      --wolf-text-placeholder: #7A7A7A;
+
+      --wolf-border-default: #E5E5E5;
+      --wolf-border-light: #F2F3F5;
+
+      /* 品牌色（极度克制使用） */
+      --wolf-primary: #4A6FA5;
+      --wolf-primary-hover: #4065A0;
+      --wolf-primary-active: #365A95;
+      --wolf-primary-light: rgba(74, 111, 165, 0.1);
+
+      /* 功能色 */
+      --wolf-success-text: #2B633C;
+      --wolf-success-bg: #EDF7EF;
+      --wolf-warning-text: #7A4F1E;
+      --wolf-warning-bg: #FFF6E8;
+      --wolf-danger-text: #7A2828;
+      --wolf-danger-bg: #FCECEC;
+
+      /* 字号（仅4种） */
+      --wolf-font-size-title: 16px;
+      --wolf-font-size-body: 14px;
+      --wolf-font-size-auxiliary: 13px;
+      --wolf-font-size-caption: 12px;
+
+      /* 字重 */
+      --wolf-font-weight-normal: 400;
+      --wolf-font-weight-medium: 500;
+      --wolf-font-weight-semibold: 600;
+
+      /* 间距系统（8dp） */
+      --wolf-space-xs: 4px;
+      --wolf-space-sm: 8px;
+      --wolf-space-md: 16px;
+      --wolf-space-lg: 24px;
+      --wolf-space-xl: 32px;
+
+      /* 圆角 */
+      --wolf-radius-sm: 4px;
+      --wolf-radius-md: 8px;
+      --wolf-radius-lg: 12px;
+      --wolf-radius-full: 9999px;
+
+      /* 阴影 */
+      --wolf-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05);
+      --wolf-shadow-hover: 0 2px 8px rgba(74, 111, 165, 0.1);
+
+      /* 动画 */
+      --wolf-transition-fast: 0.15s ease;
+      --wolf-transition-normal: 0.2s ease;
+      --wolf-transition-slow: 0.3s ease;
+
+      /* 按钮高度 */
+      --wolf-button-height: 32px;
+      --wolf-button-height-sm: 28px;
+
+      /* 页面头部高度 */
+      --wolf-header-height: 48px;
+
+      /* 页面边距 */
+      --wolf-page-padding: 24px;
+
+      /* IBM Plex Sans 字体 */
+      --wolf-font-display: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+      --wolf-font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+    }
+
+    /* ==================== 基础样式 ==================== */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--wolf-font-family);
+      background: var(--wolf-bg-page);
+      color: var(--wolf-text-primary);
+      line-height: 1.6;
+      /* 🔧 P0: 减少移动端300ms延迟 */
+      touch-action: manipulation;
+    }
+
+    /* ==================== 页面容器 ==================== */
+    .customer-detail-page {
+      min-height: 100vh;
+      background: var(--wolf-bg-page);
+      padding-bottom: 60px; /* 为底部操作栏留空间 */
+      /* 🔧 P2: iOS safe-area 支持 */
+      padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    }
+
+    /* ==================== 页面头部（ Sticky ） ==================== */
+    .page-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--wolf-bg-card);
+      border-bottom: 1px solid var(--wolf-border-default);
+      height: var(--wolf-header-height);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 var(--wolf-page-padding);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-sm);
+    }
+
+    .back-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--wolf-radius-md);
+      background: transparent;
+      border: none;
+      color: var(--wolf-text-tertiary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--wolf-transition-normal);
+      /* 🔧 P2: 焦点环 */
+      outline: none;
+    }
+
+    .back-btn:hover {
+      background: var(--wolf-bg-hover);
+      color: var(--wolf-text-secondary);
+    }
+
+    .back-btn:focus-visible {
+      outline: 2px solid var(--wolf-primary);
+      outline-offset: 2px;
+    }
+
+    .page-title {
+      font-family: var(--wolf-font-display);
+      font-size: var(--wolf-font-size-title);
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-primary);
+    }
+
+    /* ==================== 详情内容 ==================== */
+    .detail-content {
+      padding: var(--wolf-page-padding);
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+
+    /* ==================== 骨架屏（ P1 修复） ==================== */
+    .skeleton-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: var(--wolf-space-md);
+    }
+
+    .skeleton-card {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-card);
+    }
+
+    .skeleton-row {
+      display: flex;
+      gap: var(--wolf-space-md);
+      margin-bottom: var(--wolf-space-md);
+    }
+
+    .skeleton-item {
+      background: linear-gradient(90deg, var(--wolf-bg-hover) 25%, var(--wolf-bg-active) 50%, var(--wolf-bg-hover) 75%);
+      background-size: 200% 100%;
+      animation: skeleton-loading 1.5s infinite;
+      border-radius: var(--wolf-radius-sm);
+    }
+
+    .skeleton-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--wolf-radius-full);
+    }
+
+    .skeleton-title {
+      width: 200px;
+      height: 20px;
+    }
+
+    .skeleton-text {
+      width: 100%;
+      height: 14px;
+    }
+
+    .skeleton-text-short {
+      width: 60%;
+      height: 14px;
+    }
+
+    @keyframes skeleton-loading {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ==================== 信息卡片 ==================== */
+    .info-card {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      margin-bottom: var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-card);
+      transition: box-shadow var(--wolf-transition-normal);
+    }
+
+    .info-card:hover {
+      box-shadow: var(--wolf-shadow-hover);
+    }
+
+    .info-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: var(--wolf-space-lg);
+    }
+
+    .title-section {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-md);
+    }
+
+    .title-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--wolf-radius-full);
+      background: var(--wolf-primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: var(--wolf-font-weight-semibold);
+      font-family: var(--wolf-font-display);
+    }
+
+    .title-name {
+      font-family: var(--wolf-font-display);
+      font-size: var(--wolf-font-size-title);
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-primary);
+      margin-bottom: var(--wolf-space-xs);
+    }
+
+    .title-tags {
+      display: flex;
+      gap: var(--wolf-space-xs);
+      flex-wrap: wrap;
+    }
+
+    /* ==================== 状态标签（ P2: 添加图标） ==================== */
+    .status-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      font-size: var(--wolf-font-size-caption);
+      border-radius: var(--wolf-radius-sm);
+      transition: all var(--wolf-transition-fast);
+    }
+
+    .status-tag .status-icon {
+      font-size: 12px;
+    }
+
+    .status-following {
+      background: var(--wolf-warning-bg);
+      color: var(--wolf-warning-text);
+    }
+
+    .status-success {
+      background: var(--wolf-success-bg);
+      color: var(--wolf-success-text);
+    }
+
+    .status-lost {
+      background: var(--wolf-danger-bg);
+      color: var(--wolf-danger-text);
+    }
+
+    .status-info {
+      background: var(--wolf-bg-hover);
+      color: var(--wolf-text-tertiary);
+    }
+
+    .info-divider {
+      height: 1px;
+      background: var(--wolf-border-light);
+      margin: var(--wolf-space-md) 0;
+    }
+
+    .attributes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: var(--wolf-space-md);
+    }
+
+    .attribute-item {
+      display: flex;
+      flex-direction: column;
+      gap: var(--wolf-space-xs);
+    }
+
+    .attribute-label {
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+    }
+
+    .attribute-value {
+      font-size: var(--wolf-font-size-auxiliary);
+      color: var(--wolf-text-secondary);
+      font-weight: var(--wolf-font-weight-medium);
+    }
+
+    .attribute-value.not-filled {
+      color: var(--wolf-text-placeholder);
+      font-style: italic;
+    }
+
+    /* ==================== 热力值卡片（ P1: 添加说明） ==================== */
+    .score-card-compact {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      margin-bottom: var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-card);
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-md);
+    }
+
+    .score-mini-circle {
+      flex-shrink: 0;
+      width: 60px;
+      height: 60px;
+      position: relative;
+    }
+
+    .score-ring {
+      width: 100%;
+      height: 100%;
+      border-radius: var(--wolf-radius-full);
+      border: 4px solid var(--wolf-border-default);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .score-ring-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: var(--wolf-radius-full);
+      border: 4px solid transparent;
+      border-top-color: var(--wolf-primary);
+      transform: rotate(45deg); /* 示例：45/360 = 12.5% */
+    }
+
+    .score-value {
+      font-size: var(--wolf-font-size-title);
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-primary);
+    }
+
+    .score-mini-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .score-mini-header {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-xs);
+      margin-bottom: var(--wolf-space-xs);
+    }
+
+    .score-mini-icon {
+      font-size: 18px;
+    }
+
+    .score-mini-level {
+      font-size: var(--wolf-font-size-auxiliary);
+      color: var(--wolf-text-tertiary);
+      background: var(--wolf-bg-page);
+      padding: 2px var(--wolf-space-xs);
+      border-radius: var(--wolf-radius-sm);
+    }
+
+    /* 🔧 P1: 热力值说明 */
+    .score-hint {
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+      margin-top: var(--wolf-space-xs);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .score-hint-icon {
+      font-size: 12px;
+      color: var(--wolf-primary);
+      cursor: help;
+    }
+
+    /* ==================== 标签页卡片 ==================== */
+    .tabs-card {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-card);
+    }
+
+    /* ==================== 标签页头部（ P0: 移动端滚动） ==================== */
+    .tabs-header {
+      display: flex;
+      gap: var(--wolf-space-md);
+      border-bottom: 1px solid var(--wolf-border-default);
+      margin-bottom: var(--wolf-space-md);
+      /* 🔧 P0: 移动端横向滚动 */
+      overflow-x: auto;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none; /* Firefox */
+    }
+
+    .tabs-header::-webkit-scrollbar {
+      display: none; /* Chrome/Safari */
+    }
+
+    .tabs-item {
+      padding: var(--wolf-space-sm) 0;
+      font-size: var(--wolf-font-size-auxiliary);
+      color: var(--wolf-text-tertiary);
+      cursor: pointer;
+      position: relative;
+      transition: all var(--wolf-transition-normal);
+      /* 🔧 P2: 焦点环 */
+      outline: none;
+      border-radius: var(--wolf-radius-sm);
+    }
+
+    .tabs-item:hover {
+      color: var(--wolf-text-secondary);
+    }
+
+    /* 🔧 P0: 按下反馈 */
+    .tabs-item:active {
+      transform: scale(0.95);
+      color: var(--wolf-primary);
+    }
+
+    .tabs-item:focus-visible {
+      outline: 2px solid var(--wolf-primary);
+      outline-offset: 4px;
+    }
+
+    .tabs-item.is-active {
+      color: var(--wolf-text-secondary);
+      font-weight: var(--wolf-font-weight-medium);
+    }
+
+    .tabs-item.is-active::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--wolf-primary);
+      border-radius: var(--wolf-radius-full) var(--wolf-radius-full) 0 0;
+    }
+
+    /* ==================== 标签页内容（ P0: 过渡动画） ==================== */
+    .tabs-content {
+      min-height: 200px;
+      position: relative;
+    }
+
+    .tab-panel {
+      /* 🔧 P0: 过渡动画 */
+      opacity: 1;
+      transform: translateY(0);
+      transition: opacity var(--wolf-transition-fast), transform var(--wolf-transition-fast);
+    }
+
+    .tab-panel.hidden {
+      display: none;
+    }
+
+    .tab-panel.fade-out {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+
+    .tab-panel.fade-in {
+      animation: fadeIn var(--wolf-transition-fast) ease forwards;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* ==================== 面板头部 ==================== */
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--wolf-space-md);
+      font-size: var(--wolf-font-size-auxiliary);
+      font-weight: var(--wolf-font-weight-medium);
+      color: var(--wolf-text-secondary);
+    }
+
+    /* ==================== 按钮（ P0: 加载状态） ==================== */
+    .wolf-btn {
+      height: var(--wolf-button-height);
+      padding: 0 var(--wolf-space-md);
+      border-radius: var(--wolf-radius-md);
+      font-size: var(--wolf-font-size-body);
+      font-weight: var(--wolf-font-weight-medium);
+      cursor: pointer;
+      transition: all var(--wolf-transition-normal);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--wolf-space-xs);
+      border: 1px solid transparent;
+      outline: none;
+    }
+
+    .wolf-btn:focus-visible {
+      outline: 2px solid var(--wolf-primary);
+      outline-offset: 2px;
+    }
+
+    .wolf-btn--primary {
+      background: var(--wolf-primary);
+      color: white;
+      border-color: var(--wolf-primary);
+    }
+
+    .wolf-btn--primary:hover {
+      background: var(--wolf-primary-hover);
+      border-color: var(--wolf-primary-hover);
+    }
+
+    .wolf-btn--primary:active {
+      background: var(--wolf-primary-active);
+      border-color: var(--wolf-primary-active);
+      transform: scale(0.98);
+    }
+
+    /* 🔧 P0: 加载状态 */
+    .wolf-btn--loading {
+      pointer-events: none;
+      opacity: 0.7;
+    }
+
+    .wolf-btn--loading .btn-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: var(--wolf-radius-full);
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .wolf-btn--primary-sm {
+      height: var(--wolf-button-height-sm);
+      padding: 0 var(--wolf-space-sm);
+      font-size: var(--wolf-font-size-caption);
+    }
+
+    .wolf-btn--default {
+      background: var(--wolf-bg-card);
+      color: var(--wolf-text-secondary);
+      border-color: var(--wolf-border-default);
+    }
+
+    .wolf-btn--default:hover {
+      background: var(--wolf-bg-hover);
+      border-color: var(--wolf-border-hover);
+    }
+
+    /* ==================== 底部操作栏（新增） ==================== */
+    .detail-actions-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--wolf-bg-card);
+      border-top: 1px solid var(--wolf-border-default);
+      padding: var(--wolf-space-md) var(--wolf-page-padding);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 90;
+      /* 🔧 P2: iOS safe-area */
+      padding-bottom: calc(var(--wolf-space-md) + env(safe-area-inset-bottom, 0px));
+    }
+
+    .actions-bar-left {
+      display: flex;
+      gap: var(--wolf-space-sm);
+    }
+
+    .actions-bar-right {
+      display: flex;
+      gap: var(--wolf-space-sm);
+    }
+
+    /* ==================== 下拉菜单（快捷操作） ==================== */
+    .dropdown-wrapper {
+      position: relative;
+      display: inline-block;
+    }
+
+    .dropdown-trigger {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .dropdown-menu {
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      margin-bottom: var(--wolf-space-xs);
+      background: var(--wolf-bg-card);
+      border: 1px solid var(--wolf-border-default);
+      border-radius: var(--wolf-radius-md);
+      box-shadow: var(--wolf-shadow-hover);
+      min-width: 160px;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(8px);
+      transition: all var(--wolf-transition-fast);
+      z-index: 100;
+    }
+
+    .dropdown-wrapper:hover .dropdown-menu,
+    .dropdown-wrapper:focus-within .dropdown-menu {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
+    .dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-sm);
+      padding: var(--wolf-space-sm) var(--wolf-space-md);
+      font-size: var(--wolf-font-size-body);
+      color: var(--wolf-text-secondary);
+      cursor: pointer;
+      transition: background var(--wolf-transition-fast);
+      outline: none;
+    }
+
+    .dropdown-item:hover {
+      background: var(--wolf-bg-hover);
+    }
+
+    .dropdown-item:focus-visible {
+      outline: 2px solid var(--wolf-primary);
+      outline-offset: -2px;
+    }
+
+    .dropdown-item:first-child {
+      border-radius: var(--wolf-radius-md) var(--wolf-radius-md) 0 0;
+    }
+
+    .dropdown-item:last-child {
+      border-radius: 0 0 var(--wolf-radius-md) var(--wolf-radius-md);
+    }
+
+    .dropdown-divider {
+      height: 1px;
+      background: var(--wolf-border-default);
+      margin: var(--wolf-space-xs) 0;
+    }
+
+    /* ==================== Toast 提示（ P0: 进度指示） ==================== */
+    .toast-container {
+      position: fixed;
+      top: var(--wolf-header-height);
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: var(--wolf-space-sm);
+    }
+
+    .toast {
+      background: var(--wolf-bg-card);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-sm) var(--wolf-space-md);
+      box-shadow: var(--wolf-shadow-hover);
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-sm);
+      font-size: var(--wolf-font-size-body);
+      animation: toastIn var(--wolf-transition-fast) ease;
+      max-width: 400px;
+    }
+
+    .toast.toast-out {
+      animation: toastOut var(--wolf-transition-fast) ease forwards;
+    }
+
+    @keyframes toastIn {
+      from {
+        opacity: 0;
+        transform: translateY(-16px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes toastOut {
+      from {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      to {
+        opacity: 0;
+        transform: translateY(-16px);
+      }
+    }
+
+    .toast--info {
+      border-left: 3px solid var(--wolf-primary);
+    }
+
+    .toast--success {
+      border-left: 3px solid var(--wolf-success-text);
+    }
+
+    .toast--error {
+      border-left: 3px solid var(--wolf-danger-text);
+    }
+
+    .toast-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--wolf-border-default);
+      border-top-color: var(--wolf-primary);
+      border-radius: var(--wolf-radius-full);
+      animation: spin 0.8s linear infinite;
+    }
+
+    .toast-icon {
+      font-size: 16px;
+    }
+
+    .toast--success .toast-icon {
+      color: var(--wolf-success-text);
+    }
+
+    .toast--error .toast-icon {
+      color: var(--wolf-danger-text);
+    }
+
+    /* ==================== 跟进时间线 ==================== */
+    .follow-up-list {
+      position: relative;
+      padding-left: 20px;
+    }
+
+    .follow-up-item {
+      position: relative;
+      padding-bottom: var(--wolf-space-lg);
+      padding-left: var(--wolf-space-lg);
+    }
+
+    .follow-up-item-tail {
+      position: absolute;
+      left: 0;
+      top: 12px;
+      height: calc(100% - 12px);
+      width: 2px;
+      background: var(--wolf-border-default);
+    }
+
+    .follow-up-item.is-last .follow-up-item-tail {
+      display: none;
+    }
+
+    .follow-up-item-dot {
+      position: absolute;
+      left: -6px;
+      top: 0;
+      width: 14px;
+      height: 14px;
+      border-radius: var(--wolf-radius-full);
+      background: var(--wolf-bg-card);
+      border: 2px solid var(--wolf-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .follow-up-item-content {
+      background: var(--wolf-bg-elevated);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-sm);
+      transition: background var(--wolf-transition-normal);
+    }
+
+    .follow-up-item-content:hover {
+      background: var(--wolf-bg-hover);
+    }
+
+    .follow-up-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--wolf-space-xs);
+    }
+
+    .follow-up-time {
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+    }
+
+    .follow-up-tags {
+      display: flex;
+      gap: var(--wolf-space-xs);
+      flex-wrap: wrap;
+      margin-bottom: var(--wolf-space-sm);
+    }
+
+    .meta-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: var(--wolf-radius-sm);
+      font-size: var(--wolf-font-size-caption);
+    }
+
+    .type-tag {
+      background: var(--wolf-primary-light);
+      color: var(--wolf-primary);
+      font-weight: var(--wolf-font-weight-medium);
+    }
+
+    .method-tag {
+      background: var(--wolf-bg-card);
+      color: var(--wolf-text-secondary);
+      border: 1px solid var(--wolf-border-default);
+    }
+
+    .content-value {
+      font-size: var(--wolf-font-size-body);
+      color: var(--wolf-text-primary);
+      line-height: 1.6;
+    }
+
+    /* ==================== 联系人表格 ==================== */
+    .contacts-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .contacts-table th,
+    .contacts-table td {
+      padding: var(--wolf-space-sm);
+      text-align: left;
+      border-bottom: 1px solid var(--wolf-border-default);
+    }
+
+    .contacts-table th {
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-tertiary);
+      font-weight: var(--wolf-font-weight-medium);
+    }
+
+    .contacts-table td {
+      font-size: var(--wolf-font-size-body);
+      color: var(--wolf-text-secondary);
+    }
+
+    .contacts-table tbody tr:hover {
+      background: var(--wolf-bg-hover);
+    }
+
+    .table-actions {
+      display: flex;
+      gap: var(--wolf-space-xs);
+    }
+
+    .wolf-btn--text {
+      background: transparent;
+      border: none;
+      color: var(--wolf-primary);
+      padding: 4px 8px;
+      font-size: var(--wolf-font-size-caption);
+      cursor: pointer;
+      transition: color var(--wolf-transition-fast);
+    }
+
+    .wolf-btn--text:hover {
+      color: var(--wolf-primary-hover);
+    }
+
+    /* ==================== 空状态 ==================== */
+    .empty-state {
+      padding: var(--wolf-space-lg);
+      text-align: center;
+      color: var(--wolf-text-tertiary);
+    }
+
+    .empty-icon {
+      font-size: 48px;
+      color: var(--wolf-text-placeholder);
+      margin-bottom: var(--wolf-space-md);
+    }
+
+    .empty-text {
+      font-size: var(--wolf-font-size-body);
+    }
+
+    /* ==================== 响应式 ==================== */
+    @media (max-width: 768px) {
+      .detail-content {
+        padding: var(--wolf-space-md);
+      }
+
+      .info-top {
+        flex-direction: column;
+        gap: var(--wolf-space-md);
+      }
+
+      .attributes-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tabs-header {
+        gap: var(--wolf-space-sm);
+        padding-bottom: var(--wolf-space-xs);
+      }
+
+      .tabs-item {
+        padding: var(--wolf-space-xs) var(--wolf-space-sm);
+      }
+
+      .detail-actions-bar {
+        padding: var(--wolf-space-sm) var(--wolf-space-md);
+      }
+
+      .actions-bar-left {
+        flex: 1;
+      }
+
+      /* 移动端：下拉菜单改为全屏抽屉（此处仅示例） */
+      .dropdown-menu {
+        position: fixed;
+        bottom: 60px;
+        left: var(--wolf-space-md);
+        right: var(--wolf-space-md);
+        border-radius: var(--wolf-radius-md);
+      }
+    }
+
+    @media (min-width: 1024px) {
+      .detail-content {
+        max-width: 1200px;
+      }
+    }
+
+    /* ==================== 演示控制面板 ==================== */
+    .demo-controls {
+      position: fixed;
+      top: var(--wolf-header-height);
+      right: var(--wolf-space-md);
+      background: var(--wolf-bg-card);
+      border: 1px solid var(--wolf-border-default);
+      border-radius: var(--wolf-radius-md);
+      padding: var(--wolf-space-md);
+      z-index: 150;
+      box-shadow: var(--wolf-shadow-hover);
+      max-width: 240px;
+    }
+
+    .demo-control-title {
+      font-size: var(--wolf-font-size-auxiliary);
+      font-weight: var(--wolf-font-weight-semibold);
+      color: var(--wolf-text-primary);
+      margin-bottom: var(--wolf-space-md);
+    }
+
+    .demo-control-item {
+      display: flex;
+      align-items: center;
+      gap: var(--wolf-space-sm);
+      margin-bottom: var(--wolf-space-sm);
+      font-size: var(--wolf-font-size-caption);
+      color: var(--wolf-text-secondary);
+    }
+
+    .demo-control-checkbox {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    .demo-control-btn {
+      width: 100%;
+      margin-top: var(--wolf-space-xs);
+    }
+
+    /* ==================== 减少动画支持（ P2） ==================== */
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+
+      .tabs-item:active {
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Toast 容器 -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- 演示控制面板 -->
+  <div class="demo-controls">
+    <div class="demo-control-title">演示控制</div>
+
+    <div class="demo-control-item">
+      <input type="checkbox" id="showSkeleton" class="demo-control-checkbox">
+      <label for="showSkeleton">显示骨架屏</label>
+    </div>
+
+    <div class="demo-control-item">
+      <input type="checkbox" id="showLoading" class="demo-control-checkbox">
+      <label for="showLoading">按钮加载状态</label>
+    </div>
+
+    <div class="demo-control-item">
+      <input type="checkbox" id="showToast" class="demo-control-checkbox">
+      <label for="showToast">显示进度Toast</label>
+    </div>
+
+    <button class="wolf-btn wolf-btn--primary-sm demo-control-btn" onclick="showSuccessToast()">
+      测试成功提示
+    </button>
+
+    <button class="wolf-btn wolf-btn--default wolf-btn--primary-sm demo-control-btn" onclick="simulateAddFollowUp()">
+      模拟添加跟进
+    </button>
+  </div>
+
+  <div class="customer-detail-page">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <div class="header-left">
+        <button class="back-btn" aria-label="返回客户列表" onclick="alert('返回客户列表')">
+          ←
+        </button>
+        <h1 class="page-title">客户详情</h1>
+      </div>
+      <div class="header-right">
+        <button class="wolf-btn wolf-btn--default wolf-btn--primary-sm" onclick="alert('编辑客户')">
+          编辑
+        </button>
+      </div>
+    </div>
+
+    <!-- 详情内容 -->
+    <div class="detail-content">
+      <!-- 骨架屏（默认隐藏） -->
+      <div class="skeleton-wrapper" id="skeletonWrapper" style="display: none;">
+        <div class="skeleton-card">
+          <div class="skeleton-row">
+            <div class="skeleton-item skeleton-avatar"></div>
+            <div>
+              <div class="skeleton-item skeleton-title" style="margin-bottom: 8px;"></div>
+              <div class="skeleton-item skeleton-text-short"></div>
+            </div>
+          </div>
+          <div class="skeleton-row">
+            <div class="skeleton-item skeleton-text"></div>
+          </div>
+        </div>
+
+        <div class="skeleton-card">
+          <div class="skeleton-row">
+            <div class="skeleton-item skeleton-text-short"></div>
+          </div>
+        </div>
+
+        <div class="skeleton-card" style="min-height: 200px;">
+          <div class="skeleton-item skeleton-text" style="width: 30%;"></div>
+        </div>
+      </div>
+
+      <!-- 实际内容 -->
+      <div id="actualContent">
+        <!-- 客户信息卡片 -->
+        <div class="info-card">
+          <div class="info-top">
+            <div class="title-section">
+              <div class="title-avatar">阿</div>
+              <div>
+                <h2 class="title-name">阿里巴巴集团</h2>
+                <div class="title-tags">
+                  <!-- 🔧 P2: 状态标签添加图标 -->
+                  <span class="status-tag status-following">
+                    <span class="status-icon">⏱</span>
+                    跟进中
+                  </span>
+                  <span class="status-tag status-info">
+                    <span class="status-icon">🏢</span>
+                    互联网
+                  </span>
+                  <span class="status-tag status-info">
+                    <span class="status-icon">👥</span>
+                    500-1000人
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="stats-section">
+              <div class="stat-item">
+                <div class="stat-label">联系人数</div>
+                <div class="stat-value">12 人</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="info-divider"></div>
+
+          <div class="attributes-grid">
+            <div class="attribute-item">
+              <div class="attribute-label">客户来源</div>
+              <span class="attribute-value">展会获客</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">所在城市</div>
+              <span class="attribute-value">杭州市</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">公司地址</div>
+              <span class="attribute-value">浙江省杭州市西湖区...</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">负责销售</div>
+              <span class="attribute-value">张伟</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">创建时间</div>
+              <span class="attribute-value">2026-01-15</span>
+            </div>
+            <div class="attribute-item">
+              <div class="attribute-label">最后修改</div>
+              <span class="attribute-value">2026-07-05</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 热力值卡片（ P1: 添加说明） -->
+        <div class="score-card-compact">
+          <div class="score-mini-circle">
+            <div class="score-ring">
+              <div class="score-ring-fill" style="transform: rotate(calc(85 * 3.6deg)); /* 85% */"></div>
+              <span class="score-value">85</span>
+            </div>
+          </div>
+          <div class="score-mini-info">
+            <div class="score-mini-header">
+              <span class="score-mini-icon">🔥</span>
+              <span class="score-mini-level">高活跃</span>
+            </div>
+            <!-- 🔧 P1: 热力值说明 -->
+            <div class="score-hint">
+              <span class="score-hint-icon" title="点击查看计算明细">💡</span>
+              <span>热力值反映客户活跃度（0-100），由跟进频率、商机进展等因素计算</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 标签页卡片 -->
+        <div class="tabs-card">
+          <!-- 标签页头部（ P0: 移动端滚动） -->
+          <div class="tabs-header" role="tablist">
+            <div
+              class="tabs-item is-active"
+              role="tab"
+              aria-selected="true"
+              tabindex="0"
+              data-tab="followup"
+              onclick="switchTab('followup')"
+              onkeydown="handleTabKeydown(event, 'followup')"
+            >
+              客户跟进
+            </div>
+            <div
+              class="tabs-item"
+              role="tab"
+              aria-selected="false"
+              tabindex="-1"
+              data-tab="contacts"
+              onclick="switchTab('contacts')"
+              onkeydown="handleTabKeydown(event, 'contacts')"
+            >
+              联系人
+            </div>
+            <div
+              class="tabs-item"
+              role="tab"
+              aria-selected="false"
+              tabindex="-1"
+              data-tab="opportunities"
+              onclick="switchTab('opportunities')"
+            >
+              商机
+            </div>
+            <div
+              class="tabs-item"
+              role="tab"
+              aria-selected="false"
+              tabindex="-1"
+              data-tab="contracts"
+              onclick="switchTab('contracts')"
+            >
+              合同
+            </div>
+            <div
+              class="tabs-item"
+              role="tab"
+              aria-selected="false"
+              tabindex="-1"
+              data-tab="payments"
+              onclick="switchTab('payments')"
+            >
+              回款
+            </div>
+            <div
+              class="tabs-item"
+              role="tab"
+              aria-selected="false"
+              tabindex="-1"
+              data-tab="invoices"
+              onclick="switchTab('invoices')"
+            >
+              发票
+            </div>
+          </div>
+
+          <!-- 标签页内容 -->
+          <div class="tabs-content">
+            <!-- 客户跟进 -->
+            <div class="tab-panel" id="panel-followup" role="tabpanel">
+              <div class="panel-header">
+                <span>操作时间线</span>
+                <!-- 🔧 P0: 按钮加载状态 -->
+                <button class="wolf-btn wolf-btn--primary-sm" id="addFollowUpBtn" onclick="handleAddFollowUp()">
+                  <span class="btn-icon">+</span>
+                  <span class="btn-text">添加跟进</span>
+                  <span class="btn-spinner" style="display: none;"></span>
+                </button>
+              </div>
+
+              <div class="follow-up-list">
+                <div class="follow-up-item">
+                  <div class="follow-up-item-tail"></div>
+                  <div class="follow-up-item-dot"></div>
+                  <div class="follow-up-item-content">
+                    <div class="follow-up-header">
+                      <span class="follow-up-time">今天 14:30</span>
+                    </div>
+                    <div class="follow-up-tags">
+                      <span class="meta-tag type-tag">跟进记录</span>
+                      <span class="meta-tag method-tag">📞 电话</span>
+                    </div>
+                    <div class="content-value">
+                      与客户技术总监沟通了系统对接方案，对方对API集成方案表示认可，下周安排技术团队对接测试。
+                    </div>
+                  </div>
+                </div>
+
+                <div class="follow-up-item">
+                  <div class="follow-up-item-tail"></div>
+                  <div class="follow-up-item-dot"></div>
+                  <div class="follow-up-item-content">
+                    <div class="follow-up-header">
+                      <span class="follow-up-time">昨天 16:00</span>
+                    </div>
+                    <div class="follow-up-tags">
+                      <span class="meta-tag type-tag">跟进记录</span>
+                      <span class="meta-tag method-tag">💬 微信</span>
+                    </div>
+                    <div class="content-value">
+                      发送产品演示视频，客户反馈功能符合需求，询问价格方案。
+                    </div>
+                  </div>
+                </div>
+
+                <div class="follow-up-item is-last">
+                  <div class="follow-up-item-tail"></div>
+                  <div class="follow-up-item-dot"></div>
+                  <div class="follow-up-item-content">
+                    <div class="follow-up-header">
+                      <span class="follow-up-time">3天前</span>
+                    </div>
+                    <div class="follow-up-tags">
+                      <span class="meta-tag type-tag">跟进记录</span>
+                      <span class="meta-tag method-tag">👥 拜访</span>
+                    </div>
+                    <div class="content-value">
+                      实地拜访客户总部，与采购负责人面谈，了解预算审批流程。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 联系人 -->
+            <div class="tab-panel hidden" id="panel-contacts" role="tabpanel">
+              <div class="panel-header">
+                <span>联系人列表</span>
+                <button class="wolf-btn wolf-btn--primary-sm">
+                  <span>+ 添加联系人</span>
+                </button>
+              </div>
+
+              <table class="contacts-table">
+                <thead>
+                  <tr>
+                    <th>姓名</th>
+                    <th>职务</th>
+                    <th>手机</th>
+                    <th>邮箱</th>
+                    <th>决策人</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>王总监</td>
+                    <td>技术总监</td>
+                    <td>138****1234</td>
+                    <td>wang@example.com</td>
+                    <td><span class="status-tag status-success">是</span></td>
+                    <td>
+                      <div class="table-actions">
+                        <button class="wolf-btn--text">编辑</button>
+                        <button class="wolf-btn--text" style="color: var(--wolf-danger-text);">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>李经理</td>
+                    <td>采购经理</td>
+                    <td>139****5678</td>
+                    <td>li@example.com</td>
+                    <td><span class="status-tag status-info">否</span></td>
+                    <td>
+                      <div class="table-actions">
+                        <button class="wolf-btn--text">编辑</button>
+                        <button class="wolf-btn--text" style="color: var(--wolf-danger-text);">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 商机 -->
+            <div class="tab-panel hidden" id="panel-opportunities" role="tabpanel">
+              <div class="panel-header">
+                <span>商机列表</span>
+                <button class="wolf-btn wolf-btn--primary-sm">
+                  <span>+ 新建商机</span>
+                </button>
+              </div>
+
+              <div class="empty-state">
+                <div class="empty-icon">📋</div>
+                <div class="empty-text">暂无商机，点击新建开始追踪销售进展</div>
+              </div>
+            </div>
+
+            <!-- 其他标签页省略 -->
+            <div class="tab-panel hidden" id="panel-contracts" role="tabpanel">
+              <div class="empty-state">
+                <div class="empty-icon">📄</div>
+                <div class="empty-text">暂无合同</div>
+              </div>
+            </div>
+
+            <div class="tab-panel hidden" id="panel-payments" role="tabpanel">
+              <div class="empty-state">
+                <div class="empty-icon">💰</div>
+                <div class="empty-text">暂无回款计划</div>
+              </div>
+            </div>
+
+            <div class="tab-panel hidden" id="panel-invoices" role="tabpanel">
+              <div class="empty-state">
+                <div class="empty-icon">🧾</div>
+                <div class="empty-text">暂无发票</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🔧 新增：底部操作栏 -->
+    <div class="detail-actions-bar">
+      <div class="actions-bar-left">
+        <!-- 下拉菜单：快捷操作 -->
+        <div class="dropdown-wrapper">
+          <button class="wolf-btn wolf-btn--primary dropdown-trigger">
+            <span>快捷操作</span>
+            <span>▼</span>
+          </button>
+          <div class="dropdown-menu">
+            <div class="dropdown-item" onclick="handleQuickAction('addFollowUp')">
+              <span>📝</span>
+              <span>添加跟进</span>
+            </div>
+            <div class="dropdown-item" onclick="handleQuickAction('addContact')">
+              <span>👤</span>
+              <span>添加联系人</span>
+            </div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-item" onclick="handleQuickAction('createOpportunity')">
+              <span>🎯</span>
+              <span>创建商机</span>
+            </div>
+            <div class="dropdown-item" onclick="handleQuickAction('createContract')">
+              <span>📄</span>
+              <span>创建合同</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions-bar-right">
+        <button class="wolf-btn wolf-btn--default">编辑客户</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==================== 标签页切换（ P0: 过渡动画） ====================
+    let currentTab = 'followup';
+
+    function switchTab(tabKey) {
+      if (currentTab === tabKey) return;
+
+      // 旧面板淡出
+      const oldPanel = document.getElementById(`panel-${currentTab}`);
+      if (oldPanel) {
+        oldPanel.classList.add('fade-out');
+        setTimeout(() => {
+          oldPanel.classList.remove('fade-out');
+          oldPanel.classList.add('hidden');
+        }, 150);
+      }
+
+      // 更新标签状态
+      document.querySelectorAll('.tabs-item').forEach(item => {
+        const isActive = item.dataset.tab === tabKey;
+        item.classList.toggle('is-active', isActive);
+        item.setAttribute('aria-selected', isActive);
+        item.setAttribute('tabindex', isActive ? '0' : '-1');
+      });
+
+      // 新面板淡入
+      setTimeout(() => {
+        const newPanel = document.getElementById(`panel-${tabKey}`);
+        if (newPanel) {
+          newPanel.classList.remove('hidden');
+          newPanel.classList.add('fade-in');
+          setTimeout(() => {
+            newPanel.classList.remove('fade-in');
+          }, 150);
+        }
+      }, 150);
+
+      currentTab = tabKey;
+    }
+
+    // 键盘导航支持
+    function handleTabKeydown(event, tabKey) {
+      const tabs = Array.from(document.querySelectorAll('.tabs-item'));
+      const currentIndex = tabs.findIndex(t => t.dataset.tab === tabKey);
+
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        const nextIndex = (currentIndex + 1) % tabs.length;
+        tabs[nextIndex].focus();
+        tabs[nextIndex].click();
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        tabs[prevIndex].focus();
+        tabs[prevIndex].click();
+      } else if (event.key === 'Home') {
+        tabs[0].focus();
+        tabs[0].click();
+      } else if (event.key === 'End') {
+        tabs[tabs.length - 1].focus();
+        tabs[tabs.length - 1].click();
+      }
+    }
+
+    // ==================== Toast 提示（ P0: 进度指示） ====================
+    function showToast(message, type = 'info', duration = 3000) {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast toast--${type}`;
+
+      let icon = '';
+      if (type === 'info') {
+        icon = '<div class="toast-spinner"></div>';
+      } else if (type === 'success') {
+        icon = '<span class="toast-icon">✓</span>';
+      } else if (type === 'error') {
+        icon = '<span class="toast-icon">✗</span>';
+      }
+
+      toast.innerHTML = `${icon}<span>${message}</span>`;
+      container.appendChild(toast);
+
+      if (duration > 0) {
+        setTimeout(() => {
+          toast.classList.add('toast-out');
+          setTimeout(() => toast.remove(), 150);
+        }, duration);
+      }
+
+      return toast;
+    }
+
+    function showSuccessToast() {
+      showToast('跟进记录已添加', 'success', 2000);
+    }
+
+    function showErrorToast(message) {
+      showToast(message, 'error', 3000);
+    }
+
+    // ==================== 模拟添加跟进（演示加载状态） ====================
+    function simulateAddFollowUp() {
+      const btn = document.getElementById('addFollowUpBtn');
+      const btnText = btn.querySelector('.btn-text');
+      const btnSpinner = btn.querySelector('.btn-spinner');
+
+      // 1. 显示进度 Toast
+      const loadingToast = showToast('正在添加跟进记录...', 'info', 0);
+
+      // 2. 按钮进入加载状态
+      btn.classList.add('wolf-btn--loading');
+      btnText.textContent = '添加中...';
+      btnSpinner.style.display = 'inline-block';
+
+      // 3. 模拟异步操作
+      setTimeout(() => {
+        // 4. 关闭进度 Toast
+        loadingToast.classList.add('toast-out');
+        setTimeout(() => loadingToast.remove(), 150);
+
+        // 5. 显示成功 Toast
+        showSuccessToast();
+
+        // 6. 恢复按钮状态
+        btn.classList.remove('wolf-btn--loading');
+        btnText.textContent = '添加跟进';
+        btnSpinner.style.display = 'none';
+      }, 1500);
+    }
+
+    function handleAddFollowUp() {
+      const checkbox = document.getElementById('showLoading');
+      if (checkbox.checked) {
+        simulateAddFollowUp();
+      } else {
+        alert('打开演示控制面板的"按钮加载状态"选项查看效果');
+      }
+    }
+
+    // ==================== 快捷操作 ====================
+    function handleQuickAction(action) {
+      const actions = {
+        addFollowUp: '添加跟进',
+        addContact: '添加联系人',
+        createOpportunity: '创建商机',
+        createContract: '创建合同'
+      };
+
+      const checkbox = document.getElementById('showToast');
+      if (checkbox.checked) {
+        const loadingToast = showToast(`正在打开${actions[action]}...`, 'info', 0);
+        setTimeout(() => {
+          loadingToast.classList.add('toast-out');
+          setTimeout(() => loadingToast.remove(), 150);
+          showToast(`${actions[action]}页面已打开`, 'success', 2000);
+        }, 800);
+      } else {
+        alert(`模拟打开：${actions[action]}`);
+      }
+    }
+
+    // ==================== 骨架屏切换 ====================
+    document.getElementById('showSkeleton').addEventListener('change', (e) => {
+      const skeleton = document.getElementById('skeletonWrapper');
+      const content = document.getElementById('actualContent');
+
+      if (e.target.checked) {
+        skeleton.style.display = 'flex';
+        content.style.display = 'none';
+      } else {
+        skeleton.style.display = 'none';
+        content.style.display = 'block';
+      }
+    });
+
+    // ==================== 初始化 ====================
+    // 模拟首次加载时显示骨架屏（1秒后消失）
+    setTimeout(() => {
+      // 自动关闭骨架屏演示
+      document.getElementById('showSkeleton').checked = false;
+    }, 1000);
+  </script>
+</body>
+</html>
