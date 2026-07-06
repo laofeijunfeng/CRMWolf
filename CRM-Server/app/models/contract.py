@@ -56,6 +56,9 @@ class Contract(Base):
     invoice_applications = relationship("InvoiceApplication", back_populates="contract", cascade="all, delete-orphan")
     license_applications = relationship("LicenseApplication", back_populates="contract")
     approvals = relationship("Approval", back_populates="contract", foreign_keys="[Approval.contract_id]")
+    # 新增：Customer 和 Opportunity relationships（修复 AttributeError）
+    customer = relationship("Customer", foreign_keys=[customer_id])
+    opportunity = relationship("Opportunity", foreign_keys=[opportunity_id])
 
     __table_args__ = (
         Index('idx_contract_customer', 'customer_id'),
