@@ -100,6 +100,7 @@ class Customer(Base):
     profile_error_message = Column(Text, nullable=True, comment="档案生成失败原因")
 
     license_expiry_date = Column(Date, nullable=True, comment="客户 License 最晚到期时间（自动更新）")
+    license_type = Column(String(20), nullable=True, comment="客户 License 类型（自动更新）：TRIAL/OFFICIAL")
 
     contacts = relationship("Contact", back_populates="customer", cascade="all, delete-orphan")
     deployment_infos = relationship("DeploymentInfo", back_populates="customer", cascade="all, delete-orphan")
