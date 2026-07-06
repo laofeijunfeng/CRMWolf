@@ -1,0 +1,262 @@
+@use '@/styles/variables.scss' as *;
+
+// ==================== Frontend Design 视觉规范补充 ====================
+// Motion: 导航过渡动画时长（补充 variables.scss 未定义的变量）
+$wolf-transition-normal: 0.15s ease-out;  // ✅ Material Design 标准
+
+// Icon Sizing: 系统性图标尺寸定义
+$wolf-icon-size-nav: 16px;    // 导航图标（紧凑型）
+$wolf-icon-size-action: 14px; // 快捷操作图标（比导航图标小）
+$wolf-icon-container: 20px;   // 图标容器宽度（统一）
+
+// ==================== 左侧导航宽度 ====================
+$sidebar-width: 48px;        // ✅ 收窄到48px（icon-only）
+$sidebar-collapsed: 48px;    // ✅ 折叠状态也是48px
+
+.payment-sidebar {
+  width: $sidebar-width;
+  background: $wolf-bg-sidebar;
+  border-right: 1px solid $wolf-border-default;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  height: 100%; // 撑满父容器高度
+}
+
+.sidebar-body {
+  flex: 1;
+  padding: $wolf-space-sm $wolf-space-xs;
+  overflow-y: auto;
+}
+
+.nav-section {
+  margin-bottom: $wolf-space-md;
+}
+
+// 🔧 P0: 导航项样式（触摸目标≥44pt + 按下反馈 + aria-label）
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;
+  padding: 12px $wolf-space-sm;  // ✅ 增加到12px，总高度约44pt
+  min-height: 44px;              // ✅ 强制最小高度44pt
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-secondary;
+  cursor: pointer;
+  border-radius: $wolf-radius-sm;
+  margin-bottom: $wolf-space-sm;  // ✅ P0: 增加到8px
+  transition: all $wolf-transition-normal;
+  outline: none;
+  position: relative;
+
+  // ✅ 触摸区域扩展（视觉不变，触摸范围增大）
+  &::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    left: -8px;
+    right: -8px;
+    // 高度: 44px + 8px = 52px > 44pt ✅
+  }
+
+  // 左侧指示条（Signature 元素）
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 20px;
+    background: $wolf-primary;
+    border-radius: 0 2px 2px 0;
+    transition: width $wolf-transition-normal;
+  }
+
+  &:hover {
+    background: $wolf-bg-hover;
+    color: $wolf-text-primary;
+
+    &::before {
+      width: 3px;
+    }
+  }
+
+  // ✅ P0: 按下反馈（scale + opacity）
+  &:active {
+    transform: scale(0.95);  // 按下缩放反馈
+    opacity: 0.7;            // 按下降低透明度
+    background: $wolf-bg-active;
+  }
+
+  &.active {
+    background: $wolf-primary-light;
+    color: $wolf-primary;
+    font-weight: $wolf-font-weight-medium;
+
+    &::before {
+      width: 3px;
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+    outline-offset: -2px;
+  }
+}
+
+// ✅ P0: 图标添加 aria-label + 系统性尺寸定义
+.nav-icon {
+  font-size: $wolf-icon-size-nav;  // ✅ 使用系统性图标尺寸（16px）
+  flex-shrink: 0;
+  width: $wolf-icon-container;    // ✅ 使用图标容器宽度（20px）
+  text-align: center;
+}
+
+// ==================== Reduced Motion（尊重用户动画偏好）====================
+// ✅ P0: UI/UX Pro Max 规则 - 尊重 prefers-reduced-motion
+@media (prefers-reduced-motion: reduce) {
+  .nav-item,
+  .nav-icon {
+    transition: none !important;  // ✅ 禁用所有过渡动画
+  }
+
+  .nav-item::before {
+    transition: none !important;  // ✅ 禁用指示条动画
+  }
+
+  .nav-item:active {
+    transform: none !important;  // ✅ 禁用按下缩放
+    opacity: 1 !important;       // ✅ 禁用按下透明度变化
+  }
+}
+
+// 导航分隔线
+.nav-divider {
+  height: 1px;
+  background: $wolf-border-default;
+  margin: $wolf-space-sm $wolf-space-xs;
+}
+
+// 🔧 P0: 快捷操作样式（触摸目标≥44pt + 按下反馈 + aria-label）
+.nav-action {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;           // ✅ 增加到8px
+  padding: 12px $wolf-space-sm;  // ✅ 增加到12px，总高度约44pt
+  min-height: 44px;              // ✅ 强制最小高度44pt
+  font-size: 11px;
+  color: $wolf-primary;
+  cursor: pointer;
+  border-radius: $wolf-radius-sm;
+  margin-bottom: $wolf-space-xs; // ✅ 增加到4px
+  transition: all $wolf-transition-normal;
+  outline: none;
+  position: relative;
+
+  // ✅ 触摸区域扩展（视觉不变，触摸范围增大）
+  &::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    left: -8px;
+    right: -8px;
+  }
+
+  &:hover {
+    background: $wolf-primary-light;
+    color: $wolf-primary-hover;
+  }
+
+  // ✅ P0: 按下反馈（scale + opacity）
+  &:active {
+    transform: scale(0.95);  // 按下缩放反馈
+    opacity: 0.7;            // 按下降低透明度
+  }
+
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+    outline-offset: -2px;
+  }
+}
+
+// ✅ P0: 快捷操作图标
+.nav-action-icon {
+  font-size: $wolf-icon-size-action;  // ✅ 使用系统性图标尺寸（14px）
+  flex-shrink: 0;
+  width: $wolf-icon-container;       // ✅ 使用图标容器宽度（20px）
+  text-align: center;
+}
+
+// 响应式：中等屏幕折叠为48px（只显示图标）
+@media (max-width: 1024px) {
+  .payment-sidebar {
+    width: $sidebar-collapsed;
+  }
+}
+
+// 🔧 P0: 响应式：移动端改为顶部横向标签（触摸目标≥44pt + 间距≥8px）
+@media (max-width: 768px) {
+  .payment-sidebar {
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid $wolf-border-default;
+    flex-direction: row;
+  }
+
+  .sidebar-body {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $wolf-space-sm;    // ✅ 增加到8px
+    padding: $wolf-space-md; // ✅ 增加到16px
+  }
+
+  .nav-section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $wolf-space-sm;    // ✅ 增加到8px
+    margin-bottom: 0;
+  }
+
+  // ✅ P0: 移动端导航项（触摸目标≥44pt + 总宽度<375px）
+  .nav-item {
+    flex: 1;
+    min-width: 60px;        // ✅ 减少到60px
+    max-width: 80px;        // ✅ 限制最大宽度
+    min-height: 44px;       // ✅ 强制最小高度44pt
+    justify-content: center;
+    padding: 12px $wolf-space-sm; // ✅ 增加到12px，总高度约44pt
+
+    // ✅ P0: 触摸区域扩展（移动端需要更大的触摸范围）
+    &::after {
+      content: '';
+      position: absolute;
+      top: -8px;
+      bottom: -8px;
+      left: -8px;
+      right: -8px;
+    }
+
+    &::before {
+      display: none; // 移动端隐藏指示条
+    }
+
+    // ✅ P0: 移动端按下反馈（scale + opacity）
+    &:active {
+      transform: scale(0.95);
+      opacity: 0.7;
+    }
+  }
+
+  .nav-icon {
+    margin: 0 auto;
+  }
+
+  .nav-divider,
+  .nav-action {
+    display: none; // 移动端隐藏快捷操作（改为其他入口）
+  }
+}
