@@ -2,11 +2,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, InfoFilled, RefreshRight, WarningFilled } from '@element-plus/icons-vue'
 import paymentApi, {
   type PaymentPlanResponse,
   type PaymentRecordCreate,
-  type PaymentPlanStatus
+  type PaymentRecordUpdate,
+  type PaymentPlanStatus,
+  type ApprovalStatus
 } from '@/api/payment'
 import { useApprovalStore } from '@/stores/approval'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
@@ -32,6 +34,16 @@ const paymentForm = ref<PaymentRecordCreate>({
 // Approval submission loading state
 const submittingApproval = ref(false)
 
+// Task 8.1: Edit and resubmit approval flow state
+const showEditRecordDialog = ref(false)
+const editRecordForm = ref<PaymentRecordUpdate>({
+  actual_amount: 0,
+  payment_date: '',
+  proof_attachment: '',
+  notes: ''
+})
+const resubmittingApproval = ref(false)
+
 // Computed: has pending payment record (confirmation_status === 'PENDING' and no approval submitted)
 const hasPendingRecord = computed(() => {
   if (!plan.value?.payment_records || plan.value.payment_records.length === 0) return false
@@ -39,13 +51,37 @@ const hasPendingRecord = computed(() => {
   return latestRecord?.confirmation_status === 'PENDING'
 })
 
-// Computed: has approval in progress (submitted but not confirmed)
-const hasPendingApproval = computed(() => {
-  if (!plan.value?.payment_records || plan.value.payment_records.length === 0) return false
-  // Check if any record has pending approval
-  return plan.value.payment_records.some(record =>
-    record.confirmation_status === 'PENDING' && record.id !== undefined
-  )
+// Task 8.1: Computed: approval is rejected
+const hasRejectedApproval = computed(() => {
+  return plan.value?.latest_approval?.status === 'REJECTED'
+})
+
+// Task 8.1: Computed: approval is approved
+const hasApprovedApproval = computed(() => {
+  return plan.value?.latest_approval?.status === 'APPROVED'
+})
+
+// Task 8.1: Computed: approval is pending
+const hasApprovalPending = computed(() => {
+  return plan.value?.latest_approval?.status === 'PENDING'
+})
+
+// Task 8.1: Get rejection reason from approval nodes
+const rejectionReason = computed(() => {
+  if (!hasRejectedApproval.value || !plan.value?.latest_approval?.nodes) return null
+
+  // Find the rejected node and get its comment
+  const rejectedNode = plan.value.latest_approval.nodes.find(node => node.status === 'REJECTED')
+  return rejectedNode?.comment ?? '审批被驳回，请查看详情'
+})
+
+// Task 8.1: Get current approver info
+const currentApproverName = computed(() => {
+  if (!hasApprovalPending.value || !plan.value?.latest_approval?.nodes) return null
+
+  // Find the pending node and get approver info
+  const pendingNode = plan.value.latest_approval.nodes.find(node => node.status === 'PENDING')
+  return pendingNode?.approver_name ?? '待分配'
 })
 
 // Fetch plan detail
@@ -83,6 +119,25 @@ const getStatusLabel = (status: PaymentPlanStatus): string => {
     'OVERDUE': '已逾期',
     'PARTIAL': '部分回款',
     'COMPLETED': '已完成'
+  }
+  return statusMap[status] ?? status
+}
+
+// Task 8.1: Approval status helpers
+const getApprovalStatusType = (status: ApprovalStatus): string => {
+  const statusMap: Record<ApprovalStatus, string> = {
+    'PENDING': 'warning',
+    'APPROVED': 'success',
+    'REJECTED': 'danger'
+  }
+  return statusMap[status] ?? 'info'
+}
+
+const getApprovalStatusLabel = (status: ApprovalStatus): string => {
+  const statusMap: Record<ApprovalStatus, string> = {
+    'PENDING': '审批中',
+    'APPROVED': '已通过',
+    'REJECTED': '已驳回'
   }
   return statusMap[status] ?? status
 }
@@ -164,6 +219,56 @@ const viewContract = (): void => {
 const viewApprovalDetail = (): void => {
   router.push(`/approvals?business_type=PAYMENT&business_id=${planId}`)
 }
+
+// Task 8.1: Handle resubmit approval for rejected payment record
+const handleResubmitApproval = (): void => {
+  if (!plan.value?.latest_approval) return
+
+  // Initialize edit form with latest record data
+  const latestRecord = plan.value.payment_records[plan.value.payment_records.length - 1]
+  if (latestRecord) {
+    editRecordForm.value = {
+      actual_amount: latestRecord.actual_amount,
+      payment_date: latestRecord.payment_date,
+      proof_attachment: latestRecord.proof_attachment ?? '',
+      notes: latestRecord.notes ?? ''
+    }
+  }
+
+  showEditRecordDialog.value = true
+}
+
+// Task 8.1: Handle edit and resubmit approval
+const handleEditAndResubmit = async (): Promise<void> => {
+  // Explicitly check for nullish/zero cases (ESLint strict-boolean-expressions)
+  if (plan.value?.latest_record_id === undefined || plan.value?.latest_record_id === null || plan.value?.latest_record_id === 0) {
+    return
+  }
+  if (resubmittingApproval.value) return
+
+  resubmittingApproval.value = true
+  try {
+    // 1. Update payment record
+    await paymentApi.updatePaymentRecord(plan.value.latest_record_id, editRecordForm.value)
+
+    // 2. Resubmit approval
+    const res = await approvalStore.submitEntity('PAYMENT', plan.value.latest_record_id)
+    if (res.approval_id === 0) {
+      ElMessage.success('未配置审批流，已转为财务确认')
+    } else {
+      ElMessage.success('已重新提交审批')
+    }
+
+    // 3. Refresh detail
+    fetchPlanDetail()
+    showEditRecordDialog.value = false
+  } catch (error: unknown) {
+    logger.error('[PaymentPlanDetail]', '重新提交审批失败', { error })
+    showError(error, '重新提交审批')
+  } finally {
+    resubmittingApproval.value = false
+  }
+}
 </script>
 
 <template>
@@ -237,8 +342,8 @@ const viewApprovalDetail = (): void => {
         <PaymentRecordList :records="plan?.payment_records || []" @register="handleRegisterPayment" />
       </el-card>
 
-      <!-- Approval progress (if there are pending records) -->
-      <el-card v-if="hasPendingApproval" class="approval-card">
+      <!-- Approval progress (Task 8.1 + Task 6.7: enhanced with rejection handling) -->
+      <el-card v-if="plan?.latest_approval" class="approval-card">
         <template #header>
           <div class="card-header">
             <span>审批进度</span>
@@ -246,31 +351,61 @@ const viewApprovalDetail = (): void => {
           </div>
         </template>
 
+        <!-- Task 8.1: Rejection reason display -->
+        <el-alert v-if="hasRejectedApproval" type="error" :closable="false" class="rejection-alert">
+          <template #title>
+            <div class="rejection-header">
+              <el-icon><WarningFilled /></el-icon>
+              <span>审批被驳回</span>
+            </div>
+          </template>
+          <div class="rejection-content">
+            {{ rejectionReason ?? '请查看驳回原因并修正后重新提交' }}
+          </div>
+        </el-alert>
+
         <!-- Task 6.7: Approval status visual hierarchy -->
         <el-descriptions :column="1" border>
           <el-descriptions-item label="审批状态">
-            <el-tag type="warning" size="small">审批中</el-tag>
+            <el-tag :type="getApprovalStatusType(plan?.latest_approval?.status ?? 'PENDING')" size="small">
+              {{ getApprovalStatusLabel(plan?.latest_approval?.status ?? 'PENDING') }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="审批人">
             <div class="approver-info">
               <el-avatar :size="24" />
-              <span class="approver-name">待分配</span>
+              <span class="approver-name">{{ currentApproverName ?? '待分配' }}</span>
             </div>
           </el-descriptions-item>
-          <el-descriptions-item label="说明">该回款记录已提交审批，等待审批人处理</el-descriptions-item>
+          <el-descriptions-item v-if="hasApprovalPending" label="说明">
+            该回款记录已提交审批，等待审批人处理
+          </el-descriptions-item>
         </el-descriptions>
 
-        <!-- Task 6.7: Current approver highlight -->
-        <div class="current-approver-hint">
+        <!-- Task 6.7: Current approver hint -->
+        <div v-if="hasApprovalPending" class="current-approver-hint">
           <el-icon><InfoFilled /></el-icon>
           <span>审批通过后，回款状态将自动更新为"已确认"</span>
         </div>
       </el-card>
 
-      <!-- Action buttons -->
+      <!-- Action buttons (Task 8.1: added resubmit button) -->
       <div class="action-buttons">
+        <!-- Task 8.1: Resubmit approval button for rejected status -->
         <el-button
-          v-if="plan?.status !== 'COMPLETED' && hasPendingRecord"
+          v-if="hasRejectedApproval && plan?.status !== 'COMPLETED'"
+          type="warning"
+          :loading="resubmittingApproval"
+          :disabled="resubmittingApproval"
+          @click="handleResubmitApproval"
+        >
+          <el-icon><RefreshRight /></el-icon>
+          重新提交审批
+        </el-button>
+
+        <!-- First-time submit approval button -->
+        <el-button
+          v-if="plan?.status !== 'COMPLETED' && hasPendingRecord && !plan?.latest_approval"
           type="primary"
           :loading="submittingApproval"
           :disabled="submittingApproval"
@@ -278,6 +413,27 @@ const viewApprovalDetail = (): void => {
         >
           提交审批
         </el-button>
+
+        <!-- Approval in progress button (disabled) -->
+        <el-button
+          v-if="hasApprovalPending"
+          type="info"
+          disabled
+        >
+          <el-icon><InfoFilled /></el-icon>
+          审批中...
+        </el-button>
+
+        <!-- Approval approved button -->
+        <el-button
+          v-if="hasApprovedApproval"
+          type="success"
+          disabled
+        >
+          <el-icon><Plus /></el-icon>
+          已通过
+        </el-button>
+
         <el-button @click="router.push('/payments')">返回列表</el-button>
       </div>
     </template>
@@ -330,6 +486,64 @@ const viewApprovalDetail = (): void => {
       <template #footer>
         <el-button @click="paymentModalVisible = false">取消</el-button>
         <el-button type="primary" @click="handleCreatePayment">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Task 8.1: Edit payment record dialog for resubmission -->
+    <el-dialog
+      v-model="showEditRecordDialog"
+      title="修改回款记录"
+      width="500px"
+    >
+      <el-alert type="warning" :closable="false" class="edit-warning">
+        <template #title>驳回原因</template>
+        {{ rejectionReason ?? '请查看驳回原因并修正后重新提交' }}
+      </el-alert>
+
+      <el-form :model="editRecordForm" label-position="top" style="margin-top: 16px">
+        <el-form-item label="回款金额" required>
+          <el-input-number
+            v-model="editRecordForm.actual_amount"
+            :min="0"
+            :precision="2"
+            :controls="false"
+            style="width: 100%"
+          >
+            <template #prefix>¥</template>
+          </el-input-number>
+        </el-form-item>
+        <el-form-item label="回款日期" required>
+          <el-date-picker
+            v-model="editRecordForm.payment_date"
+            type="date"
+            placeholder="请选择回款日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="凭证附件">
+          <el-input v-model="editRecordForm.proof_attachment" placeholder="附件URL（可选）" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="editRecordForm.notes"
+            type="textarea"
+            placeholder="备注信息（可选）"
+            :maxlength="200"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditRecordDialog = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="resubmittingApproval"
+          :disabled="resubmittingApproval"
+          @click="handleEditAndResubmit"
+        >
+          {{ resubmittingApproval ? '提交中...' : '修改并重新提交' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -429,6 +643,28 @@ const viewApprovalDetail = (): void => {
   border-radius: $wolf-radius-sm;
   color: $wolf-text-secondary;
   font-size: $wolf-font-size-caption;
+}
+
+// Task 8.1: Rejection alert styles
+.rejection-alert {
+  margin-bottom: $wolf-space-md;
+
+  .rejection-header {
+    display: flex;
+    align-items: center;
+    gap: $wolf-space-sm;
+    font-weight: $wolf-font-weight-semibold;
+  }
+
+  .rejection-content {
+    margin-top: $wolf-space-sm;
+    font-size: $wolf-font-size-body;
+    line-height: 1.5;
+  }
+}
+
+.edit-warning {
+  margin-bottom: $wolf-space-md;
 }
 
 // Responsive
