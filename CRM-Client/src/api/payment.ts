@@ -163,6 +163,14 @@ export interface PaymentRecordWithDetails extends PaymentRecordResponse {
   stage_name?: string
 }
 
+export interface BadgeCounts {
+  pending: number           // 未登记的计划数
+  partial: number           // 部分回款的计划数
+  overdue: number           // 逾期计划数
+  pending_submit: number    // 待提交审批的记录数
+  pending_approval: number  // 审批中的记录数
+}
+
 const paymentApi = {
   getPaymentSummary: (contractId: number): Promise<ContractPaymentSummary> => {
     return request.get<ContractPaymentSummary>(`/v1/payments/contracts/${contractId}/payment-summary`)
@@ -220,6 +228,10 @@ const paymentApi = {
 
   listPaymentRecords: (params: PaymentRecordListParams) => {
     return request.get<PaginatedResponse<PaymentRecordWithDetails>>('/v1/payments/payment-records', { params })
+  },
+
+  getBadgeCounts: (): Promise<BadgeCounts> => {
+    return request.get<BadgeCounts>('/v1/payments/payment-plans/badge-counts')
   }
 }
 
