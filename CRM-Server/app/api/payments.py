@@ -75,14 +75,13 @@ def get_payment_plans(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="合同不存在"
         )
-    
+
     plans = payment_plan_crud.get_by_contract_id(db, contract_id, status)
-    
-    for plan in plans:
-        paid_amount = sum(float(r.actual_amount) for r in plan.payment_records)
-        plan.paid_amount = paid_amount
-        plan.remaining_amount = float(plan.planned_amount) - paid_amount
-    
+
+    # Task 1.2: Add computed fields to each plan
+    # Note: paid_amount, remaining_amount, invoiced_amount, invoice_count, is_invoiced
+    # are computed properties on the model, no need to set them
+
     return plans
 
 
@@ -115,11 +114,10 @@ def list_payment_plans(
             due_date_end=due_date_end,
             current_user_id=current_user_id
         )
-        
+
+        # Task 1.2: Computed fields are properties on the model, no need to set them
+        # Just enrich with contract/customer info
         for plan in plans:
-            paid_amount = sum(float(r.actual_amount) for r in plan.payment_records)
-            plan.paid_amount = paid_amount
-            plan.remaining_amount = float(plan.planned_amount) - paid_amount
             if hasattr(plan, 'contract') and plan.contract:
                 plan.contract_name = plan.contract.contract_name
                 plan.creator_id = plan.contract.creator_id
@@ -331,10 +329,6 @@ def get_payment_plan_detail(
             detail="回款计划不存在"
         )
 
-    # 计算已回款金额和待回款金额
-    paid_amount = sum(float(r.actual_amount) for r in plan.payment_records)
-    remaining_amount = float(plan.planned_amount) - paid_amount
-
     # 从关联对象获取信息（不修改 plan 对象）
     contract_name = None
     creator_id = None
@@ -420,6 +414,11 @@ def get_payment_plan_detail(
                 }
 
     # 构建响应（添加 approval 信息）
+    # Task 1.2: Compute invoice fields using model properties
+    invoiced_amount = float(plan.invoiced_amount)
+    invoice_count = plan.invoice_count
+    is_invoiced = invoice_count > 0
+
     response = {
         "id": plan.id,
         "contract_id": plan.contract_id,
@@ -428,8 +427,8 @@ def get_payment_plan_detail(
         "due_date": plan.due_date.isoformat(),
         "notes": plan.notes,
         "status": plan.status.value if hasattr(plan.status, 'value') else plan.status,
-        "paid_amount": paid_amount,
-        "remaining_amount": float(plan.planned_amount) - paid_amount,
+        "paid_amount": float(plan.paid_amount),
+        "remaining_amount": float(plan.remaining_amount),
         "payment_records": [
             {
                 "id": r.id,
@@ -451,8 +450,10 @@ def get_payment_plan_detail(
         "opportunity_name": opportunity_name,
         "created_time": plan.created_time.isoformat(),
         "last_modified_time": plan.last_modified_time.isoformat(),
-        "paid_amount": paid_amount,
-        "remaining_amount": remaining_amount,
+        # Task 1.2: Invoice computed fields
+        "invoiced_amount": invoiced_amount,
+        "invoice_count": invoice_count,
+        "is_invoiced": is_invoiced,
         # Task 8.2: 新增审批信息字段
         "latest_record_id": latest_record.id if latest_record else None,
         "latest_approval": latest_approval
@@ -490,9 +491,7 @@ def update_payment_plan(
 
     try:
         updated_plan = payment_plan_crud.update(db, plan, plan_data)
-        paid_amount = sum(float(r.actual_amount) for r in updated_plan.payment_records)
-        updated_plan.paid_amount = paid_amount
-        updated_plan.remaining_amount = float(updated_plan.planned_amount) - paid_amount
+        # Task 1.2: Computed fields are properties on the model, no need to set them
         return updated_plan
     except ValueError as e:
         raise HTTPException(
