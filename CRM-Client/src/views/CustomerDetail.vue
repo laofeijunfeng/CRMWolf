@@ -163,22 +163,36 @@
         <div class="profile-card">
           <div class="card-title">
             <span>客户档案</span>
-            <div class="profile-status">
-              <template v-if="customerDetail?.profile_status === 'PENDING'">
-                <el-tag class="wolf-tag wolf-tag--gray" size="small">等待生成</el-tag>
-              </template>
-              <template v-else-if="customerDetail?.profile_status === 'GENERATING'">
-                <el-tag class="wolf-tag wolf-tag--warning" size="small">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                  正在生成
-                </el-tag>
-              </template>
-              <template v-else-if="customerDetail?.profile_status === 'COMPLETED'">
-                <el-tag class="wolf-tag wolf-tag--success" size="small">生成完成</el-tag>
-              </template>
-              <template v-else-if="customerDetail?.profile_status === 'FAILED'">
-                <el-tag class="wolf-tag wolf-tag--danger" size="small">生成失败</el-tag>
-              </template>
+            <div class="profile-controls">
+              <!-- ✅ Task 3: 展开/收起按钮 -->
+              <el-button
+                class="wolf-btn wolf-btn--text collapse-btn"
+                @click="profileExpanded = !profileExpanded"
+              >
+                <el-icon>
+                  <component :is="profileExpanded ? ArrowDown : ArrowRight" />
+                </el-icon>
+                {{ profileExpanded ? '收起' : '展开' }}
+              </el-button>
+
+              <!-- 原有的状态标签 -->
+              <div class="profile-status">
+                <template v-if="customerDetail?.profile_status === 'PENDING'">
+                  <el-tag class="wolf-tag wolf-tag--gray" size="small">等待生成</el-tag>
+                </template>
+                <template v-else-if="customerDetail?.profile_status === 'GENERATING'">
+                  <el-tag class="wolf-tag wolf-tag--warning" size="small">
+                    <el-icon class="is-loading"><Loading /></el-icon>
+                    正在生成
+                  </el-tag>
+                </template>
+                <template v-else-if="customerDetail?.profile_status === 'COMPLETED'">
+                  <el-tag class="wolf-tag wolf-tag--success" size="small">生成完成</el-tag>
+                </template>
+                <template v-else-if="customerDetail?.profile_status === 'FAILED'">
+                  <el-tag class="wolf-tag wolf-tag--danger" size="small">生成失败</el-tag>
+                </template>
+              </div>
             </div>
           </div>
 
@@ -921,7 +935,9 @@ import {
   ShoppingCart,
   Document,
   Loading,
-  WarningFilled
+  WarningFilled,
+  ArrowDown,    // ✅ Task 3: 展开箭头
+  ArrowRight    // ✅ Task 3: 收起箭头
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
@@ -1759,6 +1775,30 @@ $wolf-transition-normal: 0.15s ease-out;
   font-size: $wolf-font-size-body;
   font-weight: $wolf-font-weight-semibold;
   color: $wolf-text-primary;
+}
+
+// ✅ Task 3: 客户档案控制栏样式
+.profile-controls {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-md;
+}
+
+.collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-tertiary;
+
+  &:hover {
+    color: $wolf-text-secondary;
+  }
+
+  .el-icon {
+    font-size: 14px;
+    transition: transform $wolf-transition-normal;
+  }
 }
 
 .profile-status {
