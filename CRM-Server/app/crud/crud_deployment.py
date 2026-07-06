@@ -233,3 +233,23 @@ class DeploymentInfoCRUD:
 
 # 创建全局实例
 deployment_info_crud = DeploymentInfoCRUD()
+
+# 独立函数导出（供 API 直接导入）
+def create_deployment_info(db: Session, team_id: int, obj_in: DeploymentInfoCreate) -> DeploymentInfo:
+    return deployment_info_crud.create(db, team_id, obj_in)
+
+def get_deployment_info(db: Session, team_id: int, deployment_id: int) -> Optional[DeploymentInfo]:
+    return deployment_info_crud.get(db, team_id, deployment_id)
+
+def get_deployment_infos_by_customer(db: Session, team_id: int, customer_id: int) -> List[DeploymentInfo]:
+    deployments, _ = deployment_info_crud.get_by_customer(db, team_id, customer_id)
+    return deployments
+
+def update_deployment_info(db: Session, team_id: int, deployment_id: int, obj_in: DeploymentInfoUpdate) -> Optional[DeploymentInfo]:
+    return deployment_info_crud.update(db, team_id, deployment_id, obj_in)
+
+def delete_deployment_info(db: Session, team_id: int, deployment_id: int) -> bool:
+    return deployment_info_crud.delete(db, team_id, deployment_id)
+
+def set_default_deployment_info(db: Session, team_id: int, deployment_id: int) -> Optional[DeploymentInfo]:
+    return deployment_info_crud.set_default(db, team_id, deployment_id)

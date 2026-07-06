@@ -1801,7 +1801,7 @@ $wolf-transition-normal: 0.15s ease-out;
   color: $wolf-text-tertiary;
 
   &:hover {
-    color: $wolf-brand-primary;
+    color: $wolf-primary;
   }
 
   .el-icon {
