@@ -49,6 +49,14 @@ from app.schemas.ai import (
     FieldChange,
     generate_action_id,
 )
+from app.schemas.deployment import (
+    DeploymentInfoBase,
+    DeploymentInfoCreate,
+    DeploymentInfoUpdate,
+    DeploymentInfoResponse,
+    DeploymentInfoListResponse,
+    DeploymentInfoMessageResponse,
+)
 
 __all__ = [
     "UserBase",
@@ -88,4 +96,10 @@ __all__ = [
     "ActionPlan",
     "FieldChange",
     "generate_action_id",
+    "DeploymentInfoBase",
+    "DeploymentInfoCreate",
+    "DeploymentInfoUpdate",
+    "DeploymentInfoResponse",
+    "DeploymentInfoListResponse",
+    "DeploymentInfoMessageResponse",
 ]
