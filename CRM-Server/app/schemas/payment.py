@@ -216,3 +216,42 @@ class PaymentRecordWithConfirmation(PaymentRecordResponse):
     confirmed_by_name: Optional[str] = Field(None, description="确认人姓名")
     confirmed_time: Optional[datetime] = Field(None, description="确认时间")
     confirmation_notes: Optional[str] = Field(None, description="确认备注")
+
+
+# Task 1.4: PaymentRecord list response schemas
+
+class ApprovalNodeInfo(BaseModel):
+    """审批节点信息"""
+    id: int
+    node_order: int
+    node_name: str
+    approve_role: str
+    status: str = "PENDING"
+    approver_id: Optional[str] = None
+    approver_name: Optional[str] = None
+    comment: Optional[str] = None
+
+
+class ApprovalInfo(BaseModel):
+    """审批信息"""
+    id: int
+    status: str
+    current_approver_name: Optional[str] = None
+    nodes: List[ApprovalNodeInfo] = Field(default_factory=list)
+
+
+class PaymentRecordListItem(PaymentRecordResponse):
+    """回款记录列表项（含审批信息）"""
+    confirmation_status: PaymentConfirmationStatusEnum = Field(..., description="确认状态")
+    approval_id: Optional[int] = Field(None, description="审批ID")
+    approval: Optional[ApprovalInfo] = Field(None, description="审批信息")
+
+
+class PaymentRecordListResponse(BaseModel, Generic[T]):
+    """回款记录列表响应（含待我审批数量）"""
+    items: List[T] = Field(..., description="数据列表")
+    total: int = Field(..., description="总数")
+    page: int = Field(..., description="当前页码")
+    page_size: int = Field(..., description="每页大小")
+    total_pages: int = Field(..., description="总页数")
+    pending_approval_me_count: int = Field(..., description="待我审批的回款记录数量")

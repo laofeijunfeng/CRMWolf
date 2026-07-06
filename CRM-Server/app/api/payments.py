@@ -7,8 +7,9 @@ from datetime import date
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
 from app.crud.approval import approval_crud, approval_flow_crud
-from app.crud.payment import payment_plan_crud, payment_record_crud
+from app.crud.payment import payment_plan_crud, payment_record_crud, query_pending_approval_me
 from app.crud.contract import contract_crud
+from app.crud.role import role_crud
 from app.constants.business_types import BusinessType
 from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord, PaymentConfirmationStatus
 from app.models.approval import Approval, ApprovalStatus, ApprovalRecord, ApprovalNode
@@ -16,7 +17,8 @@ from app.schemas.payment import (
     PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate, PaymentPlanResponse,
     PaymentRecordCreate, PaymentRecordUpdate, PaymentRecordResponse,
     PaymentRecordConfirm, PaymentRecordWithConfirmation,
-    ContractPaymentSummary, PaymentReminder, PaginatedResponse
+    ContractPaymentSummary, PaymentReminder, PaginatedResponse,
+    PaymentRecordListItem, PaymentRecordListResponse
 )
 from app.services.approval_adapter import get_adapter
 
@@ -211,8 +213,6 @@ def get_payment_plan_badge_counts(
 
     # Task 8.3: 6. 待我审批的数量（与审批中心一致）
     # 查询当前审批节点角色属于当前用户角色集的审批记录
-    from app.crud.role import role_crud
-    from app.models.approval import ApprovalNode
 
     # 获取当前用户的角色集合
     user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
@@ -652,7 +652,7 @@ def delete_payment_record(
         )
 
 
-@router.get("/payment-records", summary="查询回款记录列表", description="支持按合同、计划、日期范围、金额、审批状态等条件筛选并分页查询回款记录。返回记录详情及关联的客户、商机、合同、回款阶段信息、审批信息、待我审批数量。可用于前端表格渲染和回款历史查询。")
+@router.get("/payment-records", response_model=PaymentRecordListResponse[PaymentRecordListItem], summary="查询回款记录列表", description="支持按合同、计划、日期范围、金额、审批状态等条件筛选并分页查询回款记录。返回记录详情及关联的客户、商机、合同、回款阶段信息、审批信息、待我审批数量。可用于前端表格渲染和回款历史查询。")
 def list_payment_records(
     contract_id: Optional[int] = Query(None, description="合同ID筛选"),
     payment_plan_id: Optional[int] = Query(None, description="回款计划ID筛选"),
@@ -689,9 +689,6 @@ def list_payment_records(
         )
 
         # Task 1.4: Calculate pending_approval_me_count
-        from app.crud.role import role_crud
-        from app.crud.payment import query_pending_approval_me
-
         user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
         user_roles = [r.code for r in user_role_objs]
         pending_approval_me_count = query_pending_approval_me(db, team_id, user_roles)
@@ -744,7 +741,6 @@ def list_payment_records(
 
             # Task 1.4: Add approval info if exists
             if record.approval_id and record.approval:
-                from app.models.approval import ApprovalRecord
                 approval_records = db.query(ApprovalRecord).filter(
                     ApprovalRecord.approval_id == record.approval.id
                 ).order_by(ApprovalRecord.created_time).all()
