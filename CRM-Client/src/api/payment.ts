@@ -13,6 +13,32 @@ export interface PaymentPlanBatchCreate {
 
 export type PaymentConfirmationStatus = 'PENDING' | 'CONFIRMED' | 'DISPUTED'
 
+// Task 8.2: Approval info types
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
+
+export interface ApprovalNodeInfo {
+  id: number
+  node_order: number
+  node_name: string
+  approve_role: string
+  status: ApprovalStatus
+  approver_id?: string
+  approver_name?: string
+  approved_time?: string
+  comment?: string
+}
+
+export interface ApprovalInfo {
+  id: number
+  status: ApprovalStatus
+  submitter_id: string
+  submitter_name: string
+  created_time: string
+  nodes: ApprovalNodeInfo[]
+  // Reject reason (from the rejected node)
+  reject_reason?: string
+}
+
 export interface PaymentRecordInfo {
   id: number
   actual_amount: number
@@ -51,6 +77,9 @@ export interface PaymentPlanResponse {
   invoiced_amount?: number
   created_time: string
   last_modified_time: string
+  // Task 8.2: Approval info for latest payment record
+  latest_record_id?: number
+  latest_approval?: ApprovalInfo
 }
 
 export interface ContractPaymentSummary {
@@ -171,6 +200,9 @@ export interface BadgeCounts {
   pending_approval: number  // 审批中的记录数
 }
 
+/* eslint-disable @typescript-eslint/explicit-function-return-type, @typescript-eslint/explicit-module-boundary-types, crmwolf/require-zod-schema */
+// TODO: Add Zod schema validation for API responses in future iteration
+
 const paymentApi = {
   getPaymentSummary: (contractId: number): Promise<ContractPaymentSummary> => {
     return request.get<ContractPaymentSummary>(`/v1/payments/contracts/${contractId}/payment-summary`)
@@ -214,7 +246,7 @@ const paymentApi = {
   },
 
   getUpcomingPayments: (days?: number) => {
-    const params = days ? { days } : {}
+    const params = days !== undefined && days !== null ? { days } : {}
     return request.get<UpcomingPayment[]>('/v1/payments/reminders/upcoming', { params })
   },
 
