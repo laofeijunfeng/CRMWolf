@@ -15,6 +15,7 @@ import { ref } from 'vue'
 import paymentApi, {
   type PaymentPlanResponse,
   type PaymentPlanStatus,
+  type PaymentRecordWithDetails,
   type BadgeCounts
 } from '@/api/payment'
 
@@ -32,8 +33,13 @@ export const usePaymentPlansStore = defineStore('paymentPlans', () => {
   const paymentPlans = ref<PaymentPlanResponse[]>([])
   const total = ref<number>(0)
 
+  // Task 7.2: 回款记录列表
+  const paymentRecords = ref<PaymentRecordWithDetails[]>([])
+  const recordsTotal = ref<number>(0)
+
   // 加载状态
   const loading = ref<boolean>(false)
+  const recordsLoading = ref<boolean>(false)
 
   // ===== Actions =====
 
@@ -107,6 +113,37 @@ export const usePaymentPlansStore = defineStore('paymentPlans', () => {
   }
 
   /**
+   * Task 7.2: 获取回款记录列表（带筛选）
+   * @param filters 筛选条件（approvalStatus, page, pageSize）
+   */
+  const fetchPaymentRecords = async (filters?: {
+    approvalStatus?: string
+    page?: number
+    pageSize?: number
+  }): Promise<void> => {
+    recordsLoading.value = true
+    try {
+      const params: {
+        page?: number
+        page_size?: number
+      } = {}
+      if (filters?.page !== undefined) {
+        params.page = filters.page
+      }
+      if (filters?.pageSize !== undefined) {
+        params.page_size = filters.pageSize
+      }
+      const response = await paymentApi.listPaymentRecords(params)
+      paymentRecords.value = response.items
+      recordsTotal.value = response.total
+    } catch {
+      // 静默处理，保持现有值
+    } finally {
+      recordsLoading.value = false
+    }
+  }
+
+  /**
    * 清空状态
    */
   const clear = (): void => {
@@ -118,7 +155,10 @@ export const usePaymentPlansStore = defineStore('paymentPlans', () => {
     pendingApprovalMeCount.value = 0  // Task 8.3
     paymentPlans.value = []
     total.value = 0
+    paymentRecords.value = []  // Task 7.2
+    recordsTotal.value = 0
     loading.value = false
+    recordsLoading.value = false
   }
 
   return {
@@ -131,11 +171,15 @@ export const usePaymentPlansStore = defineStore('paymentPlans', () => {
     pendingApprovalMeCount,  // Task 8.3
     paymentPlans,
     total,
+    paymentRecords,  // Task 7.2
+    recordsTotal,    // Task 7.2
     loading,
+    recordsLoading,  // Task 7.2
     // Actions
     fetchBadgeCounts,
     fetchPaymentPlans,
     fetchPlanDetail,
+    fetchPaymentRecords,  // Task 7.2
     clear
   }
 })

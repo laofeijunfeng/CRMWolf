@@ -48,6 +48,11 @@ export interface PaymentRecordInfo {
   notes?: string
   confirmation_status?: PaymentConfirmationStatus
   created_time: string
+  // Task 7.2: Approval info for payment record
+  approval_id?: number
+  approval_status?: ApprovalStatus
+  current_approver_name?: string
+  invoice_application_count?: number  // Task 7.2: Number of invoice applications linked
 }
 
 export type PaymentPlanStatus = 'PENDING' | 'OVERDUE' | 'PARTIAL' | 'COMPLETED'
@@ -190,6 +195,13 @@ export interface PaymentRecordListParams {
 export interface PaymentRecordWithDetails extends PaymentRecordResponse {
   contract_name?: string
   stage_name?: string
+  customer_name?: string
+  // Task 7.2: Approval and invoice info
+  approval_id?: number
+  approval_status?: ApprovalStatus
+  current_approver_name?: string
+  invoice_application_count?: number
+  confirmation_status?: PaymentConfirmationStatus
 }
 
 export interface BadgeCounts {
