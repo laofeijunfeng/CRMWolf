@@ -928,6 +928,80 @@ onUnmounted(() => {
   }
 }
 
+// Task 7: ISSUED 状态高亮文件区域样式
+.issued-file-highlight {
+  margin-top: $wolf-space-lg;
+  padding: $wolf-card-padding;
+  background: linear-gradient(135deg, $wolf-success-bg 0%, $wolf-bg-card 100%);
+  border: 2px solid $wolf-success-border;
+  border-radius: $wolf-radius-md;
+
+  .highlight-header {
+    display: flex;
+    align-items: center;
+    gap: $wolf-space-sm;
+    margin-bottom: $wolf-space-md;
+
+    .success-icon {
+      font-size: 20px;
+      color: $wolf-success-text;
+    }
+
+    .highlight-title {
+      font-size: $wolf-font-size-body;
+      font-weight: $wolf-font-weight-semibold;
+      color: $wolf-success-text;
+    }
+
+    .invoice-number-badge {
+      font-size: $wolf-font-size-caption;
+      padding: 2px 8px;
+      background: $wolf-success-text;
+      color: $wolf-text-inverse;
+      border-radius: $wolf-radius-sm;
+      font-weight: $wolf-font-weight-medium;
+    }
+  }
+
+  .file-download-area {
+    display: flex;
+    align-items: center;
+    gap: $wolf-space-md;
+    padding: $wolf-space-md;
+    background: $wolf-bg-card;
+    border-radius: $wolf-radius-sm;
+
+    .file-type-icon {
+      font-size: 32px;
+
+      &.pdf-icon { color: #E53935; }  // PDF 红色
+      &.image-icon { color: #43A047; }  // 图片绿色
+      &.ofd-icon { color: $wolf-primary; }  // OFD 蓝色
+      &.default-icon { color: $wolf-text-tertiary; }
+    }
+
+    .file-type-label {
+      font-size: $wolf-font-size-body;
+      color: $wolf-text-secondary;
+      font-weight: $wolf-font-weight-medium;
+    }
+
+    // UX: touch-target-size (CRITICAL) - 最小 44px
+    .download-btn {
+      margin-left: auto;
+      min-width: 140px;
+      min-height: 44px;  // 确保满足 touch-target 要求
+    }
+  }
+
+  // UX: reduced-motion (MEDIUM)
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition: none;
+    }
+  }
+}
+
 @media (max-width: 1200px) {
   .info-top {
     grid-template-columns: 1fr;
