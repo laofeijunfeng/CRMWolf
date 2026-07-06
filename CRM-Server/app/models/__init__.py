@@ -21,6 +21,7 @@ from app.models.email_verification_code import EmailVerificationCode, Verificati
 from app.models.ai_conversation_history import AIConversationHistory
 from app.models.system_config import SystemConfig, ConfigType
 from app.models.deployment import DeploymentInfo
+from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 
 __all__ = [
     "User", "UserStatus",
@@ -46,5 +47,6 @@ __all__ = [
     "EmailVerificationCode", "VerificationPurpose",
     "AIConversationHistory",
     "SystemConfig", "ConfigType",
-    "DeploymentInfo"
+    "DeploymentInfo",
+    "LicenseApplication", "LicenseApplicationStatus", "LicenseType"
 ]
