@@ -8,7 +8,8 @@ import paymentApi, {
   type PaymentRecordCreate,
   type PaymentRecordUpdate,
   type PaymentPlanStatus,
-  type ApprovalStatus
+  type ApprovalStatus,
+  type ApprovalNodeInfo
 } from '@/api/payment'
 import { useApprovalStore } from '@/stores/approval'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
@@ -146,6 +147,46 @@ const getApprovalStatusLabel = (status: ApprovalStatus): string => {
 const formatDate = (dateStr: string): string => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN')
+}
+
+// Task 6.7: Format datetime
+const formatDateTime = (dateTimeStr: string): string => {
+  const date = new Date(dateTimeStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+// Task 6.7: Get current node order for el-steps
+const getCurrentNodeOrder = (): number => {
+  if (!plan.value?.latest_approval?.nodes) return 0
+
+  // Find the first PENDING node's order
+  const pendingNode = plan.value.latest_approval.nodes.find(node => node.status === 'PENDING')
+  return pendingNode?.node_order ?? plan.value.latest_approval.nodes.length
+}
+
+// Task 6.7: Get node description for el-step
+const getNodeDescription = (node: ApprovalNodeInfo): string => {
+  if (node.status === 'PENDING') {
+    return `等待 ${node.approve_role} 审批`
+  } else if (node.status === 'APPROVED') {
+    return node.approver_name ?? '已通过'
+  } else if (node.status === 'REJECTED') {
+    return node.approver_name ?? '已驳回'
+  }
+  return node.approve_role ?? '审批中'
+}
+
+// Task 6.7: Get node status for el-step
+const getNodeStatus = (status: ApprovalStatus): string => {
+  if (status === 'APPROVED') return 'success'
+  if (status === 'REJECTED') return 'error'
+  return 'process'
 }
 
 // Open register payment dialog
@@ -364,8 +405,25 @@ const handleEditAndResubmit = async (): Promise<void> => {
           </div>
         </el-alert>
 
+        <!-- Task 6.7: Approval nodes steps display -->
+        <el-steps
+          v-if="plan?.latest_approval?.nodes && plan.latest_approval.nodes.length > 0"
+          :active="getCurrentNodeOrder()"
+          finish-status="success"
+          align-center
+          class="approval-steps"
+        >
+          <el-step
+            v-for="node in plan.latest_approval.nodes"
+            :key="node.id"
+            :title="node.node_name"
+            :description="getNodeDescription(node)"
+            :status="getNodeStatus(node.status)"
+          />
+        </el-steps>
+
         <!-- Task 6.7: Approval status visual hierarchy -->
-        <el-descriptions :column="1" border>
+        <el-descriptions :column="1" border style="margin-top: 16px">
           <el-descriptions-item label="审批状态">
             <el-tag :type="getApprovalStatusType(plan?.latest_approval?.status ?? 'PENDING')" size="small">
               {{ getApprovalStatusLabel(plan?.latest_approval?.status ?? 'PENDING') }}
@@ -376,6 +434,9 @@ const handleEditAndResubmit = async (): Promise<void> => {
               <el-avatar :size="24" />
               <span class="approver-name">{{ currentApproverName ?? '待分配' }}</span>
             </div>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="plan?.latest_approval?.created_time" label="提交时间">
+            {{ formatDateTime(plan.latest_approval.created_time) }}
           </el-descriptions-item>
           <el-descriptions-item v-if="hasApprovalPending" label="说明">
             该回款记录已提交审批，等待审批人处理

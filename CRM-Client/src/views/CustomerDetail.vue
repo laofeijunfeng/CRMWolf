@@ -7,7 +7,6 @@
         @nav-change="handleNavChange"
         @show-add-follow-up="showAddFollowUpModal"
         @show-add-contact="showAddContactModal"
-        @profile-toggle="handleProfileToggle"
       />
 
       <!-- 右侧内容区 -->
@@ -979,27 +978,17 @@ const scoreDetails = ref<ScoreDetail[]>([])
 const profileExpanded = ref<boolean>(true)  // 默认：展开
 const userExpandedProfile = ref<boolean>(false)  // 用户是否手动展开过
 
-const activeTab = ref('profile')  // ✅ Task 4: 默认激活客户档案
+const activeTab = ref('followup')  // ✅ Task 4: 默认激活跟进（profile导航项已移除）
 
-// 导航切换处理（✅ Task 4: 添加智能折叠逻辑）
+// 导航切换处理
 const handleNavChange = (navKey: string): void => {
   activeTab.value = navKey
 
-  // ✅ 智能折叠逻辑：
-  // - 馰次切换：自动收起客户档案（节省空间）
-  // - 用户手动展开后：不自动收起（尊重用户控制权）
-  if (navKey !== 'profile' && !userExpandedProfile.value) {
+  // ✅ 智能折叠逻辑保持不变:
+  // - 首次切换:自动收起客户档案(节省空间)
+  // - 用户手动展开后:不自动收起(尊重用户控制权)
+  if (!userExpandedProfile.value) {
     profileExpanded.value = false  // 自动收起
-  }
-}
-
-// ✅ Task 4: 监听客户档案展开/收起（来自 CustomerDetailSidebar）
-const handleProfileToggle = (expanded: boolean): void => {
-  profileExpanded.value = expanded
-
-  // ✅ 记录用户是否手动展开
-  if (expanded) {
-    userExpandedProfile.value = true
   }
 }
 
