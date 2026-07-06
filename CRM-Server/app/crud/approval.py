@@ -1032,15 +1032,21 @@ class ApprovalCRUD:
                     "entity_amount": float(inv.invoice_amount) if inv.invoice_amount is not None else None,
                 }
 
-        # PAYMENT（无单号字段，合成 PAY-{id}；entity_name 暂 None 避免多层 join plan→contract）
+        # PAYMENT（通过 payment_plan_id 关联获取合同名称）
         if ids_by_type["PAYMENT"]:
             for pr in db.query(PaymentRecord).filter(
                 PaymentRecord.id.in_(ids_by_type["PAYMENT"]),
                 PaymentRecord.team_id == team_id,
             ).all():
+                # 关联 PaymentPlan -> Contract 获取合同名称
+                plan = db.query(PaymentPlan).filter(PaymentPlan.id == pr.payment_plan_id).first()
+                contract_name = None
+                if plan:
+                    contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
+                    contract_name = contract.contract_name if contract else None
                 summaries[(BusinessType.PAYMENT, pr.id)] = {
                     "application_number": f"PAY-{pr.id}",
-                    "entity_name": None,
+                    "entity_name": contract_name,
                     "entity_amount": float(pr.actual_amount) if pr.actual_amount is not None else None,
                 }
 
