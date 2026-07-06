@@ -14,7 +14,7 @@ import { ref, computed } from 'vue'
 import DynamicParamForm from '@/components/DynamicParamForm.vue'
 
 const props = defineProps<{
-  missingFields: Array<{
+  missingFields: {
     label: string
     type: 'text' | 'number' | 'date' | 'select' | 'textarea'
     required: boolean
@@ -22,7 +22,7 @@ const props = defineProps<{
     default_value?: string
     options?: { value: string; label: string }[]
     key: string // 字段名
-  }>
+  }[]
   prefill?: Record<string, unknown>
 }>()
 

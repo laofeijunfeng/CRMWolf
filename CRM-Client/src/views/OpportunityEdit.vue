@@ -267,7 +267,7 @@ const searchCustomers = async (query: string) => {
   }
 }
 
-const fetchCustomerInfo = async (id: string, setDefaults: boolean = false) => {
+const fetchCustomerInfo = async (id: string, setDefaults = false) => {
   loading.value = true
   try {
     const data = await customerApi.getCustomerDetail(Number(id))
