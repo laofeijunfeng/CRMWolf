@@ -451,26 +451,58 @@ const downloadInvoiceFile = (): void => {
   window.open(url, '_blank')
 }
 
-// Stub functions (Task 6 will implement full logic)
-const isPdf = (filePath: string | null | undefined): boolean => {
-  return filePath?.toLowerCase().endsWith('.pdf') ?? false
+/**
+ * 判断是否为 PDF 文件
+ */
+const isPdf = (filePath: string | null): boolean => {
+  if (filePath === null) return false
+  return filePath.toLowerCase().endsWith('.pdf')
 }
 
-const getFileIconClass = (_filePath: string | null | undefined): string => {
-  return 'default-icon'
+/**
+ * 获取文件图标类名
+ */
+const getFileIconClass = (filePath: string | null): string => {
+  if (filePath === null) return 'default-icon'
+  const ext = filePath.toLowerCase().split('.').pop()
+  const classMap: Record<string, string> = {
+    'pdf': 'pdf-icon',
+    'jpg': 'image-icon',
+    'jpeg': 'image-icon',
+    'png': 'image-icon',
+    'ofd': 'ofd-icon',
+  }
+  return classMap[ext ?? ''] ?? 'default-icon'
 }
 
-const getFileTypeLabel = (filePath: string | null | undefined): string => {
-  if (filePath === null || filePath === undefined || filePath.length === 0) return '发票文件'
-  const lower = filePath.toLowerCase()
-  if (lower.endsWith('.pdf')) return 'PDF 文件'
-  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'JPG 图片'
-  if (lower.endsWith('.png')) return 'PNG 图片'
-  return '发票文件'
+/**
+ * 获取文件类型标签
+ */
+const getFileTypeLabel = (filePath: string | null): string => {
+  if (filePath === null) return '发票文件'
+  const ext = filePath.toLowerCase().split('.').pop()
+  const labelMap: Record<string, string> = {
+    'pdf': 'PDF 发票',
+    'jpg': '图片发票 (JPG)',
+    'jpeg': '图片发票 (JPEG)',
+    'png': '图片发票 (PNG)',
+    'ofd': 'OFD 电子发票',
+  }
+  return labelMap[ext ?? ''] ?? '发票文件'
 }
 
+/**
+ * 下载发票文件（带 Toast 反馈）
+ * UX: success-feedback - 下载成功有提示
+ */
 const handleDownloadWithFeedback = (): void => {
-  // Task 6 will implement toast feedback
+  if (!invoiceInfo.value) return
+
+  ElMessage.success({
+    message: '发票文件下载成功',
+    duration: 2000
+  })
+
   downloadInvoiceFile()
 }
 
