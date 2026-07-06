@@ -31,7 +31,18 @@ class LicenseApplication(Base):
 
     expiry_date = Column(Date, nullable=False, comment="到期时间")
     license_type = Column(String(20), nullable=False, comment="License 类型")
-    license_code = Column(Text, nullable=True, comment="授权码（审批人回填）")
+
+    # 审批人回填的 License 详细信息（补充需求）
+    enterprise_id = Column(String(50), nullable=True, comment="企业编号（审批人回填，如：15739）")
+    supported_modules = Column(String(500), nullable=True, comment="支持模块（审批人回填，如：desktop,web,branch）")
+    server_license_code = Column(Text, nullable=True, comment="服务端 License（审批人回填）")
+    client_license_code = Column(Text, nullable=True, comment="客户端 License（审批人回填）")
+
+    # 申请人备注（补充需求）
+    remark = Column(Text, nullable=True, comment="备注（申请时填写，如：需要开通 desktop,web,branch）")
+
+    # 原有授权码字段（兼容保留）
+    license_code = Column(Text, nullable=True, comment="授权码（审批人回填，旧字段）")
 
     status = Column(String(20), nullable=False, default=LicenseApplicationStatus.DRAFT, comment="申请状态")
     applicant_id = Column(String(100), nullable=False, comment="申请人飞书用户ID")
