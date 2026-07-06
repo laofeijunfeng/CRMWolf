@@ -1000,7 +1000,7 @@ class ApprovalCRUD:
         """
         from app.models.contract import Contract
         from app.models.invoice import InvoiceApplication
-        from app.models.payment import PaymentRecord
+        from app.models.payment import PaymentRecord, PaymentPlan
 
         ids_by_type: Dict[str, List[int]] = {"CONTRACT": [], "INVOICE": [], "PAYMENT": []}
         for ap in approvals:

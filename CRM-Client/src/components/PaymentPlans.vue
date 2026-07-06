@@ -188,6 +188,14 @@
       @close="quickCreateVisible = false"
       @success="handleQuickCreateSuccess"
     />
+
+    <!-- 下一步引导弹窗 -->
+    <PaymentNextStepDialog
+      v-model:visible="showNextStepDialog"
+      :record="createdRecord"
+      @update:visible="handleNextStepClose"
+      @submitted="handleNextStepSubmitted"
+    />
   </el-card>
 </template>
 
@@ -205,9 +213,10 @@ import {
   Clock,
   Calendar
 } from '@element-plus/icons-vue'
-import paymentApi, { type PaymentPlanResponse, type PaymentPlanStatus, type PaymentRecordCreate } from '@/api/payment'
+import paymentApi, { type PaymentPlanResponse, type PaymentPlanStatus, type PaymentRecordCreate, type PaymentRecordResponse } from '@/api/payment'
 import PaymentRecords from './PaymentRecords.vue'
 import PaymentPlanQuickCreate from './PaymentPlanQuickCreate.vue'
+import PaymentNextStepDialog from './PaymentNextStepDialog.vue'
 
 interface Props {
   contractId: number
@@ -236,6 +245,10 @@ const paymentForm = ref<PaymentRecordCreate>({
   payment_date: ''
 })
 const currentPlan = ref<PaymentPlanResponse | null>(null)
+
+// 下一步引导弹窗状态
+const showNextStepDialog = ref(false)
+const createdRecord = ref<PaymentRecordResponse | null>(null)
 
 const recordsModalVisible = ref(false)
 
@@ -326,7 +339,7 @@ const handleCreatePayment = async () => {
     ElMessage.error('请输入有效的回款金额')
     return
   }
-  
+
   if (!paymentForm.value.payment_date) {
     ElMessage.error('请选择回款日期')
     return
@@ -334,9 +347,13 @@ const handleCreatePayment = async () => {
 
   if (currentPlan.value) {
     try {
-      await paymentApi.createPaymentRecord(currentPlan.value.id, paymentForm.value)
-      ElMessage.success('登记成功')
-      paymentModalVisible.value = false
+      const record = await paymentApi.createPaymentRecord(currentPlan.value.id, paymentForm.value)
+
+      // 登记成功后显示下一步选项，不关闭弹窗
+      createdRecord.value = record
+      showNextStepDialog.value = true
+
+      // 刷新回款计划列表
       fetchPlans()
       emit('plan-updated')
     } catch (error: unknown) {
@@ -345,6 +362,19 @@ const handleCreatePayment = async () => {
       ElMessage.error(err.message || '登记失败')
     }
   }
+}
+
+// 下一步弹窗关闭后的处理
+const handleNextStepClose = () => {
+  showNextStepDialog.value = false
+  paymentModalVisible.value = false
+  createdRecord.value = null
+}
+
+// 下一步弹窗提交审批后的处理
+const handleNextStepSubmitted = () => {
+  fetchPlans()
+  emit('plan-updated')
 }
 
 const showRecords = (plan: PaymentPlanResponse) => {
