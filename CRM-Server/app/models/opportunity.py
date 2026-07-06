@@ -87,6 +87,7 @@ class Opportunity(Base):
     last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
     version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
 
+    contracts = relationship("Contract", back_populates="opportunity", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="opportunity", cascade="all, delete-orphan")
 
     __table_args__ = (

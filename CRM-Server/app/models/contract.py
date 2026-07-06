@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Numeric, Index
+from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Numeric, Index, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -29,9 +29,9 @@ class Contract(Base):
     contract_number = Column(String(50), unique=True, nullable=False, comment="合同编号（系统自动生成）")
     contract_name = Column(String(255), nullable=False, comment="合同名称")
 
-    customer_id = Column(BigInteger, nullable=False, comment="关联客户ID")
-    opportunity_id = Column(BigInteger, nullable=False, comment="关联商机ID")
-    signing_contact_id = Column(BigInteger, nullable=False, comment="客户签约人ID")
+    customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
+    opportunity_id = Column(BigInteger, ForeignKey('crm_opportunities.id', ondelete='CASCADE'), nullable=False, comment="关联商机ID")
+    signing_contact_id = Column(BigInteger, ForeignKey('crm_contacts.id', ondelete='SET NULL'), nullable=False, comment="客户签约人ID")
 
     user_count = Column(Integer, nullable=False, comment="采购用户数")
     total_amount = Column(Numeric(12, 2), nullable=False, comment="合同总金额")
@@ -56,9 +56,9 @@ class Contract(Base):
     invoice_applications = relationship("InvoiceApplication", back_populates="contract", cascade="all, delete-orphan")
     license_applications = relationship("LicenseApplication", back_populates="contract")
     approvals = relationship("Approval", back_populates="contract", foreign_keys="[Approval.contract_id]")
-    # 新增：Customer 和 Opportunity relationships（修复 AttributeError）
-    customer = relationship("Customer", foreign_keys=[customer_id])
-    opportunity = relationship("Opportunity", foreign_keys=[opportunity_id])
+    # 新增：Customer 和 Opportunity relationships
+    customer = relationship("Customer", back_populates="contracts")
+    opportunity = relationship("Opportunity", back_populates="contracts")
 
     __table_args__ = (
         Index('idx_contract_customer', 'customer_id'),

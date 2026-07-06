@@ -103,6 +103,7 @@ class Customer(Base):
     license_type = Column(String(20), nullable=True, comment="客户 License 类型（自动更新）：TRIAL/OFFICIAL")
 
     contacts = relationship("Contact", back_populates="customer", cascade="all, delete-orphan")
+    contracts = relationship("Contract", back_populates="customer", cascade="all, delete-orphan")
     deployment_infos = relationship("DeploymentInfo", back_populates="customer", cascade="all, delete-orphan")
     license_applications = relationship("LicenseApplication", back_populates="customer", cascade="all, delete-orphan")
     invoice_titles = relationship("InvoiceTitle", back_populates="customer", cascade="all, delete-orphan")
