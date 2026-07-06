@@ -89,7 +89,7 @@ def get_payment_plans(
 
 @router.get("/payment-plans", response_model=PaginatedResponse[PaymentPlanResponse], summary="查询回款计划列表", description="支持按状态、负责人、日期范围等条件筛选并分页查询回款计划。返回计划详情及关联的客户、商机、合同信息。可用于前端表格渲染和数据筛选。")
 def list_payment_plans(
-    status: Optional[str] = Query(None, description="回款状态筛选：PENDING, OVERDUE, PARTIAL, COMPLETED"),
+    plan_status: Optional[str] = Query(None, alias="status", description="回款状态筛选：PENDING, OVERDUE, PARTIAL, COMPLETED"),
     owner_id: Optional[str] = Query(None, description="负责人飞书ID（合同创建人）"),
     me: bool = Query(False, description="是否只查询当前用户的计划"),
     due_date_start: Optional[date] = Query(None, description="计划回款日期起始（YYYY-MM-DD）"),
@@ -110,7 +110,7 @@ def list_payment_plans(
             team_id=team_id,
             skip=skip,
             limit=page_size,
-            status=status,
+            status=plan_status,
             owner_id=owner_id,
             due_date_start=due_date_start,
             due_date_end=due_date_end,
