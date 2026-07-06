@@ -54,6 +54,7 @@ class Contract(Base):
 
     payment_plans = relationship("PaymentPlan", back_populates="contract", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="contract", cascade="all, delete-orphan")
+    license_applications = relationship("LicenseApplication", back_populates="contract")
     approvals = relationship("Approval", back_populates="contract", foreign_keys="[Approval.contract_id]")
 
     __table_args__ = (

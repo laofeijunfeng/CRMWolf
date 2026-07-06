@@ -4,13 +4,15 @@ class BusinessType:
     CONTRACT = "CONTRACT"
     PAYMENT = "PAYMENT"
     INVOICE = "INVOICE"
+    LICENSE = "LICENSE"  # 新增
 
-ALL_BUSINESS_TYPES = [BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE]
+ALL_BUSINESS_TYPES = [BusinessType.CONTRACT, BusinessType.PAYMENT, BusinessType.INVOICE, BusinessType.LICENSE]
 
 BUSINESS_TYPE_DISPLAY_NAMES = {
     BusinessType.CONTRACT: "合同",
     BusinessType.PAYMENT: "回款登记",
     BusinessType.INVOICE: "发票申请",
+    BusinessType.LICENSE: "License申请",  # 新增
 }
 
 def is_valid_business_type(business_type: str) -> bool:

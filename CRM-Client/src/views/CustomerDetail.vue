@@ -672,6 +672,16 @@
                   </div>
                 </div>
               </div>
+
+          <!-- License 管理 -->
+          <div v-show="activeTab === 'license-management'" class="content-panel">
+                <div class="panel-header">
+                  <span>License 管理</span>
+                </div>
+                <div class="empty-placeholder">
+                  <el-empty description="License 管理功能正在开发中" />
+                </div>
+              </div>
         </div>
       </div>
     </div>

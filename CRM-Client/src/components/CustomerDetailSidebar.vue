@@ -75,7 +75,8 @@ import {
   TrendCharts,
   Document,
   Money,
-  Tickets
+  Tickets,
+  Key
 } from '@element-plus/icons-vue'
 
 // Props 定义
@@ -103,7 +104,8 @@ const navItems = [
   { key: 'opportunities', label: '商机', icon: TrendCharts },
   { key: 'contracts', label: '合同', icon: Document },
   { key: 'payments', label: '回款', icon: Money },
-  { key: 'invoices', label: '发票', icon: Tickets }
+  { key: 'invoices', label: '发票', icon: Tickets },
+  { key: 'license-management', label: 'License 管理', icon: Key }
 ]
 
 // 快捷操作定义（✅ P0: 使用 SVG 图标替代文字）

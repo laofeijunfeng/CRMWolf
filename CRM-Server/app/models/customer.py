@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, func, Index, ForeignKey, Text, event
+from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, func, Index, ForeignKey, Text, event
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
 from app.core.database import Base
@@ -99,7 +99,12 @@ class Customer(Base):
     profile_generated_time = Column(DateTime, nullable=True, comment="档案生成完成时间")
     profile_error_message = Column(Text, nullable=True, comment="档案生成失败原因")
 
+    license_expiry_date = Column(Date, nullable=True, comment="客户 License 最晚到期时间（自动更新）")
+    license_type = Column(String(20), nullable=True, comment="客户 License 类型（自动更新）：TRIAL/OFFICIAL")
+
     contacts = relationship("Contact", back_populates="customer", cascade="all, delete-orphan")
+    deployment_infos = relationship("DeploymentInfo", back_populates="customer", cascade="all, delete-orphan")
+    license_applications = relationship("LicenseApplication", back_populates="customer", cascade="all, delete-orphan")
     invoice_titles = relationship("InvoiceTitle", back_populates="customer", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="customer", cascade="all, delete-orphan")
 

@@ -1973,3 +1973,277 @@ git commit -m "fix: resolve integration test issues for supplementary requiremen
 - ✅ LicenseApplicationStatus 枚举值一致
 - ✅ LicenseType 枚举值一致
 - ✅ API 端点路径一致
+
+---
+
+## Phase 8: UI/UX 视觉设计补充（Task 21-27）
+
+> **说明**: 本 Phase 补充前端组件的视觉设计细节，确保与 CRMWolf 设计系统无缝融合。详细设计说明见 `docs/superpowers/plans/2026-07-06-license-management-ui-supplement.md`。
+
+### Task 21: 导航结构优化 - 合并单一 Tab
+
+**Files:**
+- Modify: `CRM-Client/src/components/CustomerDetailSidebar.vue`
+
+**Interfaces:**
+- Consumes: CustomerDetailSidebar 导航项定义
+- Produces: 新增"授权"导航项（使用 Key 图标），合并部署信息和 License 申请
+
+- [ ] **Step 1: 修改 CustomerDetailSidebar.vue，新增授权导航项**
+
+```typescript
+import { Key } from '@element-plus/icons-vue'
+
+const navItems = [
+  { key: 'followup', label: '跟进', icon: ChatDotRound },
+  { key: 'contacts', label: '联系人', icon: User },
+  { key: 'opportunities', label: '商机', icon: TrendCharts },
+  { key: 'contracts', label: '合同', icon: Document },
+  { key: 'payments', label: '回款', icon: Money },
+  { key: 'invoices', label: '发票', icon: Tickets },
+  { key: 'license', label: '授权', icon: Key }  // 新增
+]
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add CRM-Client/src/components/CustomerDetailSidebar.vue
+git commit -m "feat(ui): add License navigation item with Key icon"
+```
+
+---
+
+### Task 22: 部署信息卡片视觉设计
+
+**Files:**
+- Modify: `CRM-Client/src/components/LicenseManagement.vue`
+- Create: `CRM-Client/src/styles/license-management.scss`
+
+**Interfaces:**
+- Consumes: variables.scss 设计 token
+- Produces: 部署信息卡片样式（参照 invoice-title-item），服务器地址使用 IBM Plex Mono
+
+- [ ] **Step 1: 创建 license-management.scss 样式文件**
+
+完整样式见 `docs/superpowers/plans/2026-07-06-license-management-ui-supplement.md` 第二章。
+
+- [ ] **Step 2: 更新 LicenseManagement.vue 部署信息区域样式**
+
+应用新样式类：`deployment-info-item`, `deployment-info-grid`, `server-address`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add CRM-Client/src/styles/license-management.scss CRM-Client/src/components/LicenseManagement.vue
+git commit -m "feat(ui): add deployment info card styles with IBM Plex Mono signature"
+```
+
+---
+
+### Task 23: License 申请状态徽章更新
+
+**Files:**
+- Modify: `CRM-Client/src/components/ApprovalStatusBadge.vue`
+- Modify: `CRM-Client/src/schemas/approvalGeneric.ts`
+
+**Interfaces:**
+- Consumes: ApprovalStatus 类型
+- Produces: 新增 ISSUED 状态映射（使用 Key 图标）
+
+- [ ] **Step 1: 修改 ApprovalStatusBadge.vue，新增 ISSUED 状态**
+
+```typescript
+import { Key } from '@element-plus/icons-vue'
+
+const STATUS_MAP = {
+  // ... 其他状态
+  ISSUED: {
+    label: '已发放',
+    icon: Key,
+    textVar: '--wolf-success-text',
+    bgVar: '--wolf-success-bg'
+  }
+}
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add CRM-Client/src/components/ApprovalStatusBadge.vue CRM-Client/src/schemas/approvalGeneric.ts
+git commit -m "feat(ui): add ISSUED status badge with Key icon signature"
+```
+
+---
+
+### Task 24: 申请表单 UI 细化（动态表单）
+
+**Files:**
+- Modify: `CRM-Client/src/components/LicenseApplicationDialog.vue`
+
+**Interfaces:**
+- Consumes: LicenseApplication API，合同 API
+- Produces: 动态表单（试用 License 隐藏合同字段，正式 License 显示并必填）
+
+- [ ] **Step 1: 实现动态表单逻辑**
+
+```vue
+<!-- 正式 License 时动态显示合同字段 -->
+<el-form-item
+  v-show="form.license_type === 'OFFICIAL'"
+  label="关联合同"
+  prop="contract_id"
+  :required="form.license_type === 'OFFICIAL'"
+>
+  ...
+</el-form-item>
+```
+
+完整代码见 `docs/superpowers/plans/2026-07-06-license-management-ui-supplement.md` 第四章。
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add CRM-Client/src/components/LicenseApplicationDialog.vue
+git commit -m "feat(ui): add dynamic form logic for License application"
+```
+
+---
+
+### Task 25: 审批对话框 License 信息输入优化
+
+**Files:**
+- Modify: `CRM-Client/src/components/LicenseApprovalDialog.vue`
+
+**Interfaces:**
+- Consumes: 审批 API
+- Produces: License 信息 textarea（IBM Plex Mono 字体），格式提示
+
+- [ ] **Step 1: 更新审批对话框样式**
+
+```scss
+.license-code-input :deep(.el-textarea__inner) {
+  font-family: $wolf-font-mono;
+  font-size: $wolf-font-size-caption;
+  background: $wolf-bg-page;
+  min-height: 200px;
+}
+```
+
+完整样式见 `docs/superpowers/plans/2026-07-06-license-management-ui-supplement.md` 第五章。
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add CRM-Client/src/components/LicenseApprovalDialog.vue
+git commit -m "feat(ui): optimize License approval dialog with mono font"
+```
+
+---
+
+### Task 26: Empty States 和 Loading States
+
+**Files:**
+- Modify: `CRM-Client/src/components/LicenseManagement.vue`
+
+**Interfaces:**
+- Consumes: DeploymentInfo API, LicenseApplication API
+- Produces: 空状态组件，加载状态（v-loading）
+
+- [ ] **Step 1: 添加空状态和加载状态**
+
+```vue
+<div v-loading="deploymentsLoading" style="min-height: 120px">
+  <div v-if="!deploymentsLoading && deployments.length === 0">
+    <el-empty description="添加部署信息，配置服务器地址">
+      <el-button type="primary" size="small">添加部署信息</el-button>
+    </el-empty>
+  </div>
+</div>
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add CRM-Client/src/components/LicenseManagement.vue
+git commit -m "feat(ui): add empty states and loading states"
+```
+
+---
+
+### Task 27: 无障碍设计和响应式适配
+
+**Files:**
+- Modify: `CRM-Client/src/styles/license-management.scss`
+
+**Interfaces:**
+- Consumes: variables.scss
+- Produces: 无障碍样式（键盘导航、reduced motion），响应式断点
+
+- [ ] **Step 1: 添加无障碍样式**
+
+```scss
+.deployment-info-item {
+  tabindex: 0;
+  
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deployment-info-item { transition: none; }
+}
+
+@media (max-width: 768px) {
+  .deployment-info-grid { grid-template-columns: 1fr; }
+}
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add CRM-Client/src/styles/license-management.scss
+git commit -m "feat(ui): add accessibility and responsive styles"
+```
+
+---
+
+## Self-Review Checklist (Final)
+
+**1. Spec coverage:**
+- ✅ Task 1-4: 数据层基础
+- ✅ Task 5-6: CRUD 层
+- ✅ Task 7-8: API 层
+- ✅ Task 9-11: 前端界面（基础）
+- ✅ Task 12: 通知与权限
+- ✅ Task 13: 集成测试
+- ✅ Task 14-15: 补充数据层
+- ✅ Task 16-17: 补充 API 层
+- ✅ Task 18-19: 补充前端
+- ✅ Task 20: 补充需求集成测试
+- ✅ **Task 21-27: UI/UX 视觉设计补充**
+
+**2. Placeholder scan:**
+- ✅ 无 "TODO"、"TBD"、模糊需求
+- ✅ 所有代码步骤包含完整代码或引用详细文档
+
+**3. Type consistency:**
+- ✅ 所有字段名一致
+- ✅ 所有枚举值一致
+- ✅ API 端点路径一致
+
+**4. UI/UX 完整性:**
+- ✅ 导航结构优化（合并单一 Tab）
+- ✅ 部署信息卡片设计（参照发票抬头 + Mono 字体）
+- ✅ 状态徽章更新（ISSIED 状态 + Key 图标）
+- ✅ 动态表单逻辑（试用/正式切换）
+- ✅ 审批对话框优化（Mono 字体 + 格式提示）
+- ✅ Empty States 和 Loading States
+- ✅ 无障碍设计（键盘导航 + reduced motion）
+- ✅ 响应式适配（768px 断点）
+
+**5. Signature Elements:**
+- ✅ Key 图标（导航 + ISSUED 状态）
+- ✅ IBM Plex Mono 字体（服务器地址 + License 信息输入）
+- ✅ 技术 vernacular 视觉风格
