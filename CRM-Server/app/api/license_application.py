@@ -1,6 +1,7 @@
 # CRM-Server/app/api/license_application.py
 """License 申请管理 API 端点"""
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -14,15 +15,18 @@ from app.crud.crud_license_application import (
     delete_license_application,
     submit_license_application,
     approve_license_application,
+    approve_license_application_full,
     reject_license_application
 )
 from app.schemas.license_application import (
     LicenseApplicationCreate,
     LicenseApplicationUpdate,
     LicenseApplicationApprove,
+    LicenseApplicationApproveFull,
     LicenseApplicationResponse
 )
 from app.models.license_application import LicenseApplicationStatus
+from app.services.license_export_service import export_license_document
 
 
 router = APIRouter(prefix="/v1/license-applications", tags=["License申请管理"])
@@ -157,6 +161,37 @@ def approve_application(
     return approve_license_application(db, team_id, application_id, approve_data, current_user.id)
 
 
+@router.post("/{application_id}/approve-full", response_model=LicenseApplicationResponse, summary="审批通过License申请（完整版本）")
+def approve_application_full(
+    application_id: int,
+    approve_data: LicenseApplicationApproveFull,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    审批通过 License 申请（完整版本）
+
+    接收完整的 License 信息文本，解析并填充：
+    - enterprise_id: 企业编号
+    - supported_modules: 支持模块
+    - server_license_code: 服务端 License
+    - client_license_code: 客户端 License
+    """
+    existing = get_license_application(db, team_id, application_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="License申请不存在"
+        )
+    if existing.status != LicenseApplicationStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅待审批状态的申请可以审批"
+        )
+    return approve_license_application_full(db, team_id, application_id, approve_data, current_user.id)
+
+
 @router.post("/{application_id}/reject", response_model=LicenseApplicationResponse, summary="审批拒绝License申请")
 def reject_application(
     application_id: int,
@@ -178,3 +213,37 @@ def reject_application(
             detail="仅待审批状态的申请可以拒绝"
         )
     return reject_license_application(db, team_id, application_id, reason)
+
+
+@router.get("/{application_id}/export", summary="导出License文档")
+def export_application(
+    application_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    导出 License Word 文档
+
+    仅已发放状态的申请可以导出，文件名格式：
+    私有化{试用/正式}License-{客户名称}_{当前日期}.docx
+    """
+    existing = get_license_application(db, team_id, application_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="License申请不存在"
+        )
+    if existing.status != LicenseApplicationStatus.ISSUED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅已发放状态的申请可以导出"
+        )
+
+    # 导出 Word 文档
+    file_path = export_license_document(existing)
+    return FileResponse(
+        file_path,
+        filename=f"License_{existing.application_number}.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
