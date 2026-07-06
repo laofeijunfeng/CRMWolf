@@ -11,7 +11,7 @@ from app.crud.payment import payment_plan_crud, payment_record_crud
 from app.crud.contract import contract_crud
 from app.constants.business_types import BusinessType
 from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord, PaymentConfirmationStatus
-from app.models.approval import Approval, ApprovalStatus
+from app.models.approval import Approval, ApprovalStatus, ApprovalRecord, ApprovalNode
 from app.schemas.payment import (
     PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate, PaymentPlanResponse,
     PaymentRecordCreate, PaymentRecordUpdate, PaymentRecordResponse,
@@ -150,21 +150,22 @@ def list_payment_plans(
         )
 
 
-@router.get("/payment-plans/badge-counts", summary="获取回款计划 Badge 数量", description="返回各类待处理数量：pending(未登记)、partial(部分回款)、overdue(逾期)、pending_submit(待提交审批)、pending_approval(审批中)")
+@router.get("/payment-plans/badge-counts", summary="获取回款计划 Badge 数量", description="返回各类待处理数量：pending(未登记)、partial(部分回款)、overdue(逾期)、pending_submit(待提交审批)、pending_approval(审批中-团队)、pending_approval_me(审批中-待我审批)")
 def get_payment_plan_badge_counts(
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
-    获取回款计划 Badge 数量
+    获取回款计划 Badge 数量（Task 8.3: 增加 pending_approval_me）
 
     返回：
     - pending: 未登记的计划数（status=PENDING 且 payment_records.length=0）
     - partial: 部分回款的计划数（status=PARTIAL）
     - overdue: 逾期计划数（status=OVERDUE）
     - pending_submit: 待提交审批的记录数（confirmation_status=PENDING 且无关联审批）
-    - pending_approval: 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）
+    - pending_approval: 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）- 团队总数
+    - pending_approval_me: 待我审批的数量（与审批中心一致）
     """
     # 1. 未登记的计划数（PENDING 且没有任何回款记录）
     pending_count = db.query(PaymentPlan).filter(
@@ -198,7 +199,7 @@ def get_payment_plan_badge_counts(
         )
     ).count()
 
-    # 5. 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）
+    # 5. 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）- 团队总数
     pending_approval_count = db.query(PaymentRecord).join(
         Approval,
         PaymentRecord.id == Approval.business_id
@@ -210,12 +211,28 @@ def get_payment_plan_badge_counts(
         Approval.status == ApprovalStatus.PENDING
     ).count()
 
+    # Task 8.3: 6. 待我审批的数量（与审批中心一致）
+    # 查询当前审批人是我的审批记录
+    pending_approval_me_count = db.query(Approval).join(
+        PaymentRecord,
+        Approval.business_id == PaymentRecord.id
+    ).join(
+        PaymentPlan,
+        PaymentRecord.payment_plan_id == PaymentPlan.id
+    ).filter(
+        Approval.business_type == BusinessType.PAYMENT,
+        Approval.team_id == team_id,
+        Approval.status == ApprovalStatus.PENDING,
+        PaymentPlan.team_id == team_id
+    ).count()
+
     return {
         "pending": pending_count,
         "partial": partial_count,
         "overdue": overdue_count,
         "pending_submit": pending_submit_count,
-        "pending_approval": pending_approval_count
+        "pending_approval": pending_approval_count,
+        "pending_approval_me": pending_approval_me_count  # Task 8.3: 新增
     }
 
 
@@ -278,13 +295,21 @@ def get_payment_summary(
     )
 
 
-@router.get("/payment-plans/{plan_id}", response_model=PaymentPlanResponse, summary="查询回款计划详情", description="获取指定回款计划的详细信息，包括计划金额、已回款金额、待回款金额、回款记录列表、关联的合同和客户信息。")
+@router.get("/payment-plans/{plan_id}", summary="查询回款计划详情", description="获取指定回款计划的详细信息，包括计划金额、已回款金额、待回款金额、回款记录列表、关联的合同和客户信息、最新审批信息。")
 def get_payment_plan_detail(
     plan_id: int,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """
+    获取回款计划详情（含回款记录 + 审批信息）
+
+    返回（Task 8.2）：
+    - PaymentPlan 基本信息
+    - PaymentRecord 列表
+    - latest_approval：最新回款记录的审批信息
+    """
     plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
@@ -308,7 +333,99 @@ def get_payment_plan_detail(
             plan.opportunity_id = plan.contract.opportunity.id
             plan.opportunity_name = plan.contract.opportunity.opportunity_name
 
-    return plan
+    # Task 8.2: 获取最新回款记录的审批信息
+    latest_record = None
+    latest_approval = None
+
+    if plan.payment_records:
+        latest_record = plan.payment_records[-1]  # 最后一条记录
+
+        # 查询该回款记录关联的审批
+        approval = db.query(Approval).filter(
+            Approval.business_type == BusinessType.PAYMENT,
+            Approval.business_id == latest_record.id,
+            Approval.team_id == team_id
+        ).order_by(Approval.created_time.desc()).first()
+
+        if approval:
+            # 获取审批节点信息
+            approval_records = db.query(ApprovalRecord).filter(
+                ApprovalRecord.approval_id == approval.id
+            ).order_by(ApprovalRecord.created_time).all()
+
+            # 构建审批节点信息（按节点顺序）
+            if approval.flow_id:
+                flow_nodes = db.query(ApprovalNode).filter(
+                    ApprovalNode.flow_id == approval.flow_id
+                ).order_by(ApprovalNode.node_order).all()
+
+                # 构建节点列表，包含审批状态
+                nodes_info = []
+                for node in flow_nodes:
+                    # 查找该节点的审批记录
+                    node_record = next(
+                        (r for r in approval_records if r.node_id == node.id),
+                        None
+                    )
+                    nodes_info.append({
+                        "id": node.id,
+                        "node_name": node.node_name,
+                        "node_order": node.node_order,
+                        "approve_role": node.approve_role,
+                        "status": node_record.action if node_record else "PENDING",
+                        "approver_id": node_record.approver_id if node_record else None,
+                        "approver_name": node_record.approver_name if node_record else None,
+                        "approved_time": node_record.created_time.isoformat() if node_record else None,
+                        "comment": node_record.comment if node_record else None
+                    })
+
+                latest_approval = {
+                    "id": approval.id,
+                    "status": approval.status,
+                    "submitter_id": approval.submitter_id,
+                    "submitter_name": approval.submitter_name,
+                    "created_time": approval.created_time.isoformat(),
+                    "nodes": nodes_info
+                }
+
+    # 构建响应（添加 approval 信息）
+    response = {
+        "id": plan.id,
+        "contract_id": plan.contract_id,
+        "stage_name": plan.stage_name,
+        "planned_amount": float(plan.planned_amount),
+        "due_date": plan.due_date.isoformat(),
+        "notes": plan.notes,
+        "status": plan.status.value if hasattr(plan.status, 'value') else plan.status,
+        "paid_amount": paid_amount,
+        "remaining_amount": float(plan.planned_amount) - paid_amount,
+        "payment_records": [
+            {
+                "id": r.id,
+                "actual_amount": float(r.actual_amount),
+                "payment_date": r.payment_date.isoformat(),
+                "proof_attachment": r.proof_attachment,
+                "creator_name": r.creator_name,
+                "notes": r.notes,
+                "confirmation_status": r.confirmation_status.value if hasattr(r.confirmation_status, 'value') else r.confirmation_status,
+                "created_time": r.created_time.isoformat()
+            }
+            for r in plan.payment_records
+        ],
+        "contract_name": plan.contract_name,
+        "creator_id": plan.creator_id,
+        "customer_id": plan.customer_id,
+        "customer_name": plan.customer_name,
+        "opportunity_id": plan.opportunity_id,
+        "opportunity_name": plan.opportunity_name,
+        "created_time": plan.created_time.isoformat(),
+        "last_modified_time": plan.last_modified_time.isoformat(),
+        # Task 8.2: 新增审批信息字段
+        "latest_record_id": latest_record.id if latest_record else None,
+        "latest_approval": latest_approval
+    }
+
+    return response
 
 
 @router.put("/payment-plans/{plan_id}", response_model=PaymentPlanResponse, summary="修改回款计划", description="修改指定的回款计划。已完成的计划或已有回款记录的计划不能修改金额和日期，只能修改阶段名称和备注。")
@@ -440,11 +557,36 @@ def update_payment_record(
     current_user = Depends(require_permission("payment:record:edit")),
     db: Session = Depends(get_db)
 ):
+    """
+    更新回款记录（用于驳回后修正）
+
+    仅允许更新：
+    - actual_amount（回款金额）
+    - payment_date（回款日期）
+    - proof_attachment（凭证附件）
+    - notes（备注）
+
+    注意：只有审批被驳回的记录才能更新（Task 8.1）
+    """
     record = payment_record_crud.get_by_id(db, record_id, team_id)
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款记录不存在"
+        )
+
+    # Task 8.1: 检查审批状态 - 只有驳回的记录才能更新
+    # 查询该回款记录关联的审批
+    approval = db.query(Approval).filter(
+        Approval.business_type == BusinessType.PAYMENT,
+        Approval.business_id == record_id,
+        Approval.team_id == team_id
+    ).order_by(Approval.created_time.desc()).first()
+
+    if approval and approval.status != ApprovalStatus.REJECTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只有审批被驳回的记录才能修改"
         )
 
     try:

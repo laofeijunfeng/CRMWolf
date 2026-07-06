@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { CircleCheckFilled } from '@element-plus/icons-vue'
+import { DocumentChecked, Clock, View, ArrowRight } from '@element-plus/icons-vue'
 import { useApprovalStore } from '@/stores/approval'
 import type { PaymentRecordResponse } from '@/api/payment'
 
@@ -21,6 +21,15 @@ const approvalStore = useApprovalStore()
 
 // Task 6.1: Loading state for async button
 const submitting = ref(false)
+
+// Task 7.5: Format helpers
+const formatAmount = (amount: number): string => {
+  return amount?.toLocaleString() ?? '0'
+}
+
+const formatDate = (date: string): string => {
+  return date ?? ''
+}
 
 const handleSubmitApproval = async (): Promise<void> => {
   if (!props.record) return
@@ -69,66 +78,202 @@ const handleViewDetail = (): void => {
     :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
     title="登记成功"
-    width="400px"
+    width="420px"
     :close-on-click-modal="false"
   >
+    <!-- Task 7.5: Signature design - Amount hero display -->
     <div class="success-content">
-      <el-icon class="success-icon" color="#67C23A" :size="48">
-        <CircleCheckFilled />
-      </el-icon>
+      <!-- Signature: Payment amount large number display -->
+      <div class="amount-hero">
+        <div class="amount-label">回款金额</div>
+        <!-- Task 7.1: Mono font for amount -->
+        <div class="amount-value mono-number">
+          ¥{{ formatAmount(record?.actual_amount ?? 0) }}
+        </div>
+        <div class="amount-date">
+          回款日期：{{ formatDate(record?.payment_date ?? '') }}
+        </div>
+      </div>
 
-      <h3>回款登记成功！</h3>
+      <!-- Visual separator -->
+      <div class="divider"></div>
 
-      <el-descriptions v-if="record" :column="1" border size="small">
-        <el-descriptions-item label="回款金额">
-          ¥{{ record.actual_amount.toLocaleString() }}
-        </el-descriptions-item>
-        <el-descriptions-item label="回款日期">
-          {{ record.payment_date }}
-        </el-descriptions-item>
-      </el-descriptions>
-    </div>
+      <!-- Next step option cards -->
+      <div class="next-steps">
+        <!-- Primary action: Submit approval -->
+        <div
+          class="step-card primary"
+          @click="handleSubmitApproval"
+          :class="{ disabled: submitting }"
+        >
+          <div class="step-icon">
+            <el-icon><DocumentChecked /></el-icon>
+          </div>
+          <div class="step-content">
+            <div class="step-label">立即提交审批</div>
+            <div class="step-desc">快速进入审批流程</div>
+          </div>
+          <el-icon class="step-arrow"><ArrowRight /></el-icon>
+        </div>
 
-    <div class="next-step">
-      <h4>下一步操作：</h4>
-      <el-button
-        type="primary"
-        :loading="submitting"
-        :disabled="submitting"
-        @click="handleSubmitApproval"
-      >
-        {{ submitting ? '提交中...' : '立即提交审批' }}
-      </el-button>
-      <el-button @click="handleLater">
-        稍后提交
-      </el-button>
-      <el-button text @click="handleViewDetail">
-        查看详情
-      </el-button>
+        <!-- Secondary action: Submit later -->
+        <div class="step-card" @click="handleLater">
+          <div class="step-icon">
+            <el-icon><Clock /></el-icon>
+          </div>
+          <div class="step-content">
+            <div class="step-label">稍后提交</div>
+            <div class="step-desc">等待准备更多资料</div>
+          </div>
+          <el-icon class="step-arrow"><ArrowRight /></el-icon>
+        </div>
+
+        <!-- Text action: View detail -->
+        <div class="step-card text" @click="handleViewDetail">
+          <el-icon><View /></el-icon>
+          <span class="step-label">查看详情</span>
+        </div>
+      </div>
     </div>
   </el-dialog>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
+@use '@/styles/variables.scss' as *;
+
+// Task 7.5: Signature design - Amount hero display
 .success-content {
-  text-align: center;
-  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
 }
 
-.success-icon {
-  margin-bottom: 16px;
+// Signature: Amount large number display with gradient background
+.amount-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: $wolf-space-lg;
+  background: linear-gradient(135deg, rgba($wolf-primary, 0.08) 0%, rgba($wolf-warning-text, 0.05) 100%);
+  border-radius: $wolf-radius-md;
+  margin-bottom: $wolf-space-md;
 }
 
-.next-step {
-  border-top: 1px solid var(--el-border-color);
-  padding-top: 16px;
+.amount-label {
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-tertiary;
+  margin-bottom: $wolf-space-xs;
 }
 
-.next-step h4 {
-  margin-bottom: 12px;
+.amount-value {
+  font-size: 32px;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+  margin-bottom: $wolf-space-xs;
+  font-family: $wolf-font-mono;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
-.next-step .el-button {
-  margin-right: 8px;
+.amount-date {
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-secondary;
+}
+
+// Visual separator (gradient line)
+.divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, $wolf-border-default 50%, transparent 100%);
+  margin: $wolf-space-md 0;
+}
+
+// Next step option cards
+.next-steps {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-sm;
+}
+
+.step-card {
+  display: flex;
+  align-items: center;
+  padding: $wolf-space-md;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: $wolf-bg-card;
+  margin-bottom: $wolf-space-sm;
+  border: 1px solid $wolf-border-light;
+}
+
+.step-card.primary {
+  background: $wolf-primary;
+  color: $wolf-text-inverse;
+  border-color: $wolf-primary;
+}
+
+.step-card.text {
+  background: transparent;
+  border-color: transparent;
+  padding: $wolf-space-sm;
+  justify-content: center;
+  gap: $wolf-space-xs;
+}
+
+.step-card:hover:not(.disabled) {
+  transform: translateY(-2px);
+  box-shadow: $wolf-shadow-hover;
+}
+
+.step-card.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.step-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: $wolf-bg-hover;
+  border-radius: 8px;
+  margin-right: $wolf-space-md;
+}
+
+.step-card.primary .step-icon {
+  background: rgba($wolf-text-inverse, 0.2);
+}
+
+.step-content {
+  flex: 1;
+}
+
+.step-label {
+  font-size: $wolf-font-size-body;
+  font-weight: $wolf-font-weight-medium;
+  margin-bottom: $wolf-space-xs;
+}
+
+.step-desc {
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-tertiary;
+}
+
+.step-card.primary .step-desc {
+  color: rgba($wolf-text-inverse, 0.8);
+}
+
+.step-arrow {
+  font-size: 16px;
+  color: $wolf-text-tertiary;
+}
+
+.step-card.primary .step-arrow {
+  color: rgba($wolf-text-inverse, 0.8);
+}
+
+// Task 7.1: Mono-number style
+.mono-number {
+  font-family: $wolf-font-mono;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 </style>
