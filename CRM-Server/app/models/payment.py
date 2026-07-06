@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Optional
 
 from sqlalchemy import Column, BigInteger, String, Text, DateTime, Date, Numeric, ForeignKey, func, Index
 from sqlalchemy.orm import relationship
@@ -106,8 +107,12 @@ class PaymentRecord(Base):
     confirmation_notes = Column(Text, comment="确认备注")
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
 
+    # 审批关联
+    approval_id = Column(BigInteger, ForeignKey('crm_contract_approvals.id', ondelete='SET NULL'), nullable=True, comment="审批实例ID")
+
     payment_plan = relationship("PaymentPlan", back_populates="payment_records")
     invoice_applications = relationship("InvoiceApplication", back_populates="payment_record", cascade="all, delete-orphan")
+    approval = relationship("Approval", foreign_keys=[approval_id])
 
     __table_args__ = (
         Index('idx_payment_record_team_id', 'team_id'),
@@ -115,3 +120,23 @@ class PaymentRecord(Base):
 
     def __repr__(self):
         return f"<PaymentRecord(id={self.id}, payment_plan_id={self.payment_plan_id}, actual_amount={self.actual_amount}, payment_date={self.payment_date})>"
+
+    def get_current_approver_name(self) -> Optional[str]:
+        """
+        获取当前审批节点名称（审批中状态时）
+
+        Returns:
+            当前审批节点名称，如无审批或非待审批状态则返回 None
+        """
+        if not self.approval:
+            return None
+
+        # 检查审批状态是否为 PENDING
+        if self.approval.status != 'PENDING':
+            return None
+
+        # 获取当前审批节点
+        if not self.approval.current_node:
+            return None
+
+        return self.approval.current_node.node_name
