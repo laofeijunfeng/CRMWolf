@@ -418,7 +418,13 @@ def get_payment_plan_invoices(
     )
 
 
-def _populate_application_info(db: Session, application, team_id: Optional[int] = None) -> dict:
+def _populate_application_info(db: Session, application, team_id: Optional[int] = None) -> InvoiceApplicationResponse:
+    """填充发票申请完整响应信息
+
+    Changes:
+    - 返回 InvoiceApplicationResponse（而非 dict）类型安全
+    - 添加 invoice_file_path / invoice_number / issued_time（修复 bug）
+    """
     customer_query = db.query(Customer).filter(Customer.id == application.customer_id)
     if team_id is not None:
         customer_query = customer_query.filter(Customer.team_id == team_id)
@@ -438,49 +444,56 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
     if team_id is not None:
         payment_plan_query = payment_plan_query.filter(PaymentPlan.team_id == team_id)
     payment_plan = payment_plan_query.first()
-    
-    result = {
-        "id": application.id,
-        "application_number": application.application_number,
-        "customer_id": application.customer_id,
-        "contract_id": application.contract_id,
-        "opportunity_id": application.opportunity_id,
-        "payment_plan_id": application.payment_plan_id,
-        "invoice_title_id": application.invoice_title_id,
-        "invoice_amount": float(application.invoice_amount),
-        "invoice_type": application.invoice_type,
-        "status": application.status,
-        "applicant_id": application.applicant_id,
-        "reviewer_id": application.reviewer_id,
-        "review_comment": application.review_comment,
-        "reviewed_time": application.reviewed_time,
-        "payment_record_id": application.payment_record_id,
-        "invoice_title_type": application.invoice_title_type,
-        "invoice_title_text": application.invoice_title_text,
-        "invoice_taxpayer_id": application.invoice_taxpayer_id,
-        "invoice_bank_name": application.invoice_bank_name,
-        "invoice_bank_account": application.invoice_bank_account,
-        "invoice_address": application.invoice_address,
-        "invoice_phone": application.invoice_phone,
-        "created_time": application.created_time,
-        "last_modified_time": application.last_modified_time,
-        "customer_name": customer.account_name if customer else None,
-        "contract_name": contract.contract_name if contract else None,
-        "opportunity_name": opportunity.opportunity_name if opportunity else None,
-        "payment_plan_stage_name": payment_plan.stage_name if payment_plan else None,
-        "invoice_title_title": application.invoice_title_text,
-        "applicant_name": None,
-        "reviewer_name": None
-    }
-    
+
+    # 查询申请人/审批人名称
+    applicant_name = None
+    reviewer_name = None
     if application.applicant_id:
         applicant = db.query(User).filter(User.id == int(application.applicant_id)).first()
         if applicant:
-            result["applicant_name"] = applicant.name
-
+            applicant_name = applicant.name
     if application.reviewer_id:
         reviewer = db.query(User).filter(User.id == int(application.reviewer_id)).first()
         if reviewer:
-            result["reviewer_name"] = reviewer.name
-    
-    return result
+            reviewer_name = reviewer.name
+
+    return InvoiceApplicationResponse(
+        id=application.id,
+        application_number=application.application_number,
+        customer_id=application.customer_id,
+        contract_id=application.contract_id,
+        opportunity_id=application.opportunity_id,
+        payment_plan_id=application.payment_plan_id,
+        invoice_title_id=application.invoice_title_id,
+        invoice_amount=float(application.invoice_amount),
+        invoice_type=application.invoice_type,
+        status=application.status,
+        applicant_id=application.applicant_id,
+        reviewer_id=application.reviewer_id,
+        review_comment=application.review_comment,
+        reviewed_time=application.reviewed_time,
+        payment_record_id=application.payment_record_id,
+        invoice_title_type=application.invoice_title_type,
+        invoice_title_text=application.invoice_title_text,
+        invoice_taxpayer_id=application.invoice_taxpayer_id,
+        invoice_bank_name=application.invoice_bank_name,
+        invoice_bank_account=application.invoice_bank_account,
+        invoice_address=application.invoice_address,
+        invoice_phone=application.invoice_phone,
+        created_time=application.created_time,
+        last_modified_time=application.last_modified_time,
+
+        # Bug 修复：添加三个缺失字段
+        invoice_file_path=application.invoice_file_path,
+        invoice_number=application.invoice_number,
+        issued_time=application.issued_time,
+
+        # 关联业务信息
+        customer_name=customer.account_name if customer else None,
+        contract_name=contract.contract_name if contract else None,
+        opportunity_name=opportunity.opportunity_name if opportunity else None,
+        payment_plan_stage_name=payment_plan.stage_name if payment_plan else None,
+        invoice_title_title=application.invoice_title_text,
+        applicant_name=applicant_name,
+        reviewer_name=reviewer_name,
+    )
