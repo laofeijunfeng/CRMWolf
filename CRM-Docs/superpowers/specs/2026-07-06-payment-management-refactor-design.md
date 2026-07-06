@@ -521,7 +521,228 @@ def list_payment_records(db, team_id, params):
 
 ---
 
-## 八、实施任务拆分（概览）
+---
+
+## 八、用户旅程完整性设计
+
+### 8.1 销售人员完整旅程
+
+**标准流程**：
+```
+登记回款 → 提交审批 → 等待审批 → 审批通过（自动确认） → 审批驳回（重新提交）
+```
+
+**补充场景1：审批超时催办**
+- **触发条件**：审批超过48小时未处理
+- **用户痛点**：销售人员不知道审批进度，无法跟进
+- **设计要点**：
+  - 详情页显示"审批超时"提示（红色警告）
+  - 增加"催办"按钮（发送飞书通知给审批人）
+  - 显示审批超时天数（已用时：{overdue_hours}小时）
+
+**补充场景2：审批驳回后的重新提交通道**
+- **现状**：Task 8.1已实现（PaymentPlanDetail.vue），但设计文档需明确
+- **设计要点**：
+  - 详情页驳回原因显示（红色Alert）
+  - "修改并重新提交"按钮（打开编辑对话框）
+  - 保留原回款记录数据，允许修改金额/日期/备注
+  - 修改后重新提交审批（传入修改后的record.id）
+
+**补充场景3：查看当前审批人**
+- **现状**：表格列已新增，但未明确交互
+- **设计要点**：
+  - 表格列："当前审批人"（审批中状态时显示）
+  - 显示格式：头像 + 姓名（hover显示联系方式）
+  - 点击跳转审批详情页（查看完整审批节点）
+
+### 8.2 财务人员完整旅程
+
+**标准流程**：
+```
+收到飞书通知 → ApprovalCenter查看详情 → 审批通过/驳回 → 查看已审批记录
+```
+
+**补充场景1：审批历史查询**
+- **用户痛点**：财务需要查看已审批过的历史记录（审计追溯）
+- **设计要点**：
+  - ApprovalCenter已有"我已处理"Tab（无需Payments重复实现）
+  - 审批详情页显示审批历史（审批人、审批时间、审批意见）
+
+**补充场景2：审批意见填写**
+- **现状**：ApprovalActionRequest已支持comment字段
+- **设计要点**：
+  - 审批驳回时强制填写驳回原因（ApprovalCenter表单校验）
+  - 审批通过时可选填写审批意见
+  - 驳回原因显示在Payments详情页（Alert提示）
+
+---
+
+## 九、空状态与Loading状态设计
+
+### 9.1 空状态处理
+
+**无回款计划时**：
+```vue
+<div class="empty-state">
+  <el-empty description="还没有回款计划">
+    <template #image>
+      <el-icon :size="100" color="#9CA3AF"><Calendar /></el-icon>
+    </template>
+    <el-button type="primary" @click="handleCreatePlan">
+      创建回款计划
+    </el-button>
+  </el-empty>
+</div>
+```
+
+**无回款记录时**：
+```vue
+<div class="empty-state">
+  <el-empty description="还没有登记回款">
+    <template #image>
+      <el-icon :size="100" color="#9CA3AF"><Wallet /></el-icon>
+    </template>
+    <el-button type="primary" @click="handleNavChange('plans')">
+      前往回款计划
+    </el-button>
+    <div class="empty-hint">
+      <p>请先在"回款计划"中选择计划并登记回款</p>
+    </div>
+  </el-empty>
+</div>
+```
+
+**无审批流程配置时**：
+```vue
+<div class="empty-state">
+  <el-empty description="系统未配置回款审批流程">
+    <template #image>
+      <el-icon :size="100" color="#EF4444"><Warning /></el-icon>
+    </template>
+    <div class="empty-hint">
+      <p>提交审批将直接转为财务确认入账，无需审批</p>
+      <p class="text-warning">建议联系管理员配置审批流程</p>
+    </div>
+  </el-empty>
+</div>
+```
+
+### 9.2 Loading状态设计
+
+**表格加载骨架屏**：
+```vue
+<!-- 计划表格骨架屏 -->
+<el-table v-if="loading" class="skeleton-table">
+  <el-table-column label="客户名称" width="150">
+    <template #default>
+      <el-skeleton-item variant="text" style="width: 100%" />
+    </template>
+  </el-table-column>
+  <el-table-column label="合同名称" width="180">
+    <template #default>
+      <el-skeleton-item variant="text" style="width: 100%" />
+    </template>
+  </el-table-column>
+  <el-table-column label="计划金额" width="120">
+    <template #default>
+      <el-skeleton-item variant="text" style="width: 80px" />
+    </template>
+  </el-table-column>
+  <!-- ... 其他列 -->
+</el-table>
+```
+
+**详情页加载骨架屏**：
+```vue
+<el-card v-if="loading" class="skeleton-card">
+  <el-skeleton :rows="6" animated />
+</el-card>
+```
+
+**按钮Loading状态**（遵循UX规范）：
+```vue
+<el-button
+  type="primary"
+  :loading="submitting"
+  :disabled="submitting"
+  @click="handleSubmit"
+>
+  {{ submitting ? '提交中...' : '提交审批' }}
+</el-button>
+```
+
+---
+
+## 十、深链支持与移动端适配
+
+### 10.1 深链URL参数设计
+
+**支持的URL参数**：
+```typescript
+interface PaymentURLParams {
+  nav?: 'plans' | 'records'  // 默认显示哪个视图
+  plan_status?: 'pending' | 'partial' | 'overdue' | 'upcoming'  // 计划筛选
+  approval_status?: 'pending_submit' | 'pending_approval' | 'approved' | 'rejected'  // 记录筛选
+  plan_id?: number  // 高亮某个计划
+  record_id?: number  // 高亮某个记录
+  action?: 'resubmit'  // 直接打开重新提交对话框
+}
+```
+
+**深链跳转示例**：
+- 飞书通知跳转：`/payments?nav=records&record_id={id}&action=resubmit`
+- ApprovalCenter跳转：`/payments/{plan_id}?action=resubmit&record_id={record_id}`
+- 审批详情跳转：`/approvals?business_type=PAYMENT&tab=pending&highlight={record_id}`
+
+### 10.2 移动端适配细节
+
+**左侧导航折叠逻辑**（参考CustomerDetailSidebar）：
+```vue
+<!-- 移动端：左侧导航改为顶部横向导航 -->
+<div v-if="isMobile" class="mobile-nav">
+  <el-radio-group v-model="activeNav" size="small">
+    <el-radio-button label="plans">回款计划</el-radio-button>
+    <el-radio-button label="records">回款记录</el-radio-button>
+  </el-radio-group>
+</div>
+
+<!-- 桌面端：左侧导航 -->
+<CustomerDetailSidebar v-else :nav-items="navItems" @nav-change="handleNavChange" />
+```
+
+**表格横向滚动**（遵循UX规范）：
+```scss
+// 移动端表格处理（UX规范§3）
+.table-card {
+  @media (max-width: 768px) {
+    overflow-x: auto;  // 允许横向滚动
+
+    .el-table {
+      min-width: 800px;  // 确保表格完整显示
+    }
+  }
+}
+```
+
+**篛选器紧凑布局**（遵循UX规范§2）：
+```scss
+// 移动端篛选器
+.filter-tabs {
+  @media (max-width: 768px) {
+    flex-wrap: wrap;  // 允许换行
+    gap: $wolf-space-xs;
+
+    .filter-tab {
+      padding: 6px $wolf-space-sm;
+      font-size: $wolf-font-size-caption;  // 更小字号
+    }
+  }
+}
+```
+
+---
+
+## 十一、实施任务拆分（更新版）
 
 **Phase 1：导航重构**（预计2天）
 - Task 1.1：创建PaymentSidebar组件（参考CustomerDetailSidebar）
@@ -548,12 +769,27 @@ def list_payment_records(db, team_id, params):
 - Task 5.2：前端API调用更新（paymentRecords.list()）
 - Task 5.3：PaymentPlansStore扩展（pendingApprovalMeCount）
 
-**Phase 6：测试与验收**（预计1天）
-- Task 6.1：单元测试（导航切换、筛选逻辑、审批提交）
-- Task 6.2：集成测试（端到端流程：登记→提交→审批→确认）
-- Task 6.3：用户验收（销售人员、财务人员验证）
+**Phase 6：审批中心联动集成**（预计1天）
+- Task 6.1：Payments跳转到ApprovalCenter入口按钮实现
+- Task 6.2：ApprovalCenter驳回后跳转优化（跳转详情页而非列表页）
+- Task 6.3：深链URL参数解析逻辑实现
+- Task 6.4：审批状态Badge显示组件（ApprovalStatusBadge复用）
 
-**总计：7.5天**
+**Phase 7：UX增强功能**（预计1.5天）
+- Task 7.1：空状态组件实现（无计划/无记录/无审批流程）
+- Task 7.2：Loading骨架屏实现（表格/详情页）
+- Task 7.3：审批超时催办功能（催办按钮+飞书通知）
+- Task 7.4：驳回原因显示优化（Alert提示+重新提交对话框）
+- Task 7.5：移动端适配优化（导航折叠+表格滚动+篛选器紧凑）
+- Task 7.6：当前审批人显示优化（头像+姓名+联系方式）
+
+**Phase 8：测试与验收**（预计1天）
+- Task 8.1：单元测试（导航切换、筛选逻辑、审批提交）
+- Task 8.2：集成测试（端到端流程：登记→提交→审批→确认）
+- Task 8.3：联动测试（ApprovalCenter双向跳转）
+- Task 8.4：用户验收（销售人员、财务人员验证）
+
+**总计更新**：原计划7.5天 + Phase 6-7 2.5天 = **10天**
 
 ---
 
@@ -595,7 +831,137 @@ def list_payment_records(db, team_id, params):
 
 ---
 
-## 十、验收标准
+## 十、审批中心联动设计
+
+### 10.1 功能边界明确化
+
+**审批中心（ApprovalCenter）职责**：
+- 财务人员的审批主入口
+- 批量审批功能（批量同意/批量拒绝）
+- 审批历史查询（待我审批/我已处理/我提交的）
+- 超时提醒和催办
+- 单据类型筛选（PAYMENT/INVOICE/CONTRACT）
+
+**回款管理（Payments）职责**：
+- 销售人员的管理主入口
+- 登记回款记录
+- 提交审批
+- 查看审批状态（辅助信息）
+- 驳回后重新提交
+- 回款计划和记录管理
+
+**避免重复功能**：
+- ❌ Payments不实现批量审批按钮（ApprovalCenter已有）
+- ❌ Payments不实现独立的"同意/拒绝"按钮（ApprovalCenter已有）
+- ✅ Payments显示审批状态Badge（仅展示，不操作）
+- ✅ Payments提供跳转到ApprovalCenter的入口
+
+### 10.2 双向跳转联动设计
+
+**场景1：销售人员查看审批详情**
+```typescript
+// Payments列表点击审批中状态的记录
+<el-button
+  link
+  type="primary"
+  size="small"
+  @click="viewApprovalDetail(row)"
+>
+  查看审批详情
+</el-button>
+
+// 跳转到ApprovalCenter，筛选PAYMENT类型
+function viewApprovalDetail(row: PaymentRecordInfo): void {
+  router.push({
+    path: '/approvals',
+    query: {
+      business_type: 'PAYMENT',
+      tab: 'pending',
+      highlight: row.id  // 高亮该记录
+    }
+  })
+}
+```
+
+**场景2：财务人员驳回后重新提交**
+```typescript
+// ApprovalCenter点击驳回记录（第663-669行）
+if (row.business_type === 'PAYMENT') {
+  router.push({
+    path: '/payments',
+    query: {
+      action: 'resubmit',
+      record_id: row.business_id
+    }
+  })
+  ElMessage.info('请在回款管理页面找到该记录，点击详情查看驳回原因并修改重新提交')
+}
+```
+
+**场景3：审批超时催办**
+```typescript
+// Payments详情页或ApprovalCenter点击催办
+<el-button
+  v-if="hasOverdueApproval && approval.status === 'PENDING'"
+  type="warning"
+  size="small"
+  @click="handleReminder"
+>
+  <el-icon><Bell /></el-icon>
+  催办审批人
+</el-button>
+
+// 发送飞书催办通知
+async function handleReminder(): void {
+  await notificationService.sendReminder({
+    approval_id: currentApproval.id,
+    approver_id: currentApprover.id,
+    business_type: 'PAYMENT',
+    message: `回款审批已超时${overdueHours}小时，请尽快处理`
+  })
+  ElMessage.success('已发送催办通知')
+}
+```
+
+**场景4：Payments跳转到ApprovalCenter入口**
+```vue
+<!-- 回款记录视图顶部操作栏 -->
+<div class="action-bar">
+  <el-button
+    v-if="hasPermission('payment:approve')"
+    type="primary"
+    size="small"
+    @click="router.push('/approvals?business_type=PAYMENT')"
+  >
+    <el-icon><Stamp /></el-icon>
+    前往审批中心
+  </el-button>
+</div>
+```
+
+### 10.3 ApprovalCenter补充设计
+
+**ApprovalCenter需要补充的跳转优化**：
+```typescript
+// 第663-669行改进：驳回PAYMENT类型跳转到详情页而非列表页
+if (row.business_type === 'PAYMENT') {
+  // 获取PaymentRecord对应的PaymentPlan ID
+  const paymentPlanId = await getPaymentPlanIdByRecordId(row.business_id)
+  
+  router.push({
+    path: `/payments/${paymentPlanId}`,
+    query: {
+      action: 'resubmit',
+      record_id: row.business_id
+    }
+  })
+  // 移除info提示，直接跳转到详情页并打开编辑对话框
+}
+```
+
+---
+
+## 十一、验收标准
 
 ### 10.1 功能验收
 
