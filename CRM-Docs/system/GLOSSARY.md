@@ -117,7 +117,20 @@ status: active
 | `invoice:title:delete` | 删除发票抬头 | 删除抬头 |
 | `invoice:title:set_default` | 设置默认抬头 | 设置默认抬头 |
 
-### 1.8 系统权限
+### 1.8 License 权限
+
+| 权限码 | 名称 | 说明 |
+|--------|------|------|
+| `deployment:manage` | 管理部署信息 | 创建/编辑/删除部署信息 |
+| `license:create` | 创建 License 申请 | 新建申请 |
+| `license:edit:own` | 编辑自己的申请 | 编辑草稿申请 |
+| `license:delete:own` | 删除自己的申请 | 删除草稿申请 |
+| `license:submit` | 提交审批 | 提交申请审批 |
+| `license:approve` | 审批 License | 审批申请（填写授权码） |
+| `license:view:own` | 查看自己的申请 | 仅看自己申请的 |
+| `license:view:all` | 查看所有申请 | 看全部申请 |
+
+### 1.9 系统权限
 
 | 权限码 | 名称 | 说明 |
 |--------|------|------|
