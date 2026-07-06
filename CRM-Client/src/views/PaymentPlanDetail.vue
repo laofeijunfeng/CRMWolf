@@ -167,105 +167,120 @@ const viewApprovalDetail = (): void => {
 </script>
 
 <template>
-  <div class="payment-plan-detail" v-loading="loading">
-    <!-- Plan info card -->
-    <el-card class="plan-info-card">
-      <template #header>
-        <div class="card-header">
-          <span>回款计划详情</span>
-          <el-button text @click="router.push('/payments')">返回列表</el-button>
-        </div>
-      </template>
+  <div class="payment-plan-detail">
+    <!-- Skeleton loading state -->
+    <template v-if="loading">
+      <el-card class="plan-info-card skeleton-card">
+        <el-skeleton :rows="6" animated />
+      </el-card>
+      <el-card class="records-card skeleton-card">
+        <el-skeleton :rows="4" animated />
+      </el-card>
+    </template>
 
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="客户名称">
-          <span class="link-text" @click="viewContract">{{ plan?.customer_name || '未知' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="合同名称">
-          <span class="link-text" @click="viewContract">{{ plan?.contract_name || '未知' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="回款阶段">{{ plan?.stage_name }}</el-descriptions-item>
-        <el-descriptions-item label="计划金额">
-          <span class="amount">{{ formatCurrency(plan?.planned_amount ?? 0) }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="计划日期">{{ formatDate(plan?.due_date ?? '') }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="getStatusType(plan?.status ?? 'PENDING')" size="small">
-            {{ getStatusLabel(plan?.status ?? 'PENDING') }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="待回款金额">
-          <span class="remaining">{{ formatCurrency(plan?.remaining_amount ?? 0) }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="累计回款">
-          <span class="paid">{{ formatCurrency(plan?.paid_amount ?? 0) }}</span>
-        </el-descriptions-item>
-      </el-descriptions>
-    </el-card>
-
-    <!-- Payment records list -->
-    <el-card class="records-card">
-      <template #header>
-        <div class="card-header">
-          <span>回款记录</span>
-          <el-button
-            v-if="plan?.status !== 'COMPLETED'"
-            type="primary"
-            size="small"
-            @click="handleRegisterPayment"
-          >
-            <el-icon><Plus /></el-icon>
-            登记回款
-          </el-button>
-        </div>
-      </template>
-
-      <PaymentRecordList :records="plan?.payment_records || []" @register="handleRegisterPayment" />
-    </el-card>
-
-    <!-- Approval progress (if there are pending records) -->
-    <el-card v-if="hasPendingApproval" class="approval-card">
-      <template #header>
-        <div class="card-header">
-          <span>审批进度</span>
-          <el-button text type="primary" @click="viewApprovalDetail">查看详情</el-button>
-        </div>
-      </template>
-
-      <!-- Task 6.7: Approval status visual hierarchy -->
-      <el-descriptions :column="1" border>
-        <el-descriptions-item label="审批状态">
-          <el-tag type="warning" size="small">审批中</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="审批人">
-          <div class="approver-info">
-            <el-avatar :size="24" />
-            <span class="approver-name">待分配</span>
+    <!-- Actual content -->
+    <template v-else>
+      <!-- Plan info card -->
+      <el-card class="plan-info-card">
+        <template #header>
+          <div class="card-header">
+            <span>回款计划详情</span>
+            <el-button text @click="router.push('/payments')">返回列表</el-button>
           </div>
-        </el-descriptions-item>
-        <el-descriptions-item label="说明">该回款记录已提交审批，等待审批人处理</el-descriptions-item>
-      </el-descriptions>
+        </template>
 
-      <!-- Task 6.7: Current approver highlight -->
-      <div class="current-approver-hint">
-        <el-icon><InfoFilled /></el-icon>
-        <span>审批通过后，回款状态将自动更新为"已确认"</span>
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="客户名称">
+            <span class="link-text" @click="viewContract">{{ plan?.customer_name || '未知' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="合同名称">
+            <span class="link-text" @click="viewContract">{{ plan?.contract_name || '未知' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="回款阶段">{{ plan?.stage_name }}</el-descriptions-item>
+          <!-- Task 7.1: Mono font for amounts (tabular-nums) -->
+          <el-descriptions-item label="计划金额">
+            <span class="amount mono-number">{{ formatCurrency(plan?.planned_amount ?? 0) }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="计划日期">{{ formatDate(plan?.due_date ?? '') }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="getStatusType(plan?.status ?? 'PENDING')" size="small">
+              {{ getStatusLabel(plan?.status ?? 'PENDING') }}
+            </el-tag>
+          </el-descriptions-item>
+          <!-- Task 7.1: Mono font for remaining/paid amounts -->
+          <el-descriptions-item label="待回款金额">
+            <span class="remaining mono-number">{{ formatCurrency(plan?.remaining_amount ?? 0) }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="累计回款">
+            <span class="paid mono-number">{{ formatCurrency(plan?.paid_amount ?? 0) }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+      </el-card>
+
+      <!-- Payment records list -->
+      <el-card class="records-card">
+        <template #header>
+          <div class="card-header">
+            <span>回款记录</span>
+            <el-button
+              v-if="plan?.status !== 'COMPLETED'"
+              type="primary"
+              size="small"
+              @click="handleRegisterPayment"
+            >
+              <el-icon><Plus /></el-icon>
+              登记回款
+            </el-button>
+          </div>
+        </template>
+
+        <PaymentRecordList :records="plan?.payment_records || []" @register="handleRegisterPayment" />
+      </el-card>
+
+      <!-- Approval progress (if there are pending records) -->
+      <el-card v-if="hasPendingApproval" class="approval-card">
+        <template #header>
+          <div class="card-header">
+            <span>审批进度</span>
+            <el-button text type="primary" @click="viewApprovalDetail">查看详情</el-button>
+          </div>
+        </template>
+
+        <!-- Task 6.7: Approval status visual hierarchy -->
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="审批状态">
+            <el-tag type="warning" size="small">审批中</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="审批人">
+            <div class="approver-info">
+              <el-avatar :size="24" />
+              <span class="approver-name">待分配</span>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item label="说明">该回款记录已提交审批，等待审批人处理</el-descriptions-item>
+        </el-descriptions>
+
+        <!-- Task 6.7: Current approver highlight -->
+        <div class="current-approver-hint">
+          <el-icon><InfoFilled /></el-icon>
+          <span>审批通过后，回款状态将自动更新为"已确认"</span>
+        </div>
+      </el-card>
+
+      <!-- Action buttons -->
+      <div class="action-buttons">
+        <el-button
+          v-if="plan?.status !== 'COMPLETED' && hasPendingRecord"
+          type="primary"
+          :loading="submittingApproval"
+          :disabled="submittingApproval"
+          @click="handleSubmitApproval"
+        >
+          提交审批
+        </el-button>
+        <el-button @click="router.push('/payments')">返回列表</el-button>
       </div>
-    </el-card>
-
-    <!-- Action buttons -->
-    <div class="action-buttons">
-      <el-button
-        v-if="plan?.status !== 'COMPLETED' && hasPendingRecord"
-        type="primary"
-        :loading="submittingApproval"
-        :disabled="submittingApproval"
-        @click="handleSubmitApproval"
-      >
-        提交审批
-      </el-button>
-      <el-button @click="router.push('/payments')">返回列表</el-button>
-    </div>
+    </template>
 
     <!-- Register payment dialog -->
     <el-dialog
@@ -285,7 +300,8 @@ const viewApprovalDetail = (): void => {
           >
             <template #prefix>¥</template>
           </el-input-number>
-          <div v-if="plan" class="form-extra">
+          <!-- Task 7.1: Mono font for remaining amount display -->
+          <div v-if="plan" class="form-extra mono-number">
             待回款：{{ formatCurrency(plan.remaining_amount ?? 0) }}
           </div>
         </el-form-item>
@@ -334,6 +350,16 @@ const viewApprovalDetail = (): void => {
   margin-bottom: $wolf-space-md;
 }
 
+// Task 7.6: Skeleton loading styles
+.skeleton-card {
+  background: $wolf-bg-card;
+  margin-bottom: $wolf-space-md;
+
+  .el-skeleton {
+    padding: $wolf-space-md;
+  }
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -347,6 +373,12 @@ const viewApprovalDetail = (): void => {
   &:hover {
     color: $wolf-text-link-hover;
   }
+}
+
+// Task 7.1: Mono-number style for amounts
+.mono-number {
+  font-family: $wolf-font-mono;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 .amount {
@@ -393,7 +425,7 @@ const viewApprovalDetail = (): void => {
   gap: $wolf-space-sm;
   margin-top: $wolf-space-md;
   padding: $wolf-space-md;
-  background: $wolf-bg-soft;
+  background: $wolf-bg-elevated;
   border-radius: $wolf-radius-sm;
   color: $wolf-text-secondary;
   font-size: $wolf-font-size-caption;

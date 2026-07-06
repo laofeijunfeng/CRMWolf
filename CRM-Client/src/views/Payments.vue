@@ -1,7 +1,7 @@
 <!-- eslint-disable vue/multi-word-component-names -- 路由页面以资源名单词命名，重命名将破坏 router 注册与既有深链 -->
 <template>
   <div class="payments-page">
-    <!-- 快捷筛选标签 -->
+    <!-- Task 7.4: Tab navigation structure with visual hierarchy -->
     <div class="filter-tabs">
       <span
         v-for="tab in tabs"
@@ -9,9 +9,16 @@
         :class="['filter-tab', { active: activeTab === tab.key }]"
         @click="handleTabChange(tab.key)"
       >
-        <el-icon><component :is="tab.icon" /></el-icon>
-        {{ tab.label }}
-        <el-badge v-if="tabBadgeCounts[tab.key as keyof typeof tabBadgeCounts] > 0" :value="tabBadgeCounts[tab.key as keyof typeof tabBadgeCounts]" />
+        <!-- Icon as visual anchor -->
+        <el-icon class="tab-icon"><component :is="tab.icon" /></el-icon>
+        <!-- Text label -->
+        <span class="tab-label">{{ tab.label }}</span>
+        <!-- Badge as eyebrow (Task 7.1: mono font) -->
+        <el-badge
+          v-if="tabBadgeCounts[tab.key as keyof typeof tabBadgeCounts] > 0"
+          :value="tabBadgeCounts[tab.key as keyof typeof tabBadgeCounts]"
+          class="tab-badge"
+        />
       </span>
     </div>
 
@@ -67,14 +74,16 @@
         </el-table-column>
         <el-table-column prop="contract_name" label="合同名称" min-width="180" />
         <el-table-column prop="stage_name" label="回款阶段" min-width="120" />
+        <!-- Task 7.1: Mono font for amount column -->
         <el-table-column label="计划金额" min-width="120">
           <template #default="{ row }">
-            <span class="amount">{{ formatCurrency(row.planned_amount) }}</span>
+            <span class="amount mono-number">{{ formatCurrency(row.planned_amount) }}</span>
           </template>
         </el-table-column>
+        <!-- Task 7.1: Mono font for paid amount column -->
         <el-table-column label="已回款" min-width="120">
           <template #default="{ row }">
-            <span class="paid">{{ formatCurrency(row.paid_amount || 0) }}</span>
+            <span class="paid mono-number">{{ formatCurrency(row.paid_amount || 0) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="计划日期" min-width="120">
@@ -119,10 +128,12 @@
           </template>
         </el-table-column>
       </el-table>
+      </transition>
 
       <!-- 分页 -->
       <div class="pagination-bar">
-        <span class="total-text">共 {{ pagination.total }} 条</span>
+        <!-- Task 7.1: Mono font for total count -->
+        <span class="total-text mono-number">共 {{ pagination.total }} 条</span>
         <el-pagination
           v-model:current-page="pagination.current"
           v-model:page-size="pagination.pageSize"
@@ -146,7 +157,8 @@
           <el-input-number v-model="paymentForm.actual_amount" placeholder="请输入回款金额" :min="0" :precision="2" :controls="false" style="width: 100%">
             <template #prefix>¥</template>
           </el-input-number>
-          <div v-if="currentPlan" class="form-extra">
+          <!-- Task 7.1: Mono font for remaining amount -->
+          <div v-if="currentPlan" class="form-extra mono-number">
             待回款：¥{{ formatAmount(currentPlan.remaining_amount || 0) }}
           </div>
         </el-form-item>
@@ -488,38 +500,70 @@ onMounted(() => {
   min-height: calc(100vh - 48px);
 }
 
-// 快捷筛选标签
+// Task 7.4: Tab navigation structure with visual hierarchy
 .filter-tabs {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs;
+  gap: $wolf-space-sm;
   margin-bottom: $wolf-space-md;
+  padding-bottom: $wolf-space-sm;
+  border-bottom: 1px solid $wolf-border-light;
 }
 
 .filter-tab {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px $wolf-space-md;
+  gap: $wolf-space-xs;
+  padding: $wolf-space-sm $wolf-space-md;
   font-size: $wolf-font-size-auxiliary;
   font-weight: $wolf-font-weight-normal;
   color: $wolf-text-tertiary;
   background: $wolf-bg-card;
   border-radius: $wolf-radius-sm;
+  border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.2s ease-in-out;
+  position: relative;
 
-  &:hover {
+  &:hover:not(.active) {
     background: $wolf-bg-hover;
     color: $wolf-text-secondary;
+    border-color: $wolf-border-default;
   }
 
   &.active {
-    background: $wolf-bg-hover;
-    color: $wolf-text-secondary;
+    background: $wolf-primary;
+    color: $wolf-text-inverse;
     font-weight: $wolf-font-weight-medium;
     // Task 6.6: Scale animation for active tab
     transform: scale(1.02);
+    border-color: $wolf-primary;
+    box-shadow: 0 2px 8px rgba($wolf-primary, 0.2);
+  }
+}
+
+// Task 7.4: Tab visual hierarchy
+.tab-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.tab-label {
+  font-size: $wolf-font-size-auxiliary;
+  line-height: $wolf-line-height-normal;
+}
+
+// Task 7.4: Badge position (eyebrow)
+.tab-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+
+  // Task 7.1: Badge number mono font
+  .el-badge__content {
+    font-family: $wolf-font-mono;
+    font-variant-numeric: tabular-nums lining-nums;
+    font-size: 10px;
   }
 }
 
@@ -574,6 +618,12 @@ onMounted(() => {
   &:hover {
     color: $wolf-text-link-hover;
   }
+}
+
+// Task 7.1: Mono-number style for amounts
+.mono-number {
+  font-family: $wolf-font-mono;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 // 状态标签（浅底色 + 同色系文字）
