@@ -294,4 +294,59 @@ export const EditMode: Story = {
 
 ---
 
+## 九、CustomerDetailSidebar 组件文档
+
+### 组件概述
+
+客户详情页左侧导航组件，用于切换内容面板和触发快捷操作。
+
+### Props
+
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| customerId | number | Yes | 客户ID，用于快捷操作跳转 |
+
+### Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| nav-change | string | 导航切换事件，payload为导航key（followup、contacts、opportunities、contracts、payments、invoices） |
+| show-add-follow-up | void | 触发"添加跟进"模态框 |
+| show-add-contact | void | 触发"添加联系人"模态框 |
+
+### 响应式行为
+
+| 断点 | 宽度 | 行为 |
+|------|------|------|
+| ≥1024px | 160px | 全部显示（图标 + 文字） |
+| 768-1024px | 60px | 折叠（只显示图标） |
+| <768px | 100% | 顶部横向标签（flex-wrap） |
+
+### 导航项
+
+- 跟进（ChatDotRound图标）
+- 联系人（User图标）
+- 商机（TrendCharts图标）
+- 合同（Document图标）
+- 回款（Money图标）
+- 发票（Tickets图标）
+
+### 快捷操作
+
+- 新建跟进（emit: show-add-follow-up）
+- 新建联系人（emit: show-add-contact）
+- 新建商机（route: /customers/:id/opportunities/create）
+- 新建合同（route: /contracts/create?customerId=:id）
+
+### UI/UX 特性
+
+- ✅ 触摸目标≥44pt（导航项、快捷操作）
+- ✅ 按下反馈（scale(0.95) + opacity: 0.7）
+- ✅ 左侧指示条（Signature Element，3px宽度）
+- ✅ aria-label（所有交互元素）
+- ✅ Reduced motion 支持（prefers-reduced-motion）
+- ✅ 移动端触摸间距≥8px
+
+---
+
 **版本：1.0 | 最后更新：2026-04-21 | 修改需人工审批**
