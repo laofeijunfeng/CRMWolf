@@ -48,6 +48,7 @@ class LicenseApplicationBase(BaseModel):
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     license_type: LicenseType = Field(..., description="License 类型")
     expiry_date: date = Field(..., description="到期时间")
+    remark: Optional[str] = Field(None, description="备注（申请时填写）")
 
     @field_validator('expiry_date')
     @classmethod
@@ -83,6 +84,7 @@ class LicenseApplicationUpdate(BaseModel):
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     contract_id: Optional[int] = Field(None, description="关联合同ID")
     expiry_date: Optional[date] = Field(None, description="到期时间")
+    remark: Optional[str] = Field(None, description="备注")
 
     @field_validator('expiry_date')
     @classmethod
@@ -94,8 +96,14 @@ class LicenseApplicationUpdate(BaseModel):
 
 
 class LicenseApplicationApprove(BaseModel):
-    """审批 License 申请请求模型"""
+    """审批 License 申请请求模型 - 简化版本"""
     license_code: str = Field(..., min_length=1, description="授权码（审批人回填）")
+
+
+class LicenseApplicationApproveFull(BaseModel):
+    """审批 License 申请请求模型 - 完整版本"""
+    license_info: str = Field(..., min_length=1, description="完整的 License 信息文本")
+    comment: Optional[str] = Field(None, description="审批意见")
 
 
 class LicenseApplicationResponse(BaseModel):
@@ -108,7 +116,14 @@ class LicenseApplicationResponse(BaseModel):
     contract_id: Optional[int] = Field(None, description="关联合同ID")
     expiry_date: date = Field(..., description="到期时间")
     license_type: str = Field(..., description="License 类型")
-    license_code: Optional[str] = Field(None, description="授权码")
+    # 补充需求字段
+    enterprise_id: Optional[str] = Field(None, description="企业编号")
+    supported_modules: Optional[str] = Field(None, description="支持模块")
+    server_license_code: Optional[str] = Field(None, description="服务端 License")
+    client_license_code: Optional[str] = Field(None, description="客户端 License")
+    remark: Optional[str] = Field(None, description="备注")
+    # 原有字段
+    license_code: Optional[str] = Field(None, description="授权码（旧字段）")
     status: str = Field(..., description="申请状态")
     applicant_id: str = Field(..., description="申请人飞书用户ID")
     approver_id: Optional[str] = Field(None, description="审批人飞书用户ID")
