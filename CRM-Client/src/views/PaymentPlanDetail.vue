@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, InfoFilled } from '@element-plus/icons-vue'
 import paymentApi, {
   type PaymentPlanResponse,
   type PaymentRecordCreate,
@@ -220,7 +220,7 @@ const viewApprovalDetail = (): void => {
         </div>
       </template>
 
-      <PaymentRecordList :records="plan?.payment_records || []" />
+      <PaymentRecordList :records="plan?.payment_records || []" @register="handleRegisterPayment" />
     </el-card>
 
     <!-- Approval progress (if there are pending records) -->
@@ -232,12 +232,25 @@ const viewApprovalDetail = (): void => {
         </div>
       </template>
 
+      <!-- Task 6.7: Approval status visual hierarchy -->
       <el-descriptions :column="1" border>
         <el-descriptions-item label="审批状态">
           <el-tag type="warning" size="small">审批中</el-tag>
         </el-descriptions-item>
+        <el-descriptions-item label="审批人">
+          <div class="approver-info">
+            <el-avatar :size="24" />
+            <span class="approver-name">待分配</span>
+          </div>
+        </el-descriptions-item>
         <el-descriptions-item label="说明">该回款记录已提交审批，等待审批人处理</el-descriptions-item>
       </el-descriptions>
+
+      <!-- Task 6.7: Current approver highlight -->
+      <div class="current-approver-hint">
+        <el-icon><InfoFilled /></el-icon>
+        <span>审批通过后，回款状态将自动更新为"已确认"</span>
+      </div>
     </el-card>
 
     <!-- Action buttons -->
@@ -361,6 +374,29 @@ const viewApprovalDetail = (): void => {
   color: $wolf-text-secondary;
   font-size: $wolf-font-size-caption;
   margin-top: $wolf-space-xs;
+}
+
+// Task 6.7: Approver visual hierarchy styles
+.approver-info {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;
+}
+
+.approver-name {
+  font-weight: $wolf-font-weight-medium;
+}
+
+.current-approver-hint {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;
+  margin-top: $wolf-space-md;
+  padding: $wolf-space-md;
+  background: $wolf-bg-soft;
+  border-radius: $wolf-radius-sm;
+  color: $wolf-text-secondary;
+  font-size: $wolf-font-size-caption;
 }
 
 // Responsive

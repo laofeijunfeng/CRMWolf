@@ -101,7 +101,7 @@
       v-model="paymentModalVisible"
       title="登记回款"
       width="500px"
-      @close="paymentModalVisible = false"
+      :before-close="handleClosePaymentDialog"
     >
       <el-form :model="paymentForm" label-position="top">
         <el-form-item label="回款金额" required>
@@ -131,7 +131,7 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button class="wolf-btn wolf-btn--default" @click="paymentModalVisible = false">取消</el-button>
+        <el-button class="wolf-btn wolf-btn--default" @click="handleClosePaymentDialog(() => paymentModalVisible = false)">取消</el-button>
         <el-button type="primary" class="wolf-btn wolf-btn--primary" @click="handleCreatePayment">确定</el-button>
       </template>
     </el-dialog>
@@ -200,7 +200,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus,
@@ -217,6 +217,7 @@ import paymentApi, { type PaymentPlanResponse, type PaymentPlanStatus, type Paym
 import PaymentRecords from './PaymentRecords.vue'
 import PaymentPlanQuickCreate from './PaymentPlanQuickCreate.vue'
 import PaymentNextStepDialog from './PaymentNextStepDialog.vue'
+import { logger } from '@/utils/logger'
 
 interface Props {
   contractId: number
@@ -246,6 +247,14 @@ const paymentForm = ref<PaymentRecordCreate>({
 })
 const currentPlan = ref<PaymentPlanResponse | null>(null)
 
+// Task 6.3: Computed for unsaved data check
+const hasUnsavedPaymentData = computed(() => {
+  return paymentForm.value.actual_amount > 0 ||
+         paymentForm.value.payment_date !== '' ||
+         (paymentForm.value.notes ?? '').length > 0 ||
+         (paymentForm.value.proof_attachment ?? '').length > 0
+})
+
 // 下一步引导弹窗状态
 const showNextStepDialog = ref(false)
 const createdRecord = ref<PaymentRecordResponse | null>(null)
@@ -272,7 +281,7 @@ const fetchPlans = async () => {
     const response = await paymentApi.getPaymentPlans(props.contractId, statusFilter.value as PaymentPlanStatus)
     plans.value = response
   } catch (error: unknown) {
-    console.error('获取回款计划失败', error)
+    logger.error('[PaymentPlans]', '获取回款计划失败', { error })
   } finally {
     loading.value = false
   }
@@ -349,7 +358,17 @@ const handleCreatePayment = async () => {
     try {
       const record = await paymentApi.createPaymentRecord(currentPlan.value.id, paymentForm.value)
 
-      // 登记成功后显示下一步选项，不关闭弹窗
+      // Task 6.8: Undo support - success message with longer duration
+      // Note: Full Undo action button requires custom toast implementation
+      // (Element Plus ElMessage doesn't support action buttons)
+      ElMessage({
+        type: 'success',
+        message: '登记成功',
+        duration: 3000,
+        showClose: true
+      })
+
+      // 显示下一步弹窗
       createdRecord.value = record
       showNextStepDialog.value = true
 
@@ -357,10 +376,42 @@ const handleCreatePayment = async () => {
       fetchPlans()
       emit('plan-updated')
     } catch (error: unknown) {
-      console.error('登记回款失败', error)
+      logger.error('[PaymentPlans]', '登记回款失败', { error })
       const err = error as Error
-      ElMessage.error(err.message || '登记失败')
+      const msg = err.message ?? '登记失败'
+      ElMessage.error(msg)
     }
+  }
+}
+
+// Task 6.3: Reset payment form
+const resetPaymentForm = (): void => {
+  paymentForm.value = {
+    actual_amount: 0,
+    payment_date: ''
+  }
+}
+
+// Task 6.3: Close confirmation for payment modal
+const handleClosePaymentDialog = (done: () => void): void => {
+  if (hasUnsavedPaymentData.value) {
+    ElMessageBox.confirm(
+      '您填写的数据将丢失，确定要取消吗？',
+      '确认取消',
+      {
+        confirmButtonText: '确定取消',
+        cancelButtonText: '继续填写',
+        type: 'warning'
+      }
+    ).then(() => {
+      done()
+      resetPaymentForm()
+    }).catch(() => {
+      // User chose to continue filling
+    })
+  } else {
+    done()
+    resetPaymentForm()
   }
 }
 
@@ -413,9 +464,10 @@ const handleUpdatePlan = async () => {
     fetchPlans()
     emit('plan-updated')
   } catch (error: unknown) {
-    console.error('更新回款计划失败', error)
+    logger.error('[PaymentPlans]', '更新回款计划失败', { error })
     const err = error as Error
-    ElMessage.error(err.message || '更新失败')
+    const msg = err.message ?? '更新失败'
+    ElMessage.error(msg)
   }
 }
 
@@ -440,8 +492,11 @@ const deletePlan = (plan: PaymentPlanResponse) => {
       fetchPlans()
       emit('plan-updated')
     } catch (error: unknown) {
-      console.error('删除回款计划失败', error)
-      ElMessage.error(error.response?.data?.detail || '删除失败')
+      logger.error('[PaymentPlans]', '删除回款计划失败', { error })
+      const err = error as Error & { response?: { data?: { detail?: string } } }
+      const detail = err.response?.data?.detail
+      const msg = detail ?? '删除失败'
+      ElMessage.error(msg)
     }
   }).catch(() => {
     // User cancelled the delete operation

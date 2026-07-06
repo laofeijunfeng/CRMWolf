@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { CircleCheckFilled } from '@element-plus/icons-vue'
@@ -18,9 +19,14 @@ const emit = defineEmits<{
 const router = useRouter()
 const approvalStore = useApprovalStore()
 
+// Task 6.1: Loading state for async button
+const submitting = ref(false)
+
 const handleSubmitApproval = async (): Promise<void> => {
   if (!props.record) return
+  if (submitting.value) return
 
+  submitting.value = true
   try {
     const result = await approvalStore.submitEntity('PAYMENT', props.record.id)
     if (result.approval_id === 0 && result.status === 'APPROVED') {
@@ -31,8 +37,19 @@ const handleSubmitApproval = async (): Promise<void> => {
     emit('submitted')
     emit('update:visible', false)
   } catch (error: unknown) {
-    const err = error as Error
-    ElMessage.error(err.message || '提交审批失败')
+    // Task 6.2: Error recovery path with clear message
+    const err = error as Error & { response?: { data?: { message?: string } } }
+    const responseMessage = err.response?.data?.message
+    const errorMessage = err.message
+    const errorMsg = responseMessage ?? errorMessage ?? '提交审批失败'
+    ElMessage({
+      type: 'error',
+      message: `${errorMsg}，请检查网络连接后重试`,
+      duration: 5000,
+      showClose: true
+    })
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -74,8 +91,13 @@ const handleViewDetail = (): void => {
 
     <div class="next-step">
       <h4>下一步操作：</h4>
-      <el-button type="primary" @click="handleSubmitApproval">
-        立即提交审批
+      <el-button
+        type="primary"
+        :loading="submitting"
+        :disabled="submitting"
+        @click="handleSubmitApproval"
+      >
+        {{ submitting ? '提交中...' : '立即提交审批' }}
       </el-button>
       <el-button @click="handleLater">
         稍后提交

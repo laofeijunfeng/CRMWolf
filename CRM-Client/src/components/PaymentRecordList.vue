@@ -9,6 +9,11 @@ defineProps<{
   records: PaymentRecordInfo[]
 }>()
 
+// Task 6.4: Emit register event for empty state action
+defineEmits<{
+  register: []
+}>()
+
 const getStatusType = (status: PaymentConfirmationStatus | undefined): string => {
   if (status === undefined) return 'info'
   switch (status) {
@@ -97,7 +102,15 @@ const viewApprovalDetail = (recordId: number): void => {
     </el-table-column>
   </el-table>
 
-  <el-empty v-else description="暂无回款记录" />
+  <!-- Task 6.4: Enhanced empty state with action suggestion -->
+  <el-empty v-else description="暂无回款记录">
+    <el-button type="primary" size="small" @click="$emit('register')">
+      登记回款
+    </el-button>
+    <template #footer>
+      <p class="empty-hint">点击上方"登记回款"按钮开始记录</p>
+    </template>
+  </el-empty>
 </template>
 
 <style scoped lang="scss">
@@ -109,6 +122,12 @@ const viewApprovalDetail = (recordId: number): void => {
 }
 
 .text-muted {
+  color: $wolf-text-tertiary;
+}
+
+.empty-hint {
+  margin-top: $wolf-space-sm;
+  font-size: $wolf-font-size-caption;
   color: $wolf-text-tertiary;
 }
 </style>

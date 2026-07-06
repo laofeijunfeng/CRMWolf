@@ -51,12 +51,15 @@
 
     <!-- 表格区 -->
     <div class="table-card">
-      <el-table
-        :data="filteredPaymentPlans"
-        v-loading="loading"
-        stripe
-        style="width: 100%"
-      >
+      <!-- Task 6.6: Transition animation for tab switching -->
+      <transition name="fade" mode="out-in">
+        <el-table
+          :data="filteredPaymentPlans"
+          v-loading="loading"
+          stripe
+          style="width: 100%"
+          :key="activeTab + approvalStatusFilter"
+        >
         <el-table-column prop="customer_name" label="客户名称" min-width="150">
           <template #default="{ row }">
             <span class="link-text" @click="viewDetail(row)">{{ row.customer_name }}</span>
@@ -515,6 +518,8 @@ onMounted(() => {
     background: $wolf-bg-hover;
     color: $wolf-text-secondary;
     font-weight: $wolf-font-weight-medium;
+    // Task 6.6: Scale animation for active tab
+    transform: scale(1.02);
   }
 }
 
@@ -653,5 +658,44 @@ onMounted(() => {
   .payments-page { padding: $wolf-space-md; }
   .search-input { width: 100%; }
   .filter-tabs { flex-wrap: wrap; }
+
+  // Task 6.5: Mobile responsive for filter tabs
+  .filter-tab {
+    padding: 6px $wolf-space-sm;
+    font-size: $wolf-font-size-caption;
+  }
+
+  // Task 6.5: Mobile responsive for approval status filter
+  .approval-status-filter {
+    .el-radio-group {
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .el-radio-button {
+      margin: 0;
+    }
+
+    .el-radio-button__inner {
+      padding: 6px 12px;
+      font-size: $wolf-font-size-caption;
+    }
+  }
+
+  // Task 6.5: Mobile responsive for table
+  .table-card {
+    overflow-x: auto;
+  }
+}
+
+// Task 6.6: Fade transition animation
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
