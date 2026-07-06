@@ -1,6 +1,9 @@
+from decimal import Decimal
+
 from sqlalchemy import Column, BigInteger, String, Text, DateTime, Date, Numeric, ForeignKey, func, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.models.invoice import InvoiceApplicationStatus
 
 
 class PaymentPlanStatus:
@@ -37,6 +40,47 @@ class PaymentPlan(Base):
     __table_args__ = (
         Index('idx_payment_plan_team_id', 'team_id'),
     )
+
+    @property
+    def paid_amount(self) -> Decimal:
+        """累计已回款金额 = sum of payment_records.actual_amount"""
+        try:
+            if not self.payment_records:
+                return Decimal('0.00')
+            return sum(Decimal(str(r.actual_amount)) for r in self.payment_records)
+        except Exception:
+            # Handle detached instance or other errors
+            return Decimal('0.00')
+
+    @property
+    def remaining_amount(self) -> Decimal:
+        """待回款金额 = 计划金额 - 累计已回款"""
+        return self.planned_amount - self.paid_amount
+
+    @property
+    def invoiced_amount(self) -> Decimal:
+        """已开票金额 = 关联发票申请的总金额（仅已开票状态 ISSUED）"""
+        try:
+            if not self.invoice_applications:
+                return Decimal('0.00')
+            return sum(
+                Decimal(str(inv.invoice_amount)) for inv in self.invoice_applications
+                if inv.status == InvoiceApplicationStatus.ISSUED
+            )
+        except Exception:
+            # Handle detached instance or other errors
+            return Decimal('0.00')
+
+    @property
+    def invoice_count(self) -> int:
+        """发票申请数量"""
+        try:
+            if not self.invoice_applications:
+                return 0
+            return len(self.invoice_applications)
+        except Exception:
+            # Handle detached instance or other errors
+            return 0
 
     def __repr__(self):
         # 完全不访问属性，避免 DetachedInstanceError
