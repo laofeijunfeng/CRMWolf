@@ -36,7 +36,7 @@
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { deploymentApi } from '@/api/deployment'
+import deploymentApi from '@/api/deployment'
 import type { DeploymentInfo, DeploymentInfoCreate } from '@/schemas/deployment'
 
 const props = defineProps<{

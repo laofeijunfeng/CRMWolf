@@ -2,7 +2,7 @@
   <div class="license-management">
     <!-- 部署信息区域 -->
     <el-divider content-position="left">
-      <el-icon><Server /></el-icon> 部署信息配置
+      <el-icon><Monitor /></el-icon> 部署信息配置
     </el-divider>
     <div class="deployment-section">
       <el-button type="primary" size="small" @click="showDeploymentDialog()">
@@ -105,10 +105,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { Server, Key, Plus, Link, User } from '@element-plus/icons-vue'
+import { Monitor, Key, Plus, Link, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { deploymentApi } from '@/api/deployment'
-import { licenseApplicationApi } from '@/api/licenseApplication'
+import deploymentApi from '@/api/deployment'
+import licenseApplicationApi from '@/api/licenseApplication'
 import type { DeploymentInfo, LicenseApplication } from '@/schemas/deployment'
 import DeploymentInfoDialog from './DeploymentInfoDialog.vue'
 import LicenseApplicationDialog from './LicenseApplicationDialog.vue'

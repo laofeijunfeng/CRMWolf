@@ -58,7 +58,7 @@
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { licenseApplicationApi } from '@/api/licenseApplication'
+import licenseApplicationApi from '@/api/licenseApplication'
 import type { DeploymentInfo, LicenseApplication, LicenseApplicationCreate } from '@/schemas/deployment'
 
 const props = defineProps<{
