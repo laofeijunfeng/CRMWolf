@@ -1,773 +1,130 @@
 <!-- eslint-disable vue/multi-word-component-names -- 路由页面以资源名单词命名，重命名将破坏 router 注册与既有深链 -->
 <template>
   <div class="payments-page">
-    <!-- Task 7.4: Tab navigation structure with visual hierarchy -->
-    <div class="filter-tabs">
-      <span
-        v-for="tab in tabs"
-        :key="tab.key"
-        :class="['filter-tab', { active: activeTab === tab.key }]"
-        @click="handleTabChange(tab.key)"
-      >
-        <!-- Icon as visual anchor -->
-        <el-icon class="tab-icon"><component :is="tab.icon" /></el-icon>
-        <!-- Text label -->
-        <span class="tab-label">{{ tab.label }}</span>
-        <!-- Badge as eyebrow (Task 7.1: mono font) -->
-        <el-badge
-          v-if="tabBadgeCounts[tab.key as keyof typeof tabBadgeCounts] > 0"
-          :value="tabBadgeCounts[tab.key as keyof typeof tabBadgeCounts]"
-          class="tab-badge"
-        />
-      </span>
-    </div>
+    <!-- Left sidebar: PaymentSidebar component -->
+    <PaymentSidebar
+      :active-nav="activeNav"
+      @nav-change="handleNavChange"
+      @create-action="handleQuickAction"
+    />
 
-    <!-- 审批状态筛选器 -->
-    <div class="approval-status-filter">
-      <el-radio-group v-model="approvalStatusFilter">
-        <el-radio-button label="all">全部</el-radio-button>
-        <el-radio-button label="pending_submit">待提交审批</el-radio-button>
-        <el-radio-button label="pending_approval">
-          审批中
-          <!-- Task 8.3: 显示待我审批的数量 -->
-          <el-badge
-            v-if="paymentPlansStore.pendingApprovalMeCount > 0"
-            :value="paymentPlansStore.pendingApprovalMeCount"
-            class="status-badge"
-          />
-        </el-radio-button>
-        <el-radio-button label="confirmed">已确认</el-radio-button>
-        <el-radio-button label="rejected">已驳回</el-radio-button>
-      </el-radio-group>
-    </div>
-
-    <!-- 搜索筛选区 -->
-    <div class="filter-card">
-      <div class="filter-row">
-        <div class="filter-left">
-          <el-input
-            v-model="searchForm.keyword"
-            placeholder="搜索客户/合同名称"
-            clearable
-            class="search-input"
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-        </div>
-        <div class="filter-right">
-          <el-button @click="handleReset">重置</el-button>
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 表格区 -->
-    <div class="table-card">
-      <!-- Task 6.6: Transition animation for tab switching -->
-      <transition name="fade" mode="out-in">
-        <el-table
-          :data="filteredPaymentPlans"
-          v-loading="loading"
-          stripe
-          style="width: 100%"
-          :key="activeTab + approvalStatusFilter"
-        >
-        <el-table-column prop="customer_name" label="客户名称" min-width="150">
-          <template #default="{ row }">
-            <span class="link-text" @click="viewDetail(row)">{{ row.customer_name }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="contract_name" label="合同名称" min-width="180" />
-        <el-table-column prop="stage_name" label="回款阶段" min-width="120" />
-        <!-- Task 7.1: Mono font for amount column -->
-        <el-table-column label="计划金额" min-width="120">
-          <template #default="{ row }">
-            <span class="amount mono-number">{{ formatCurrency(row.planned_amount) }}</span>
-          </template>
-        </el-table-column>
-        <!-- Task 7.1: Mono font for paid amount column -->
-        <el-table-column label="已回款" min-width="120">
-          <template #default="{ row }">
-            <span class="paid mono-number">{{ formatCurrency(row.paid_amount || 0) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="计划日期" min-width="120">
-          <template #default="{ row }">
-            {{ formatDate(row.due_date) }}
-          </template>
-        </el-table-column>
-        <el-table-column v-if="activeTab === 'overdue'" label="逾期天数" width="100">
-          <template #default="{ row }">
-            <span class="overdue-days">{{ getOverdueDays(row.due_date) }} 天</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <span :class="['status-tag', getStatusClass(row.status)]">
-              {{ getStatusText(row.status) }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="owner_name" label="负责人" min-width="100" />
-        <el-table-column label="操作" width="220" fixed="right">
-          <template #default="{ row }">
-            <div class="action-cell">
-              <span class="action-link" @click="viewDetail(row)">查看</span>
-              <span
-                v-if="row.status !== 'COMPLETED' && permissionStore.hasPermission('payment:register')"
-                class="action-link"
-                @click="handleRegisterPayment(row)"
-              >登记回款</span>
-              <el-button
-                v-permission="paymentSubmitPermission"
-                data-testid="submit-approval-btn"
-                link
-                type="primary"
-                size="small"
-                :loading="submittingApprovalId === row.id"
-                :disabled="submittingApprovalId === row.id"
-                class="action-link"
-                @click="handleSubmitApproval(row)"
-              >提交审批</el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
+    <!-- Right content area: Dynamic view switching with keep-alive -->
+    <div class="content-area">
+      <transition name="slide-fade" mode="out-in">
+        <keep-alive>
+          <PaymentPlanView v-if="activeNav === 'plans'" key="plans" />
+          <PaymentRecordView v-else key="records" />
+        </keep-alive>
       </transition>
-
-      <!-- 分页 -->
-      <div class="pagination-bar">
-        <!-- Task 7.1: Mono font for total count -->
-        <span class="total-text mono-number">共 {{ pagination.total }} 条</span>
-        <el-pagination
-          v-model:current-page="pagination.current"
-          v-model:page-size="pagination.pageSize"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="pagination.total"
-          layout="sizes, prev, pager, next, jumper"
-          @current-change="handlePageChange"
-          @size-change="handlePageSizeChange"
-        />
-      </div>
     </div>
-
-    <!-- 登记回款弹窗 -->
-    <el-dialog
-      v-model="paymentModalVisible"
-      title="登记回款"
-      width="500px"
-    >
-      <el-form :model="paymentForm" label-position="top">
-        <el-form-item label="回款金额" required>
-          <el-input-number v-model="paymentForm.actual_amount" placeholder="请输入回款金额" :min="0" :precision="2" :controls="false" style="width: 100%">
-            <template #prefix>¥</template>
-          </el-input-number>
-          <!-- Task 7.1: Mono font for remaining amount -->
-          <div v-if="currentPlan" class="form-extra mono-number">
-            待回款：¥{{ formatAmount(currentPlan.remaining_amount || 0) }}
-          </div>
-        </el-form-item>
-        <el-form-item label="回款日期" required>
-          <el-date-picker
-            v-model="paymentForm.payment_date"
-            type="date"
-            placeholder="请选择回款日期"
-            value-format="YYYY-MM-DD"
-            style="width: 100%"
-          />
-        </el-form-item>
-        <el-form-item label="凭证附件">
-          <el-input v-model="paymentForm.proof_attachment" placeholder="附件URL（可选）" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="paymentForm.notes" type="textarea" placeholder="备注信息（可选）" :maxlength="200" show-word-limit />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="paymentModalVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleCreatePayment">确定</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { showError, showSuccess } from '@/utils/errorMessages'
-import { Search, EditPen, Wallet, Warning, Clock, List } from '@element-plus/icons-vue'
-import paymentApi, {
-  type PaymentPlanWithDetails,
-  type PaymentPlanListParams,
-  type PaymentRecordCreate,
-  type PaymentPlanStatus
-} from '@/api/payment'
+import PaymentSidebar from '@/components/PaymentSidebar.vue'
+import PaymentPlanView from '@/views/PaymentPlanView.vue'
+import PaymentRecordView from '@/views/PaymentRecordView.vue'
 import { usePermissionStore } from '@/stores/permissions'
-import { useApprovalStore } from '@/stores/approval'
-import { usePaymentPlansStore } from '@/stores/paymentPlans'
-import { formatCurrency } from '@/utils/format'
 import { logger } from '@/utils/logger'
 
 const router = useRouter()
+const route = useRoute()
 const permissionStore = usePermissionStore()
-const approvalStore = useApprovalStore()
-const paymentPlansStore = usePaymentPlansStore()
 
-// v-permission 门控：仅 payment:submit 持有者见「提交审批」按钮
-const paymentSubmitPermission = 'payment:submit'
+// Active navigation state: 'plans' or 'records'
+const activeNav = ref<'plans' | 'records'>('plans')
 
-// 正在提交审批的回款计划 ID（按钮 :loading + :disabled 防双提交）
-const submittingApprovalId = ref<number | null>(null)
-
-// 标签定义（移除"回款记录"标签）
-const tabs = [
-  { key: 'pending', label: '待登记', icon: EditPen },
-  { key: 'partial', label: '部分回款', icon: Wallet },
-  { key: 'overdue', label: '已逾期', icon: Warning },
-  { key: 'upcoming', label: '即将到期', icon: Clock },
-  { key: 'all', label: '全部计划', icon: List }
-]
-
-const activeTab = ref('pending')
-const searchForm = ref({
-  keyword: '',
-  status: '' as PaymentPlanStatus | ''
-})
-const loading = ref(false)
-
-const paymentPlans = ref<PaymentPlanWithDetails[]>([])
-const pagination = ref({
-  current: 1,
-  pageSize: 20,
-  total: 0
-})
-
-// Badge 数量（占位：Task 4 创建 Store 后连接）
-const tabBadgeCounts = ref({
-  pending: 0,      // 未登记的计划数
-  partial: 0,      // 部分回款的计划数
-  overdue: 0,      // 逾期计划数
-  upcoming: 0,     // 即将到期不显示 Badge
-  all: 0           // 全部计划不显示 Badge
-})
-
-// 审批状态筛选器
-const approvalStatusFilter = ref('all')
-
-const paymentModalVisible = ref(false)
-const paymentForm = ref<PaymentRecordCreate>({
-  actual_amount: 0,
-  payment_date: ''
-})
-const currentPlan = ref<PaymentPlanWithDetails | null>(null)
-
-const getOverdueDays = (dueDate: string): number => {
-  const today = new Date()
-  const due = new Date(dueDate)
-  const diffTime = today.getTime() - due.getTime()
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
-  return diffDays > 0 ? diffDays : 0
-}
-
-const getUpcomingDate = (days: number): string => {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  // Use local timezone, not UTC (toISOString() converts to UTC causing date offset in China)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const fetchPaymentPlans = async (): Promise<void> => {
-  loading.value = true
-  try {
-    const params: PaymentPlanListParams = {
-      page: pagination.value.current,
-      page_size: pagination.value.pageSize
-    }
-
-    // 根据标签设置筛选参数
-    if (activeTab.value === 'pending') {
-      params.status = 'PENDING'
-    } else if (activeTab.value === 'partial') {
-      params.status = 'PARTIAL'
-    } else if (activeTab.value === 'overdue') {
-      params.status = 'OVERDUE'
-    } else if (activeTab.value === 'upcoming') {
-      const upcomingDate = getUpcomingDate(7)
-      params.due_date_end = upcomingDate
-    }
-    // 'all' 不设置任何筛选参数
-
-    const data = await paymentApi.listPaymentPlans(params)
-
-    let filteredPlans: PaymentPlanWithDetails[] = data.items
-
-    // 关键词搜索筛选
-    if (searchForm.value.keyword.length > 0) {
-      filteredPlans = filteredPlans.filter((plan: PaymentPlanWithDetails) => {
-        const keyword = searchForm.value.keyword.toLowerCase()
-        return (
-          (plan.contract_name?.toLowerCase().includes(keyword) ?? false) ||
-          (plan.customer_name?.toLowerCase().includes(keyword) ?? false)
-        )
-      })
-    }
-
-    paymentPlans.value = filteredPlans
-    pagination.value.total = data.total
-  } catch (error) {
-    logger.error('[Payments]', '获取回款计划失败', { error })
-    showError(error, '获取回款计划')
-  } finally {
-    loading.value = false
-  }
-}
-
-// 筛选后的回款计划列表（按审批状态筛选）
-const filteredPaymentPlans = computed(() => {
-  let plans = paymentPlans.value
-
-  // 按审批状态筛选（占位逻辑：Task 4 完成后 Store 将提供完整实现）
-  if (approvalStatusFilter.value !== 'all') {
-    plans = plans.filter(plan => {
-      // 使用可选链，避免类型定义不完整导致的错误
-      // 后端 PaymentRecord 有 confirmation_status 和 approval 关系，但前端类型未定义
-      // Task 4: 更新 PaymentRecordInfo 类型 + Store 实现
-      const latestRecord = plan.payment_records?.[plan.payment_records.length - 1] as Record<string, unknown> | undefined
-
-      if (latestRecord === undefined) {
-        // 待登记：无回款记录，仅当筛选"待提交审批"时显示
-        return approvalStatusFilter.value === 'pending_submit'
-      }
-
-      // 使用括号访问（TypeScript index signature 要求）
-      const confirmationStatus = latestRecord['confirmation_status'] as string | undefined
-      const approvalId = latestRecord['approval_id'] as number | undefined
-      const approval = latestRecord['approval'] as Record<string, unknown> | undefined
-      const approvalStatus = approval?.['status'] as string | undefined
-
-      switch (approvalStatusFilter.value) {
-        case 'pending_submit':
-          // 待提交审批：confirmation_status=PENDING 且无 approval_id
-          return confirmationStatus === 'PENDING' && approvalId === undefined
-        case 'pending_approval':
-          // 审批中：confirmation_status=PENDING 且有 approval_id 且 approval.status=PENDING
-          return confirmationStatus === 'PENDING' && approvalId !== undefined && approvalStatus === 'PENDING'
-        case 'confirmed':
-          // 已确认：confirmation_status=CONFIRMED
-          return confirmationStatus === 'CONFIRMED'
-        case 'rejected':
-          // 已驳回：confirmation_status=PENDING 且 approval.status=REJECTED
-          return confirmationStatus === 'PENDING' && approvalStatus === 'REJECTED'
-        default:
-          return true
-      }
-    })
-  }
-
-  return plans
-})
-
-const handleTabChange = (key: string): void => {
-  activeTab.value = key
-  pagination.value.current = 1
-  searchForm.value.status = ''
-  approvalStatusFilter.value = 'all'
-  fetchPaymentPlans()
-}
-
-const handleSearch = (): void => {
-  pagination.value.current = 1
-  fetchPaymentPlans()
-}
-
-const handleReset = (): void => {
-  searchForm.value.keyword = ''
-  searchForm.value.status = ''
-  pagination.value.current = 1
-  fetchPaymentPlans()
-}
-
-const handlePageChange = (page: number): void => {
-  pagination.value.current = page
-  fetchPaymentPlans()
-}
-
-const handlePageSizeChange = (pageSize: number): void => {
-  pagination.value.pageSize = pageSize
-  pagination.value.current = 1
-  fetchPaymentPlans()
-}
-
-const getStatusText = (status: string): string => {
-  const statusMap: Record<string, string> = {
-    'PENDING': '待回款',
-    'OVERDUE': '已逾期',
-    'PARTIAL': '部分回款',
-    'COMPLETED': '已完成'
-  }
-  return statusMap[status] ?? status
-}
-
-const getStatusClass = (status: string): string => {
-  const classMap: Record<string, string> = {
-    'PENDING': 'status-default',
-    'OVERDUE': 'status-danger',
-    'PARTIAL': 'status-warning',
-    'COMPLETED': 'status-success'
-  }
-  return classMap[status] ?? 'status-default'
-}
-
-const formatAmount = (amount: number): string => {
-  return amount.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })
-}
-
-const formatDate = (dateStr: string): string => {
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('zh-CN')
-}
-
-const viewDetail = (plan: PaymentPlanWithDetails): void => {
-  router.push(`/payments/${plan.id}`)
-}
-
-const handleRegisterPayment = (plan: PaymentPlanWithDetails): void => {
-  currentPlan.value = plan
-  paymentForm.value = {
-    actual_amount: 0,
-    payment_date: ''
-  }
-  paymentModalVisible.value = true
-}
-
-const handleCreatePayment = async (): Promise<void> => {
-  if (paymentForm.value.actual_amount === null || paymentForm.value.actual_amount <= 0) {
-    ElMessage.error('请输入有效的回款金额')
-    return
-  }
-
-  if (paymentForm.value.payment_date.length === 0) {
-    ElMessage.error('请选择回款日期')
-    return
-  }
-
-  if (currentPlan.value) {
-    try {
-      await paymentApi.createPaymentRecord(currentPlan.value.id, paymentForm.value)
-      showSuccess('登记', '回款')
-      paymentModalVisible.value = false
-      fetchPaymentPlans()
-    } catch (error: unknown) {
-      logger.error('[Payments]', '登记回款失败', { error })
-      showError(error, '登记回款')
-    }
-  }
-}
-
-// 提交审批（Phase C / Task C3）：调通用审批 store，PAYMENT 类型 + 计划 ID。
-// 后端 match_flow_generic(PAYMENT) 未匹配到流时直通（approval_id=0, APPROVED），
-// 此处按响应 toast；未配置流时提示「未配置审批流，已转为财务确认」。
-const handleSubmitApproval = async (plan: PaymentPlanWithDetails): Promise<void> => {
-  if (submittingApprovalId.value !== null) return
-  submittingApprovalId.value = plan.id
-  try {
-    const res = await approvalStore.submitEntity('PAYMENT', plan.id)
-    if (res.approval_id === 0) {
-      // E5：未配置审批流，后端直通财务确认
-      ElMessage.success('未配置审批流，已转为财务确认')
-    } else {
-      ElMessage.success('已提交审批，等待审批人处理')
-    }
-    fetchPaymentPlans()
-  } catch {
-    // 错误 toast 由 request 拦截器统一处理
-  } finally {
-    submittingApprovalId.value = null
-  }
-}
-
+// Deep link URL param parsing on mount
 onMounted(() => {
-  fetchPaymentPlans()
+  const navParam = route.query['nav'] as string | undefined
+  if (navParam === 'plans' || navParam === 'records') {
+    activeNav.value = navParam
+  }
 })
+
+// Handle navigation change from sidebar
+function handleNavChange(key: 'plans' | 'records'): void {
+  activeNav.value = key
+  // Update URL query param for deep linking
+  router.replace({ query: { ...route.query, nav: key } })
+}
+
+// Handle quick actions from sidebar
+function handleQuickAction(action: { key: string; label: string }): void {
+  logger.info('[Payments]', 'Quick action triggered', { action })
+
+  switch (action.key) {
+    case 'create-plan':
+      // Check permission for creating payment plan
+      if (permissionStore.hasPermission('payment:create')) {
+        router.push('/payments/create')
+      } else {
+        ElMessage.warning('您没有创建回款计划的权限')
+      }
+      break
+    case 'register-payment':
+      // This action requires selecting a plan first
+      // Switch to plans view and show a hint
+      if (activeNav.value !== 'plans') {
+        activeNav.value = 'plans'
+        router.replace({ query: { ...route.query, nav: 'plans' } })
+      }
+      ElMessage.info('请在回款计划列表中选择要登记的计划')
+      break
+    default:
+      logger.warn('[Payments]', 'Unknown quick action', { action })
+  }
+}
 </script>
 
 <style scoped lang="scss">
 @use '@/styles/variables.scss' as *;
 
 .payments-page {
-  padding: $wolf-page-padding;
+  display: flex;
+  height: calc(100vh - 48px); // Subtract header height
   background: $wolf-bg-page;
-  min-height: calc(100vh - 48px);
 }
 
-// Task 7.4: Tab navigation structure with visual hierarchy
-.filter-tabs {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-  margin-bottom: $wolf-space-md;
-  padding-bottom: $wolf-space-sm;
-  border-bottom: 1px solid $wolf-border-light;
+.content-area {
+  flex: 1;
+  overflow: hidden;
+  padding: $wolf-page-padding;
+  min-width: 0; // Prevent flex item overflow
 }
 
-.filter-tab {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-xs;
-  padding: $wolf-space-sm $wolf-space-md;
-  font-size: $wolf-font-size-auxiliary;
-  font-weight: $wolf-font-weight-normal;
-  color: $wolf-text-tertiary;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-sm;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all 0.2s ease-in-out;
-  position: relative;
-
-  &:hover:not(.active) {
-    background: $wolf-bg-hover;
-    color: $wolf-text-secondary;
-    border-color: $wolf-border-default;
-  }
-
-  &.active {
-    background: $wolf-primary;
-    color: $wolf-text-inverse;
-    font-weight: $wolf-font-weight-medium;
-    // Task 6.6: Scale animation for active tab
-    transform: scale(1.02);
-    border-color: $wolf-primary;
-    box-shadow: 0 2px 8px rgba($wolf-primary, 0.2);
-  }
+// Slide-fade transition for view switching
+.slide-fade-enter-active {
+  transition: all 0.2s ease-out;
 }
 
-// Task 7.4: Tab visual hierarchy
-.tab-icon {
-  font-size: 16px;
-  flex-shrink: 0;
+.slide-fade-leave-active {
+  transition: all 0.15s ease-in;
 }
 
-.tab-label {
-  font-size: $wolf-font-size-auxiliary;
-  line-height: $wolf-line-height-normal;
-}
-
-// Task 7.4: Badge position (eyebrow)
-.tab-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-
-  // Task 7.1: Badge number mono font
-  .el-badge__content {
-    font-family: $wolf-font-mono;
-    font-variant-numeric: tabular-nums lining-nums;
-    font-size: 10px;
-  }
-}
-
-// 审批状态筛选器
-.approval-status-filter {
-  margin-bottom: $wolf-space-md;
-  padding: $wolf-space-sm $wolf-space-md;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-sm;
-}
-
-// 筛选区
-.filter-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
-  box-shadow: $wolf-shadow-card;
-}
-
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-lg;
-}
-
-.filter-left {
-  flex-shrink: 0;
-}
-
-.search-input {
-  width: 280px;
-}
-
-.filter-right {
-  display: flex;
-  gap: $wolf-space-xs;
-  flex-shrink: 0;
-}
-
-// 表格样式由全局 wolf-design.scss 统一控制
-.table-card {
-  background: transparent;
-  overflow: visible;
-}
-
-// 链接样式
-.link-text {
-  color: $wolf-text-link;
-  cursor: pointer;
-  font-weight: $wolf-font-weight-medium;
-  &:hover {
-    color: $wolf-text-link-hover;
-  }
-}
-
-// Task 7.1: Mono-number style for amounts
-.mono-number {
-  font-family: $wolf-font-mono;
-  font-variant-numeric: tabular-nums lining-nums;
-}
-
-// 状态标签（浅底色 + 同色系文字）
-.status-tag {
-  display: inline-flex;
-  padding: 4px 8px;
-  font-size: $wolf-font-size-caption;
-  font-weight: $wolf-font-weight-normal;
-  border-radius: $wolf-radius-sm;
-}
-
-.status-default {
-  background: $wolf-bg-hover;
-  color: $wolf-text-tertiary;
-}
-
-.status-warning {
-  background: $wolf-warning-bg;
-  color: $wolf-warning-text;
-}
-
-.status-danger {
-  background: $wolf-danger-bg;
-  color: $wolf-danger-text;
-}
-
-.status-success {
-  background: $wolf-success-bg;
-  color: $wolf-success-text;
-}
-
-// 操作区
-.action-cell {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-md;
-}
-
-.action-link {
-  color: $wolf-text-link;
-  font-size: $wolf-font-size-auxiliary;
-  cursor: pointer;
-  &:hover { color: $wolf-text-link-hover; }
-}
-
-.amount {
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-primary;
-}
-
-.paid {
-  color: $wolf-success-text;
-  font-weight: $wolf-font-weight-medium;
-}
-
-.overdue-days {
-  color: $wolf-danger-text;
-  font-weight: $wolf-font-weight-semibold;
-}
-
-// 分页
-.pagination-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: $wolf-space-md;
-}
-
-.total-text {
-  font-size: $wolf-font-size-auxiliary;
-  color: $wolf-text-tertiary;
-}
-
-.form-extra {
-  color: $wolf-text-secondary;
-  font-size: $wolf-font-size-caption;
-  margin-top: $wolf-space-xs;
-}
-
-// Task 8.3: Badge for approval status filter
-.status-badge {
-  margin-left: $wolf-space-xs;
-  vertical-align: middle;
-
-  .el-badge__content {
-    font-family: $wolf-font-mono;
-    font-variant-numeric: tabular-nums lining-nums;
-    font-size: 10px;
-  }
-}
-
-// 响应式
-@media (max-width: 768px) {
-  .payments-page { padding: $wolf-space-md; }
-  .search-input { width: 100%; }
-  .filter-tabs { flex-wrap: wrap; }
-
-  // Task 6.5: Mobile responsive for filter tabs
-  .filter-tab {
-    padding: 6px $wolf-space-sm;
-    font-size: $wolf-font-size-caption;
-  }
-
-  // Task 6.5: Mobile responsive for approval status filter
-  .approval-status-filter {
-    .el-radio-group {
-      flex-wrap: wrap;
-      gap: 4px;
-    }
-
-    .el-radio-button {
-      margin: 0;
-    }
-
-    .el-radio-button__inner {
-      padding: 6px 12px;
-      font-size: $wolf-font-size-caption;
-    }
-  }
-
-  // Task 6.5: Mobile responsive for table
-  .table-card {
-    overflow-x: auto;
-  }
-}
-
-// Task 6.6: Fade transition animation
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
+.slide-fade-enter-from {
   opacity: 0;
+  transform: translateX(10px);
+}
+
+.slide-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+// Responsive adjustments
+@media (max-width: 768px) {
+  .payments-page {
+    flex-direction: column;
+    height: auto;
+    min-height: calc(100vh - 48px);
+  }
+
+  .content-area {
+    padding: $wolf-space-md;
+  }
 }
 </style>
