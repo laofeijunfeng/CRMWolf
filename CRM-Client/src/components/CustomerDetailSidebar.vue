@@ -72,8 +72,7 @@ const props = defineProps<Props>()
 // Emits 定义
 interface Emits {
   (e: 'nav-change', navKey: string): void
-  (e: 'show-add-follow-up'): void
-  (e: 'show-add-contact'): void
+  (e: 'show-add-follow-up' | 'show-add-contact'): void
 }
 
 const emit = defineEmits<Emits>()
@@ -107,9 +106,9 @@ function handleNavClick(navKey: string): void {
 
 // 快捷操作点击（✅ P0: 简化逻辑）
 function handleActionClick(action: { emitKey?: string; route?: string }): void {
-  if (action.route) {
+  if (action.route !== undefined && action.route !== '') {
     router.push(action.route)
-  } else if (action.emitKey) {
+  } else if (action.emitKey !== undefined && action.emitKey !== '') {
     emit(action.emitKey)
   }
 }

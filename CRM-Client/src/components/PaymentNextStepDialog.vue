@@ -18,7 +18,7 @@ const emit = defineEmits<{
 const router = useRouter()
 const approvalStore = useApprovalStore()
 
-const handleSubmitApproval = async () => {
+const handleSubmitApproval = async (): Promise<void> => {
   if (!props.record) return
 
   try {
@@ -36,11 +36,11 @@ const handleSubmitApproval = async () => {
   }
 }
 
-const handleLater = () => {
+const handleLater = (): void => {
   emit('update:visible', false)
 }
 
-const handleViewDetail = () => {
+const handleViewDetail = (): void => {
   if (!props.record) return
   router.push(`/payments/${props.record.plan_id}`)
   emit('update:visible', false)
