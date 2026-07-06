@@ -57,6 +57,19 @@ export interface LicenseApplicationResponse {
 }
 
 const licenseApplicationApi = {
+  // 创建申请
+  create: (data: LicenseApplicationCreate) => {
+    return request.post<LicenseApplicationResponse>('/v1/license-applications/', data)
+  },
+
+  // 获取申请列表（别名）
+  list: (customerId: number) => {
+    return request.get<LicenseApplicationResponse[]>('/v1/license-applications/', {
+      params: { customer_id: customerId }
+    })
+  },
+
+  // 原方法名（向后兼容）
   createApplication: (data: LicenseApplicationCreate) => {
     return request.post<LicenseApplicationResponse>('/v1/license-applications/', data)
   },

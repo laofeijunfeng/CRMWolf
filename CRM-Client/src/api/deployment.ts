@@ -28,6 +28,19 @@ export interface DeploymentInfoResponse {
 }
 
 const deploymentApi = {
+  // 创建部署信息
+  create: (data: DeploymentInfoCreate) => {
+    return request.post<DeploymentInfoResponse>('/v1/deployment-infos/', data)
+  },
+
+  // 获取部署信息列表（别名）
+  list: (customerId: number) => {
+    return request.get<DeploymentInfoResponse[]>('/v1/deployment-infos/', {
+      params: { customer_id: customerId }
+    })
+  },
+
+  // 原方法名（向后兼容）
   createDeployment: (data: DeploymentInfoCreate) => {
     return request.post<DeploymentInfoResponse>('/v1/deployment-infos/', data)
   },
