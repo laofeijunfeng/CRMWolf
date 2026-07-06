@@ -1965,9 +1965,10 @@ async def approve_with_file(
             node_id=approval.current_node_id if approval else None,
             approver_id=str(current_user.id),
             approver_name=current_user.name,
-            action="approve_with_file",
+            action=ApprovalAction.APPROVE,  # 使用枚举值而非自定义字符串
             comment=comment or f"审批通过，发票号码：{invoice_number or '未填写'}",
             created_time=func.now(),
+            team_id=team_id,
         )
         db.add(record)
 
