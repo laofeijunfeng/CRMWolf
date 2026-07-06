@@ -186,7 +186,39 @@ const downloadInvoiceFile = (row: InvoiceApplicationResponse): void => {
 }
 ```
 
-### 2.3 样式定义
+### 2.3 样式定义（含 UX 规则补充）
+
+> **UX 审查补充（ui-ux-pro-max）：**
+> - `touch-target-size` (CRITICAL): 最小 44×44px，扩展 hitSlop
+> - `aria-labels` (CRITICAL): 添加 aria-label
+> - `hover-vs-tap` (HIGH): 添加 pressed/active 状态
+> - `loading-states` (HIGH): 添加下载 Toast 提示
+
+```vue
+<!-- 模板改动：添加 aria-label + 扩展点击区域 -->
+<span 
+  v-if="row.status === 'ISSUED' && row.invoice_file_path" 
+  class="download-badge"
+  role="button"
+  aria-label="下载发票文件"
+  @click.stop="downloadInvoiceFile(row)"
+>
+  <el-icon class="download-icon"><Download /></el-icon>
+  <span class="download-link">下载</span>
+</span>
+```
+
+```typescript
+// 下载函数：添加 Toast 提示（ux: loading-states）
+const downloadInvoiceFile = (row: InvoiceApplicationResponse): void => {
+  ElMessage.success({
+    message: '正在下载发票文件',
+    duration: 1500
+  })
+  const url = getInvoiceFileUrl(row.id)
+  window.open(url, '_blank')
+}
+```
 
 ```scss
 // Invoices.vue style 中添加
@@ -197,27 +229,46 @@ const downloadInvoiceFile = (row: InvoiceApplicationResponse): void => {
 }
 
 .download-badge {
+  // UX: touch-target-size (CRITICAL) - 最小 44px 高度
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 2px 8px;
+  min-height: 44px;  // 扩展 hitSlop
+  min-width: 44px;
+  padding: 8px 12px;  // 增大 padding 以满足 44px
   background: $wolf-success-bg;
   border-radius: $wolf-radius-sm;
   font-size: $wolf-font-size-caption;
+  cursor: pointer;  // UX: cursor-pointer
+  transition: all 0.15s ease-out;  // UX: duration-timing
   
   .download-icon {
     color: $wolf-success-text;
-    font-size: 12px;
+    font-size: 14px;
   }
   
   .download-link {
     color: $wolf-success-text;
-    cursor: pointer;
     font-weight: $wolf-font-weight-medium;
-    
-    &:hover {
-      text-decoration: underline;
-    }
+  }
+  
+  // UX: hover-vs-tap (HIGH) - hover 状态
+  &:hover {
+    background: $wolf-success-border;
+    transform: translateY(-1px);
+  }
+  
+  // UX: press-feedback (HIGH) - active/pressed 状态
+  &:active {
+    transform: scale(0.95);
+    opacity: 0.9;
+  }
+  
+  // UX: focus-states (CRITICAL) - focus ring
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+    outline-offset: 2px;
   }
 }
 ```
@@ -320,7 +371,41 @@ const getFileTypeLabel = (filePath: string | null): string => {
 }
 ```
 
-### 3.3 样式定义
+### 3.3 样式定义（含 UX 规则补充）
+
+> **UX 审查补充（ui-ux-pro-max）：**
+> - `touch-target-size` (CRITICAL): 下载按钮最小 44×44px
+> - `aria-labels` (CRITICAL): 添加 aria-label
+> - `loading-states` (HIGH): 添加下载成功 Toast
+> - `success-feedback` (HIGH): 下载完成后的反馈
+
+```vue
+<!-- 模板改动：添加 aria-label -->
+<el-button 
+  type="primary" 
+  class="download-btn" 
+  aria-label="下载发票文件"
+  @click="handleDownloadWithFeedback"
+>
+  <el-icon><Download /></el-icon>
+  下载发票文件
+</el-button>
+```
+
+```typescript
+// 下载函数：添加反馈提示
+const handleDownloadWithFeedback = (): void => {
+  if (!invoiceInfo.value) return
+  
+  ElMessage.success({
+    message: '发票文件下载成功',
+    description: '请在浏览器下载目录查看',
+    duration: 2000
+  })
+  
+  downloadInvoiceFile()
+}
+```
 
 ```scss
 // InvoiceDetail.vue style 中添加
@@ -383,9 +468,11 @@ const getFileTypeLabel = (filePath: string | null): string => {
       font-weight: $wolf-font-weight-medium;
     }
     
+    // UX: touch-target-size (CRITICAL) - 最小 44px
     .download-btn {
       margin-left: auto;
       min-width: 140px;
+      min-height: 44px;  // 确保满足 touch-target 要求
     }
   }
 }
@@ -441,6 +528,37 @@ const getFileTypeLabel = (filePath: string | null): string => {
 - [ ] 详情页：文件图标按类型差异化显示
 - [ ] 详情页：下载按钮点击可正常打开文件
 - [ ] 审批中心：Drawer 详情页显示下载按钮（依赖 bug 修复后自动生效）
+
+---
+
+## UX 验证清单（ui-ux-pro-max）
+
+### Accessibility (CRITICAL)
+
+- [ ] `color-contrast` — 下载徽章颜色对比度 ≥ 4.5:1（验证 `$wolf-success-bg` + `$wolf-success-text`）
+- [ ] `aria-labels` — 下载徽章有 `aria-label="下载发票文件"`
+- [ ] `focus-states` — 下载徽章有 `focus-visible` 样式（2px outline）
+- [ ] `color-not-only` — 状态不仅靠颜色区分（有图标 + 文字）
+
+### Touch & Interaction (CRITICAL)
+
+- [ ] `touch-target-size` — 下载徽章最小 44×44px（含 hitSlop 扩展）
+- [ ] `touch-spacing` — 下载徽章与申请单号间距 ≥ 8px（`$wolf-space-sm`）
+- [ ] `hover-vs-tap` — 下载徽章有 hover + active 状态反馈
+- [ ] `press-feedback` — 下载徽章 active 时 `scale(0.95)` 反馈
+- [ ] `loading-buttons` — 下载按钮有 Toast 提示（非阻塞）
+- [ ] `cursor-pointer` — 下载徽章有 `cursor: pointer`
+
+### Animation (MEDIUM)
+
+- [ ] `duration-timing` — hover/active 动画 150ms（符合 150-300ms 标准）
+- [ ] `transform-performance` — 使用 `transform` 而非 `width/height` 动画
+- [ ] `reduced-motion` — 用户偏好 `prefers-reduced-motion` 时禁用动画
+
+### Forms & Feedback (MEDIUM)
+
+- [ ] `success-feedback` — 下载成功有 Toast 提示
+- [ ] `error-feedback` — 下载失败有明确错误提示（文件不存在时）
 
 ---
 
