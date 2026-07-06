@@ -27,7 +27,15 @@
       <el-radio-group v-model="approvalStatusFilter">
         <el-radio-button label="all">全部</el-radio-button>
         <el-radio-button label="pending_submit">待提交审批</el-radio-button>
-        <el-radio-button label="pending_approval">审批中</el-radio-button>
+        <el-radio-button label="pending_approval">
+          审批中
+          <!-- Task 8.3: 显示待我审批的数量 -->
+          <el-badge
+            v-if="paymentPlansStore.pendingApprovalMeCount > 0"
+            :value="paymentPlansStore.pendingApprovalMeCount"
+            class="status-badge"
+          />
+        </el-radio-button>
         <el-radio-button label="confirmed">已确认</el-radio-button>
         <el-radio-button label="rejected">已驳回</el-radio-button>
       </el-radio-group>
@@ -701,6 +709,18 @@ onMounted(() => {
   color: $wolf-text-secondary;
   font-size: $wolf-font-size-caption;
   margin-top: $wolf-space-xs;
+}
+
+// Task 8.3: Badge for approval status filter
+.status-badge {
+  margin-left: $wolf-space-xs;
+  vertical-align: middle;
+
+  .el-badge__content {
+    font-family: $wolf-font-mono;
+    font-variant-numeric: tabular-nums lining-nums;
+    font-size: 10px;
+  }
 }
 
 // 响应式

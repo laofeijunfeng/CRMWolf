@@ -212,19 +212,33 @@ def get_payment_plan_badge_counts(
     ).count()
 
     # Task 8.3: 6. 待我审批的数量（与审批中心一致）
-    # 查询当前审批人是我的审批记录
-    pending_approval_me_count = db.query(Approval).join(
-        PaymentRecord,
-        Approval.business_id == PaymentRecord.id
-    ).join(
-        PaymentPlan,
-        PaymentRecord.payment_plan_id == PaymentPlan.id
-    ).filter(
-        Approval.business_type == BusinessType.PAYMENT,
-        Approval.team_id == team_id,
-        Approval.status == ApprovalStatus.PENDING,
-        PaymentPlan.team_id == team_id
-    ).count()
+    # 查询当前审批节点角色属于当前用户角色集的审批记录
+    from app.crud.role import role_crud
+    from app.models.approval import ApprovalNode
+
+    # 获取当前用户的角色集合
+    user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
+    user_roles = [r.code for r in user_role_objs]
+
+    # 查询待我审批的数量（JOIN ApprovalNode，过滤 approve_role IN user_roles）
+    if not user_roles:
+        # 无任何角色 → 0
+        pending_approval_me_count = 0
+    else:
+        pending_approval_me_query = (
+            db.query(Approval)
+            .join(ApprovalNode, Approval.current_node_id == ApprovalNode.id)
+            .join(PaymentRecord, Approval.business_id == PaymentRecord.id)
+            .join(PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id)
+            .filter(
+                Approval.business_type == BusinessType.PAYMENT,
+                Approval.team_id == team_id,
+                Approval.status == ApprovalStatus.PENDING,
+                PaymentPlan.team_id == team_id,
+                ApprovalNode.approve_role.in_(user_roles)
+            )
+        )
+        pending_approval_me_count = pending_approval_me_query.count()
 
     return {
         "pending": pending_count,

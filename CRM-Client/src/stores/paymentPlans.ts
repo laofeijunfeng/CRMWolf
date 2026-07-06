@@ -26,6 +26,7 @@ export const usePaymentPlansStore = defineStore('paymentPlans', () => {
   const overdueCount = ref<number>(0)
   const pendingSubmitCount = ref<number>(0)
   const pendingApprovalCount = ref<number>(0)
+  const pendingApprovalMeCount = ref<number>(0)  // Task 8.3: 待我审批的数量
 
   // 回款计划列表
   const paymentPlans = ref<PaymentPlanResponse[]>([])
@@ -48,6 +49,7 @@ export const usePaymentPlansStore = defineStore('paymentPlans', () => {
       overdueCount.value = counts.overdue
       pendingSubmitCount.value = counts.pending_submit
       pendingApprovalCount.value = counts.pending_approval
+      pendingApprovalMeCount.value = counts.pending_approval_me  // Task 8.3
     } catch {
       // 静默处理，保持现有值
     }
@@ -113,6 +115,7 @@ export const usePaymentPlansStore = defineStore('paymentPlans', () => {
     overdueCount.value = 0
     pendingSubmitCount.value = 0
     pendingApprovalCount.value = 0
+    pendingApprovalMeCount.value = 0  // Task 8.3
     paymentPlans.value = []
     total.value = 0
     loading.value = false
@@ -125,6 +128,7 @@ export const usePaymentPlansStore = defineStore('paymentPlans', () => {
     overdueCount,
     pendingSubmitCount,
     pendingApprovalCount,
+    pendingApprovalMeCount,  // Task 8.3
     paymentPlans,
     total,
     loading,

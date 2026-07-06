@@ -70,9 +70,26 @@
         stripe
         style="width: 100%"
       >
-        <el-table-column label="申请单号" min-width="200">
+        <el-table-column label="申请单号" min-width="220">
           <template #default="{ row }">
-            <span class="link-text" @click="handleViewDetail(row)">{{ row.application_number }}</span>
+            <div class="application-number-cell">
+              <span class="link-text" @click="handleViewDetail(row)">
+                {{ row.application_number }}
+              </span>
+              <!-- ISSUED 状态 + 有文件：显示下载入口 -->
+              <span
+                v-if="row.status === 'ISSUED' && row.invoice_file_path"
+                class="download-badge"
+                role="button"
+                aria-label="下载发票文件"
+                tabindex="0"
+                @click.stop="downloadInvoiceFile(row)"
+                @keydown.enter="downloadInvoiceFile(row)"
+              >
+                <el-icon class="download-icon"><Download /></el-icon>
+                <span class="download-link">下载</span>
+              </span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="客户名称" min-width="150">
@@ -193,9 +210,10 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessageBox, ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
-import { Plus, Search, ArrowDown, Edit, Check, Delete } from '@element-plus/icons-vue'
+import { Plus, Search, ArrowDown, Edit, Check, Delete, Download } from '@element-plus/icons-vue'
+// Task 3 will add: import { getInvoiceFileUrl } from '@/api/fileUpload'
 import invoiceApi, {
   type InvoiceApplicationResponse,
   type InvoiceApplicationQueryParams
@@ -405,6 +423,17 @@ const handleConfirmInvoiced = async () => {
   }
 }
 
+/**
+ * 下载发票文件
+ * Task 3: 将实现完整的下载逻辑
+ */
+const downloadInvoiceFile = (record: InvoiceApplicationResponse) => {
+  // Task 3 will implement the actual download logic
+  // For now, just show a message that the feature is coming
+  ElMessage.info('下载功能即将上线')
+  console.log('Download invoice file for:', record.id)
+}
+
 const getStatusText = (status: string) => {
   const map: Record<string, string> = {
     'DRAFT': '草稿',
@@ -568,6 +597,45 @@ onMounted(() => {
   &:hover {
     color: $wolf-text-link-hover;
   }
+}
+
+// 申请单号单元格
+.application-number-cell {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;
+}
+
+// 下载徽章
+.download-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: $wolf-primary-light;
+  color: $wolf-primary;
+  border-radius: $wolf-radius-sm;
+  font-size: $wolf-font-size-caption;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+
+  &:hover {
+    background: $wolf-primary;
+    color: #fff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+    outline-offset: 2px;
+  }
+}
+
+.download-icon {
+  font-size: 14px;
+}
+
+.download-link {
+  font-weight: $wolf-font-weight-medium;
 }
 
 // 状态标签（浅底色 + 同色系文字）

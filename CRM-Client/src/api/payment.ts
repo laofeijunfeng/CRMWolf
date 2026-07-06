@@ -197,7 +197,8 @@ export interface BadgeCounts {
   partial: number           // 部分回款的计划数
   overdue: number           // 逾期计划数
   pending_submit: number    // 待提交审批的记录数
-  pending_approval: number  // 审批中的记录数
+  pending_approval: number  // 审批中的记录数（团队总数）
+  pending_approval_me: number  // Task 8.3: 待我审批的数量（与审批中心一致）
 }
 
 /* eslint-disable @typescript-eslint/explicit-function-return-type, @typescript-eslint/explicit-module-boundary-types, crmwolf/require-zod-schema */
