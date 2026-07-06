@@ -675,13 +675,8 @@
 
           <!-- License 管理 -->
           <div v-show="activeTab === 'license-management'" class="content-panel">
-                <div class="panel-header">
-                  <span>License 管理</span>
-                </div>
-                <div class="empty-placeholder">
-                  <el-empty description="License 管理功能正在开发中" />
-                </div>
-              </div>
+            <LicenseManagement :customer-id="customerId" />
+          </div>
         </div>
       </div>
     </div>
@@ -938,6 +933,7 @@ import { ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import FollowUpList from '@/components/FollowUpList.vue'
 import CustomerDetailSidebar from '@/components/CustomerDetailSidebar.vue'
+import LicenseManagement from '@/components/LicenseManagement.vue'
 import customerApi, { type CustomerDetailResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
 import customerFollowUpApi, { type CustomerFollowUpCreate, type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
