@@ -16,9 +16,8 @@
         </div>
 
       <div v-else>
-        <!-- ✅ Task 5: 客户档案面板（可折叠） -->
+        <!-- ✅ 客户档案面板（始终可见，可折叠） -->
         <div
-          v-show="activeTab === 'profile' || profileExpanded"
           class="profile-panel"
           :class="{ expanded: profileExpanded, collapsed: !profileExpanded }"
         >
