@@ -878,7 +878,9 @@
         <el-empty description="计算热力值，评估客户活跃度" />
       </div>
     </el-dialog>
-  </template>
+    </div><!-- detail-content -->
+  </div><!-- detail-layout -->
+</template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
