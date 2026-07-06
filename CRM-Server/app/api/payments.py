@@ -10,7 +10,8 @@ from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.payment import payment_plan_crud, payment_record_crud
 from app.crud.contract import contract_crud
 from app.constants.business_types import BusinessType
-from app.models.payment import PaymentPlanStatus
+from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord, PaymentConfirmationStatus
+from app.models.approval import Approval, ApprovalStatus
 from app.schemas.payment import (
     PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate, PaymentPlanResponse,
     PaymentRecordCreate, PaymentRecordUpdate, PaymentRecordResponse,
@@ -147,6 +148,75 @@ def list_payment_plans(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"查询回款计划失败: {str(e)}"
         )
+
+
+@router.get("/payment-plans/badge-counts", summary="获取回款计划 Badge 数量", description="返回各类待处理数量：pending(未登记)、partial(部分回款)、overdue(逾期)、pending_submit(待提交审批)、pending_approval(审批中)")
+def get_payment_plan_badge_counts(
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    获取回款计划 Badge 数量
+
+    返回：
+    - pending: 未登记的计划数（status=PENDING 且 payment_records.length=0）
+    - partial: 部分回款的计划数（status=PARTIAL）
+    - overdue: 逾期计划数（status=OVERDUE）
+    - pending_submit: 待提交审批的记录数（confirmation_status=PENDING 且无关联审批）
+    - pending_approval: 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）
+    """
+    # 1. 未登记的计划数（PENDING 且没有任何回款记录）
+    pending_count = db.query(PaymentPlan).filter(
+        PaymentPlan.team_id == team_id,
+        PaymentPlan.status == PaymentPlanStatus.PENDING,
+        ~PaymentPlan.payment_records.any()
+    ).count()
+
+    # 2. 部分回款的计划数
+    partial_count = db.query(PaymentPlan).filter(
+        PaymentPlan.team_id == team_id,
+        PaymentPlan.status == PaymentPlanStatus.PARTIAL
+    ).count()
+
+    # 3. 逾期计划数
+    overdue_count = db.query(PaymentPlan).filter(
+        PaymentPlan.team_id == team_id,
+        PaymentPlan.status == PaymentPlanStatus.OVERDUE
+    ).count()
+
+    # 4. 待提交审批的记录数（confirmation_status=PENDING 且没有关联审批）
+    # 查找没有审批记录的回款记录
+    pending_submit_count = db.query(PaymentRecord).filter(
+        PaymentRecord.team_id == team_id,
+        PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING,
+        ~PaymentRecord.id.in_(
+            db.query(Approval.business_id).filter(
+                Approval.business_type == BusinessType.PAYMENT,
+                Approval.team_id == team_id
+            )
+        )
+    ).count()
+
+    # 5. 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）
+    pending_approval_count = db.query(PaymentRecord).join(
+        Approval,
+        PaymentRecord.id == Approval.business_id
+    ).filter(
+        PaymentRecord.team_id == team_id,
+        Approval.business_type == BusinessType.PAYMENT,
+        Approval.team_id == team_id,
+        PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING,
+        Approval.status == ApprovalStatus.PENDING
+    ).count()
+
+    return {
+        "pending": pending_count,
+        "partial": partial_count,
+        "overdue": overdue_count,
+        "pending_submit": pending_submit_count,
+        "pending_approval": pending_approval_count
+    }
 
 
 @router.get("/contracts/{contract_id}/payment-summary", response_model=ContractPaymentSummary, summary="查询合同回款汇总", description="获取指定合同的回款汇总信息，包括合同金额、已回款金额、回款状态、计划完成情况等")
