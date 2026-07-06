@@ -10,8 +10,8 @@ $wolf-icon-size-action: 14px; // 快捷操作图标（比导航图标小）
 $wolf-icon-container: 20px;   // 图标容器宽度（统一）
 
 // ==================== 左侧导航宽度 ====================
-$sidebar-width: 160px;
-$sidebar-collapsed: 60px;
+$sidebar-width: 48px;        // ✅ 收窄到48px（icon-only）
+$sidebar-collapsed: 48px;    // ✅ 折叠状态也是48px
 
 .customer-detail-sidebar {
   width: $sidebar-width;
@@ -113,6 +113,38 @@ $sidebar-collapsed: 60px;
   &:focus-visible {
     outline: 2px solid $wolf-primary;
     outline-offset: -2px;
+  }
+}
+
+// ✅ Task 3: 可折叠导航项样式
+.nav-item.collapsible {
+  position: relative;
+
+  // ✅ 收起状态：视觉反馈
+  &:not(.expanded) {
+    .nav-icon { opacity: 0.6; }  // 收起时图标半透明
+  }
+
+  // ✅ 展开状态：视觉反馈
+  &.expanded {
+    background: $wolf-primary-light;  // 展开时背景高亮
+
+    .nav-icon { color: $wolf-primary; }  // 展开时图标高亮
+  }
+
+  // ✅ 展开/收起箭头（右侧）
+  .collapse-icon {
+    position: absolute;
+    right: $wolf-space-xs;  // 4px
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: $wolf-text-tertiary;
+    transition: transform $wolf-transition-normal;
+  }
+
+  &.expanded .collapse-icon {
+    transform: translateY(-50%) rotate(90deg);  // 展开时箭头向下
   }
 }
 

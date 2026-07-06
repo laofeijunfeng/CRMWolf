@@ -7,6 +7,7 @@
         @nav-change="handleNavChange"
         @show-add-follow-up="showAddFollowUpModal"
         @show-add-contact="showAddContactModal"
+        @profile-toggle="handleProfileToggle"
       />
 
       <!-- 右侧内容区 -->
@@ -16,8 +17,29 @@
         </div>
 
       <div v-else>
-        <!-- 客户信息卡片 -->
-        <div class="info-card">
+        <!-- ✅ Task 5: 客户档案面板（可折叠） -->
+        <div
+          v-show="activeTab === 'profile' || profileExpanded"
+          class="profile-panel"
+          :class="{ expanded: profileExpanded, collapsed: !profileExpanded }"
+        >
+          <!-- ✅ 收起时：只显示简化版客户名称卡片 -->
+          <div v-if="!profileExpanded" class="customer-name-card-compact">
+            <div class="customer-avatar">{{ customerDetail?.account_name?.charAt(0) || '客' }}</div>
+            <div class="customer-info">
+              <div class="customer-name">{{ customerDetail?.account_name }}</div>
+              <div class="customer-status">
+                <span :class="['status-tag', getStatusClass(customerDetail?.status)]">
+                  {{ getStatusText(customerDetail?.status) }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- ✅ 展开时：显示完整客户档案 -->
+          <template v-else>
+            <!-- 客户信息卡片 -->
+            <div class="info-card">
           <div class="info-content">
             <!-- 上部分：标题和统计 -->
             <div class="info-top">
@@ -249,6 +271,8 @@
             </div>
           </div>
         </div>
+          </template>
+        </div><!-- ✅ Task 5: profile-panel 结束 -->
 
         <!-- 内容面板区 -->
         <div class="content-panels">
@@ -935,11 +959,32 @@ const selectedContact = ref<any>(null)
 const showScoreDetails = ref(false)
 const scoreDetails = ref<ScoreDetail[]>([])
 
-const activeTab = ref('followup')
+// ✅ Task 4: 智能折叠状态
+const profileExpanded = ref<boolean>(true)  // 默认：展开
+const userExpandedProfile = ref<boolean>(false)  // 用户是否手动展开过
 
-// 导航切换处理
+const activeTab = ref('profile')  // ✅ Task 4: 默认激活客户档案
+
+// 导航切换处理（✅ Task 4: 添加智能折叠逻辑）
 const handleNavChange = (navKey: string): void => {
   activeTab.value = navKey
+
+  // ✅ 智能折叠逻辑：
+  // - 馰次切换：自动收起客户档案（节省空间）
+  // - 用户手动展开后：不自动收起（尊重用户控制权）
+  if (navKey !== 'profile' && !userExpandedProfile.value) {
+    profileExpanded.value = false  // 自动收起
+  }
+}
+
+// ✅ Task 4: 监听客户档案展开/收起（来自 CustomerDetailSidebar）
+const handleProfileToggle = (expanded: boolean): void => {
+  profileExpanded.value = expanded
+
+  // ✅ 记录用户是否手动展开
+  if (expanded) {
+    userExpandedProfile.value = true
+  }
 }
 
 const handleFollowUpDelete = async (followUp: { id: number }) => {
@@ -1606,6 +1651,9 @@ onMounted(async () => {
 
 <style scoped lang="scss">
 @use '@/styles/variables.scss' as *;
+
+// ✅ Task 5: 补充过渡动画变量（与 CustomerDetailSidebar.scss 一致）
+$wolf-transition-normal: 0.15s ease-out;
 
 // 加载容器 - 为 v-loading 指令提供最小高度
 .loading-container {
@@ -2564,5 +2612,61 @@ onMounted(async () => {
 
 .score-details-empty {
   padding: $wolf-space-lg;
+}
+
+// ✅ Task 5: 简化版客户名称卡片（收起状态）
+.customer-name-card-compact {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;
+  padding: $wolf-space-sm $wolf-space-md;
+  background: $wolf-bg-card;
+  border-radius: $wolf-radius-sm;
+  border: 1px solid $wolf-border-light;
+  margin-bottom: $wolf-space-md;
+
+  .customer-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: $wolf-radius-full;
+    background: $wolf-primary-light;
+    color: $wolf-primary;
+    font-size: 18px;
+    font-weight: $wolf-font-weight-semibold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .customer-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .customer-name {
+    font-size: $wolf-font-size-title;  // 16px
+    font-weight: $wolf-font-weight-semibold;
+    color: $wolf-text-primary;
+  }
+
+  .customer-status {
+    font-size: $wolf-font-size-caption;  // 12px
+    color: $wolf-text-tertiary;
+  }
+}
+
+// ✅ Task 5: 客户档案面板样式
+.profile-panel {
+  transition: all $wolf-transition-normal;
+
+  &.collapsed {
+    // 收起状态：只显示简化版卡片
+  }
+
+  &.expanded {
+    // 展开状态：显示完整客户档案
+  }
 }
 </style>
