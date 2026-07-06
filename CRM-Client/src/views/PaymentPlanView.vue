@@ -73,8 +73,6 @@ const tabBadgeCounts = computed(() => ({
   all: paymentPlansStore.total
 }))
 
-const approvalStatusFilter = ref('all')
-
 const paymentModalVisible = ref(false)
 const paymentForm = ref<PaymentRecordCreate>({
   actual_amount: 0,
@@ -157,48 +155,14 @@ const fetchPaymentPlans = async (): Promise<void> => {
   }
 }
 
-// Task 7.3: Correct approval submission logic
 const filteredPaymentPlans = computed(() => {
-  let plans = paymentPlans.value
-
-  if (approvalStatusFilter.value !== 'all') {
-    plans = plans.filter(plan => {
-      const latestRecord = plan.payment_records?.[plan.payment_records.length - 1] as Record<string, unknown> | undefined
-
-      if (latestRecord === undefined) {
-        return approvalStatusFilter.value === 'pending_submit'
-      }
-
-      const confirmationStatus = latestRecord['confirmation_status'] as string | undefined
-      const approvalId = latestRecord['approval_id'] as number | undefined
-      const approval = latestRecord['approval'] as Record<string, unknown> | undefined
-      const approvalStatus = approval?.['status'] as string | undefined
-
-      // Task 7.3: Check approval_id === null && confirmation_status === 'PENDING' for "提交审批"
-      switch (approvalStatusFilter.value) {
-        case 'pending_submit':
-          // Correct logic: PENDING confirmation with NO approval submitted (approval_id === null/undefined)
-          return confirmationStatus === 'PENDING' && (approvalId === undefined || approvalId === null)
-        case 'pending_approval':
-          return confirmationStatus === 'PENDING' && approvalId !== undefined && approvalId !== null && approvalStatus === 'PENDING'
-        case 'confirmed':
-          return confirmationStatus === 'CONFIRMED'
-        case 'rejected':
-          return confirmationStatus === 'PENDING' && approvalStatus === 'REJECTED'
-        default:
-          return true
-      }
-    })
-  }
-
-  return plans
+  return paymentPlans.value
 })
 
 const handleTabChange = (key: string): void => {
   activeTab.value = key
   pagination.value.current = 1
   searchForm.value.status = ''
-  approvalStatusFilter.value = 'all'
   fetchPaymentPlans()
 }
 
@@ -373,24 +337,6 @@ watch(() => paymentPlansStore.pendingApprovalMeCount, () => {
       </div>
     </div>
 
-    <!-- Approval status filter -->
-    <div class="approval-status-filter">
-      <el-radio-group v-model="approvalStatusFilter">
-        <el-radio-button label="all">全部</el-radio-button>
-        <el-radio-button label="pending_submit">待提交审批</el-radio-button>
-        <el-radio-button label="pending_approval">
-          审批中
-          <el-badge
-            v-if="paymentPlansStore.pendingApprovalMeCount > 0"
-            :value="paymentPlansStore.pendingApprovalMeCount"
-            class="status-badge"
-          />
-        </el-radio-button>
-        <el-radio-button label="confirmed">已确认</el-radio-button>
-        <el-radio-button label="rejected">已驳回</el-radio-button>
-      </el-radio-group>
-    </div>
-
     <!-- Search filter -->
     <div class="filter-card">
       <div class="filter-row">
@@ -445,7 +391,7 @@ watch(() => paymentPlansStore.pendingApprovalMeCount, () => {
           v-loading="loading"
           stripe
           style="width: 100%"
-          :key="activeTab + approvalStatusFilter"
+          :key="activeTab"
         >
           <!-- Task 7.1: 12 columns including computed fields -->
           <el-table-column prop="customer_name" label="客户名称" min-width="150">

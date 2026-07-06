@@ -311,11 +311,24 @@ class PaymentRecordCRUD:
         from app.models.opportunity import Opportunity
         from app.models.approval import Approval, ApprovalStatus
         from app.constants.business_types import BusinessType
+        from sqlalchemy.orm import contains_eager, joinedload
 
+        # Query with eager loading for customer_name, contract_name, stage_name, approval info
         records_query = db.query(PaymentRecord).join(
             PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id
         ).join(
             Contract, PaymentPlan.contract_id == Contract.id
+        ).outerjoin(
+            Customer, Contract.customer_id == Customer.id
+        ).options(
+            # Eager load payment_plan (contains_eager since we joined)
+            contains_eager(PaymentRecord.payment_plan).contains_eager(
+                PaymentPlan.contract
+            ).contains_eager(
+                Contract.customer
+            ),
+            # Eager load approval for current_approver_name
+            joinedload(PaymentRecord.approval)
         )
         records_query = records_query.filter(PaymentRecord.team_id == team_id)
 
@@ -371,22 +384,8 @@ class PaymentRecordCRUD:
         total = records_query.count()
         records = records_query.order_by(PaymentRecord.payment_date.desc()).offset(skip).limit(limit).all()
 
-        for record in records:
-            payment_plan = record.payment_plan if hasattr(record, 'payment_plan') else None
-            if not payment_plan:
-                payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == record.payment_plan_id).first()
-                if payment_plan:
-                    record.payment_plan = payment_plan
-
-            if payment_plan:
-                contract = payment_plan.contract if hasattr(payment_plan, 'contract') else None
-                if not contract:
-                    contract = db.query(Contract).filter(Contract.id == payment_plan.contract_id).first()
-                    if contract:
-                        payment_plan.contract = contract
-
-                # Note: Customer and Opportunity are optional - may not be loaded in test fixtures
-                # The API layer will handle enrichment if needed
+        # Records now have eager-loaded: payment_plan, contract, customer, approval
+        # No need for manual filling
 
         return records, total
     
