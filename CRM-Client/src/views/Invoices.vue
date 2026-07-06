@@ -699,4 +699,66 @@ onMounted(() => {
   .filter-item { width: 100%; }
   .filter-tabs { flex-wrap: wrap; }
 }
+
+// 下载徽章容器
+.application-number-cell {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm;  // UX: touch-spacing ≥ 8px
+}
+
+// 下载徽章（含 UX 规则）
+.download-badge {
+  // UX: touch-target-size (CRITICAL) - 最小 44px 高度
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 44px;  // 扩展 hitSlop
+  min-width: 44px;
+  padding: 8px 12px;  // 增大 padding 以满足 44px
+  background: $wolf-success-bg;
+  border-radius: $wolf-radius-sm;
+  font-size: $wolf-font-size-caption;
+  cursor: pointer;  // UX: cursor-pointer
+  transition: all 0.15s ease-out;  // UX: duration-timing 150ms
+
+  .download-icon {
+    color: $wolf-success-text;
+    font-size: 14px;
+  }
+
+  .download-link {
+    color: $wolf-success-text;
+    font-weight: $wolf-font-weight-medium;
+  }
+
+  // UX: hover-vs-tap (HIGH) - hover 状态
+  &:hover {
+    background: $wolf-success-border;
+    transform: translateY(-1px);
+  }
+
+  // UX: press-feedback (HIGH) - active/pressed 状态
+  &:active {
+    transform: scale(0.95);
+    opacity: 0.9;
+  }
+
+  // UX: focus-states (CRITICAL) - focus ring
+  &:focus-visible {
+    outline: 2px solid $wolf-primary;
+    outline-offset: 2px;
+  }
+
+  // UX: reduced-motion (MEDIUM)
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+    transform: none;
+
+    &:hover, &:active {
+      transform: none;
+    }
+  }
+}
 </style>
