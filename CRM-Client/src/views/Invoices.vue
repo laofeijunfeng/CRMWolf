@@ -213,7 +213,7 @@ import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
 import { Plus, Search, ArrowDown, Edit, Check, Delete, Download } from '@element-plus/icons-vue'
-// Task 3 will add: import { getInvoiceFileUrl } from '@/api/fileUpload'
+import { getInvoiceFileUrl } from '@/api/fileUpload'
 import invoiceApi, {
   type InvoiceApplicationResponse,
   type InvoiceApplicationQueryParams
@@ -424,14 +424,16 @@ const handleConfirmInvoiced = async () => {
 }
 
 /**
- * 下载发票文件
- * Task 3: 将实现完整的下载逻辑
+ * 直接下载发票文件（列表页）
+ * UX: loading-states - 添加 Toast 提示
  */
-const downloadInvoiceFile = (record: InvoiceApplicationResponse) => {
-  // Task 3 will implement the actual download logic
-  // For now, just show a message that the feature is coming
-  ElMessage.info('下载功能即将上线')
-  console.log('Download invoice file for:', record.id)
+const downloadInvoiceFile = (row: InvoiceApplicationResponse): void => {
+  ElMessage.success({
+    message: '正在下载发票文件',
+    duration: 1500
+  })
+  const url = getInvoiceFileUrl(row.id)
+  window.open(url, '_blank')
 }
 
 const getStatusText = (status: string) => {
