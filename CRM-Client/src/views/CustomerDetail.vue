@@ -16,28 +16,8 @@
         </div>
 
       <div v-else>
-        <!-- ✅ 客户档案面板（始终可见，可折叠） -->
-        <div
-          class="profile-panel"
-          :class="{ expanded: profileExpanded, collapsed: !profileExpanded }"
-        >
-          <!-- ✅ 收起时：只显示简化版客户名称卡片 -->
-          <div v-if="!profileExpanded" class="customer-name-card-compact">
-            <div class="customer-avatar">{{ customerDetail?.account_name?.charAt(0) || '客' }}</div>
-            <div class="customer-info">
-              <div class="customer-name">{{ customerDetail?.account_name }}</div>
-              <div class="customer-status">
-                <span :class="['status-tag', getStatusClass(customerDetail?.status)]">
-                  {{ getStatusText(customerDetail?.status) }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- ✅ 展开时：显示完整客户档案 -->
-          <template v-else>
-            <!-- 客户信息卡片 -->
-            <div class="info-card">
+        <!-- ✅ 客户基本信息卡片：始终显示 -->
+        <div class="info-card">
           <div class="info-content">
             <!-- 上部分：标题和统计 -->
             <div class="info-top">
@@ -157,20 +137,18 @@
           </div>
         </div>
 
-        <!-- 客户档案卡片 -->
-        <div class="profile-card">
+        <!-- ✅ 客户档案卡片（可折叠） -->
+        <div v-show="profileExpanded" class="profile-card">
           <div class="card-title">
             <span>客户档案</span>
             <div class="profile-controls">
-              <!-- ✅ Task 3: 展开/收起按钮 -->
+              <!-- ✅ 展开时显示收起按钮 -->
               <el-button
                 class="wolf-btn wolf-btn--text collapse-btn"
-                @click="profileExpanded = !profileExpanded"
+                @click="profileExpanded = false"
               >
-                <el-icon>
-                  <component :is="profileExpanded ? ArrowDown : ArrowRight" />
-                </el-icon>
-                {{ profileExpanded ? '收起' : '展开' }}
+                <el-icon><ArrowDown /></el-icon>
+                收起
               </el-button>
 
               <!-- 原有的状态标签 -->
@@ -283,8 +261,17 @@
             </div>
           </div>
         </div>
-          </template>
-        </div><!-- ✅ Task 5: profile-panel 结束 -->
+
+        <!-- ✅ 收起时显示展开提示 -->
+        <div v-if="!profileExpanded" class="profile-expand-hint">
+          <el-button
+            class="wolf-btn wolf-btn--text expand-btn"
+            @click="profileExpanded = true; userExpandedProfile = true"
+          >
+            <el-icon><ArrowRight /></el-icon>
+            展开客户档案
+          </el-button>
+        </div>
 
         <!-- 内容面板区 -->
         <div class="content-panels">
@@ -1786,6 +1773,29 @@ $wolf-transition-normal: 0.15s ease-out;
   .el-icon {
     font-size: 14px;
     transition: transform $wolf-transition-normal;
+  }
+}
+
+// ✅ 展开提示样式
+.profile-expand-hint {
+  display: flex;
+  justify-content: center;
+  padding: $wolf-space-md 0;
+}
+
+.expand-btn {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs;
+  font-size: $wolf-font-size-caption;
+  color: $wolf-text-tertiary;
+
+  &:hover {
+    color: $wolf-brand-primary;
+  }
+
+  .el-icon {
+    font-size: 14px;
   }
 }
 
