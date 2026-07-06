@@ -227,6 +227,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '回款管理' }
       },
       {
+        path: 'payments/:id',
+        name: 'PaymentPlanDetail',
+        component: () => import('@/views/PaymentPlanDetail.vue'),
+        meta: { requiresAuth: true, title: '回款计划详情' }
+      },
+      {
         path: 'invoices',
         name: 'Invoices',
         component: () => import('@/views/Invoices.vue'),

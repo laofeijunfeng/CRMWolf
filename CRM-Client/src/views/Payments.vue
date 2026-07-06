@@ -413,9 +413,7 @@ const formatDate = (dateStr: string): string => {
 }
 
 const viewDetail = (plan: PaymentPlanWithDetails): void => {
-  if (plan.contract_id) {
-    router.push(`/contracts/${plan.contract_id}`)
-  }
+  router.push(`/payments/${plan.id}`)
 }
 
 const handleRegisterPayment = (plan: PaymentPlanWithDetails): void => {

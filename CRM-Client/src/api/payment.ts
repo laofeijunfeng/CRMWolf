@@ -11,6 +11,8 @@ export interface PaymentPlanBatchCreate {
   plans: PaymentPlanCreate[]
 }
 
+export type PaymentConfirmationStatus = 'PENDING' | 'CONFIRMED' | 'DISPUTED'
+
 export interface PaymentRecordInfo {
   id: number
   actual_amount: number
@@ -18,6 +20,7 @@ export interface PaymentRecordInfo {
   proof_attachment?: string
   creator_name?: string
   notes?: string
+  confirmation_status?: PaymentConfirmationStatus
   created_time: string
 }
 
@@ -33,9 +36,19 @@ export interface PaymentPlanResponse {
   due_date: string
   notes?: string
   status: PaymentPlanStatus
+  status_name?: string
   paid_amount?: number
   remaining_amount?: number
   payment_records: PaymentRecordInfo[]
+  contract_name?: string
+  customer_id?: number
+  customer_name?: string
+  opportunity_id?: number
+  opportunity_name?: string
+  creator_id?: string
+  is_invoiced?: boolean
+  invoice_count?: number
+  invoiced_amount?: number
   created_time: string
   last_modified_time: string
 }
@@ -151,13 +164,17 @@ export interface PaymentRecordWithDetails extends PaymentRecordResponse {
 }
 
 const paymentApi = {
-  getPaymentSummary: (contractId: number) => {
+  getPaymentSummary: (contractId: number): Promise<ContractPaymentSummary> => {
     return request.get<ContractPaymentSummary>(`/v1/payments/contracts/${contractId}/payment-summary`)
   },
 
-  getPaymentPlans: (contractId: number, status?: PaymentPlanStatus) => {
+  getPaymentPlans: (contractId: number, status?: PaymentPlanStatus): Promise<PaymentPlanResponse[]> => {
     const params = status ? { status } : {}
     return request.get<PaymentPlanResponse[]>(`/v1/payments/contracts/${contractId}/payment-plans`, { params })
+  },
+
+  getPaymentPlanDetail: (planId: number): Promise<PaymentPlanResponse> => {
+    return request.get<PaymentPlanResponse>(`/v1/payments/payment-plans/${planId}`)
   },
 
   createPaymentPlans: (contractId: number, data: PaymentPlanBatchCreate) => {

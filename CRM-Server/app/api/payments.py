@@ -204,6 +204,39 @@ def get_payment_summary(
     )
 
 
+@router.get("/payment-plans/{plan_id}", response_model=PaymentPlanResponse, summary="查询回款计划详情", description="获取指定回款计划的详细信息，包括计划金额、已回款金额、待回款金额、回款记录列表、关联的合同和客户信息。")
+def get_payment_plan_detail(
+    plan_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="回款计划不存在"
+        )
+
+    # 计算已回款金额和待回款金额
+    paid_amount = sum(float(r.actual_amount) for r in plan.payment_records)
+    plan.paid_amount = paid_amount
+    plan.remaining_amount = float(plan.planned_amount) - paid_amount
+
+    # 填充关联信息
+    if hasattr(plan, 'contract') and plan.contract:
+        plan.contract_name = plan.contract.contract_name
+        plan.creator_id = plan.contract.creator_id
+        if hasattr(plan.contract, 'customer') and plan.contract.customer:
+            plan.customer_id = plan.contract.customer.id
+            plan.customer_name = plan.contract.customer.account_name
+        if hasattr(plan.contract, 'opportunity') and plan.contract.opportunity:
+            plan.opportunity_id = plan.contract.opportunity.id
+            plan.opportunity_name = plan.contract.opportunity.opportunity_name
+
+    return plan
+
+
 @router.put("/payment-plans/{plan_id}", response_model=PaymentPlanResponse, summary="修改回款计划", description="修改指定的回款计划。已完成的计划或已有回款记录的计划不能修改金额和日期，只能修改阶段名称和备注。")
 def update_payment_plan(
     plan_id: int,
