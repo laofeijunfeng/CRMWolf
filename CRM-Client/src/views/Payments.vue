@@ -208,12 +208,14 @@ import paymentApi, {
 } from '@/api/payment'
 import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
+import { usePaymentPlansStore } from '@/stores/paymentPlans'
 import { formatCurrency } from '@/utils/format'
 import { logger } from '@/utils/logger'
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
 const approvalStore = useApprovalStore()
+const paymentPlansStore = usePaymentPlansStore()
 
 // v-permission 门控：仅 payment:submit 持有者见「提交审批」按钮
 const paymentSubmitPermission = 'payment:submit'
