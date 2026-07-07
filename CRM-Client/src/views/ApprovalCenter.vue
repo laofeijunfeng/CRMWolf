@@ -8,7 +8,6 @@
   （business_type）+ 表格 + 右侧 el-drawer 内嵌 ApprovalProcessGeneric。
 
   C-DSG-7 落本组件部分：
-    条1 批量同意/拒绝按钮（仅对当前用户可审批选中行启用，走 store.bulkApprove）
     条4 「我提交的」tab 对 REJECTED 行显示「修改并重新提交」（update→DRAFT→submit）
     条5 超时徽章列（overdue_hours>=48）+ 待我审批按 overdue_hours 降序
     条7 抽屉信息层级固化：①el-descriptions 决策字段置顶 ②timeline ③操作吸底
@@ -99,34 +98,6 @@
         <div class="card-header">
           <div class="card-title-group">
             <span class="card-title">审批列表</span>
-            <span v-if="selectedRows.length > 0" class="card-tag primary">
-              已选择 {{ selectedRows.length }} 项
-            </span>
-          </div>
-          <div
-            v-if="activeTab === 'pending'"
-            class="card-actions"
-          >
-            <el-button
-              data-testid="bulk-approve-btn"
-              size="small"
-              type="primary"
-              :loading="bulkPending"
-              :disabled="bulkPending || selectedRows.length === 0"
-              @click="handleBulkApprove"
-            >
-              批量同意
-            </el-button>
-            <el-button
-              data-testid="bulk-reject-btn"
-              size="small"
-              type="danger"
-              :loading="bulkPending"
-              :disabled="bulkPending || selectedRows.length === 0"
-              @click="handleBulkReject"
-            >
-              批量拒绝
-            </el-button>
           </div>
         </div>
 
@@ -137,9 +108,7 @@
           stripe
           style="width: 100%"
           row-class-name="approval-row"
-          @selection-change="handleSelectionChange"
         >
-          <el-table-column v-if="activeTab === 'pending'" type="selection" width="55" />
           <el-table-column label="单号" min-width="180">
             <template #default="{ row }">
               <span
@@ -396,43 +365,6 @@
       </div>
     </el-drawer>
 
-    <!-- 批量驳回理由弹窗（条1：理由对全部选中行应用） -->
-    <el-dialog
-      v-model="bulkRejectVisible"
-      data-testid="bulk-reject-dialog"
-      title="批量驳回审批"
-      width="480px"
-      :close-on-click-modal="false"
-    >
-      <el-alert
-        type="warning"
-        :show-icon="true"
-        :closable="false"
-        style="margin-bottom: 12px"
-      >
-        请填写驳回理由，提交人将据此修改。理由对全部 {{ selectedRows.length }} 条选中审批同时应用。
-      </el-alert>
-      <el-input
-        v-model="bulkRejectReason"
-        data-testid="bulk-reject-reason"
-        type="textarea"
-        :rows="4"
-        placeholder="请填写驳回理由"
-        maxlength="500"
-        show-word-limit
-      />
-      <template #footer>
-        <el-button @click="bulkRejectVisible = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="bulkPending"
-          :disabled="bulkPending"
-          data-testid="bulk-reject-confirm-btn"
-          @click="confirmBulkReject"
-        >确定</el-button>
-      </template>
-    </el-dialog>
-
     <!-- 移动端快速驳回弹窗 -->
     <el-dialog
       v-model="quickRejectVisible"
@@ -498,15 +430,10 @@ const total = ref<number>(0)
 const rows = ref<ApprovalListItem[]>([])
 const loadError = ref<LoadError>(null)
 
-const selectedRows = ref<ApprovalListItem[]>([])
 const drawerVisible = ref<boolean>(false)
 const currentRow = ref<ApprovalListItem | null>(null)
 const triggerRowIndex = ref<number>(-1)
 const focusedRowEl = ref<HTMLElement | null>(null)
-
-const bulkPending = ref<boolean>(false)
-const bulkRejectVisible = ref<boolean>(false)
-const bulkRejectReason = ref<string>('')
 
 const resubmitPendingId = ref<number | null>(null)
 
@@ -578,7 +505,6 @@ const reload = (): void => {
 
 const handleTabChange = (): void => {
   page.value = 1
-  selectedRows.value = []
   fetchList()
 }
 
@@ -591,10 +517,6 @@ const resetFilter = (): void => {
   filterForm.value.business_type = ''
   page.value = 1
   fetchList()
-}
-
-const handleSelectionChange = (selection: ApprovalListItem[]): void => {
-  selectedRows.value = selection
 }
 
 const copyNumber = async (num: string): Promise<void> => {
@@ -746,90 +668,6 @@ const confirmQuickReject = async (): Promise<void> => {
 const onResubmit = (): void => {
   if (currentRow.value == null) return
   handleResubmit(currentRow.value)
-}
-
-// E6/E8：批量同意（逐条独立事务，部分成功汇总 toast）
-const handleBulkApprove = async (): Promise<void> => {
-  if (selectedRows.value.length === 0) return
-  try {
-    await ElMessageBox.confirm(
-      `确认同意选中的 ${selectedRows.value.length} 条审批吗？`,
-      '批量同意',
-      { type: 'success' }
-    )
-  } catch {
-    return
-  }
-  bulkPending.value = true
-  try {
-    const firstRow = selectedRows.value[0]
-    if (!firstRow) return
-    const ids = selectedRows.value.map(r => r.business_id)
-    const updatedTimes: Record<string, string> = {}
-    selectedRows.value.forEach(r => { updatedTimes[String(r.business_id)] = r.updated_time })
-    const res = await store.bulkApprove(
-      firstRow.business_type,
-      ids,
-      'APPROVE',
-      '批量审批通过',
-      updatedTimes
-    )
-    announceBulkResult(res.success_count, res.failed.length, '同意')
-    selectedRows.value = []
-    fetchList()
-  } catch {
-    // 拦截器已 toast
-  } finally {
-    bulkPending.value = false
-  }
-}
-
-const handleBulkReject = (): void => {
-  if (selectedRows.value.length === 0) return
-  bulkRejectReason.value = ''
-  bulkRejectVisible.value = true
-}
-
-const confirmBulkReject = async (): Promise<void> => {
-  const reason = bulkRejectReason.value.trim()
-  if (!reason) {
-    ElMessage.warning('请填写驳回理由，提交人将据此修改')
-    return
-  }
-  if (selectedRows.value.length === 0) return
-  bulkPending.value = true
-  try {
-    const firstRow = selectedRows.value[0]
-    if (!firstRow) return
-    const ids = selectedRows.value.map(r => r.business_id)
-    const updatedTimes: Record<string, string> = {}
-    selectedRows.value.forEach(r => { updatedTimes[String(r.business_id)] = r.updated_time })
-    const res = await store.bulkApprove(
-      firstRow.business_type,
-      ids,
-      'REJECT',
-      reason,
-      updatedTimes
-    )
-    announceBulkResult(res.success_count, res.failed.length, '驳回')
-    bulkRejectVisible.value = false
-    selectedRows.value = []
-    fetchList()
-  } catch {
-    // 拦截器已 toast
-  } finally {
-    bulkPending.value = false
-  }
-}
-
-const announceBulkResult = (success: number, failed: number, verb: string): void => {
-  if (failed === 0) {
-    ElMessage.success(`已${verb} ${success} 条`)
-  } else if (success === 0) {
-    ElMessage.error(`全部${verb}失败（${failed} 条），可重试`)
-  } else {
-    ElMessage.warning(`成功 ${success} 条，失败 ${failed} 条，失败行可重试`)
-  }
 }
 
 // 键盘快捷键（条9）：J/K 上下行、A 同意、R 驳回、Enter 开抽屉、Esc 关抽屉

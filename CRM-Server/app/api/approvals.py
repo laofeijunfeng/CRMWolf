@@ -22,9 +22,6 @@ from app.schemas.approval import (
 from app.schemas.approval_generic import (
     ApprovalSubmitRequest as GenericApprovalSubmitRequest,
     GenericApprovalSubmitResponse,
-    BulkApproveRequest,
-    BulkApproveResponse,
-    BulkApproveFailedItem,
     ApprovalListItemResponse,
     ApprovalGenericListResponse,
 )
@@ -1183,7 +1180,6 @@ def _check_next_node_has_approvers(
 #   由端点补写 reviewer_id / review_comment 两字段（不扩适配器签名）
 # - cancel：approval_crud.cancel 内部校验 submitter_id==user_id
 # - detail：get_by_entity → 序列化返回
-# - /bulk-approve（E6）：逐条独立事务，部分成功汇总，不整体事务
 # - 旧 `/contracts/{contract_id}/submit|approve|cancel|detail` 保留为 wrapper，
 #   合同回归契约（E1）由此保证。
 # ============================================================================
@@ -1651,118 +1647,6 @@ def detail_generic_approval(
 
 
 @router.post(
-    "/bulk-approve",
-    response_model=BulkApproveResponse,
-    summary="批量审批（E6）",
-    description="""
-对多条同类型业务单据批量执行审批操作。
-
-**E6 拍板**：逐条独立事务，部分成功汇总，不整体事务——避免一条失败全回滚让审批人白做。
-
-**返回字段：**
-- success_count: 成功审批的条数
-- failed: 失败条目列表 `[{id, reason}]`，乐观锁冲突单列 reason="已被他人处理"
-""",
-)
-async def bulk_approve(
-    payload: BulkApproveRequest,
-    db: Session = Depends(get_db),
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-):
-    _validate_entity_type(payload.entity_type)
-
-    from app.schemas.approval import ApprovalActionRequest as _ApprovalActionReq
-
-    success_count = 0
-    failed: list[BulkApproveFailedItem] = []
-
-    for bid in payload.ids:
-        # 逐条独立事务：approve 内部 db.commit()，单条失败 db.rollback() 不影响他条
-        try:
-            approval = approval_crud.get_by_entity(
-                db, payload.entity_type, bid, team_id
-            )
-            if not approval:
-                raise ValueError("审批实例不存在")
-            if not approval.current_node:
-                raise ValueError("当前审批节点不存在")
-
-            # 角色校验（与单条 approve 端点一致）
-            user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-            role_codes = {r.code for r in user_roles}
-            if approval.current_node.approve_role not in role_codes:
-                raise ValueError(f"需要角色: {approval.current_node.approve_role}")
-
-            # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE 通用，M-3 泛化）
-            # 复用 _check_self_approval_permission；helper 抛 HTTPException，
-            # 这里转 ValueError 由 bulk 失败汇总逻辑计入 failed（reason=detail 文案）。
-            try:
-                _check_self_approval_permission(
-                    db, current_user, team_id, payload.entity_type, bid
-                )
-            except HTTPException as e:
-                raise ValueError(str(e.detail)) from None
-
-            # 取该条的乐观锁时间戳
-            ut_raw = None
-            if payload.updated_times:
-                v = payload.updated_times.get(str(bid))
-                if v:
-                    try:
-                        ut_raw = _datetime.fromisoformat(v)
-                    except (ValueError, TypeError):
-                        ut_raw = None
-
-            req = _ApprovalActionReq(
-                action=payload.action,
-                comment=payload.comment,
-                updated_time=ut_raw,
-            )
-
-            approval_crud.approve(
-                db, approval, req, str(current_user.id), current_user.name
-            )
-
-            # D3 端点回写（INVOICE）——审批已生效，reviewer 写失败仅记日志不影响成功计数
-            if payload.entity_type == BusinessType.INVOICE:
-                inv_adapter = get_adapter(BusinessType.INVOICE)
-                invoice = inv_adapter.get_entity(db, approval.business_id, approval.team_id)
-                if invoice is not None:
-                    try:
-                        invoice.reviewer_id = str(current_user.id)
-                        invoice.review_comment = payload.comment
-                        db.commit()
-                    except Exception as reviewer_err:
-                        logger.error(
-                            "reviewer 回写失败 approval_id=%s: %s",
-                            approval.id, reviewer_err
-                        )
-                        db.rollback()
-
-            success_count += 1
-        except ValueError as e:
-            db.rollback()
-            msg = str(e)
-            if "审批已被其他用户处理" in msg:
-                reason = "已被他人处理"
-            else:
-                reason = msg
-            failed.append(BulkApproveFailedItem(id=bid, reason=reason))
-        except Exception as e:  # noqa: BLE001
-            db.rollback()
-            failed.append(BulkApproveFailedItem(id=bid, reason=str(e)))
-
-    log_approval_operation(
-        operation="BulkApprove",
-        operator=current_user.name,
-        flow_direction=f"success={success_count}, failed={len(failed)}",
-        reason=payload.entity_type,
-        business_type=payload.entity_type,
-        level=20,
-    )
-
-    return BulkApproveResponse(success_count=success_count, failed=failed)
 
 
 # ============================================================================
