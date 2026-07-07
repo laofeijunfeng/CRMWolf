@@ -28,11 +28,40 @@
         </el-radio-group>
       </el-form-item>
       <el-form-item label="关联合同" prop="contract_id" v-if="formData.license_type === 'OFFICIAL'">
-        <el-select v-model="formData.contract_id" placeholder="选择合同（正式 License 必选）" style="width: 100%">
-          <el-option label="请在客户合同 Tab 中创建合同后选择" value="" disabled />
-          <!-- TODO: 需要从 API 加载客户合同列表 -->
+        <el-select
+          v-model="formData.contract_id"
+          placeholder="选择合同（正式 License 必选）"
+          style="width: 100%"
+          :loading="loadingContracts"
+        >
+          <el-option
+            v-if="contracts.length === 0 && !loadingContracts"
+            label="请在客户合同 Tab 中创建合同后选择"
+            value=""
+            disabled
+          />
+          <el-option
+            v-for="c in contracts"
+            :key="c.id"
+            :label="c.contract_name"
+            :value="c.id"
+          >
+            <span>{{ c.contract_name }}</span>
+            <el-tag
+              :type="c.status === 'EFFECTIVE' ? 'success' : 'primary'"
+              size="small"
+              style="margin-left: 8px"
+            >
+              {{ c.status === 'EFFECTIVE' ? '已生效' : '已签署' }}
+            </el-tag>
+          </el-option>
         </el-select>
-        <div class="form-tip">正式 License 必须关联合同</div>
+        <div class="form-tip" v-if="contracts.length > 0">
+          已自动选择最新审批通过的合同
+        </div>
+        <div class="form-tip" v-else>
+          正式 License 必须关联合同
+        </div>
       </el-form-item>
       <el-form-item label="到期时间" prop="expiry_date">
         <el-date-picker
@@ -59,8 +88,13 @@ import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import licenseApplicationApi from '@/api/licenseApplication'
+import contractApi from '@/api/contract'
 import type { DeploymentInfo } from '@/schemas/deployment'
-import type { LicenseApplication, LicenseApplicationCreate } from '@/schemas/licenseApplication'
+import type { LicenseApplication } from '@/schemas/licenseApplication'
+import type { ContractListResponse } from '@/api/contract'
+
+// Approved contract statuses (SIGNED = approved, EFFECTIVE = in effect)
+const APPROVED_STATUSES = ['SIGNED', 'EFFECTIVE']
 
 const props = defineProps<{
   visible: boolean
@@ -91,6 +125,54 @@ const formData = ref({
   remark: ''
 })
 
+// Fetch approved contracts for this customer
+const contracts = ref<ContractListResponse[]>([])
+const loadingContracts = ref(false)
+
+const loadContracts = async (): void => {
+  if (!props.customerId) return
+  loadingContracts.value = true
+  try {
+    const allContracts = await contractApi.getCustomerContracts(props.customerId)
+    // Filter only approved contracts (SIGNED or EFFECTIVE)
+    contracts.value = allContracts.filter(c => APPROVED_STATUSES.includes(c.status))
+  } catch {
+    // Don't show error to user, just leave contracts empty
+    contracts.value = []
+  } finally {
+    loadingContracts.value = false
+  }
+}
+
+// Auto-select latest approved contract when switching to OFFICIAL
+watch(() => formData.value.license_type, (newType): void => {
+  if (newType === 'OFFICIAL' && formData.value.contract_id === undefined && contracts.value.length > 0) {
+    // Sort by created_time descending and pick the latest
+    const sortedContracts = [...contracts.value].sort((a, b) =>
+      new Date(b.created_time).getTime() - new Date(a.created_time).getTime()
+    )
+    // sortedContracts[0] exists because contracts.value.length > 0
+    const latestContract = sortedContracts[0]
+    if (latestContract) {
+      formData.value.contract_id = latestContract.id
+    }
+  }
+})
+
+// Load contracts when dialog opens
+watch(() => props.visible, (visible): void => {
+  if (visible) {
+    loadContracts()
+    // Auto-select default deployment info if exists and not editing
+    if (!props.application) {
+      const defaultDeployment = props.deployments.find(d => d.is_default)
+      if (defaultDeployment !== undefined && formData.value.deployment_info_id === undefined) {
+        formData.value.deployment_info_id = defaultDeployment.id
+      }
+    }
+  }
+})
+
 const rules: FormRules = {
   deployment_info_id: [
     { required: true, message: '请选择部署信息', trigger: 'change' }
@@ -100,8 +182,8 @@ const rules: FormRules = {
   ],
   contract_id: [
     {
-      validator: (rule, value, callback) => {
-        if (formData.value.license_type === 'OFFICIAL' && !value) {
+      validator: (_rule, value, callback): void => {
+        if (formData.value.license_type === 'OFFICIAL' && value === undefined) {
           callback(new Error('正式 License 必须关联合同'))
         } else {
           callback()
@@ -115,26 +197,29 @@ const rules: FormRules = {
   ]
 }
 
-const disabledDate = (date: Date) => {
+const disabledDate = (date: Date): boolean => {
   return date <= new Date()
 }
 
 // 格式化日期为 YYYY-MM-DD
 const formatDate = (date: Date | string): string => {
-  if (typeof date === 'string') return date.split('T')[0]
+  if (typeof date === 'string') {
+    const parts = date.split('T')
+    return parts[0] ?? ''
+  }
   const d = new Date(date)
-  return d.toISOString().split('T')[0]
+  return d.toISOString().split('T')[0] ?? ''
 }
 
-watch(() => props.application, (val) => {
+watch(() => props.application, (val): void => {
   if (val) {
     formData.value = {
       customer_id: props.customerId,
       deployment_info_id: val.deployment_info_id ?? undefined,
       license_type: val.license_type,
       contract_id: val.contract_id ?? undefined,
-      expiry_date: val.expiry_date ? formatDate(val.expiry_date) : '',
-      remark: val.remark || ''
+      expiry_date: val.expiry_date !== null && val.expiry_date !== '' ? formatDate(val.expiry_date) : '',
+      remark: val.remark ?? ''
     }
   } else {
     formData.value = {
@@ -148,22 +233,32 @@ watch(() => props.application, (val) => {
   }
 }, { immediate: true })
 
-const handleSubmit = async () => {
+const handleSubmit = async (): void => {
   try {
     await formRef.value?.validate()
     loading.value = true
 
-    // 转换日期格式
+    // 转换日期格式并处理可选字段
     const submitData = {
-      ...formData.value,
-      expiry_date: formData.value.expiry_date ? formatDate(formData.value.expiry_date) : ''
+      customer_id: formData.value.customer_id,
+      deployment_info_id: formData.value.deployment_info_id ?? null,
+      license_type: formData.value.license_type,
+      contract_id: formData.value.contract_id ?? null,
+      expiry_date: formData.value.expiry_date !== '' ? formatDate(formData.value.expiry_date) : '',
+      remark: formData.value.remark ?? null
     }
 
     let applicationId: number
 
     if (props.application) {
       // 编辑模式：更新现有申请
-      await licenseApplicationApi.updateApplication(props.application.id, submitData)
+      const updateData = {
+        deployment_info_id: submitData.deployment_info_id,
+        contract_id: submitData.contract_id,
+        expiry_date: submitData.expiry_date,
+        remark: submitData.remark
+      }
+      await licenseApplicationApi.updateApplication(props.application.id, updateData)
       applicationId = props.application.id
     } else {
       // 新建模式：创建申请
@@ -176,16 +271,17 @@ const handleSubmit = async () => {
 
     ElMessage.success('License 申请已提交，等待审批')
     emit('success')
-  } catch (error: any) {
+  } catch (error) {
     if (error !== false) {
-      ElMessage.error(error.message || '操作失败')
+      const err = error as { message?: string }
+      ElMessage.error(err.message ?? '操作失败')
     }
   } finally {
     loading.value = false
   }
 }
 
-const handleClose = () => {
+const handleClose = (): void => {
   formRef.value?.resetFields()
 }
 </script>
