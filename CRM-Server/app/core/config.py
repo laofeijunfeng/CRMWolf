@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     FEISHU_APP_ID: str = ""
     FEISHU_APP_SECRET: str = ""
 
+    # 前端应用地址（用于飞书通知跳转链接）
+    FRONTEND_URL: str = ""  # 例如: https://crm.example.com
+
     # 邮件服务配置
     SMTP_PROVIDER: str = "console"  # console | smtp | aliyun
     SMTP_HOST: str = ""

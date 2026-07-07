@@ -136,12 +136,53 @@ class FeishuService:
         user_id: str,
         title: str,
         content: str,
+        button_url: Optional[str] = None,
         tenant_access_token: Optional[str] = None
     ) -> bool:
+        """发送飞书消息卡片（支持按钮链接）
+
+        Args:
+            user_id: 用户 open_id
+            title: 卡片标题
+            content: 卡片内容（lark_md 格式）
+            button_url: 可选按钮跳转链接
+            tenant_access_token: 租户访问令牌
+
+        Returns:
+            bool: 发送成功返回 True
+        """
         try:
             if not tenant_access_token:
                 tenant_access_token = await self.get_tenant_access_token()
-            
+
+            # 构建消息卡片元素
+            elements = [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": content
+                    }
+                }
+            ]
+
+            # 添加按钮（如果有）
+            if button_url:
+                elements.append({
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": "查看详情"
+                            },
+                            "url": button_url,
+                            "type": "primary"
+                        }
+                    ]
+                })
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.base_url}/open-apis/message/v4/send",
@@ -160,15 +201,7 @@ class FeishuService:
                                 },
                                 "template": "blue"
                             },
-                            "elements": [
-                                {
-                                    "tag": "div",
-                                    "text": {
-                                        "tag": "lark_md",
-                                        "content": content
-                                    }
-                                }
-                            ]
+                            "elements": elements
                         }
                     },
                     headers={
@@ -178,11 +211,11 @@ class FeishuService:
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 if data.get("code") != 0:
                     print(f"飞书发送消息失败: {data.get('msg')}")
                     return False
-                
+
                 return True
         except Exception as e:
             print(f"飞书发送消息异常: {str(e)}")
@@ -462,7 +495,10 @@ class FeishuService:
 
 请及时处理，避免影响业务进度。"""
 
-        return await self.send_message_card(user_id, title, content)
+        # 审批通知：跳转到审批中心（而非单据详情页）
+        button_url = self._approval_center_url(entity_type)
+
+        return await self.send_message_card(user_id, title, content, button_url)
 
     async def notify_approval_approved(
         self,
@@ -486,7 +522,10 @@ class FeishuService:
 
 {label}已审批通过，可以进行后续操作。"""
 
-        return await self.send_message_card(user_id, title, content)
+        # 审批通知：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
+
+        return await self.send_message_card(user_id, title, content, button_url)
 
     async def notify_approval_rejected(
         self,
@@ -512,7 +551,10 @@ class FeishuService:
 
 请根据审批意见修改后重新提交。"""
 
-        return await self.send_message_card(user_id, title, content)
+        # 审批通知：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
+
+        return await self.send_message_card(user_id, title, content, button_url)
 
     # ========== Webhook 群聊通知方法 ==========
 
@@ -617,6 +659,28 @@ class FeishuService:
         segment = path_map.get(entity_type, "contracts")
         return f"{frontend_url}/{segment}/{business_id}"
 
+    def _approval_center_url(self, business_type: Optional[str] = None) -> Optional[str]:
+        """构造审批中心跳转链接。
+
+        Args:
+            business_type: 可选业务类型筛选（CONTRACT/PAYMENT/INVOICE）
+
+        Returns:
+            审批中心链接，如 {FRONTEND_URL}/approvals?status=PENDING&business_type=PAYMENT
+        """
+        frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
+        if not frontend_url:
+            return None
+
+        # 基础路径：审批中心，筛选待处理状态
+        url = f"{frontend_url}/approvals?status=PENDING"
+
+        # 可选：按业务类型筛选
+        if business_type:
+            url += f"&business_type={business_type}"
+
+        return url
+
     async def notify_approval_webhook(
         self,
         webhook_url: str,
@@ -663,7 +727,8 @@ class FeishuService:
 
 请及时处理，避免影响业务进度。"""
 
-        button_url = self._entity_detail_url(entity_type, business_id)
+        # 审批通知：跳转到审批中心（而非单据详情页）
+        button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
@@ -704,7 +769,8 @@ class FeishuService:
 
 {label}已审批通过，可以进行后续操作。"""
 
-        button_url = self._entity_detail_url(entity_type, business_id)
+        # 审批通知：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
@@ -748,7 +814,8 @@ class FeishuService:
 
 请根据审批意见修改后重新提交。"""
 
-        button_url = self._entity_detail_url(entity_type, business_id)
+        # 审批通知：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
@@ -792,7 +859,8 @@ class FeishuService:
 
 提交人已撤回审批，您无需继续处理此审批任务。"""
 
-        button_url = self._entity_detail_url(entity_type, business_id)
+        # 审批通知：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
@@ -853,7 +921,10 @@ class FeishuService:
 
 请尽快处理或联系提交人说明情况。"""
 
-        return await self.send_message_card(user_id, title, content)
+        # 审批催办通知：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
+
+        return await self.send_message_card(user_id, title, content, button_url)
 
     async def notify_approval_reminder_webhook(
         self,
@@ -918,7 +989,8 @@ class FeishuService:
 
 请尽快处理或联系提交人说明情况。"""
 
-        button_url = self._entity_detail_url(entity_type, business_id)
+        # 审批催办通知：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
@@ -993,7 +1065,10 @@ class FeishuService:
 → 联系审批人催办
 → 撤回审批，修改后重新提交"""
 
-        return await self.send_message_card(user_id, title, content)
+        # 审批超时告警：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
+
+        return await self.send_message_card(user_id, title, content, button_url)
 
     async def notify_approval_timeout_webhook(
         self,
@@ -1071,7 +1146,8 @@ class FeishuService:
 → 联系审批人催办
 → 撤回审批，修改后重新提交"""
 
-        button_url = self._entity_detail_url(entity_type, business_id)
+        # 审批超时告警：跳转到审批中心
+        button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(webhook_url, title, content, button_url)
 
