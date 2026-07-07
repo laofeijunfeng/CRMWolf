@@ -21,9 +21,7 @@ import { showError } from '@/utils/errorMessages'
 import { Search } from '@element-plus/icons-vue'
 import paymentApi, {
   type PaymentRecordWithDetails,
-  type PaymentRecordListParams,
-  type ApprovalStatus,
-  type PaymentConfirmationStatus
+  type PaymentRecordListParams
 } from '@/api/payment'
 import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
@@ -38,7 +36,8 @@ const permissionStore = usePermissionStore()
 const approvalStore = useApprovalStore()
 const paymentPlansStore = usePaymentPlansStore()
 
-const paymentConfirmPermission = 'payment:confirm'
+// 提交审批权限码（重构：统一使用 payment:submit）
+const paymentSubmitPermission = 'payment:submit'
 const submittingRecordId = ref<number | null>(null)
 
 // Task 7.2: Filter-tabs with Badge
@@ -158,46 +157,28 @@ const handlePageSizeChange = (pageSize: number): void => {
   fetchPaymentRecords()
 }
 
-// Task 7.2: Approval status helpers
-const getApprovalStatusText = (status: ApprovalStatus | undefined): string => {
-  if (status === undefined) return '未提交'
-  const statusMap: Record<ApprovalStatus, string> = {
-    'PENDING': '审批中',
-    'APPROVED': '已通过',
-    'REJECTED': '已驳回'
+// 状态统一显示逻辑（重构：去掉确认状态，统一显示审批状态）
+// 所有回款统一走审批流程，审批状态即最终业务状态
+const getEffectiveStatusText = (record: PaymentRecordWithDetails): string => {
+  // 有审批实例 → 显示审批状态
+  if (record.approval_id !== undefined && record.approval_id !== null) {
+    if (record.approval_status === 'PENDING') return '审批中'
+    if (record.approval_status === 'APPROVED') return '已确认'
+    if (record.approval_status === 'REJECTED') return '审批驳回'
+    return '审批中'
   }
-  return statusMap[status] ?? '未提交'
+  // 无审批实例 → 待提交审批
+  return '待提交审批'
 }
 
-const getApprovalStatusClass = (status: ApprovalStatus | undefined): string => {
-  if (status === undefined) return 'approval-badge-default'
-  const classMap: Record<ApprovalStatus, string> = {
-    'PENDING': 'approval-badge-pending',
-    'APPROVED': 'approval-badge-approved',
-    'REJECTED': 'approval-badge-rejected'
+const getEffectiveStatusClass = (record: PaymentRecordWithDetails): string => {
+  if (record.approval_id !== undefined && record.approval_id !== null) {
+    if (record.approval_status === 'PENDING') return 'status-warning approval-badge-pending'
+    if (record.approval_status === 'APPROVED') return 'status-success approval-badge-approved'
+    if (record.approval_status === 'REJECTED') return 'status-danger approval-badge-rejected'
+    return 'status-default'
   }
-  return classMap[status] ?? 'approval-badge-default'
-}
-
-// Task 7.2: Confirmation status helpers
-const getConfirmationStatusText = (status: PaymentConfirmationStatus | undefined): string => {
-  if (status === undefined) return '未知'
-  const statusMap: Record<PaymentConfirmationStatus, string> = {
-    'PENDING': '待确认',
-    'CONFIRMED': '已确认',
-    'DISPUTED': '有争议'
-  }
-  return statusMap[status] ?? '未知'
-}
-
-const getConfirmationStatusClass = (status: PaymentConfirmationStatus | undefined): string => {
-  if (status === undefined) return 'status-default'
-  const classMap: Record<PaymentConfirmationStatus, string> = {
-    'PENDING': 'status-warning',
-    'CONFIRMED': 'status-success',
-    'DISPUTED': 'status-danger'
-  }
-  return classMap[status] ?? 'status-default'
+  return 'status-default'
 }
 
 const formatDate = (dateStr: string): string => {
@@ -217,7 +198,8 @@ const formatDateTime = (dateTimeStr: string): string => {
 }
 
 const viewPlanDetail = (record: PaymentRecordWithDetails): void => {
-  router.push(`/payments/${record.plan_id}`)
+  // 修复：使用 payment_plan_id（与后端 schema 一致）
+  router.push(`/payments/${record.payment_plan_id}`)
 }
 
 const viewApprovalDetail = (record: PaymentRecordWithDetails): void => {
@@ -228,16 +210,26 @@ const viewApprovalDetail = (record: PaymentRecordWithDetails): void => {
   }
 }
 
+// 检查是否可以提交审批（重构：所有回款必须走审批流程）
+const canSubmitApproval = (record: PaymentRecordWithDetails): boolean => {
+  // 未提交审批的回款可以提交审批
+  return (
+    (record.approval_id === undefined || record.approval_id === null) &&
+    permissionStore.hasPermission(paymentSubmitPermission)
+  )
+}
+
 // Task 7.2: Confirm payment record (finance action)
 const handleConfirmPayment = async (record: PaymentRecordWithDetails): Promise<void> => {
   if (submittingRecordId.value !== null) return
 
   submittingRecordId.value = record.id
   try {
-    // Call approval store to confirm payment (bypasses approval if configured)
+    // Call approval store to submit approval
     const res = await approvalStore.submitEntity('PAYMENT', record.id)
     if (res.approval_id === 0) {
-      ElMessage.success('已直接确认为财务确认状态')
+      // No approval flow configured, direct to finance confirmation
+      ElMessage.success('未配置审批流，已转为财务确认')
     } else {
       ElMessage.success('已提交审批，等待审批人处理')
     }
@@ -248,15 +240,6 @@ const handleConfirmPayment = async (record: PaymentRecordWithDetails): Promise<v
   } finally {
     submittingRecordId.value = null
   }
-}
-
-// Check if confirm button should be shown
-const canConfirmPayment = (record: PaymentRecordWithDetails): boolean => {
-  return (
-    record.confirmation_status === 'PENDING' &&
-    (record.approval_id === undefined || record.approval_id === null) &&
-    permissionStore.hasPermission(paymentConfirmPermission)
-  )
 }
 
 // Fetch badge counts on mount
@@ -386,27 +369,18 @@ watch(() => paymentPlansStore.pendingApprovalMeCount, () => {
             </template>
           </el-table-column>
 
-          <!-- Task 7.2: Confirmation status -->
-          <el-table-column label="确认状态" min-width="100">
+          <!-- 状态统一显示（重构：合并确认状态和审批状态）-->
+          <el-table-column label="状态" min-width="120">
             <template #default="{ row }">
-              <span :class="['status-tag', getConfirmationStatusClass(row.confirmation_status)]">
-                {{ getConfirmationStatusText(row.confirmation_status) }}
+              <span :class="['status-tag', getEffectiveStatusClass(row)]">
+                <!-- 审批中状态添加脉冲动画 -->
+                <span v-if="row.approval_status === 'PENDING' && row.approval_id !== undefined && row.approval_id !== null" class="approval-pulse"></span>
+                {{ getEffectiveStatusText(row) }}
               </span>
             </template>
           </el-table-column>
 
-          <!-- Task 7.2: Approval status badge with pulse animation -->
-          <el-table-column label="审批状态" min-width="120">
-            <template #default="{ row }">
-              <span :class="['approval-badge', getApprovalStatusClass(row.approval_status)]">
-                <!-- Task 7.2: Pulse animation for "审批中" state -->
-                <span v-if="row.approval_status === 'PENDING'" class="approval-pulse"></span>
-                {{ getApprovalStatusText(row.approval_status) }}
-              </span>
-            </template>
-          </el-table-column>
-
-          <!-- Task 7.2: Current approver display -->
+          <!-- 当前审批人（仅审批中时显示）-->
           <el-table-column label="当前审批人" min-width="120">
             <template #default="{ row }">
               <div v-if="row.approval_status === 'PENDING' && row.current_approver_name" class="current-approver-cell">
@@ -460,9 +434,9 @@ watch(() => paymentPlansStore.pendingApprovalMeCount, () => {
                   class="action-link"
                   @click="viewApprovalDetail(row)"
                 >审批详情</span>
-                <!-- Task 7.2: Row-level loading for confirm button -->
+                <!-- 提交审批按钮（重构：统一走审批流程）-->
                 <span
-                  v-if="canConfirmPayment(row)"
+                  v-if="canSubmitApproval(row)"
                   class="action-link"
                   :class="{ 'row-action-loading': submittingRecordId === row.id }"
                   @click="handleConfirmPayment(row)"

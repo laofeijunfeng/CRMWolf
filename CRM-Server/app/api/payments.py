@@ -883,9 +883,8 @@ def get_overdue_payments(
     "/records/{record_id}/submit-approval",
     summary="提交回款审批",
     description=(
-        "为指定回款记录提交审批。系统按回款金额匹配审批流程：匹配到流→建 Approval 走审批，"
-        "回款 confirmation_status 保持 PENDING；未匹配流（决策1 直通）→不建 Approval，"
-        "回款保持 PENDING 待财务确认。权限码：payment:submit。"
+        "为指定回款记录提交审批。系统按回款金额匹配审批流程，审批通过后自动确认入账。"
+        "权限码：payment:submit。"
     ),
 )
 def submit_payment_approval(
@@ -894,6 +893,11 @@ def submit_payment_approval(
     current_user=Depends(require_permission("payment:submit")),
     db: Session = Depends(get_db),
 ):
+    """
+    提交回款审批（重构：统一走审批流程，去掉无审批流逻辑）
+
+    所有回款必须走审批流程，审批通过后自动确认入账（confirmation_status=CONFIRMED）。
+    """
     record = payment_record_crud.get_by_id(db, record_id, team_id)
     if not record:
         raise HTTPException(
@@ -901,18 +905,17 @@ def submit_payment_approval(
             detail="回款记录不存在"
         )
 
-    # 决策1：PAYMENT 未匹配返 (None, None)，不报错
-    flow, _err = approval_flow_crud.match_flow_generic(
+    # 匹配 PAYMENT 审批流程
+    flow, error_msg = approval_flow_crud.match_flow_generic(
         db, BusinessType.PAYMENT, team_id, record.actual_amount, None
     )
 
+    # 强制匹配审批流：未匹配则报错（去掉无审批流逻辑）
     if flow is None:
-        # E5：免审批直通财务确认，不建 Approval
-        return {
-            "approval_id": None,
-            "status": "NO_FLOW",
-            "message": "未配置回款审批流，已转为财务确认"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg or "未找到匹配的回款审批流程，请联系管理员配置完整的审批流程覆盖范围"
+        )
 
     # 经适配器取提交人（PaymentRecordAdapter.get_submitter → creator_id, creator_name）
     adapter = get_adapter(BusinessType.PAYMENT)
@@ -935,52 +938,16 @@ def submit_payment_approval(
     }
 
 
-@router.post(
-    "/records/{record_id}/confirm",
-    response_model=PaymentRecordWithConfirmation,
-    summary="财务确认回款入账",
-    description=(
-        "财务人员直接确认回款入账（非审批路径）。action=confirm→CONFIRMED；"
-        "action=dispute→DISPUTED。权限码：payment:confirm。"
-        "对应 crud：payment_record_crud.confirm_payment（已存在但此前无 API 调用方）。"
-    ),
-)
-def confirm_payment_record(
-    record_id: int,
-    body: PaymentRecordConfirm,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(require_permission("payment:confirm")),
-    db: Session = Depends(get_db),
-):
-    record = payment_record_crud.get_by_id(db, record_id, team_id)
-    if not record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="回款记录不存在"
-        )
-
-    # confirm_payment 内部用 get_by_id(record_id) 二次取记录，已在上一步做 team 隔离 404，
-    # 因此此处不会跨 team 误确认；二次 None 守卫兜底。
-    try:
-        updated = payment_record_crud.confirm_payment(
-            db,
-            record_id,
-            str(current_user.id),
-            current_user.name,
-            body.action,
-            body.notes,
-            invoice_application_ids=body.invoice_application_ids,
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-    if updated is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="回款记录不存在"
-        )
-
-    return updated
+# ========== 已废弃：财务直接确认 API（统一走审批流程）==========
+# 所有回款必须走审批流程，审批通过后自动确认入账。
+# 此 API 已废弃，保留仅用于向后兼容，请勿使用。
+#
+# @router.post(
+#     "/records/{record_id}/confirm",
+#     response_model=PaymentRecordWithConfirmation,
+#     summary="[已废弃] 财务确认回款入账",
+#     description="已废弃：所有回款统一走审批流程，审批通过后自动确认入账。请使用审批中心进行审批操作。",
+#     deprecated=True,
+# )
+# def confirm_payment_record(...):
+#     pass

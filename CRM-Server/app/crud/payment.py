@@ -505,40 +505,49 @@ class PaymentRecordCRUD:
         notes: Optional[str] = None,
         invoice_application_ids: Optional[List[int]] = None
     ) -> Optional[PaymentRecord]:
+        """
+        [已废弃] 财务直接确认回款入账
+
+        所有回款统一走审批流程，审批通过后自动确认入账（adapter.on_approved）。
+        此方法已废弃，保留仅用于适配器内部调用（PaymentRecordAdapter.on_approved）。
+        请勿直接调用此方法，使用审批中心进行审批操作。
+        """
         from app.models.payment import PaymentConfirmationStatus
         from app.models.invoice import InvoiceApplication
-        
+
         record = self.get_by_id(db, record_id)
         if not record:
             return None
-        
+
         if record.confirmation_status != PaymentConfirmationStatus.PENDING:
             raise ValueError("只能确认待确认状态的回款记录")
-        
+
+        # action=dispute 已废弃（无实际业务使用）
         if action == "confirm":
             record.confirmation_status = PaymentConfirmationStatus.CONFIRMED
         elif action == "dispute":
+            # DISPUTED 状态已废弃，此处仅保留向后兼容
             record.confirmation_status = PaymentConfirmationStatus.DISPUTED
         else:
             raise ValueError("无效的确认操作")
-        
+
         record.confirmed_by = confirmer_id
         record.confirmed_by_name = confirmer_name
         record.confirmed_time = datetime.now()
         record.confirmation_notes = notes
-        
+
         if invoice_application_ids:
             invoice_applications = db.query(InvoiceApplication).filter(
                 InvoiceApplication.id.in_(invoice_application_ids)
             ).all()
-            
+
             for inv_app in invoice_applications:
                 if inv_app.payment_record_id is not None:
                     raise ValueError(f"发票申请 {inv_app.application_number} 已经关联了回款记录")
-            
+
             for inv_app in invoice_applications:
                 inv_app.payment_record_id = record_id
-        
+
         db.commit()
         db.refresh(record)
         return record
@@ -578,12 +587,14 @@ class PaymentRecordCRUD:
 
     def _auto_submit_approval(self, db: Session, record: PaymentRecord, creator_id: str, creator_name: str):
         """
-        登记回款后自动提交审批（Task: 登记回款自动提交审批）
+        登记回款后自动提交审批（重构：统一走审批流程）
 
         流程：
         1. 调用 match_flow_generic 匹配 PAYMENT 审批流程
-        2. 若未匹配 -> 免审批直通（返回，不报错）
-        3. 若匹配 -> create_approval_generic 创建审批实例
+        2. 未匹配 -> 报错（强制走审批流程）
+        3. 匹配 -> create_approval_generic 创建审批实例
+
+        注意：所有回款必须走审批流程，审批通过后自动确认入账。
         """
         from app.crud.approval import approval_crud, approval_flow_crud
         from app.models.approval import BusinessType
@@ -597,9 +608,9 @@ class PaymentRecordCRUD:
             license_type=None
         )
 
-        # 未匹配 = 免审批直通（决策1）
+        # 强制匹配审批流：未匹配则报错（去掉无审批流逻辑）
         if flow is None:
-            return
+            raise ValueError(error_msg or "未找到匹配的回款审批流程，请联系管理员配置完整的审批流程覆盖范围")
 
         # 创建审批实例
         approval_crud.create_approval_generic(

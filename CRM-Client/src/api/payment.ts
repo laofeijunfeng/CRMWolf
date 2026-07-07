@@ -115,11 +115,12 @@ export interface PaymentRecordUpdate {
 
 export interface PaymentRecordResponse {
   id: number
-  plan_id: number
+  payment_plan_id: number  // 修复：与后端 schema 字段名一致
   actual_amount: number
   payment_date: string
   proof_attachment?: string
   notes?: string
+  creator_id?: string
   creator_name?: string
   created_time: string
   last_modified_time: string

@@ -23,98 +23,19 @@ from app.crud.payment import payment_record_crud, payment_plan_crud
 router = APIRouter(prefix="/finance", tags=["财务管理"])
 
 
-@router.post(
-    "/payment-records/{record_id}/confirm",
-    response_model=PaymentRecordWithConfirmation,
-    summary="确认回款入账",
-    description="财务角色确认销售登记的回款记录，支持关联发票申请"
-)
-def confirm_payment_record(
-    record_id: int,
-    confirm_data: PaymentRecordConfirm,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("payment:confirm")),
-    db: Session = Depends(get_db)
-):
-    record = payment_record_crud.get_by_id(db, record_id)
-    if not record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="回款记录不存在"
-        )
-
-    # 验证回款记录所属合同属于当前团队
-    payment_plan = db.query(PaymentPlan).filter(
-        PaymentPlan.id == record.payment_plan_id
-    ).first()
-    if payment_plan:
-        contract = db.query(Contract).filter(
-            Contract.id == payment_plan.contract_id
-        ).first()
-        if contract and contract.team_id != team_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="回款记录不存在或不属于当前团队"
-            )
-    
-    if confirm_data.action not in ["confirm", "dispute"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="action 参数必须为 confirm 或 dispute"
-        )
-    
-    if confirm_data.invoice_application_ids:
-        total_invoice_amount = Decimal(0)
-        for inv_id in confirm_data.invoice_application_ids:
-            inv_app = db.query(InvoiceApplication).filter(
-                InvoiceApplication.id == inv_id
-            ).first()
-            if not inv_app:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"发票申请 {inv_id} 不存在"
-                )
-            
-            payment_plan = db.query(PaymentPlan).filter(
-                PaymentPlan.id == record.payment_plan_id
-            ).first()
-            if not payment_plan or inv_app.contract_id != payment_plan.contract_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"发票申请 {inv_id} 不属于该回款记录关联合同"
-                )
-            
-            total_invoice_amount += inv_app.invoice_amount
-        
-        if total_invoice_amount > record.actual_amount:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"关联发票总金额({total_invoice_amount})超过回款金额({record.actual_amount})"
-            )
-    
-    try:
-        confirmed_record = payment_record_crud.confirm_payment(
-            db,
-            record_id,
-            str(current_user.id),
-            current_user.name,
-            confirm_data.action,
-            confirm_data.notes,
-            confirm_data.invoice_application_ids
-        )
-        
-        if not confirmed_record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="回款记录不存在"
-            )
-        
-        return _populate_record_info(db, confirmed_record)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# ========== 已废弃：财务直接确认 API（统一走审批流程）==========
+# 所有回款必须走审批流程，审批通过后自动确认入账。
+# 此 API 已废弃，保留仅用于向后兼容，请勿使用。
+#
+# @router.post(
+#     "/payment-records/{record_id}/confirm",
+#     response_model=PaymentRecordWithConfirmation,
+#     summary="[已废弃] 确认回款入账",
+#     description="已废弃：所有回款统一走审批流程，审批通过后自动确认入账。请使用审批中心进行审批操作。",
+#     deprecated=True,
+# )
+# def confirm_payment_record(...):
+#     pass
 
 
 def _populate_record_info(db: Session, record: PaymentRecord) -> dict:

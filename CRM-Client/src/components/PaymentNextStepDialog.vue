@@ -68,7 +68,8 @@ const handleLater = (): void => {
 
 const handleViewDetail = (): void => {
   if (!props.record) return
-  router.push(`/payments/${props.record.plan_id}`)
+  // 修复：使用 payment_plan_id（与后端 schema 一致）
+  router.push(`/payments/${props.record.payment_plan_id}`)
   emit('update:visible', false)
 }
 </script>
