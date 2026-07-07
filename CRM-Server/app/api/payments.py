@@ -392,12 +392,25 @@ def get_payment_plan_detail(
                         (r for r in approval_records if r.node_id == node.id),
                         None
                     )
+
+                    # 修复节点状态显示：根据 ApprovalRecord.action 和 Approval 整体状态
+                    # SUBMIT 节点：显示"已提交"
+                    # APPROVE/REJECT 节点：显示实际审批动作
+                    node_status = "PENDING"
+                    if node_record:
+                        if node_record.action == "SUBMIT":
+                            node_status = "SUBMIT"  # 已提交
+                        elif node_record.action == "APPROVE":
+                            node_status = "APPROVE"  # 已通过
+                        elif node_record.action == "REJECT":
+                            node_status = "REJECT"  # 已驳回
+
                     nodes_info.append({
                         "id": node.id,
                         "node_name": node.node_name,
                         "node_order": node.node_order,
                         "approve_role": node.approve_role,
-                        "status": node_record.action if node_record else "PENDING",
+                        "status": node_status,
                         "approver_id": node_record.approver_id if node_record else None,
                         "approver_name": node_record.approver_name if node_record else None,
                         "approved_time": node_record.created_time.isoformat() if node_record else None,
@@ -757,12 +770,23 @@ def list_payment_records(
                             (r for r in approval_records if r.node_id == node.id),
                             None
                         )
+
+                        # 修复节点状态显示：根据 ApprovalRecord.action 和 Approval 整体状态
+                        node_status = "PENDING"
+                        if node_record:
+                            if node_record.action == "SUBMIT":
+                                node_status = "SUBMIT"
+                            elif node_record.action == "APPROVE":
+                                node_status = "APPROVE"
+                            elif node_record.action == "REJECT":
+                                node_status = "REJECT"
+
                         nodes_info.append({
                             "id": node.id,
                             "node_order": node.node_order,
                             "node_name": node.node_name,
                             "approve_role": node.approve_role,
-                            "status": node_record.action if node_record else "PENDING",
+                            "status": node_status,
                             "approver_id": node_record.approver_id if node_record else None,
                             "approver_name": node_record.approver_name if node_record else None,
                             "comment": node_record.comment if node_record else None,
