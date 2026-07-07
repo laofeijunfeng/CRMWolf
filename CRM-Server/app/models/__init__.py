@@ -16,9 +16,7 @@ from app.models.operation_log import OperationLog, EventAction, PrimaryResourceT
 from app.models.procurement import ProcurementMethod, ProcurementStageTemplate, OpportunityStageSnapshot, StageTemplateChangeLog
 from app.models.ai_config import AIConfig
 from app.models.conversation_log import ConversationLog
-from app.models.ai_skill import AISkill, AISkillAction, AICRUDMapping, AIEnumMapping
 from app.models.email_verification_code import EmailVerificationCode, VerificationPurpose
-from app.models.ai_conversation_history import AIConversationHistory
 from app.models.system_config import SystemConfig, ConfigType
 from app.models.deployment import DeploymentInfo
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
@@ -43,9 +41,7 @@ __all__ = [
     "ProcurementMethod", "ProcurementStageTemplate", "OpportunityStageSnapshot", "StageTemplateChangeLog",
     "AIConfig",
     "ConversationLog",
-    "AISkill", "AISkillAction", "AICRUDMapping", "AIEnumMapping",
     "EmailVerificationCode", "VerificationPurpose",
-    "AIConversationHistory",
     "SystemConfig", "ConfigType",
     "DeploymentInfo",
     "LicenseApplication", "LicenseApplicationStatus", "LicenseType"
