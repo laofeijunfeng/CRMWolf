@@ -140,6 +140,7 @@
             <el-radio value="CONTRACT">合同</el-radio>
             <el-radio value="PAYMENT">回款登记</el-radio>
             <el-radio value="INVOICE">发票申请</el-radio>
+            <el-radio value="LICENSE">License申请</el-radio>
           </el-radio-group>
           <div style="color: var(--el-text-color-secondary); font-size: 12px; margin-top: 4px;">
             AI 识别结果，可手动修改
@@ -369,7 +370,7 @@ const flowForm = ref<{
   min_amount: number | undefined
   max_amount: number | undefined
   license_type: string
-  business_type: 'CONTRACT' | 'PAYMENT' | 'INVOICE'
+  business_type: 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE'
   nodes: ApprovalAIParsedNode[]
 }>({
   flow_name: '',

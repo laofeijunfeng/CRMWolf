@@ -34,10 +34,10 @@ class ApprovalAIParsedFlow(BaseModel):
     min_amount: Optional[float] = Field(None, ge=0, description="最小金额（元）")
     max_amount: Optional[float] = Field(None, ge=0, description="最大金额（元）")
     license_type: Optional[str] = Field(None, description="授权类型，如：STANDARD")
-    # B3：单据类型 CONTRACT/PAYMENT/INVOICE，默认 CONTRACT（兼容既有合同解析行为）
+    # B3：单据类型 CONTRACT/PAYMENT/INVOICE/LICENSE，默认 CONTRACT（兼容既有合同解析行为）
     business_type: str = Field(
         BusinessType.CONTRACT,
-        description="流程适用单据类型：CONTRACT（合同，默认）/PAYMENT（回款）/INVOICE（发票）",
+        description="流程适用单据类型：CONTRACT（合同，默认）/PAYMENT（回款）/INVOICE（发票）/LICENSE（License申请）",
     )
     nodes: List[ApprovalAIParsedNode] = Field(..., min_length=1, description="审批节点列表")
 
@@ -82,7 +82,7 @@ class ApprovalAICreateRequest(BaseModel):
     # B3：落库 ApprovalFlow.business_type（A5 已加该列），默认 CONTRACT
     business_type: str = Field(
         BusinessType.CONTRACT,
-        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE，默认 CONTRACT",
+        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE，默认 CONTRACT",
     )
     nodes: List[ApprovalNodeCreate] = Field(..., min_length=1, description="审批节点列表")
 
