@@ -58,6 +58,7 @@
                   <el-radio value="CONTRACT">合同</el-radio>
                   <el-radio value="PAYMENT">回款登记</el-radio>
                   <el-radio value="INVOICE">发票申请</el-radio>
+                  <el-radio value="LICENSE">License申请</el-radio>
                 </el-radio-group>
                 <div class="form-item-extra">
                   <div style="color: var(--el-text-color-secondary); font-size: 12px;">

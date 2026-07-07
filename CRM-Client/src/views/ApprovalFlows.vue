@@ -51,6 +51,7 @@
             <el-option value="CONTRACT" label="合同" />
             <el-option value="PAYMENT" label="回款登记" />
             <el-option value="INVOICE" label="发票申请" />
+            <el-option value="LICENSE" label="License申请" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -109,6 +110,9 @@
               </el-tag>
               <el-tag v-else-if="row.business_type === 'INVOICE'" type="info" size="small">
                 发票申请
+              </el-tag>
+              <el-tag v-else-if="row.business_type === 'LICENSE'" type="success" size="small">
+                License申请
               </el-tag>
               <span v-else class="text-gray">-</span>
             </template>
