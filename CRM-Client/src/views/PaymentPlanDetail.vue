@@ -191,9 +191,15 @@ const getNodeStatus = (status: ApprovalStatus): string => {
 
 // Open register payment dialog
 const handleRegisterPayment = (): void => {
+  // Use local timezone, not UTC (toISOString() converts to UTC causing date offset in China)
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  const todayStr = `${year}-${month}-${day}`
   paymentForm.value = {
-    actual_amount: 0,
-    payment_date: ''
+    actual_amount: plan.value?.remaining_amount ?? plan.value?.planned_amount ?? 0,
+    payment_date: todayStr
   }
   paymentModalVisible.value = true
 }
