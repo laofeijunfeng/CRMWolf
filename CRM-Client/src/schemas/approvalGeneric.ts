@@ -3,7 +3,7 @@
  *
  * @description 映射后端通用审批端点 `app/api/approvals.py` 的
  * `_serialize_generic_approval` 输出与 `app/schemas/approval_generic.py` 的
- * 请求/响应模型。覆盖 CONTRACT / PAYMENT / INVOICE 三类业务单据。
+ * 请求/响应模型。覆盖 CONTRACT / PAYMENT / INVOICE / LICENSE 四类业务单据。
  *
  * 字段命名沿后端 snake_case 约定（与既有 schemas/lead.ts、common.ts 一致）。
  * datetime 字段使用 `z.string().min(1)` 而非 `.datetime()`：后端 SQLAlchemy
@@ -14,7 +14,7 @@
 import { z } from 'zod'
 
 // ===== 业务单据类型（A1 BusinessType） =====
-export const EntityTypeSchema = z.enum(['CONTRACT', 'PAYMENT', 'INVOICE'])
+export const EntityTypeSchema = z.enum(['CONTRACT', 'PAYMENT', 'INVOICE', 'LICENSE'])
 export type EntityType = z.infer<typeof EntityTypeSchema>
 
 // ===== 审批动作枚举（ApprovalActionEnum） =====

@@ -85,6 +85,7 @@
               <el-option label="回款" value="PAYMENT" />
               <el-option label="发票" value="INVOICE" />
               <el-option label="合同" value="CONTRACT" />
+              <el-option label="License" value="LICENSE" />
             </el-select>
           </el-form-item>
           <el-form-item>
@@ -535,7 +536,8 @@ const businessTypeLabel = (t: EntityType): string => {
   const map: Record<EntityType, string> = {
     PAYMENT: '回款',
     INVOICE: '发票',
-    CONTRACT: '合同'
+    CONTRACT: '合同',
+    LICENSE: 'License'
   }
   return map[t] ?? t
 }
@@ -660,7 +662,9 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
       CONTRACT: `/contracts/edit/${row.business_id}`,
       // 回款无独立编辑页（/payments 为列表页）：跳列表页 + info 提示，
       // 保证不白屏/不断旅程；用户在列表内修改后重新提交审批。
-      PAYMENT: `/payments`
+      PAYMENT: `/payments`,
+      // License 申请在客户详情页的 License 管理 Tab 编辑
+      LICENSE: `/customers/${row.customer_id}?tab=license-management`
     }
     const target = route[row.business_type]
     await router.push(target)
@@ -668,6 +672,9 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     // 旅程不断（比原 window.location.assign hash bug 强）。
     if (row.business_type === 'PAYMENT') {
       ElMessage.info('请修改回款记录后重新提交审批')
+    }
+    if (row.business_type === 'LICENSE') {
+      ElMessage.info('请修改 License 申请后重新提交审批')
     }
   } catch {
     // 用户取消（ElMessageBox reject）或 router.push 失败
