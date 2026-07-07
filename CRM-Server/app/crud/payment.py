@@ -445,6 +445,7 @@ class PaymentRecordCRUD:
                 secondary_resource_id=contract.id,
                 operator_id=creator_id,
                 operator_name=operator_name_display,
+                team_id=team_id,
                 content={
                     "contractNumber": contract.contract_number,
                     "contractName": contract.contract_name,
