@@ -1646,9 +1646,6 @@ def detail_generic_approval(
     return _serialize_generic_approval(approval, db)
 
 
-@router.post(
-
-
 # ============================================================================
 # Task C3：通用审批列表端点 GET /v1/approvals
 # ============================================================================
