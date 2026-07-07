@@ -61,11 +61,21 @@ upload_to_server() {
     # 使用 SSH 密钥认证
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SERVER" "mkdir -p $DEPLOY_DIR $BACKUP_DIR"
 
-    # 上传文件
+    # 上传文件（镜像包 + 配置文件 + secrets）
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
         "$PROJECT_DIR/crm-images.tar" \
         "$PROJECT_DIR/docker-compose.yml" \
+        "$PROJECT_DIR/docker-compose.server.yml" \
         "$SERVER:$DEPLOY_DIR/"
+
+    # 上传 secrets 目录
+    ssh -i "$SSH_KEY" "$SERVER" "mkdir -p $DEPLOY_DIR/secrets"
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
+        "$PROJECT_DIR/secrets/db_password.txt" \
+        "$PROJECT_DIR/secrets/secret_key.txt" \
+        "$SERVER:$DEPLOY_DIR/secrets/"
+
+    ssh -i "$SSH_KEY" "$SERVER" "chmod 600 $DEPLOY_DIR/secrets/*.txt"
 
     log_success "文件上传完成"
 }
@@ -104,8 +114,9 @@ fi
 # 4. 重启服务
 echo "[重启] 重启 Docker 服务..."
 # 使用新版 Docker 内置 compose 命令（docker compose 而非 docker-compose）
-docker compose down || true
-docker compose up -d
+# 使用 server 配置文件（依赖外部 mysql8/redis6）
+docker compose -f docker-compose.yml -f docker-compose.server.yml down || true
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
 
 # 5. 等待服务启动
 echo "[等待] 等待服务启动..."

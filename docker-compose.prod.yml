@@ -1,7 +1,6 @@
-version: '3.8'
-
-# 生产环境配置
-# 使用方式: docker-compose -f docker-compose.prod.yml up -d
+# docker-compose.prod.yml - 完整生产环境配置（自包含）
+# 使用场景：全新部署，包含数据库和缓存
+# 使用方式：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
   mysql:
@@ -18,7 +17,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
     secrets:
       - db_password
     networks:
@@ -35,40 +37,37 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    command: redis-server --appendonly yes
     networks:
       - crm-internal
-    command: redis-server --appendonly yes
 
   backend:
-    build:
-      context: ./CRM-Server
-      dockerfile: Dockerfile
-      args:
-        ENVIRONMENT: production
+    extends:
+      file: docker-compose.yml
+      service: backend
     container_name: crm-backend-prod
-    restart: always
     environment:
       DB_HOST: mysql
-      DB_PORT: 3306
       DB_USER: root
       DB_NAME: crm_db
       DB_PASSWORD_FILE: /run/secrets/db_password
       SECRET_KEY_FILE: /run/secrets/secret_key
       REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 5
       CRM_DEBUG: "false"
+      SMTP_PROVIDER: ${SMTP_PROVIDER:-console}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - backend_logs:/app/logs
-      - ./uploads:/app/uploads
     secrets:
-      - secret_key
       - db_password
+      - secret_key
     networks:
       - crm-internal
     deploy:
@@ -79,16 +78,13 @@ services:
           memory: 256M
 
   frontend:
-    build:
-      context: ./CRM-Client
-      dockerfile: Dockerfile
+    extends:
+      file: docker-compose.yml
+      service: frontend
     container_name: crm-frontend-prod
-    restart: always
     ports:
       - "80:80"
       - "443:443"
-    depends_on:
-      - backend
     networks:
       - crm-internal
       - crm-public
@@ -101,8 +97,6 @@ volumes:
   mysql_prod_data:
     driver: local
   redis_prod_data:
-    driver: local
-  backend_logs:
     driver: local
 
 secrets:

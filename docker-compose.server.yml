@@ -1,0 +1,48 @@
+# docker-compose.server.yml - 服务器部署配置
+# 使用场景：部署到已有 mysql8/redis6 容器的服务器
+# 使用方式：docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
+# 或直接：docker compose -f docker-compose.server.yml up -d（包含基础配置）
+
+services:
+  backend:
+    extends:
+      file: docker-compose.yml
+      service: backend
+    image: crm-backend:amd64
+    environment:
+      DB_HOST: mysql8
+      DB_USER: root
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      DB_NAME: crm_db
+      SECRET_KEY_FILE: /run/secrets/secret_key
+      REDIS_HOST: redis6
+      REDIS_PASSWORD: ""
+      SMTP_PROVIDER: ${SMTP_PROVIDER:-console}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+    secrets:
+      - db_password
+      - secret_key
+    networks:
+      - crmwolf-network
+
+  frontend:
+    extends:
+      file: docker-compose.yml
+      service: frontend
+    image: crm-frontend:amd64
+    networks:
+      - crmwolf-network
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  secret_key:
+    file: ./secrets/secret_key.txt
+
+networks:
+  crmwolf-network:
+    external: true

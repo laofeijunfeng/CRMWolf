@@ -23,6 +23,14 @@ CRM-Server/.env
 *.env.local
 *.env.*.local
 
+# ===== Secrets（敏感信息，绝不提交） =====
+secrets/
+*.key
+*.pem
+
+# ===== Docker 开发配置（本地特有） =====
+docker-compose.override.yml
+
 # ===== IDE =====
 .idea/
 .vscode/

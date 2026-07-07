@@ -132,34 +132,38 @@ docker load -i crm-images.tar
 
 ### 3. 启动服务
 
-使用 docker-compose.yml：
+使用 docker-compose.server.yml（服务器部署配置）：
 
 ```yaml
-version: '3.8'
+# docker-compose.server.yml - 依赖外部 mysql8/redis6
 services:
   backend:
     image: crm-backend:amd64
-    ports:
-      - "8000:8000"
     environment:
-      - DATABASE_URL=mysql://...
-      - REDIS_URL=redis://...
-    depends_on:
-      - mysql
-      - redis
+      DB_HOST: mysql8
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      REDIS_HOST: redis6
+    secrets:
+      - db_password
+    networks:
+      - crmwolf-network
 
   frontend:
     image: crm-frontend:amd64
-    ports:
-      - "8080:80"
     depends_on:
       - backend
+    networks:
+      - crmwolf-network
 ```
 
 启动命令：
 
 ```bash
-docker-compose up -d
+# 服务器部署（依赖外部服务）
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
+
+# 或完整生产环境（自包含）
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 ### 4. 验证部署

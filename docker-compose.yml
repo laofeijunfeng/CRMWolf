@@ -1,43 +1,41 @@
+# docker-compose.yml - 基础服务定义（所有环境共享）
+# 此文件不单独使用，需配合环境特定配置：
+#   - 本地开发：docker-compose.yml + docker-compose.override.yml（自动合并）
+#   - 服务器部署：docker-compose.yml + docker-compose.server.yml
+#   - 完整生产：docker-compose.yml + docker-compose.prod.yml
+
 services:
-  # 后端 API 服务
   backend:
-    image: crm-backend:amd64
+    image: crm-backend:${IMAGE_TAG:-amd64}
     container_name: crm-backend
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      DB_HOST: mysql8
       DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: "DA2zGezRm0NPFnqJvs55"
-      DB_NAME: crm_db
-      SECRET_KEY: MbYbcwzfpsq5y5WUoecr9gjd5qV5Wd2V
-      REDIS_HOST: redis6
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ""
       REDIS_DB: 5
       CRM_DEBUG: ${CRM_DEBUG:-false}
-      SMTP_PROVIDER: ${SMTP_PROVIDER:-console}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-465}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
     volumes:
-      - ./logs:/app/logs
+      - backend_logs:/app/logs
       - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-  # 前端 Nginx 服务
   frontend:
-    image: crm-frontend:amd64
+    image: crm-frontend:${IMAGE_TAG:-amd64}
     container_name: crm-frontend
     restart: unless-stopped
     ports:
       - "80:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
-networks:
-  default:
-    name: crmwolf-network
+volumes:
+  backend_logs:
+    driver: local

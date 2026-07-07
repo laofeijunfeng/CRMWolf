@@ -209,23 +209,29 @@ services:
 ## 常用命令
 
 ```bash
-# 构建镜像
-docker-compose build
+# 构建镜像（docker-compose.yml + override 自动合并）
+docker compose build
 
-# 启动服务
-docker-compose up -d
+# 启动服务（本地开发）
+docker compose up -d
+
+# 启动服务（服务器部署）
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
+
+# 启动服务（完整生产环境）
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 # 查看日志
-docker-compose logs -f backend
+docker compose logs -f backend
 
 # 重启服务
-docker-compose restart backend
+docker compose restart backend
 
 # 停止并清理
-docker-compose down -v
+docker compose down -v
 
 # 进入容器
-docker-compose exec backend bash
+docker compose exec backend bash
 ```
 
 ---

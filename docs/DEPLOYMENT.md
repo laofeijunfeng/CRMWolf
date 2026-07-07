@@ -117,27 +117,37 @@ mkdir -p ssl
 ### 3.1 开发环境部署
 
 ```bash
-# 构建镜像
-docker-compose build
+# 构建镜像（docker-compose.yml + docker-compose.override.yml 自动合并）
+docker compose build
 
 # 启动服务
-docker-compose up -d
+docker compose up -d
 
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
 
 # 检查服务状态
-docker-compose ps
+docker compose ps
 ```
 
-### 3.2 生产环境部署
+### 3.2 服务器部署（已有 mysql8/redis6）
 
 ```bash
-# 使用生产配置构建和启动
-docker-compose -f docker-compose.prod.yml up -d --build
+# 使用服务器配置文件
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d
 
 # 查看日志
-docker-compose -f docker-compose.prod.yml logs -f backend
+docker compose -f docker-compose.yml -f docker-compose.server.yml logs -f backend
+```
+
+### 3.3 完整生产环境部署（全新服务器）
+
+```bash
+# 使用完整生产配置构建和启动（包含数据库和缓存）
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+# 查看日志
+docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f backend
 ```
 
 ### 3.3 验证部署
@@ -323,10 +333,10 @@ crontab -e
 **解决**: 
 ```bash
 # 检查 MySQL 状态
-docker-compose logs mysql
+docker compose logs mysql
 
 # 等待 MySQL 完全启动后重启后端
-docker-compose restart backend
+docker compose restart backend
 ```
 
 ### Q2: 数据库迁移失败
@@ -342,7 +352,7 @@ docker exec -it crm-backend alembic current
 docker exec -it crm-backend alembic stamp head
 
 # 重新启动
-docker-compose restart backend
+docker compose restart backend
 ```
 
 ### Q3: 前端无法访问后端 API
@@ -365,11 +375,11 @@ curl http://localhost/api/auth/me
 
 ```bash
 # 所有服务日志
-docker-compose logs -f
+docker compose logs -f
 
 # 单个服务日志
-docker-compose logs -f backend
-docker-compose logs -f mysql
+docker compose logs -f backend
+docker compose logs -f mysql
 
 # 应用内部日志（如果配置了文件日志）
 docker exec -it crm-backend tail -f /app/logs/app.log
@@ -381,13 +391,13 @@ docker exec -it crm-backend tail -f /app/logs/app.log
 
 ```bash
 # 停止所有服务
-docker-compose down
+docker compose down
 
 # 删除数据卷
-docker-compose down -v
+docker compose down -v
 
 # 重新部署
-docker-compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.server.yml up -d --build
 ```
 
 ---
