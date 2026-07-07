@@ -112,8 +112,10 @@ def list_payment_plans(
 
     # 权限检查
     user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
-    has_view_all = "payment:view:all" in user_permissions
-    has_view_own = "payment:view:own" in user_permissions
+    permission_codes = {p.code for p in user_permissions}
+
+    has_view_all = "payment:view:all" in permission_codes
+    has_view_own = "payment:view:own" in permission_codes
 
     if not has_view_all and not has_view_own:
         raise HTTPException(
@@ -718,8 +720,10 @@ def list_payment_records(
 
     # 权限检查
     user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
-    has_view_all = "payment:view:all" in user_permissions
-    has_view_own = "payment:view:own" in user_permissions
+    permission_codes = {p.code for p in user_permissions}
+
+    has_view_all = "payment:view:all" in permission_codes
+    has_view_own = "payment:view:own" in permission_codes
 
     if not has_view_all and not has_view_own:
         raise HTTPException(
