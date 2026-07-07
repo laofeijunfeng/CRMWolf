@@ -131,78 +131,34 @@ def submit_application(
     1. 验证申请存在且状态为 DRAFT
     2. 匹配审批流程（按 license_type）
     3. 创建审批实例（Approval + ApprovalRecord）
-    4. 发送通知给审批人（待 Task A8 泛化实现）
+    4. 发送通知给审批人（待实现）
     5. 返回申请信息
     """
-    from app.crud.approval import approval_flow_crud, approval_crud
-    from app.services.approval_adapter import get_adapter
-    from app.constants.business_types import BusinessType
+    from app.crud.crud_license_application import license_application_crud
 
-    # 1. 获取申请并验证
-    existing = get_license_application(db, team_id, application_id)
-    if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="License申请不存在"
-        )
-    if existing.status != LicenseApplicationStatus.DRAFT:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="仅草稿状态的申请可以提交"
-        )
+    # 获取提交人信息
+    submitter_id = str(current_user.id)
+    submitter_name = current_user.name
 
-    # 2. 获取适配器
-    adapter = get_adapter(BusinessType.LICENSE)
-
-    # 3. 匹配审批流程
-    flow, err = approval_flow_crud.match_flow_generic(
-        db,
-        BusinessType.LICENSE,
-        team_id,
-        **adapter.match_kwargs(existing)
-    )
-
-    if flow is None and err:
-        # CONTRACT 分支：未匹配报错（沿用合同语义）
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=err or "未匹配到审批流程"
-        )
-
-    if flow is None:
-        # PAYMENT/INVOICE 分支：未匹配直通（决策1）
-        # License 申请未配置流程时，直接批准（免审批）
-        existing.status = LicenseApplicationStatus.ISSUED
-        db.commit()
-        db.refresh(existing)
-        return existing
-
-    # 4. 获取提交人信息
-    submitter_id, submitter_name = adapter.get_submitter(existing)
-
-    # 5. 创建审批实例（会自动调用 adapter.on_submit 切换状态）
     try:
-        approval = approval_crud.create_approval_generic(
+        application = license_application_crud.submit(
             db,
-            BusinessType.LICENSE,
-            application_id,
             team_id,
-            flow,
+            application_id,
             submitter_id,
-            submitter_name or current_user.name,  # 补充姓名
+            submitter_name
         )
+        if not application:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="License申请不存在"
+            )
+        return application
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-
-    # 6. 发送通知给审批人（待 Task A8 泛化实现）
-    # TODO: 调用通知服务发送飞书消息
-
-    # 7. 返回申请信息（状态已由 adapter.on_submit 切换为 PENDING）
-    db.refresh(existing)
-    return existing
 
 
 @router.post("/{application_id}/approve", response_model=LicenseApplicationResponse, summary="审批通过License申请")

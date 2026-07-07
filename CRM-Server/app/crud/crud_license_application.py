@@ -405,22 +405,36 @@ class LicenseApplicationCRUD:
         self,
         db: Session,
         team_id: int,
-        application_id: int
+        application_id: int,
+        submitter_id: str,
+        submitter_name: str | None = None
     ) -> Optional[LicenseApplication]:
         """
-        提交 License 申请（DRAFT → PENDING）
+        提交 License 申请（接入审批引擎）
+
+        流程：
+        1. 验证申请存在且状态为 DRAFT
+        2. 匹配审批流程（按 license_type）
+        3. 创建审批实例（Approval + ApprovalRecord）
+        4. 更新申请状态为 PENDING
 
         Args:
             db: 数据库会话
             team_id: 团队ID
             application_id: 申请ID
+            submitter_id: 提交人飞书用户ID
+            submitter_name: 提交人姓名（可选）
 
         Returns:
-            Optional[LicenseApplication]: 更新后的申请，不存在或状态不对则返回 None
+            Optional[LicenseApplication]: 更新后的申请
 
         Raises:
-            ValueError: 申请状态不是 DRAFT
+            ValueError: 申请状态不是 DRAFT 或审批流程未匹配
         """
+        from app.crud.approval import approval_flow_crud, approval_crud
+        from app.services.approval_adapter import get_adapter
+        from app.constants.business_types import BusinessType
+
         application = self.get(db, team_id, application_id)
         if not application:
             return None
@@ -429,8 +443,39 @@ class LicenseApplicationCRUD:
         if application.status != LicenseApplicationStatus.DRAFT:
             raise ValueError("只有草稿状态的申请可以提交")
 
-        application.status = LicenseApplicationStatus.PENDING
-        db.commit()
+        # 获取适配器
+        adapter = get_adapter(BusinessType.LICENSE)
+
+        # 匹配审批流程
+        flow, err = approval_flow_crud.match_flow_generic(
+            db,
+            BusinessType.LICENSE,
+            team_id,
+            **adapter.match_kwargs(application)
+        )
+
+        if flow is None and err:
+            # 未匹配且报错（类似 CONTRACT 语义）
+            raise ValueError(err or "未匹配到审批流程")
+
+        if flow is None:
+            # 未匹配审批流程，直接批准（免审批直通）
+            application.status = LicenseApplicationStatus.ISSUED
+            db.commit()
+            db.refresh(application)
+            return application
+
+        # 创建审批实例（会自动调用 adapter.on_submit 切换状态）
+        approval_crud.create_approval_generic(
+            db,
+            BusinessType.LICENSE,
+            application_id,
+            team_id,
+            flow,
+            submitter_id,
+            submitter_name or "",
+        )
+
         db.refresh(application)
         return application
 
@@ -736,10 +781,12 @@ def delete_license_application(
 def submit_license_application(
     db: Session,
     team_id: int,
-    application_id: int
+    application_id: int,
+    submitter_id: str,
+    submitter_name: str | None = None
 ) -> Optional[LicenseApplication]:
-    """提交 License 申请"""
-    return license_application_crud.submit(db, team_id, application_id)
+    """提交 License 申请（接入审批引擎）"""
+    return license_application_crud.submit(db, team_id, application_id, submitter_id, submitter_name)
 
 
 def approve_license_application(
