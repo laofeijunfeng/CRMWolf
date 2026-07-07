@@ -37,6 +37,7 @@ def create_follow_up(
         obj_in=follow_up,
         customer_id=customer_id,
         creator_id=str(current_user.id),
+        team_id=team_id,
         operator_name=current_user.name
     )
 
