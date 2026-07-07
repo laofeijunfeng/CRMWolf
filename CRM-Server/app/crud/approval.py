@@ -666,6 +666,12 @@ class ApprovalCRUD:
             comment=None,
             team_id=team_id,
         ))
+
+        # 更新业务单据的 approval_id（关键修复）
+        # 将创建的 Approval.id 关联到业务单据，使前端能正确显示审批状态
+        if hasattr(entity, 'approval_id'):
+            entity.approval_id = db_approval.id
+
         adapter.on_submit(db, entity)
 
         db.commit()
