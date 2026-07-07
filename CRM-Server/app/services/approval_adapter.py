@@ -18,6 +18,7 @@ from app.constants.business_types import BusinessType
 from app.models.contract import Contract, ContractStatus
 from app.models.payment import PaymentRecord, PaymentConfirmationStatus
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
+from app.models.license_application import LicenseApplication, LicenseApplicationStatus
 
 
 class ApprovalEntityAdapter(Protocol):
@@ -171,10 +172,80 @@ class InvoiceApplicationAdapter:
         return f"发票申请#{entity.id}"
 
 
+class LicenseApplicationAdapter:
+    """License 申请审批适配器
+
+    状态流转：
+    - on_submit: DRAFT → PENDING（提交审批）
+    - on_approved: PENDING → ISSUED（审批通过，由审批人在 approve_full API 中设置）
+    - on_rejected: PENDING → REJECTED（审批拒绝）
+    - on_cancelled: PENDING → DRAFT（撤回审批）
+    """
+    business_type = BusinessType.LICENSE
+
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> Optional[LicenseApplication]:
+        """获取 License 申请实体"""
+        from app.crud.crud_license_application import license_application_crud
+        return license_application_crud.get(db, team_id, business_id)
+
+    def get_submitter(self, entity: LicenseApplication) -> tuple[str, str | None]:
+        """获取提交人信息
+
+        Returns:
+            (applicant_id, None) - License 申请只有 applicant_id，无姓名字段
+        """
+        if entity is None:
+            return "", None
+        return entity.applicant_id or "", None
+
+    def match_kwargs(self, entity: LicenseApplication) -> dict:
+        """匹配审批流程的维度参数
+
+        License 申请按 license_type（试用/正式）匹配流程
+        """
+        return {
+            "amount": 0,  # License 申请无金额概念
+            "license_type": getattr(entity, "license_type", None),
+        }
+
+    def on_submit(self, db: Session, entity: LicenseApplication) -> None:
+        """提交审批时的状态切换"""
+        if entity is None: return  # E4 守卫
+        entity.status = LicenseApplicationStatus.PENDING
+
+    def on_approved(self, db: Session, entity: LicenseApplication) -> None:
+        """审批通过时的状态切换
+
+        注意：License 申请的审批通过需要审批人填写 License 信息，
+        在 approve_full API 中手动设置状态为 ISSUED。
+        此处预留回调逻辑（如需要可扩展）。
+        """
+        if entity is None: return  # E4 守卫
+        # 审批通过后，状态由审批人在 approve_full API 中设置为 ISSUED
+        # 此处不修改状态，避免与 approve_full 冲突
+
+    def on_rejected(self, db: Session, entity: LicenseApplication) -> None:
+        """审批拒绝时的状态切换"""
+        if entity is None: return  # E4 守卫
+        entity.status = LicenseApplicationStatus.REJECTED
+
+    def on_cancelled(self, db: Session, entity: LicenseApplication) -> None:
+        """撤回审批时的状态切换"""
+        if entity is None: return  # E4 守卫
+        entity.status = LicenseApplicationStatus.DRAFT
+
+    def get_name(self, entity: LicenseApplication) -> str:
+        """获取申请展示名称（用于通知）"""
+        if entity is None:
+            return "License申请"
+        return f"License申请#{entity.application_number}"
+
+
 _REGISTRY: dict[str, ApprovalEntityAdapter] = {
     BusinessType.CONTRACT: ContractAdapter(),
     BusinessType.PAYMENT: PaymentRecordAdapter(),
     BusinessType.INVOICE: InvoiceApplicationAdapter(),
+    BusinessType.LICENSE: LicenseApplicationAdapter(),
 }
 
 

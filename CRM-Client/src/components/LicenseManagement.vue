@@ -57,15 +57,15 @@
         <el-icon><Plus /></el-icon> 申请 License
       </el-button>
       <el-table :data="applications" style="margin-top: 16px" v-loading="loadingApplications">
-        <el-table-column prop="application_no" label="申请单号" width="150" />
+        <el-table-column prop="application_number" label="申请单号" width="150" />
         <el-table-column prop="license_type" label="类型" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.license_type === 'trial' ? 'warning' : 'success'" size="small">
-              {{ row.license_type === 'trial' ? '试用' : '正式' }}
+            <el-tag :type="row.license_type === 'TRIAL' ? 'warning' : 'success'" size="small">
+              {{ row.license_type === 'TRIAL' ? '试用' : '正式' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="license_expiry_date" label="到期时间" width="120" />
+        <el-table-column prop="expiry_date" label="到期时间" width="120" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)" size="small">
@@ -77,7 +77,6 @@
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text @click="showApplicationDialog(row)" v-if="row.status === 'DRAFT'">编辑</el-button>
-            <el-button size="small" text @click="handleSubmitApplication(row.id)" v-if="row.status === 'DRAFT'">提交</el-button>
             <el-button size="small" text type="danger" @click="handleDeleteApplication(row.id)" v-if="row.status === 'DRAFT'">删除</el-button>
           </template>
         </el-table-column>
@@ -109,7 +108,8 @@ import { Monitor, Key, Plus, Link, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import deploymentApi from '@/api/deployment'
 import licenseApplicationApi from '@/api/licenseApplication'
-import type { DeploymentInfo, LicenseApplication } from '@/schemas/deployment'
+import type { DeploymentInfo } from '@/schemas/deployment'
+import type { LicenseApplication } from '@/schemas/licenseApplication'
 import DeploymentInfoDialog from './DeploymentInfoDialog.vue'
 import LicenseApplicationDialog from './LicenseApplicationDialog.vue'
 
@@ -174,7 +174,7 @@ const handleApplicationSuccess = () => {
 const handleDeleteDeployment = async (id: number) => {
   try {
     await ElMessageBox.confirm('确定删除该部署信息？', '确认', { type: 'warning' })
-    await deploymentApi.delete(id)
+    await deploymentApi.deleteDeployment(id)
     ElMessage.success('删除成功')
     loadDeployments()
   } catch (error: any) {
@@ -197,25 +197,12 @@ const handleSetDefault = async (id: number) => {
 const handleDeleteApplication = async (id: number) => {
   try {
     await ElMessageBox.confirm('确定删除该 License 申请？', '确认', { type: 'warning' })
-    await licenseApplicationApi.delete(id)
+    await licenseApplicationApi.deleteApplication(id)
     ElMessage.success('删除成功')
     loadApplications()
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '删除失败')
-    }
-  }
-}
-
-const handleSubmitApplication = async (id: number) => {
-  try {
-    await ElMessageBox.confirm('确定提交该 License 申请？', '确认', { type: 'info' })
-    await licenseApplicationApi.submit(id)
-    ElMessage.success('提交成功')
-    loadApplications()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.message || '提交失败')
     }
   }
 }
