@@ -128,6 +128,8 @@ class LicenseApplicationResponse(BaseModel):
     applicant_id: str = Field(..., description="申请人飞书用户ID")
     approver_id: Optional[str] = Field(None, description="审批人飞书用户ID")
     approved_time: Optional[datetime] = Field(None, description="审批时间")
+    # 审批关联字段
+    approval_id: Optional[int] = Field(None, description="审批实例ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
 

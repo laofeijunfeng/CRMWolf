@@ -49,16 +49,21 @@ class LicenseApplication(Base):
     approver_id = Column(String(100), nullable=True, comment="审批人飞书用户ID")
     approved_time = Column(DateTime, nullable=True, comment="审批时间")
 
+    # 审批关联字段（支持审批引擎）
+    approval_id = Column(BigInteger, ForeignKey('crm_contract_approvals.id', ondelete='SET NULL'), nullable=True, comment="审批实例ID")
+
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
     last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
 
     customer = relationship("Customer", back_populates="license_applications")
     deployment_info = relationship("DeploymentInfo", back_populates="license_applications")
     contract = relationship("Contract", back_populates="license_applications")
+    approval = relationship("Approval", foreign_keys=[approval_id])
 
     __table_args__ = (
         Index('idx_license_customer_id', 'customer_id'),
         Index('idx_license_contract_id', 'contract_id'),
         Index('idx_license_status', 'status'),
+        Index('idx_license_approval_id', 'approval_id'),
         {'comment': 'License 申请表'}
     )
