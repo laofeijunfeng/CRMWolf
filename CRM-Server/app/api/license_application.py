@@ -51,7 +51,8 @@ def list_applications(
     db: Session = Depends(get_db)
 ):
     """获取客户的 License 申请列表"""
-    return get_license_applications_by_customer(db, team_id, customer_id)
+    applications, _ = get_license_applications_by_customer(db, team_id, customer_id)
+    return applications
 
 
 @router.get("/{application_id}", response_model=LicenseApplicationResponse, summary="获取License申请详情")
