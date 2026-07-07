@@ -100,9 +100,34 @@ def list_payment_plans(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """
+    查询回款计划列表（添加权限隔离）
+
+    权限逻辑：
+    - payment:view:all → 可查看所有回款计划
+    - payment:view:own → 只能查看自己创建的回款计划（通过合同创建人）
+    - 都没有 → 403 Forbidden
+    """
+    from app.crud.permission import permission_crud
+
+    # 权限检查
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    has_view_all = "payment:view:all" in user_permissions
+    has_view_own = "payment:view:own" in user_permissions
+
+    if not has_view_all and not has_view_own:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="没有查看回款计划的权限"
+        )
+
     skip = (page - 1) * page_size
 
-    current_user_id = str(current_user.id) if me else None
+    # 数据所有权隔离
+    current_user_id = None
+    if me or (has_view_own and not has_view_all):
+        # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
+        current_user_id = str(current_user.id)
 
     try:
         plans, total = payment_plan_crud.list_plans(
@@ -681,9 +706,34 @@ def list_payment_records(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """
+    查询回款记录列表（添加权限隔离）
+
+    权限逻辑：
+    - payment:view:all → 可查看所有回款记录
+    - payment:view:own → 只能查看自己登记的回款记录
+    - 都没有 → 403 Forbidden
+    """
+    from app.crud.permission import permission_crud
+
+    # 权限检查
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    has_view_all = "payment:view:all" in user_permissions
+    has_view_own = "payment:view:own" in user_permissions
+
+    if not has_view_all and not has_view_own:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="没有查看回款记录的权限"
+        )
+
     skip = (page - 1) * page_size
 
-    current_user_id = str(current_user.id) if me else None
+    # 数据所有权隔离
+    current_user_id = None
+    if me or (has_view_own and not has_view_all):
+        # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
+        current_user_id = str(current_user.id)
 
     try:
         records, total = payment_record_crud.list_records(

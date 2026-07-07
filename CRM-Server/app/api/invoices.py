@@ -171,7 +171,33 @@ def list_invoice_applications(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    current_user_id = str(current_user.id) if me else None
+    """
+    查询发票申请列表（添加权限隔离）
+
+    权限逻辑：
+    - invoice:view:all → 可查看所有发票申请
+    - invoice:view:own → 只能查看自己申请的发票
+    - 都没有 → 403 Forbidden
+    """
+    from app.crud.permission import permission_crud
+    from fastapi import HTTPException, status
+
+    # 权限检查
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    has_view_all = "invoice:view:all" in user_permissions
+    has_view_own = "invoice:view:own" in user_permissions
+
+    if not has_view_all and not has_view_own:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="没有查看发票申请的权限"
+        )
+
+    # 数据所有权隔离
+    current_user_id = None
+    if me or (has_view_own and not has_view_all):
+        # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
+        current_user_id = str(current_user.id)
 
     applications, total = invoice_application_crud.list_applications(
         db,
