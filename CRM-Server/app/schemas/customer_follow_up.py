@@ -46,7 +46,24 @@ class CustomerFollowUpCreate(CustomerFollowUpBase):
 
 
 class CustomerFollowUpUpdate(BaseModel):
+    method: Optional[str] = Field(None, min_length=1, max_length=50, description="跟进方式")
+    content: Optional[str] = Field(None, min_length=1, description="跟进内容")
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
+    next_action: Optional[str] = Field(None, description="下一步动作内容")
+
+    @field_validator('content')
+    @classmethod
+    def content_must_not_be_empty(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('跟进内容不能为空')
+        return v.strip() if v else v
+
+    @field_validator('method')
+    @classmethod
+    def method_must_not_be_empty(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('跟进方式不能为空')
+        return v.strip() if v else v
 
 
 class CustomerFollowUpResponse(BaseModel):

@@ -116,6 +116,91 @@ def get_follow_ups(
     return result
 
 
+@router.put("/{follow_up_id}", response_model=CustomerFollowUpResponse, summary="更新跟进记录", description="更新跟进记录的内容、方式、下次跟进时间等")
+def update_follow_up(
+    follow_up_id: int,
+    follow_up_update: CustomerFollowUpUpdate,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    from sqlalchemy import text
+
+    follow_up = customer_follow_up_crud.get_by_id(db, follow_up_id)
+    if not follow_up:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="跟进记录不存在"
+        )
+
+    # 验证跟进记录的客户属于当前团队
+    customer = customer_crud.get_by_id(db, follow_up.customer_id, team_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="跟进记录不存在或不属于当前团队"
+        )
+
+    # 权限检查：只有创建者可以更新
+    if follow_up.creator_id != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权更新此跟进记录"
+        )
+
+    updated_follow_up = customer_follow_up_crud.update(
+        db=db,
+        db_obj=follow_up,
+        obj_in=follow_up_update
+    )
+
+    # 构建响应（复用 get_follow_ups 的逻辑）
+    creator_info = None
+    if updated_follow_up.creator_id:
+        creator_data = db.execute(text("""
+            SELECT id, name, avatar_url
+            FROM users
+            WHERE id = :creator_id
+        """), {"creator_id": int(updated_follow_up.creator_id)}).first()
+
+        if creator_data:
+            creator_info = {
+                "id": str(creator_data[0]),
+                "name": creator_data[1],
+                "avatar_url": creator_data[2]
+            }
+
+    customer_info = None
+    if updated_follow_up.customer_id:
+        customer_data = db.execute(text("""
+            SELECT id, account_name
+            FROM crm_customers
+            WHERE id = :customer_id
+        """), {"customer_id": updated_follow_up.customer_id}).first()
+
+        if customer_data:
+            customer_info = {
+                "id": customer_data[0],
+                "account_name": customer_data[1]
+            }
+
+    follow_up_dict = {
+        "id": updated_follow_up.id,
+        "customer_id": updated_follow_up.customer_id,
+        "original_lead_id": updated_follow_up.original_lead_id,
+        "content": updated_follow_up.content,
+        "method": updated_follow_up.method,
+        "next_follow_time": updated_follow_up.next_follow_time,
+        "next_action": updated_follow_up.next_action,
+        "creator_id": updated_follow_up.creator_id,
+        "created_time": updated_follow_up.created_time,
+        "creator_info": creator_info,
+        "customer_info": customer_info
+    }
+
+    return CustomerFollowUpResponse(**follow_up_dict)
+
+
 @router.patch("/{follow_up_id}/next-time", response_model=CustomerFollowUpResponse, summary="更新下次跟进时间", description="修改单条记录的下次跟进时间")
 def update_next_time(
     follow_up_id: int,

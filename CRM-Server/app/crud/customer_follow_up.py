@@ -116,6 +116,24 @@ class CustomerFollowUpCRUD:
         db.commit()
         return migrated_follow_ups
 
+    def update(
+        self,
+        db: Session,
+        db_obj: CustomerFollowUp,
+        obj_in: CustomerFollowUpUpdate
+    ) -> CustomerFollowUp:
+        """更新跟进记录"""
+        update_data = obj_in.model_dump(exclude_unset=True)
+
+        if update_data:
+            for field, value in update_data.items():
+                setattr(db_obj, field, value)
+
+            db.commit()
+            db.refresh(db_obj)
+
+        return db_obj
+
     def update_next_time(
         self,
         db: Session,
