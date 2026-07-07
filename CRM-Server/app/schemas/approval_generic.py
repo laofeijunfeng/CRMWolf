@@ -10,7 +10,7 @@
 - submit 仅需 comment（可选）
 - approve 复用 schemas.approval.ApprovalActionRequest（ApprovalActionEnum + 乐观锁 updated_time）
 """
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, Field
 
