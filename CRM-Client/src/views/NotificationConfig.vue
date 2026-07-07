@@ -206,7 +206,7 @@ const router = useRouter()
 const headerStore = useHeaderStore()
 
 onMounted(() => {
-  headerStore.setBack(true, '/ai-assistant')
+  headerStore.setBack(true, '/settings')
 })
 
 onUnmounted(() => {

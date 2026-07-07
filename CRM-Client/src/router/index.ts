@@ -348,13 +348,7 @@ const routes: RouteRecordRaw[] = [
       //   name: 'FinanceReports',
       //   component: () => import('@/views/FinanceReports.vue'),
       //   meta: { requiresAuth: true }
-      // },
-      {
-        path: 'ai-assistant',
-        name: 'AIAssistant',
-        component: () => import('@/views/AIAssistant.vue'),
-        meta: { requiresAuth: true, title: 'AI 助手' }
-      }
+      // }
     ]
   }
 ]

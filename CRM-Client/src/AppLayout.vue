@@ -23,13 +23,6 @@
       </el-dialog>
 
       <nav class="nav">
-        <!-- AI 助手 -->
-        <div class="menu-item" :class="{ active: currentPath === '/ai-assistant' }" @click="handleMenuClick('/ai-assistant')">
-          <el-icon class="item-icon"><ChatDotRound /></el-icon>
-          <span class="item-text">AI 助手</span>
-          <el-icon class="item-arrow"><ArrowRight /></el-icon>
-        </div>
-
         <div class="menu-item" :class="{ active: currentPath === '/calendar' }" @click="handleMenuClick('/calendar')">
           <el-icon class="item-icon"><Calendar /></el-icon>
           <span class="item-text">我的日历</span>
@@ -161,7 +154,7 @@ import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
 import { usePageTitleStore } from '@/stores/pageTitle'
 import { ElMessage } from 'element-plus'
-import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ChatDotRound, ArrowLeft } from '@element-plus/icons-vue'
+import { Flag, OfficeBuilding, TrendCharts, Document, Money, Tickets, ArrowRight, ArrowDown, Check, Calendar, ArrowLeft } from '@element-plus/icons-vue'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import { logger } from '@/utils/logger'
 import { useHeaderStore } from '@/stores/header'
