@@ -7,8 +7,6 @@ import logging
 from typing import Optional, AsyncGenerator, Dict, Any
 from sqlalchemy.orm import Session
 from app.crud.ai_config import ai_config_crud
-from app.schemas.ai_skill import AIParsedIntent
-from app.services.skills.dynamic_prompt_service import dynamic_prompt_service
 
 logger = logging.getLogger(__name__)
 
@@ -197,100 +195,6 @@ class AIService:
             yield {"event": "error", "message": f"AI 服务请求失败：{e.response.status_code}"}
         except Exception as e:
             yield {"event": "error", "message": f"AI 服务异常：{str(e)}"}
-
-    def _get_system_prompt(self, db: Session) -> str:
-        """
-        获取系统提示词（数据库优先，代码兜底）
-        """
-        return dynamic_prompt_service.generate_system_prompt(db)
-
-    async def parse_intent(self, db: Session, user_message: str, team_id: int = 1) -> AIParsedIntent:
-        """
-        调用 AI 解析用户意图（收集完整响应）
-        """
-        config = ai_config_crud.get_config(db, team_id)
-        if not config:
-            return AIParsedIntent(
-                skill=None,
-                action=None,
-                params={},
-                reply_text="AI 配置未设置，请联系管理员先配置 AI 服务"
-            )
-
-        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
-        if not api_key:
-            return AIParsedIntent(
-                skill=None,
-                action=None,
-                params={},
-                reply_text="AI 配置异常，无法获取 API Key"
-            )
-
-        # 使用动态提示词服务
-        system_prompt = self._get_system_prompt(db)
-
-        try:
-            full_content = await self._stream_chat_collect(
-                api_host=config.api_host,
-                api_key=api_key,
-                model=config.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                temperature=config.temperature,
-                max_tokens=config.max_tokens,
-                response_format={"type": "json_object"}
-            )
-
-            if not full_content:
-                return AIParsedIntent(
-                    skill=None,
-                    action=None,
-                    params={},
-                    reply_text="AI 返回内容为空，请稍后重试"
-                )
-
-            # 清理 markdown 代码块标记
-            clean_content = full_content.strip()
-            if clean_content.startswith("```json"):
-                clean_content = clean_content[7:]
-            if clean_content.startswith("```"):
-                clean_content = clean_content[3:]
-            if clean_content.endswith("```"):
-                clean_content = clean_content[:-3]
-            clean_content = clean_content.strip()
-
-            parsed = json.loads(clean_content)
-
-            return AIParsedIntent(
-                skill=parsed.get("skill"),
-                action=parsed.get("action"),
-                params=parsed.get("params", {}),
-                reply_text=parsed.get("reply_text", "正在为你执行操作，请稍候...")
-            )
-
-        except httpx.HTTPStatusError as e:
-            return AIParsedIntent(
-                skill=None,
-                action=None,
-                params={},
-                reply_text=f"AI 服务请求失败：{e.response.status_code}"
-            )
-        except json.JSONDecodeError:
-            return AIParsedIntent(
-                skill=None,
-                action=None,
-                params={},
-                reply_text="AI 返回格式异常，请稍后重试"
-            )
-        except Exception as e:
-            return AIParsedIntent(
-                skill=None,
-                action=None,
-                params={},
-                reply_text=f"AI 服务异常：{str(e)}"
-            )
 
     def get_config_and_key(self, db: Session, team_id: int = 1) -> tuple[Optional[Any], Optional[str]]:
         """获取 AI 配置和 API Key"""

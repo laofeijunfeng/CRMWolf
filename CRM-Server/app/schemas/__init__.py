@@ -35,12 +35,6 @@ from app.schemas.chat_message import (
     ChatMessageResponse,
     ChatReplyData
 )
-from app.schemas.ai_skill import (
-    AIParsedIntent,
-    SkillExecutionResult,
-    SkillDefinition,
-    SkillActionDefinition
-)
 from app.schemas.ai import (
     AIRequestBase,
     AIResponseBase,
@@ -86,10 +80,6 @@ __all__ = [
     "ChatMessageRequest",
     "ChatMessageResponse",
     "ChatReplyData",
-    "AIParsedIntent",
-    "SkillExecutionResult",
-    "SkillDefinition",
-    "SkillActionDefinition",
     "AIRequestBase",
     "AIResponseBase",
     "AIErrorResponse",
