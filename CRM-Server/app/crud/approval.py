@@ -611,6 +611,74 @@ class ApprovalCRUD:
         Returns:
             Approval: 创建后的审批实例
         """
+        approval = self._create_approval_impl(
+            db, business_type, business_id, team_id, flow,
+            submitter_id, submitter_name, auto_commit=True
+        )
+        db.commit()
+        db.refresh(approval)
+        return approval
+
+    def create_approval_only(
+        self,
+        db: Session,
+        business_type: str,
+        business_id: int,
+        team_id: int,
+        flow: ApprovalFlow,
+        submitter_id: str,
+        submitter_name: str,
+    ) -> Approval:
+        """
+        创建审批实例（不自动 commit）
+
+        用途：ApprovalTransactionManager.create_with_approval 中使用，
+        在同一事务中创建业务单据 + approval_phase 切换 + Approval 创建。
+
+        Args:
+            db: 数据库会话
+            business_type: 业务单据类型
+            business_id: 业务单据ID
+            team_id: 团队ID
+            flow: 匹配到的审批流程
+            submitter_id: 提交人飞书用户ID
+            submitter_name: 提交人姓名
+
+        Returns:
+            Approval: 创建后的审批实例（已 flush，未 commit）
+        """
+        return self._create_approval_impl(
+            db, business_type, business_id, team_id, flow,
+            submitter_id, submitter_name, auto_commit=False
+        )
+
+    def _create_approval_impl(
+        self,
+        db: Session,
+        business_type: str,
+        business_id: int,
+        team_id: int,
+        flow: ApprovalFlow,
+        submitter_id: str,
+        submitter_name: str,
+        auto_commit: bool = False,
+    ) -> Approval:
+        """
+        审批实例创建核心实现（避免代码重复）
+
+        Args:
+            db: 数据库会话
+            business_type: 业务单据类型
+            business_id: 业务单据ID
+            team_id: 团队ID
+            flow: 匹配到的审批流程
+            submitter_id: 提交人飞书用户ID
+            submitter_name: 提交人姓名
+            auto_commit: 是否自动 commit（False 时不 commit，由调用方统一 commit）
+
+        Returns:
+            Approval: 创建后的审批实例
+        """
         from app.models.approval import ApprovalNode, ApprovalRecord
         from app.services.approval_adapter import get_adapter
 
@@ -672,15 +740,24 @@ class ApprovalCRUD:
         if hasattr(entity, 'approval_id'):
             entity.approval_id = db_approval.id
 
-        adapter.on_submit(db, entity)
+        # 注意：不调用 adapter.on_submit，因为 approval_phase 切换由 ApprovalTransactionManager 管理
+        # auto_commit=False 时，由调用方（ApprovalTransactionManager）统一 commit
+        # auto_commit=True 时（兼容旧调用方），此处自动 commit
 
+        if not auto_commit:
+            # 不 commit，不调用 on_submit，由 ApprovalTransactionManager 管理
+            return db_approval
+
+        # auto_commit=True 时，调用 adapter.on_submit 并 commit（兼容旧调用方）
+        adapter.on_submit(db, entity)
         db.commit()
         db.refresh(db_approval)
         return db_approval
-    
+
     def approve(self, db: Session, approval: Approval, action_request: ApprovalActionRequest, approver_id: str, approver_name: str) -> Approval:
         from app.models.approval import ApprovalNode
         from app.services.approval_adapter import get_adapter
+        from app.constants.approval_phase import ApprovalPhase
 
         # 乐观锁检查：防止并发审批冲突
         if action_request.updated_time is not None:
@@ -717,14 +794,23 @@ class ApprovalCRUD:
 
             if next_node:
                 approval.current_node_id = next_node.id
+                # 多级审批中间节点通过：approval_phase 保持 PENDING_REVIEW
             else:
+                # 最后节点通过：Approval.status = APPROVED
                 approval.status = ApprovalStatus.APPROVED
                 if entity is not None:
+                    # 切换 entity.approval_phase = APPROVED
+                    if hasattr(entity, 'approval_phase'):
+                        entity.approval_phase = ApprovalPhase.APPROVED
                     adapter.on_approved(db, entity)
 
         elif action_request.action.value == ApprovalAction.REJECT:
+            # Approval.status = REJECTED
             approval.status = ApprovalStatus.REJECTED
             if entity is not None:
+                # 切换 entity.approval_phase = REJECTED
+                if hasattr(entity, 'approval_phase'):
+                    entity.approval_phase = ApprovalPhase.REJECTED
                 adapter.on_rejected(db, entity)
 
         db.commit()
@@ -733,6 +819,7 @@ class ApprovalCRUD:
 
     def cancel(self, db: Session, approval: Approval, user_id: str) -> Approval:
         from app.services.approval_adapter import get_adapter
+        from app.constants.approval_phase import ApprovalPhase
 
         if approval.status != ApprovalStatus.PENDING:
             raise ValueError("只能撤回审批中的审批流程")
@@ -746,6 +833,9 @@ class ApprovalCRUD:
         adapter = get_adapter(approval.business_type)
         entity = adapter.get_entity(db, approval.business_id, approval.team_id)
         if entity is not None:
+            # 切换 entity.approval_phase = DRAFT（允许重新提交）
+            if hasattr(entity, 'approval_phase'):
+                entity.approval_phase = ApprovalPhase.DRAFT
             adapter.on_cancelled(db, entity)
 
         db.commit()

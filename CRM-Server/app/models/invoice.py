@@ -1,6 +1,7 @@
 from sqlalchemy import Column, BigInteger, String, Text, DateTime, Numeric, Boolean, ForeignKey, func, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.constants.approval_phase import ApprovalPhase
 
 
 class TitleTypeEnum:
@@ -64,6 +65,12 @@ class InvoiceApplication(Base):
     invoice_amount = Column(Numeric(12, 2), nullable=False, comment="开票金额")
     invoice_type = Column(String(20), nullable=False, comment="发票类型：VAT_SPECIAL(增值税专用发票), VAT_NORMAL(普通发票)")
     status = Column(String(20), nullable=False, default=InvoiceApplicationStatus.DRAFT, comment="申请状态：DRAFT, PENDING_REVIEW, APPROVED, REJECTED, ISSUED")
+    approval_phase = Column(
+        String(20),
+        nullable=False,
+        default=ApprovalPhase.DRAFT,
+        comment="审批流程状态：draft/pending_review/approved/rejected"
+    )
     applicant_id = Column(String(100), nullable=False, comment="申请人ID（飞书用户ID）")
     reviewer_id = Column(String(100), comment="审批人ID（飞书用户ID）")
     review_comment = Column(String(500), comment="审批意见")

@@ -5,6 +5,7 @@ from sqlalchemy import Column, BigInteger, String, Text, DateTime, Date, Numeric
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.models.invoice import InvoiceApplicationStatus
+from app.constants.approval_phase import ApprovalPhase
 
 
 class PaymentPlanStatus:
@@ -15,6 +16,7 @@ class PaymentPlanStatus:
 
 
 class PaymentConfirmationStatus:
+    DRAFT = "DRAFT"          # 草稿状态（新增）
     PENDING = "PENDING"
     CONFIRMED = "CONFIRMED"
     DISPUTED = "DISPUTED"
@@ -101,6 +103,12 @@ class PaymentRecord(Base):
     creator_id = Column(String(100), nullable=False, comment="创建人（登记人）飞书用户ID")
     creator_name = Column(String(100), comment="创建人姓名")
     confirmation_status = Column(String(20), nullable=False, default=PaymentConfirmationStatus.PENDING, comment="确认状态：PENDING(待确认), CONFIRMED(已确认), DISPUTED(有争议)")
+    approval_phase = Column(
+        String(20),
+        nullable=False,
+        default=ApprovalPhase.DRAFT,
+        comment="审批流程状态：draft/pending_review/approved/rejected"
+    )
     confirmed_by = Column(String(100), comment="确认人（财务人员）飞书用户ID")
     confirmed_by_name = Column(String(100), comment="确认人姓名")
     confirmed_time = Column(DateTime, comment="确认入账时间")
