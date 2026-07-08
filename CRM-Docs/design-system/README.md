@@ -197,12 +197,96 @@ CRM-Docs/design-system/
 
 ---
 
-## 八、参考资料
+## 八、UI 组件框架迁移（Element Plus → shadcn-vue）
 
-| 文档 | 路径 |
-|------|------|
+### 8.1 迁移目标
+
+| 目标 | 说明 | 状态 |
+|------|------|------|
+| **100% 替换 Element Plus** | 所有 `el-*` 组件替换为 shadcn-vue 或自定义 V2 组件 | ⏳ 进行中 |
+| **设计系统统一** | 所有组件使用 V2 Design Tokens | ✅ 已定义 |
+| **不漏迁移** | ESLint + CI + 扫描脚本强制检查 | ✅ 已配置 |
+
+### 8.2 当前迁移进度
+
+| 阶段 | 任务 | 状态 | 完成日期 |
+|------|------|------|---------|
+| **Phase 0 Week 1** | Design Tokens + Lint Rules | ✅ 已完成 | 2026-07-08 |
+| **Phase 0 Week 2** | 基础组件库（ButtonV2, InputV2, TableV2, CardV2, TabV2） | ⏳ 待执行 | - |
+| **Phase 0 Week 3** | 导航组件库（SidebarV2, TopBarV2, ContextTabsV2） | ⏳ 待执行 | - |
+| **Phase 1** | 页面迁移（Leads → Customers → Contracts → Payments） | ⏳ 待规划 | - |
+| **Phase 2** | Element Plus 清理（删除依赖、CSS、全局注册） | ⏳ 待规划 | - |
+
+### 8.3 Element Plus 使用统计
+
+**当前状态**：426+ 处使用待迁移
+
+| 类别 | 数量 | 说明 |
+|------|------|------|
+| **组件使用** | 426+ | `el-*` 组件在 Vue 文件中 |
+| **高频组件** | el-button (46+), el-dialog (44+), el-input (40+), el-form (38+) | P0 优先迁移 |
+| **全局 API** | ElMessage (26), ElMessageBox (38) | 替换为 toast() + AlertDialog |
+| **图标** | Element Plus Icons → Lucide Icons | 图标映射表已定义 |
+
+### 8.4 组件映射表（Element Plus → V2）
+
+| Element Plus 组件 | V2 组件 | 优先级 | 说明 |
+|------------------|--------|--------|------|
+| `el-button` | `ButtonV2` | P0 | 5 种变体 + Focus Ring + Touch Target |
+| `el-input` | `InputV2` | P0 | Visible Label + Error Placement |
+| `el-table` | `TableV2` | P0 | No Vertical Divider + Hover State |
+| `el-dialog` | `DialogV2` | P0 | 基于 shadcn-vue Dialog |
+| `el-form` | `FormV2` | P0 | VeeValidate + Zod Schema |
+| `el-select` | `SelectV2` | P0 | 基于 shadcn-vue Select |
+| `ElMessage` | `toast()` | P1 | vue-sonner Toast |
+| `ElMessageBox` | `AlertDialog` | P1 | shadcn-vue AlertDialog |
+| `el-tooltip` | `Tooltip` | P2 | shadcn-vue Tooltip |
+| `el-pagination` | `Pagination` | P2 | shadcn-vue Pagination |
+
+**完整映射表**: `docs/superpowers/specs/2026-07-08-element-plus-to-shadcn-vue-migration-design.md`
+
+### 8.5 图标迁移（Element Plus Icons → Lucide Icons）
+
+| Element Plus Icon | Lucide Icon | 使用场景 |
+|------------------|-------------|---------|
+| `el-icon-edit` | `Pencil` | 编辑按钮 |
+| `el-icon-delete` | `Trash2` | 删除按钮 |
+| `el-icon-plus` | `Plus` | 新增按钮 |
+| `el-icon-search` | `Search` | 搜索框 |
+| `el-icon-loading` | `Loader2` (animate-spin) | 加载状态 |
+
+**完整图标映射表**: `docs/superpowers/specs/2026-07-08-element-plus-to-shadcn-vue-migration-design.md §1.2`
+
+### 8.6 迁移追踪工具
+
+| 工具 | 路径 | 用途 |
+|------|------|------|
+| **ESLint 规则** | `CRM-Client/eslint.config.js` | 禁止新增 Element Plus |
+| **Stylelint 规则** | `CRM-Client/.stylelintrc.design-system.js` | 禁止硬编码样式 |
+| **扫描脚本** | `CRM-Client/scripts/scan-element-plus.sh` | 统计迁移进度 |
+| **迁移清单** | `docs/ELEMENT-PLUS-MIGRATION-CHECKLIST.md` | 详细进度追踪 |
+
+### 8.7 迁移相关文档
+
+| 文档 | 路径 | 说明 |
+|------|------|------|
+| **迁移设计规范** | `docs/superpowers/specs/2026-07-08-element-plus-to-shadcn-vue-migration-design.md` | 完整迁移设计 |
+| **Phase 0 Week 1 计划** | `docs/superpowers/plans/2026-07-08-design-system-phase0-week1.md` | Design Tokens 实施 |
+| **Phase 0 Week 2-3 计划** | `docs/superpowers/plans/2026-07-08-design-system-phase0-week2-3.md` | 基础组件库实施 |
+| **迁移路线图** | `docs/design-system-migration-roadmap.md` | 整体迁移路线 |
+
+---
+
+## 九、参考资料
+
+| 文档 | 路径/链接 |
+|------|----------|
 | **UI/UX Pro Max** | `~/.claude/skills/ui-ux-pro-max/` |
-| **Element Plus 文档** | https://element-plus.org/ |
+| **shadcn-vue 文档** | https://www.shadcn-vue.com/ |
+| **Lucide Icons** | https://lucide.dev/ |
+| **VeeValidate** | https://vee-validate.logaretm.com/ |
+| **vue-sonner (Toast)** | https://github.com/xiaoluoboding/vue-sonner |
+| **Element Plus 文档** | https://element-plus.org/（迁移完成后删除） |
 | **Material Design** | https://material.io/design |
 | **Apple HIG** | https://developer.apple.com/design/human-interface-guidelines |
 
