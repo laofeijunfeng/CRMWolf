@@ -68,11 +68,12 @@ const hasApprovalPending = computed(() => {
 })
 
 // Task 8.1: Get rejection reason from approval nodes
+// Note: Node status can be REJECT (backend action) or REJECTED (legacy)
 const rejectionReason = computed(() => {
   if (!hasRejectedApproval.value || !plan.value?.latest_approval?.nodes) return null
 
   // Find the rejected node and get its comment
-  const rejectedNode = plan.value.latest_approval.nodes.find(node => node.status === 'REJECTED')
+  const rejectedNode = plan.value.latest_approval.nodes.find(node => node.status === 'REJECT' || node.status === 'REJECTED')
   return rejectedNode?.comment ?? '审批被驳回，请查看详情'
 })
 
@@ -171,21 +172,24 @@ const getCurrentNodeOrder = (): number => {
 }
 
 // Task 6.7: Get node description for el-step
+// Note: Backend returns action-based status: SUBMIT/APPROVE/REJECT (not APPROVED/REJECTED)
 const getNodeDescription = (node: ApprovalNodeInfo): string => {
   if (node.status === 'PENDING') {
     return `等待 ${node.approve_role} 审批`
-  } else if (node.status === 'APPROVED') {
+  } else if (node.status === 'APPROVE' || node.status === 'APPROVED') {
     return node.approver_name ?? '已通过'
-  } else if (node.status === 'REJECTED') {
+  } else if (node.status === 'REJECT' || node.status === 'REJECTED') {
     return node.approver_name ?? '已驳回'
+  } else if (node.status === 'SUBMIT') {
+    return '已提交'
   }
   return node.approve_role ?? '审批中'
 }
 
 // Task 6.7: Get node status for el-step
 const getNodeStatus = (status: ApprovalStatus): string => {
-  if (status === 'APPROVED') return 'success'
-  if (status === 'REJECTED') return 'error'
+  if (status === 'APPROVE' || status === 'APPROVED') return 'success'
+  if (status === 'REJECT' || status === 'REJECTED') return 'error'
   return 'process'
 }
 
