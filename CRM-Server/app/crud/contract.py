@@ -63,22 +63,8 @@ class ApprovalService:
                 submitter_name
             )
 
-            # 发送飞书通知给审批人（通过统一 notification_service）
-            if approval and approval.current_node:
-                from app.api.approvals import get_approvers_by_role
-                approvers = get_approvers_by_role(db, approval.current_node.approve_role)
-                notification_service = NotificationService(db, contract.team_id)
-                for approver in approvers:
-                    import asyncio
-                    asyncio.create_task(notification_service.notify_approval_pending(
-                        entity_type=BusinessType.CONTRACT,
-                        entity_name=contract.contract_name,
-                        flow_name=flow.flow_name,
-                        node_name=approval.current_node.node_name,
-                        approver_open_id=approver.feishu_open_id or "",
-                        approver_name=approver.name or "",
-                        business_id=contract_id,
-                    ))
+            # 注意：通知发送移至 API 层（异步上下文）
+            # CRUD 层不再包含异步通知逻辑，避免 "no running event loop" 错误
 
             db.refresh(approval)
         except Exception:

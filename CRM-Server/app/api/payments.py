@@ -562,42 +562,93 @@ def delete_payment_plan(
 
 
 @router.post("/payment-plans/{plan_id}/records", response_model=PaymentRecordResponse, status_code=status.HTTP_201_CREATED, summary="登记回款", description="为指定的回款计划登记回款记录。系统会自动校验回款金额，确保累计回款不超过计划金额。登记后自动更新计划状态和合同回款状态。返回创建成功的回款记录。")
-def create_payment_record(
+async def create_payment_record(
     plan_id: int,
     record_data: PaymentRecordCreate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("payment:register")),
     db: Session = Depends(get_db)
 ):
+    """
+    登记回款（异步版本 - 正确处理通知）
+
+    流程：
+    1. 验证回款计划存在
+    2. 创建回款记录（CRUD 层）
+    3. 发送审批通知（API 层 - 异步）
+    """
     plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
     if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款计划不存在"
         )
-    
+
     if plan.status == PaymentPlanStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该回款计划已完成，无法继续登记回款"
         )
-    
+
     try:
+        # 创建回款记录（CRUD 层 - 同步，不包含通知逻辑）
         record = payment_record_crud.create(
             db,
             plan_id,
             record_data,
             str(current_user.id),
             current_user.name,
-            team_id  # CRUD 红线：所有 CRUD 操作必须传入 team_id
+            team_id
         )
+
+        # 发送审批通知（API 层 - 异步）
+        # 注意：通知失败不阻断业务流程，只记录日志
+        if record.approval_id:
+            from app.services.notification import notification_service_factory
+            from app.api.approvals import get_approvers_by_role
+            from app.constants.business_types import BusinessType
+
+            notification_service = notification_service_factory(db, team_id)
+
+            # 获取审批实例
+            from app.crud.approval import approval_crud
+            approval = approval_crud.get_by_id(db, record.approval_id, team_id)
+
+            if approval and approval.current_node:
+                approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+
+                # 构造通知内容
+                from app.models.contract import Contract
+                contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
+                entity_name = contract.contract_name if contract else f"回款登记#{record.id}"
+
+                try:
+                    for approver in approvers:
+                        await notification_service.notify_approval_pending(
+                            entity_type=BusinessType.PAYMENT,
+                            entity_name=entity_name,
+                            flow_name=approval.flow.flow_name if approval.flow else "",
+                            node_name=approval.current_node.node_name,
+                            approver_open_id=approver.feishu_open_id or "",
+                            approver_name=approver.name or "",
+                            business_id=record.id,
+                        )
+                except Exception as notify_error:
+                    # 通知失败不阻断业务，记录日志
+                    logger.error(
+                        f"[Payment] 通知发送失败: record_id={record.id}, "
+                        f"approval_id={record.approval_id}, error={str(notify_error)}"
+                    )
+
         return record
+
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
+        logger.error(f"[Payment] 登记回款失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"登记回款失败: {str(e)}"
