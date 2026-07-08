@@ -460,23 +460,46 @@ def get_payment_plan_detail(
                 # 构建节点列表，包含审批状态
                 nodes_info = []
                 for node in flow_nodes:
-                    # 查找该节点的审批记录
-                    node_record = next(
-                        (r for r in approval_records if r.node_id == node.id),
-                        None
-                    )
+                    # 查找该节点的所有审批记录（可能有 SUBMIT + APPROVE）
+                    node_records = [r for r in approval_records if r.node_id == node.id]
 
-                    # 修复节点状态显示：根据 ApprovalRecord.action 和 Approval 整体状态
-                    # SUBMIT 节点：显示"已提交"
-                    # APPROVE/REJECT 节点：显示实际审批动作
+                    # 节点状态逻辑：
+                    # - 如果有多条记录（SUBMIT + APPROVE/REJECT），取最后一条（审批结果）
+                    # - 如果只有一条 SUBMIT，显示 SUBMIT
+                    # - 如果没有记录，显示 PENDING
                     node_status = "PENDING"
-                    if node_record:
-                        if node_record.action == "SUBMIT":
-                            node_status = "SUBMIT"  # 已提交
-                        elif node_record.action == "APPROVE":
-                            node_status = "APPROVE"  # 已通过
-                        elif node_record.action == "REJECT":
-                            node_status = "REJECT"  # 已驳回
+                    final_record = None
+
+                    if node_records:
+                        # 按时间排序，取最后一条（审批结果）
+                        node_records_sorted = sorted(node_records, key=lambda r: r.created_time)
+                        final_record = node_records_sorted[-1]
+
+                        # 如果最后一条是 SUBMIT，说明还在审批中
+                        # 如果最后一条是 APPROVE/REJECT，说明审批已完成
+                        if final_record.action == "SUBMIT":
+                            # 只有 SUBMIT 记录，审批中
+                            node_status = "SUBMIT"
+                        elif final_record.action == "APPROVE":
+                            node_status = "APPROVE"
+                        elif final_record.action == "REJECT":
+                            node_status = "REJECT"
+
+                    # approver_id/approver_name：取最后一条记录的审批人（如果有 APPROVE/REJECT）
+                    # 如果只有 SUBMIT，approver_id 是提交人
+                    approver_id = final_record.approver_id if final_record else None
+                    approver_name = final_record.approver_name if final_record else None
+
+                    # 但对于审批通过的情况，应该显示审批人（APPROVE 记录），而不是提交人
+                    if node_status == "APPROVE":
+                        # 找 APPROVE 记录
+                        approve_record = next(
+                            (r for r in node_records if r.action == "APPROVE"),
+                            None
+                        )
+                        if approve_record:
+                            approver_id = approve_record.approver_id
+                            approver_name = approve_record.approver_name
 
                     nodes_info.append({
                         "id": node.id,
@@ -484,10 +507,10 @@ def get_payment_plan_detail(
                         "node_order": node.node_order,
                         "approve_role": node.approve_role,
                         "status": node_status,
-                        "approver_id": node_record.approver_id if node_record else None,
-                        "approver_name": node_record.approver_name if node_record else None,
-                        "approved_time": node_record.created_time.isoformat() if node_record else None,
-                        "comment": node_record.comment if node_record else None
+                        "approver_id": approver_id,
+                        "approver_name": approver_name,
+                        "approved_time": final_record.created_time.isoformat() if final_record else None,
+                        "comment": final_record.comment if final_record else None
                     })
 
                 latest_approval = {
@@ -917,20 +940,41 @@ def list_payment_records(
                     ).order_by(ApprovalNode.node_order).all()
 
                     for node in flow_nodes:
-                        node_record = next(
-                            (r for r in approval_records if r.node_id == node.id),
-                            None
-                        )
+                        # 查找该节点的所有审批记录（可能有 SUBMIT + APPROVE）
+                        node_records = [r for r in approval_records if r.node_id == node.id]
 
-                        # 修复节点状态显示：根据 ApprovalRecord.action 和 Approval 整体状态
+                        # 节点状态逻辑：
+                        # - 如果有多条记录（SUBMIT + APPROVE/REJECT），取最后一条（审批结果）
+                        # - 如果只有一条 SUBMIT，显示 SUBMIT
+                        # - 如果没有记录，显示 PENDING
                         node_status = "PENDING"
-                        if node_record:
-                            if node_record.action == "SUBMIT":
+                        final_record = None
+
+                        if node_records:
+                            # 按时间排序，取最后一条（审批结果）
+                            node_records_sorted = sorted(node_records, key=lambda r: r.created_time)
+                            final_record = node_records_sorted[-1]
+
+                            if final_record.action == "SUBMIT":
                                 node_status = "SUBMIT"
-                            elif node_record.action == "APPROVE":
+                            elif final_record.action == "APPROVE":
                                 node_status = "APPROVE"
-                            elif node_record.action == "REJECT":
+                            elif final_record.action == "REJECT":
                                 node_status = "REJECT"
+
+                        # approver_id/approver_name：取最后一条记录
+                        approver_id = final_record.approver_id if final_record else None
+                        approver_name = final_record.approver_name if final_record else None
+
+                        # 对于审批通过，显示审批人（APPROVE 记录）
+                        if node_status == "APPROVE":
+                            approve_record = next(
+                                (r for r in node_records if r.action == "APPROVE"),
+                                None
+                            )
+                            if approve_record:
+                                approver_id = approve_record.approver_id
+                                approver_name = approve_record.approver_name
 
                         nodes_info.append({
                             "id": node.id,
@@ -938,9 +982,9 @@ def list_payment_records(
                             "node_name": node.node_name,
                             "approve_role": node.approve_role,
                             "status": node_status,
-                            "approver_id": node_record.approver_id if node_record else None,
-                            "approver_name": node_record.approver_name if node_record else None,
-                            "comment": node_record.comment if node_record else None,
+                            "approver_id": approver_id,
+                            "approver_name": approver_name,
+                            "comment": final_record.comment if final_record else None,
                         })
 
                 item_dict["approval"] = {
