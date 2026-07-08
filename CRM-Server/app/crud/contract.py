@@ -3,10 +3,13 @@ from sqlalchemy import and_
 from typing import Optional, List, Tuple
 from decimal import Decimal
 from datetime import datetime
+import logging
 
 from app.models.contract import Contract, ContractStatus
 from app.schemas.contract import ContractCreate, ContractUpdate, ContractStatusUpdate
 from app.services.contract import ContractNumberGenerator, ContractPricingService
+
+logger = logging.getLogger(__name__)
 
 
 class ApprovalService:
@@ -44,8 +47,10 @@ class ApprovalService:
         if existing_approval and existing_approval.status == ApprovalStatus.PENDING:
             return
 
-        flow = approval_flow_crud.match_flow(db, contract)
+        # A5 修复：match_flow(contract) 返回 tuple (flow, error_msg)，需要正确解构
+        flow, error_msg = approval_flow_crud.match_flow(db, contract)
         if not flow:
+            logger.warning(f"合同自动提交审批失败：{error_msg or '未匹配审批流程'}")
             return
 
         try:

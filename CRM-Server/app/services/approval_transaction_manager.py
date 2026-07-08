@@ -64,11 +64,14 @@ class ApprovalTransactionManager:
 
             # 2. 匹配审批流程（捕获查询异常）
             try:
-                flow = approval_flow_crud.match_flow(
+                # A5 修复：使用 match_flow_generic（支持 CONTRACT/PAYMENT/INVOICE/LICENSE）
+                # match_flow(contract) 是 CONTRACT 专用 wrapper，不支持 business_type 参数
+                flow, err_msg = approval_flow_crud.match_flow_generic(
                     db,
-                    business_type=business_type,
-                    team_id=team_id,
-                    **match_flow_kwargs
+                    business_type,
+                    team_id,
+                    match_flow_kwargs.get("amount"),
+                    match_flow_kwargs.get("license_type")
                 )
             except Exception as e:
                 logger.error(f"审批流程查询失败: {e}", exc_info=True)
@@ -80,7 +83,7 @@ class ApprovalTransactionManager:
                 entity.approval_phase = ApprovalPhase.DRAFT
                 db.commit()
                 logger.info(f"审批流程未匹配（business_type={business_type}, entity_id={entity.id}）")
-                return (entity, None, "请先配置审批流程")
+                return (entity, None, err_msg or "请先配置审批流程")
 
             # 4. 创建审批实例（不 commit）
             try:
@@ -178,11 +181,14 @@ class ApprovalTransactionManager:
             # 4. 匹配审批流程
             match_kwargs = adapter.match_kwargs(entity)
             try:
-                flow = approval_flow_crud.match_flow(
+                # A5 修复：使用 match_flow_generic（支持 CONTRACT/PAYMENT/INVOICE/LICENSE）
+                # match_flow(contract) 是 CONTRACT 专用 wrapper，不支持 business_type 参数
+                flow, err_msg = approval_flow_crud.match_flow_generic(
                     db,
-                    business_type=business_type,
-                    team_id=team_id,
-                    **match_kwargs
+                    business_type,
+                    team_id,
+                    match_kwargs.get("amount"),
+                    match_kwargs.get("license_type")
                 )
             except Exception as e:
                 logger.error(f"审批流程查询失败: {e}", exc_info=True)
@@ -190,7 +196,8 @@ class ApprovalTransactionManager:
                 return (None, "系统异常：审批流程查询失败")
 
             if flow is None:
-                return (None, "请先配置审批流程")
+                # 未匹配审批流程：返回错误提示（err_msg 可能是 None 或具体错误）
+                return (None, err_msg or "请先配置审批流程")
 
             # 5. 创建新审批实例
             approval = approval_crud.create_approval_only(
