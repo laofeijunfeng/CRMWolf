@@ -629,9 +629,16 @@ class PaymentRecordCRUD:
         # 发送飞书通知给审批人（通过统一 notification_service）
         if approval and approval.current_node:
             from app.api.approvals import get_approvers_by_role
+            from app.models.payment import PaymentPlan
+            from app.models.contract import Contract
             approvers = get_approvers_by_role(db, approval.current_node.approve_role)
-            # 构造通知内容
-            entity_name = f"{record.contract.customer.account_name} - {record.stage_name}"
+            # 构造通知内容：通过 payment_plan -> contract 获取合同名称
+            payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == record.payment_plan_id).first()
+            contract_name = None
+            if payment_plan:
+                contract = db.query(Contract).filter(Contract.id == payment_plan.contract_id).first()
+                contract_name = contract.contract_name if contract else None
+            entity_name = contract_name or f"回款登记#{record.id}"
             notification_service = NotificationService(db, record.team_id)
             for approver in approvers:
                 import asyncio
