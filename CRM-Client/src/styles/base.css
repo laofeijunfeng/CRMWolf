@@ -1,3 +1,4 @@
+@import './touch-safety.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

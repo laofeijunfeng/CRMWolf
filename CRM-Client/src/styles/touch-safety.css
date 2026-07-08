@@ -1,0 +1,99 @@
+/* ==================== Touch Safety Utilities ==================== */
+/* UI/UX Pro Max CRITICAL §2: Touch Target Minimum 44×44pt */
+
+@layer components {
+  /* ===== Touch-safe container ===== */
+  /* Wraps small visual elements with invisible 44px touch area */
+  .touch-safe-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ===== Hit-slop extension ===== */
+  /* Extends touch target by N pixels in all directions */
+  .hit-slop {
+    &::after {
+      content: '';
+      position: absolute;
+      top: -10px;
+      right: -10px;
+      bottom: -10px;
+      left: -10px;
+    }
+  }
+
+  /* ===== Touch-safe button sizes ===== */
+  .btn-touch-sm {
+    /* Visual size: 24px, Touch target: 44px via hit-slop */
+    @apply h-button-sm px-wolf-sm relative;
+    &::after {
+      @apply absolute;
+      content: '';
+      top: -10px;
+      right: -10px;
+      bottom: -10px;
+      left: -10px;
+    }
+  }
+
+  .btn-touch-md {
+    /* Desktop: 32px visual, Mobile: 44px auto */
+    @apply h-button-md px-wolf-lg;
+    @media (max-width: 767px) {
+      @apply h-touch-target;
+    }
+  }
+
+  .btn-touch-lg {
+    /* Always 44px touch target compliant */
+    @apply h-touch-target px-wolf-xl;
+  }
+
+  /* ===== Touch-safe input ===== */
+  .input-touch-desktop {
+    @apply h-input-desktop px-wolf-md;
+  }
+
+  .input-touch-mobile {
+    @apply h-input-mobile px-wolf-xl;
+  }
+
+  /* ===== Touch-action manipulation ===== */
+  /* Removes 300ms delay on mobile */
+  .touch-manipulation {
+    touch-action: manipulation;
+  }
+}
+
+@layer utilities {
+  /* ===== Dynamic hit-slop ===== */
+  /* Usage: hit-slop-N where N is extension in px */
+  .hit-slop-4::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    bottom: -4px;
+    left: -4px;
+  }
+
+  .hit-slop-8::after {
+    content: '';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    bottom: -8px;
+    left: -8px;
+  }
+
+  .hit-slop-10::after {
+    content: '';
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    bottom: -10px;
+    left: -10px;
+  }
+}
