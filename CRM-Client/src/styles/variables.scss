@@ -357,6 +357,52 @@ $wolf-outcome-risk-bg:  $wolf-danger-bg;     // #FCECEC
 // Task 5.8: 金额/日期字段 tabular-nums
 $wolf-numeric: tabular-nums lining-nums;
 
+// ==================== V2 向后兼容别名 ====================
+// 规则: 保留旧变量名，指向新变量（平滑过渡）
+// 过渡期: Phase 0-1（迁移完成后删除）
+// 来源: CRM-Docs/design-system/MASTER.md §10（向后兼容）
+
+// ========== V2 Design Tokens 定义（避免 @use/@import 冲突）==========
+
+// 主色 V2
+$wolf-primary-v2: #2563EB;
+$wolf-primary-hover-v2: #1E40AF;
+$wolf-primary-active-v2: #1D4ED8;
+$wolf-primary-light-v2: rgba(#2563EB, 0.1);
+
+// 圆角 V2（统一 6px）
+$wolf-radius-v2: 6px;
+$wolf-radius-sm-v2: 4px;
+$wolf-radius-lg-v2: 8px;
+$wolf-radius-full-v2: 9999px;
+
+// 阴影 V2
+$wolf-shadow-card-v2: 0 1px 3px rgba(0, 0, 0, 0.1);
+$wolf-shadow-hover-v2: 0 2px 8px rgba(0, 0, 0, 0.15);
+
+// 过渡 V2
+$wolf-transition-v2: all 0.15s ease;
+
+// ========== 向后兼容别名（旧变量名指向 V2 值）==========
+
+// 主色别名
+$wolf-primary: $wolf-primary-v2;
+$wolf-primary-hover: $wolf-primary-hover-v2;
+$wolf-primary-active: $wolf-primary-active-v2;
+$wolf-primary-light: $wolf-primary-light-v2;
+
+// 圆角别名（统一使用 $wolf-radius-v2）
+$wolf-radius-sm: $wolf-radius-v2;
+$wolf-radius-md: $wolf-radius-v2;
+$wolf-radius-lg: $wolf-radius-lg-v2;
+
+// 阴影别名
+$wolf-shadow-card: $wolf-shadow-card-v2;
+$wolf-shadow-hover: $wolf-shadow-hover-v2;
+
+// 过渡别名
+$--transition-base: $wolf-transition-v2;
+
 // ==================== Typography 统一样式导入 ====================
 // 必须在所有变量定义之后导入
 @import '_typography.scss';

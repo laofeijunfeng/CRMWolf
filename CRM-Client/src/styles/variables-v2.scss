@@ -1,0 +1,395 @@
+// ==================== CRMWolf 设计系统 V2 ====================
+// 规则来源: CRM-Docs/design-system/MASTER.md
+// 版本: V2（基于 navigation-redesign-v3.html）
+// 核心原则: 极致克制、柔和低噪、统一有序、服务内容
+
+// ==================== 颜色系统（V2）====================
+// 主色调: 现代蓝色 #2563EB（清晰、现代）
+// 中性色: 暖灰梯度（柔和低噪）
+// 功能色: 状态标签专用（极度克制）
+
+// ==================== 主色调（现代蓝色）====================
+
+$wolf-primary-v2: #2563EB;           // 主色（清晰蓝）
+$wolf-primary-hover-v2: #1E40AF;     // hover态（加深10%）
+$wolf-primary-active-v2: #1D4ED8;    // active态（加深15%）
+$wolf-primary-light-v2: rgba(#2563EB, 0.1);  // 浅底色、选中背景
+
+// 次要色（同色系）
+$wolf-secondary-v2: #3B82F6;         // 次色
+
+// 强调色（成交绿）
+$wolf-accent-v2: #059669;            // 成功/成交标记
+
+// ==================== 背景色（V2）====================
+
+$wolf-bg-page-v2: #F8FAFC;           // 页面画布底色（中性蓝灰）
+$wolf-bg-card-v2: #FFFFFF;           // 卡片/表格背景
+$wolf-bg-sidebar-v2: #FFFFFF;        // 侧边栏背景
+$wolf-bg-hover-v2: #EEF2FF;          // hover态背景、斑马纹
+$wolf-bg-muted-v2: #F1F5FD;          // 辅助背景、禁用态
+$wolf-bg-elevated-v2: #FFFFFF;       // 弹窗/抽屉内容区
+
+// ==================== 文字色（V2）====================
+
+$wolf-text-primary-v2: #0F172A;      // 页面主标题（对比度 15:1）
+$wolf-text-secondary-v2: #64748B;    // 正文、按钮文字（对比度 4.5:1）
+$wolf-text-tertiary-v2: #94A3B8;     // 辅助信息、未选中导航（对比度 3:1）
+$wolf-text-placeholder-v2: #94A3B8;  // placeholder色
+$wolf-text-inverse-v2: #FFFFFF;      // 反色文字
+
+// 链接色
+$wolf-text-link-v2: #2563EB;
+$wolf-text-link-hover-v2: #1E40AF;
+
+// ==================== 边框色（V2）====================
+
+$wolf-border-default-v2: #E4ECFC;    // 输入框默认边框、控件边框
+$wolf-border-hover-v2: #2563EB;      // hover态边框
+$wolf-border-light-v2: #F1F5FD;      // 极浅分割线
+$wolf-border-divider-v2: #E4ECFC;    // 分割线
+
+// ==================== 功能色（状态标签）====================
+// 规则: 必须搭配浅底色+同色系文字，禁止纯色填充
+
+$wolf-success-v2: #10B981;           // 成功色
+$wolf-success-text-v2: #10B981;      // 成功文字色
+$wolf-success-bg-v2: rgba(#10B981, 0.1);  // 成功背景色
+
+$wolf-warning-v2: #F59E0B;           // 警告色
+$wolf-warning-text-v2: #F59E0B;      // 警告文字色
+$wolf-warning-bg-v2: rgba(#F59E0B, 0.1);  // 警告背景色
+
+$wolf-danger-v2: #DC2626;            // 危险色
+$wolf-danger-text-v2: #DC2626;       // 危险文字色
+$wolf-danger-bg-v2: rgba(#DC2626, 0.1);   // 危险背景色
+
+// ==================== 圆角系统（统一 6px）====================
+// 规则: 所有按钮、卡片、输入框、下拉框统一 6px
+// 禁止: 旧圆角值 4px/8px/12px/16px
+
+$wolf-radius-v2: 6px;        // 主要圆角（按钮、卡片、输入框）
+$wolf-radius-sm-v2: 4px;     // 小圆角（标签、小型元素）
+$wolf-radius-lg-v2: 8px;     // 大圆角（弹窗、对话框）
+$wolf-radius-full-v2: 9999px; // 完全圆角（头像、徽章）
+
+// ==================== 间距系统（保留 8dp grid）====================
+
+$wolf-space-xs-v2: 4px;      // 元素内间距（图标与文字）
+$wolf-space-sm-v2: 8px;      // 关联元素间距
+$wolf-space-md-v2: 12px;     // 模块内间距
+$wolf-space-lg-v2: 16px;     // 模块间间距（卡片内边距）
+$wolf-space-xl-v2: 24px;     // 页面安全边距
+$wolf-space-2xl-v2: 32px;    // 大间距
+
+// 页面/组件间距
+$wolf-page-padding-v2: 24px;
+$wolf-card-gap-v2: 16px;
+$wolf-card-padding-v2: 16px;
+$wolf-section-gap-v2: 24px;
+$wolf-form-item-gap-v2: 16px;
+
+// ==================== 阴影系统（中等强度）====================
+// V1: 极淡极柔 → V2: 中等强度（更有层次感）
+
+$wolf-shadow-card-v2: 0 1px 3px rgba(0, 0, 0, 0.1);       // 卡片阴影
+$wolf-shadow-hover-v2: 0 2px 8px rgba(0, 0, 0, 0.15);     // hover态阴影
+$wolf-shadow-dropdown-v2: 0 -4px 12px rgba(0, 0, 0, 0.15); // 下拉面板阴影（向上展开）
+$wolf-shadow-modal-v2: 0 4px 16px rgba(0, 0, 0, 0.15);    // 弹窗阴影
+$wolf-shadow-bottom-v2: 0 -2px 8px rgba(0, 0, 0, 0.1);    // 底部阴影
+
+// ==================== 过渡动画系统 ====================
+// 规则: 所有交互元素 hover 150ms，状态切换 150-300ms
+// 禁止: 超过 500ms 的动画
+
+$wolf-transition-v2: all 0.15s ease;        // 标准过渡（150ms）
+$wolf-transition-hover-v2: all 0.2s ease;   // hover过渡（200ms）
+$wolf-transition-press-v2: all 0.15s ease;  // press反馈（150ms）
+
+// ==================== 组件尺寸（V2）====================
+// UI/UX Pro Max CRITICAL: Touch Target Minimum 44×44pt
+// 规则: 桌面端可使用较小尺寸，移动端必须 ≥44px
+// 来源: UI/UX Pro Max §2 (Touch & Interaction)
+
+// ========== 按钮尺寸 ==========
+
+// 桌面端尺寸（Web Dashboard）
+$wolf-button-height-sm-v2: 24px;    // 迷你型（文本按钮，仅桌面）
+$wolf-button-height-md-v2: 32px;    // 常规型（桌面端）
+$wolf-button-padding-sm-v2: 4px 8px;  // 上下4px 左右8px
+$wolf-button-padding-md-v2: 8px 16px; // 上下8px 左右16px
+
+// 移动端尺寸（Touch Target合规）
+$wolf-button-height-mobile-v2: 44px;    // 移动端常规（44pt合规）
+$wolf-button-height-lg-v2: 44px;        // 大型按钮（跨平台 touch target）
+$wolf-button-padding-mobile-v2: 12px 24px; // 移动端 padding
+
+// ========== 输入框尺寸 ==========
+
+// 桌面端
+$wolf-input-height-v2: 32px;        // 桌面端输入框
+$wolf-input-radius-v2: $wolf-radius-v2;
+$wolf-input-padding-v2: 12px;
+
+// 移动端（Touch Target合规）
+$wolf-input-height-mobile-v2: 44px; // 移动端输入框（44pt合规）
+$wolf-input-padding-mobile-v2: 16px;
+
+// ========== 表格尺寸 ==========
+
+$wolf-table-row-height-v2: 44px;        // 最小行高（自适应）
+$wolf-table-header-height-v2: 44px;
+$wolf-table-cell-padding-y-v2: 12px;
+$wolf-table-cell-padding-x-v2: 8px;
+
+// ========== Touch Target 扩展策略 ==========
+
+// 当视觉尺寸小于 44px 时，使用 hitSlop 扩展点击区域
+// 示例: 24px 图标的 hitSlop = (44-24)/2 = 10px
+$wolf-touch-target-min-v2: 44px;            // 最小 touch target
+$wolf-touch-target-hit-slop-v2: 10px;       // 默认 hitSlop 扩展值
+
+// ==================== Focus 状态规范 ====================
+// UI/UX Pro Max CRITICAL: focus-states
+// 规则: 键盘导航需要可见 focus states (2–4px; Apple HIG, Material Design)
+// 来源: UI/UX Pro Max §1 (Accessibility)
+
+// ========== Focus Ring 基础 ==========
+
+$wolf-focus-ring-width-v2: 2px;                 // Focus ring 宽度（WCAG 合规）
+$wolf-focus-ring-color-v2: rgba(#2563EB, 0.5);  // Focus ring 颜色（主色半透明）
+$wolf-focus-ring-offset-v2: 2px;                // Focus ring 偏移（不覆盖元素边界）
+
+// ========== Focus Ring 变体 ==========
+
+// 强 focus（关键交互元素）
+$wolf-focus-ring-width-strong-v2: 3px;          // 强 focus（主要按钮、关键输入）
+$wolf-focus-ring-color-strong-v2: rgba(#2563EB, 0.6);
+
+// 弱 focus（次要元素）
+$wolf-focus-ring-width-subtle-v2: 1px;          // 弱 focus（次要链接）
+$wolf-focus-ring-color-subtle-v2: rgba(#2563EB, 0.3);
+
+// ========== Focus Shadow（替代 ring 方案）==========
+
+// Material Design 风格: 使用 elevation + shadow 而非 outline
+$wolf-focus-shadow-v2: 0 0 0 2px rgba(#2563EB, 0.3);
+
+// ==================== Reduced Motion ====================
+// UI/UX Pro Max: reduced-motion
+// 规则: Respect prefers-reduced-motion; reduce/disable animations when requested
+// 来源: UI/UX Pro Max §1 (Accessibility) + §7 (Animation)
+
+// ========== Reduced Motion 变量 ==========
+
+$wolf-reduced-motion-duration-v2: 0.01ms;       // Reduced motion 时的动画时长
+$wolf-reduced-motion-delay-v2: 0ms;             // Reduced motion 时的动画延迟
+
+// ========== Reduced Motion CSS 变量 ==========
+
+// 用于 CSS custom properties（Vue 组件）
+$wolf-css-var-transition-duration-v2: --wolf-transition-duration;
+$wolf-css-var-reduced-motion-v2: --wolf-reduced-motion-duration;
+
+// ==================== 暗色模式（Dark Mode）====================
+// UI/UX Pro Max: color-dark-mode
+// 规则: Dark mode uses desaturated / lighter tonal variants, not inverted colors
+// 来源: UI/UX Pro Max §6 (Typography & Color)
+// 重要: 暗色对比度需独立测试（不假设亮色值可用）
+
+// ========== 暗色背景色 ==========
+
+$wolf-bg-page-dark-v2: #0F172A;              // 暗色页面背景（Slate-900）
+$wolf-bg-card-dark-v2: #1E293B;              // 暗色卡片背景（Slate-800）
+$wolf-bg-sidebar-dark-v2: #1E293B;           // 暗色侧边栏背景
+$wolf-bg-hover-dark-v2: #334155;             // 暗色 hover 背景（Slate-700）
+$wolf-bg-muted-dark-v2: #1E293B;             // 暗色辅助背景
+$wolf-bg-elevated-dark-v2: #334155;          // 暗色弹窗/抽屉背景
+
+// ========== 暗色文字色 ==========
+
+$wolf-text-primary-dark-v2: #F8FAFC;         // 暗色主文字（Slate-50，对比度 15:1）
+$wolf-text-secondary-dark-v2: #CBD5E1;       // 暗色次文字（Slate-300，对比度 4.5:1）
+$wolf-text-tertiary-dark-v2: #94A3B8;        // 暗色辅助文字（Slate-400，对比度 3:1）
+$wolf-text-placeholder-dark-v2: #64748B;     // 暗色 placeholder（Slate-500）
+
+// ========== 暗色边框色 ==========
+
+$wolf-border-default-dark-v2: #334155;       // 暗色默认边框
+$wolf-border-hover-dark-v2: #2563EB;         // 暗色 hover 边框（主色）
+$wolf-border-light-dark-v2: #1E293B;         // 暗色极浅分割
+
+// ========== 暗色功能色 ==========
+
+// 注意: 功能色在暗色模式下需要调整亮度
+$wolf-success-dark-v2: #34D399;              // 暗色成功色（更亮）
+$wolf-warning-dark-v2: #FBBF24;              // 暗色警告色（更亮）
+$wolf-danger-dark-v2: #F87171;               // 暗色危险色（更亮）
+
+// ========== 暗色 Focus Ring ==========
+
+$wolf-focus-ring-color-dark-v2: rgba(#3B82F6, 0.5); // 暗色 focus ring（蓝色半透明）
+
+// ==================== Disabled 状态规范 ====================
+// UI/UX Pro Max: disabled-states
+// 规则: Disabled elements use reduced opacity (0.38–0.5) + cursor change + semantic attribute
+// 来源: UI/UX Pro Max §8 (Forms & Feedback) + Material Design state layers
+
+// ========== Disabled Opacity ==========
+
+$wolf-disabled-opacity-v2: 0.38;              // Material Design disabled opacity
+$wolf-disabled-opacity-light-v2: 0.5;         // 亮色模式 disabled opacity（更柔和）
+$wolf-disabled-opacity-dark-v2: 0.38;         // 暗色模式 disabled opacity
+
+// ========== Disabled Cursor ==========
+
+$wolf-cursor-disabled-v2: not-allowed;        // Disabled cursor
+$wolf-cursor-clickable-v2: pointer;           // 可点击元素 cursor
+
+// ========== Disabled 颜色 ==========
+
+// 亮色模式
+$wolf-disabled-bg-v2: $wolf-bg-muted-v2;      // Disabled 背景
+$wolf-disabled-text-v2: $wolf-text-tertiary-v2; // Disabled 文字
+
+// 暗色模式
+$wolf-disabled-bg-dark-v2: $wolf-bg-muted-dark-v2;
+$wolf-disabled-text-dark-v2: $wolf-text-tertiary-dark-v2;
+
+// ==================== 移动端适配（Responsive Web）====================
+// UI/UX Pro Max HIGH: Layout & Responsive + Navigation Patterns
+// 规则: Mobile-first breakpoints, Safe areas, Adaptive navigation
+// 来源: UI/UX Pro Max §5 (Layout) + §9 (Navigation)
+// 平台: iOS Safari / Android Chrome（响应式 Web）
+
+// ========== 断点系统 ==========
+
+$wolf-breakpoint-xs-v2: 375px;    // 小手机（iPhone SE / Android 小屏）
+$wolf-breakpoint-sm-v2: 768px;    // 平板竖屏（iPad Mini）
+$wolf-breakpoint-md-v2: 1024px;   // 平板横屏 / 小桌面（iPad / Chromebook）
+$wolf-breakpoint-lg-v2: 1440px;   // 大桌面（标准笔记本 / 外接显示器）
+
+// 断点用途说明:
+// - xs (375px): 移动端样式生效，Sidebar 隐藏，Bottom Nav 显示
+// - sm (768px): 平板竖屏，Sidebar 可折叠，部分桌面样式
+// - md (1024px): 平板横屏/小桌面，Sidebar 显示，完整桌面样式
+// - lg (1440px): 大桌面，最大容器宽度
+
+// ========== 移动端字体尺寸 ==========
+
+// UI/UX Pro Max CRITICAL: Minimum 16px body text on mobile (avoids iOS auto-zoom)
+// iOS Safari 在 input font-size < 16px 时会自动放大页面
+$wolf-font-size-body-mobile-v2: 16px;   // 移动端正文（避免 iOS auto-zoom）
+$wolf-font-size-title-mobile-v2: 18px;  // 移动端页面标题
+$wolf-font-size-caption-mobile-v2: 14px; // 移动端辅助文字
+
+// ========== 移动端间距（更紧凑）==========
+
+// 移动端页面边距（减少以最大化内容区域）
+$wolf-page-padding-mobile-v2: 16px;     // 移动端页面边距（桌面 24px → 移动 16px）
+$wolf-card-padding-mobile-v2: 12px;     // 移动端卡片内边距（桌面 16px → 移动 12px）
+$wolf-section-gap-mobile-v2: 16px;      // 移动端模块间距（桌面 24px → 移动 16px）
+$wolf-form-item-gap-mobile-v2: 12px;    // 移动端表单项间距
+
+// ========== 移动端行长度 ==========
+
+// UI/UX Pro Max: Mobile 35–60 chars per line; desktop 60–75 chars
+// 建议: 移动端内容宽度限制，避免过长行
+$wolf-content-max-width-mobile-v2: 100%;  // 移动端全宽
+$wolf-content-max-width-tablet-v2: 720px; // 平板内容最大宽度
+$wolf-content-max-width-desktop-v2: 1200px; // 桌面内容最大宽度
+
+// ========== 安全区域（Safe Areas）==========
+
+// iOS notch / Dynamic Island / Home indicator
+// Android gesture navigation bar
+// 用法: padding-top: $wolf-safe-area-top-v2;
+
+$wolf-safe-area-top-v2: env(safe-area-inset-top, 0px);     // 顶部安全区域（notch）
+$wolf-safe-area-bottom-v2: env(safe-area-inset-bottom, 0px); // 底部手势区域
+$wolf-safe-area-left-v2: env(safe-area-inset-left, 0px);   // 左侧安全区域（横屏）
+$wolf-safe-area-right-v2: env(safe-area-inset-right, 0px); // 右侧安全区域（横屏）
+
+// ========== Viewport 单位 ==========
+
+// UI/UX Pro Max CRITICAL: Prefer min-h-dvh over 100vh on mobile
+// 100vh 在 iOS Safari 地址栏展开时会超出可视区域
+$wolf-viewport-height-mobile-v2: min(100vh, 100dvh);  // 动态 viewport 高度
+$wolf-viewport-height-desktop-v2: 100vh;             // 桌面端固定高度
+
+// ========== 响应式导航 ==========
+
+// 桌面端: Sidebar 固定显示（220px）
+// 移动端: Sidebar 隐藏，显示 Bottom Nav 或 Top Nav hamburger
+
+$wolf-sidebar-width-mobile-v2: 0;       // 移动端隐藏 Sidebar
+$wolf-sidebar-collapsed-width-v2: 0;    // 折叠宽度（移动端完全隐藏）
+
+// Bottom Navigation（移动端底部导航）
+$wolf-bottom-nav-height-v2: 56px;       // 移动端底部导航高度
+$wolf-bottom-nav-padding-v2: 8px;       // Bottom Nav 内边距
+$wolf-bottom-nav-item-height-v2: 44px;  // Bottom Nav 项目高度（touch target 合规）
+$wolf-bottom-nav-max-items-v2: 5;       // Bottom Nav 最多 5 个项目（UI/UX Pro Max）
+
+// Top Navigation（移动端顶部栏）
+$wolf-topbar-height-mobile-v2: 56px;    // 移动端顶部栏高度
+$wolf-topbar-padding-mobile-v2: 16px;   // 移动端顶部栏边距
+
+// ========== 移动端表格适配 ==========
+
+// 移动端表格: 横向滚动或简化列
+$wolf-table-min-width-mobile-v2: 100%;  // 移动端表格最小宽度
+$wolf-table-cell-padding-mobile-v2: 8px 4px; // 移动端单元格 padding（更紧凑）
+
+// ========== 移动端 Modal/Sheet ==========
+
+// UI/UX Pro Max: Modals/sheets animate from bottom on mobile
+$wolf-modal-height-mobile-v2: 90vh;     // 移动端 Modal 最大高度
+$wolf-modal-radius-mobile-v2: $wolf-radius-lg-v2; // 移动端 Modal 圆角（顶部圆角）
+$wolf-sheet-height-v2: auto;            // Sheet 高度（自适应内容）
+
+// ========== 横向滚动约束 ==========
+
+// UI/UX Pro Max CRITICAL: No horizontal scroll on mobile
+// 仅允许特定组件（表格、图片画廊）横向滚动
+$wolf-overflow-x-mobile-v2: hidden;     // 页面主体禁止横向滚动
+$wolf-overflow-x-allowed-v2: auto;      // 特定组件允许横向滚动
+
+// ==================== 字体系统（保留现有）====================
+// 建议: 保留 IBM Plex Sans（技术感），不改为 Inter
+
+$wolf-font-family-v2: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+$wolf-font-display-v2: "IBM Plex Sans", $wolf-font-family-v2;
+$wolf-font-mono-v2: "IBM Plex Mono", "SF Mono", Monaco, "Cascadia Code", monospace;
+
+// 字号（仅4种）
+$wolf-font-size-title-v2: 16px;      // 页面主标题
+$wolf-font-size-body-v2: 14px;       // 正文（桌面端）
+$wolf-font-size-auxiliary-v2: 13px;  // 辅助信息
+$wolf-font-size-caption-v2: 12px;    // 次要备注
+
+// 字重
+$wolf-font-weight-normal-v2: 400;
+$wolf-font-weight-medium-v2: 500;
+$wolf-font-weight-semibold-v2: 600;
+
+// 行高（UI/UX Pro Max: body 1.5-1.75）
+$wolf-line-height-title-v2: 1.2;
+$wolf-line-height-body-v2: 1.5;      // 正文行高（WCAG 合规）
+
+// ==================== 导航组件尺寸 ====================
+
+// Sidebar（左侧菜单 - 桌面端）
+$wolf-sidebar-width-v2: 220px;
+$wolf-sidebar-nav-item-height-v2: 40px;
+
+// TopBar（顶部栏）
+$wolf-topbar-height-v2: 56px;
+$wolf-topbar-title-font-size-v2: 20px;
+
+// ContextTabs（上下文标签栏）
+$wolf-context-tabs-height-v2: 48px;
+
+// Header
+$wolf-header-height-v2: 56px;
+$wolf-header-height-mobile-v2: 48px;

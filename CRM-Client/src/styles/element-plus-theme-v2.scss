@@ -1,0 +1,65 @@
+// ==================== Element Plus 主题适配 V2 ====================
+// 规则来源: CRM-Docs/design-system/MASTER.md §3（组件设计规范）
+// 用途: 覆盖 Element Plus 默认主题，适配 CRMWolf 设计系统
+
+@use './variables-v2.scss' as *;
+
+// ==================== 颜色覆盖 ====================
+
+$--color-primary: $wolf-primary-v2;           // #2563EB
+$--color-success: $wolf-success-v2;           // #10B981
+$--color-warning: $wolf-warning-v2;           // #F59E0B
+$--color-danger: $wolf-danger-v2;             // #DC2626
+$--color-info: $wolf-primary-v2;              // #2563EB
+
+// ==================== 文字色覆盖 ====================
+
+$--color-text-primary: $wolf-text-primary-v2;     // #0F172A
+$--color-text-regular: $wolf-text-secondary-v2;   // #64748B
+$--color-text-secondary: $wolf-text-tertiary-v2;  // #94A3B8
+$--color-text-placeholder: $wolf-text-placeholder-v2;  // #94A3B8
+
+// ==================== 背景色覆盖 ====================
+
+$--background-color-base: $wolf-bg-page-v2;       // #F8FAFC
+$--background-color-light: $wolf-bg-card-v2;      // #FFFFFF
+
+// ==================== 边框覆盖 ====================
+
+$--border-color-light: $wolf-border-light-v2;     // #F1F5FD
+$--border-color-base: $wolf-border-default-v2;    // #E4ECFC
+$--border-radius-base: $wolf-radius-v2;           // 6px（统一圆角）
+$--border-radius-small: $wolf-radius-sm-v2;       // 4px
+$--border-radius-large: $wolf-radius-lg-v2;       // 8px
+
+// ==================== 间距覆盖 ====================
+
+$--spacing-unit: 8px;
+$--spacing-xs: $wolf-space-xs-v2;     // 4px
+$--spacing-sm: $wolf-space-sm-v2;     // 8px
+$--spacing-base: $wolf-space-lg-v2;   // 16px
+$--spacing-lg: $wolf-space-xl-v2;     // 24px
+$--spacing-xl: $wolf-space-2xl-v2;    // 32px
+
+// ==================== 过渡动画覆盖 ====================
+
+$--transition-base: $wolf-transition-v2;           // 0.15s ease
+$--transition-fade: opacity 0.15s ease-in-out;
+
+// ==================== Focus 状态覆盖 ====================
+
+// Element Plus 默认 focus 颜色
+$--color-primary-light-3: $wolf-focus-ring-color-v2;  // rgba(#2563EB, 0.5)
+
+// ==================== Disabled 状态覆盖 ====================
+
+// Element Plus disabled opacity
+$--button-disabled-opacity: $wolf-disabled-opacity-v2;  // 0.38
+
+// ==================== 暗色模式覆盖（未来扩展）====================
+// 注意: Element Plus 暗色模式需要额外配置 CSS 变量映射
+// 当前仅定义变量，待暗色模式实施时使用
+
+// $--color-primary-dark: $wolf-primary-v2;
+// $--color-text-primary-dark: $wolf-text-primary-dark-v2;
+// $--bg-color-dark: $wolf-bg-page-dark-v2;
