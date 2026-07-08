@@ -594,11 +594,13 @@ class PaymentRecordCRUD:
         1. 调用 match_flow_generic 匹配 PAYMENT 审批流程
         2. 未匹配 -> 报错（强制走审批流程）
         3. 匹配 -> create_approval_generic 创建审批实例
+        4. 发送飞书通知给审批人
 
         注意：所有回款必须走审批流程，审批通过后自动确认入账。
         """
         from app.crud.approval import approval_crud, approval_flow_crud
-        from app.models.approval import BusinessType
+        from app.models.approval import BusinessType, Approval
+        from app.services.feishu import feishu_service
 
         # 匹配 PAYMENT 审批流程（金额=回款金额）
         flow, error_msg = approval_flow_crud.match_flow_generic(
@@ -614,7 +616,7 @@ class PaymentRecordCRUD:
             raise ValueError(error_msg or "未找到匹配的回款审批流程，请联系管理员配置完整的审批流程覆盖范围")
 
         # 创建审批实例
-        approval_crud.create_approval_generic(
+        approval = approval_crud.create_approval_generic(
             db,
             business_type=BusinessType.PAYMENT,
             business_id=record.id,
@@ -623,6 +625,22 @@ class PaymentRecordCRUD:
             submitter_id=creator_id,
             submitter_name=creator_name
         )
+
+        # 发送飞书通知给审批人（对齐 CONTRACT 逻辑）
+        if approval and approval.current_node:
+            from app.api.approvals import get_approvers_by_role
+            approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+            # 构造通知内容
+            entity_name = f"{record.contract.customer.account_name} - {record.stage_name}"
+            for approver in approvers:
+                if approver.feishu_open_id:
+                    import asyncio
+                    asyncio.create_task(feishu_service.notify_approval_pending(
+                        approver.feishu_open_id,
+                        entity_name,
+                        flow.flow_name,
+                        approval.current_node.node_name
+                    ))
 
 
 def query_pending_approval_me(db: Session, team_id: int, user_roles: List[str]) -> int:

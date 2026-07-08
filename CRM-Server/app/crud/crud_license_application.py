@@ -466,7 +466,7 @@ class LicenseApplicationCRUD:
             return application
 
         # 创建审批实例（会自动调用 adapter.on_submit 切换状态）
-        approval_crud.create_approval_generic(
+        approval = approval_crud.create_approval_generic(
             db,
             BusinessType.LICENSE,
             application_id,
@@ -475,6 +475,23 @@ class LicenseApplicationCRUD:
             submitter_id,
             submitter_name or "",
         )
+
+        # 发送飞书通知给审批人（对齐 CONTRACT/PAYMENT 逻辑）
+        if approval and approval.current_node:
+            from app.api.approvals import get_approvers_by_role
+            from app.services.feishu import feishu_service
+            approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+            # 构造通知内容
+            entity_name = f"License申请 - {application.application_number}"
+            for approver in approvers:
+                if approver.feishu_open_id:
+                    import asyncio
+                    asyncio.create_task(feishu_service.notify_approval_pending(
+                        approver.feishu_open_id,
+                        entity_name,
+                        flow.flow_name,
+                        approval.current_node.node_name
+                    ))
 
         db.refresh(application)
         return application
