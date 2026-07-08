@@ -594,13 +594,13 @@ class PaymentRecordCRUD:
         1. 调用 match_flow_generic 匹配 PAYMENT 审批流程
         2. 未匹配 -> 报错（强制走审批流程）
         3. 匹配 -> create_approval_generic 创建审批实例
-        4. 发送飞书通知给审批人
+        4. 发送飞书通知给审批人（通过 notification_service）
 
         注意：所有回款必须走审批流程，审批通过后自动确认入账。
         """
         from app.crud.approval import approval_crud, approval_flow_crud
-        from app.models.approval import BusinessType, Approval
-        from app.services.feishu import feishu_service
+        from app.models.approval import BusinessType
+        from app.services.notification import NotificationService
 
         # 匹配 PAYMENT 审批流程（金额=回款金额）
         flow, error_msg = approval_flow_crud.match_flow_generic(
@@ -626,21 +626,24 @@ class PaymentRecordCRUD:
             submitter_name=creator_name
         )
 
-        # 发送飞书通知给审批人（对齐 CONTRACT 逻辑）
+        # 发送飞书通知给审批人（通过统一 notification_service）
         if approval and approval.current_node:
             from app.api.approvals import get_approvers_by_role
             approvers = get_approvers_by_role(db, approval.current_node.approve_role)
             # 构造通知内容
             entity_name = f"{record.contract.customer.account_name} - {record.stage_name}"
+            notification_service = NotificationService(db, record.team_id)
             for approver in approvers:
-                if approver.feishu_open_id:
-                    import asyncio
-                    asyncio.create_task(feishu_service.notify_approval_pending(
-                        approver.feishu_open_id,
-                        entity_name,
-                        flow.flow_name,
-                        approval.current_node.node_name
-                    ))
+                import asyncio
+                asyncio.create_task(notification_service.notify_approval_pending(
+                    entity_type=BusinessType.PAYMENT,
+                    entity_name=entity_name,
+                    flow_name=flow.flow_name,
+                    node_name=approval.current_node.node_name,
+                    approver_open_id=approver.feishu_open_id or "",
+                    approver_name=approver.name or "",
+                    business_id=record.id,
+                ))
 
 
 def query_pending_approval_me(db: Session, team_id: int, user_roles: List[str]) -> int:

@@ -16,45 +16,45 @@ class ApprovalService:
     def submit_for_approval(db: Session, contract_id: int):
         """
         创建合同后自动提交审批
-        
+
         业务规则：
         - 创建合同后自动提交到审批流程
         - 只有草稿状态的合同可以提交
         - 系统自动匹配对应的审批流程
         - 创建审批实例并流转到第一个节点
-        - 向首个节点的审批人发送通知
-        
+        - 向首个节点的审批人发送通知（通过 notification_service）
+
         注意：
         - 保留撤回功能，用户可以手动撤回审批
         - 撤回后合同回到草稿状态，可以修改后重新提交
         """
         from app.models.contract import Contract
-        from app.models.approval import ApprovalFlow, Approval, ApprovalStatus, ApprovalAction
+        from app.models.approval import ApprovalFlow, Approval, ApprovalStatus, ApprovalAction, BusinessType
         from app.crud.approval import approval_flow_crud, approval_crud
-        from app.services.feishu import feishu_service
-        
+        from app.services.notification import NotificationService
+
         contract = db.query(Contract).filter(Contract.id == contract_id).first()
         if not contract:
             return
-        
+
         if contract.status != ContractStatus.DRAFT:
             return
-        
+
         existing_approval = approval_crud.get_by_contract_id(db, contract_id)
         if existing_approval and existing_approval.status == ApprovalStatus.PENDING:
             return
-        
+
         flow = approval_flow_crud.match_flow(db, contract)
         if not flow:
             return
-        
+
         try:
             from app.crud.user import user_crud
-            
+
             submitter_id = contract.creator_id
             submitter = user_crud.get_by_id(db, int(submitter_id))
             submitter_name = submitter.name if submitter else "系统"
-            
+
             approval = approval_crud.create_approval(
                 db,
                 contract,
@@ -62,19 +62,24 @@ class ApprovalService:
                 submitter_id,
                 submitter_name
             )
-            
-            if approval.current_node:
+
+            # 发送飞书通知给审批人（通过统一 notification_service）
+            if approval and approval.current_node:
                 from app.api.approvals import get_approvers_by_role
                 approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+                notification_service = NotificationService(db, contract.team_id)
                 for approver in approvers:
                     import asyncio
-                    asyncio.create_task(feishu_service.notify_approval_pending(
-                        approver.feishu_open_id,
-                        contract.contract_name,
-                        flow.flow_name,
-                        approval.current_node.node_name
+                    asyncio.create_task(notification_service.notify_approval_pending(
+                        entity_type=BusinessType.CONTRACT,
+                        entity_name=contract.contract_name,
+                        flow_name=flow.flow_name,
+                        node_name=approval.current_node.node_name,
+                        approver_open_id=approver.feishu_open_id or "",
+                        approver_name=approver.name or "",
+                        business_id=contract_id,
                     ))
-            
+
             db.refresh(approval)
         except Exception:
             pass

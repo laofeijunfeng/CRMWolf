@@ -476,22 +476,25 @@ class LicenseApplicationCRUD:
             submitter_name or "",
         )
 
-        # 发送飞书通知给审批人（对齐 CONTRACT/PAYMENT 逻辑）
+        # 发送飞书通知给审批人（通过统一 notification_service）
         if approval and approval.current_node:
             from app.api.approvals import get_approvers_by_role
-            from app.services.feishu import feishu_service
+            from app.services.notification import NotificationService
             approvers = get_approvers_by_role(db, approval.current_node.approve_role)
             # 构造通知内容
             entity_name = f"License申请 - {application.application_number}"
+            notification_service = NotificationService(db, team_id)
             for approver in approvers:
-                if approver.feishu_open_id:
-                    import asyncio
-                    asyncio.create_task(feishu_service.notify_approval_pending(
-                        approver.feishu_open_id,
-                        entity_name,
-                        flow.flow_name,
-                        approval.current_node.node_name
-                    ))
+                import asyncio
+                asyncio.create_task(notification_service.notify_approval_pending(
+                    entity_type=BusinessType.LICENSE,
+                    entity_name=entity_name,
+                    flow_name=flow.flow_name,
+                    node_name=approval.current_node.node_name,
+                    approver_open_id=approver.feishu_open_id or "",
+                    approver_name=approver.name or "",
+                    business_id=application_id,
+                ))
 
         db.refresh(application)
         return application
