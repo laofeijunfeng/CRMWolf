@@ -88,7 +88,7 @@ const fetchPaymentRecords = async (): Promise<void> => {
     // Client-side filtering based on activeTab
     if (activeTab.value !== 'all') {
       filteredRecords = filteredRecords.filter((record: PaymentRecordWithDetails) => {
-        const approvalStatus = record.approval_status
+        const approvalStatus = record.approval?.status
         const confirmationStatus = record.confirmation_status
 
         switch (activeTab.value) {
@@ -161,10 +161,10 @@ const handlePageSizeChange = (pageSize: number): void => {
 // 所有回款统一走审批流程，审批状态即最终业务状态
 const getEffectiveStatusText = (record: PaymentRecordWithDetails): string => {
   // 有审批实例 → 显示审批状态
-  if (record.approval_id !== undefined && record.approval_id !== null) {
-    if (record.approval_status === 'PENDING') return '审批中'
-    if (record.approval_status === 'APPROVED') return '已确认'
-    if (record.approval_status === 'REJECTED') return '审批驳回'
+  if (record.approval_id !== undefined && record.approval_id !== null && record.approval) {
+    if (record.approval.status === 'PENDING') return '审批中'
+    if (record.approval.status === 'APPROVED') return '已确认'
+    if (record.approval.status === 'REJECTED') return '审批驳回'
     return '审批中'
   }
   // 无审批实例 → 待提交审批
@@ -172,13 +172,22 @@ const getEffectiveStatusText = (record: PaymentRecordWithDetails): string => {
 }
 
 const getEffectiveStatusClass = (record: PaymentRecordWithDetails): string => {
-  if (record.approval_id !== undefined && record.approval_id !== null) {
-    if (record.approval_status === 'PENDING') return 'status-warning approval-badge-pending'
-    if (record.approval_status === 'APPROVED') return 'status-success approval-badge-approved'
-    if (record.approval_status === 'REJECTED') return 'status-danger approval-badge-rejected'
+  if (record.approval_id !== undefined && record.approval_id !== null && record.approval) {
+    if (record.approval.status === 'PENDING') return 'status-warning approval-badge-pending'
+    if (record.approval.status === 'APPROVED') return 'status-success approval-badge-approved'
+    if (record.approval.status === 'REJECTED') return 'status-danger approval-badge-rejected'
     return 'status-default'
   }
   return 'status-default'
+}
+
+// 获取当前审批人（从审批节点中查找状态为 PENDING 的节点）
+const getCurrentApproverName = (record: PaymentRecordWithDetails): string | null => {
+  if (!record.approval || record.approval.status !== 'PENDING') return null
+
+  // Find the pending node and get approver info
+  const pendingNode = record.approval.nodes.find(node => node.status === 'PENDING')
+  return pendingNode?.approver_name ?? null
 }
 
 const formatDate = (dateStr: string): string => {
@@ -374,7 +383,7 @@ watch(() => paymentPlansStore.pendingApprovalMeCount, () => {
             <template #default="{ row }">
               <span :class="['status-tag', getEffectiveStatusClass(row)]">
                 <!-- 审批中状态添加脉冲动画 -->
-                <span v-if="row.approval_status === 'PENDING' && row.approval_id !== undefined && row.approval_id !== null" class="approval-pulse"></span>
+                <span v-if="row.approval?.status === 'PENDING' && row.approval_id !== undefined && row.approval_id !== null" class="approval-pulse"></span>
                 {{ getEffectiveStatusText(row) }}
               </span>
             </template>
@@ -383,9 +392,9 @@ watch(() => paymentPlansStore.pendingApprovalMeCount, () => {
           <!-- 当前审批人（仅审批中时显示）-->
           <el-table-column label="当前审批人" min-width="120">
             <template #default="{ row }">
-              <div v-if="row.approval_status === 'PENDING' && row.current_approver_name" class="current-approver-cell">
+              <div v-if="getCurrentApproverName(row)" class="current-approver-cell">
                 <el-avatar :size="20" class="approver-avatar" />
-                <span class="approver-name">{{ row.current_approver_name }}</span>
+                <span class="approver-name">{{ getCurrentApproverName(row) }}</span>
               </div>
               <span v-else class="text-muted">-</span>
             </template>
