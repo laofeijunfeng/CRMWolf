@@ -3,6 +3,7 @@ from app.core.deps import require_permission
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import date
+import logging
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
@@ -24,6 +25,51 @@ from app.services.approval_adapter import get_adapter
 
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
+logger = logging.getLogger(__name__)
+
+
+def _get_current_approver_names(db: Session, approval: Approval, team_id: int) -> Optional[str]:
+    """
+    获取当前审批人姓名（从 approve_role 查询）
+
+    Args:
+        db: 数据库会话
+        approval: 审批实例
+        team_id: 团队ID
+
+    Returns:
+        审批人姓名（多个审批人用逗号分隔），如无审批人则返回 None
+
+    Note:
+        审批人姓名是从 approval.current_node.approve_role 查询角色成员得到的，
+        不是节点名称（node_name）。节点名称是审批节点名称（如"财务审批"）。
+    """
+    if not approval:
+        return None
+
+    # 检查审批状态是否为 PENDING
+    if approval.status != ApprovalStatus.PENDING:
+        return None
+
+    # 获取当前审批节点
+    if not approval.current_node:
+        return None
+
+    # 从 approve_role 查询审批人姓名
+    approve_role = approval.current_node.approve_role
+    if not approve_role:
+        return None
+
+    role = role_crud.get_by_code(db, approve_role)
+    if not role:
+        return None
+
+    users = role_crud.get_role_users(db, role.id, team_id)
+    if not users:
+        return None
+
+    # 返回审批人姓名（多个审批人用逗号分隔）
+    return ", ".join([user.name for user in users if user.name])
 
 
 @router.post("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], status_code=status.HTTP_201_CREATED, summary="创建回款计划", description="为指定合同创建回款计划，支持批量创建多个阶段。只有已签署或已生效的合同可以创建回款计划，所有阶段的计划金额之和不能超过合同总金额。返回创建成功的回款计划列表。")
@@ -900,7 +946,7 @@ def list_payment_records(
                 item_dict["approval"] = {
                     "id": record.approval.id,
                     "status": record.approval.status,
-                    "current_approver_name": record.get_current_approver_name(),
+                    "current_approver_name": _get_current_approver_names(db, record.approval, team_id),
                     "nodes": nodes_info,
                 }
 
