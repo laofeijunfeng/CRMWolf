@@ -135,6 +135,11 @@ class PaymentRecord(Base):
 
         Returns:
             当前审批节点名称，如无审批或非待审批状态则返回 None
+
+        Note:
+            此方法返回的是审批节点名称（node_name），不是审批人姓名。
+            审批人姓名应该从 approve_role 查询角色成员得到。
+            此方法已废弃，建议使用 API 层的 _get_current_approver_names 函数。
         """
         if not self.approval:
             return None
@@ -147,4 +152,6 @@ class PaymentRecord(Base):
         if not self.approval.current_node:
             return None
 
+        # 注意：此方法返回节点名称，不是审批人姓名
+        # 审批人姓名应该从 approve_role 查询
         return self.approval.current_node.node_name

@@ -626,31 +626,10 @@ class PaymentRecordCRUD:
             submitter_name=creator_name
         )
 
-        # 发送飞书通知给审批人（通过统一 notification_service）
-        if approval and approval.current_node:
-            from app.api.approvals import get_approvers_by_role
-            from app.models.payment import PaymentPlan
-            from app.models.contract import Contract
-            approvers = get_approvers_by_role(db, approval.current_node.approve_role)
-            # 构造通知内容：通过 payment_plan -> contract 获取合同名称
-            payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == record.payment_plan_id).first()
-            contract_name = None
-            if payment_plan:
-                contract = db.query(Contract).filter(Contract.id == payment_plan.contract_id).first()
-                contract_name = contract.contract_name if contract else None
-            entity_name = contract_name or f"回款登记#{record.id}"
-            notification_service = NotificationService(db, record.team_id)
-            for approver in approvers:
-                import asyncio
-                asyncio.create_task(notification_service.notify_approval_pending(
-                    entity_type=BusinessType.PAYMENT,
-                    entity_name=entity_name,
-                    flow_name=flow.flow_name,
-                    node_name=approval.current_node.node_name,
-                    approver_open_id=approver.feishu_open_id or "",
-                    approver_name=approver.name or "",
-                    business_id=record.id,
-                ))
+        # 注意：通知发送移至 API 层（异步上下文）
+        # CRUD 层不再包含异步通知逻辑，避免 "no running event loop" 错误
+
+        return approval
 
 
 def query_pending_approval_me(db: Session, team_id: int, user_roles: List[str]) -> int:
