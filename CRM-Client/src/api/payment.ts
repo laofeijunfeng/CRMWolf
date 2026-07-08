@@ -21,11 +21,18 @@ export interface ApprovalNodeInfo {
   node_order: number
   node_name: string
   approve_role: string
-  status: ApprovalStatus
+  status: 'PENDING' | 'APPROVE' | 'APPROVED' | 'REJECT' | 'REJECTED' | 'SUBMIT'
   approver_id?: string
   approver_name?: string
   approved_time?: string
   comment?: string
+}
+
+export interface ApprovalInfoLite {
+  id: number
+  status: ApprovalStatus
+  current_approver_name?: string
+  nodes: ApprovalNodeInfo[]
 }
 
 export interface ApprovalInfo {
@@ -48,10 +55,9 @@ export interface PaymentRecordInfo {
   notes?: string
   confirmation_status?: PaymentConfirmationStatus
   created_time: string
-  // Task 7.2: Approval info for payment record
+  // Task 7.2: Approval info for payment record (nested structure matching backend)
   approval_id?: number
-  approval_status?: ApprovalStatus
-  current_approver_name?: string
+  approval?: ApprovalInfoLite
   invoice_application_count?: number  // Task 7.2: Number of invoice applications linked
 }
 
@@ -197,10 +203,9 @@ export interface PaymentRecordWithDetails extends PaymentRecordResponse {
   contract_name?: string
   stage_name?: string
   customer_name?: string
-  // Task 7.2: Approval and invoice info
+  // Task 7.2: Approval and invoice info (nested structure matching backend)
   approval_id?: number
-  approval_status?: ApprovalStatus
-  current_approver_name?: string
+  approval?: ApprovalInfoLite
   invoice_application_count?: number
   confirmation_status?: PaymentConfirmationStatus
 }

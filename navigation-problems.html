@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRM系统导航 - 当前问题演示</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-primary: #2563EB;
+            --color-on-primary: #FFFFFF;
+            --color-secondary: #3B82F6;
+            --color-accent: #059669;
+            --color-background: #F8FAFC;
+            --color-foreground: #0F172A;
+            --color-muted: #F1F5FD;
+            --color-border: #E4ECFC;
+            --color-surface: #FFFFFF;
+            --color-text-secondary: #64748B;
+            --color-hover: #EEF2FF;
+            --color-danger: #DC2626;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--color-background);
+            color: var(--color-foreground);
+            line-height: 1.5;
+        }
+
+        .comparison-header {
+            background: var(--color-danger);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .comparison-header svg {
+            width: 24px;
+            height: 24px;
+            margin-right: 8px;
+        }
+
+        .problem-list {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            padding: 16px;
+            background: white;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .problem-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #FEE2E2;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #991B1B;
+            font-weight: 500;
+        }
+
+        .problem-item svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* 问题场景1：系统左侧菜单栏 */
+        .sidebar-1 {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 200px;
+            height: 100vh;
+            background: var(--color-surface);
+            border-right: 1px solid var(--color-border);
+            padding: 16px;
+        }
+
+        .sidebar-1-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--color-danger);
+            padding: 8px;
+            background: #FEE2E2;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        /* 问题场景2：客户详情页菜单栏（位置不固定） */
+        .sidebar-2 {
+            position: fixed;
+            left: 200px;
+            top: 0;
+            width: 180px;
+            height: 100vh;
+            background: #FEF3C7;
+            border-right: 1px solid #FCD34D;
+            padding: 16px;
+        }
+
+        .sidebar-2-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #92400E;
+            padding: 8px;
+            background: #FDE68A;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        /* 问题场景3：回款管理菜单栏（位置不固定） */
+        .sidebar-3 {
+            position: fixed;
+            left: 380px;
+            top: 0;
+            width: 160px;
+            height: 100vh;
+            background: #DBEAFE;
+            border-right: 1px solid #60A5FA;
+            padding: 16px;
+        }
+
+        .sidebar-3-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #1E40AF;
+            padding: 8px;
+            background: #93C5FD;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .nav-item {
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 200ms ease;
+            margin-bottom: 4px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .nav-item:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        .nav-item.active {
+            background: var(--color-primary);
+            color: white;
+        }
+
+        .main-content {
+            margin-left: 540px;
+            padding: 24px;
+        }
+
+        .content-card {
+            background: white;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .content-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        /* 问题说明框 */
+        .problem-explanation {
+            background: white;
+            border: 2px solid var(--color-danger);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .problem-explanation-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--color-danger);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .problem-explanation-title svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .problem-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .problem-card {
+            background: #FEE2E2;
+            border: 1px solid #FECACA;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .problem-card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #991B1B;
+            margin-bottom: 8px;
+        }
+
+        .problem-card-desc {
+            font-size: 13px;
+            color: #7F1D1D;
+            line-height: 1.6;
+        }
+
+        /* 解决方案提示 */
+        .solution-tip {
+            background: #DCFCE7;
+            border: 1px solid #BBF7D0;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 24px;
+        }
+
+        .solution-tip-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #166534;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .solution-tip-title svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .solution-tip-text {
+            font-size: 14px;
+            color: #15803D;
+            line-height: 1.6;
+        }
+
+        .solution-link {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 12px 24px;
+            background: var(--color-accent);
+            color: white;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 200ms ease;
+        }
+
+        .solution-link:hover {
+            background: #047857;
+        }
+
+        /* 箭头指示器 */
+        .arrow-indicator {
+            position: fixed;
+            top: 50%;
+            left: 480px;
+            transform: translateY(-50%);
+            width: 40px;
+            height: 40px;
+            background: var(--color-danger);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            animation: pulse 2s infinite;
+            z-index: 1000;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                transform: translateY(-50%) scale(1);
+                opacity: 1;
+            }
+            50% {
+                transform: translateY(-50%) scale(1.1);
+                opacity: 0.8;
+            }
+        }
+
+        .arrow-indicator svg {
+            width: 24px;
+            height: 24px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 顶部警告 -->
+    <div class="comparison-header">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.542 0 2.502-1.247 2.502-2.5V12c0-2.248-1.247-4.5-2.5-4.5H5.062c-1.254 0-2.5 2.252-2.5 4.5v2.5c0 1.253.96 2.5 2.502 2.5z"/>
+        </svg>
+        当前导航架构存在的问题演示
+    </div>
+
+    <div class="problem-list">
+        <div class="problem-item">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            多个菜单栏分散注意力
+        </div>
+        <div class="problem-item">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            位置不固定，找不到菜单
+        </div>
+        <div class="problem-item">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            导航层级混乱
+        </div>
+        <div class="problem-item">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            认知负担高
+        </div>
+    </div>
+
+    <!-- 问题场景演示 -->
+    <aside class="sidebar-1">
+        <div class="sidebar-1-title">
+            ⚠️ 系统左侧菜单栏
+        </div>
+        <div class="nav-item active">首页</div>
+        <div class="nav-item">客户管理</div>
+        <div class="nav-item">回款管理</div>
+        <div class="nav-item">合同管理</div>
+        <div class="nav-item">系统设置</div>
+    </aside>
+
+    <aside class="sidebar-2">
+        <div class="sidebar-2-title">
+            ⚠️ 客户详情页菜单栏
+        </div>
+        <div class="nav-item">客户列表</div>
+        <div class="nav-item active">客户详情</div>
+        <div class="nav-item">跟进记录</div>
+        <div class="nav-item">合同</div>
+        <div class="nav-item">回款</div>
+    </aside>
+
+    <aside class="sidebar-3">
+        <div class="sidebar-3-title">
+            ⚠️ 回款管理菜单栏
+        </div>
+        <div class="nav-item">回款列表</div>
+        <div class="nav-item active">回款详情</div>
+        <div class="nav-item">审批流程</div>
+        <div class="nav-item">统计报表</div>
+    </aside>
+
+    <!-- 指示箭头 -->
+    <div class="arrow-indicator">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+        </svg>
+    </div>
+
+    <!-- 主内容区域 -->
+    <main class="main-content">
+        <div class="problem-explanation">
+            <div class="problem-explanation-title">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                当前架构的主要问题
+            </div>
+
+            <div class="problem-grid">
+                <div class="problem-card">
+                    <div class="problem-card-title">❌ 位置不固定</div>
+                    <div class="problem-card-desc">
+                        不同页面的菜单栏位置不一致，用户在不同页面找不到菜单，降低使用效率
+                    </div>
+                </div>
+
+                <div class="problem-card">
+                    <div class="problem-card-title">❌ 多个导航并存</div>
+                    <div class="problem-card-desc">
+                        三个菜单栏同时显示，分散用户注意力，增加认知负担
+                    </div>
+                </div>
+
+                <div class="problem-card">
+                    <div class="problem-card-title">❌ 层级混乱</div>
+                    <div class="problem-card-desc">
+                        无法清晰区分一级导航、二级导航、三级导航的关系，用户迷失方向
+                    </div>
+                </div>
+
+                <div class="problem-card">
+                    <div class="problem-card-title">❌ 内容区域受限</div>
+                    <div class="problem-card-desc">
+                        过多菜单栏占用大量屏幕空间，内容区域被压缩，影响数据展示
+                    </div>
+                </div>
+
+                <div class="problem-card">
+                    <div class="problem-card-title">❌ 缺少面包屑</div>
+                    <div class="problem-card-desc">
+                        用户不知道当前在哪个位置，无法快速返回上级页面
+                    </div>
+                </div>
+
+                <div class="problem-card">
+                    <div class="problem-card-title">❌ 操作按钮分散</div>
+                    <div class="problem-card-desc">
+                        新建、导出等常用操作按钮位置不统一，用户需要在不同菜单中寻找
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content-card">
+            <h2 class="content-title">客户详情页面（当前状态）</h2>
+            <p style="color: var(--color-text-secondary); margin-bottom: 16px;">
+                请注意左侧有<strong style="color: var(--color-danger);">三个不同颜色的菜单栏</strong>同时显示，
+                这会让用户感到困惑，不知道应该关注哪个菜单。
+            </p>
+
+            <div style="background: #F8FAFC; border: 1px solid var(--color-border); border-radius: 8px; padding: 16px;">
+                <p style="font-size: 14px; line-height: 1.6; color: var(--color-text-secondary);">
+                    实际场景：当用户在客户详情页查看信息时，需要同时面对三个菜单栏：
+                </p>
+                <ul style="margin-top: 12px; padding-left: 20px; font-size: 14px; line-height: 1.8;">
+                    <li>系统左侧菜单栏（红色边框）- 包含所有主要功能</li>
+                    <li>客户详情页菜单栏（黄色边框）- 包含客户相关操作</li>
+                    <li>回款管理菜单栏（蓝色边框）- 包含回款相关操作</li>
+                </ul>
+                <p style="margin-top: 12px; font-size: 14px; color: var(--color-danger); font-weight: 600;">
+                    问题：用户不知道当前应该使用哪个菜单，很容易点击错误的菜单项。
+                </p>
+            </div>
+        </div>
+
+        <div class="solution-tip">
+            <div class="solution-tip-title">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                优化方案
+            </div>
+            <div class="solution-tip-text">
+                采用<strong>三级导航架构</strong>：<br>
+                1. <strong>一级导航（全局左侧菜单）</strong> - 固定不变，包含所有主要功能模块<br>
+                2. <strong>面包屑导航</strong> - 显示当前位置路径，支持快速返回<br>
+                3. <strong>二级导航（上下文标签栏）</strong> - 根据当前模块动态切换<br>
+                <br>
+                这种架构参考了 Salesforce、HubSpot、Zendesk 等成熟 CRM 系统的设计模式，
+                能够有效解决当前导航混乱的问题。
+            </div>
+            <a href="navigation-redesign.html" class="solution-link">
+                查看优化后的效果图 →
+            </a>
+        </div>
+    </main>
+</body>
+</html>
