@@ -73,16 +73,33 @@ describe('TableV2.vue', () => {
       })
 
       const rows = wrapper.findAll('tr.table-v2__row')
+      if (rows.length === 0) {
+        throw new Error('No rows found')
+      }
+
       const firstRow = rows[0]
-      expect(firstRow).toBeDefined()
+      if (firstRow === undefined) {
+        throw new Error('First row is undefined')
+      }
 
-      const cells = firstRow!.findAll('td.table-v2__cell')
-      expect(cells.length).toBe(4)
+      const cells = firstRow.findAll('td.table-v2__cell')
+      if (cells.length < 4) {
+        throw new Error('Expected 4 cells')
+      }
 
-      expect(cells[0]!.text()).toBe('北京科技有限公司')
-      expect(cells[1]!.text()).toBe('活跃')
-      expect(cells[2]!.text()).toBe('¥ 12,500.00')
-      expect(cells[3]!.text()).toBe('2024-01-15')
+      const cell0 = cells[0]
+      const cell1 = cells[1]
+      const cell2 = cells[2]
+      const cell3 = cells[3]
+
+      if (cell0 === undefined || cell1 === undefined || cell2 === undefined || cell3 === undefined) {
+        throw new Error('Some cells are undefined')
+      }
+
+      expect(cell0.text()).toBe('北京科技有限公司')
+      expect(cell1.text()).toBe('活跃')
+      expect(cell2.text()).toBe('¥ 12,500.00')
+      expect(cell3.text()).toBe('2024-01-15')
     })
 
     it('should display "-" for null/undefined values', () => {
@@ -94,9 +111,19 @@ describe('TableV2.vue', () => {
       })
 
       const cells = wrapper.findAll('td.table-v2__cell')
-      expect(cells.length).toBe(4)
-      expect(cells[1]!.text()).toBe('-')
-      expect(cells[2]!.text()).toBe('-')
+      if (cells.length < 4) {
+        throw new Error('Expected 4 cells')
+      }
+
+      const cell1 = cells[1]
+      const cell2 = cells[2]
+
+      if (cell1 === undefined || cell2 === undefined) {
+        throw new Error('Cells are undefined')
+      }
+
+      expect(cell1.text()).toBe('-')
+      expect(cell2.text()).toBe('-')
     })
 
     it('should apply column width styles', () => {
@@ -108,8 +135,19 @@ describe('TableV2.vue', () => {
       })
 
       const headers = wrapper.findAll('th.table-v2__header')
-      expect(headers[0]!.attributes('style')).toContain('width: 200px')
-      expect(headers[1]!.attributes('style')).toContain('width: 100px')
+      if (headers.length < 2) {
+        throw new Error('Expected at least 2 headers')
+      }
+
+      const header0 = headers[0]
+      const header1 = headers[1]
+
+      if (header0 === undefined || header1 === undefined) {
+        throw new Error('Headers are undefined')
+      }
+
+      expect(header0.attributes('style')).toContain('width: 200px')
+      expect(header1.attributes('style')).toContain('width: 100px')
     })
 
     it('should apply column align styles', () => {
@@ -121,10 +159,24 @@ describe('TableV2.vue', () => {
       })
 
       const headers = wrapper.findAll('th.table-v2__header')
-      expect(headers[2]!.attributes('style')).toContain('text-align: right')
-
       const cells = wrapper.findAll('td.table-v2__cell')
-      expect(cells[2]!.attributes('style')).toContain('text-align: right')
+
+      if (headers.length < 3) {
+        throw new Error('Expected at least 3 headers')
+      }
+      if (cells.length < 3) {
+        throw new Error('Expected at least 3 cells')
+      }
+
+      const header2 = headers[2]
+      const cell2 = cells[2]
+
+      if (header2 === undefined || cell2 === undefined) {
+        throw new Error('Header or cell is undefined')
+      }
+
+      expect(header2.attributes('style')).toContain('text-align: right')
+      expect(cell2.attributes('style')).toContain('text-align: right')
     })
   })
 
@@ -197,7 +249,11 @@ describe('TableV2.vue', () => {
       expect(rows.length).toBe(3)
 
       // Last row should exist (CSS handles no bottom border)
-      expect(rows[2]).toBeDefined()
+      if (rows.length < 3) {
+        throw new Error('Expected 3 rows')
+      }
+      const lastRow = rows[2]
+      expect(lastRow).toBeDefined()
     })
   })
 
@@ -245,10 +301,21 @@ describe('TableV2.vue', () => {
       })
 
       const headers = wrapper.findAll('th.table-v2__header')
-      expect(headers.length).toBe(3)
-      expect(headers[0]!.classes()).toContain('table-v2__header--sortable')
-      expect(headers[1]!.classes()).not.toContain('table-v2__header--sortable')
-      expect(headers[2]!.classes()).toContain('table-v2__header--sortable')
+      if (headers.length < 3) {
+        throw new Error('Expected 3 headers')
+      }
+
+      const header0 = headers[0]
+      const header1 = headers[1]
+      const header2 = headers[2]
+
+      if (header0 === undefined || header1 === undefined || header2 === undefined) {
+        throw new Error('Headers are undefined')
+      }
+
+      expect(header0.classes()).toContain('table-v2__header--sortable')
+      expect(header1.classes()).not.toContain('table-v2__header--sortable')
+      expect(header2.classes()).toContain('table-v2__header--sortable')
     })
 
     it('should emit sortChange event when clicking sortable header', async () => {
@@ -260,14 +327,23 @@ describe('TableV2.vue', () => {
       })
 
       const sortableHeaders = wrapper.findAll('th.table-v2__header--sortable')
+      if (sortableHeaders.length === 0) {
+        throw new Error('No sortable headers found')
+      }
+
       const firstSortable = sortableHeaders[0]
-      expect(firstSortable).toBeDefined()
+      if (firstSortable === undefined) {
+        throw new Error('First sortable header is undefined')
+      }
 
-      await firstSortable!.trigger('click')
+      await firstSortable.trigger('click')
 
-      expect(wrapper.emitted('sortChange')).toBeTruthy()
       const emittedEvents = wrapper.emitted('sortChange')
-      expect(emittedEvents![0]).toEqual(['name', 'asc'])
+      if (emittedEvents === undefined) {
+        throw new Error('sortChange event not emitted')
+      }
+
+      expect(emittedEvents[0]).toEqual(['name', 'asc'])
     })
 
     it('should toggle sort order on repeated clicks', async () => {
@@ -279,23 +355,38 @@ describe('TableV2.vue', () => {
       })
 
       const sortableHeaders = wrapper.findAll('th.table-v2__header--sortable')
+      if (sortableHeaders.length === 0) {
+        throw new Error('No sortable headers found')
+      }
+
       const firstSortable = sortableHeaders[0]
-      expect(firstSortable).toBeDefined()
+      if (firstSortable === undefined) {
+        throw new Error('First sortable header is undefined')
+      }
 
       // First click: asc
-      await firstSortable!.trigger('click')
+      await firstSortable.trigger('click')
       const emitted1 = wrapper.emitted('sortChange')
-      expect(emitted1![0]).toEqual(['name', 'asc'])
+      if (emitted1 === undefined) {
+        throw new Error('sortChange not emitted')
+      }
+      expect(emitted1[0]).toEqual(['name', 'asc'])
 
       // Second click: desc
-      await firstSortable!.trigger('click')
+      await firstSortable.trigger('click')
       const emitted2 = wrapper.emitted('sortChange')
-      expect(emitted2![1]).toEqual(['name', 'desc'])
+      if (emitted2 === undefined) {
+        throw new Error('sortChange not emitted')
+      }
+      expect(emitted2[1]).toEqual(['name', 'desc'])
 
       // Third click: null (reset)
-      await firstSortable!.trigger('click')
+      await firstSortable.trigger('click')
       const emitted3 = wrapper.emitted('sortChange')
-      expect(emitted3![2]).toEqual(['name', null])
+      if (emitted3 === undefined) {
+        throw new Error('sortChange not emitted')
+      }
+      expect(emitted3[2]).toEqual(['name', null])
     })
 
     it('should set aria-sort attribute correctly', async () => {
@@ -307,21 +398,43 @@ describe('TableV2.vue', () => {
       })
 
       const sortableHeaders = wrapper.findAll('th.table-v2__header--sortable')
+      if (sortableHeaders.length === 0) {
+        throw new Error('No sortable headers found')
+      }
+
       const firstSortable = sortableHeaders[0]
-      expect(firstSortable).toBeDefined()
+      if (firstSortable === undefined) {
+        throw new Error('First sortable header is undefined')
+      }
 
       // Initial state: no aria-sort
-      expect(firstSortable!.attributes('aria-sort')).toBeUndefined()
+      expect(firstSortable.attributes('aria-sort')).toBeUndefined()
 
       // Click to sort asc
-      await firstSortable!.trigger('click')
+      await firstSortable.trigger('click')
       const headersAfterClick = wrapper.findAll('th.table-v2__header--sortable')
-      expect(headersAfterClick[0]!.attributes('aria-sort')).toBe('ascending')
+      if (headersAfterClick.length === 0) {
+        throw new Error('No sortable headers')
+      }
+
+      const header0 = headersAfterClick[0]
+      if (header0 === undefined) {
+        throw new Error('Header undefined')
+      }
+      expect(header0.attributes('aria-sort')).toBe('ascending')
 
       // Click to sort desc
-      await headersAfterClick[0]!.trigger('click')
+      await header0.trigger('click')
       const headersAfterSecond = wrapper.findAll('th.table-v2__header--sortable')
-      expect(headersAfterSecond[0]!.attributes('aria-sort')).toBe('descending')
+      if (headersAfterSecond.length === 0) {
+        throw new Error('No sortable headers')
+      }
+
+      const header0Again = headersAfterSecond[0]
+      if (header0Again === undefined) {
+        throw new Error('Header undefined')
+      }
+      expect(header0Again.attributes('aria-sort')).toBe('descending')
     })
   })
 
@@ -337,8 +450,16 @@ describe('TableV2.vue', () => {
       })
 
       const rows = wrapper.findAll('tr.table-v2__row')
-      expect(rows.length).toBeGreaterThan(0)
-      expect(rows[0]!.classes()).toContain('table-v2__row--clickable')
+      if (rows.length === 0) {
+        throw new Error('No rows found')
+      }
+
+      const firstRow = rows[0]
+      if (firstRow === undefined) {
+        throw new Error('First row undefined')
+      }
+
+      expect(firstRow.classes()).toContain('table-v2__row--clickable')
     })
 
     it('should emit rowClick event when clicking clickable row', async () => {
@@ -351,14 +472,23 @@ describe('TableV2.vue', () => {
       })
 
       const rows = wrapper.findAll('tr.table-v2__row')
+      if (rows.length === 0) {
+        throw new Error('No rows found')
+      }
+
       const firstRow = rows[0]
-      expect(firstRow).toBeDefined()
+      if (firstRow === undefined) {
+        throw new Error('First row undefined')
+      }
 
-      await firstRow!.trigger('click')
+      await firstRow.trigger('click')
 
-      expect(wrapper.emitted('rowClick')).toBeTruthy()
       const emittedEvents = wrapper.emitted('rowClick')
-      expect(emittedEvents![0]).toEqual([basicData[0], 0])
+      if (emittedEvents === undefined) {
+        throw new Error('rowClick not emitted')
+      }
+
+      expect(emittedEvents[0]).toEqual([basicData[0], 0])
     })
 
     it('should not emit rowClick when clickable is false', async () => {
@@ -371,10 +501,16 @@ describe('TableV2.vue', () => {
       })
 
       const rows = wrapper.findAll('tr.table-v2__row')
-      const firstRow = rows[0]
-      expect(firstRow).toBeDefined()
+      if (rows.length === 0) {
+        throw new Error('No rows found')
+      }
 
-      await firstRow!.trigger('click')
+      const firstRow = rows[0]
+      if (firstRow === undefined) {
+        throw new Error('First row undefined')
+      }
+
+      await firstRow.trigger('click')
 
       expect(wrapper.emitted('rowClick')).toBeFalsy()
     })
@@ -449,7 +585,17 @@ describe('TableV2.vue', () => {
 
       const statusCells = wrapper.findAll('.custom-status')
       expect(statusCells.length).toBe(3)
-      expect(statusCells[0]!.text()).toBe('活跃')
+
+      if (statusCells.length === 0) {
+        throw new Error('No status cells')
+      }
+
+      const firstCell = statusCells[0]
+      if (firstCell === undefined) {
+        throw new Error('First cell undefined')
+      }
+
+      expect(firstCell.text()).toBe('活跃')
     })
   })
 

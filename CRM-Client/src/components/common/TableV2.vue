@@ -45,7 +45,7 @@
       <tbody class="table-v2__body">
         <tr
           v-for="(row, rowIndex) in data"
-          :key="rowKey ? (row[rowKey] as string | number) : rowIndex"
+          :key="rowKey ? getRowKey(row, rowKey) : rowIndex"
           class="table-v2__row"
           :class="{
             'table-v2__row--clickable': clickable,
@@ -59,14 +59,14 @@
             :style="{ textAlign: column.align || 'left' }"
           >
             <slot
-              v-if="$slots[`cell-${column.key}`]"
-              :name="`cell-${column.key}`"
+              v-if="hasSlot(column.key)"
+              :name="getSlotName(column.key)"
               :row="row"
-              :value="row[column.key] as string | number | boolean | null | undefined"
+              :value="getCellValue(row, column.key)"
               :rowIndex="rowIndex"
             />
             <template v-else>
-              {{ row[column.key] ?? '-' }}
+              {{ getCellValue(row, column.key) ?? '-' }}
             </template>
           </td>
         </tr>
@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, useSlots } from 'vue'
 import { Inbox, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-vue-next'
 
 /**
@@ -113,6 +113,7 @@ export interface TableColumn {
   sortable?: boolean
 }
 
+// eslint-disable-next-line @typescript-eslint/consistent-indexed-object-style
 export interface TableRow {
   [key: string]: unknown
 }
@@ -149,17 +150,52 @@ const emit = defineEmits<{
   sortChange: [key: string, order: 'asc' | 'desc' | null]
 }>()
 
+const slots = useSlots()
+
 const sortKey = ref<string | null>(null)
 const sortOrder = ref<'asc' | 'desc' | null>(null)
 
-const handleRowClick = (row: TableRow, index: number) => {
-  if (props.clickable) {
+function getRowKey(row: TableRow, key: string): string | number {
+  const value = row[key]
+  if (typeof value === 'string') {
+    return value
+  }
+  if (typeof value === 'number') {
+    return value
+  }
+  return String(value)
+}
+
+function getSlotName(key: string): string {
+  return `cell-${key}`
+}
+
+function hasSlot(key: string): boolean {
+  const slotName = getSlotName(key)
+  return slots[slotName] !== undefined
+}
+
+function getCellValue(row: TableRow, key: string): string | number | boolean | null | undefined {
+  const value = row[key]
+  if (value === null || value === undefined) {
+    return value
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  return String(value)
+}
+
+function handleRowClick(row: TableRow, index: number): void {
+  if (props.clickable === true) {
     emit('rowClick', row, index)
   }
 }
 
-const handleSortClick = (column: TableColumn) => {
-  if (!column.sortable) return
+function handleSortClick(column: TableColumn): void {
+  if (column.sortable !== true) {
+    return
+  }
 
   if (sortKey.value !== column.key) {
     sortKey.value = column.key
@@ -174,10 +210,16 @@ const handleSortClick = (column: TableColumn) => {
   emit('sortChange', column.key, sortOrder.value)
 }
 
-const getAriaSort = (columnKey: string): 'ascending' | 'descending' | 'none' | undefined => {
-  if (sortKey.value !== columnKey) return undefined
-  if (sortOrder.value === 'asc') return 'ascending'
-  if (sortOrder.value === 'desc') return 'descending'
+function getAriaSort(columnKey: string): 'ascending' | 'descending' | 'none' | undefined {
+  if (sortKey.value !== columnKey) {
+    return undefined
+  }
+  if (sortOrder.value === 'asc') {
+    return 'ascending'
+  }
+  if (sortOrder.value === 'desc') {
+    return 'descending'
+  }
   return undefined
 }
 </script>
