@@ -61,7 +61,10 @@ class ContractAdapter:
 
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
-        entity.status = ContractStatus.DRAFT
+        # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = REJECTED）
+        # 此处不切换原有 status（保持 PENDING_REVIEW）
+        # 注：原有设计 entity.status = ContractStatus.DRAFT 是错误的
+        pass
 
     def on_cancelled(self, db, entity):
         if entity is None: return  # E4 守卫
@@ -99,12 +102,15 @@ class PaymentRecordAdapter:
 
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
-        # 驳回：保持 PENDING（待重新登记/修正），不改 CONFIRMED
-        entity.confirmation_status = PaymentConfirmationStatus.PENDING
+        # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = REJECTED）
+        # 此处不切换 confirmation_status（保持 PENDING）
+        pass
 
     def on_cancelled(self, db, entity):
         if entity is None: return  # E4 守卫
-        entity.confirmation_status = PaymentConfirmationStatus.PENDING
+        # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = DRAFT）
+        # 撤回后切回 DRAFT（允许重新提交）
+        entity.confirmation_status = PaymentConfirmationStatus.DRAFT
 
     def get_name(self, entity):
         return f"回款登记#{entity.id}"
@@ -211,7 +217,8 @@ class LicenseApplicationAdapter:
     def on_submit(self, db: Session, entity: LicenseApplication) -> None:
         """提交审批时的状态切换"""
         if entity is None: return  # E4 守卫
-        entity.status = LicenseApplicationStatus.PENDING
+        # 统一命名：PENDING → PENDING_REVIEW（与 InvoiceApplicationStatus 一致）
+        entity.status = LicenseApplicationStatus.PENDING_REVIEW
 
     def on_approved(self, db: Session, entity: LicenseApplication) -> None:
         """审批通过时的状态切换

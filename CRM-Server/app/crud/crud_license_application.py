@@ -454,47 +454,24 @@ class LicenseApplicationCRUD:
             **adapter.match_kwargs(application)
         )
 
-        if flow is None and err:
-            # 未匹配且报错（类似 CONTRACT 语义）
-            raise ValueError(err or "未匹配到审批流程")
-
         if flow is None:
-            # 未匹配审批流程，直接批准（免审批直通）
-            application.status = LicenseApplicationStatus.ISSUED
-            db.commit()
-            db.refresh(application)
-            return application
+            # 未匹配审批流程：强制审批规则，不允许免审批直通
+            # 保留单据（approval_phase = DRAFT），返回错误提示
+            raise ValueError(err or "请先配置审批流程")
 
-        # 创建审批实例（会自动调用 adapter.on_submit 切换状态）
-        approval = approval_crud.create_approval_generic(
+        # 使用 ApprovalTransactionManager 统一管理事务边界
+        from app.services.approval_transaction_manager import approval_transaction_manager
+        approval, error_msg = approval_transaction_manager.submit_for_approval(
             db,
             BusinessType.LICENSE,
             application_id,
             team_id,
-            flow,
             submitter_id,
-            submitter_name or "",
+            submitter_name or ""
         )
 
-        # 发送飞书通知给审批人（通过统一 notification_service）
-        if approval and approval.current_node:
-            from app.api.approvals import get_approvers_by_role
-            from app.services.notification import NotificationService
-            approvers = get_approvers_by_role(db, approval.current_node.approve_role)
-            # 构造通知内容
-            entity_name = f"License申请 - {application.application_number}"
-            notification_service = NotificationService(db, team_id)
-            for approver in approvers:
-                import asyncio
-                asyncio.create_task(notification_service.notify_approval_pending(
-                    entity_type=BusinessType.LICENSE,
-                    entity_name=entity_name,
-                    flow_name=flow.flow_name,
-                    node_name=approval.current_node.node_name,
-                    approver_open_id=approver.feishu_open_id or "",
-                    approver_name=approver.name or "",
-                    business_id=application_id,
-                ))
+        if error_msg:
+            raise ValueError(error_msg)
 
         db.refresh(application)
         return application

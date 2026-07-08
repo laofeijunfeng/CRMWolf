@@ -2,11 +2,12 @@ from sqlalchemy import Column, BigInteger, String, DateTime, Date, Text, Foreign
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
+from app.constants.approval_phase import ApprovalPhase
 
 
 class LicenseApplicationStatus:
     DRAFT = "DRAFT"
-    PENDING = "PENDING"
+    PENDING_REVIEW = "PENDING_REVIEW"  # 统一命名（原 PENDING）
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     ISSUED = "ISSUED"
@@ -45,6 +46,12 @@ class LicenseApplication(Base):
     license_code = Column(Text, nullable=True, comment="授权码（审批人回填，旧字段）")
 
     status = Column(String(20), nullable=False, default=LicenseApplicationStatus.DRAFT, comment="申请状态")
+    approval_phase = Column(
+        String(20),
+        nullable=False,
+        default=ApprovalPhase.DRAFT,
+        comment="审批流程状态：draft/pending_review/approved/rejected"
+    )
     applicant_id = Column(String(100), nullable=False, comment="申请人飞书用户ID")
     approver_id = Column(String(100), nullable=True, comment="审批人飞书用户ID")
     approved_time = Column(DateTime, nullable=True, comment="审批时间")

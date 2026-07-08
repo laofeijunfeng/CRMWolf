@@ -2,6 +2,7 @@ from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Nume
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.constants.approval_phase import ApprovalPhase
 
 
 class ContractStatus:
@@ -40,6 +41,12 @@ class Contract(Base):
     standard_unit_price = Column(Numeric(10, 2), nullable=False, comment="标准单价（系统反算）")
 
     status = Column(String(20), nullable=False, default=ContractStatus.DRAFT, comment="合同状态")
+    approval_phase = Column(
+        String(20),
+        nullable=False,
+        default=ApprovalPhase.DRAFT,
+        comment="审批流程状态：draft/pending_review/approved/rejected"
+    )
     signing_date = Column(Date, nullable=True, comment="签署日期")
     effective_date = Column(Date, nullable=True, comment="生效日期")
     expiry_date = Column(Date, nullable=True, comment="到期日期")
