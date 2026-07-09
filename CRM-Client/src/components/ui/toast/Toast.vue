@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Toaster as Sonner } from 'sonner'
+import { Toaster as Sonner } from 'vue-sonner'
 import type { HTMLAttributes } from 'vue'
 import { cn } from '@/lib/utils'
 

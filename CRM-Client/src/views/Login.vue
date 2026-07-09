@@ -189,7 +189,7 @@
  */
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { toast } from 'sonner'
+import { toast } from 'vue-sonner'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
 import { authApi } from '@/api/auth'

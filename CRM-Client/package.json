@@ -31,11 +31,11 @@
     "markdown-it": "^14.2.0",
     "pinia": "^2.3.0",
     "radix-vue": "^1.9.17",
-    "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "vee-validate": "^4.15.1",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0",
+    "vue-sonner": "^2.0.9",
     "zod": "^3.23.8"
   },
   "devDependencies": {
