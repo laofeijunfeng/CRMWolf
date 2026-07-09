@@ -1,20 +1,19 @@
 <script setup lang="ts">
-import { type HTMLAttributes, computed } from 'vue'
+/**
+ * Card - shadcn-vue Card component
+ * Container for card content
+ */
 import { cn } from '@/lib/utils'
 
-interface Props extends /* @vue-ignore */ HTMLAttributes<HTMLDivElement> {}
+interface Props {
+  class?: string
+}
 
-const props = defineProps<Props>()
-
-const delegatedProps = computed(() => {
-  const { class: _, ...delegated } = props
-  return delegated
-})
+const props = withDefaults(defineProps<Props>(), {})
 </script>
 
 <template>
   <div
-    v-bind="delegatedProps"
     :class="cn('rounded-wolf-lg border border-wolf-border-default bg-wolf-bg-card text-wolf-text-primary shadow-wolf-card', props.class)"
   >
     <slot />

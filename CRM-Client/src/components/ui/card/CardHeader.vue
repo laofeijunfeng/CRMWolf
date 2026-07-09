@@ -1,22 +1,19 @@
 <script setup lang="ts">
-import { type HTMLAttributes, computed } from 'vue'
+/**
+ * CardHeader - shadcn-vue CardHeader component
+ * Header section of a card
+ */
 import { cn } from '@/lib/utils'
 
-interface Props extends /* @vue-ignore */ HTMLAttributes<HTMLDivElement> {}
+interface Props {
+  class?: string
+}
 
-const props = defineProps<Props>()
-
-const delegatedProps = computed(() => {
-  const { class: _, ...delegated } = props
-  return delegated
-})
+const props = withDefaults(defineProps<Props>(), {})
 </script>
 
 <template>
-  <div
-    v-bind="delegatedProps"
-    :class="cn('flex flex-col space-y-wolf-sm p-wolf-lg', props.class)"
-  >
+  <div :class="cn('flex flex-col space-y-wolf-sm p-wolf-lg', props.class)">
     <slot />
   </div>
 </template>

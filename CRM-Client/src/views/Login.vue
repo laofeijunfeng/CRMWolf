@@ -33,47 +33,31 @@
 
           <!-- Login Tab -->
           <TabsContent value="login" class="tab-content pt-wolf-xs focus:outline-none">
-            <Form
-              :schema="loginFormSchema"
-              @submit="handleLogin"
-              class="space-y-wolf-md"
-            >
-              <FormField v-slot="{ componentField }" name="email">
-                <FormItem>
-                  <FormControl>
-                    <TouchInput
-                      v-bind="componentField"
-                      label="邮箱"
-                      type="email"
-                      placeholder="请输入邮箱"
-                      autocomplete="email"
-                      :disabled="loading"
-                      required
-                      size="mobile"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+            <form class="space-y-wolf-md" @submit.prevent="handleLogin">
+              <TouchInput
+                v-model="loginForm.email"
+                label="邮箱"
+                type="email"
+                placeholder="请输入邮箱"
+                autocomplete="email"
+                :disabled="loading"
+                :error="loginErrors.email"
+                required
+                size="mobile"
+              />
 
-              <FormField v-slot="{ componentField }" name="password">
-                <FormItem>
-                  <FormControl>
-                    <TouchInput
-                      v-bind="componentField"
-                      label="密码"
-                      type="password"
-                      placeholder="请输入密码"
-                      autocomplete="current-password"
-                      :disabled="loading"
-                      required
-                      show-password-toggle
-                      size="mobile"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <TouchInput
+                v-model="loginForm.password"
+                label="密码"
+                type="password"
+                placeholder="请输入密码"
+                autocomplete="current-password"
+                :disabled="loading"
+                :error="loginErrors.password"
+                required
+                show-password-toggle
+                size="mobile"
+              />
 
               <TouchButton
                 type="submit"
@@ -83,71 +67,49 @@
               >
                 登录
               </TouchButton>
-            </Form>
+            </form>
           </TabsContent>
 
           <!-- Register Tab -->
           <TabsContent value="register" class="tab-content pt-wolf-xs focus:outline-none">
-            <Form
-              :schema="registerFormSchema"
-              @submit="handleRegister"
-              class="space-y-wolf-md"
-            >
-              <FormField v-slot="{ componentField }" name="email">
-                <FormItem>
-                  <FormControl>
-                    <TouchInput
-                      v-bind="componentField"
-                      label="邮箱"
-                      type="email"
-                      placeholder="请输入邮箱"
-                      autocomplete="email"
-                      :disabled="registering"
-                      required
-                      size="mobile"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+            <form class="space-y-wolf-md" @submit.prevent="handleRegister">
+              <TouchInput
+                v-model="registerForm.email"
+                label="邮箱"
+                type="email"
+                placeholder="请输入邮箱"
+                autocomplete="email"
+                :disabled="registering"
+                :error="registerErrors.email"
+                required
+                size="mobile"
+              />
 
-              <FormField v-slot="{ componentField }" name="name">
-                <FormItem>
-                  <FormControl>
-                    <TouchInput
-                      v-bind="componentField"
-                      label="姓名"
-                      type="text"
-                      placeholder="请输入姓名"
-                      autocomplete="name"
-                      :disabled="registering"
-                      required
-                      size="mobile"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <TouchInput
+                v-model="registerForm.name"
+                label="姓名"
+                type="text"
+                placeholder="请输入姓名"
+                autocomplete="name"
+                :disabled="registering"
+                :error="registerErrors.name"
+                required
+                size="mobile"
+              />
 
-              <FormField v-slot="{ componentField }" name="password">
-                <FormItem>
-                  <FormControl>
-                    <TouchInput
-                      v-bind="componentField"
-                      label="密码"
-                      type="password"
-                      placeholder="请设置密码（6-50位）"
-                      autocomplete="new-password"
-                      helper-text="密码长度为6-50个字符"
-                      :disabled="registering"
-                      required
-                      show-password-toggle
-                      size="mobile"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <TouchInput
+                v-model="registerForm.password"
+                label="密码"
+                type="password"
+                placeholder="请设置密码（6-50位）"
+                autocomplete="new-password"
+                helper-text="密码长度为6-50个字符"
+                :disabled="registering"
+                :error="registerErrors.password"
+                required
+                show-password-toggle
+                size="mobile"
+              />
 
               <TouchButton
                 type="submit"
@@ -157,7 +119,7 @@
               >
                 注册
               </TouchButton>
-            </Form>
+            </form>
           </TabsContent>
         </Tabs>
       </CardContent>
@@ -187,7 +149,7 @@
  * - Focus ring visible (2px) - §1 focus-states
  * - Keyboard navigation (Enter submit) - §1 keyboard-nav
  */
-import { ref } from 'vue'
+import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useUserStore } from '@/stores/user'
@@ -197,11 +159,6 @@ import { loginFormSchema, registerFormSchema } from '@/schemas/auth'
 import {
   TouchButton,
   TouchInput,
-  Form,
-  FormField,
-  FormItem,
-  FormControl,
-  FormMessage,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -219,16 +176,83 @@ const activeTab = ref('login')
 const loading = ref(false)
 const registering = ref(false)
 
+// Login form state
+const loginForm = reactive({
+  email: '',
+  password: '',
+})
+
+const loginErrors = reactive({
+  email: '',
+  password: '',
+})
+
+// Register form state
+const registerForm = reactive({
+  email: '',
+  name: '',
+  password: '',
+})
+
+const registerErrors = reactive({
+  email: '',
+  name: '',
+  password: '',
+})
+
+/**
+ * Validate login form
+ */
+function validateLoginForm(): boolean {
+  loginErrors.email = ''
+  loginErrors.password = ''
+
+  const result = loginFormSchema.safeParse(loginForm)
+  if (!result.success) {
+    for (const error of result.error.errors) {
+      const field = error.path[0] as keyof typeof loginErrors
+      if (field in loginErrors) {
+        loginErrors[field] = error.message
+      }
+    }
+    return false
+  }
+  return true
+}
+
+/**
+ * Validate register form
+ */
+function validateRegisterForm(): boolean {
+  registerErrors.email = ''
+  registerErrors.name = ''
+  registerErrors.password = ''
+
+  const result = registerFormSchema.safeParse(registerForm)
+  if (!result.success) {
+    for (const error of result.error.errors) {
+      const field = error.path[0] as keyof typeof registerErrors
+      if (field in registerErrors) {
+        registerErrors[field] = error.message
+      }
+    }
+    return false
+  }
+  return true
+}
+
 /**
  * Handle login form submission
  */
-const handleLogin = async (values: Record<string, unknown>) => {
+async function handleLogin(): Promise<void> {
+  if (!validateLoginForm()) return
+
   loading.value = true
 
   try {
     const res = await authApi.loginWithPassword({
-      email: values.email as string,
-      password: values.password as string,
+      email: loginForm.email,
+      password: loginForm.password,
     })
 
     userStore.setToken(res.access_token)
@@ -242,7 +266,6 @@ const handleLogin = async (values: Record<string, unknown>) => {
       userStore.setUserInfo(user)
     }
 
-    // Success feedback (UI/UX Pro Max §8 success-feedback)
     toast.success('登录成功', { description: '欢迎使用 CRM 系统' })
 
     try {
@@ -256,7 +279,6 @@ const handleLogin = async (values: Record<string, unknown>) => {
       router.push('/onboarding')
     }
   } catch (error: unknown) {
-    // Error feedback (UI/UX Pro Max §8 error-recovery)
     const message = error instanceof Error ? error.message : '登录失败，请重试'
     toast.error('登录失败', { description: message })
   } finally {
@@ -267,14 +289,16 @@ const handleLogin = async (values: Record<string, unknown>) => {
 /**
  * Handle register form submission
  */
-const handleRegister = async (values: Record<string, unknown>) => {
+async function handleRegister(): Promise<void> {
+  if (!validateRegisterForm()) return
+
   registering.value = true
 
   try {
     const res = await authApi.registerWithPassword({
-      email: values.email as string,
-      name: values.name as string,
-      password: values.password as string,
+      email: registerForm.email,
+      name: registerForm.name,
+      password: registerForm.password,
     })
 
     userStore.setToken(res.access_token)
@@ -288,11 +312,9 @@ const handleRegister = async (values: Record<string, unknown>) => {
       userStore.setUserInfo(user)
     }
 
-    // Success feedback
     toast.success('注册成功', { description: '正在跳转到团队设置...' })
     router.push('/onboarding')
   } catch (error: unknown) {
-    // Error feedback
     const message = error instanceof Error ? error.message : '注册失败，请重试'
     toast.error('注册失败', { description: message })
   } finally {

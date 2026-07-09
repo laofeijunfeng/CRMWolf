@@ -1,21 +1,18 @@
 <script setup lang="ts">
 /**
- * Form - shadcn-vue Form component
- * Form container with vee-validate integration
+ * Form - vee-validate Form wrapper
+ * Form container with Zod schema validation
  */
 import type { HTMLAttributes } from 'vue'
-import { computed } from 'vue'
-import { FormRoot } from 'vee-validate'
+import { Form, type GenericObject } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
-import type { ZodType, ZodTypeDef } from 'zod'
-import type { GenericObject } from 'vee-validate'
+import type { ZodType } from 'zod'
 import { cn } from '@/lib/utils'
 
 interface Props {
   class?: HTMLAttributes['class']
-  schema?: ZodType<GenericObject, ZodTypeDef, GenericObject>
-  initialValues?: GenericObject
-  keepValues?: boolean
+  schema?: ZodType<GenericObject>
+  initialValues?: Record<string, unknown>
 }
 
 const props = defineProps<Props>()
@@ -24,27 +21,27 @@ const emit = defineEmits<{
   submit: [values: GenericObject]
 }>()
 
-const formProps = computed(() => {
-  const result: Record<string, unknown> = {}
-  if (props.schema) {
-    result.validationSchema = toTypedSchema(props.schema)
-  }
-  if (props.initialValues) {
-    result.initialValues = props.initialValues
-  }
-  if (props.keepValues !== undefined) {
-    result.keepValues = props.keepValues
-  }
-  return result
-})
+function handleSubmit(values: GenericObject): void {
+  emit('submit', values)
+}
 </script>
 
 <template>
-  <FormRoot
-    v-bind="formProps"
+  <Form
+    v-if="props.schema"
+    :validation-schema="toTypedSchema(props.schema)"
+    :initial-values="props.initialValues"
     :class="cn('space-y-wolf-md', props.class)"
-    @submit="emit('submit', $event as GenericObject)"
+    @submit="handleSubmit"
   >
     <slot />
-  </FormRoot>
+  </Form>
+  <Form
+    v-else
+    :initial-values="props.initialValues"
+    :class="cn('space-y-wolf-md', props.class)"
+    @submit="handleSubmit"
+  >
+    <slot />
+  </Form>
 </template>

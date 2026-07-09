@@ -24,9 +24,9 @@ interface Props {
   /** Loading state */
   loading?: boolean
   /** Icon component */
-  icon?: Component
+  icon?: Component | null
   /** Aria label for icon buttons */
-  ariaLabel?: string
+  ariaLabel?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -34,8 +34,8 @@ const props = withDefaults(defineProps<Props>(), {
   size: 'md',
   disabled: false,
   loading: false,
-  icon: undefined,
-  ariaLabel: undefined,
+  icon: null,
+  ariaLabel: null,
 })
 
 // Map CRMWolf variants to shadcn variants

@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from 'vue'
-import { computed } from 'vue'
+/**
+ * Alert - shadcn-vue Alert component
+ * Alert message container
+ */
 import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
@@ -24,18 +26,13 @@ const alertVariants = cva(
 
 type AlertVariants = VariantProps<typeof alertVariants>
 
-interface Props extends HTMLAttributes {
-  class?: HTMLAttributes['class']
+interface Props {
+  class?: string
   variant?: AlertVariants['variant']
 }
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'default',
-})
-
-const delegatedProps = computed(() => {
-  const { class: _, variant: __, ...delegated } = props
-  return delegated
 })
 </script>
 
@@ -43,7 +40,6 @@ const delegatedProps = computed(() => {
   <div
     role="alert"
     :class="cn(alertVariants({ variant: props.variant }), props.class)"
-    v-bind="delegatedProps"
   >
     <slot />
   </div>
