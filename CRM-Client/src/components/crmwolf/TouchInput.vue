@@ -4,11 +4,17 @@
  * UI/UX Pro Max CRITICAL: §1 Focus, §2 Touch, §8 Forms
  *
  * Features:
- * - Visible label (never placeholder-only)
- * - Error message below field
- * - Mobile 44px height
- * - iOS auto-zoom prevention (16px font)
- * - Focus ring visible
+ * - Visible label (never placeholder-only) - §8 input-labels
+ * - Error message below field - §8 error-placement
+ * - Helper text below input - §8 input-helper-text
+ * - Required field indicator (*) - §8 required-indicators
+ * - Mobile 44px height - §2 touch-target-size
+ * - iOS auto-zoom prevention (16px font) - §5 readable-font-size
+ * - Focus ring visible (2px) - §1 focus-states
+ * - Password toggle button - §8 password-toggle
+ * - Autocomplete support - §8 autofill-support
+ * - Semantic input type (email triggers correct keyboard) - §8 input-type-keyboard
+ * - aria-live for errors - §8 aria-live-errors
  */
 import { computed, ref } from 'vue'
 import { Input } from '@/components/ui/input'
@@ -23,7 +29,7 @@ interface Props {
   type?: 'text' | 'password' | 'email' | 'number' | 'tel' | 'url' | 'search'
   /** Placeholder hint */
   placeholder?: string
-  /** Helper text */
+  /** Helper text below input */
   helperText?: string
   /** Error message */
   error?: string
@@ -37,6 +43,10 @@ interface Props {
   inputId?: string
   /** Size variant */
   size?: 'default' | 'mobile'
+  /** Autocomplete attribute (UI/UX Pro Max §8 autofill-support) */
+  autocomplete?: 'on' | 'off' | 'email' | 'current-password' | 'new-password' | 'name' | 'tel' | 'username'
+  /** Show password toggle button (UI/UX Pro Max §8 password-toggle) */
+  showPasswordToggle?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -50,6 +60,8 @@ const props = withDefaults(defineProps<Props>(), {
   required: false,
   inputId: '',
   size: 'default',
+  autocomplete: 'on',
+  showPasswordToggle: false,
 })
 
 const emit = defineEmits<{
@@ -59,12 +71,22 @@ const emit = defineEmits<{
 
 const isFocused = ref(false)
 const inputRef = ref<HTMLInputElement | null>(null)
+const showPassword = ref(false) // Password toggle state
 
 const computedId = computed((): string =>
   props.inputId || `touch-input-${Math.random().toString(36).slice(2, 9)}`
 )
 
 const hasError = computed((): boolean => props.error !== '')
+
+const isPasswordType = computed((): boolean => props.type === 'password')
+
+const effectiveType = computed((): string => {
+  if (isPasswordType.value && showPassword.value) {
+    return 'text'
+  }
+  return props.type
+})
 
 const inputWrapperClasses = computed((): string =>
   cn(
@@ -79,6 +101,10 @@ const inputWrapperClasses = computed((): string =>
     }
   )
 )
+
+const togglePassword = (): void => {
+  showPassword.value = !showPassword.value
+}
 
 const handleInput = (event: Event): void => {
   const target = event.target as HTMLInputElement
@@ -132,11 +158,12 @@ defineExpose({ focus, blur, inputRef })
       <Input
         :id="computedId"
         ref="inputRef"
-        :type="type"
+        :type="effectiveType"
         :value="modelValue"
         :placeholder="placeholder"
         :disabled="disabled"
         :readonly="readonly"
+        :autocomplete="autocomplete"
         :aria-invalid="hasError ? 'true' : undefined"
         :aria-describedby="hasError ? `${computedId}-error` : helperText ? `${computedId}-helper` : undefined"
         :aria-required="required ? 'true' : undefined"
@@ -146,6 +173,38 @@ defineExpose({ focus, blur, inputRef })
         @blur="handleBlur"
         @change="handleChange"
       />
+
+      <!-- Password Toggle Button (UI/UX Pro Max §8 password-toggle) -->
+      <button
+        v-if="isPasswordType && showPasswordToggle"
+        type="button"
+        :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+        :aria-pressed="showPassword"
+        class="password-toggle absolute right-wolf-md flex items-center justify-center h-touch-target w-touch-target min-w-touch-target cursor-pointer touch-manipulation"
+        @click="togglePassword"
+      >
+        <svg
+          v-if="showPassword"
+          class="w-wolf-icon-sm h-wolf-icon-sm text-wolf-text-tertiary"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.242 4.242M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0l.246.246M3 21l3.59-3.59" />
+        </svg>
+        <svg
+          v-else
+          class="w-wolf-icon-sm h-wolf-icon-sm text-wolf-text-tertiary"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+      </button>
     </div>
 
     <!-- Helper Text -->

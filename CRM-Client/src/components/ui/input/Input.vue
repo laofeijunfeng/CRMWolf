@@ -13,9 +13,11 @@ const props = withDefaults(defineProps<Props>(), {
   modelValue: undefined,
 })
 
-const emits = defineEmits<{
-  (e: 'update:modelValue', payload: string | number): void
-}>()
+type Emits = {
+  'update:modelValue': [payload: string | number]
+}
+
+const emits = defineEmits<Emits>()
 
 const modelValue = useVModel(props, 'modelValue', emits, {
   passive: true,
@@ -33,7 +35,7 @@ const delegatedProps = computed(() => {
     v-model="modelValue"
     v-bind="delegatedProps"
     :class="cn(
-      'flex h-input-desktop w-full rounded-wolf border border-wolf-border-default bg-wolf-bg-card px-wolf-md text-wolf-body font-wolf ring-offset-wolf file:border-0 file:bg-transparent file:text-wolf-body file:font-wolf-medium placeholder:text-wolf-text-placeholder focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-38',
+      'flex h-input-desktop w-full rounded-wolf border border-wolf-border-default bg-wolf-bg-card px-wolf-md text-wolf-body font-wolf ring-offset-wolf file:border-0 file:bg-transparent file:text-wolf-body file:font-wolf-medium placeholder:text-wolf-text-placeholder focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40',
       'mobile:h-input-mobile mobile:px-wolf-xl',
       props.class,
     )"

@@ -125,22 +125,12 @@ export default [
     }
   },
 
-  // ========== shadcn-vue 组件：遵循上游标准 ==========
-  // shadcn-vue 组件遵循 shadcn 设计系统标准，部分 ESLint 规则放宽
+  // ========== Views 页面：路由约定命名 ==========
+  // Vue Router 页面使用单字命名（Login, Home, Settings 等）
   {
-    files: ['src/components/ui/**/*.vue', 'src/components/ui/**/*.ts'],
+    files: ['src/views/**/*.vue'],
     rules: {
-      // shadcn-vue 组件使用单字命名（Button, Input, Card 等）
       'vue/multi-word-component-names': 'off',
-      // shadcn-vue 组件使用空接口继承 HTMLAttributes
-      '@typescript-eslint/no-empty-object-type': 'off',
-      // shadcn-vue 组件 props 可选时不强制默认值
-      'vue/require-default-prop': 'off',
-      // shadcn-vue 组件允许 unsafe assignment（HTMLAttributes）
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      // 未使用的下划线变量（class: _）
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      // 函数返回类型
       '@typescript-eslint/explicit-function-return-type': 'warn',
       '@typescript-eslint/explicit-module-boundary-types': 'warn'
     }
