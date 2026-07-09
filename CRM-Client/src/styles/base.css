@@ -84,6 +84,6 @@
 
   /* ===== Disabled state ===== */
   .disabled-state {
-    @apply opacity-38 cursor-not-allowed pointer-events-none;
+    @apply opacity-40 cursor-not-allowed pointer-events-none;
   }
 }

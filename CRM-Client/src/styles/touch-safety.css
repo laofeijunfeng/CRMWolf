@@ -41,7 +41,11 @@
   .btn-touch-md {
     /* Desktop: 32px visual, Mobile: 44px auto */
     @apply h-button-md px-wolf-lg;
-    @media (max-width: 767px) {
+  }
+
+  /* Mobile variant for btn-touch-md */
+  @media (max-width: 767px) {
+    .btn-touch-md {
       @apply h-touch-target;
     }
   }
