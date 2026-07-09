@@ -1,0 +1,89 @@
+@import './touch-safety.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==================== CRMWolf Base Layer Overrides ==================== */
+/* UI/UX Pro Max CRITICAL: Focus states, Touch targets, Reduced motion */
+
+@layer base {
+  /* ===== Focus Ring Default ===== */
+  *:focus-visible {
+    @apply outline-wolf-focus outline-offset-wolf outline-wolf-primary/50;
+  }
+
+  /* ===== Button Reset ===== */
+  button {
+    @apply cursor-pointer;
+  }
+
+  /* ===== Input Reset ===== */
+  input,
+  textarea,
+  select {
+    @apply font-wolf text-wolf-body;
+  }
+
+  /* ===== Touch Target Safety ===== */
+  /* Mobile: 所有交互元素最小 44px */
+  @media (max-width: 767px) {
+    button,
+    a,
+    input,
+    select,
+    [role="button"] {
+      @apply min-h-touch-target min-w-touch-target;
+    }
+  }
+
+  /* ===== Reduced Motion Support ===== */
+  /* UI/UX Pro Max CRITICAL: Respect prefers-reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* ===== iOS Auto-zoom Prevention ===== */
+  /* UI/UX Pro Max CRITICAL: input font-size >= 16px on mobile */
+  @media (max-width: 767px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
+}
+
+/* ==================== CRMWolf Utilities ==================== */
+
+@layer utilities {
+  /* ===== Touch-safe utility ===== */
+  .touch-safe {
+    @apply min-h-touch-target min-w-touch-target;
+  }
+
+  /* ===== Press feedback ===== */
+  .press-feedback {
+    @apply transition-transform duration-wolf-press active:scale-[0.98];
+  }
+
+  /* ===== Focus ring utilities ===== */
+  .focus-ring {
+    @apply focus-visible:outline-wolf-focus focus-visible:outline-offset-wolf;
+  }
+
+  .focus-ring-danger {
+    @apply focus-visible:outline-wolf-focus focus-visible:outline-offset-wolf focus-visible:outline-wolf-danger/50;
+  }
+
+  /* ===== Disabled state ===== */
+  .disabled-state {
+    @apply opacity-40 cursor-not-allowed pointer-events-none;
+  }
+}
