@@ -1,30 +1,31 @@
 <script setup lang="ts">
-import { type HTMLAttributes, computed } from 'vue'
-import {
-  TabsRoot,
-  type TabsRootProps,
-  TabsList,
-  type TabsListProps,
-  TabsIndicator,
-} from 'radix-vue'
+/**
+ * Tabs - shadcn-vue Tabs component
+ * Container for tabbed interface
+ */
+import { TabsRoot } from 'radix-vue'
 import { cn } from '@/lib/utils'
+import type { HTMLAttributes } from 'vue'
 
-interface Props extends TabsRootProps {
+interface Props {
   class?: HTMLAttributes['class']
+  defaultValue?: string
+  modelValue?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {})
 
-const delegatedProps = computed(() => {
-  const { class: _, ...delegated } = props
-  return delegated
-})
+const emit = defineEmits<{
+  'update:modelValue': [value: string]
+}>()
 </script>
 
 <template>
   <TabsRoot
-    v-bind="delegatedProps"
+    :default-value="props.defaultValue"
+    :model-value="props.modelValue"
     :class="cn('w-full', props.class)"
+    @update:model-value="emit('update:modelValue', $event as string)"
   >
     <slot />
   </TabsRoot>

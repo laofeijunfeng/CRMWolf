@@ -1,23 +1,23 @@
 <script setup lang="ts">
-import { type HTMLAttributes, computed } from 'vue'
-import { TabsContent, type TabsContentProps } from 'radix-vue'
+/**
+ * TabsContent - shadcn-vue TabsContent component
+ * Content panel for each tab
+ */
+import { TabsContent } from 'radix-vue'
 import { cn } from '@/lib/utils'
+import type { HTMLAttributes } from 'vue'
 
-interface Props extends TabsContentProps {
+interface Props {
   class?: HTMLAttributes['class']
+  value: string
 }
 
 const props = withDefaults(defineProps<Props>(), {})
-
-const delegatedProps = computed(() => {
-  const { class: _, ...delegated } = props
-  return delegated
-})
 </script>
 
 <template>
   <TabsContent
-    v-bind="delegatedProps"
+    :value="props.value"
     :class="cn('mt-wolf-lg ring-offset-wolf focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2', props.class)"
   >
     <slot />

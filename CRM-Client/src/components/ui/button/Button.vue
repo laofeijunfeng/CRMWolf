@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { type HTMLAttributes, computed } from 'vue'
-import { Primitive, type PrimitiveProps } from 'radix-vue'
+/**
+ * Button - shadcn-vue Button component
+ * Styled button with variants
+ */
+import { Primitive } from 'radix-vue'
 import { type VariantProps, cva } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
+import type { HTMLAttributes } from 'vue'
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-wolf text-wolf-body font-wolf-medium ring-offset-wolf transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-38',
+  'inline-flex items-center justify-center whitespace-nowrap rounded-wolf text-wolf-body font-wolf-medium ring-offset-wolf transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40',
   {
     variants: {
       variant: {
@@ -32,25 +36,29 @@ const buttonVariants = cva(
 
 type ButtonVariants = VariantProps<typeof buttonVariants>
 
-interface Props extends PrimitiveProps {
+interface Props {
   variant?: ButtonVariants['variant']
   size?: ButtonVariants['size']
   class?: HTMLAttributes['class']
+  disabled?: boolean
+  type?: 'button' | 'submit' | 'reset'
+  as?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  variant: 'default',
+  size: 'default',
+  disabled: false,
+  type: 'button',
   as: 'button',
-})
-
-const delegatedProps = computed(() => {
-  const { class: _, ...delegated } = props
-  return delegated
 })
 </script>
 
 <template>
   <Primitive
-    v-bind="delegatedProps"
+    :as="props.as"
+    :type="props.type"
+    :disabled="props.disabled"
     :class="cn(buttonVariants({ variant: props.variant, size: props.size }), props.class)"
   >
     <slot />

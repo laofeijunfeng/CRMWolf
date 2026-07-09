@@ -1,24 +1,23 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from 'vue'
-import { computed } from 'vue'
-import { LabelRoot, type LabelRootProps } from 'radix-vue'
+/**
+ * Label - shadcn-vue Label component
+ * Accessible label element for form fields
+ */
+import { LabelRoot } from 'radix-vue'
 import { cn } from '@/lib/utils'
+import type { HTMLAttributes } from 'vue'
 
-interface Props extends LabelRootProps {
+interface Props {
   class?: HTMLAttributes['class']
+  for?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {})
-
-const delegatedProps = computed(() => {
-  const { class: _, ...delegated } = props
-  return delegated
-})
 </script>
 
 <template>
   <LabelRoot
-    v-bind="delegatedProps"
+    :for="props.for"
     :class="cn(
       'text-wolf-sm font-wolf-medium text-wolf-text-secondary leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-40',
       props.class
