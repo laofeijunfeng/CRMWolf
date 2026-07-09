@@ -1,22 +1,15 @@
 <script setup lang="ts">
-import { type HTMLAttributes, computed } from 'vue'
 import { cn } from '@/lib/utils'
 
-interface Props extends /* @vue-ignore */ HTMLAttributes<HTMLTableCellElement> {}
+interface Props {
+  class?: string
+}
 
-const props = defineProps<Props>()
-
-const delegatedProps = computed(() => {
-  const { class: _, ...delegated } = props
-  return delegated
-})
+const props = withDefaults(defineProps<Props>(), {})
 </script>
 
 <template>
-  <td
-    v-bind="delegatedProps"
-    :class="cn('p-wolf-md align-middle [&:has([role=checkbox])]:pr-0', props.class)"
-  >
+  <td :class="cn('p-wolf-md align-middle [&:has([role=checkbox])]:pr-0', props.class)">
     <slot />
   </td>
 </template>
