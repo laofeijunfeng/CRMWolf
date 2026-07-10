@@ -156,111 +156,145 @@
       </DataTable>
 
       <!-- 移动端卡片列表 -->
-      <div class="mobile-card-list" v-else>
-        <div v-if="rows.length > 0">
-          <div
-            v-for="(row, $index) in rows"
-            :key="row.id"
-            class="approval-card"
-            :class="{ 'has-overdue': row.overdue_hours != null && row.overdue_hours >= 48 }"
-          >
-            <!-- 卡片头部：单号 + 状态徽章 -->
-            <div class="card-header-row">
+      <div v-if="isMobile" class="space-y-4">
+        <Card
+          v-for="(row, $index) in rows"
+          :key="row.id"
+          :class="cn(
+            'relative',
+            row.overdue_hours != null && row.overdue_hours >= 48 && 'border-warning'
+          )"
+        >
+          <CardContent class="p-4">
+            <!-- 卡片头部：单号 + 状态 -->
+            <div class="flex justify-between items-center mb-3">
               <span
-                class="number-cell mobile"
+                class="font-mono text-primary text-base cursor-pointer"
                 data-testid="copy-number-mobile"
                 @click="copyNumber(row.application_number)"
-              >{{ row.application_number }}</span>
+              >
+                {{ row.application_number }}
+              </span>
               <ApprovalStatusBadge :status="row.status" size="small" />
             </div>
 
-            <!-- 卡片主体：客户 + 金额 -->
-            <div class="card-body-row">
-              <span class="entity-name">{{ row.entity_name || '-' }}</span>
-              <span class="amount mobile">{{ formatCurrency(row.entity_amount) }}</span>
-            </div>
-
-            <!-- 卡片次要信息：提交人 + 时间 -->
-            <div class="card-meta-row">
-              <span class="submitter">{{ row.submitter_name }} 提交</span>
-              <span class="time">{{ formatDateRelative(row.created_time) }}</span>
-            </div>
-
-            <!-- 超时提示（如有） -->
-            <div
-              v-if="row.overdue_hours != null && row.overdue_hours >= 48"
-              class="card-overdue-row"
-            >
-              <span class="overdue-badge mobile" role="status" :aria-label="`超时 ${row.overdue_hours} 小时`">
-                <el-icon :size="12"><Clock /></el-icon>
-                超时 {{ row.overdue_hours }} 小时
+            <!-- 卡片主体：实体 + 金额 -->
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-base font-medium max-w-[60%] truncate">
+                {{ row.entity_name || '-' }}
+              </span>
+              <span class="font-mono font-semibold text-lg text-warning">
+                {{ formatCurrency(row.entity_amount) }}
               </span>
             </div>
 
-            <!-- 分割线 -->
-            <div class="card-divider"></div>
+            <!-- 卡片次要信息：提交人 + 时间 -->
+            <div class="flex justify-between text-sm text-muted-foreground mb-3">
+              <span class="max-w-[50%] truncate">{{ row.submitter_name }} 提交</span>
+              <span>{{ formatDateRelative(row.created_time) }}</span>
+            </div>
 
-            <!-- 操作按钮：同意 / 驳回 / 详情（全宽） -->
-            <div class="card-actions-row" v-if="activeTab === 'pending'">
-              <el-button
-                type="primary"
-                size="default"
+            <!-- 超时提示 -->
+            <div v-if="row.overdue_hours != null && row.overdue_hours >= 48" class="mb-3">
+              <Badge class="gap-1 bg-warning text-warning-foreground border-transparent">
+                <Clock class="w-3 h-3" />
+                超时 {{ row.overdue_hours }} 小时
+              </Badge>
+            </div>
+
+            <Separator class="my-3" />
+
+            <!-- 操作按钮（Touch Target ≥44pt） -->
+            <div class="flex gap-2" v-if="activeTab === 'pending'">
+              <Button
+                variant="default"
+                size="lg"
+                class="flex-1 min-h-[44px]"
                 data-testid="mobile-approve-btn"
                 @click="handleQuickApprove(row)"
-              >同意</el-button>
-              <el-button
-                type="danger"
-                size="default"
+              >
+                同意
+              </Button>
+              <Button
+                variant="destructive"
+                size="lg"
+                class="flex-1 min-h-[44px]"
                 data-testid="mobile-reject-btn"
                 @click="handleQuickReject(row)"
-              >驳回</el-button>
-              <el-button
-                type="default"
-                size="default"
+              >
+                驳回
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                class="flex-1 min-h-[44px]"
                 data-testid="mobile-detail-btn"
                 @click="openDetail(row, $index)"
-              >详情</el-button>
+              >
+                详情
+              </Button>
             </div>
-            <div class="card-actions-row" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED'">
-              <el-button
-                type="primary"
-                size="default"
+            <div class="flex gap-2" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED'">
+              <Button
+                variant="default"
+                size="lg"
+                class="flex-1 min-h-[44px]"
                 data-testid="mobile-resubmit-btn"
                 :loading="resubmitPendingId === row.id"
                 @click="handleResubmit(row)"
-              >修改并重新提交</el-button>
+              >
+                修改并重新提交
+              </Button>
             </div>
-            <div class="card-actions-row" v-else>
-              <el-button
-                type="default"
-                size="default"
+            <div class="flex gap-2" v-else>
+              <Button
+                variant="outline"
+                size="lg"
+                class="flex-1 min-h-[44px]"
                 data-testid="mobile-detail-btn"
                 @click="openDetail(row, $index)"
-              >详情</el-button>
+              >
+                详情
+              </Button>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         <!-- 移动端空态 -->
         <WolfEmpty
-          v-else
+          v-if="rows.length === 0"
           title="暂无待审批事项"
           description="所有回款与发票申请都已处理完毕"
         />
 
-        <!-- 移动端分页（简化版） -->
-        <div v-if="rows.length > 0" class="mobile-pagination">
-          <span class="total-text">共 {{ total }} 条</span>
-          <el-pagination
-            v-model:current-page="page"
-            v-model:page-size="pageSize"
+        <!-- 移动端分页 -->
+        <div v-if="rows.length > 0" class="flex flex-col items-center gap-2 py-4 pb-[env(safe-area-inset-bottom)]">
+          <span class="text-sm text-muted-foreground">共 {{ total }} 条</span>
+          <Pagination
+            v-model:page="page"
             :total="total"
-            :page-sizes="[10, 20, 50]"
-            layout="prev, pager, next"
-            small
-            @current-change="fetchList"
-            @size-change="fetchList"
-          />
+            :items-per-page="pageSize"
+            @update:page="fetchList"
+          >
+            <PaginationContent>
+              <PaginationPrevious />
+              <PaginationItem
+                v-for="item in getPageItems()"
+                :key="item"
+                :value="item"
+                as-child
+              >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  :class="page === item ? 'bg-primary text-primary-foreground' : ''"
+                >
+                  {{ item }}
+                </Button>
+              </PaginationItem>
+              <PaginationNext />
+            </PaginationContent>
+          </Pagination>
         </div>
       </div>
     </template>
@@ -350,37 +384,43 @@
     </Sheet>
 
     <!-- 移动端快速驳回弹窗 -->
-    <el-dialog
-      v-model="quickRejectVisible"
-      data-testid="quick-reject-dialog"
-      title="驳回审批"
-      width="90%"
-    >
-      <el-alert
-        type="warning"
-        :closable="false"
-        style="margin-bottom: 12px"
-      >
-        请填写驳回理由，提交人将据此修改。
-      </el-alert>
-      <el-input
-        v-model="quickRejectReason"
-        data-testid="quick-reject-reason"
-        type="textarea"
-        :rows="4"
-        placeholder="请填写驳回理由"
-        maxlength="500"
-        show-word-limit
-      />
-      <template #footer>
-        <el-button @click="quickRejectVisible = false">取消</el-button>
-        <el-button
-          type="primary"
-          data-testid="quick-reject-confirm-btn"
-          @click="confirmQuickReject"
-        >确定</el-button>
-      </template>
-    </el-dialog>
+    <Dialog v-model:open="quickRejectVisible">
+      <DialogContent class="max-w-[90vw]">
+        <DialogHeader>
+          <DialogTitle>驳回审批</DialogTitle>
+          <DialogDescription>
+            请填写驳回理由，提交人将据此修改。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="space-y-4">
+          <Textarea
+            v-model="quickRejectReason"
+            data-testid="quick-reject-reason"
+            placeholder="请填写驳回理由"
+            :rows="4"
+            :maxlength="500"
+            class="min-h-[44px]"
+          />
+          <p class="text-sm text-muted-foreground text-right">
+            {{ quickRejectReason.length }} / 500
+          </p>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" @click="quickRejectVisible = false">
+            取消
+          </Button>
+          <Button
+            variant="default"
+            data-testid="quick-reject-confirm-btn"
+            @click="confirmQuickReject"
+          >
+            确定
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -390,15 +430,18 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Clock } from 'lucide-vue-next'
-import { ContextTabs, FilterPanel, DataTable, Badge } from '@/components/crmwolf'
+import { ContextTabs, FilterPanel, DataTable, Badge, Separator } from '@/components/crmwolf'
+import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from '@/components/ui/pagination'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
-// Element Plus components for remaining template sections (dialog, mobile pagination)
-import { ElPagination, ElButton, ElIcon, ElDialog, ElInput, ElAlert } from 'element-plus'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
+// Element Plus components for remaining template sections (none remaining after refactor)
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -581,6 +624,31 @@ const byOverdueDesc = (a: ApprovalListItem, b: ApprovalListItem): number => {
   const ah = a.overdue_hours ?? 0
   const bh = b.overdue_hours ?? 0
   return bh - ah
+}
+
+// 移动端分页页码计算
+const getPageItems = (): number[] => {
+  const totalPages = Math.ceil(total.value / pageSize.value)
+  const current = page.value
+  const items: number[] = []
+
+  // 显示最多 5 个页码
+  const maxItems = 5
+  const half = Math.floor(maxItems / 2)
+
+  let start = Math.max(1, current - half)
+  let end = Math.min(totalPages, start + maxItems - 1)
+
+  // 调整起点以确保显示足够的页码
+  if (end - start < maxItems - 1) {
+    start = Math.max(1, end - maxItems + 1)
+  }
+
+  for (let i = start; i <= end; i++) {
+    items.push(i)
+  }
+
+  return items
 }
 
 const reload = (): void => {
@@ -852,113 +920,16 @@ watch(rows, async () => {
   }
 }
 
+// 移动端卡片警告边框样式
 @media (max-width: 768px) {
   .approval-center {
     padding: $wolf-page-padding-mobile-v2;
   }
 
-  // 移动端卡片列表样式
-  .mobile-card-list {
-    margin-top: $wolf-space-md-v2;
-  }
-
-  .approval-card {
-    background: $wolf-bg-card-v2;
-    border-radius: $wolf-radius-v2;
-    padding: $wolf-card-padding-mobile-v2;
-    margin-bottom: $wolf-space-md-v2;
-    box-shadow: $wolf-shadow-card-v2;
-
-    &.has-overdue {
-      border: 1px solid $wolf-warning-v2;
-    }
-  }
-
-  .card-header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: $wolf-space-sm-v2;
-  }
-
-  .card-body-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: $wolf-space-sm-v2;
-
-    .entity-name {
-      font-size: $wolf-font-size-title-mobile-v2;
-      color: $wolf-text-primary-v2;
-      font-weight: $wolf-font-weight-medium-v2;
-      max-width: 60%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-  }
-
-  .card-meta-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: $wolf-font-size-auxiliary-v2;
-    color: $wolf-text-secondary-v2;
-    margin-bottom: $wolf-space-sm-v2;
-
-    .submitter {
-      max-width: 50%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-  }
-
-  .card-overdue-row {
-    margin-bottom: $wolf-space-sm-v2;
-  }
-
-  .card-divider {
-    height: 1px;
-    background: $wolf-border-light-v2;
-    margin: $wolf-space-sm-v2 0;
-  }
-
-  .card-actions-row {
-    display: flex;
-    gap: $wolf-space-sm-v2;
-    padding-top: $wolf-space-sm-v2;
-
-    // 按钮全宽（移动端审批入口优化）
-    button {
-      flex: 1;
-      min-height: 44px; // touch-target ≥ 44pt
-    }
-  }
-
-  // 移动端单号样式
-  .number-cell.mobile {
-    font-size: $wolf-font-size-body-mobile-v2;
-  }
-
-  // 移动端金额样式（突出）
-  .amount.mobile {
-    font-size: $wolf-font-size-title-mobile-v2;
-    font-weight: $wolf-font-weight-semibold-v2;
-  }
-
-  // 移动端超时徽章
-  .overdue-badge.mobile {
-    font-size: $wolf-font-size-caption-mobile-v2;
-  }
-
-  // 移动端分页
-  .mobile-pagination {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: $wolf-space-sm-v2;
-    padding: $wolf-space-md-v2 0;
-    padding-bottom: env(safe-area-inset-bottom, 0); // 安全区
+  // 超时卡片边框警告样式（配合 :class="row.overdue_hours >= 48 && 'border-warning'"）
+  :deep(.border-warning) {
+    border-color: $wolf-warning-v2;
+    border-width: 1px;
   }
 }
 </style>
