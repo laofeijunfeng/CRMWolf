@@ -98,12 +98,6 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
-        path: 'customers/:id',
-        name: 'CustomerDetail',
-        component: () => import('@/views/CustomerDetail.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
         path: 'public-customers',
         name: 'PublicCustomers',
         component: () => import('@/views/PublicCustomers.vue'),
