@@ -11,7 +11,7 @@ debug_mode = os.getenv("CRM_DEBUG", "true").lower() == "true"
 setup_logging(debug=debug_mode)
 logger = get_logger(__name__)
 
-from app.api import auth, users, roles, permissions, leads, customers, customer_follow_ups, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, calendar, teams, industry, lead_ai, procurement_ai, approval_ai, system_configs
+from app.api import auth, users, roles, permissions, leads, customers, customer_follow_ups, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, teams, industry, lead_ai, procurement_ai, approval_ai, system_configs
 from app.api.deployment import router as deployment_router  # 新增
 from app.api.license_application import router as license_application_router  # 新增
 from app.api.customer_ai import router as customer_ai_router
@@ -99,9 +99,6 @@ api_router.include_router(procurement_admin.router)
 api_router.include_router(teams.router)
 api_router.include_router(deployment_router)  # 新增：部署信息管理
 api_router.include_router(license_application_router)  # 新增：License申请管理
-
-# === 日历路由 ===
-api_router.include_router(calendar.router)
 
 # === AI 相关路由 ===
 api_router.include_router(ai_config_router)
