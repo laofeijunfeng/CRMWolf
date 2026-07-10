@@ -44,18 +44,6 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '线索管理' }
       },
       {
-        path: 'leads/create',
-        name: 'LeadCreate',
-        component: () => import('@/views/LeadForm.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'leads/:id/edit',
-        name: 'LeadEdit',
-        component: () => import('@/views/LeadForm.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
         path: 'leads/:id',
         name: 'LeadDetail',
         component: () => import('@/views/LeadDetail.vue'),
@@ -222,12 +210,28 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'payments',
-        name: 'Payments',
-        component: () => import('@/views/Payments.vue'),
+        redirect: '/payments/plans'
+      },
+      {
+        path: 'payments/plans',
+        name: 'PaymentPlans',
+        component: () => import('@/views/PaymentPlans.vue'),
+        meta: { requiresAuth: true, title: '回款计划' }
+      },
+      {
+        path: 'payments/records',
+        name: 'PaymentRecords',
+        component: () => import('@/views/PaymentRecords.vue'),
         meta: { requiresAuth: true, title: '回款管理' }
       },
       {
-        path: 'payments/:id',
+        path: 'payments/create',
+        name: 'PaymentPlanCreate',
+        component: () => import('@/views/PaymentPlanCreate.vue'),
+        meta: { requiresAuth: true, title: '新建回款计划' }
+      },
+      {
+        path: 'payments/plans/:id',
         name: 'PaymentPlanDetail',
         component: () => import('@/views/PaymentPlanDetail.vue'),
         meta: { requiresAuth: true, title: '回款计划详情' }
