@@ -900,8 +900,8 @@ watch(rows, async () => {
 .overdue-badge-inline {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
+  gap: $wolf-space-xs-v2;
+  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
   border-radius: $wolf-radius-sm-v2;
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-medium-v2;
@@ -916,6 +916,8 @@ watch(rows, async () => {
 
   &:focus,
   &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
     background: $wolf-bg-hover-v2;
   }
 }
