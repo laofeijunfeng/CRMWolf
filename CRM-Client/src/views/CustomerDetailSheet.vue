@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import CustomerDetailSidebar from '@/components/CustomerDetailSidebar.vue'
@@ -143,6 +144,51 @@ watch(() => props.visible, (visible): void => {
         <!-- 右侧内容区 -->
         <ScrollArea class="flex-1">
           <div class="p-6 space-y-6">
+            <!-- 基本信息卡片 -->
+            <Card class="info-card">
+              <CardContent class="p-0">
+                <div class="p-4 border-b border-wolf-border-light-v2">
+                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">基本信息</h3>
+                </div>
+                <div class="p-4">
+                  <div class="attributes-grid">
+                    <div class="attribute-item">
+                      <div class="attribute-label">客户来源</div>
+                      <div class="attribute-value">-</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">所在城市</div>
+                      <div class="attribute-value">-</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">公司地址</div>
+                      <div class="attribute-value">-</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">负责销售</div>
+                      <div class="attribute-value">-</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">采购方式</div>
+                      <div class="attribute-value">-</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">创建人</div>
+                      <div class="attribute-value">-</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">创建时间</div>
+                      <div class="attribute-value">-</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">最后修改</div>
+                      <div class="attribute-value">-</div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             <!-- 内容面板（待后续实现） -->
             <div class="text-sm text-wolf-text-secondary-v2">面板内容: {{ activePanel }}</div>
           </div>
@@ -192,5 +238,37 @@ watch(() => props.visible, (visible): void => {
   @media (min-width: 769px) {
     flex-direction: row;
   }
+}
+
+.attributes-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @media (max-width: 480px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.attribute-item {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+}
+
+.attribute-label {
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-tertiary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.attribute-value {
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
 }
 </style>
