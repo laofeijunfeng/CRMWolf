@@ -21,7 +21,7 @@
   E9 N+1：列表只调 1 次 listApprovals；详情走单点 getApprovalDetail；不逐行查询。
 -->
 <template>
-  <div class="finance-approval-center" v-loading="loading">
+  <div class="approval-center" v-loading="loading">
     <!-- 标题 + 全局 ErrorState（403 forbidden / 加载失败） -->
     <ErrorState
       v-if="loadError === 'forbidden'"
@@ -29,7 +29,7 @@
       title="你没有该审批中心的访问权限"
     >
       <template #action>
-        <el-button data-testid="reload-list-btn" @click="reload">重新加载</el-button>
+        <Button data-testid="reload-list-btn" @click="reload">重新加载</Button>
       </template>
     </ErrorState>
     <ErrorState
@@ -38,60 +38,37 @@
       description="可点击下方按钮重新加载，若持续失败请联系管理员"
     >
       <template #action>
-        <el-button data-testid="reload-list-btn" type="primary" @click="reload">重新加载</el-button>
+        <Button data-testid="reload-list-btn" variant="default" @click="reload">重新加载</Button>
       </template>
     </ErrorState>
 
     <template v-else>
-      <!-- 三 tab（权限驱动，徽章显示待办数） -->
-      <div class="tabs-card">
-        <el-tabs v-model="activeTab" @tab-change="handleTabChange">
-          <el-tab-pane name="pending">
-            <template #label>
-              <span data-testid="tab-pending">待我审批</span>
-              <el-badge
-                v-if="pendingCount > 0"
-                :value="pendingCount"
-                class="tab-badge"
-                type="primary"
-              />
-            </template>
-          </el-tab-pane>
-          <el-tab-pane name="processed">
-            <template #label>
-              <span data-testid="tab-processed">我已处理</span>
-            </template>
-          </el-tab-pane>
-          <el-tab-pane name="submitted">
-            <template #label>
-              <span data-testid="tab-submitted">我提交的</span>
-            </template>
-          </el-tab-pane>
-        </el-tabs>
-      </div>
+      <!-- ContextTabs（高度 48px） -->
+      <ContextTabs
+        v-model:activeTab="activeTab"
+        :tabs="tabs"
+        @change="handleTabChange"
+        class="mb-6"
+      >
+        <template #badge="{ tab }">
+          <Badge
+            v-if="tab.key === 'pending' && pendingCountBadge"
+            variant="destructive"
+            class="ml-2"
+          >
+            {{ pendingCountBadge }}
+          </Badge>
+        </template>
+      </ContextTabs>
 
-      <!-- 筛选区 -->
-      <div class="filter-card">
-        <el-form :model="filterForm" :inline="true">
-          <el-form-item label="单据类型">
-            <el-select
-              v-model="filterForm.business_type"
-              placeholder="全部类型"
-              clearable
-              style="width: 160px"
-              @change="handleFilterChange"
-            >
-              <el-option label="回款" value="PAYMENT" />
-              <el-option label="发票" value="INVOICE" />
-              <el-option label="合同" value="CONTRACT" />
-              <el-option label="License" value="LICENSE" />
-            </el-select>
-          </el-form-item>
-          <el-form-item>
-            <el-button @click="resetFilter">重置</el-button>
-          </el-form-item>
-        </el-form>
-      </div>
+      <!-- FilterPanel -->
+      <FilterPanel
+        :fields="filterFields"
+        v-model:values="filterValues"
+        @search="handleFilterChange"
+        @reset="resetFilter"
+        class="mb-6"
+      />
 
       <!-- 表格（桌面端） -->
       <div class="table-card" v-if="!isMobile">
@@ -401,29 +378,41 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch, reactive } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Clock } from '@element-plus/icons-vue'
-import { useApprovalStore } from '@/stores/approval'
-import type { EntityType, ApprovalListItem } from '@/schemas/approvalGeneric'
+import { toast } from 'vue-sonner'
+import { Clock } from 'lucide-vue-next'
+import { ContextTabs, FilterPanel } from '@/components/crmwolf'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+// Element Plus components for remaining template sections (Task 2 will replace these)
+import { ElTable, ElTableColumn, ElPagination, ElButton, ElIcon, ElDrawer, ElDescriptions, ElDescriptionsItem, ElDialog, ElInput, ElAlert } from 'element-plus'
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import WolfEmpty from '@/components/WolfEmpty.vue'
+import { useApprovalStore } from '@/stores/approval'
+import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency, formatDateRelative } from '@/utils/format'
+import { createConfirmDialog } from '@/utils/confirmDialogImpl'
+import type { EntityType, ApprovalListItem } from '@/schemas/approvalGeneric'
 
 type Tab = 'pending' | 'processed' | 'submitted'
 type LoadError = null | 'error' | 'forbidden'
 
+// ==================== Stores ====================
+usePageTitle()
 const store = useApprovalStore()
 const { loading, pendingCount } = storeToRefs(store)
 const router = useRouter()
 
-// ===== State =====
+// ==================== State ====================
 const activeTab = ref<Tab>('pending')
-const filterForm = ref<{ business_type: EntityType | '' }>({ business_type: '' })
+const filterValues = reactive({
+  business_type: '' as EntityType | ''
+})
+
 const page = ref<number>(1)
 const pageSize = ref<number>(20)
 const total = ref<number>(0)
@@ -437,14 +426,48 @@ const focusedRowEl = ref<HTMLElement | null>(null)
 
 const resubmitPendingId = ref<number | null>(null)
 
-// ===== 计算属性 =====
-const drawerSize = computed<string>(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : '480px'))
-
 // 移动端检测（响应式）
 const isMobile = ref<boolean>(false)
 const checkMobile = (): void => {
   isMobile.value = typeof window !== 'undefined' && window.innerWidth < 768
 }
+
+// 快速驳回弹窗
+const quickRejectVisible = ref<boolean>(false)
+const quickRejectReason = ref<string>('')
+const quickRejectRow = ref<ApprovalListItem | null>(null)
+
+// ==================== 计算属性 ====================
+const drawerSize = computed<string>(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : '480px'))
+
+// ==================== ContextTabs 配置 ====================
+const tabs = [
+  { key: 'pending', label: '待我审批' },
+  { key: 'processed', label: '我已处理' },
+  { key: 'submitted', label: '我提交的' }
+]
+
+// Badge 显示待办数
+const pendingCountBadge = computed(() =>
+  activeTab.value === 'pending' && pendingCount.value > 0 ? pendingCount.value : null
+)
+
+// ==================== FilterPanel 配置 ====================
+const filterFields = [
+  {
+    key: 'business_type',
+    type: 'select' as const,
+    label: '单据类型',
+    placeholder: '全部类型',
+    options: [
+      { value: 'PAYMENT', label: '回款' },
+      { value: 'INVOICE', label: '发票' },
+      { value: 'CONTRACT', label: '合同' },
+      { value: 'LICENSE', label: 'License' }
+    ]
+  }
+]
+
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
@@ -476,7 +499,7 @@ const fetchList = async (): Promise<void> => {
       tab: activeTab.value,
       page: page.value,
       page_size: pageSize.value,
-      ...(filterForm.value.business_type ? { business_type: filterForm.value.business_type } : {})
+      ...(filterValues.business_type ? { business_type: filterValues.business_type } : {})
     }
     const res = await store.fetchList(query)
     rows.value = activeTab.value === 'pending'
@@ -514,7 +537,7 @@ const handleFilterChange = (): void => {
 }
 
 const resetFilter = (): void => {
-  filterForm.value.business_type = ''
+  filterValues.business_type = ''
   page.value = 1
   fetchList()
 }
@@ -534,9 +557,9 @@ const copyNumber = async (num: string): Promise<void> => {
       document.execCommand('copy')
       document.body.removeChild(ta)
     }
-    ElMessage.success('已复制单号')
+    toast.success('已复制单号')
   } catch {
-    ElMessage.error('复制失败，请手动选择单号复制')
+    toast.error('复制失败，请手动选择单号复制')
   }
 }
 
@@ -573,11 +596,14 @@ const onApprovalActionDone = (): void => {
 const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
   resubmitPendingId.value = row.id
   try {
-    await ElMessageBox.confirm(
-      `将跳转到 ${businessTypeLabel(row.business_type)} 编辑页修改后重新提交审批。是否继续？`,
-      '修改并重新提交',
-      { type: 'info' }
-    )
+    const confirmed = await createConfirmDialog({
+      title: '修改并重新提交',
+      message: `将跳转到 ${businessTypeLabel(row.business_type)} 编辑页修改后重新提交审批。是否继续？`,
+      confirmText: '确定',
+      cancelText: '取消',
+      variant: 'default'
+    })
+    if (!confirmed) return
     // 跳转到对应实体编辑页（route 由路由层声明，审批中心不内嵌 update 逻辑）
     const route: Record<EntityType, string> = {
       INVOICE: `/invoices/edit/${row.business_id}`,
@@ -593,13 +619,13 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     // PAYMENT 目标是列表页，无法直接进入驳回回款的编辑入口——补 info 引导，
     // 旅程不断（比原 window.location.assign hash bug 强）。
     if (row.business_type === 'PAYMENT') {
-      ElMessage.info('请修改回款记录后重新提交审批')
+      toast.info('请修改回款记录后重新提交审批')
     }
     if (row.business_type === 'LICENSE') {
-      ElMessage.info('请修改 License 申请后重新提交审批')
+      toast.info('请修改 License 申请后重新提交审批')
     }
   } catch {
-    // 用户取消（ElMessageBox reject）或 router.push 失败
+    // router.push 失败
   } finally {
     resubmitPendingId.value = null
   }
@@ -608,11 +634,14 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
 // 移动端快速审批：同意（单条，无抽屉）
 const handleQuickApprove = async (row: ApprovalListItem): Promise<void> => {
   try {
-    await ElMessageBox.confirm(
-      '确定同意该审批？',
-      '快速审批',
-      { type: 'success' }
-    )
+    const confirmed = await createConfirmDialog({
+      title: '快速审批',
+      message: '确定同意该审批？',
+      confirmText: '确定',
+      cancelText: '取消',
+      variant: 'default'
+    })
+    if (!confirmed) return
     // 调 store.approveEntity（单条审批，updated_time 用当前行）
     await store.approveEntity(
       row.business_type,
@@ -621,19 +650,15 @@ const handleQuickApprove = async (row: ApprovalListItem): Promise<void> => {
       '审批通过',
       row.updated_time
     )
-    ElMessage.success('已同意')
+    toast.success('已同意')
     // 刷新列表（移除该行）
     fetchList()
   } catch {
-    // 用户取消或审批失败（拦截器已 toast）
+    // 审批失败（拦截器已 toast）
   }
 }
 
 // 移动端快速审批：驳回（单条，弹窗输入理由）
-const quickRejectReason = ref<string>('')
-const quickRejectRow = ref<ApprovalListItem | null>(null)
-const quickRejectVisible = ref<boolean>(false)
-
 const handleQuickReject = (row: ApprovalListItem): void => {
   quickRejectReason.value = ''
   quickRejectRow.value = row
@@ -643,7 +668,7 @@ const handleQuickReject = (row: ApprovalListItem): void => {
 const confirmQuickReject = async (): Promise<void> => {
   const reason = quickRejectReason.value.trim()
   if (!reason) {
-    ElMessage.warning('请填写驳回理由，提交人将据此修改')
+    toast.warning('请填写驳回理由，提交人将据此修改')
     return
   }
   if (!quickRejectRow.value) return
@@ -655,7 +680,7 @@ const confirmQuickReject = async (): Promise<void> => {
       reason,
       quickRejectRow.value.updated_time
     )
-    ElMessage.success('已驳回，申请人可修改后重新提交')
+    toast.success('已驳回，申请人可修改后重新提交')
     quickRejectVisible.value = false
     fetchList()
   } catch {
@@ -732,108 +757,88 @@ watch(rows, async () => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
-.finance-approval-center {
-  padding: $wolf-page-padding;
-  background: $wolf-bg-page;
-  min-height: calc(100vh - 48px);
-}
-
-.tabs-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-space-sm $wolf-card-padding;
-  margin-bottom: $wolf-card-gap;
-  box-shadow: $wolf-shadow-card;
-}
-
-.tab-badge {
-  margin-left: $wolf-space-xs;
-}
-
-.filter-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-card-padding;
-  margin-bottom: $wolf-card-gap;
-  box-shadow: $wolf-shadow-card;
+.approval-center {
+  padding: $wolf-page-padding-v2;
+  background: $wolf-bg-page-v2;
+  min-height: calc(100vh - 56px);
 }
 
 .table-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-card-padding;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-v2;
+  padding: $wolf-card-padding-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: $wolf-space-md;
+  margin-bottom: $wolf-space-md-v2;
 }
 
 .card-title-group {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md;
+  gap: $wolf-space-md-v2;
 }
 
 .card-title {
-  font-size: $wolf-font-size-body;
-  font-weight: $wolf-font-weight-medium;
-  color: $wolf-text-primary;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-primary-v2;
 }
 
 .card-tag {
-  font-size: $wolf-font-size-caption;
+  font-size: $wolf-font-size-caption-v2;
   padding: 2px 8px;
-  border-radius: $wolf-radius-sm;
+  border-radius: $wolf-radius-sm-v2;
 
   &.primary {
-    color: $wolf-primary;
-    background: $wolf-primary-light;
+    color: $wolf-primary-v2;
+    background: $wolf-primary-light-v2;
   }
 }
 
 .card-actions {
   display: flex;
-  gap: $wolf-button-gap;
+  gap: $wolf-space-sm-v2;
 }
 
 .number-cell {
-  font-family: $wolf-font-mono;
-  font-size: $wolf-font-size-auxiliary;
-  color: $wolf-text-link;
+  font-family: $wolf-font-mono-v2;
+  font-size: $wolf-font-size-auxiliary-v2;
+  color: $wolf-text-link-v2;
   cursor: pointer;
   user-select: none;
 
   &:hover {
-    color: $wolf-text-link-hover;
+    color: $wolf-text-link-hover-v2;
     text-decoration: underline;
   }
 }
 
 .type-tag {
-  font-size: $wolf-font-size-caption;
-  color: $wolf-text-secondary;
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-secondary-v2;
 }
 
 .amount {
-  font-weight: $wolf-font-weight-medium;
-  color: $wolf-warning-text;
-  font-family: $wolf-font-mono;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-warning-text-v2;
+  font-family: $wolf-font-mono-v2;
 }
 
 .mono-time {
-  font-family: $wolf-font-mono;
-  font-size: $wolf-font-size-caption;
-  color: $wolf-text-tertiary;
+  font-family: $wolf-font-mono-v2;
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
 .muted {
-  color: $wolf-text-placeholder;
+  color: $wolf-text-placeholder-v2;
 }
 
 .overdue-badge {
@@ -841,23 +846,23 @@ watch(rows, async () => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: $wolf-radius-sm;
-  font-size: $wolf-font-size-caption;
-  font-weight: $wolf-font-weight-medium;
-  color: var(--wolf-approval-pending-text, $wolf-warning-text);
-  background: var(--wolf-approval-pending-bg, $wolf-warning-bg);
+  border-radius: $wolf-radius-sm-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-warning-text-v2;
+  background: $wolf-warning-bg-v2;
 }
 
 .pagination-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: $wolf-space-md 0;
+  padding: $wolf-space-md-v2 0;
 }
 
 .total-text {
-  font-size: $wolf-font-size-auxiliary;
-  color: $wolf-text-tertiary;
+  font-size: $wolf-font-size-auxiliary-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
 // 行级聚焦态（键盘导航 + 抽屉关闭后焦点回归）
@@ -866,7 +871,7 @@ watch(rows, async () => {
 
   &:focus,
   &:focus-visible {
-    background: $wolf-bg-hover;
+    background: $wolf-bg-hover-v2;
   }
 }
 
@@ -874,7 +879,7 @@ watch(rows, async () => {
 .drawer-body {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md;
+  gap: $wolf-space-md-v2;
   height: 100%;
 }
 
@@ -890,30 +895,30 @@ watch(rows, async () => {
   :deep(.approval-process-generic__actions) {
     position: sticky;
     bottom: 0;
-    background: $wolf-bg-card;
+    background: $wolf-bg-card-v2;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
 }
 
 @media (max-width: 768px) {
-  .finance-approval-center {
-    padding: $wolf-space-md;
+  .approval-center {
+    padding: $wolf-page-padding-mobile-v2;
   }
 
   // 移动端卡片列表样式
   .mobile-card-list {
-    margin-top: $wolf-space-md;
+    margin-top: $wolf-space-md-v2;
   }
 
   .approval-card {
-    background: $wolf-bg-card;
-    border-radius: $wolf-radius-md;
-    padding: $wolf-space-md;
-    margin-bottom: $wolf-space-md;
-    box-shadow: $wolf-shadow-card;
+    background: $wolf-bg-card-v2;
+    border-radius: $wolf-radius-v2;
+    padding: $wolf-card-padding-mobile-v2;
+    margin-bottom: $wolf-space-md-v2;
+    box-shadow: $wolf-shadow-card-v2;
 
     &.has-overdue {
-      border: 1px solid $wolf-warning-border;
+      border: 1px solid $wolf-warning-v2;
     }
   }
 
@@ -921,19 +926,19 @@ watch(rows, async () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: $wolf-space-sm;
+    margin-bottom: $wolf-space-sm-v2;
   }
 
   .card-body-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: $wolf-space-sm;
+    margin-bottom: $wolf-space-sm-v2;
 
     .entity-name {
-      font-size: $wolf-font-size-title;
-      color: $wolf-text-primary;
-      font-weight: $wolf-font-weight-medium;
+      font-size: $wolf-font-size-title-mobile-v2;
+      color: $wolf-text-primary-v2;
+      font-weight: $wolf-font-weight-medium-v2;
       max-width: 60%;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -944,9 +949,9 @@ watch(rows, async () => {
   .card-meta-row {
     display: flex;
     justify-content: space-between;
-    font-size: $wolf-font-size-auxiliary;
-    color: $wolf-text-secondary;
-    margin-bottom: $wolf-space-sm;
+    font-size: $wolf-font-size-auxiliary-v2;
+    color: $wolf-text-secondary-v2;
+    margin-bottom: $wolf-space-sm-v2;
 
     .submitter {
       max-width: 50%;
@@ -957,22 +962,22 @@ watch(rows, async () => {
   }
 
   .card-overdue-row {
-    margin-bottom: $wolf-space-sm;
+    margin-bottom: $wolf-space-sm-v2;
   }
 
   .card-divider {
     height: 1px;
-    background: $wolf-border-light;
-    margin: $wolf-space-sm 0;
+    background: $wolf-border-light-v2;
+    margin: $wolf-space-sm-v2 0;
   }
 
   .card-actions-row {
     display: flex;
-    gap: $wolf-button-gap;
-    padding-top: $wolf-space-sm;
+    gap: $wolf-space-sm-v2;
+    padding-top: $wolf-space-sm-v2;
 
     // 按钮全宽（移动端审批入口优化）
-    .el-button {
+    button {
       flex: 1;
       min-height: 44px; // touch-target ≥ 44pt
     }
@@ -980,18 +985,18 @@ watch(rows, async () => {
 
   // 移动端单号样式
   .number-cell.mobile {
-    font-size: $wolf-font-size-body;
+    font-size: $wolf-font-size-body-mobile-v2;
   }
 
   // 移动端金额样式（突出）
   .amount.mobile {
-    font-size: $wolf-font-size-title;
-    font-weight: $wolf-font-weight-semibold;
+    font-size: $wolf-font-size-title-mobile-v2;
+    font-weight: $wolf-font-weight-semibold-v2;
   }
 
   // 移动端超时徽章
   .overdue-badge.mobile {
-    font-size: $wolf-font-size-auxiliary;
+    font-size: $wolf-font-size-caption-mobile-v2;
   }
 
   // 移动端分页
@@ -999,27 +1004,9 @@ watch(rows, async () => {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: $wolf-space-sm;
-    padding: $wolf-space-md 0;
+    gap: $wolf-space-sm-v2;
+    padding: $wolf-space-md-v2 0;
     padding-bottom: env(safe-area-inset-bottom, 0); // 安全区
-
-    .el-pagination {
-      width: 100%;
-      justify-content: center;
-    }
-  }
-
-  // 移动端抽屉全屏（已通过 drawerSize computed 实现）
-  // 移动端筛选区简化（隐藏次要筛选）
-  .filter-card {
-    .el-form-item {
-      margin-bottom: $wolf-space-sm;
-    }
-  }
-
-  // 移动端 Tab 简化（Badge 位置调整）
-  .tab-badge {
-    margin-left: 4px;
   }
 }
 </style>
