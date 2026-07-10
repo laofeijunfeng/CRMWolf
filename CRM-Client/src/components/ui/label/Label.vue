@@ -1,26 +1,25 @@
 <script setup lang="ts">
-/**
- * Label - Simple label component
- * Accessible label for form fields
- */
-import { cn } from '@/lib/utils'
+import type { LabelProps } from "reka-ui"
+import type { HTMLAttributes } from "vue"
+import { reactiveOmit } from "@vueuse/core"
+import { Label } from "reka-ui"
+import { cn } from "@/lib/utils"
 
-interface Props {
-  class?: string
-  for?: string
-}
+const props = defineProps<LabelProps & { class?: HTMLAttributes["class"] }>()
 
-const props = withDefaults(defineProps<Props>(), {})
+const delegatedProps = reactiveOmit(props, "class")
 </script>
 
 <template>
-  <label
-    :for="props.for"
-    :class="cn(
-      'text-wolf-sm font-wolf-medium text-wolf-text-secondary leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-40',
-      props.class
-    )"
+  <Label
+    v-bind="delegatedProps"
+    :class="
+      cn(
+        'text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
+        props.class,
+      )
+    "
   >
     <slot />
-  </label>
+  </Label>
 </template>

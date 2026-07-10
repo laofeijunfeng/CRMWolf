@@ -476,8 +476,12 @@ onUnmounted(() => {
 
       <!-- 来源 -->
       <template #cell-source="{ row }">
-        <span v-if="row.source" class="status-badge status-default">{{ row.source }}</span>
-        <span v-else>-</span>
+        <StatusBadge
+          v-if="row.source"
+          :status="row.source"
+          type="source"
+        />
+        <span v-else class="text-muted-foreground">-</span>
       </template>
 
       <!-- 城市 -->
@@ -487,7 +491,12 @@ onUnmounted(() => {
 
       <!-- 规模 -->
       <template #cell-company_scale="{ row }">
-        {{ row.company_scale || '-' }}
+        <StatusBadge
+          v-if="row.company_scale"
+          :status="row.company_scale"
+          type="companyScale"
+        />
+        <span v-else class="text-muted-foreground">-</span>
       </template>
 
       <!-- 状态 -->
@@ -700,22 +709,6 @@ onUnmounted(() => {
 .score-number {
   font-weight: $wolf-font-weight-medium-v2;
   font-size: $wolf-font-size-auxiliary-v2;
-}
-
-// 状态 Badge（符合 list-page.md 4.1）
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  border-radius: $wolf-radius-full-v2;
-  white-space: nowrap;
-}
-
-.status-default {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-tertiary-v2;
 }
 
 // 简易弹窗样式（临时使用，后续替换为 shadcn-vue Dialog）

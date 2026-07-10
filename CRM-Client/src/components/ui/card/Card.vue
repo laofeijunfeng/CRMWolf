@@ -14,7 +14,8 @@ const props = withDefaults(defineProps<Props>(), {})
 
 <template>
   <div
-    :class="cn('rounded-wolf-lg border border-wolf-border-default bg-wolf-bg-card text-wolf-text-primary shadow-wolf-card', props.class)"
+    :class="props.class"
+    class="rounded-wolf-lg border border-wolf-border-default bg-wolf-bg-card text-wolf-text-primary shadow-wolf-card"
   >
     <slot />
   </div>

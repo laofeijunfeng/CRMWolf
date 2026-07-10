@@ -1,219 +1,105 @@
-<template>
-  <div class="contracts-page">
-    <!-- 快捷筛选标签 + 操作按钮 -->
-    <div class="filter-tabs-bar">
-      <div class="filter-tabs">
-        <span
-          :class="['filter-tab', { active: activeTab === 'all' }]"
-          @click="handleTabChange('all')"
-        >全部合同</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'DRAFT' }]"
-          @click="handleTabChange('DRAFT')"
-        >草稿</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'PENDING_REVIEW' }]"
-          @click="handleTabChange('PENDING_REVIEW')"
-        >审批中</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'SIGNED' }]"
-          @click="handleTabChange('SIGNED')"
-        >已签署</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'EFFECTIVE' }]"
-          @click="handleTabChange('EFFECTIVE')"
-        >生效中</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'EXPIRED' }]"
-          @click="handleTabChange('EXPIRED')"
-        >已到期</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'TERMINATED' }]"
-          @click="handleTabChange('TERMINATED')"
-        >已终止</span>
-      </div>
-      <div class="filter-actions">
-        <el-button v-if="canCreateContract" type="primary" @click="handleCreate">
-          <el-icon><Plus /></el-icon>
-          新建合同
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 表格区 -->
-    <div class="table-card">
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        stripe
-      >
-        <el-table-column prop="contract_number" label="合同编号" width="180" />
-        <el-table-column prop="contract_name" min-width="220">
-          <template #header>
-            <FilterTableHeader
-              label="合同名称"
-              field="contract_name"
-              :filter="{ type: 'search', placeholder: '搜索合同名称' }"
-              :sortable="true"
-              :filter-value="filterValues['contract_name']"
-              :sort-state="sortState.field === 'contract_name' ? sortState : null"
-              @filter-change="handleFilterChange"
-              @filter-clear="handleFilterClear"
-              @sort-change="handleSortChange"
-            />
-          </template>
-          <template #default="{ row }">
-            <div class="name-cell">
-              <span class="link-text" @click="handleViewDetail(row)">{{ row.contract_name }}</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="关联客户" min-width="160">
-          <template #default="{ row }">
-            {{ row.customer_info?.account_name || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="关联商机" min-width="160">
-          <template #default="{ row }">
-            {{ row.opportunity_info?.opportunity_name || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column width="140">
-          <template #header>
-            <FilterTableHeader
-              label="总金额"
-              field="total_amount"
-              :sortable="true"
-              :sort-state="sortState.field === 'total_amount' ? sortState : null"
-              @sort-change="handleSortChange"
-            />
-          </template>
-          <template #default="{ row }">
-            ¥{{ formatAmount(row.total_amount) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="授权模式" width="100">
-          <template #default="{ row }">
-            <span :class="['status-tag', row.license_type === 'SUBSCRIPTION' ? 'status-subscription' : 'status-perpetual']">
-              {{ row.license_type === 'SUBSCRIPTION' ? '订阅' : '买断' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column width="100">
-          <template #header>
-            <FilterTableHeader
-              label="状态"
-              field="status"
-              :filter="{ type: 'select', placeholder: '选择状态', options: [
-                { value: 'DRAFT', label: '草稿' },
-                { value: 'PENDING_REVIEW', label: '审批中' },
-                { value: 'SIGNED', label: '已签署' },
-                { value: 'EFFECTIVE', label: '生效中' },
-                { value: 'EXPIRED', label: '已到期' },
-                { value: 'TERMINATED', label: '已终止' }
-              ] }"
-              :sortable="true"
-              :filter-value="filterValues['status']"
-              :sort-state="sortState.field === 'status' ? sortState : null"
-              @filter-change="handleFilterChange"
-              @filter-clear="handleFilterClear"
-              @sort-change="handleSortChange"
-            />
-          </template>
-          <template #default="{ row }">
-            <span :class="['status-tag', getStatusClass(row.status)]">
-              {{ getStatusText(row.status) }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建人" width="100">
-          <template #default="{ row }">
-            {{ row.creator_info?.name || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column width="120">
-          <template #header>
-            <FilterTableHeader
-              label="签署日期"
-              field="signing_date"
-              :sortable="true"
-              :sort-state="sortState.field === 'signing_date' ? sortState : null"
-              @sort-change="handleSortChange"
-            />
-          </template>
-          <template #default="{ row }">
-            {{ row.signing_date || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
-          <template #default="{ row }">
-            <div class="action-cell">
-              <el-tooltip content="查看" placement="top">
-                <el-icon class="action-icon" @click="handleViewDetail(row)">
-                  <View />
-                </el-icon>
-              </el-tooltip>
-              <el-tooltip v-if="canEditRow(row)" content="编辑" placement="top">
-                <el-icon class="action-icon" @click="handleEdit(row)">
-                  <Edit />
-                </el-icon>
-              </el-tooltip>
-              <el-tooltip v-if="canDeleteRow(row)" content="删除" placement="top">
-                <el-icon class="action-icon action-danger" @click="handleDelete(row)">
-                  <Delete />
-                </el-icon>
-              </el-tooltip>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <div class="pagination-bar">
-        <span class="total-text">共 {{ pagination.total }} 条</span>
-        <el-pagination
-          v-model:current-page="pagination.current"
-          v-model:page-size="pagination.pageSize"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="pagination.total"
-          layout="sizes, prev, pager, next, jumper"
-          @size-change="handlePageSizeChange"
-          @current-change="handlePageChange"
-        />
-      </div>
-    </div>
-
-    <!-- Magic Wand 弹窗 -->
-    </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+/**
+ * Contracts.vue - 合同管理页面
+ *
+ * 基于 MASTER.md §6.6 布局架构：
+ * - AppLayout 提供 TopBar（56px）
+ * - 页面 padding: 24px
+ * - gap: 24px（组件间距）
+ *
+ * 改动清单：
+ * - ✅ TopBar 集成（useHeaderStore）
+ * - ✅ ContextTabs 组件（方案 A：显示常用状态）
+ * - ✅ FilterPanel 组件（状态下拉筛选包含全部状态）
+ * - ✅ DataTable 组件
+ * - ✅ V2 Design Tokens
+ * - ✅ Flexbox 高度管理
+ */
+import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { showError, showSuccess } from '@/utils/errorMessages'
-import { Plus, Search, View, Edit, Delete } from '@element-plus/icons-vue'
-import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
-import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
-import contractApi, { type ContractListResponse, type ContractQueryParams } from '@/api/contract'
+import { handleApiError } from '@/utils/errorHandler'
+import { toast } from 'vue-sonner'
+import { Plus, Eye, Edit, Send, Trash2 } from 'lucide-vue-next'
+import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import { confirmDelete } from '@/utils/confirmDialog'
+import StatusBadge from '@/components/StatusBadge.vue'
+import contractApi, {
+  type ContractListResponse,
+  type ContractQueryParams
+} from '@/api/contract'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
+import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { formatCurrency } from '@/utils/format'
 
-usePageTitle()  // 自动从 route.meta.title 设置标题
+// 自动从 route.meta.title 设置页面标题
+usePageTitle()
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
 const userStore = useUserStore()
+const headerStore = useHeaderStore()
 
-const tableData = ref<ContractListResponse[]>([])
+// ==================== State ====================
 const loading = ref(false)
-const activeTab = ref<string>('all')
+const tableData = ref<ContractListResponse[]>([])
+const activeTab = ref('all')
 
-const filterValues = ref<Record<string, FilterValue>>({})
-const sortState = ref<SortState>({ field: '', order: null })
+const pagination = reactive({
+  current: 1,
+  pageSize: 20,
+  total: 0
+})
 
-// 权限计算属性
+// ==================== ContextTabs 配置（方案 A：显示常用状态）====================
+const tabs = [
+  { key: 'all', label: '全部合同' },
+  { key: 'DRAFT', label: '草稿' },
+  { key: 'PENDING_REVIEW', label: '审批中' },
+  { key: 'SIGNED', label: '已签署' },
+  { key: 'EFFECTIVE', label: '生效中' }
+]
+
+// ==================== FilterPanel 配置（状态下拉筛选包含全部状态）====================
+const filterFields = [
+  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索合同名称' },
+  {
+    key: 'status',
+    type: 'select' as const,
+    label: '状态',
+    placeholder: '全部状态',
+    options: [
+      { value: 'DRAFT', label: '草稿' },
+      { value: 'PENDING_REVIEW', label: '审批中' },
+      { value: 'SIGNED', label: '已签署' },
+      { value: 'EFFECTIVE', label: '生效中' },
+      { value: 'EXPIRED', label: '已到期' },
+      { value: 'TERMINATED', label: '已终止' }
+    ]
+  }
+]
+
+const filterValues = reactive({
+  keyword: '',
+  status: ''
+})
+
+// ==================== DataTable 配置 ====================
+const columns = [
+  { key: 'contract_number', title: '合同编号', width: '180px' },
+  { key: 'contract_name', title: '合同名称', width: '220px' },
+  { key: 'customer', title: '关联客户', width: '160px' },
+  { key: 'opportunity', title: '关联商机', width: '160px' },
+  { key: 'total_amount', title: '总金额', align: 'right' as const, width: '140px' },
+  { key: 'license_type', title: '授权模式', align: 'center' as const, width: '100px' },
+  { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
+  { key: 'creator', title: '创建人', width: '100px' },
+  { key: 'signing_date', title: '签署日期', width: '120px' },
+  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
+]
+
+// ==================== 权限 ====================
 const canCreateContract = computed(() => permissionStore.hasPermission('contract:create'))
 const canEditAllContract = computed(() => permissionStore.hasPermission('contract:edit:all'))
 const canEditOwnContract = computed(() => permissionStore.hasPermission('contract:edit:own'))
@@ -222,370 +108,316 @@ const canDeleteOwnContract = computed(() => permissionStore.hasPermission('contr
 
 // 行级权限检查函数
 const canEditRow = (row: ContractListResponse): boolean => {
-  // 合同编辑需要额外检查状态（只有草稿状态可编辑）
-  if (row.status !== 'DRAFT') return false
+  if (row['status'] !== 'DRAFT') return false
   if (canEditAllContract.value) return true
-  if (canEditOwnContract.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  // Note: ContractListResponse may not have owner_id, check creator_id instead
+  if (canEditOwnContract.value && row.creator_id === String(userStore.userInfo?.id)) return true
   return false
 }
 
 const canDeleteRow = (row: ContractListResponse): boolean => {
-  // 合同删除需要额外检查状态（只有草稿状态可删除）
-  if (row.status !== 'DRAFT') return false
+  if (row['status'] !== 'DRAFT') return false
   if (canDeleteAllContract.value) return true
-  if (canDeleteOwnContract.value && row.owner_id === String(userStore.userInfo?.id)) return true
+  if (canDeleteOwnContract.value && row.creator_id === String(userStore.userInfo?.id)) return true
   return false
 }
 
-const searchForm = reactive<ContractQueryParams>({
-  keyword: '',
-  status: null,
-  license_type: null
-})
-
-const pagination = reactive({
-  current: 1,
-  pageSize: 20,
-  total: 0
-})
-
-const getStatusText = (status: string) => {
-  const map: Record<string, string> = {
-    DRAFT: '草稿',
-    PENDING_REVIEW: '审批中',
-    SIGNED: '已签署',
-    EFFECTIVE: '生效中',
-    EXPIRED: '已到期',
-    TERMINATED: '已终止'
-  }
-  return map[status] || '未知'
+const canSubmitApproval = (row: ContractListResponse): boolean => {
+  return row['status'] === 'DRAFT'
 }
 
-const getStatusClass = (status: string) => {
-  const map: Record<string, string> = {
-    DRAFT: 'status-draft',
-    PENDING_REVIEW: 'status-pending',
-    SIGNED: 'status-signed',
-    EFFECTIVE: 'status-effective',
-    EXPIRED: 'status-expired',
-    TERMINATED: 'status-terminated'
-  }
-  return map[status] || 'status-draft'
-}
-
-const handleFilterChange = (field: string, value: FilterValue) => {
-  filterValues.value[field] = value
-  pagination.current = 1
-  fetchContractList()
-}
-
-const handleFilterClear = (field: string) => {
-  delete filterValues.value[field]
-  pagination.current = 1
-  fetchContractList()
-}
-
-const handleSortChange = (newSortState: SortState) => {
-  sortState.value = newSortState
-  pagination.current = 1
-  fetchContractList()
-}
-
-const fetchContractList = async () => {
+// ==================== Methods ====================
+const fetchContractList = async (): Promise<void> => {
   loading.value = true
   try {
-    // 从 filterValues 提取筛选值
-    const keyword = filterValues.value['contract_name']?.search || searchForm.keyword || undefined
-    const statusSelect = filterValues.value['status']?.select
-    const statusFilter = statusSelect !== undefined && statusSelect !== null && statusSelect !== '' ? statusSelect : undefined
+    // Tab 状态筛选
+    let statusFilter: string | null = null
+    if (activeTab.value !== 'all') {
+      statusFilter = activeTab.value
+    } else if (filterValues.status) {
+      statusFilter = filterValues.status
+    }
 
-    const params: ContractQueryParams = {
+    const params: Record<string, unknown> = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      keyword,
-      license_type: searchForm.license_type || undefined
+      keyword: filterValues.keyword || null,
+      status: statusFilter,
+      license_type: null
     }
 
-    // 快捷筛选标签
-    if (activeTab.value !== 'all') {
-      params.status = activeTab.value
-    } else if (statusFilter) {
-      params.status = statusFilter
-    }
-
-    if (sortState.value.order) {
-      params.order_by = sortState.value.field
-      params.order_dir = sortState.value.order
-    }
-
-    const data = await contractApi.getContracts(params) as unknown as ContractListResponse[]
+    const data = await contractApi.getContracts(params as ContractQueryParams) as unknown as ContractListResponse[]
     tableData.value = data
     pagination.total = data.length
-  } catch (error: unknown) {
-    const err = error as Error
-    console.error('获取合同列表失败', err)
-    // ✅ P0: Copywriting - 具体 + 方向性
-    showError(error, '获取合同列表')
+  } catch (error) {
+    handleApiError(error, '获取合同列表')
   } finally {
     loading.value = false
   }
 }
 
-const handleSearch = () => {
+const handleSearch = (values: Record<string, any>): void => {
+  Object.assign(filterValues, values)
+  // 使用 FilterPanel 状态筛选时，清除 Tab 状态
+  if (values['status']) {
+    activeTab.value = 'all'
+  }
   pagination.current = 1
   fetchContractList()
 }
 
-const handleReset = () => {
-  searchForm.keyword = ''
-  searchForm.license_type = null
-  filterValues.value = {}
-  sortState.value = { field: '', order: null }
-  handleSearch()
-}
-
-const handleTabChange = (key: string) => {
-  activeTab.value = key
+const handleReset = (): void => {
+  filterValues.keyword = ''
+  filterValues.status = ''
+  activeTab.value = 'all'
   pagination.current = 1
   fetchContractList()
 }
 
-const handlePageChange = (page: number) => {
+const handlePageChange = (page: number): void => {
   pagination.current = page
   fetchContractList()
 }
 
-const handlePageSizeChange = (pageSize: number) => {
+const handlePageSizeChange = (pageSize: number): void => {
   pagination.pageSize = pageSize
   pagination.current = 1
   fetchContractList()
 }
 
-const handleCreate = () => {
+const handleCreate = (): void => {
   router.push('/contracts/create')
 }
 
-const handleViewDetail = (record: ContractListResponse) => {
+const handleViewDetail = (record: ContractListResponse): void => {
   router.push(`/contracts/${record.id}`)
 }
 
-const handleEdit = (record: ContractListResponse) => {
+const handleEdit = (record: ContractListResponse): void => {
   router.push(`/contracts/edit/${record.id}`)
 }
 
-const handleDelete = async (record: ContractListResponse) => {
+const handleDelete = async (record: ContractListResponse): Promise<void> => {
+  const confirmed = await confirmDelete(`合同 "${record.contract_name}"`)
+  if (!confirmed) return
+
   try {
-    await ElMessageBox.confirm(
-      `确认要删除合同 "${record.contract_name}" 吗？此操作不可恢复。`,
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
     await contractApi.deleteContract(record.id)
-    // ✅ P0: Copywriting - 具体化的成功提示
-    showSuccess('删除', '合同')
+    toast.success('合同删除成功')
     fetchContractList()
-  } catch (error: unknown) {
-    const err = error as Error
-    if (err.message !== 'cancel') {
-      console.error('[Contracts] handleDelete error:', err)
-      // ✅ P0: Copywriting - 具体 + 方向性
-      showError(error, '删除合同')
-    }
+  } catch (error) {
+    handleApiError(error, '删除合同')
   }
 }
 
-const formatAmount = (amount: string) => {
-  const num = parseFloat(amount)
-  if (isNaN(num)) return amount
-  return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const handleSubmitApproval = async (record: ContractListResponse): Promise<void> => {
+  try {
+    await contractApi.updateContractStatus(record.id, { status: 'PENDING_REVIEW' })
+    toast.success('合同已提交审批')
+    fetchContractList()
+  } catch (error) {
+    handleApiError(error, '提交审批')
+  }
 }
 
+// ==================== TableRowActions 配置 ====================
+const getRowActions = (row: ContractListResponse) => ({
+  primaryActions: [
+    {
+      label: '查看',
+      handler: handleViewDetail,
+      icon: Eye
+    },
+    {
+      label: '编辑',
+      handler: handleEdit,
+      icon: Edit,
+      visible: canEditRow(row)
+    }
+  ],
+  secondaryActions: [
+    {
+      label: '提交审批',
+      handler: handleSubmitApproval,
+      icon: Send,
+      visible: canSubmitApproval(row)
+    },
+    {
+      label: '删除',
+      handler: handleDelete,
+      icon: Trash2,
+      destructive: true,
+      separator: true,
+      visible: canDeleteRow(row)
+    }
+  ]
+})
+
+// ==================== 格式化函数 ====================
+const mapContractStatus = (status: string): 'draft' | 'pending_review' | 'signed' | 'effective' | 'expired' | 'terminated' => {
+  const map: Record<string, 'draft' | 'pending_review' | 'signed' | 'effective' | 'expired' | 'terminated'> = {
+    'DRAFT': 'draft',
+    'PENDING_REVIEW': 'pending_review',
+    'SIGNED': 'signed',
+    'EFFECTIVE': 'effective',
+    'EXPIRED': 'expired',
+    'TERMINATED': 'terminated'
+  }
+  return map[status] || 'draft'
+}
+
+const getLicenseTypeText = (type: string): string => {
+  return type === 'SUBSCRIPTION' ? '订阅' : '买断'
+}
+
+const getLicenseTypeClass = (type: string): string => {
+  return type === 'SUBSCRIPTION' ? 'status-info' : 'status-default'
+}
+
+// ==================== Lifecycle ====================
 onMounted(() => {
   fetchContractList()
 })
+
+// TopBar 配置（Tabs + Actions）
+watchEffect(() => {
+  // 注册 ContextTabs 到 TopBar
+  headerStore.setTabs(tabs, activeTab.value)
+
+  // 注册操作按钮
+  headerStore.setActions([
+    {
+      id: 'create-contract',
+      label: '新建合同',
+      icon: Plus,
+      type: 'primary',
+      handler: handleCreate,
+      visible: canCreateContract.value,
+      ariaLabel: '新建合同'
+    }
+  ])
+})
+
+// Watch activeTab changes from headerStore
+watchEffect(() => {
+  if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
+    activeTab.value = headerStore.activeTab
+    // 切换 Tab 时清除状态筛选
+    filterValues.status = ''
+    pagination.current = 1
+    fetchContractList()
+  }
+})
+
+// ✅ 不调用 headerStore.clear()
+// 让新页面直接覆盖旧状态，避免页面切换时 TopBar 短暂显示标题
 </script>
 
+<template>
+  <div class="contracts-page">
+    <!-- FilterPanel -->
+    <FilterPanel
+      :fields="filterFields"
+      @search="handleSearch"
+      @reset="handleReset"
+    />
+
+    <!-- DataTable -->
+    <DataTable
+      :columns="columns"
+      :data="tableData"
+      :loading="loading"
+      :page="pagination.current"
+      :page-size="pagination.pageSize"
+      :total="pagination.total"
+      empty-title="暂无合同"
+      @update:page="handlePageChange"
+      @update:page-size="handlePageSizeChange"
+    >
+      <!-- 合同编号 -->
+      <template #cell-contract_number="{ row }">
+        {{ row.contract_number || '-' }}
+      </template>
+
+      <!-- 合同名称 -->
+      <template #cell-contract_name="{ row }">
+        <span class="link-text" @click.stop="handleViewDetail(row)">
+          {{ row.contract_name }}
+        </span>
+      </template>
+
+      <!-- 关联客户 -->
+      <template #cell-customer="{ row }">
+        {{ row.customer_info?.account_name || '-' }}
+      </template>
+
+      <!-- 关联商机 -->
+      <template #cell-opportunity="{ row }">
+        {{ row.opportunity_info?.opportunity_name || '-' }}
+      </template>
+
+      <!-- 总金额 -->
+      <template #cell-total_amount="{ row }">
+        <span class="amount-cell">{{ formatCurrency(row.total_amount) }}</span>
+      </template>
+
+      <!-- 授权模式 -->
+      <template #cell-license_type="{ row }">
+        <span :class="['status-badge', getLicenseTypeClass(row.license_type)]">
+          {{ getLicenseTypeText(row.license_type) }}
+        </span>
+      </template>
+
+      <!-- 状态 -->
+      <template #cell-status="{ row }">
+        <StatusBadge :status="mapContractStatus(row.status)" type="contract" />
+      </template>
+
+      <!-- 创建人 -->
+      <template #cell-creator="{ row }">
+        {{ row.creator_info?.name || '-' }}
+      </template>
+
+      <!-- 签署日期 -->
+      <template #cell-signing_date="{ row }">
+        {{ row.signing_date || '-' }}
+      </template>
+
+      <!-- 操作 -->
+      <template #cell-actions="{ row }">
+        <TableRowActions :row="row" v-bind="getRowActions(row)" />
+      </template>
+    </DataTable>
+  </div>
+</template>
+
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
 .contracts-page {
-  padding: $wolf-page-padding;
-  background: $wolf-bg-page;
-  min-height: calc(100vh - 48px);
-}
-
-// 快捷筛选标签 + 操作按钮栏
-.filter-tabs-bar {
+  padding: $wolf-page-padding-v2;
+  background: $wolf-bg-page-v2;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: $wolf-space-md;
-}
-
-.filter-tabs {
-  display: flex;
-  gap: $wolf-space-xs;
-}
-
-.filter-actions {
-  display: flex;
-  gap: $wolf-space-xs;
-}
-
-.filter-tab {
-  padding: 8px $wolf-space-md;
-  font-size: $wolf-font-size-auxiliary;
-  font-weight: $wolf-font-weight-normal;
-  color: $wolf-text-tertiary;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-sm;
-  cursor: pointer;
-  transition: all 0.2s ease-in-out;
-
-  &:hover {
-    background: $wolf-bg-hover;
-    color: $wolf-text-secondary;
-  }
-
-  &.active {
-    background: $wolf-bg-hover;
-    color: $wolf-text-secondary;
-    font-weight: $wolf-font-weight-medium;
-  }
-}
-
-// 表格区 - 卡片容器样式
-.table-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  box-shadow: $wolf-shadow-card;
-  overflow: visible;
+  flex-direction: column;
+  gap: $wolf-section-gap-v2;
+  min-height: 0;
+  flex: 1;
 }
 
 // 链接样式
 .link-text {
-  color: $wolf-text-link;
+  color: $wolf-text-link-v2;
+  font-weight: $wolf-font-weight-medium-v2;
   cursor: pointer;
-  font-weight: $wolf-font-weight-medium;
+
   &:hover {
-    color: $wolf-text-link-hover;
+    color: $wolf-text-link-hover-v2;
   }
 }
 
-// 名称列布局
-.name-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.magicwand-icon {
-  font-size: 14px;
-  color: $wolf-primary;
-  cursor: pointer;
-  transition: all 0.2s;
-
-  &:hover {
-    transform: scale(1.15);
-    color: $wolf-primary-hover;
-  }
-}
-
-
-// 状态标签（中性色系）
-.status-tag {
-  display: inline-flex;
-  padding: 4px 8px;
-  font-size: $wolf-font-size-caption;
-  font-weight: $wolf-font-weight-normal;
-  border-radius: $wolf-radius-sm;
-}
-
-.status-draft {
-  background: $wolf-bg-hover;
-  color: $wolf-text-tertiary;
-}
-
-.status-pending {
-  background: $wolf-warning-bg;
-  color: $wolf-warning-text;
-}
-
-.status-signed {
-  background: $wolf-bg-hover;
-  color: $wolf-text-secondary;
-}
-
-.status-effective {
-  background: $wolf-success-bg;
-  color: $wolf-success-text;
-}
-
-.status-expired {
-  background: $wolf-danger-bg;
-  color: $wolf-danger-text;
-}
-
-.status-terminated {
-  background: $wolf-bg-hover;
-  color: $wolf-text-placeholder;
-}
-
-.status-subscription {
-  background: $wolf-bg-hover;
-  color: $wolf-text-tertiary;
-}
-
-.status-perpetual {
-  background: $wolf-bg-hover;
-  color: $wolf-text-secondary;
-}
-
-// 操作区
-.action-cell {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.action-icon {
-  font-size: 16px;
-  color: $wolf-text-link;
-  cursor: pointer;
-  transition: all 0.2s;
-
-  &:hover {
-    color: $wolf-text-link-hover;
-    transform: scale(1.1);
-  }
-}
-
-// 分页
-.pagination-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: $wolf-space-md;
-}
-
-.total-text {
-  font-size: $wolf-font-size-auxiliary;
-  color: $wolf-text-tertiary;
-}
-
-// 响应式
-@media (max-width: 1200px) {
-  .filter-row { flex-wrap: wrap; }
-  .filter-item { width: 100%; }
-  .search-input { width: 100%; }
-}
-
-@media (max-width: 768px) {
-  .contracts-page { padding: $wolf-space-md; }
-  .filter-tabs { flex-wrap: wrap; }
+// 金额单元格
+.amount-cell {
+  font-family: $wolf-font-mono-v2;
+  font-variant-numeric: tabular-nums;
 }
 </style>

@@ -3,6 +3,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==================== shadcn-vue CSS Variables ==================== */
+/* 必须在 @layer base 之前定义，供 bg-background 等类使用 */
+:root {
+  --background: 0 0% 100%;  /* #FFFFFF */
+  --foreground: 222 47% 11%;  /* #0F172A */
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 217 91% 60%;  /* #2563EB */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 214 32% 91%;  /* #EEF2FF */
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;  /* #F1F5FD */
+  --muted-foreground: 215 16% 47%;  /* #64748B */
+  --accent: 214 32% 91%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 84% 60%;  /* #DC2626 */
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 13% 91%;  /* #E4ECFC */
+  --input: 220 13% 91%;
+  --ring: 217 91% 60%;
+}
+
 /* ==================== CRMWolf Base Layer Overrides ==================== */
 /* UI/UX Pro Max CRITICAL: Focus states, Touch targets, Reduced motion */
 
@@ -46,6 +70,14 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
+    }
+
+    /* Tab content fade animation fallback */
+    [data-state="inactive"] {
+      opacity: 0 !important;
+    }
+    [data-state="active"] {
+      opacity: 1 !important;
     }
   }
 

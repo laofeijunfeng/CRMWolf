@@ -1,192 +1,314 @@
 <template>
-  <el-dialog
-    v-model="visible"
-    title="AI 智能创建线索"
-    width="600px"
-    :close-on-click-modal="false"
+  <Dialog
+    v-model:open="visible"
     class="ai-lead-create-dialog"
     @close="handleClose"
   >
-    <!-- 阶段 1：输入 -->
-    <div v-if="stage === 'input'" class="input-stage">
-      <div class="input-hint">
-        <el-icon><InfoFilled /></el-icon>
-        <span>请用自然语言描述线索信息，AI 会自动识别并提取关键信息</span>
+    <DialogContent class="dialog-content">
+      <DialogHeader>
+        <DialogTitle>AI 智能创建线索</DialogTitle>
+      </DialogHeader>
+
+      <!-- 阶段 1：输入 -->
+      <div v-if="stage === 'input'" class="input-stage">
+        <div class="input-hint" role="note">
+          <Info class="hint-icon" aria-hidden="true" />
+          <span>请用自然语言描述线索信息，AI 会自动识别并提取关键信息</span>
+        </div>
+        <Textarea
+          v-model="inputText"
+          :rows="4"
+          placeholder="例如：张三，13800138000，来自杭州的阿里巴巴，大概500人，网上注册来的，想做电商系统"
+          :disabled="isParsing"
+          aria-label="输入线索信息描述"
+          class="input-textarea"
+          @keydown.ctrl.enter="handleParse"
+        />
+        <div class="input-tip">按 Ctrl+Enter 快速识别</div>
+        <div class="input-actions">
+          <Button
+            variant="outline"
+            aria-label="取消创建"
+            class="dialog-button"
+            @click="handleClose"
+          >
+            取消
+          </Button>
+          <Button
+            variant="default"
+            :disabled="!inputText.trim() || isParsing"
+            aria-label="智能识别线索信息"
+            class="dialog-button"
+            @click="handleParse"
+          >
+            <WandSparkles v-if="!isParsing" class="w-4 h-4 mr-2" aria-hidden="true" />
+            <Loader2 v-else class="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+            智能识别
+          </Button>
+        </div>
       </div>
-      <el-input
-        v-model="inputText"
-        type="textarea"
-        :rows="4"
-        placeholder="例如：张三，13800138000，来自杭州的阿里巴巴，大概500人，网上注册来的，想做电商系统"
-        :disabled="isParsing"
-        @keydown.ctrl.enter="handleParse"
-      />
-      <div class="input-tip">按 Ctrl+Enter 快速识别</div>
-      <div class="input-actions">
-        <el-button @click="handleClose">取消</el-button>
-        <el-button
-          type="primary"
-          :disabled="!inputText.trim() || isParsing"
-          :loading="isParsing"
-          @click="handleParse"
+
+      <!-- 阶段 2：解析过程 -->
+      <div v-if="stage === 'parsing'" class="parse-stage" role="status" aria-live="polite">
+        <div class="status-message">
+          <Loader2 class="w-5 h-5 animate-spin status-icon" aria-hidden="true" />
+          <span>{{ statusMessage }}</span>
+        </div>
+        <div v-if="thinkingContent" class="thinking-section">
+          <div class="thinking-header">AI 思考过程</div>
+          <ScrollArea class="thinking-scroll">
+            <div class="thinking-content">{{ thinkingContent }}</div>
+          </ScrollArea>
+        </div>
+      </div>
+
+      <!-- 阶段 3：预览确认 -->
+      <div v-if="stage === 'preview'" class="preview-stage">
+        <div class="preview-header" role="status">
+          <CircleCheck class="preview-icon" aria-hidden="true" />
+          <span>解析完成，请确认以下信息</span>
+        </div>
+
+        <!-- 缺失字段提示 -->
+        <div
+          v-if="parseResult?.lead_info?.missing_fields?.length"
+          class="missing-fields-tip"
+          role="alert"
+          aria-describedby="missing-fields-description"
         >
-          <el-icon><MagicStick /></el-icon>
-          智能识别
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 阶段 2：解析过程 -->
-    <div v-if="stage === 'parsing'" class="parse-stage">
-      <div class="status-message">
-        <el-icon class="loading-icon"><Loading /></el-icon>
-        <span>{{ statusMessage }}</span>
-      </div>
-      <div v-if="thinkingContent" class="thinking-section">
-        <div class="thinking-header">
-          <span>AI 思考过程</span>
-        </div>
-        <div class="thinking-content">{{ thinkingContent }}</div>
-      </div>
-    </div>
-
-    <!-- 阶段 3：预览确认 -->
-    <div v-if="stage === 'preview'" class="preview-stage">
-      <div class="preview-header">
-        <el-icon><SuccessFilled /></el-icon>
-        <span>解析完成，请确认以下信息</span>
-      </div>
-
-      <!-- 缺失字段提示 -->
-      <div v-if="parseResult?.lead_info?.missing_fields?.length" class="missing-fields-tip">
-        <el-icon><WarningFilled /></el-icon>
-        <span>以下必填信息未能识别，请手动补充：</span>
-        <span class="missing-list">{{ formatMissingFields(parseResult.lead_info.missing_fields) }}</span>
-      </div>
-
-      <!-- 预览表单 -->
-      <el-form
-        ref="previewFormRef"
-        :model="previewForm"
-        :rules="previewRules"
-        label-position="top"
-        class="preview-form"
-      >
-        <div class="form-grid">
-          <el-form-item label="线索名称" prop="lead_name" required>
-            <el-input v-model="previewForm.lead_name" placeholder="请输入线索名称" />
-          </el-form-item>
-
-          <el-form-item label="线索来源" prop="source" required>
-            <el-select v-model="previewForm.source" placeholder="请选择来源" style="width: 100%">
-              <el-option value="线上注册" label="线上注册" />
-              <el-option value="市场活动" label="市场活动" />
-              <el-option value="客户推荐" label="客户推荐" />
-              <el-option value="电话营销" label="电话营销" />
-              <el-option value="网站咨询" label="网站咨询" />
-              <el-option value="展会" label="展会" />
-              <el-option value="其他" label="其他" />
-            </el-select>
-          </el-form-item>
+          <AlertCircle class="warning-icon" aria-hidden="true" />
+          <span id="missing-fields-description">
+            以下必填信息未能识别，请手动补充：
+            <strong class="missing-list">{{ formatMissingFields(parseResult.lead_info.missing_fields) }}</strong>
+          </span>
         </div>
 
-        <div class="form-grid">
-          <el-form-item label="所在城市" prop="city" required>
-            <el-input v-model="previewForm.city" placeholder="请输入城市" />
-          </el-form-item>
+        <!-- 预览表单 -->
+        <form class="preview-form" @submit.prevent="handleCreate">
+          <div class="form-grid">
+            <div class="form-item">
+              <Label for="preview-lead-name" class="form-label">
+                线索名称 <span class="required">*</span>
+              </Label>
+              <Input
+                id="preview-lead-name"
+                v-model="previewForm.lead_name"
+                placeholder="请输入线索名称"
+                aria-required="true"
+                :aria-invalid="!previewForm.lead_name"
+                class="dialog-input"
+              />
+              <span v-if="!previewForm.lead_name" class="error-message" role="alert">
+                请输入线索名称
+              </span>
+            </div>
 
-          <el-form-item label="公司规模" prop="company_scale">
-            <el-select
-              v-model="previewForm.company_scale"
-              placeholder="请选择规模"
-              clearable
-              style="width: 100%"
-            >
-              <el-option value="1-50人" label="1-50人" />
-              <el-option value="51-200人" label="51-200人" />
-              <el-option value="201-500人" label="201-500人" />
-              <el-option value="501-1000人" label="501-1000人" />
-              <el-option value="1000人以上" label="1000人以上" />
-            </el-select>
-          </el-form-item>
-        </div>
-
-        <div class="form-grid">
-          <el-form-item label="联系人姓名" prop="contact_name" required>
-            <el-input v-model="previewForm.contact_name" placeholder="请输入联系人姓名" />
-          </el-form-item>
-
-          <el-form-item label="联系电话" prop="contact_phone" required>
-            <el-input v-model="previewForm.contact_phone" placeholder="请输入联系电话" />
-          </el-form-item>
-        </div>
-      </el-form>
-
-      <!-- 跟进信息 -->
-      <div v-if="hasFollowUpInfo" class="follow-up-section">
-        <div class="follow-up-header">
-          <el-icon><Document /></el-icon>
-          <span>跟进信息（将自动创建跟进记录）</span>
-        </div>
-        <div class="follow-up-fields">
-          <div v-if="parseResult?.follow_up_info?.content" class="follow-up-item">
-            <span class="label">跟进内容：</span>
-            <span class="value">{{ parseResult.follow_up_info.content }}</span>
+            <div class="form-item">
+              <Label for="preview-source" class="form-label">
+                线索来源 <span class="required">*</span>
+              </Label>
+              <Select v-model="previewForm.source" aria-required="true">
+                <SelectTrigger id="preview-source" class="dialog-select">
+                  <SelectValue placeholder="请选择来源" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="线上注册">线上注册</SelectItem>
+                  <SelectItem value="市场活动">市场活动</SelectItem>
+                  <SelectItem value="客户推荐">客户推荐</SelectItem>
+                  <SelectItem value="电话营销">电话营销</SelectItem>
+                  <SelectItem value="网站咨询">网站咨询</SelectItem>
+                  <SelectItem value="展会">展会</SelectItem>
+                  <SelectItem value="其他">其他</SelectItem>
+                </SelectContent>
+              </Select>
+              <span v-if="!previewForm.source" class="error-message" role="alert">
+                请选择线索来源
+              </span>
+            </div>
           </div>
-          <div v-if="parseResult?.follow_up_info?.next_action" class="follow-up-item">
-            <span class="label">下一步动作：</span>
-            <span class="value">{{ parseResult.follow_up_info.next_action }}</span>
+
+          <div class="form-grid">
+            <div class="form-item">
+              <Label for="preview-city" class="form-label">
+                所在城市 <span class="required">*</span>
+              </Label>
+              <Input
+                id="preview-city"
+                v-model="previewForm.city"
+                placeholder="请输入城市"
+                aria-required="true"
+                :aria-invalid="!previewForm.city"
+                class="dialog-input"
+              />
+              <span v-if="!previewForm.city" class="error-message" role="alert">
+                请输入所在城市
+              </span>
+            </div>
+
+            <div class="form-item">
+              <Label for="preview-company-scale" class="form-label">
+                公司规模
+              </Label>
+              <Select v-model="previewForm.company_scale">
+                <SelectTrigger id="preview-company-scale" class="dialog-select">
+                  <SelectValue placeholder="请选择规模" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1-50人">1-50人</SelectItem>
+                  <SelectItem value="51-200人">51-200人</SelectItem>
+                  <SelectItem value="201-500人">201-500人</SelectItem>
+                  <SelectItem value="501-1000人">501-1000人</SelectItem>
+                  <SelectItem value="1000人以上">1000人以上</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div v-if="parseResult?.follow_up_info?.next_follow_time" class="follow-up-item">
-            <span class="label">下次跟进时间：</span>
-            <span class="value">{{ parseResult.follow_up_info.next_follow_time }}</span>
+
+          <div class="form-grid">
+            <div class="form-item">
+              <Label for="preview-contact-name" class="form-label">
+                联系人姓名 <span class="required">*</span>
+              </Label>
+              <Input
+                id="preview-contact-name"
+                v-model="previewForm.contact_name"
+                placeholder="请输入联系人姓名"
+                aria-required="true"
+                :aria-invalid="!previewForm.contact_name"
+                class="dialog-input"
+              />
+              <span v-if="!previewForm.contact_name" class="error-message" role="alert">
+                请输入联系人姓名
+              </span>
+            </div>
+
+            <div class="form-item">
+              <Label for="preview-contact-phone" class="form-label">
+                联系电话 <span class="required">*</span>
+              </Label>
+              <Input
+                id="preview-contact-phone"
+                v-model="previewForm.contact_phone"
+                placeholder="请输入联系电话"
+                aria-required="true"
+                :aria-invalid="!previewForm.contact_phone || !isValidPhone(previewForm.contact_phone)"
+                class="dialog-input"
+              />
+              <span v-if="!previewForm.contact_phone" class="error-message" role="alert">
+                请输入联系电话
+              </span>
+              <span v-else-if="!isValidPhone(previewForm.contact_phone)" class="error-message" role="alert">
+                请输入正确的手机号码
+              </span>
+            </div>
           </div>
+        </form>
+
+        <!-- 跟进信息 -->
+        <div v-if="hasFollowUpInfo" class="follow-up-section">
+          <div class="follow-up-header">
+            <FileText class="follow-up-icon" aria-hidden="true" />
+            <span>跟进信息（将自动创建跟进记录）</span>
+          </div>
+          <div class="follow-up-fields">
+            <div v-if="parseResult?.follow_up_info?.content" class="follow-up-item">
+              <span class="label">跟进内容：</span>
+              <span class="value">{{ parseResult.follow_up_info.content }}</span>
+            </div>
+            <div v-if="parseResult?.follow_up_info?.next_action" class="follow-up-item">
+              <span class="label">下一步动作：</span>
+              <span class="value">{{ parseResult.follow_up_info.next_action }}</span>
+            </div>
+            <div v-if="parseResult?.follow_up_info?.next_follow_time" class="follow-up-item">
+              <span class="label">下次跟进时间：</span>
+              <span class="value">{{ parseResult.follow_up_info.next_follow_time }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-actions">
+          <Button
+            variant="outline"
+            aria-label="返回修改输入内容"
+            class="dialog-button"
+            @click="handleBackToInput"
+          >
+            返回修改
+          </Button>
+          <Button
+            variant="default"
+            :disabled="hasMissingRequiredFields"
+            :aria-disabled="hasMissingRequiredFields"
+            aria-label="创建线索"
+            class="dialog-button"
+            @click="handleCreate"
+          >
+            <Loader2 v-if="isCreating" class="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+            创建线索
+          </Button>
         </div>
       </div>
 
-      <div class="preview-actions">
-        <el-button @click="handleBackToInput">返回修改</el-button>
-        <el-button
-          type="primary"
-          :disabled="hasMissingRequiredFields"
-          :loading="isCreating"
-          @click="handleCreate"
-        >
-          创建线索
-        </el-button>
+      <!-- 阶段 4：创建成功 -->
+      <div v-if="stage === 'success'" class="success-stage" role="status" aria-live="polite">
+        <div class="success-icon">
+          <CircleCheck class="w-12 h-12 success-check-icon" aria-hidden="true" />
+        </div>
+        <div class="success-message">线索创建成功!</div>
+        <div v-if="hasFollowUpInfo" class="success-extra">
+          <span>已自动创建跟进记录</span>
+        </div>
+        <div class="success-actions">
+          <Button
+            variant="outline"
+            aria-label="关闭对话框"
+            class="dialog-button"
+            @click="handleClose"
+          >
+            关闭
+          </Button>
+          <Button
+            variant="default"
+            aria-label="查看创建的线索详情"
+            class="dialog-button"
+            @click="handleViewLead"
+          >
+            查看线索
+          </Button>
+        </div>
       </div>
-    </div>
-
-    <!-- 阶段 4：创建成功 -->
-    <div v-if="stage === 'success'" class="success-stage">
-      <div class="success-icon">
-        <el-icon><CircleCheckFilled /></el-icon>
-      </div>
-      <div class="success-message">线索创建成功！</div>
-      <div v-if="hasFollowUpInfo" class="success-extra">
-        <span>已自动创建跟进记录</span>
-      </div>
-      <div class="success-actions">
-        <el-button @click="handleClose">关闭</el-button>
-        <el-button type="primary" @click="handleViewLead">查看线索</el-button>
-      </div>
-    </div>
-  </el-dialog>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { toast } from 'vue-sonner'
 import {
-  InfoFilled,
-  MagicStick,
-  Loading,
-  SuccessFilled,
-  WarningFilled,
-  Document,
-  CircleCheckFilled
-} from '@element-plus/icons-vue'
+  Info,
+  WandSparkles,
+  Loader2,
+  CircleCheck,
+  AlertCircle,
+  FileText
+} from 'lucide-vue-next'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  Button,
+  Input,
+  Textarea,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  ScrollArea
+} from '@/components/crmwolf'
 import { useUserStore } from '@/stores/user'
 import { leadAiApi, type LeadAIParsedInfo, type LeadAIFollowUpInfo, type LeadAIParseSSEEvent } from '@/api/leadAI'
 
@@ -225,7 +347,6 @@ const parseResult = ref<{
 const createdLeadId = ref<number | null>(null)
 
 // 预览表单
-const previewFormRef = ref()
 const previewForm = reactive({
   lead_name: '',
   source: '',
@@ -238,16 +359,8 @@ const previewForm = reactive({
   next_follow_time: ''
 })
 
-const previewRules = {
-  lead_name: [{ required: true, message: '请输入线索名称', trigger: 'blur' }],
-  source: [{ required: true, message: '请选择线索来源', trigger: 'change' }],
-  city: [{ required: true, message: '请输入所在城市', trigger: 'blur' }],
-  contact_name: [{ required: true, message: '请输入联系人姓名', trigger: 'blur' }],
-  contact_phone: [
-    { required: true, message: '请输入联系电话', trigger: 'blur' },
-    { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的手机号码', trigger: 'blur' }
-  ]
-}
+// 手机号验证
+const isValidPhone = (phone: string) => /^1[3-9]\d{9}$/.test(phone)
 
 // 计算是否有缺失必填字段
 const hasMissingRequiredFields = computed(() => {
@@ -255,7 +368,8 @@ const hasMissingRequiredFields = computed(() => {
     !previewForm.source ||
     !previewForm.city ||
     !previewForm.contact_name ||
-    !previewForm.contact_phone
+    !previewForm.contact_phone ||
+    !isValidPhone(previewForm.contact_phone)
 })
 
 // 计算是否有跟进信息
@@ -320,7 +434,7 @@ const handleParse = async () => {
 
   const token = userStore.token
   if (!token) {
-    ElMessage.error('请先登录')
+    toast.error('请先登录')
     stage.value = 'input'
     isParsing.value = false
     return
@@ -362,7 +476,7 @@ const handleParse = async () => {
             }
             break
           case 'error':
-            ElMessage.error(event.message || '解析失败')
+            toast.error(event.message || '解析失败')
             stage.value = 'input'
             break
         }
@@ -370,7 +484,7 @@ const handleParse = async () => {
       token
     )
   } catch (error) {
-    ElMessage.error('解析请求失败')
+    toast.error('解析请求失败')
     stage.value = 'input'
   } finally {
     isParsing.value = false
@@ -384,11 +498,8 @@ const handleBackToInput = () => {
 
 // 处理创建
 const handleCreate = async () => {
-  if (!previewFormRef.value) return
-
-  try {
-    await previewFormRef.value.validate()
-  } catch {
+  if (hasMissingRequiredFields.value) {
+    toast.error('请填写所有必填字段')
     return
   }
 
@@ -412,12 +523,14 @@ const handleCreate = async () => {
     if (response && response.id) {
       createdLeadId.value = response.id
       stage.value = 'success'
+      toast.success('线索创建成功')
       emit('success')
     } else {
-      ElMessage.error('创建失败')
+      toast.error('创建失败')
     }
   } catch (error: unknown) {
-    ElMessage.error(error.message || '创建失败')
+    const errorMessage = error instanceof Error ? error.message : '创建失败'
+    toast.error(errorMessage)
   } finally {
     isCreating.value = false
   }
@@ -440,117 +553,162 @@ watch(visible, (val) => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
-.ai-lead-create-dialog {
-  :deep(.el-dialog__body) {
-    padding: $wolf-space-lg;
+// Dialog 内容样式
+.dialog-content {
+  max-width: 600px;
+  border-radius: $wolf-radius-lg-v2;
+  background: $wolf-bg-card-v2;  // 使用 V2 Design Token
+  box-shadow: $wolf-shadow-modal-v2;
+  padding: $wolf-space-lg-v2;
+
+  // 移动端适配
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    max-width: 100%;
+    width: 100%;
+    margin: 0;
+    border-radius: $wolf-radius-lg-v2 $wolf-radius-lg-v2 0 0;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: $wolf-modal-height-mobile-v2;
   }
 }
 
+// 输入阶段样式
 .input-stage {
   .input-hint {
     display: flex;
     align-items: center;
-    gap: $wolf-space-sm;
-    padding: $wolf-space-md;
-    background: $wolf-bg-hover;
-    border-radius: $wolf-radius-md;
-    margin-bottom: $wolf-space-md;
-    color: $wolf-text-secondary;
-    font-size: $wolf-font-size-body;
+    gap: $wolf-space-sm-v2;
+    padding: $wolf-space-md-v2;
+    background: $wolf-bg-hover-v2;
+    border-radius: $wolf-radius-v2;
+    margin-bottom: $wolf-space-md-v2;
+    color: $wolf-text-secondary-v2;
+    font-size: $wolf-font-size-body-v2;
 
-    .el-icon {
-      color: $wolf-primary;
+    .hint-icon {
+      color: $wolf-primary-v2;
+      width: 20px;
+      height: 20px;
     }
   }
 
-  .el-textarea {
-    margin-bottom: $wolf-space-sm;
+  .input-textarea {
+    margin-bottom: $wolf-space-sm-v2;
+    border-radius: $wolf-radius-v2;
+    border: 1px solid $wolf-border-default-v2;
+
+    &:focus-visible {
+      border-color: $wolf-primary-v2;
+      outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+      outline-offset: $wolf-focus-ring-offset-v2;
+    }
+
+    // 移动端适配
+    @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+      min-height: $wolf-input-height-mobile-v2;
+      font-size: $wolf-font-size-body-mobile-v2;
+    }
   }
 
   .input-tip {
-    font-size: $wolf-font-size-caption;
-    color: $wolf-text-tertiary;
-    margin-bottom: $wolf-space-md;
+    font-size: $wolf-font-size-caption-v2;
+    color: $wolf-text-tertiary-v2;
+    margin-bottom: $wolf-space-md-v2;
   }
 
   .input-actions {
     display: flex;
     justify-content: flex-end;
-    gap: $wolf-space-sm;
+    gap: $wolf-space-sm-v2;
+
+    // 移动端按钮全宽
+    @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+      flex-direction: column;
+      gap: $wolf-space-md-v2;
+    }
   }
 }
 
+// 解析阶段样式
 .parse-stage {
   .status-message {
     display: flex;
     align-items: center;
-    gap: $wolf-space-sm;
-    padding: $wolf-space-md;
-    background: $wolf-bg-hover;
-    border-radius: $wolf-radius-md;
-    margin-bottom: $wolf-space-md;
-    color: $wolf-text-secondary;
+    gap: $wolf-space-sm-v2;
+    padding: $wolf-space-md-v2;
+    background: $wolf-bg-hover-v2;
+    border-radius: $wolf-radius-v2;
+    margin-bottom: $wolf-space-md-v2;
+    color: $wolf-text-secondary-v2;
 
-    .loading-icon {
-      animation: spin 1s linear infinite;
-      color: $wolf-primary;
+    .status-icon {
+      color: $wolf-primary-v2;
     }
   }
 
   .thinking-section {
     .thinking-header {
-      font-size: $wolf-font-size-caption;
-      color: $wolf-text-tertiary;
-      margin-bottom: $wolf-space-sm;
+      font-size: $wolf-font-size-caption-v2;
+      color: $wolf-text-tertiary-v2;
+      margin-bottom: $wolf-space-sm-v2;
+    }
+
+    .thinking-scroll {
+      max-height: 200px;
     }
 
     .thinking-content {
-      padding: $wolf-space-md;
-      background: $wolf-bg-page;
-      border-radius: $wolf-radius-sm;
-      font-size: $wolf-font-size-caption;
-      color: $wolf-text-tertiary;
+      padding: $wolf-space-md-v2;
+      background: $wolf-bg-muted-v2;
+      border-radius: $wolf-radius-sm-v2;
+      font-size: $wolf-font-size-caption-v2;
+      color: $wolf-text-tertiary-v2;
       white-space: pre-wrap;
-      max-height: 200px;
-      overflow-y: auto;
     }
   }
 }
 
+// 预览阶段样式
 .preview-stage {
   .preview-header {
     display: flex;
     align-items: center;
-    gap: $wolf-space-sm;
-    padding: $wolf-space-md;
-    background: $wolf-success-bg;
-    border-radius: $wolf-radius-md;
-    margin-bottom: $wolf-space-md;
-    color: $wolf-success-text;
+    gap: $wolf-space-sm-v2;
+    padding: $wolf-space-md-v2;
+    background: $wolf-success-bg-v2;
+    border-radius: $wolf-radius-v2;
+    margin-bottom: $wolf-space-md-v2;
+    color: $wolf-success-text-v2;
 
-    .el-icon {
-      font-size: 20px;
+    .preview-icon {
+      width: 20px;
+      height: 20px;
     }
   }
 
   .missing-fields-tip {
     display: flex;
     align-items: center;
-    gap: $wolf-space-sm;
-    padding: $wolf-space-md;
-    background: $wolf-warning-bg;
-    border-radius: $wolf-radius-md;
-    margin-bottom: $wolf-space-md;
-    color: $wolf-warning-text;
+    gap: $wolf-space-sm-v2;
+    padding: $wolf-space-md-v2;
+    background: $wolf-warning-bg-v2;
+    border-radius: $wolf-radius-v2;
+    margin-bottom: $wolf-space-md-v2;
+    color: $wolf-warning-text-v2;
 
-    .el-icon {
-      color: $wolf-warning;
+    .warning-icon {
+      color: $wolf-warning-v2;
+      width: 20px;
+      height: 20px;
     }
 
     .missing-list {
-      font-weight: $wolf-font-weight-medium;
+      font-weight: $wolf-font-weight-medium-v2;
     }
   }
 
@@ -558,44 +716,74 @@ watch(visible, (val) => {
     .form-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: $wolf-space-md;
-      margin-bottom: $wolf-space-md;
+      gap: $wolf-space-md-v2;
+      margin-bottom: $wolf-space-md-v2;
+
+      // 移动端单列布局
+      @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .form-item {
+      display: flex;
+      flex-direction: column;
+      gap: $wolf-space-xs-v2;
+    }
+
+    .form-label {
+      font-size: $wolf-font-size-body-v2;
+      font-weight: $wolf-font-weight-medium-v2;
+      color: $wolf-text-secondary-v2;
+
+      .required {
+        color: $wolf-danger-v2;
+      }
+    }
+
+    .error-message {
+      display: block;
+      font-size: $wolf-font-size-caption-v2;
+      color: $wolf-danger-text-v2;
+      margin-top: $wolf-space-xs-v2;
     }
   }
 
   .follow-up-section {
-    margin-top: $wolf-space-md;
-    padding: $wolf-space-md;
-    background: $wolf-bg-hover;
-    border-radius: $wolf-radius-md;
+    margin-top: $wolf-space-md-v2;
+    padding: $wolf-space-md-v2;
+    background: $wolf-bg-hover-v2;
+    border-radius: $wolf-radius-v2;
 
     .follow-up-header {
       display: flex;
       align-items: center;
-      gap: $wolf-space-sm;
-      font-size: $wolf-font-size-caption;
-      color: $wolf-text-tertiary;
-      margin-bottom: $wolf-space-sm;
+      gap: $wolf-space-sm-v2;
+      font-size: $wolf-font-size-caption-v2;
+      color: $wolf-text-tertiary-v2;
+      margin-bottom: $wolf-space-sm-v2;
 
-      .el-icon {
-        color: $wolf-primary;
+      .follow-up-icon {
+        color: $wolf-primary-v2;
+        width: 16px;
+        height: 16px;
       }
     }
 
     .follow-up-fields {
       .follow-up-item {
         display: flex;
-        gap: $wolf-space-sm;
-        margin-bottom: $wolf-space-xs;
+        gap: $wolf-space-sm-v2;
+        margin-bottom: $wolf-space-xs-v2;
 
         .label {
-          color: $wolf-text-tertiary;
-          font-size: $wolf-font-size-caption;
+          color: $wolf-text-tertiary-v2;
+          font-size: $wolf-font-size-caption-v2;
         }
 
         .value {
-          color: $wolf-text-secondary;
-          font-size: $wolf-font-size-body;
+          color: $wolf-text-secondary-v2;
+          font-size: $wolf-font-size-body-v2;
         }
       }
     }
@@ -604,46 +792,136 @@ watch(visible, (val) => {
   .preview-actions {
     display: flex;
     justify-content: flex-end;
-    gap: $wolf-space-sm;
-    margin-top: $wolf-space-lg;
+    gap: $wolf-space-sm-v2;
+    margin-top: $wolf-space-lg-v2;
+
+    // 移动端按钮全宽
+    @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+      flex-direction: column;
+      gap: $wolf-space-md-v2;
+    }
   }
 }
 
+// 成功阶段样式
 .success-stage {
   text-align: center;
-  padding: $wolf-space-lg 0;
+  padding: $wolf-space-lg-v2 0;
 
   .success-icon {
-    margin-bottom: $wolf-space-md;
+    margin-bottom: $wolf-space-md-v2;
 
-    .el-icon {
-      font-size: 48px;
-      color: $wolf-success;
+    .success-check-icon {
+      color: $wolf-success-v2;
     }
   }
 
   .success-message {
-    font-size: $wolf-font-size-title;
-    font-weight: $wolf-font-weight-semibold;
-    color: $wolf-text-primary;
-    margin-bottom: $wolf-space-sm;
+    font-size: $wolf-font-size-title-v2;
+    font-weight: $wolf-font-weight-semibold-v2;
+    color: $wolf-text-primary-v2;
+    margin-bottom: $wolf-space-sm-v2;
   }
 
   .success-extra {
-    font-size: $wolf-font-size-body;
-    color: $wolf-text-secondary;
-    margin-bottom: $wolf-space-lg;
+    font-size: $wolf-font-size-body-v2;
+    color: $wolf-text-secondary-v2;
+    margin-bottom: $wolf-space-lg-v2;
   }
 
   .success-actions {
     display: flex;
     justify-content: center;
-    gap: $wolf-space-md;
+    gap: $wolf-space-md-v2;
+
+    // 移动端按钮全宽
+    @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+      flex-direction: column;
+      gap: $wolf-space-md-v2;
+    }
   }
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+// 按钮样式（桌面端 + 移动端 Touch Target）
+.dialog-button {
+  height: $wolf-button-height-md-v2;
+  border-radius: $wolf-radius-v2;
+  padding: $wolf-button-padding-md-v2;
+  cursor: $wolf-cursor-clickable-v2;
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+  }
+
+  &:disabled {
+    opacity: $wolf-disabled-opacity-light-v2;
+    cursor: $wolf-cursor-disabled-v2;
+  }
+
+  // 移动端 Touch Target 合规
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    min-height: $wolf-touch-target-min-v2;
+    height: $wolf-button-height-mobile-v2;
+    padding: $wolf-button-padding-mobile-v2;
+    width: 100%;
+  }
+
+  // Reduced Motion 支持
+  @media (prefers-reduced-motion: reduce) {
+    transition-duration: $wolf-reduced-motion-duration-v2;
+  }
+}
+
+// 输入框样式（桌面端 + 移动端 Touch Target）
+.dialog-input {
+  height: $wolf-input-height-v2;
+  border-radius: $wolf-radius-v2;
+  border: 1px solid $wolf-border-default-v2;
+  padding: $wolf-input-padding-v2;
+
+  &:focus-visible {
+    border-color: $wolf-primary-v2;
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+  }
+
+  // 移动端 Touch Target 合规 + 16px 字号
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    min-height: $wolf-input-height-mobile-v2;
+    height: $wolf-input-height-mobile-v2;
+    font-size: $wolf-font-size-body-mobile-v2;
+    padding: $wolf-input-padding-mobile-v2;
+  }
+
+  // Reduced Motion 支持
+  @media (prefers-reduced-motion: reduce) {
+    transition-duration: $wolf-reduced-motion-duration-v2;
+  }
+}
+
+// Select 样式（桌面端 + 移动端 Touch Target）
+.dialog-select {
+  height: $wolf-input-height-v2;
+  border-radius: $wolf-radius-v2;
+  border: 1px solid $wolf-border-default-v2;
+
+  &:focus-visible {
+    border-color: $wolf-primary-v2;
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+  }
+
+  // 移动端 Touch Target 合规
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    min-height: $wolf-input-height-mobile-v2;
+    height: $wolf-input-height-mobile-v2;
+    font-size: $wolf-font-size-body-mobile-v2;
+  }
+
+  // Reduced Motion 支持
+  @media (prefers-reduced-motion: reduce) {
+    transition-duration: $wolf-reduced-motion-duration-v2;
+  }
 }
 </style>

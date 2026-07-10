@@ -1,14 +1,9 @@
-import axios, { AxiosError, InternalAxiosRequestConfig, AxiosRequestConfig } from 'axios'
-import { ElMessage } from 'element-plus'
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { useUserStore } from '@/stores/user'
-
-interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
-  skipErrorNotification?: boolean
-}
 
 const axiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
-  timeout: 30000  // 普通请求超时 30 秒（AI SSE 不使用 axios）
+  timeout: 30000, // 普通请求超时 30 秒（AI SSE 不使用 axios）
 })
 
 axiosInstance.interceptors.request.use(
@@ -25,26 +20,35 @@ axiosInstance.interceptors.request.use(
   }
 )
 
+/**
+ * 响应拦截器
+ *
+ * UI/UX Pro Max §8: error-feedback
+ *
+ * 职责：
+ * - 只处理 401（跳转登录）
+ * - 其他错误由页面级处理（使用 handleApiError）
+ * - 不再全局显示错误提示，避免重复干扰
+ */
 axiosInstance.interceptors.response.use(
   (response) => {
     console.log('API 响应:', response.config.url, response.status, response.data)
     return response.data
   },
   (error: AxiosError) => {
-    const config = error.config as CustomAxiosRequestConfig
-    
-    if (!config?.skipErrorNotification) {
-      console.error('API 错误:', error.config?.url, error.response?.status, error.response?.data)
-      const message = (error.response?.data as any)?.detail || (error.response?.data as any)?.message || error.message || '请求失败'
-      ElMessage.error(message)
-    }
-    
+    console.error('API 错误:', error.config?.url, error.response?.status, error.response?.data)
+
+    // 只处理 401（跳转登录）
     if (error.response?.status === 401) {
       const userStore = useUserStore()
       userStore.logout()
       window.location.href = '/login'
     }
-    
+
+    // ❌ 移除全局 ElMessage.error()
+    // 所有其他错误由页面级处理（使用 handleApiError）
+    // 这样可以让页面根据具体业务场景提供更清晰的错误提示
+
     return Promise.reject(error)
   }
 )

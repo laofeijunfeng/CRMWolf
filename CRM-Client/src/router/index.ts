@@ -308,12 +308,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/TeamMembers.vue'),
         meta: { requiresAuth: true }
       },
-      {
-        path: 'calendar',
-        name: 'Calendar',
-        component: () => import('@/views/Calendar.vue'),
-        meta: { requiresAuth: true, title: '我的日历' }
-      },
       // 审批中心（Phase C / Task C3）：取代自写按钮的
       // FinanceInvoiceApprovals / FinancePaymentConfirmations，INVOICE 与 PAYMENT
       // 合一指向 ApprovalCenter，business_type 筛选分流。

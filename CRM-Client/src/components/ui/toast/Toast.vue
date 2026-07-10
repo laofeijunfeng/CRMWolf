@@ -1,7 +1,13 @@
 <script setup lang="ts">
+/**
+ * Toast - shadcn-vue Toast component wrapper
+ * UI/UX Pro Max §8: Toast notification with accessible styling
+ *
+ * Note: vue-sonner requires CSS import in main.ts:
+ * import 'vue-sonner/style.css'
+ */
 import { Toaster as Sonner } from 'vue-sonner'
 import type { HTMLAttributes } from 'vue'
-import { cn } from '@/lib/utils'
 
 interface Props {
   class?: HTMLAttributes['class']
@@ -19,28 +25,15 @@ const props = withDefaults(defineProps<Props>(), {
   closeButton: false,
   duration: 4000, // UI/UX Pro Max §8: toast-dismiss 3-5s
 })
-
-const toastOptions = {
-  classes: {
-    toast: 'group-[toast]:bg-wolf-bg-card group-[toast]:text-wolf-text-primary group-[toast]:border-wolf-border-light group-[toast]:shadow-wolf-card group-[toast]:rounded-wolf-md',
-    title: 'group-[toast]:text-wolf-text-primary group-[toast]:font-wolf-medium group-[toast]:text-wolf-body',
-    description: 'group-[toast]:text-wolf-text-secondary group-[toast]:text-wolf-sm',
-    success: 'group-[toast]:bg-wolf-success-bg group-[toast]:border-wolf-success-border',
-    error: 'group-[toast]:bg-wolf-danger-bg group-[toast]:border-wolf-danger-border',
-    warning: 'group-[toast]:bg-wolf-warning-bg group-[toast]:border-wolf-warning-border',
-    info: 'group-[toast]:bg-wolf-info-bg group-[toast]:border-wolf-info-border',
-  },
-}
 </script>
 
 <template>
   <Sonner
-    :class="cn(props.class)"
+    :class="props.class"
     :position="props.position"
     :richColors="props.richColors"
     :expand="props.expand"
     :closeButton="props.closeButton"
     :duration="props.duration"
-    :toastOptions="toastOptions"
   />
 </template>

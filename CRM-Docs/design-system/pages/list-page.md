@@ -46,6 +46,143 @@ Sidebar（一级导航，固定）
 
 ## 三、表格区域布局
 
+### 3.0 DataTable 组件（强制使用）
+
+> ⚠️ **强制要求**：所有列表页必须使用 `DataTable` 组件，确保样式统一
+
+**组件位置**：`src/components/crmwolf/DataTable.vue`
+
+**核心特性**：
+
+| 特性 | 说明 |
+|------|------|
+| **固定首列和尾列** | 默认固定左侧1列、右侧1列，中间列横向滚动 |
+| **固定高度** | 默认 `calc(100vh - 200px)`，可自定义 |
+| **内部滚动** | 表格内容区可滚动，表头固定 |
+| **分页固定** | 底部分页栏固定，不随内容滚动 |
+| **加载状态** | 内置 LoadingSkeleton |
+| **空状态** | 内置 EmptyState |
+
+**Props**：
+
+| 属性 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `columns` | `Column[]` | ✅ | - | 列定义 |
+| `data` | `Record<string, unknown>[]` | ✅ | - | 数据源 |
+| `total` | `number` | ✅ | - | 总条数 |
+| `page` | `number` | ✅ | - | 当前页码 |
+| `pageSize` | `number` | ✅ | - | 每页条数 |
+| `loading` | `boolean` | ❌ | `false` | 加载状态 |
+| `height` | `string` | ❌ | `calc(100vh - 200px)` | 卡片高度 |
+| `emptyTitle` | `string` | ❌ | `暂无数据` | 空状态标题 |
+| `fixedLeftCount` | `number` | ❌ | `1` | 默认固定左侧列数 |
+| `fixedRightCount` | `number` | ❌ | `1` | 默认固定右侧列数 |
+
+**Column 配置**：
+
+| 属性 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `key` | `string` | ✅ | 列标识（用于 slot 和数据绑定） |
+| `title` | `string` | ✅ | 列标题 |
+| `width` | `string` | ❌ | 列宽度（如 `"150px"`） |
+| `align` | `'left' \| 'center' \| 'right'` | ❌ | 对齐方式 |
+| `fixed` | `'left' \| 'right'` | ❌ | 固定列位置（优先级高于 fixedLeftCount/fixedRightCount） |
+
+**Events**：
+
+| 事件 | 参数 | 说明 |
+|------|------|------|
+| `update:page` | `number` | 页码变化 |
+| `update:pageSize` | `number` | 每页条数变化 |
+| `row-click` | `row` | 行点击 |
+
+**Slots**：
+
+| 插槽 | 参数 | 说明 |
+|------|------|------|
+| `cell-{key}` | `{ row, value }` | 自定义单元格 |
+
+**固定列配置示例**：
+
+```vue
+<script setup lang="ts">
+import { DataTable } from '@/components/crmwolf'
+
+// 方式一：默认配置（固定左侧1列、右侧1列）
+const columns = [
+  { key: 'application_number', title: '申请单号', width: '220px' },  // 自动固定左侧
+  { key: 'customer_name', title: '客户名称', width: '150px' },
+  { key: 'contract_name', title: '合同名称', width: '180px' },
+  { key: 'invoice_type', title: '发票类型', width: '150px' },
+  { key: 'invoice_amount', title: '开票金额', width: '130px' },
+  { key: 'actions', title: '操作', width: '140px' },  // 自动固定右侧
+]
+// 无需额外配置，默认固定首列和尾列
+
+// 方式二：自定义固定列数
+<DataTable
+  :columns="columns"
+  :fixed-left-count="2"  // 固定左侧2列
+  :fixed-right-count="1"
+/>
+
+// 方式三：显式指定固定列（最高优先级）
+const columns = [
+  { key: 'id', title: 'ID', width: '80px', fixed: 'left' },
+  { key: 'name', title: '名称', width: '150px' },  // 不固定
+  { key: 'status', title: '状态', width: '100px', fixed: 'right' },
+  { key: 'actions', title: '操作', width: '120px', fixed: 'right' },
+]
+</script>
+```
+
+**使用示例**：
+
+```vue
+<script setup lang="ts">
+import { DataTable } from '@/components/crmwolf'
+
+const columns = [
+  { key: 'name', title: '客户名称' },
+  { key: 'contact', title: '联系人' },
+  { key: 'phone', title: '联系电话' },
+  { key: 'status', title: '状态', align: 'center' },
+  { key: 'actions', title: '操作', align: 'center', width: '120px' },
+]
+
+const pagination = reactive({
+  page: 1,
+  pageSize: 20,
+  total: 100
+})
+</script>
+
+<template>
+  <DataTable
+    :columns="columns"
+    :data="tableData"
+    :page="pagination.page"
+    :page-size="pagination.pageSize"
+    :total="pagination.total"
+    @update:page="pagination.page = $event"
+    @row-click="handleRowClick"
+  >
+    <!-- 自定义单元格 -->
+    <template #cell-status="{ row }">
+      <span :class="['status-badge', `status-${row.status}`]">
+        {{ getStatusText(row.status) }}
+      </span>
+    </template>
+
+    <template #cell-actions="{ row }">
+      <Button size="sm" @click.stop="handleEdit(row)">编辑</Button>
+    </template>
+  </DataTable>
+</template>
+```
+
+---
+
 ### 3.1 搜索/筛选栏（表格上方）
 
 | 元素 | 高度 | 位置 |
@@ -84,7 +221,82 @@ Sidebar（一级导航，固定）
 
 ---
 
-## 四、状态 Badge 规范
+## 四、布局实现规范
+
+### 4.1 页面容器布局
+
+列表页应遵循 AppLayout 的布局架构（详见 MASTER.md §6.6）：
+
+```scss
+// 列表页容器（如 Leads.vue）
+.leads-page {
+  padding: $wolf-page-padding-v2;  // 24px
+  background: $wolf-bg-page-v2;
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-section-gap-v2;  // 24px - SearchCard 与 DataTable 的间距
+  min-height: 0;  // 让 flexbox 控制高度
+  flex: 1;  // 继承父容器高度
+}
+```
+
+**关键要点：**
+
+1. ✅ 使用 `padding: 24px`（AppLayout 已提供顶部 16px 系统级间距）
+2. ✅ 使用 `gap: 24px` 分隔 SearchCard 和 DataTable
+3. ✅ 使用 `min-height: 0` + `flex: 1` 管理 flexbox 高度
+4. ❌ 禁止使用 `min-height: calc(100vh - XXpx)` 固定高度计算
+
+### 4.2 高度管理
+
+**AppLayout 层级：**
+- 使用 `100dvh` (dynamic viewport height)
+- 提供 `padding-top: 16px` 系统级间距
+
+**页面组件层级：**
+- 使用 `min-height: 0` + `flex: 1` 继承高度
+- 禁止硬编码高度计算
+
+**DataTable 组件：**
+- 使用固定高度 `calc(100vh - 200px)` 或自定义 `height` prop
+- 内部滚动，表头固定
+
+### 4.3 间距计算示例
+
+```
+AppLayout.main-content (无 padding-top)
+├── TopBar (56px, sticky, top: 0)  ← 紧贴顶部
+└── Leads.vue
+    ├── padding-top: 24px  ← 与 TopBar 的间距
+    ├── SearchCard
+    ├── gap: 24px  ← 组件间距
+    └── DataTable (flex: 1, 填充剩余空间)
+```
+
+### 4.4 常见错误
+
+```scss
+// ❌ 错误 1：硬编码高度计算
+.leads-page {
+  min-height: calc(100vh - 48px);  // 错误的值
+}
+
+// ❌ 错误 2：缺少 gap 属性
+.leads-page {
+  display: flex;
+  flex-direction: column;
+  // SearchCard 和 DataTable 贴在一起
+}
+
+// ❌ 错误 3：移除所有 padding
+.leads-page {
+  padding: 0;  // 页面内容贴边
+}
+```
+
+---
+
+## 五、状态 Badge 规范
 
 ### 4.1 客户状态
 

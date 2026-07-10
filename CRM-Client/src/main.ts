@@ -2,6 +2,10 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+
+// UI/UX Pro Max §8: Toast notification styles (vue-sonner)
+import 'vue-sonner/style.css'
+
 import './styles/base.css'
 import './styles/element-plus-theme.scss'
 import './styles/global.scss'

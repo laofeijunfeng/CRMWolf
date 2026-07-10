@@ -256,7 +256,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { showError, showSuccess } from '@/utils/errorMessages'
+import { handleApiError } from '@/utils/errorHandler'
+import { toast } from 'vue-sonner'
 import {
   Plus
 } from '@element-plus/icons-vue'
@@ -369,7 +370,7 @@ const fetchLeadDetail = async () => {
       }
     }
   } catch (error: unknown) {
-    showError(error, '获取线索详情')
+    handleApiError(error, '获取线索详情')
   } finally {
     loading.value = false
   }
@@ -392,11 +393,11 @@ const handleEditModalOk = async () => {
       company_scale: editForm.company_scale || undefined
     }
     await leadApi.updateLead(leadId, updateData)
-    showSuccess('更新', '线索')
+    toast.success('线索更新成功')
     editModalVisible.value = false
     await fetchLeadDetail()
   } catch (error: unknown) {
-    showError(error, '更新线索')
+    handleApiError(error, '更新线索')
   }
 }
 
@@ -442,23 +443,23 @@ const handleFollowUpModalOk = async () => {
       next_action: followUpForm.next_action || null
     }
     await leadApi.addFollowUp(leadId, data)
-    showSuccess('添加', '跟进记录')
+    toast.success('跟进记录添加成功')
     followUpModalVisible.value = false
     // 刷新跟进记录
     await fetchLeadDetail()
   } catch (error: unknown) {
-    showError(error, '添加跟进')
+    handleApiError(error, '添加跟进')
   }
 }
 
 const handleFollowUpDelete = async (followUp: { id: number }) => {
   try {
     await leadApi.deleteFollowUp(leadId, followUp['id'])
-    showSuccess('删除', '跟进记录')
+    toast.success('跟进记录删除成功')
     // 刷新跟进记录
     await fetchLeadDetail()
   } catch (error: unknown) {
-    showError(error, '删除跟进')
+    handleApiError(error, '删除跟进')
   }
 }
 

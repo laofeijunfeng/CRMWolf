@@ -1,230 +1,53 @@
-<template>
-  <div class="opportunities-page">
-    <!-- 快捷筛选标签 + 操作按钮 -->
-    <div class="filter-tabs-bar">
-      <div class="filter-tabs">
-        <span
-          :class="['filter-tab', { active: activeTab === 'all' }]"
-          @click="handleTabChange('all')"
-        >所有商机</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'active' }]"
-          @click="handleTabChange('active')"
-        >跟进中</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'won' }]"
-          @click="handleTabChange('won')"
-        >已赢单</span>
-        <span
-          :class="['filter-tab', { active: activeTab === 'lost' }]"
-          @click="handleTabChange('lost')"
-        >已输单</span>
-      </div>
-      <div class="filter-actions">
-        <el-button v-if="canCreateOpportunity" type="primary" @click="router.push('/opportunities/create')">
-          <el-icon><Plus /></el-icon>
-          新建商机
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 表格区 -->
-    <div class="table-card">
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        stripe
-      >
-        <el-table-column prop="opportunity_name" min-width="220">
-          <template #header>
-            <FilterTableHeader
-              label="商机名称"
-              field="opportunity_name"
-              :filter="{ type: 'search', placeholder: '搜索商机名称' }"
-              :sortable="true"
-              :filter-value="filterValues['opportunity_name']"
-              :sort-state="sortState.field === 'opportunity_name' ? sortState : null"
-              @filter-change="handleFilterChange"
-              @filter-clear="handleFilterClear"
-              @sort-change="handleSortChange"
-            />
-          </template>
-          <template #default="{ row }">
-            <div class="name-cell">
-              <span class="link-text" @click="router.push(`/opportunities/${row.id}`)">{{ row.opportunity_name }}</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="customer_name" label="客户名称" min-width="150">
-          <template #default="{ row }">
-            <span class="link-text" @click="handleViewCustomer(row.customer_id)">{{ row.customer_name || '-' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column width="130" align="right">
-          <template #header>
-            <FilterTableHeader
-              label="预计金额"
-              field="total_amount"
-              :sortable="true"
-              :sort-state="sortState.field === 'total_amount' ? sortState : null"
-              @sort-change="handleSortChange"
-            />
-          </template>
-          <template #default="{ row }">
-            <span class="amount-text">{{ formatAmount(row.total_amount) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="user_count" label="用户数" width="100" align="right">
-          <template #default="{ row }">
-            {{ row.user_count || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="授权模式" width="100">
-          <template #default="{ row }">
-            <span :class="['status-tag', row.license_type === 'SUBSCRIPTION' ? 'status-info' : 'status-success']">
-              {{ row.license_type === 'SUBSCRIPTION' ? '订阅制' : '买断制' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="采购类型" width="100">
-          <template #default="{ row }">
-            <span :class="['status-tag', getPurchaseTypeClass(row.purchase_type)]">
-              {{ getPurchaseTypeText(row.purchase_type) }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column width="140">
-          <template #header>
-            <FilterTableHeader
-              label="预计成交日期"
-              field="expected_closing_date"
-              :sortable="true"
-              :sort-state="sortState.field === 'expected_closing_date' ? sortState : null"
-              @sort-change="handleSortChange"
-            />
-          </template>
-          <template #default="{ row }">
-            {{ formatDate(row.expected_closing_date) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="销售阶段" width="120">
-          <template #default="{ row }">
-            <span :class="['status-tag', getStageClass(row.stage?.win_probability)]">
-              {{ row.stage?.stage_name || row.stage_name || '-' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="赢率" width="80" align="right">
-          <template #default="{ row }">
-            {{ row.stage?.win_probability !== undefined ? row.stage.win_probability + '%' : (row.win_probability !== undefined ? row.win_probability + '%' : '-') }}
-          </template>
-        </el-table-column>
-        <el-table-column label="负责人" width="100">
-          <template #default="{ row }">
-            {{ row.owner_info?.name || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column width="100">
-          <template #header>
-            <FilterTableHeader
-              label="状态"
-              field="status"
-              :filter="{ type: 'select', placeholder: '选择状态', options: [
-                { value: 0, label: '跟进中' },
-                { value: 1, label: '已赢单' },
-                { value: 2, label: '已输单' }
-              ] }"
-              :sortable="true"
-              :filter-value="filterValues['status']"
-              :sort-state="sortState.field === 'status' ? sortState : null"
-              @filter-change="handleFilterChange"
-              @filter-clear="handleFilterClear"
-              @sort-change="handleSortChange"
-            />
-          </template>
-          <template #default="{ row }">
-            <span :class="['status-tag', getStatusClass(row.status)]">
-              {{ getStatusText(row.status) }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="{ row }">
-            <div class="action-cell">
-              <el-tooltip content="查看" placement="top">
-                <el-icon class="action-icon" @click="router.push(`/opportunities/${row.id}`)">
-                  <View />
-                </el-icon>
-              </el-tooltip>
-              <el-tooltip v-if="canEditRow(row)" content="编辑" placement="top">
-                <el-icon class="action-icon" @click="router.push(`/opportunities/${row.id}/edit`)">
-                  <Edit />
-                </el-icon>
-              </el-tooltip>
-              <el-tooltip v-if="canDeleteRow(row)" content="删除" placement="top">
-                <el-icon class="action-icon action-danger" @click="handleDelete(row)">
-                  <Delete />
-                </el-icon>
-              </el-tooltip>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <div class="pagination-bar">
-        <span class="total-text">共 {{ pagination.total }} 条</span>
-        <el-pagination
-          v-model:current-page="pagination.current"
-          v-model:page-size="pagination.pageSize"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="pagination.total"
-          layout="sizes, prev, pager, next, jumper"
-          @size-change="handlePageSizeChange"
-          @current-change="handlePageChange"
-        />
-      </div>
-    </div>
-
-    <!-- Magic Wand 弹窗 -->
-    </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+/**
+ * Opportunities.vue - 商机管理页面
+ *
+ * 基于 MASTER.md §6.6 布局架构：
+ * - AppLayout 提供 TopBar（56px）
+ * - 页面 padding: 24px
+ * - gap: 24px（组件间距）
+ *
+ * 组件替换：
+ * - ✅ TopBar 集成（useHeaderStore）
+ * - ✅ ContextTabs 组件（Segmented Control 模式）
+ * - ✅ FilterPanel 组件
+ * - ✅ DataTable 组件
+ * - ✅ V2 Design Tokens
+ * - ✅ Flexbox 高度管理
+ */
+import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { showError, showSuccess } from '@/utils/errorMessages'
-import { Search, View, Edit, Delete, Plus } from '@element-plus/icons-vue'
-import FilterTableHeader from '@/components/FilterTableHeader/index.vue'
-import type { FilterValue, SortState } from '@/components/FilterTableHeader/types'
+import { handleApiError } from '@/utils/errorHandler'
+import { toast } from 'vue-sonner'
+import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
+import { FilterPanel, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { confirmDelete } from '@/utils/confirmDialog'
+import StatusBadge from '@/components/StatusBadge.vue'
 import { opportunityApi, type Opportunity, type OpportunityListParams } from '@/api/opportunity'
 import customerApi from '@/api/customer'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
+import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { formatCurrency } from '@/utils/format'
+import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 
-usePageTitle()  // 自动从 route.meta.title 设置标题
+// 自动从 route.meta.title 设置页面标题
+usePageTitle()
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
 const userStore = useUserStore()
+const headerStore = useHeaderStore()
 
+// ==================== State ====================
 const loading = ref(false)
 const tableData = ref<Opportunity[]>([])
 const customers = ref<any[]>([])
-const activeTab = ref('all')
 
-const filterValues = ref<Record<string, FilterValue>>({})
-const sortState = ref<SortState>({ field: '', order: null })
-
-const searchForm = reactive({
-  keyword: '',
-  customer_id: undefined as number | undefined,
-  procurement_stage_id: undefined as number | undefined,
-  owner_id: undefined as string | undefined,
-  status: undefined as number | undefined
-})
+// 抽屉状态
+const sheetVisible = ref(false)
+const selectedOpportunityId = ref<number | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -232,7 +55,54 @@ const pagination = reactive({
   total: 0
 })
 
-// 权限计算属性
+// ==================== ContextTabs 配置 ====================
+const tabs = [
+  { key: 'all', label: '所有商机' },
+  { key: 'active', label: '跟进中' },
+  { key: 'won', label: '已赢单' },
+  { key: 'lost', label: '已输单' }
+]
+
+const activeTab = ref('all')
+
+// ==================== FilterPanel 配置 ====================
+const filterFields = [
+  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索商机名称' },
+  {
+    key: 'status',
+    type: 'select' as const,
+    label: '状态',
+    placeholder: '全部状态',
+    options: [
+      { value: '0', label: '跟进中' },
+      { value: '1', label: '已赢单' },
+      { value: '2', label: '已输单' }
+    ]
+  }
+]
+
+const filterValues = reactive({
+  keyword: '',
+  status: ''
+})
+
+// ==================== DataTable 配置 ====================
+const columns = [
+  { key: 'opportunity_name', title: '商机名称', width: '220px' },
+  { key: 'customer_name', title: '客户名称', width: '150px' },
+  { key: 'total_amount', title: '预计金额', align: 'right' as const, width: '130px' },
+  { key: 'user_count', title: '用户数', align: 'right' as const, width: '100px' },
+  { key: 'license_type', title: '授权模式', align: 'center' as const, width: '100px' },
+  { key: 'purchase_type', title: '采购类型', align: 'center' as const, width: '100px' },
+  { key: 'expected_closing_date', title: '预计成交日期', width: '140px' },
+  { key: 'stage', title: '销售阶段', width: '120px' },
+  { key: 'win_probability', title: '赢率', align: 'right' as const, width: '80px' },
+  { key: 'owner', title: '负责人', width: '100px' },
+  { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
+  { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
+]
+
+// ==================== 权限 ====================
 const canCreateOpportunity = computed(() =>
   permissionStore.hasPermission('opportunity:create')
 )
@@ -262,146 +132,157 @@ const canDeleteRow = (row: Opportunity): boolean => {
   return false
 }
 
-const fetchCustomers = async () => {
+// ==================== Methods ====================
+const fetchCustomers = async (): Promise<void> => {
   try {
     const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
     customers.value = response || []
   } catch (error) {
-    console.error('获取客户列表失败', error)
+    handleApiError(error, '获取客户列表')
   }
 }
 
-const handleFilterChange = (field: string, value: FilterValue) => {
-  filterValues.value[field] = value
-  pagination.current = 1
-  fetchOpportunities()
-}
-
-const handleFilterClear = (field: string) => {
-  delete filterValues.value[field]
-  pagination.current = 1
-  fetchOpportunities()
-}
-
-const handleSortChange = (newSortState: SortState) => {
-  sortState.value = newSortState
-  pagination.current = 1
-  fetchOpportunities()
-}
-
-const fetchOpportunities = async () => {
+const fetchOpportunities = async (): Promise<void> => {
   loading.value = true
   try {
     // 从 filterValues 提取筛选值
-    const keyword = filterValues.value['opportunity_name']?.search || searchForm.keyword || undefined
-    const statusSelect = filterValues.value['status']?.select
-    const statusFilter = statusSelect !== undefined && statusSelect !== null ? statusSelect : searchForm.status
+    const keyword = filterValues.keyword || null
+    let status: number | null = filterValues.status ? parseInt(filterValues.status, 10) : null
+
+    // 快捷筛选标签覆盖
+    if (activeTab.value === 'active') {
+      status = 0
+    } else if (activeTab.value === 'won') {
+      status = 1
+    } else if (activeTab.value === 'lost') {
+      status = 2
+    }
 
     const params: OpportunityListParams = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
       keyword,
-      customer_id: searchForm.customer_id,
-      procurement_stage_id: searchForm.procurement_stage_id,
-      owner_id: searchForm.owner_id,
-      status: statusFilter
-    }
-
-    // 快捷筛选标签覆盖
-    if (activeTab.value === 'active') {
-      params.status = 0
-    } else if (activeTab.value === 'won') {
-      params.status = 1
-    } else if (activeTab.value === 'lost') {
-      params.status = 2
-    }
-
-    if (sortState.value.order) {
-      params.order_by = sortState.value.field
-      params.order_dir = sortState.value.order
+      status
     }
 
     const response = await opportunityApi.getOpportunities(params)
     tableData.value = Array.isArray(response) ? response : []
     pagination.total = Array.isArray(response) ? response.length : 0
-  } catch (error: unknown) {
-    const err = error as Error
-    console.error('[Opportunities] fetchOpportunities error:', err)
-    // ✅ P0: Copywriting - 具体 + 方向性
-    showError(error, '获取商机列表')
+  } catch (error) {
+    handleApiError(error, '获取商机列表')
   } finally {
     loading.value = false
   }
 }
 
-const handleTabChange = (tab: string) => {
-  activeTab.value = tab
+const handleSearch = (values: Record<string, any>): void => {
+  Object.assign(filterValues, values)
   pagination.current = 1
   fetchOpportunities()
 }
 
-const handleSearch = () => {
+const handleReset = (): void => {
+  filterValues.keyword = ''
+  filterValues.status = ''
   pagination.current = 1
   fetchOpportunities()
 }
 
-const handleReset = () => {
-  searchForm.keyword = ''
-  searchForm.customer_id = undefined
-  searchForm.procurement_stage_id = undefined
-  searchForm.owner_id = undefined
-  filterValues.value = {}
-  sortState.value = { field: '', order: null }
-  handleSearch()
-}
-
-const handlePageChange = (page: number) => {
+const handlePageChange = (page: number): void => {
   pagination.current = page
   fetchOpportunities()
 }
 
-const handlePageSizeChange = (pageSize: number) => {
+const handlePageSizeChange = (pageSize: number): void => {
   pagination.pageSize = pageSize
   pagination.current = 1
   fetchOpportunities()
 }
 
-const handleViewCustomer = (customerId: number) => {
+const handleViewCustomer = (customerId: number): void => {
   router.push(`/customers/${customerId}`)
 }
 
-const handleDelete = async (record: Opportunity) => {
+// 打开商机详情抽屉
+const openOpportunitySheet = (id: number): void => {
+  selectedOpportunityId.value = id
+  sheetVisible.value = true
+}
+
+// 抽屉刷新后刷新列表
+const handleSheetRefresh = (): void => {
+  fetchOpportunities()
+}
+
+const handleDelete = async (record: Opportunity): Promise<void> => {
+  const confirmed = await confirmDelete(`商机 "${record.opportunity_name}"`)
+  if (!confirmed) return
+
   try {
-    await ElMessageBox.confirm(
-      `确认要删除商机 "${record.opportunity_name}" 吗？此操作不可恢复。`,
-      '确认删除',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
     await opportunityApi.deleteOpportunity(record.id)
-    // ✅ P0: Copywriting - 具体化的成功提示
-    showSuccess('删除', '商机')
+    toast.success('商机删除成功')
     fetchOpportunities()
-  } catch (error: unknown) {
-    const err = error as Error
-    if (err.message !== 'cancel') {
-      console.error('[Opportunities] handleDelete error:', err)
-      // ✅ P0: Copywriting - 具体 + 方向性
-      showError(error, '删除商机')
-    }
+  } catch (error) {
+    handleApiError(error, '删除商机')
   }
 }
 
-const formatAmount = (amount: number | string | undefined) => {
-  if (!amount) return '0'
-  const num = typeof amount === 'string' ? parseFloat(amount) : amount
-  return num.toLocaleString()
+const handleAdvanceStage = (record: Opportunity): void => {
+  // Navigate to stage advancement page
+  router.push(`/opportunities/${record.id}/advance-stage`)
 }
 
-const formatDate = (dateStr: string) => {
+const handleMarkAsWon = async (record: Opportunity): Promise<void> => {
+  // TODO: Show dialog to input actual_amount and actual_closing_date
+  router.push(`/opportunities/${record.id}/win`)
+}
+
+const handleMarkAsLost = async (record: Opportunity): Promise<void> => {
+  // TODO: Show dialog to input loss_reason
+  router.push(`/opportunities/${record.id}/lose`)
+}
+
+// ==================== TableRowActions 配置 ====================
+const getPrimaryActions = (row: Opportunity): ActionConfig[] => [
+  {
+    label: '编辑',
+    icon: Pencil,
+    handler: () => router.push(`/opportunities/${row.id}/edit`),
+    visible: canEditRow(row)
+  },
+  {
+    label: '推进阶段',
+    icon: ArrowRight,
+    handler: () => handleAdvanceStage(row),
+    visible: row.status === 0 // 仅"跟进中"状态可推进
+  }
+]
+
+const getSecondaryActions = (row: Opportunity): ActionConfig[] => [
+  {
+    label: '赢单',
+    icon: Trophy,
+    handler: () => handleMarkAsWon(row),
+    visible: row.status === 0 // 仅"跟进中"状态可赢单
+  },
+  {
+    label: '输单',
+    icon: XCircle,
+    handler: () => handleMarkAsLost(row),
+    visible: row.status === 0 // 仅"跟进中"状态可输单
+  },
+  {
+    label: '删除',
+    icon: Trash2,
+    handler: () => handleDelete(row),
+    visible: canDeleteRow(row),
+    destructive: true,
+    separator: true
+  }
+]
+
+// ==================== 格式化函数 ====================
+const formatDate = (dateStr: string): string => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
   const year = date.getFullYear()
@@ -410,251 +291,200 @@ const formatDate = (dateStr: string) => {
   return `${year}-${month}-${day}`
 }
 
-const getStatusText = (status: number) => {
-  const map: Record<number, string> = { 0: '跟进中', 1: '已赢单', 2: '已输单' }
-  return map[status] || '未知'
-}
-
-const getStatusClass = (status: number) => {
-  const map: Record<number, string> = {
-    0: 'status-following',
-    1: 'status-converted',
-    2: 'status-invalid'
+const mapOpportunityStatus = (status: number): 'active' | 'won' | 'lost' => {
+  const map: Record<number, 'active' | 'won' | 'lost'> = {
+    0: 'active',
+    1: 'won',
+    2: 'lost'
   }
-  return map[status] || 'status-default'
+  return map[status] || 'active'
 }
 
-const getPurchaseTypeText = (type: string) => {
-  const map: Record<string, string> = { 'NEW': '新购', 'RENEWAL': '续购', 'EXPANSION': '增购' }
-  return map[type] || '-'
-}
-
-const getPurchaseTypeClass = (type: string) => {
-  const map: Record<string, string> = { 'NEW': 'status-info', 'RENEWAL': 'status-success', 'EXPANSION': 'status-warning' }
-  return map[type] || 'status-default'
-}
-
-const getStageClass = (winProbability: number | undefined) => {
+const getStageClass = (winProbability: number | undefined): string => {
   if (winProbability === undefined) return 'status-default'
   if (winProbability >= 80) return 'status-success'
   if (winProbability >= 50) return 'status-warning'
   return 'status-info'
 }
 
+// ==================== Lifecycle ====================
 onMounted(async () => {
-  try {
-    await Promise.all([
-      fetchOpportunities(),
-      fetchCustomers()
-    ])
-  } catch (error) {
-    console.error('初始化失败', error)
+  await Promise.all([
+    fetchOpportunities(),
+    fetchCustomers()
+  ])
+})
+
+// TopBar 配置（Tabs + Actions）
+watchEffect(() => {
+  // 注册 ContextTabs 到 TopBar
+  headerStore.setTabs(tabs, activeTab.value)
+
+  // 注册操作按钮
+  headerStore.setActions([
+    {
+      id: 'create-opportunity',
+      label: '新建商机',
+      icon: Plus,
+      type: 'primary',
+      handler: () => router.push('/opportunities/create'),
+      visible: canCreateOpportunity.value,
+      ariaLabel: '新建商机'
+    }
+  ])
+})
+
+// Watch activeTab changes from headerStore
+watchEffect(() => {
+  if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
+    activeTab.value = headerStore.activeTab
+    pagination.current = 1
+    fetchOpportunities()
   }
 })
+
+// ✅ 不调用 headerStore.clear()
+// 让新页面直接覆盖旧状态，避免页面切换时 TopBar 短暂显示标题
 </script>
 
+<template>
+  <div class="opportunities-page">
+    <!-- FilterPanel -->
+    <FilterPanel
+      :fields="filterFields"
+      @search="handleSearch"
+      @reset="handleReset"
+    />
+
+    <!-- DataTable -->
+    <DataTable
+      :columns="columns"
+      :data="tableData"
+      :loading="loading"
+      :page="pagination.current"
+      :page-size="pagination.pageSize"
+      :total="pagination.total"
+      empty-title="暂无商机"
+      @update:page="handlePageChange"
+      @update:page-size="handlePageSizeChange"
+    >
+      <!-- 商机名称 -->
+      <template #cell-opportunity_name="{ row }">
+        <span class="link-text" @click.stop="openOpportunitySheet(row.id)">
+          {{ row.opportunity_name }}
+        </span>
+      </template>
+
+      <!-- 客户名称 -->
+      <template #cell-customer_name="{ row }">
+        <span class="link-text" @click.stop="handleViewCustomer(row.customer_id)">
+          {{ row.customer_name || '-' }}
+        </span>
+      </template>
+
+      <!-- 预计金额 -->
+      <template #cell-total_amount="{ row }">
+        <span class="amount-cell">{{ formatCurrency(row.total_amount) }}</span>
+      </template>
+
+      <!-- 用户数 -->
+      <template #cell-user_count="{ row }">
+        {{ row.user_count || '-' }}
+      </template>
+
+      <!-- 授权模式 -->
+      <template #cell-license_type="{ row }">
+        <StatusBadge
+          v-if="row.license_type"
+          :status="row.license_type"
+          type="authorizationMode"
+        />
+        <span v-else class="text-muted-foreground">-</span>
+      </template>
+
+      <!-- 采购类型 -->
+      <template #cell-purchase_type="{ row }">
+        <StatusBadge
+          v-if="row.purchase_type"
+          :status="row.purchase_type"
+          type="procurementType"
+        />
+        <span v-else class="text-muted-foreground">-</span>
+      </template>
+
+      <!-- 预计成交日期 -->
+      <template #cell-expected_closing_date="{ row }">
+        {{ formatDate(row.expected_closing_date) }}
+      </template>
+
+      <!-- 销售阶段 -->
+      <template #cell-stage="{ row }">
+        <span :class="['status-badge', getStageClass(row.win_probability)]">
+          {{ row.current_stage_snapshot?.stage_name || row.stage_name || '-' }}
+        </span>
+      </template>
+
+      <!-- 赢率 -->
+      <template #cell-win_probability="{ row }">
+        {{ row.win_probability !== undefined ? row.win_probability + '%' : '-' }}
+      </template>
+
+      <!-- 负责人 -->
+      <template #cell-owner="{ row }">
+        {{ row.owner_info?.name || '-' }}
+      </template>
+
+      <!-- 状态 -->
+      <template #cell-status="{ row }">
+        <StatusBadge :status="mapOpportunityStatus(row.status)" type="opportunity" />
+      </template>
+
+      <!-- 操作 -->
+      <template #cell-actions="{ row }">
+        <TableRowActions
+          :row="row"
+          :primary-actions="getPrimaryActions(row)"
+          :secondary-actions="getSecondaryActions(row)"
+        />
+      </template>
+    </DataTable>
+
+    <!-- 商机详情抽屉 -->
+    <OpportunityDetailSheet
+      v-model:visible="sheetVisible"
+      :opportunity-id="selectedOpportunityId"
+      @refresh="handleSheetRefresh"
+    />
+  </div>
+</template>
+
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
 .opportunities-page {
-  padding: $wolf-page-padding;
-  background: $wolf-bg-page;
-  min-height: calc(100vh - 48px);
-}
-
-// 快捷筛选标签 + 操作按钮栏
-.filter-tabs-bar {
+  padding: $wolf-page-padding-v2;
+  background: $wolf-bg-page-v2;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: $wolf-space-md;
-}
-
-.filter-tabs {
-  display: flex;
-  gap: $wolf-space-xs;
-}
-
-.filter-actions {
-  display: flex;
-  gap: $wolf-space-xs;
-}
-
-.filter-tab {
-  padding: 8px $wolf-space-md;
-  font-size: $wolf-font-size-auxiliary;
-  font-weight: $wolf-font-weight-normal;
-  color: $wolf-text-tertiary;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-sm;
-  cursor: pointer;
-  transition: all 0.2s ease-in-out;
-
-  &:hover {
-    background: $wolf-bg-hover;
-    color: $wolf-text-secondary;
-  }
-
-  &.active {
-    background: $wolf-bg-hover;
-    color: $wolf-text-secondary;
-    font-weight: $wolf-font-weight-medium;
-  }
-}
-
-.search-input {
-  width: 280px;
-}
-
-.filter-center {
-  display: flex;
-  gap: $wolf-space-xs;
+  flex-direction: column;
+  gap: $wolf-section-gap-v2;
+  min-height: 0;
   flex: 1;
-}
-
-.filter-item {
-  width: 120px;
-}
-
-.filter-right {
-  display: flex;
-  gap: $wolf-space-xs;
-  flex-shrink: 0;
-}
-
-// 表格区 - 卡片容器样式
-.table-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  box-shadow: $wolf-shadow-card;
-  overflow: visible;
-}
-
-.table-card :deep(.el-table__fixed-right),
-.table-card :deep(.el-table__fixed-body-wrapper) {
-  overflow: visible;
 }
 
 // 链接样式
 .link-text {
-  color: $wolf-text-link;
+  color: $wolf-text-link-v2;
+  font-weight: $wolf-font-weight-medium-v2;
   cursor: pointer;
-  font-weight: $wolf-font-weight-medium;
+
   &:hover {
-    color: $wolf-text-link-hover;
+    color: $wolf-text-link-hover-v2;
   }
 }
 
-// 名称列布局
-.name-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.magicwand-icon {
-  font-size: 14px;
-  color: $wolf-primary;
-  cursor: pointer;
-  transition: all 0.2s;
-
-  &:hover {
-    transform: scale(1.15);
-    color: $wolf-primary-hover;
-  }
-}
-
-
-// 金额样式
-.amount-text {
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-}
-
-// 状态标签（浅底色 + 同色系文字）
-.status-tag {
-  display: inline-flex;
-  padding: 4px 8px;
-  font-size: $wolf-font-size-caption;
-  font-weight: $wolf-font-weight-normal;
-  border-radius: $wolf-radius-sm;
-}
-
-.status-new,
-.status-info {
-  background: $wolf-bg-hover;
-  color: $wolf-text-tertiary;
-}
-
-.status-following,
-.status-warning {
-  background: $wolf-warning-bg;
-  color: $wolf-warning-text;
-}
-
-.status-converted,
-.status-success {
-  background: $wolf-success-bg;
-  color: $wolf-success-text;
-}
-
-.status-invalid {
-  background: $wolf-danger-bg;
-  color: $wolf-danger-text;
-}
-
-.status-default {
-  background: $wolf-bg-hover;
-  color: $wolf-text-placeholder;
-}
-
-// 操作区
-.action-cell {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-}
-
-.action-icon {
-  font-size: 16px;
-  color: $wolf-text-link;
-  cursor: pointer;
-  transition: all 0.2s;
-
-  &:hover {
-    color: $wolf-text-link-hover;
-    transform: scale(1.1);
-  }
-}
-
-.action-danger {
-  color: $wolf-danger-text;
-  &:hover { color: #A83232; }
-}
-
-// 分页
-.pagination-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: $wolf-space-md;
-}
-
-.total-text {
-  font-size: $wolf-font-size-auxiliary;
-  color: $wolf-text-tertiary;
-}
-
-// 响应式
-@media (max-width: 1200px) {
-  .filter-row { flex-wrap: wrap; }
-  .filter-center { width: 100%; margin-top: $wolf-space-sm; order: 2; }
-  .search-input { width: 100%; }
-}
-
-@media (max-width: 768px) {
-  .opportunities-page { padding: $wolf-space-md; }
-  .filter-item { width: 100%; }
-  .filter-tabs { flex-wrap: wrap; }
+// 金额单元格
+.amount-cell {
+  font-family: $wolf-font-mono-v2;
+  font-variant-numeric: tabular-nums;
 }
 </style>

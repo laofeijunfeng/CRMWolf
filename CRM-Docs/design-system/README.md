@@ -8,13 +8,13 @@
 
 ```
 CRM-Docs/design-system/
-├── MASTER.md                      # 全局设计规则唯一来源
+├── MASTER.md                      # 全局设计规则唯一来源（含布局架构说明 §6.6）
 ├── pages/                         # 页面特定结构规范
 │   ├── list-page.md               # 列表页结构规范
 │   ├── detail-page.md             # 详情页结构规范
 │   ├── form-page.md               # 表单页结构规范
 │   └── approval-center.md         # 审批中心结构规范
-└── README.md                      # 本文档（索引）
+└── README.md                      # 本文档（索引 + 架构说明 §三）
 ```
 
 ---
@@ -41,22 +41,61 @@ CRM-Docs/design-system/
 
 ---
 
-## 三、文档清单
+## 三、架构说明
+
+### 3.1 布局架构实现
+
+CRMWolf 采用 **"内部 Sticky TopBar"** 架构，与设计规范 HTML（navigation-redesign-v3.html）略有不同。
+
+**关键差异：**
+
+| 维度 | 设计规范 HTML | CRMWolf 实现 |
+|------|--------------|--------------|
+| TopBar 定位 | `fixed` 在外部 | `sticky` 在内部 |
+| 间距处理 | `margin-top` 推开 | `padding-top` 创建间距 |
+| ContextTabs | 有（48px） | 暂无 |
+
+**实现原理：**
+
+```scss
+// AppLayout：TopBar 紧贴顶部
+.main-content {
+  // 无 padding-top
+}
+
+// 页面组件：自己的 padding 提供间距
+.leads-page {
+  padding: 24px;  // 顶部、左右、底部
+  gap: 24px;  // 组件间距
+  flex: 1;  // 继承高度
+}
+```
+
+**总间距：24px**（由页面 padding-top 提供）
+
+> 详见 `MASTER.md` 第 6.6 节"布局架构实现"
+
+---
+
+## 四、文档清单
 
 ### 3.1 MASTER.md（全局规则）
 
 | 章节 | 内容 |
 |------|------|
-| **一、设计原则** | 四大核心原则、设计优先级 |
-| **二、视觉风格规范** | 色彩、圆角、间距、阴影、动画系统 |
-| **三、组件设计规范** | Button、Input、Table、Card、Tab |
-| **四、导航组件规范** | Sidebar、TopBar、ContextTabs、UserInfoDropdown |
-| **五、交互规范** | Hover、Active、Disabled、Loading 状态 |
-| **六、无障碍规范** | 对比度、Focus、Screen Reader |
-| **七、性能规范** | 动画性能、响应时间 |
-| **八、响应式规范** | 断点系统、间距适配 |
-| **九、禁止事项** | Anti-Patterns、Stylelint 强制规则 |
-| **十、向后兼容** | 变量别名、迁移时间表 |
+| **一、设计原则** | 四大核心原则、设计优先级、移动端设计原则 |
+| **二、设计系统强制规范** | Design Token 强制规范（CRITICAL） |
+| **三、组件开发规范** | shadcn-vue 优先原则（CRITICAL） |
+| **四、视觉风格规范** | 色彩、圆角、间距、阴影、动画系统 |
+| **五、组件设计规范** | Button、Input、Table、Card、Tab |
+| **六、导航组件规范** | Sidebar、TopBar、ContextTabs、UserInfoDropdown |
+| **七、交互规范** | Hover、Active、Disabled、Loading 状态 |
+| **八、无障碍规范** | 对比度、Focus、Screen Reader |
+| **九、性能规范** | 动画性能、响应时间 |
+| **十、响应式规范** | 断点系统、间距适配、Safe Areas |
+| **十一、禁止事项** | Anti-Patterns、Stylelint 强制规则 |
+| **十二、向后兼容** | 变量别名、迁移时间表 |
+| **十三、文档检索规则** | 层级检索、页面文档命名 |
 
 ---
 
@@ -197,83 +236,103 @@ CRM-Docs/design-system/
 
 ---
 
-## 八、UI 组件框架迁移（Element Plus → shadcn-vue）
+## 八、shadcn-vue 强制使用规范（CRITICAL）
 
-### 8.1 迁移目标
+> ⚠️ **铁律：所有 UI 组件必须使用已安装的 shadcn-vue 组件，禁止自定义开发**
 
-| 目标 | 说明 | 状态 |
-|------|------|------|
-| **100% 替换 Element Plus** | 所有 `el-*` 组件替换为 shadcn-vue 或自定义 V2 组件 | ⏳ 进行中 |
-| **设计系统统一** | 所有组件使用 V2 Design Tokens | ✅ 已定义 |
-| **不漏迁移** | ESLint + CI + 扫描脚本强制检查 | ✅ 已配置 |
+### 8.1 核心原则
 
-### 8.2 当前迁移进度
+| 规则 | 说明 |
+|------|------|
+| **唯一来源** | 所有 UI 组件必须来自 `src/components/ui/` |
+| **用户确认** | shadcn-vue 没有的组件，必须向用户确认后才能自定义 |
+| **零容忍** | 禁止任何"技术壁垒"、"特殊需求"、"临时方案"等借口 |
 
-| 阶段 | 任务 | 状态 | 完成日期 |
-|------|------|------|---------|
-| **Phase 0 Week 1** | Design Tokens + Lint Rules | ✅ 已完成 | 2026-07-08 |
-| **Phase 0 Week 2** | 基础组件库（ButtonV2, InputV2, TableV2, CardV2, TabV2） | ⏳ 待执行 | - |
-| **Phase 0 Week 3** | 导航组件库（SidebarV2, TopBarV2, ContextTabsV2） | ⏳ 待执行 | - |
-| **Phase 1** | 页面迁移（Leads → Customers → Contracts → Payments） | ⏳ 待规划 | - |
-| **Phase 2** | Element Plus 清理（删除依赖、CSS、全局注册） | ⏳ 待规划 | - |
+### 8.2 已安装组件清单（2026-07-10）
 
-### 8.3 Element Plus 使用统计
+**总计**：41 个组件目录，136+ 个组件文件
 
-**当前状态**：426+ 处使用待迁移
+| 类别 | 组件 |
+|------|------|
+| **核心组件** | Button, Input, Textarea, Label |
+| **布局容器** | Card, Separator, ScrollArea, AspectRatio |
+| **导航组件** | Tabs, Breadcrumb, NavigationMenu, DropdownMenu, Select |
+| **数据录入** | Checkbox, Switch, RadioGroup, Select, Combobox, Slider |
+| **反馈状态** | Badge, Progress, Skeleton, Avatar, Alert, Toast |
+| **弹窗模态** | Dialog, AlertDialog, DropdownMenu, Popover, Sheet, Drawer, Tooltip, HoverCard |
+| **命令菜单** | Command, ContextMenu, Menubar |
+| **数据展示** | Table, Pagination |
+| **折叠展开** | Accordion, Collapsible |
+| **日历日期** | Calendar |
+| **轮播** | Carousel |
 
-| 类别 | 数量 | 说明 |
-|------|------|------|
-| **组件使用** | 426+ | `el-*` 组件在 Vue 文件中 |
-| **高频组件** | el-button (46+), el-dialog (44+), el-input (40+), el-form (38+) | P0 优先迁移 |
-| **全局 API** | ElMessage (26), ElMessageBox (38) | 替换为 toast() + AlertDialog |
-| **图标** | Element Plus Icons → Lucide Icons | 图标映射表已定义 |
+### 8.3 使用方式
 
-### 8.4 组件映射表（Element Plus → V2）
+```typescript
+// 统一从 crmwolf 导入
+import {
+  Button, Dialog, AlertDialog, DropdownMenu,
+  Badge, Avatar, Progress
+} from '@/components/crmwolf'
 
-| Element Plus 组件 | V2 组件 | 优先级 | 说明 |
-|------------------|--------|--------|------|
-| `el-button` | `ButtonV2` | P0 | 5 种变体 + Focus Ring + Touch Target |
-| `el-input` | `InputV2` | P0 | Visible Label + Error Placement |
-| `el-table` | `TableV2` | P0 | No Vertical Divider + Hover State |
-| `el-dialog` | `DialogV2` | P0 | 基于 shadcn-vue Dialog |
-| `el-form` | `FormV2` | P0 | VeeValidate + Zod Schema |
-| `el-select` | `SelectV2` | P0 | 基于 shadcn-vue Select |
-| `ElMessage` | `toast()` | P1 | vue-sonner Toast |
-| `ElMessageBox` | `AlertDialog` | P1 | shadcn-vue AlertDialog |
-| `el-tooltip` | `Tooltip` | P2 | shadcn-vue Tooltip |
-| `el-pagination` | `Pagination` | P2 | shadcn-vue Pagination |
+// 或直接从 ui 目录导入
+import { Button } from '@/components/ui/button'
+```
 
-**完整映射表**: `docs/superpowers/specs/2026-07-08-element-plus-to-shadcn-vue-migration-design.md`
+### 8.4 详细规范
 
-### 8.5 图标迁移（Element Plus Icons → Lucide Icons）
+> **完整规范**：详见 [MASTER.md §三、组件开发规范](MASTER.md#三组件开发规范critical)
 
-| Element Plus Icon | Lucide Icon | 使用场景 |
-|------------------|-------------|---------|
-| `el-icon-edit` | `Pencil` | 编辑按钮 |
-| `el-icon-delete` | `Trash2` | 删除按钮 |
-| `el-icon-plus` | `Plus` | 新增按钮 |
-| `el-icon-search` | `Search` | 搜索框 |
-| `el-icon-loading` | `Loader2` (animate-spin) | 加载状态 |
+### 8.5 组件封装原则（CRITICAL）
 
-**完整图标映射表**: `docs/superpowers/specs/2026-07-08-element-plus-to-shadcn-vue-migration-design.md §1.2`
+> ⚠️ **最高优先级原则**：如有冲突，以此原则为准
 
-### 8.6 迁移追踪工具
+**核心规则**：
 
-| 工具 | 路径 | 用途 |
-|------|------|------|
-| **ESLint 规则** | `CRM-Client/eslint.config.js` | 禁止新增 Element Plus |
-| **Stylelint 规则** | `CRM-Client/.stylelintrc.design-system.js` | 禁止硬编码样式 |
-| **扫描脚本** | `CRM-Client/scripts/scan-element-plus.sh` | 统计迁移进度 |
-| **迁移清单** | `docs/ELEMENT-PLUS-MIGRATION-CHECKLIST.md` | 详细进度追踪 |
+| 规则 | 说明 |
+|------|------|
+| **严格按规范封装** | 所有使用 shadcn-vue 的组件，必须严格按照设计规范进行封装 |
+| **样式改造** | 封装过程中，仅根据设计规范调整样式（颜色、圆角、间距等） |
+| **保留原生动态效果** | 所有动态效果（动画、过渡、交互反馈）使用组件本身的动态效果，不做任何调整 |
+| **冲突处理** | 当其他规则与本原则冲突时，以本原则为准 |
 
-### 8.7 迁移相关文档
+**实施要点**：
 
-| 文档 | 路径 | 说明 |
-|------|------|------|
-| **迁移设计规范** | `docs/superpowers/specs/2026-07-08-element-plus-to-shadcn-vue-migration-design.md` | 完整迁移设计 |
-| **Phase 0 Week 1 计划** | `docs/superpowers/plans/2026-07-08-design-system-phase0-week1.md` | Design Tokens 实施 |
-| **Phase 0 Week 2-3 计划** | `docs/superpowers/plans/2026-07-08-design-system-phase0-week2-3.md` | 基础组件库实施 |
-| **迁移路线图** | `docs/design-system-migration-roadmap.md` | 整体迁移路线 |
+```typescript
+// ✅ 正确：仅封装样式
+const CustomButton = defineComponent({
+  setup(props, { slots }) {
+    return () => h(Button, {
+      class: 'bg-primary text-white rounded-md' // 仅样式改造
+    }, slots)
+  }
+})
+
+// ❌ 错误：修改动态效果
+const CustomButton = defineComponent({
+  setup(props, { slots }) {
+    return () => h(Button, {
+      class: 'bg-primary',
+      // ❌ 禁止修改过渡时长
+      style: { transition: 'all 0.3s ease' }
+    }, slots)
+  }
+})
+```
+
+**为什么这样做**：
+
+1. **一致性保证**：shadcn-vue 的动画经过精心设计和测试，保证跨浏览器一致性
+2. **维护成本最低**：避免自定义动画带来的维护负担
+3. **用户体验统一**：保持整个应用的交互体验一致性
+4. **升级友好**：组件库升级时，不会因为自定义动画而产生冲突
+
+**适用范围**：
+
+- ✅ Button、Input、Table、Card 等所有 shadcn-vue 组件
+- ✅ Dialog、DropdownMenu、Popover 等弹窗类组件
+- ✅ Tabs、Breadcrumb 等导航类组件
+- ✅ 所有未来新增的 shadcn-vue 组件
 
 ---
 
@@ -292,7 +351,7 @@ CRM-Docs/design-system/
 
 ---
 
-## 九、联系与反馈
+## 十、联系与反馈
 
 **文档维护团队**：
 - 设计负责人：[待定]
@@ -304,4 +363,6 @@ CRM-Docs/design-system/
 
 ---
 
-**版本：V2 | 最后更新：2026-07-08**
+**版本：V2.3 | 最后更新：2026-07-10**
+
+> **本次更新**：新增 §8.5 组件封装原则（CRITICAL），明确 shadcn-vue 组件封装时仅改造样式、保留原生动态效果

@@ -11,6 +11,7 @@ export interface HeaderAction {
   icon?: Component
   disabled?: boolean
   visible?: boolean
+  ariaLabel?: string  // Phase 6: Accessibility
 }
 
 export interface HeaderLeftAction {
@@ -24,12 +25,25 @@ export interface HeaderLeftAction {
   ariaLabel?: string
 }
 
+export interface TabItem {
+  /** Tab 唯一标识 */
+  key: string
+  /** Tab 显示文字 */
+  label: string
+  /** 是否禁用 */
+  disabled?: boolean
+}
+
 export interface HeaderConfig {
   showBack?: boolean
   backRoute?: string | null
   actions?: HeaderAction[]
   /** 左侧自定义按钮（替代默认返回按钮） */
   leftAction?: HeaderLeftAction | null
+  /** ContextTabs 配置（替代页面标题） */
+  tabs?: TabItem[] | null
+  /** 当前激活的 Tab */
+  activeTab?: string
 }
 
 export const useHeaderStore = defineStore('header', () => {
@@ -37,15 +51,20 @@ export const useHeaderStore = defineStore('header', () => {
   const backRoute = ref<string | null>(null)
   const actions = ref<HeaderAction[]>([])
   const leftAction = ref<HeaderLeftAction | null>(null)
+  const tabs = ref<TabItem[] | null>(null)
+  const activeTab = ref<string>('')
 
   const hasActions = computed(() => actions.value.length > 0)
   const hasLeftAction = computed(() => leftAction.value !== null)
+  const hasTabs = computed(() => tabs.value !== null && tabs.value.length > 0)
 
   function configure(config: HeaderConfig): void {
     if (config.showBack !== undefined) showBack.value = config.showBack
     if (config.backRoute !== undefined) backRoute.value = config.backRoute
     if (config.actions !== undefined) actions.value = config.actions
     if (config.leftAction !== undefined) leftAction.value = config.leftAction
+    if (config.tabs !== undefined) tabs.value = config.tabs
+    if (config.activeTab !== undefined) activeTab.value = config.activeTab
   }
 
   function clear(): void {
@@ -53,6 +72,8 @@ export const useHeaderStore = defineStore('header', () => {
     backRoute.value = null
     actions.value = []
     leftAction.value = null
+    tabs.value = null
+    activeTab.value = ''
   }
 
   function setBack(show: boolean, route?: string): void {
@@ -85,19 +106,42 @@ export const useHeaderStore = defineStore('header', () => {
     }
   }
 
+  function setTabs(newTabs: TabItem[] | null, initialTab?: string): void {
+    tabs.value = newTabs
+    // 设置初始激活 Tab
+    if (newTabs && newTabs.length > 0) {
+      if (initialTab) {
+        activeTab.value = initialTab
+      } else {
+        activeTab.value = newTabs[0]!.key
+      }
+    } else {
+      activeTab.value = ''
+    }
+  }
+
+  function setActiveTab(tabKey: string): void {
+    activeTab.value = tabKey
+  }
+
   return {
     showBack,
     backRoute,
     actions,
     leftAction,
+    tabs,
+    activeTab,
     hasActions,
     hasLeftAction,
+    hasTabs,
     configure,
     clear,
     setBack,
     setActions,
     addAction,
     removeAction,
-    setLeftAction
+    setLeftAction,
+    setTabs,
+    setActiveTab
   }
 })

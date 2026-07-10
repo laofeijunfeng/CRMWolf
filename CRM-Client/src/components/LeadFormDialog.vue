@@ -43,7 +43,7 @@ import { leadSchema, type LeadForm } from '@/schemas/lead-form'
 interface Props {
   open: boolean
   mode: 'create' | 'edit'
-  leadId?: number
+  leadId?: number | undefined
 }
 
 interface Emits {
