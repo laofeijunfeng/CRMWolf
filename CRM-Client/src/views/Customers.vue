@@ -17,15 +17,16 @@
  * - ✅ 移除活跃筛选汇总区
  * - ✅ 保留业务逻辑（退回公海、输单、赢单等）
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Sparkles, MoreHorizontal, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil } from 'lucide-vue-next'
+import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import AICustomerCreateDialog from '@/components/AICustomerCreateDialog.vue'
+import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import customerApi, {
   type CustomerResponse,
@@ -52,6 +53,10 @@ const loading = ref(false)
 const tableData = ref<CustomerResponse[]>([])
 const selectedCustomer = ref<CustomerResponse | null>(null)
 const showAICustomerCreate = ref(false)
+
+// CustomerDetailSheet 状态
+const sheetVisible = ref(false)
+const selectedCustomerId = ref<number | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -206,7 +211,12 @@ const handlePageSizeChange = (pageSize: number): void => {
 }
 
 const handleViewDetail = (record: CustomerResponse): void => {
-  router.push(`/customers/${record.id}`)
+  selectedCustomerId.value = record.id
+  sheetVisible.value = true
+}
+
+const handleSheetRefresh = (): void => {
+  fetchCustomerList()
 }
 
 const handleEdit = (record: CustomerResponse): void => {
@@ -395,9 +405,8 @@ watchEffect(() => {
   }
 })
 
-onUnmounted(() => {
-  headerStore.clear()
-})
+// ✅ 不调用 headerStore.clear()
+// 让新页面直接覆盖旧状态，避免页面切换时 TopBar 短暂显示标题
 </script>
 
 <template>
@@ -624,6 +633,13 @@ onUnmounted(() => {
     <AICustomerCreateDialog
       v-model="showAICustomerCreate"
       @success="fetchCustomerList"
+    />
+
+    <!-- 客户详情抽屉 -->
+    <CustomerDetailSheet
+      v-model:visible="sheetVisible"
+      :customer-id="selectedCustomerId ?? null"
+      @refresh="handleSheetRefresh"
     />
   </div>
 </template>
