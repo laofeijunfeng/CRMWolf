@@ -13,6 +13,7 @@
 import { computed } from 'vue'
 import { TabsRoot, TabsList, TabsTrigger } from 'radix-vue'
 import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 
 // ==================== Types ====================
 interface TabItem {
@@ -22,6 +23,8 @@ interface TabItem {
   label: string
   /** 是否禁用 */
   disabled?: boolean
+  /** 徽标内容（如待办数量） */
+  badge?: number | string
 }
 
 interface Props {
@@ -44,7 +47,7 @@ const emit = defineEmits<{
 const activeTabKey = computed(() => props.activeTab)
 
 // ==================== Methods ====================
-function handleTabChange(value: string) {
+function handleTabChange(value: string): void {
   emit('update:activeTab', value)
   emit('change', value)
 }
@@ -94,7 +97,16 @@ function handleTabChange(value: string) {
           'hover:text-wolf-primary'
         )"
       >
-        {{ tab.label }}
+        <span class="inline-flex items-center gap-2">
+          {{ tab.label }}
+          <Badge
+            v-if="tab.badge"
+            variant="destructive"
+            class="ml-1"
+          >
+            {{ tab.badge }}
+          </Badge>
+        </span>
       </TabsTrigger>
     </TabsList>
   </TabsRoot>

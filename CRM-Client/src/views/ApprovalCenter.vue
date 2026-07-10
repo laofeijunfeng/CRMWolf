@@ -49,17 +49,7 @@
         :tabs="tabs"
         @change="handleTabChange"
         class="mb-6"
-      >
-        <template #badge="{ tab }">
-          <Badge
-            v-if="tab.key === 'pending' && pendingCountBadge"
-            variant="destructive"
-            class="ml-2"
-          >
-            {{ pendingCountBadge }}
-          </Badge>
-        </template>
-      </ContextTabs>
+      />
 
       <!-- FilterPanel -->
       <FilterPanel
@@ -385,7 +375,6 @@ import { toast } from 'vue-sonner'
 import { Clock } from 'lucide-vue-next'
 import { ContextTabs, FilterPanel } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 // Element Plus components for remaining template sections (Task 2 will replace these)
 import { ElTable, ElTableColumn, ElPagination, ElButton, ElIcon, ElDrawer, ElDescriptions, ElDescriptionsItem, ElDialog, ElInput, ElAlert } from 'element-plus'
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
@@ -441,16 +430,11 @@ const quickRejectRow = ref<ApprovalListItem | null>(null)
 const drawerSize = computed<string>(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : '480px'))
 
 // ==================== ContextTabs 配置 ====================
-const tabs = [
-  { key: 'pending', label: '待我审批' },
+const tabs = computed(() => [
+  { key: 'pending', label: '待我审批', badge: pendingCount.value > 0 ? pendingCount.value : undefined },
   { key: 'processed', label: '我已处理' },
   { key: 'submitted', label: '我提交的' }
-]
-
-// Badge 显示待办数
-const pendingCountBadge = computed(() =>
-  activeTab.value === 'pending' && pendingCount.value > 0 ? pendingCount.value : null
-)
+])
 
 // ==================== FilterPanel 配置 ====================
 const filterFields = [
