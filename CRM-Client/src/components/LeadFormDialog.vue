@@ -152,7 +152,7 @@ const handleSubmit = async (values: GenericObject): void => {
 
     // UX 优化：Focus Management - 提交失败后自动聚焦第一个错误字段
     nextTick(() => {
-      const errorElement = document.querySelector('[data-invalid="true"]') as HTMLInputElement
+      const errorElement = document.querySelector('[aria-invalid="true"]') as HTMLInputElement
       if (errorElement !== null && errorElement !== undefined) {
         errorElement.focus()
       }
