@@ -60,115 +60,100 @@
         class="mb-6"
       />
 
-      <!-- 表格（桌面端） -->
-      <div class="table-card" v-if="!isMobile">
-        <div class="card-header">
-          <div class="card-title-group">
-            <span class="card-title">审批列表</span>
+      <!-- DataTable（桌面端） -->
+      <DataTable
+        v-if="!isMobile"
+        :columns="columns"
+        :data="rows"
+        :total="total"
+        :page="page"
+        :page-size="pageSize"
+        :loading="loading"
+        height="calc(100vh - 320px)"
+        empty-title="暂无待审批事项"
+        @update:page="page = $event; fetchList()"
+        @update:page-size="pageSize = $event; page = 1; fetchList()"
+        @row-click="openDetail"
+      >
+        <!-- 单号列：mono font + 点击复制 -->
+        <template #cell-application_number="{ row }">
+          <span
+            class="font-mono text-primary cursor-pointer hover:underline"
+            data-testid="copy-number"
+            :title="`点击复制 ${row.application_number}`"
+            @click.stop="copyNumber(row.application_number)"
+          >
+            {{ row.application_number }}
+          </span>
+        </template>
+
+        <!-- 类型列 -->
+        <template #cell-business_type="{ row }">
+          <span class="text-secondary">{{ businessTypeLabel(row.business_type) }}</span>
+        </template>
+
+        <!-- 实体列 -->
+        <template #cell-entity_name="{ row }">
+          <span>{{ row.entity_name || '-' }}</span>
+        </template>
+
+        <!-- 金额列：mono font + 强调 -->
+        <template #cell-entity_amount="{ row }">
+          <span class="font-mono font-semibold text-warning">
+            {{ formatCurrency(row.entity_amount) }}
+          </span>
+        </template>
+
+        <!-- 时间列：relative time -->
+        <template #cell-created_time="{ row }">
+          <span class="font-mono text-muted-foreground text-sm">
+            {{ formatDateRelative(row.created_time) }}
+          </span>
+        </template>
+
+        <!-- 状态列：ApprovalStatusBadge -->
+        <template #cell-status="{ row }">
+          <ApprovalStatusBadge :status="row.status" size="small" />
+        </template>
+
+        <!-- 超时列：徽章 -->
+        <template #cell-overdue_hours="{ row }">
+          <Badge
+            v-if="row.overdue_hours != null && row.overdue_hours >= 48"
+            class="gap-1 overdue-badge-inline"
+            role="status"
+            :aria-label="`超时 ${row.overdue_hours} 小时`"
+          >
+            <Clock class="w-3 h-3" />
+            超时 {{ row.overdue_hours }} 小时
+          </Badge>
+          <span v-else class="text-muted-foreground">-</span>
+        </template>
+
+        <!-- 操作列 -->
+        <template #cell-actions="{ row }">
+          <div class="flex gap-2 justify-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="detail-btn"
+              @click.stop="openDetail(row)"
+            >
+              详情
+            </Button>
+            <Button
+              v-if="activeTab === 'submitted' && row.status === 'REJECTED'"
+              variant="ghost"
+              size="sm"
+              data-testid="resubmit-btn"
+              :loading="resubmitPendingId === row.id"
+              @click.stop="handleResubmit(row)"
+            >
+              修改并重新提交
+            </Button>
           </div>
-        </div>
-
-        <el-table
-          v-if="rows.length > 0"
-          :data="rows"
-          row-key="id"
-          stripe
-          style="width: 100%"
-          row-class-name="approval-row"
-        >
-          <el-table-column label="单号" min-width="180">
-            <template #default="{ row }">
-              <span
-                class="number-cell"
-                data-testid="copy-number"
-                :title="`点击复制 ${row.application_number}`"
-                @click="copyNumber(row.application_number)"
-              >{{ row.application_number }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="类型" width="90">
-            <template #default="{ row }">
-              <span class="type-tag">{{ businessTypeLabel(row.business_type) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="实体" min-width="160">
-            <template #default="{ row }">
-              <span>{{ row.entity_name || '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="金额" min-width="130">
-            <template #default="{ row }">
-              <span class="amount">{{ formatCurrency(row.entity_amount) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="submitter_name" label="提交人" min-width="110" />
-          <el-table-column label="提交时间" min-width="150">
-            <template #default="{ row }">
-              <span class="mono-time">{{ formatDateRelative(row.created_time) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="120">
-            <template #default="{ row }">
-              <ApprovalStatusBadge :status="row.status" size="small" />
-            </template>
-          </el-table-column>
-          <el-table-column label="超时" width="130">
-            <template #default="{ row }">
-              <span
-                v-if="row.overdue_hours != null && row.overdue_hours >= 48"
-                class="overdue-badge"
-                role="status"
-                :aria-label="`超时 ${row.overdue_hours} 小时`"
-              >
-                <el-icon :size="12"><Clock /></el-icon>
-                超时 {{ row.overdue_hours }} 小时
-              </span>
-              <span v-else class="muted">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
-            <template #default="{ row, $index }">
-              <el-button
-                link
-                type="primary"
-                size="small"
-                data-testid="detail-btn"
-                @click="openDetail(row, $index)"
-              >详情</el-button>
-              <el-button
-                v-if="activeTab === 'submitted' && row.status === 'REJECTED'"
-                link
-                type="primary"
-                size="small"
-                data-testid="resubmit-btn"
-                :loading="resubmitPendingId === row.id"
-                @click="handleResubmit(row)"
-              >修改并重新提交</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <!-- 空态 -->
-        <WolfEmpty
-          v-else
-          title="暂无待审批事项"
-          description="所有回款与发票申请都已处理完毕"
-        />
-
-        <!-- 分页 -->
-        <div v-if="rows.length > 0" class="pagination-bar">
-          <span class="total-text">共 {{ total }} 条</span>
-          <el-pagination
-            v-model:current-page="page"
-            v-model:page-size="pageSize"
-            :total="total"
-            :page-sizes="[10, 20, 50, 100]"
-            layout="sizes, prev, pager, next, jumper"
-            @current-change="fetchList"
-            @size-change="fetchList"
-          />
-        </div>
-      </div>
+        </template>
+      </DataTable>
 
       <!-- 移动端卡片列表 -->
       <div class="mobile-card-list" v-else>
@@ -373,10 +358,10 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Clock } from 'lucide-vue-next'
-import { ContextTabs, FilterPanel } from '@/components/crmwolf'
+import { ContextTabs, FilterPanel, DataTable, Badge } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
-// Element Plus components for remaining template sections (Task 2 will replace these)
-import { ElTable, ElTableColumn, ElPagination, ElButton, ElIcon, ElDrawer, ElDescriptions, ElDescriptionsItem, ElDialog, ElInput, ElAlert } from 'element-plus'
+// Element Plus components for remaining template sections (drawer, dialog, mobile pagination)
+import { ElPagination, ElButton, ElIcon, ElDrawer, ElDescriptions, ElDescriptionsItem, ElDialog, ElInput, ElAlert } from 'element-plus'
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -449,6 +434,62 @@ const filterFields = [
       { value: 'CONTRACT', label: '合同' },
       { value: 'LICENSE', label: 'License' }
     ]
+  }
+]
+
+// ==================== DataTable Columns 配置 ====================
+const columns = [
+  {
+    key: 'application_number',
+    title: '单号',
+    width: '180px',
+    fixed: 'left' as const
+  },
+  {
+    key: 'business_type',
+    title: '类型',
+    width: '90px',
+    align: 'center' as const
+  },
+  {
+    key: 'entity_name',
+    title: '实体',
+    width: '160px'
+  },
+  {
+    key: 'entity_amount',
+    title: '金额',
+    width: '130px',
+    align: 'right' as const
+  },
+  {
+    key: 'submitter_name',
+    title: '提交人',
+    width: '110px'
+  },
+  {
+    key: 'created_time',
+    title: '提交时间',
+    width: '150px'
+  },
+  {
+    key: 'status',
+    title: '状态',
+    width: '120px',
+    align: 'center' as const
+  },
+  {
+    key: 'overdue_hours',
+    title: '超时',
+    width: '130px',
+    align: 'center' as const
+  },
+  {
+    key: 'actions',
+    title: '操作',
+    width: '200px',
+    align: 'center' as const,
+    fixed: 'right' as const
   }
 ]
 
@@ -547,10 +588,12 @@ const copyNumber = async (num: string): Promise<void> => {
   }
 }
 
-const openDetail = (row: ApprovalListItem, index: number): void => {
+const openDetail = (row: ApprovalListItem, index?: number): void => {
+  // Find index if not provided (DataTable row-click doesn't provide index)
+  const rowIndex = index ?? rows.value.findIndex(r => r.id === row.id)
   currentRow.value = row
-  triggerRowIndex.value = index
-  focusedRowEl.value = (document.querySelectorAll('.approval-row')[index] as HTMLElement) ?? null
+  triggerRowIndex.value = rowIndex
+  focusedRowEl.value = (document.querySelectorAll('.data-table-row')[rowIndex] as HTMLElement) ?? null
   drawerVisible.value = true
 }
 
@@ -679,7 +722,7 @@ const onResubmit = (): void => {
   handleResubmit(currentRow.value)
 }
 
-// 键盘快捷键（条9）：J/K 上下行、A 同意、R 驳回、Enter 开抽屉、Esc 关抽屉
+// 键盘快捷键（条9）：J/K 上下行、Enter 开抽屉、Esc 关抽屉
 // 通过全局 keydown 监听，避免每行绑定；仅当焦点不在输入/弹窗内时生效。
 const onKeydown = (e: KeyboardEvent): void => {
   const target = e.target as HTMLElement | null
@@ -706,7 +749,7 @@ const onKeydown = (e: KeyboardEvent): void => {
 const focusIndex = ref<number>(0)
 
 const focusCurrentRow = (): void => {
-  const els = document.querySelectorAll('.approval-row')
+  const els = document.querySelectorAll('.data-table-row')
   const el = els[focusIndex.value] as HTMLElement | undefined
   if (el && typeof el.focus === 'function') {
     el.focus()
@@ -734,7 +777,7 @@ onBeforeUnmount((): void => {
 // 行可聚焦（条9 键盘导航 + 条13 焦点回归）：每次列表刷新后给行加 tabindex=0
 watch(rows, async () => {
   await nextTick()
-  document.querySelectorAll<HTMLElement>('.approval-row').forEach((el) => {
+  document.querySelectorAll<HTMLElement>('.data-table-row').forEach((el) => {
     el.setAttribute('tabindex', '0')
   })
 }, { flush: 'post' })
@@ -749,83 +792,8 @@ watch(rows, async () => {
   min-height: calc(100vh - 56px);
 }
 
-.table-card {
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-v2;
-  padding: $wolf-card-padding-v2;
-  box-shadow: $wolf-shadow-card-v2;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: $wolf-space-md-v2;
-}
-
-.card-title-group {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-md-v2;
-}
-
-.card-title {
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-primary-v2;
-}
-
-.card-tag {
-  font-size: $wolf-font-size-caption-v2;
-  padding: 2px 8px;
-  border-radius: $wolf-radius-sm-v2;
-
-  &.primary {
-    color: $wolf-primary-v2;
-    background: $wolf-primary-light-v2;
-  }
-}
-
-.card-actions {
-  display: flex;
-  gap: $wolf-space-sm-v2;
-}
-
-.number-cell {
-  font-family: $wolf-font-mono-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
-  color: $wolf-text-link-v2;
-  cursor: pointer;
-  user-select: none;
-
-  &:hover {
-    color: $wolf-text-link-hover-v2;
-    text-decoration: underline;
-  }
-}
-
-.type-tag {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-secondary-v2;
-}
-
-.amount {
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-warning-text-v2;
-  font-family: $wolf-font-mono-v2;
-}
-
-.mono-time {
-  font-family: $wolf-font-mono-v2;
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-}
-
-.muted {
-  color: $wolf-text-placeholder-v2;
-}
-
-.overdue-badge {
+// 超时徽章（DataTable 内使用 Badge 组件）
+.overdue-badge-inline {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -835,22 +803,11 @@ watch(rows, async () => {
   font-weight: $wolf-font-weight-medium-v2;
   color: $wolf-warning-text-v2;
   background: $wolf-warning-bg-v2;
-}
-
-.pagination-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: $wolf-space-md-v2 0;
-}
-
-.total-text {
-  font-size: $wolf-font-size-auxiliary-v2;
-  color: $wolf-text-tertiary-v2;
+  border: none;
 }
 
 // 行级聚焦态（键盘导航 + 抽屉关闭后焦点回归）
-:deep(.approval-row) {
+:deep(.data-table-row) {
   outline: none;
 
   &:focus,
