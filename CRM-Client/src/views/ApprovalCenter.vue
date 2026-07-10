@@ -265,57 +265,89 @@
       </div>
     </template>
 
-    <!-- 详情抽屉：①el-descriptions 决策字段 ②ApprovalProcessGeneric（含 timeline）③操作吸底 -->
-    <el-drawer
-      v-model="drawerVisible"
-      data-testid="approval-detail-drawer"
-      title="审批详情"
-      direction="rtl"
-      :size="drawerSize"
-      :with-header="true"
-      @closed="onDrawerClosed"
-    >
-      <div class="drawer-body">
-        <div v-if="currentRow" class="drawer-decisions">
-          <el-descriptions :column="1" border>
-            <el-descriptions-item label="单号">
-              <span class="number-cell" @click="copyNumber(currentRow.application_number)">
-                {{ currentRow.application_number }}
-              </span>
-            </el-descriptions-item>
-            <el-descriptions-item label="单据类型">
-              {{ businessTypeLabel(currentRow.business_type) }}
-            </el-descriptions-item>
-            <el-descriptions-item label="客户/实体">
-              {{ currentRow.entity_name || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="金额">
-              <span class="amount">{{ formatCurrency(currentRow.entity_amount) }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="提交人">
-              {{ currentRow.submitter_name }}
-            </el-descriptions-item>
-            <el-descriptions-item label="提交时间">
-              {{ formatDateRelative(currentRow.created_time) }}
-            </el-descriptions-item>
-          </el-descriptions>
-        </div>
+    <!-- 详情 Sheet -->
+    <Sheet v-model:open="sheetVisible" @closed="onSheetClosed">
+      <SheetContent
+        :side="'right'"
+        :class="isMobile ? 'w-full' : 'w-[480px]'"
+        class="flex flex-col"
+      >
+        <!-- SheetHeader -->
+        <SheetHeader>
+          <SheetTitle>审批详情</SheetTitle>
+          <SheetDescription>
+            审批单号：{{ selectedApproval?.application_number }}
+          </SheetDescription>
+        </SheetHeader>
 
-        <ApprovalProcessGeneric
-          v-if="currentRow"
-          class="drawer-approval"
-          :entity-type="currentRow.business_type"
-          :entity-id="currentRow.business_id"
-          :can-approve="activeTab === 'pending'"
-          :is-submitter="activeTab === 'submitted'"
-          @approved="onApprovalActionDone"
-          @rejected="onApprovalActionDone"
-          @withdrawn="onApprovalActionDone"
-          @submitted="onApprovalActionDone"
-          @resubmit="onResubmit"
-        />
-      </div>
-    </el-drawer>
+        <!-- SheetContent（ScrollArea） -->
+        <ScrollArea class="flex-1 -mx-6 px-6">
+          <!-- 加载状态 -->
+          <div v-if="loading" class="space-y-4">
+            <Skeleton class="h-32 w-full" />
+            <Skeleton class="h-48 w-full" />
+          </div>
+
+          <!-- 基本信息 Card -->
+          <Card v-else-if="selectedApproval" class="mb-4">
+            <CardHeader>
+              <h3 class="text-base font-semibold">基本信息</h3>
+            </CardHeader>
+            <CardContent>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <Label class="text-muted-foreground">单号</Label>
+                  <p
+                    class="font-mono text-primary cursor-pointer hover:underline mt-1"
+                    @click="copyNumber(selectedApproval.application_number)"
+                  >
+                    {{ selectedApproval.application_number }}
+                  </p>
+                </div>
+                <div>
+                  <Label class="text-muted-foreground">单据类型</Label>
+                  <p class="mt-1">{{ businessTypeLabel(selectedApproval.business_type) }}</p>
+                </div>
+                <div>
+                  <Label class="text-muted-foreground">客户/实体</Label>
+                  <p class="mt-1">{{ selectedApproval.entity_name || '-' }}</p>
+                </div>
+                <div>
+                  <Label class="text-muted-foreground">金额</Label>
+                  <p class="font-mono font-semibold text-warning mt-1">
+                    {{ formatCurrency(selectedApproval.entity_amount) }}
+                  </p>
+                </div>
+                <div>
+                  <Label class="text-muted-foreground">提交人</Label>
+                  <p class="mt-1">{{ selectedApproval.submitter_name }}</p>
+                </div>
+                <div>
+                  <Label class="text-muted-foreground">提交时间</Label>
+                  <p class="font-mono text-sm mt-1">
+                    {{ formatDateRelative(selectedApproval.created_time) }}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <!-- 审批流程 Card -->
+          <ApprovalProcessGeneric
+            v-if="selectedApproval"
+            :entity-type="selectedApproval.business_type"
+            :entity-id="selectedApproval.business_id"
+            :can-approve="activeTab === 'pending'"
+            :is-submitter="activeTab === 'submitted'"
+            @approved="onApprovalActionDone"
+            @rejected="onApprovalActionDone"
+            @withdrawn="onApprovalActionDone"
+            @submitted="onApprovalActionDone"
+            @resubmit="onResubmit"
+          />
+        </ScrollArea>
+      </SheetContent>
+    </Sheet>
 
     <!-- 移动端快速驳回弹窗 -->
     <el-dialog
@@ -360,8 +392,13 @@ import { toast } from 'vue-sonner'
 import { Clock } from 'lucide-vue-next'
 import { ContextTabs, FilterPanel, DataTable, Badge } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
-// Element Plus components for remaining template sections (drawer, dialog, mobile pagination)
-import { ElPagination, ElButton, ElIcon, ElDrawer, ElDescriptions, ElDescriptionsItem, ElDialog, ElInput, ElAlert } from 'element-plus'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Skeleton } from '@/components/ui/skeleton'
+// Element Plus components for remaining template sections (dialog, mobile pagination)
+import { ElPagination, ElButton, ElIcon, ElDialog, ElInput, ElAlert } from 'element-plus'
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -393,8 +430,8 @@ const total = ref<number>(0)
 const rows = ref<ApprovalListItem[]>([])
 const loadError = ref<LoadError>(null)
 
-const drawerVisible = ref<boolean>(false)
-const currentRow = ref<ApprovalListItem | null>(null)
+const sheetVisible = ref<boolean>(false)
+const selectedApproval = ref<ApprovalListItem | null>(null)
 const triggerRowIndex = ref<number>(-1)
 const focusedRowEl = ref<HTMLElement | null>(null)
 
@@ -412,7 +449,6 @@ const quickRejectReason = ref<string>('')
 const quickRejectRow = ref<ApprovalListItem | null>(null)
 
 // ==================== 计算属性 ====================
-const drawerSize = computed<string>(() => (typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : '480px'))
 
 // ==================== ContextTabs 配置 ====================
 const tabs = computed(() => [
@@ -591,25 +627,25 @@ const copyNumber = async (num: string): Promise<void> => {
 const openDetail = (row: ApprovalListItem, index?: number): void => {
   // Find index if not provided (DataTable row-click doesn't provide index)
   const rowIndex = index ?? rows.value.findIndex(r => r.id === row.id)
-  currentRow.value = row
+  selectedApproval.value = row
   triggerRowIndex.value = rowIndex
   focusedRowEl.value = (document.querySelectorAll('.data-table-row')[rowIndex] as HTMLElement) ?? null
-  drawerVisible.value = true
+  sheetVisible.value = true
 }
 
-const onDrawerClosed = (): void => {
+const onSheetClosed = (): void => {
   // 条13：抽屉关闭焦点回触发发行（或下一行）
   const target = focusedRowEl.value ?? null
   if (target && typeof target.focus === 'function') {
     target.focus()
   }
-  currentRow.value = null
+  selectedApproval.value = null
   triggerRowIndex.value = -1
 }
 
 const onApprovalActionDone = (): void => {
   // 审批完成（同意/驳回/撤回/提交）后刷新列表 + 关抽屉
-  drawerVisible.value = false
+  sheetVisible.value = false
   fetchList()
 }
 
@@ -716,10 +752,10 @@ const confirmQuickReject = async (): Promise<void> => {
 }
 
 // 抽屉侧 ApprovalProcessGeneric REJECTED 态「修改并重新提交」CTA（Important #2）
-// 事件无 payload，目标行取 currentRow（抽屉当前展示行）。
+// 事件无 payload，目标行取 selectedApproval（抽屉当前展示行）。
 const onResubmit = (): void => {
-  if (currentRow.value == null) return
-  handleResubmit(currentRow.value)
+  if (selectedApproval.value == null) return
+  handleResubmit(selectedApproval.value)
 }
 
 // 键盘快捷键（条9）：J/K 上下行、Enter 开抽屉、Esc 关抽屉
@@ -727,9 +763,9 @@ const onResubmit = (): void => {
 const onKeydown = (e: KeyboardEvent): void => {
   const target = e.target as HTMLElement | null
   if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
-  if (drawerVisible.value) {
+  if (sheetVisible.value) {
     if (e.key === 'Escape') {
-      drawerVisible.value = false
+      sheetVisible.value = false
     }
     return
   }
@@ -813,31 +849,6 @@ watch(rows, async () => {
   &:focus,
   &:focus-visible {
     background: $wolf-bg-hover-v2;
-  }
-}
-
-// 抽屉内信息层级（条7 固化）
-.drawer-body {
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-md-v2;
-  height: 100%;
-}
-
-.drawer-decisions {
-  // 决策字段置顶
-  flex-shrink: 0;
-}
-
-.drawer-approval {
-  // timeline + 操作区
-  flex: 1 1 auto;
-  // 移动端操作区 sticky 吸底（条11）
-  :deep(.approval-process-generic__actions) {
-    position: sticky;
-    bottom: 0;
-    background: $wolf-bg-card-v2;
-    padding-bottom: env(safe-area-inset-bottom, 0);
   }
 }
 
