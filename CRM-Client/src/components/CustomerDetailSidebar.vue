@@ -1,138 +1,105 @@
-<template>
-  <aside class="customer-detail-sidebar">
-    <!-- 导航主体 -->
-    <div class="sidebar-body">
-      <!-- 核心导航 -->
-      <div class="nav-section">
-        <div class="nav-section-title">导航</div>
-
-        <!-- ✅ P0: 使用 el-tooltip 显示中文名（icon-only 模式） -->
-        <!-- ✅ Task 1: 标准导航项（移除客户档案特殊处理） -->
-        <el-tooltip
-          v-for="nav in navItems"
-          :key="nav.key"
-          :content="nav.label"
-          placement="right"
-          :show-after="300"
-          effect="light"
-        >
-          <div
-            class="nav-item"
-            :class="{ active: activeNav === nav.key }"
-            tabindex="0"
-            :aria-label="nav.label"
-            @click="handleNavClick(nav.key)"
-            @keydown.enter="handleNavClick(nav.key)"
-          >
-            <el-icon class="nav-icon">
-              <component :is="nav.icon" />
-            </el-icon>
-          </div>
-        </el-tooltip>
-      </div>
-
-      <!-- 分隔线 -->
-      <div class="nav-divider"></div>
-
-      <!-- 快捷操作 -->
-      <div class="nav-section">
-        <div class="nav-section-title">快捷操作</div>
-
-        <!-- ✅ P0: 快捷操作也使用 el-tooltip -->
-        <el-tooltip
-          v-for="action in quickActions"
-          :key="action.key"
-          :content="'新建' + action.label"
-          placement="right"
-          :show-after="300"
-          effect="light"
-        >
-          <div
-            class="nav-action"
-            tabindex="0"
-            :aria-label="'新建' + action.label"
-            @click="handleActionClick(action)"
-            @keydown.enter="handleActionClick(action)"
-          >
-            <el-icon class="nav-action-icon">
-              <!-- ✅ Task 2: 使用差异化图标 -->
-              <component :is="action.icon" />
-            </el-icon>
-            <!-- ✅ icon-only 模式：移除 nav-action-label -->
-          </div>
-        </el-tooltip>
-      </div>
-    </div>
-  </aside>
-</template>
-
 <script setup lang="ts">
-import { ref, defineProps, defineEmits } from 'vue'
-import { useRouter } from 'vue-router'
+/**
+ * CustomerDetailSidebar.vue - 客户详情侧边栏导航
+ *
+ * 改造：使用 shadcn-vue Sidebar 组件替代 Element Plus
+ */
 import {
-  ChatDotRound,
-  User,
-  TrendCharts,
-  Document,
-  Money,
-  Tickets,
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem
+} from '@/components/ui/sidebar'
+import {
+  MessageSquare,
+  Users,
+  TrendingUp,
+  FileText,
+  CreditCard,
+  Receipt,
   Key
-} from '@element-plus/icons-vue'
+} from 'lucide-vue-next'
+import type { LucideIcon } from 'lucide-vue-next'
 
-// Props 定义
+// ==================== Props & Emits ====================
 interface Props {
-  customerId: number
+  activePanel: string
 }
 
 const props = defineProps<Props>()
+const emit = defineEmits<{
+  'update:activePanel': [value: string]
+}>()
 
-// Emits 定义
-interface Emits {
-  (e: 'nav-change', navKey: string): void
-  (e: 'show-add-follow-up' | 'show-add-contact'): void
+// ==================== 导航项配置 ====================
+interface NavItem {
+  key: string
+  label: string
+  icon: LucideIcon
 }
 
-const emit = defineEmits<Emits>()
-
-const router = useRouter()
-const activeNav = ref<string>('followup')  // ✅ Task 1: 默认激活跟进（移除profile后）
-
-// 导航项定义（✅ Task 1: 移除客户档案项，避免导航层级混淆）
-const navItems = [
-  { key: 'followup', label: '跟进', icon: ChatDotRound },
-  { key: 'contacts', label: '联系人', icon: User },
-  { key: 'opportunities', label: '商机', icon: TrendCharts },
-  { key: 'contracts', label: '合同', icon: Document },
-  { key: 'payments', label: '回款', icon: Money },
-  { key: 'invoices', label: '发票', icon: Tickets },
-  { key: 'license-management', label: 'License 管理', icon: Key }
+const navItems: NavItem[] = [
+  { key: 'followup', label: '跟进记录', icon: MessageSquare },
+  { key: 'contacts', label: '联系人', icon: Users },
+  { key: 'opportunities', label: '商机', icon: TrendingUp },
+  { key: 'contracts', label: '合同', icon: FileText },
+  { key: 'payments', label: '回款', icon: CreditCard },
+  { key: 'invoices', label: '发票', icon: Receipt },
+  { key: 'license-management', label: 'License', icon: Key }
 ]
 
-// 快捷操作定义（✅ P0: 使用 SVG 图标替代文字）
-// ✅ Task 2: 为每个快捷操作添加差异化图标
-const quickActions = [
-  { key: 'addFollowUp', label: '跟进', icon: ChatDotRound, emitKey: 'show-add-follow-up' as const },
-  { key: 'addContact', label: '联系人', icon: User, emitKey: 'show-add-contact' as const },
-  { key: 'createOpportunity', label: '商机', icon: TrendCharts, route: `/customers/${props.customerId}/opportunities/create` },
-  { key: 'createContract', label: '合同', icon: Document, route: `/contracts/create?customerId=${props.customerId}` }
-]
-
-// 导航切换
-function handleNavClick(navKey: string): void {
-  activeNav.value = navKey
-  emit('nav-change', navKey)
+// ==================== Methods ====================
+const handleNavClick = (key: string): void => {
+  emit('update:activePanel', key)
 }
 
-// 快捷操作点击（✅ P0: 简化逻辑）
-function handleActionClick(action: { emitKey?: 'show-add-follow-up' | 'show-add-contact'; route?: string }): void {
-  if (action.route !== undefined && action.route !== '') {
-    router.push(action.route)
-  } else if (action.emitKey !== undefined) {
-    emit(action.emitKey)
-  }
+const isActive = (key: string): boolean => {
+  return props.activePanel === key
 }
 </script>
 
+<template>
+  <Sidebar class="border-r-0">
+    <SidebarContent>
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            <SidebarMenuItem v-for="item in navItems" :key="item.key">
+              <SidebarMenuButton
+                :is-active="isActive(item.key)"
+                @click="handleNavClick(item.key)"
+              >
+                <component :is="item.icon" class="w-4 h-4" />
+                <span>{{ item.label }}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </SidebarContent>
+  </Sidebar>
+</template>
+
 <style scoped lang="scss">
-@use './CustomerDetailSidebar.scss';
+@use '@/styles/variables-v2.scss' as *;
+
+// shadcn-vue Sidebar 样式覆盖
+:deep([data-sidebar="menu-button"]) {
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+
+  &:hover {
+    background: $wolf-bg-hover-v2;
+    color: $wolf-text-primary-v2;
+  }
+
+  &[data-active="true"] {
+    background: $wolf-primary-light-v2;
+    color: $wolf-primary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
+  }
+}
 </style>
