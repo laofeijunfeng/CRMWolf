@@ -20,6 +20,15 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import CustomerDetailSidebar from '@/components/CustomerDetailSidebar.vue'
 import { Plus, Pencil } from 'lucide-vue-next'
+import { handleApiError } from '@/utils/errorHandler'
+import customerApi, { type CustomerDetailResponse } from '@/api/customer'
+import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
+import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
+import contractApi, { type ContractListResponse } from '@/api/contract'
+import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
+import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
+import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
+import { getCustomerScore, type ScoreResponse } from '@/api/score'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -36,6 +45,16 @@ const emit = defineEmits<{
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
 const activePanel = ref('followup')  // Sidebar 导航切换
+
+// ==================== Data Loading State ====================
+const customer = ref<CustomerDetailResponse | null>(null)
+const score = ref<ScoreResponse | null>(null)
+const followUps = ref<CustomerFollowUpResponse[]>([])
+const opportunities = ref<OpportunityListResponse[]>([])
+const contracts = ref<ContractListResponse[]>([])
+const invoiceTitles = ref<InvoiceTitleResponse[]>([])
+const licenseApplications = ref<LicenseApplicationResponse[]>([])
+const deployments = ref<DeploymentInfoResponse[]>([])
 
 // ==================== Mobile Navigation ====================
 interface MobileNavItem {
@@ -77,14 +96,60 @@ const setActivePanel = (panel: string): void => {
   activePanel.value = panel
 }
 
+// ==================== Data Loading ====================
+const loadAllData = async (customerId: number): Promise<void> => {
+  loading.value = true
+  try {
+    const [
+      customerDetail,
+      scoreData,
+      followUpsData,
+      opportunitiesData,
+      contractsData,
+      invoiceTitlesData,
+      licenseApplicationsData,
+      deploymentsData
+    ] = await Promise.all([
+      customerApi.getCustomerDetail(customerId),
+      getCustomerScore(customerId).catch(() => null),
+      customerFollowUpApi.getFollowUps(customerId).catch(() => []),
+      opportunityApi.getAvailableForContract(customerId).catch(() => []),
+      contractApi.getCustomerContracts(customerId).catch(() => []),
+      invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
+      licenseApplicationApi.list(customerId).catch(() => []),
+      deploymentApi.list(customerId).catch(() => [])
+    ])
+
+    customer.value = customerDetail
+    score.value = scoreData
+    followUps.value = followUpsData
+    opportunities.value = opportunitiesData
+    contracts.value = contractsData
+    invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
+    licenseApplications.value = licenseApplicationsData
+    deployments.value = deploymentsData
+  } catch (error) {
+    handleApiError(error, '加载客户详情')
+  } finally {
+    loading.value = false
+  }
+}
+
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
-    // TODO: 加载客户详情数据
-    loading.value = true  // 占位使用，Task 3 实现真实加载
-    loading.value = false
-    // 重置为默认面板
+    loadAllData(props.customerId)
     setActivePanel('followup')
+  } else if (!visible) {
+    // 清理状态
+    customer.value = null
+    score.value = null
+    followUps.value = []
+    opportunities.value = []
+    contracts.value = []
+    invoiceTitles.value = []
+    licenseApplications.value = []
+    deployments.value = []
   }
 })
 </script>
