@@ -10,11 +10,11 @@
  * 不直接调 API（COMPONENTS.md「组件禁直接调 API」），统一通过 useApprovalStore()
  * 的 actions：fetchDetail / submitEntity / approveEntity / cancelEntity。
  *
- * 五态覆盖（C-DSG-4）：Loading(el-skeleton) / Empty(WolfEmpty 草稿态 CTA) /
- * Error(ErrorState 通用/forbidden) / Success(ElMessage) / Conflict(409 重载保输入)。
+ * 五态覆盖（C-DSG-4）：Loading(Skeleton) / Empty(WolfEmpty 草稿态 CTA) /
+ * Error(ErrorState 通用/forbidden) / Success(toast) / Conflict(409 重载保输入)。
  *
  * C-DSG-7 P0 已落：
- *   条2 驳回弹窗 reason 必填 + el-form rule；同意 comment 可空（直接按钮）。
+ *   条2 驳回弹窗 reason 必填；同意 comment 可空（直接按钮）。
  *   条3 按钮 action pending 期间 :loading + :disabled，防双击。
  *   条8 乐观锁冲突→保留 rejectForm.reason→warning toast→重载 detail；
  *       重载后非 PENDING→禁用提交并提示「该审批已由他人处理，无需重复操作」。
@@ -24,16 +24,18 @@
  */
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import type { PropType } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import type { PropType, Component } from 'vue'
+import { toast } from 'vue-sonner'
 import {
-  Promotion,
-  CircleCheckFilled,
-  CircleCloseFilled,
-  RefreshLeft,
+  Send,
+  CheckCircle2,
+  XCircle,
+  RotateCcw,
   Download,
-  Document
-} from '@element-plus/icons-vue'
+  FileText,
+  Loader2,
+  AlertTriangle
+} from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useApprovalStore } from '@/stores/approval'
 import type {
@@ -44,11 +46,32 @@ import type {
 import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
 import ErrorState from './ErrorState.vue'
 import WolfEmpty from './WolfEmpty.vue'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { Skeleton } from '@/components/ui/skeleton'
 import InvoiceFileUpload from './InvoiceFileUpload.vue'
 import { getInvoiceFileUrl } from '@/api/fileUpload'
 
 interface RecordVisual {
-  icon: typeof Promotion
+  icon: Component
   actionLabel: string
   textVar: string
 }
@@ -57,17 +80,18 @@ const RECORD_VISUAL: Record<
   'SUBMIT' | 'APPROVE' | 'REJECT' | 'ROLLBACK' | 'CANCEL',
   RecordVisual
 > = {
-  SUBMIT: { icon: Promotion, actionLabel: '提交', textVar: '--wolf-approval-pending-text' },
-  APPROVE: { icon: CircleCheckFilled, actionLabel: '同意', textVar: '--wolf-approval-approved-text' },
-  REJECT: { icon: CircleCloseFilled, actionLabel: '驳回', textVar: '--wolf-approval-rejected-text' },
-  ROLLBACK: { icon: RefreshLeft, actionLabel: '撤回', textVar: '--wolf-approval-cancelled-text' },
-  CANCEL: { icon: RefreshLeft, actionLabel: '撤回', textVar: '--wolf-approval-cancelled-text' }
+  SUBMIT: { icon: Send, actionLabel: '提交', textVar: '--wolf-approval-pending-text' },
+  APPROVE: { icon: CheckCircle2, actionLabel: '同意', textVar: '--wolf-approval-approved-text' },
+  REJECT: { icon: XCircle, actionLabel: '驳回', textVar: '--wolf-approval-rejected-text' },
+  ROLLBACK: { icon: RotateCcw, actionLabel: '撤回', textVar: '--wolf-approval-cancelled-text' },
+  CANCEL: { icon: RotateCcw, actionLabel: '撤回', textVar: '--wolf-approval-cancelled-text' }
 }
 
 const SUBMIT_PERMISSION: Record<EntityType, string> = {
   CONTRACT: 'contract:submit',
   PAYMENT: 'payment:submit',
-  INVOICE: 'invoice:submit'
+  INVOICE: 'invoice:submit',
+  LICENSE: 'license:submit'
 }
 
 const props = defineProps({
@@ -107,6 +131,7 @@ const loadError = ref<boolean>(false)
 const notFound = ref<boolean>(false)
 const actionPending = ref<boolean>(false)
 const rejectDialogVisible = ref<boolean>(false)
+const withdrawDialogVisible = ref<boolean>(false)
 const rejectForm = ref<{ reason: string }>({ reason: '' })
 const isWide = ref<boolean>(true)
 const conflictNotice = ref<string>('')
@@ -126,10 +151,6 @@ const isLocked = computed<boolean>(() => conflictNotice.value.length > 0)
 const records = computed<ApprovalRecord[]>(() => detail.value?.records ?? [])
 
 const submitPermissionCode = computed<string>(() => SUBMIT_PERMISSION[props.entityType])
-
-const rejectFormRule = computed<{ required: boolean; message: string; trigger: string }[]>(
-  () => [{ required: true, message: '请填写驳回理由，提交人将据此修改', trigger: 'blur' }]
-)
 
 // Task 6: 发票审批时是否显示文件上传组件
 // 条件：entityType === 'INVOICE' && canApprove && status === 'PENDING_REVIEW'
@@ -173,7 +194,7 @@ const handleSubmit = async (): Promise<void> => {
   actionPending.value = true
   try {
     await store.submitEntity(props.entityType, props.entityId)
-    ElMessage.success('已提交审批，等待审批人处理')
+    toast.success('已提交审批，等待审批人处理')
     emit('submitted')
     await loadDetail()
   } catch {
@@ -191,11 +212,11 @@ const handleApprove = async (): Promise<void> => {
     await store.approveEntity(
       props.entityType, props.entityId, 'APPROVE', '', detail.value.updated_time
     )
-    ElMessage.success('已同意')
+    toast.success('已同意')
     emit('approved')
   } catch (err) {
     if (isAxiosStatus(err, 409)) {
-      ElMessage.warning('该审批已被其他人处理，已为你刷新最新状态')
+      toast.warning('该审批已被其他人处理，已为你刷新最新状态')
       await loadDetail()
       if (!isPending.value) {
         conflictNotice.value = '该审批已由他人处理，无需重复操作'
@@ -214,9 +235,9 @@ const openRejectDialog = (): void => {
 
 const confirmReject = async (): Promise<void> => {
   if (actionPending.value || isLocked.value) return
-  // 同步必填守卫（条2）：el-form rule 仅做视觉提示，action 入口必须先校验
+  // 同步必填守卫（条2）：action 入口必须先校验
   if (!rejectForm.value.reason.trim()) {
-    ElMessage.warning('请填写驳回理由，提交人将据此修改')
+    toast.warning('请填写驳回理由，提交人将据此修改')
     return
   }
   if (detail.value == null) return
@@ -226,14 +247,14 @@ const confirmReject = async (): Promise<void> => {
       props.entityType, props.entityId, 'REJECT',
       rejectForm.value.reason, detail.value.updated_time
     )
-    ElMessage.success('已驳回，申请人可修改后重新提交')
+    toast.success('已驳回，申请人可修改后重新提交')
     rejectDialogVisible.value = false
     rejectForm.value.reason = ''
     emit('rejected')
   } catch (err) {
     if (isAxiosStatus(err, 409)) {
       // C-DSG-7 条8：不清空 reason、不关弹窗、提示并重载
-      ElMessage.warning('该审批已被他人处理，你的填写已保留')
+      toast.warning('该审批已被他人处理，你的填写已保留')
       await loadDetail()
       if (!isPending.value) {
         conflictNotice.value = '该审批已由他人处理，无需重复操作'
@@ -245,22 +266,17 @@ const confirmReject = async (): Promise<void> => {
   }
 }
 
-const handleWithdraw = async (): Promise<void> => {
+const openWithdrawDialog = (): void => {
+  withdrawDialogVisible.value = true
+}
+
+const confirmWithdraw = async (): Promise<void> => {
   if (actionPending.value || isLocked.value || !isPending.value) return
-  try {
-    await ElMessageBox.confirm(
-      '撤回后审批中止，需重新提交。确定撤回？',
-      '撤回审批',
-      { type: 'warning' }
-    )
-  } catch {
-    // 用户取消，不做任何事
-    return
-  }
   actionPending.value = true
   try {
     await store.cancelEntity(props.entityType, props.entityId)
-    ElMessage.success('已撤回')
+    toast.success('已撤回')
+    withdrawDialogVisible.value = false
     emit('withdrawn')
     await loadDetail()
   } catch {
@@ -288,7 +304,7 @@ const handleFileUploaded = (file_path: string, invoice_number: string): void => 
 
 // Task 6: 发票文件上传错误处理
 const handleUploadError = (message: string): void => {
-  ElMessage.error(message.length > 0 ? message : '文件上传失败')
+  toast.error(message.length > 0 ? message : '文件上传失败')
 }
 
 // Task 6: 发票文件下载
@@ -329,7 +345,10 @@ onMounted(async (): Promise<void> => {
 <template>
   <div class="approval-process-generic">
     <!-- 加载骨架（C-DSG-4 Loading） -->
-    <el-skeleton v-if="loadError === false && notFound === false && detail === null" :rows="3" animated />
+    <div v-if="loadError === false && notFound === false && detail === null" class="space-y-4">
+      <Skeleton class="h-32 w-full" />
+      <Skeleton class="h-48 w-full" />
+    </div>
 
     <!-- 错误态（C-DSG-4 Error） -->
     <ErrorState
@@ -338,9 +357,9 @@ onMounted(async (): Promise<void> => {
       description="可点击下方按钮重新加载，若持续失败请联系管理员"
     >
       <template #action>
-        <el-button data-testid="reload-detail-btn" type="primary" @click="loadDetail">
+        <Button data-testid="reload-detail-btn" @click="loadDetail">
           重新加载
-        </el-button>
+        </Button>
       </template>
     </ErrorState>
 
@@ -351,21 +370,20 @@ onMounted(async (): Promise<void> => {
       description="提交后审批人将收到待办通知"
     >
       <template v-if="isSubmitter" #action>
-        <el-button
+        <Button
           v-permission="submitPermissionCode"
           data-testid="submit-approval-btn"
-          type="primary"
-          :loading="actionPending"
           :disabled="actionPending"
           @click="handleSubmit"
         >
+          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
           提交审批
-        </el-button>
+        </Button>
       </template>
     </WolfEmpty>
 
     <!-- 详情态：PENDING / APPROVED / REJECTED / CANCELLED -->
-    <div v-else class="approval-process-generic__body">
+    <div v-else-if="detail" class="approval-process-generic__body">
       <!-- 标题 + 状态徽章 -->
       <div class="approval-process-generic__header">
         <span class="approval-process-generic__title">{{ detail?.flow_name ?? '审批进度' }}</span>
@@ -374,7 +392,7 @@ onMounted(async (): Promise<void> => {
 
       <!-- 冲突锁定提示（C-DSG-7 条8：重载后已由他人终结） -->
       <div v-if="isLocked" class="approval-process-generic__conflict" role="alert">
-        <el-icon><CircleCloseFilled /></el-icon>
+        <AlertTriangle class="h-4 w-4" />
         <span>{{ conflictNotice }}</span>
       </div>
 
@@ -387,17 +405,17 @@ onMounted(async (): Promise<void> => {
       <!-- Task 6: 已上传发票文件显示（仅 INVOICE 类型） -->
       <div v-if="hasInvoiceFile" class="approval-process-generic__file-section">
         <div class="file-header">
-          <el-icon><Document /></el-icon>
+          <FileText class="h-4 w-4" />
           <span class="file-title">发票文件</span>
         </div>
         <div class="file-info">
           <span v-if="detail?.invoice_number" class="invoice-number">
             发票号码：{{ detail.invoice_number }}
           </span>
-          <el-button link type="primary" size="small" @click="downloadInvoiceFile">
-            <el-icon><Download /></el-icon>
+          <Button variant="link" size="sm" @click="downloadInvoiceFile">
+            <Download class="mr-1 h-4 w-4" />
             下载发票文件
-          </el-button>
+          </Button>
         </div>
       </div>
 
@@ -413,9 +431,10 @@ onMounted(async (): Promise<void> => {
           class="approval-process-generic__timeline-item"
           :style="{ color: `var(${RECORD_VISUAL[record.action ?? 'ROLLBACK'].textVar})` }"
         >
-          <el-icon class="approval-process-generic__timeline-icon" :size="18">
-            <component :is="RECORD_VISUAL[record.action ?? 'ROLLBACK'].icon" />
-          </el-icon>
+          <component
+            :is="RECORD_VISUAL[record.action ?? 'ROLLBACK'].icon"
+            class="approval-process-generic__timeline-icon"
+          />
           <div class="approval-process-generic__timeline-content">
             <span class="approval-process-generic__timeline-action">
               {{ RECORD_VISUAL[record.action ?? 'ROLLBACK'].actionLabel }}
@@ -440,7 +459,7 @@ onMounted(async (): Promise<void> => {
           <InvoiceFileUpload
             ref="invoiceFileUploadRef"
             :invoice-id="entityId"
-            :approval-status="status"
+            :approval-status="(status as string | undefined)"
             @uploaded="handleFileUploaded"
             @error="handleUploadError"
             @rejected="() => { emit('rejected'); loadDetail() }"
@@ -450,140 +469,168 @@ onMounted(async (): Promise<void> => {
 
         <!-- 原有操作按钮（非 INVOICE 或非审批状态时显示） -->
         <template v-if="!showInvoiceFileUpload">
-          <el-button
+          <Button
             v-if="isSubmitter && isPending"
+            variant="outline"
             data-testid="withdraw-btn"
-            :loading="actionPending"
             :disabled="actionPending || isLocked"
-            @click="handleWithdraw"
+            @click="openWithdrawDialog"
           >
+            <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
             撤回审批
-          </el-button>
-          <el-button
+          </Button>
+          <Button
             v-if="isSubmitter && isRejected"
             data-testid="resubmit-btn"
-            type="primary"
-            :loading="actionPending"
             :disabled="actionPending || isLocked"
             @click="handleResubmit"
           >
+            <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
             修改并重新提交
-          </el-button>
-          <el-button
+          </Button>
+          <Button
             v-if="canApprove && isPending"
             data-testid="approve-btn"
-            type="primary"
-            :loading="actionPending"
             :disabled="actionPending || isLocked"
             @click="handleApprove"
           >
+            <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
             同意
-          </el-button>
-          <el-button
+          </Button>
+          <Button
             v-if="canApprove && isPending"
+            variant="destructive"
             data-testid="reject-btn"
-            type="danger"
-            :loading="actionPending"
             :disabled="actionPending || isLocked"
             @click="openRejectDialog"
           >
+            <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
             驳回
-          </el-button>
+          </Button>
         </template>
       </div>
 
-      <!-- 驳回弹窗：reason 必填 + el-form rule，C-DSG-7 条2 -->
-      <el-dialog
-        v-model="rejectDialogVisible"
-        data-testid="reject-dialog"
-        title="驳回审批"
-        width="480px"
-        :close-on-click-modal="false"
-      >
-        <el-form ref="rejectFormRef" :model="rejectForm" :rules="rejectFormRule" label-position="top">
-          <el-form-item label="驳回理由" prop="reason" required>
-            <el-input
+      <!-- 驳回弹窗：reason 必填，C-DSG-7 条2 -->
+      <Dialog v-model:open="rejectDialogVisible">
+        <DialogContent class="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>驳回审批</DialogTitle>
+            <DialogDescription>
+              请填写驳回理由，提交人将据此修改。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div class="space-y-4">
+            <Textarea
               v-model="rejectForm.reason"
               data-testid="reject-reason"
-              type="textarea"
-              :rows="4"
               placeholder="请填写驳回理由，提交人将据此修改"
-              maxlength="500"
-              show-word-limit
+              :rows="4"
+              :maxlength="500"
             />
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button
-            data-testid="reject-cancel-btn"
-            :disabled="actionPending"
-            @click="rejectDialogVisible = false"
-          >
-            取消
-          </el-button>
-          <el-button
-            data-testid="reject-confirm-btn"
-            type="primary"
-            :loading="actionPending"
-            :disabled="actionPending || isLocked"
-            @click="confirmReject"
-          >
-            确定
-          </el-button>
-        </template>
-      </el-dialog>
+            <p class="text-sm text-muted-foreground text-right">
+              {{ rejectForm.reason.length }} / 500
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" @click="rejectDialogVisible = false">
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="reject-confirm-btn"
+              :disabled="!rejectForm.reason.trim() || actionPending"
+              @click="confirmReject"
+            >
+              <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
+              确定
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <!-- 撤回确认弹窗 -->
+      <AlertDialog v-model:open="withdrawDialogVisible">
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>撤回审批</AlertDialogTitle>
+            <AlertDialogDescription>
+              撤回后审批中止，需重新提交。确定撤回？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel @click="withdrawDialogVisible = false">
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              :disabled="actionPending"
+              @click="confirmWithdraw"
+            >
+              <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
+              确定撤回
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   </div>
 </template>
 
 <style scoped lang="scss">
-@import '@/styles/variables.scss';
+@use '@/styles/variables-v2.scss' as *;
 
 .approval-process-generic {
   width: 100%;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-card-padding;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-v2;
+  padding: $wolf-card-padding-v2;
+}
+
+.approval-process-generic__body {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-md-v2;
 }
 
 .approval-process-generic__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-sm;
-  margin-bottom: $wolf-space-md;
+  gap: $wolf-space-sm-v2;
+  margin-bottom: $wolf-space-md-v2;
 }
 
 .approval-process-generic__title {
-  font-family: $wolf-font-display;
-  font-size: $wolf-font-size-body;
-  font-weight: $wolf-font-weight-medium;
-  color: $wolf-text-primary;
+  font-family: $wolf-font-display-v2;
+  font-size: $wolf-font-size-title-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-primary-v2;
 }
 
 .approval-process-generic__conflict {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm;
-  padding: $wolf-space-sm $wolf-space-md;
-  background: var(--wolf-approval-rejected-bg, $wolf-approval-rejected-bg);
-  color: var(--wolf-approval-rejected-text, $wolf-approval-rejected-text);
-  border-radius: $wolf-radius-sm;
-  font-size: $wolf-font-size-auxiliary;
-  margin-bottom: $wolf-space-md;
+  gap: $wolf-space-sm-v2;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  background: $wolf-danger-bg-v2;
+  color: $wolf-danger-text-v2;
+  border-radius: $wolf-radius-sm-v2;
+  font-size: $wolf-font-size-auxiliary-v2;
+  margin-bottom: $wolf-space-md-v2;
 }
 
 .approval-process-generic__current-node {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs;
-  margin-bottom: $wolf-space-md;
-  font-size: $wolf-font-size-auxiliary;
-  color: $wolf-text-tertiary;
+  gap: $wolf-space-xs-v2;
+  margin-bottom: $wolf-space-md-v2;
+  font-size: $wolf-font-size-auxiliary-v2;
+  color: $wolf-text-tertiary-v2;
 
   .approval-process-generic__current-node-value {
-    color: $wolf-text-secondary;
-    font-weight: $wolf-font-weight-medium;
+    color: $wolf-text-secondary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
   }
 }
 
@@ -596,7 +643,7 @@ onMounted(async (): Promise<void> => {
   &.is-wide {
     display: flex;
     align-items: flex-start;
-    gap: $wolf-space-md;
+    gap: $wolf-space-md-v2;
     flex-wrap: wrap;
   }
 
@@ -604,14 +651,14 @@ onMounted(async (): Promise<void> => {
   &:not(.is-wide) {
     display: flex;
     flex-direction: column;
-    gap: $wolf-space-md;
+    gap: $wolf-space-md-v2;
   }
 }
 
 .approval-process-generic__timeline-item {
   display: flex;
   align-items: flex-start;
-  gap: $wolf-space-sm;
+  gap: $wolf-space-sm-v2;
 
   .is-wide & {
     flex: 1 1 200px;
@@ -623,44 +670,46 @@ onMounted(async (): Promise<void> => {
 
 .approval-process-generic__timeline-icon {
   flex-shrink: 0;
+  width: 18px;
+  height: 18px;
 }
 
 .approval-process-generic__timeline-content {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: $wolf-font-size-auxiliary;
-  line-height: $wolf-line-height-body;
+  font-size: $wolf-font-size-auxiliary-v2;
+  line-height: $wolf-line-height-body-v2;
 }
 
 .approval-process-generic__timeline-action {
-  font-weight: $wolf-font-weight-medium;
+  font-weight: $wolf-font-weight-medium-v2;
   color: inherit;
 }
 
 .approval-process-generic__timeline-user {
-  color: $wolf-text-secondary;
+  color: $wolf-text-secondary-v2;
 }
 
 .approval-process-generic__timeline-time {
-  color: $wolf-text-placeholder;
-  font-family: $wolf-font-mono;
-  font-size: $wolf-font-size-caption;
+  color: $wolf-text-placeholder-v2;
+  font-family: $wolf-font-mono-v2;
+  font-size: $wolf-font-size-caption-v2;
 }
 
 .approval-process-generic__timeline-comment {
-  color: $wolf-text-secondary;
-  margin-top: $wolf-space-xs;
+  color: $wolf-text-secondary-v2;
+  margin-top: $wolf-space-xs-v2;
 }
 
 .approval-process-generic__actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: $wolf-button-gap;
-  margin-top: $wolf-space-lg;
-  padding-top: $wolf-space-md;
-  border-top: 1px solid $wolf-border-light;
+  gap: $wolf-space-sm-v2;
+  margin-top: $wolf-space-lg-v2;
+  padding-top: $wolf-space-md-v2;
+  border-top: 1px solid $wolf-border-light-v2;
 }
 
 // Task 6: 发票文件上传区域样式
@@ -670,32 +719,32 @@ onMounted(async (): Promise<void> => {
 
 // Task 6: 已上传文件显示区域样式
 .approval-process-generic__file-section {
-  background: $wolf-bg-hover;
-  border-radius: $wolf-radius-sm;
-  padding: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
+  background: $wolf-bg-hover-v2;
+  border-radius: $wolf-radius-sm-v2;
+  padding: $wolf-space-md-v2;
+  margin-bottom: $wolf-space-md-v2;
 
   .file-header {
     display: flex;
     align-items: center;
-    gap: $wolf-space-xs;
-    margin-bottom: $wolf-space-sm;
-    color: $wolf-text-secondary;
-    font-weight: $wolf-font-weight-medium;
+    gap: $wolf-space-xs-v2;
+    margin-bottom: $wolf-space-sm-v2;
+    color: $wolf-text-secondary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
   }
 
   .file-title {
-    font-size: $wolf-font-size-body;
+    font-size: $wolf-font-size-body-v2;
   }
 
   .file-info {
     display: flex;
     align-items: center;
-    gap: $wolf-space-md;
+    gap: $wolf-space-md-v2;
 
     .invoice-number {
-      font-size: $wolf-font-size-caption;
-      color: $wolf-text-tertiary;
+      font-size: $wolf-font-size-caption-v2;
+      color: $wolf-text-tertiary-v2;
     }
   }
 }
