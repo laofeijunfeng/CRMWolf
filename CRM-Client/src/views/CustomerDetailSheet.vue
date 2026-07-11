@@ -17,9 +17,10 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import CustomerDetailSidebar from '@/components/CustomerDetailSidebar.vue'
-import { Plus, Pencil } from 'lucide-vue-next'
+import { Plus, Pencil, Flame, Zap, CheckCircle, TrendingDown, HelpCircle } from 'lucide-vue-next'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerDetailResponse } from '@/api/customer'
 import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
@@ -135,6 +136,33 @@ const loadAllData = async (customerId: number): Promise<void> => {
   }
 }
 
+// ==================== Score Helpers ====================
+const getScoreIcon = (scoreValue: number | null): typeof Flame => {
+  if (scoreValue === null) return HelpCircle
+  if (scoreValue >= 80) return Flame
+  if (scoreValue >= 60) return Zap
+  if (scoreValue >= 40) return CheckCircle
+  return TrendingDown
+}
+
+const getScoreColorValue = (scoreValue: number | null): string => {
+  if (scoreValue === null) return '#94A3B8'
+  if (scoreValue >= 80) return '#10B981'
+  if (scoreValue >= 60) return '#F59E0B'
+  if (scoreValue >= 40) return '#3B82F6'
+  return '#64748B'
+}
+
+const getScoreLevelText = (scoreValue: number | null): string => {
+  if (scoreValue === null) return '未知'
+  if (scoreValue >= 80) return '高'
+  if (scoreValue >= 60) return '中'
+  if (scoreValue >= 40) return '低'
+  return '危险'
+}
+
+const scoreDetailsDialogOpen = ref(false)
+
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
@@ -248,6 +276,52 @@ watch(() => props.visible, (visible): void => {
                     <div class="attribute-item">
                       <div class="attribute-label">最后修改</div>
                       <div class="attribute-value">-</div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <!-- 热力值卡片 -->
+            <Card v-if="score" class="score-card">
+              <CardContent class="p-4">
+                <div class="flex items-center gap-4">
+                  <div class="flex-shrink-0">
+                    <component :is="getScoreIcon(score.score)" class="w-8 h-8" :style="{ color: getScoreColorValue(score.score) }" />
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class="text-2xl font-bold text-wolf-text-primary-v2">
+                        {{ score.score ?? '--' }}
+                      </span>
+                      <span class="text-sm text-wolf-text-tertiary-v2 bg-wolf-bg-muted-v2 px-2 py-0.5 rounded">
+                        {{ getScoreLevelText(score.score) }}
+                      </span>
+                    </div>
+                    <Progress
+                      :model-value="score.score || 0"
+                      class="h-2"
+                      :style="{ '--progress-background': getScoreColorValue(score.score) }"
+                    />
+                    <div class="flex items-center gap-2 mt-2 text-xs text-wolf-text-tertiary-v2">
+                      <template v-for="(detail, idx) in score.details?.slice(0, 2)" :key="detail.id">
+                        <span>
+                          {{ detail.factor_name }}:
+                          <span :class="detail.score_change >= 0 ? 'text-wolf-success-text-v2' : 'text-wolf-danger-text-v2'">
+                            {{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}
+                          </span>
+                        </span>
+                        <span v-if="idx < 1 && score.details?.length > 1">·</span>
+                      </template>
+                      <Button
+                        v-if="score.details?.length > 0"
+                        variant="link"
+                        size="sm"
+                        class="h-auto p-0 text-xs"
+                        @click="scoreDetailsDialogOpen = true"
+                      >
+                        详情
+                      </Button>
                     </div>
                   </div>
                 </div>
