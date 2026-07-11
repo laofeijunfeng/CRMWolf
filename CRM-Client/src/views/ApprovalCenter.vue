@@ -1,24 +1,24 @@
 <!--
-  FinanceApprovalCenter — 财务审批中心（Phase C Task C3）
+  ApprovalCenter — 审批中心
 
-  取代自写按钮的 FinanceInvoiceApprovals / FinancePaymentConfirmations（本期加
-  deprecation 注释指向本组件，不删文件以免破坏既有 import）。
+  基于 V2 设计规范重构：
+  - ContextTabs（待我审批/我已处理/我提交的，权限驱动）+ Badge 显示待办数
+  - FilterPanel（单据类型筛选）
+  - DataTable（桌面端表格）+ 键盘快捷键（J/K 上下行、Enter 开 Sheet、Esc 关 Sheet）
+  - 移动端卡片列表 + 快速审批按钮（Touch Target ≥44pt）
+  - Sheet（详情抽屉）内嵌 Card + Label + ApprovalProcessGeneric
+  - V2 Design Tokens 统一样式
 
-  C-DSG-5 线框：3 tab（待我审批 / 我已处理 / 我提交的，权限驱动）+ 类型筛选
-  （business_type）+ 表格 + 右侧 el-drawer 内嵌 ApprovalProcessGeneric。
+  核心功能：
+  - 待我审批按 overdue_hours 降序排列
+  - 超时徽章（overdue_hours>=48）实时提醒
+  - Sheet 关闭焦点回归触发行
+  - 单号 mono 字体 + 点击复制
+  - 快速审批（同意/驳回）
+  - REJECTED 行显示「修改并重新提交」
 
-  C-DSG-7 落本组件部分：
-    条4 「我提交的」tab 对 REJECTED 行显示「修改并重新提交」（update→DRAFT→submit）
-    条5 超时徽章列（overdue_hours>=48）+ 待我审批按 overdue_hours 降序
-    条7 抽屉信息层级固化：①el-descriptions 决策字段置顶 ②timeline ③操作吸底
-    条9 键盘 J/K 上下行、A 同意、R 驳回、Enter 开抽屉、Esc 关抽屉
-    条11 移动端操作区 sticky 吸底 + 安全区 padding
-    条13 抽屉关闭 @closed 焦点回到触发行
-    条14 单号 mono 字体 + 点击复制
-
-  E2 越权过滤：列表查询严格按 tab 角色过滤参数传后端（submitted=pending=
-  processed；team_id 由后端依赖注入携带）。前端不伪造过滤。
-  E9 N+1：列表只调 1 次 listApprovals；详情走单点 getApprovalDetail；不逐行查询。
+  权限过滤：列表查询严格按 tab 角色过滤参数传后端。前端不伪造过滤。
+  性能优化：列表只调 1 次 listApprovals；详情走单点 getApprovalDetail。
 -->
 <template>
   <div class="approval-center" v-loading="loading">

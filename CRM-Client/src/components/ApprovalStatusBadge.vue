@@ -14,10 +14,10 @@ import { computed } from 'vue'
 import type { PropType, Component } from 'vue'
 import {
   Clock,
-  CircleCheckFilled,
-  CircleCloseFilled,
+  CheckCircle2,
+  XCircle,
   Minus
-} from '@element-plus/icons-vue'
+} from 'lucide-vue-next'
 import type { ApprovalStatus } from '@/schemas/approvalGeneric'
 
 interface StatusConfig {
@@ -36,13 +36,13 @@ const STATUS_MAP: Record<ApprovalStatus, StatusConfig> = {
   },
   APPROVED: {
     label: '已通过',
-    icon: CircleCheckFilled,
+    icon: CheckCircle2,
     textVar: '--wolf-approval-approved-text',
     bgVar: '--wolf-approval-approved-bg'
   },
   REJECTED: {
     label: '已驳回',
-    icon: CircleCloseFilled,
+    icon: XCircle,
     textVar: '--wolf-approval-rejected-text',
     bgVar: '--wolf-approval-rejected-bg'
   },
@@ -83,26 +83,28 @@ const ariaLabel = computed<string>(() => config.value.label)
     role="status"
     :aria-label="ariaLabel"
   >
-    <el-icon class="approval-status-badge__icon" :size="size === 'small' ? 12 : 14">
-      <component :is="config.icon" />
-    </el-icon>
+    <component
+      :is="config.icon"
+      class="approval-status-badge__icon"
+      :size="size === 'small' ? 12 : 14"
+    />
     <span class="approval-status-badge__label">{{ config.label }}</span>
   </span>
 </template>
 
 <style scoped lang="scss">
-@import '@/styles/variables.scss';
+@use '@/styles/variables-v2.scss' as *;
 
 .approval-status-badge {
   display: inline-flex;
   align-items: center;
-  gap: $wolf-space-xs;
-  height: $wolf-tag-height;
-  padding: $wolf-tag-padding;
-  border-radius: $wolf-tag-radius;
-  font-size: $wolf-tag-font-size;
-  font-weight: $wolf-font-weight-normal;
-  line-height: $wolf-line-height-body;
+  gap: $wolf-space-xs-v2;
+  height: $wolf-tag-height-v2;
+  padding: $wolf-tag-padding-v2;
+  border-radius: $wolf-radius-v2;
+  font-size: $wolf-tag-font-size-v2;
+  font-weight: $wolf-font-weight-normal-v2;
+  line-height: $wolf-line-height-body-v2;
   white-space: nowrap;
   // 视觉对齐：图标与文字基线
   vertical-align: middle;
