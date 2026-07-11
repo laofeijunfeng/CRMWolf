@@ -19,8 +19,15 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent
+} from '@/components/ui/accordion'
 import CustomerDetailSidebar from '@/components/CustomerDetailSidebar.vue'
-import { Plus, Pencil, Flame, Zap, CheckCircle, TrendingDown, HelpCircle } from 'lucide-vue-next'
+import { Plus, Pencil, Flame, Zap, CheckCircle, TrendingDown, HelpCircle, RefreshCw, Loader2 } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerDetailResponse } from '@/api/customer'
 import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
@@ -46,6 +53,7 @@ const emit = defineEmits<{
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
 const activePanel = ref('followup')  // Sidebar 导航切换
+const regeneratingProfile = ref(false)  // 档案重新生成状态
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
@@ -162,6 +170,20 @@ const getScoreLevelText = (scoreValue: number | null): string => {
 }
 
 const scoreDetailsDialogOpen = ref(false)
+
+// ==================== Profile Actions ====================
+const handleRegenerateProfile = async (): Promise<void> => {
+  if (props.customerId === null) return
+  regeneratingProfile.value = true
+  try {
+    await customerApi.regenerateProfile(props.customerId)
+    toast.success('档案生成中，请稍后刷新')
+  } catch (error) {
+    handleApiError(error, '生成档案')
+  } finally {
+    regeneratingProfile.value = false
+  }
+}
 
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
@@ -328,6 +350,108 @@ watch(() => props.visible, (visible): void => {
               </CardContent>
             </Card>
 
+            <!-- 客户档案卡片（Accordion） -->
+            <Accordion type="single" collapsible default-value="profile" class="profile-accordion">
+              <AccordionItem value="profile">
+                <AccordionTrigger class="px-4 py-3 hover:no-underline">
+                  <div class="flex items-center gap-2 w-full">
+                    <span class="text-sm font-semibold text-wolf-text-primary-v2">客户档案</span>
+                    <Badge
+                      v-if="customer?.profile_status"
+                      variant="outline"
+                      class="ml-2"
+                    >
+                      {{ customer.profile_status === 'PENDING' ? '待生成' : customer.profile_status === 'GENERATING' ? '生成中' : customer.profile_status === 'COMPLETED' ? '已完成' : '失败' }}
+                    </Badge>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent class="px-4 pb-4">
+                  <!-- 生成中状态 -->
+                  <div v-if="customer?.profile_status === 'GENERATING'" class="flex items-center gap-3 py-4">
+                    <Loader2 class="w-5 h-5 animate-spin text-wolf-primary-v2" />
+                    <span class="text-sm text-wolf-text-secondary-v2">档案正在生成中，请稍后刷新查看...</span>
+                  </div>
+
+                  <!-- 待生成状态 -->
+                  <div v-else-if="customer?.profile_status === 'PENDING' || !customer?.profile_status" class="flex flex-col items-center gap-3 py-4">
+                    <span class="text-sm text-wolf-text-tertiary-v2">暂无客户档案</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      :disabled="regeneratingProfile"
+                      @click="handleRegenerateProfile"
+                    >
+                      <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
+                      生成档案
+                    </Button>
+                  </div>
+
+                  <!-- 失败状态 -->
+                  <div v-else-if="customer?.profile_status === 'FAILED'" class="flex flex-col gap-3 py-4">
+                    <div class="text-sm text-wolf-danger-text-v2">
+                      档案生成失败: {{ customer?.profile_error_message || '未知错误' }}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      :disabled="regeneratingProfile"
+                      @click="handleRegenerateProfile"
+                    >
+                      <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
+                      重新生成
+                    </Button>
+                  </div>
+
+                  <!-- 已完成状态 -->
+                  <div v-else-if="customer?.profile_status === 'COMPLETED'" class="space-y-4">
+                    <!-- 企业背景 -->
+                    <div v-if="customer?.company_background" class="profile-item">
+                      <div class="profile-label">企业背景</div>
+                      <div class="profile-value">{{ customer.company_background }}</div>
+                    </div>
+
+                    <!-- 公司网站 -->
+                    <div v-if="customer?.company_website" class="profile-item">
+                      <div class="profile-label">公司网站</div>
+                      <a
+                        :href="customer.company_website"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="profile-link"
+                      >
+                        {{ customer.company_website }}
+                      </a>
+                    </div>
+
+                    <!-- 主营业务 -->
+                    <div v-if="customer?.main_business" class="profile-item">
+                      <div class="profile-label">主营业务</div>
+                      <div class="profile-value">{{ customer.main_business }}</div>
+                    </div>
+
+                    <!-- 项目背景 -->
+                    <div v-if="customer?.project_background" class="profile-item">
+                      <div class="profile-label">项目背景</div>
+                      <div class="profile-value">{{ customer.project_background }}</div>
+                    </div>
+
+                    <!-- 重新生成按钮 -->
+                    <div class="pt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        :disabled="regeneratingProfile"
+                        @click="handleRegenerateProfile"
+                      >
+                        <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
+                        重新生成档案
+                      </Button>
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+
             <!-- 内容面板（待后续实现） -->
             <div class="text-sm text-wolf-text-secondary-v2">面板内容: {{ activePanel }}</div>
           </div>
@@ -409,5 +533,40 @@ watch(() => props.visible, (visible): void => {
   font-size: $wolf-font-size-body-v2;
   color: $wolf-text-secondary-v2;
   font-weight: $wolf-font-weight-medium-v2;
+}
+
+// Profile card styles
+.profile-accordion {
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-lg-v2;
+  background: $wolf-bg-card-v2;
+}
+
+.profile-item {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+}
+
+.profile-label {
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-tertiary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.profile-value {
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.profile-link {
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-link-v2;
+  text-decoration: underline;
+
+  &:hover {
+    color: $wolf-text-link-hover-v2;
+  }
 }
 </style>
