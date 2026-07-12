@@ -765,6 +765,17 @@ watch(() => props.visible, (visible): void => {
   }
 }
 
+.sidebar-wrapper {
+  width: 200px;
+  flex-shrink: 0;
+  border-right: 1px solid $wolf-border-default-v2;
+  background: $wolf-bg-card-v2;
+
+  @media (max-width: 768px) {
+    display: none;
+  }
+}
+
 .attributes-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
