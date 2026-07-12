@@ -9,6 +9,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
@@ -167,6 +168,7 @@ function continueEditing(): void {
     <DialogContent class="sm:max-w-[500px]">
       <DialogHeader>
         <DialogTitle>添加跟进记录</DialogTitle>
+        <DialogDescription class="sr-only">记录本次跟进的详细信息</DialogDescription>
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">

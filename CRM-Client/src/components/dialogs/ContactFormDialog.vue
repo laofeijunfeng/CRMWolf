@@ -9,6 +9,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
@@ -212,6 +213,7 @@ function continueEditing(): void {
     <DialogContent class="sm:max-w-[500px]">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑联系人' : '新建联系人' }}</DialogTitle>
+        <DialogDescription class="sr-only">填写联系人信息</DialogDescription>
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
