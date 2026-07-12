@@ -5,6 +5,7 @@
  * 改造：使用 shadcn-vue Sidebar 组件替代 Element Plus
  */
 import {
+  SidebarProvider,
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -62,25 +63,27 @@ const isActive = (key: string): boolean => {
 </script>
 
 <template>
-  <Sidebar class="border-r-0">
-    <SidebarContent>
-      <SidebarGroup>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem v-for="item in navItems" :key="item.key">
-              <SidebarMenuButton
-                :is-active="isActive(item.key)"
-                @click="handleNavClick(item.key)"
-              >
-                <component :is="item.icon" class="w-4 h-4" />
-                <span>{{ item.label }}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    </SidebarContent>
-  </Sidebar>
+  <SidebarProvider>
+    <Sidebar class="border-r-0">
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem v-for="item in navItems" :key="item.key">
+                <SidebarMenuButton
+                  :is-active="isActive(item.key)"
+                  @click="handleNavClick(item.key)"
+                >
+                  <component :is="item.icon" class="w-4 h-4" />
+                  <span>{{ item.label }}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
+  </SidebarProvider>
 </template>
 
 <style scoped lang="scss">
