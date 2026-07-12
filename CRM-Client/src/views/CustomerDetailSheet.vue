@@ -12,8 +12,6 @@ import {
   Sheet,
   SheetContent,
   SheetHeader,
-  SheetTitle,
-  SheetDescription,
   SheetFooter
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
@@ -129,6 +127,16 @@ const handleEdit = (): void => {
 // 占位方法：Sidebar 面板切换（Task 4 实现）
 const setActivePanel = (panel: string): void => {
   activePanel.value = panel
+}
+
+// ==================== Helper Functions ====================
+const formatDate = (dateStr: string | undefined): string => {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 // ==================== Data Loading ====================
@@ -373,19 +381,6 @@ watch(() => props.visible, (visible): void => {
     >
       <!-- Header -->
       <SheetHeader class="p-6 border-b border-wolf-border-default-v2">
-        <!-- 桌面端 & 移动端：客户信息 + ContextTabs -->
-        <div class="flex items-center gap-4 mb-4">
-          <div class="title-avatar">客</div>
-          <div class="flex-1 min-w-0">
-            <SheetTitle class="text-base font-semibold truncate">客户详情</SheetTitle>
-            <SheetDescription class="sr-only">查看客户详细信息、跟进记录、联系人和商机</SheetDescription>
-          </div>
-          <div class="text-right">
-            <div class="text-xs text-wolf-text-tertiary-v2">联系人数</div>
-            <div class="text-base font-semibold text-wolf-text-primary-v2">0 人</div>
-          </div>
-        </div>
-
         <!-- ContextTabs 导航 -->
         <ContextTabs
           :tabs="navTabs"
@@ -408,35 +403,35 @@ watch(() => props.visible, (visible): void => {
                   <div class="attributes-grid">
                     <div class="attribute-item">
                       <div class="attribute-label">客户来源</div>
-                      <div class="attribute-value">-</div>
+                      <div class="attribute-value">{{ customer?.source || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">所在城市</div>
-                      <div class="attribute-value">-</div>
+                      <div class="attribute-value">{{ customer?.city || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">公司地址</div>
-                      <div class="attribute-value">-</div>
+                      <div class="attribute-value">{{ customer?.address || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">负责销售</div>
-                      <div class="attribute-value">-</div>
+                      <div class="attribute-value">{{ customer?.owner_info?.name || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">采购方式</div>
-                      <div class="attribute-value">-</div>
+                      <div class="attribute-value">{{ customer?.default_procurement_method_info?.name || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">创建人</div>
-                      <div class="attribute-value">-</div>
+                      <div class="attribute-value">{{ customer?.creator_info?.name || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">创建时间</div>
-                      <div class="attribute-value">-</div>
+                      <div class="attribute-value">{{ customer?.created_time ? formatDate(customer.created_time) : '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">最后修改</div>
-                      <div class="attribute-value">-</div>
+                      <div class="attribute-value">{{ customer?.last_modified_time ? formatDate(customer.last_modified_time) : '-' }}</div>
                     </div>
                   </div>
                 </div>
@@ -490,7 +485,7 @@ watch(() => props.visible, (visible): void => {
             </Card>
 
             <!-- 客户档案卡片（Accordion） -->
-            <Accordion type="single" collapsible default-value="profile" class="profile-accordion">
+            <Accordion type="single" collapsible class="profile-accordion">
               <AccordionItem value="profile">
                 <AccordionTrigger class="px-4 py-3 hover:no-underline">
                   <div class="flex items-center gap-2 w-full">
