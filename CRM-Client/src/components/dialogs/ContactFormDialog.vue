@@ -32,6 +32,14 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type ContactResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
@@ -45,7 +53,9 @@ const schema = toTypedSchema(
     is_decision_maker: z.boolean().optional(),
     mobile: z.string().min(1, '请输入手机号').regex(/^1[3-9]\d{9}$/, '请输入正确的手机号'),
     email: z.string().email('请输入正确的邮箱').optional().or(z.literal('')),
-    wechat_id: z.string().max(50, '微信号不能超过50字').optional()
+    wechat_id: z.string().max(50, '微信号不能超过50字').optional(),
+    remark: z.string().max(500, '备注不能超过500字').optional(),
+    reports_to: z.string().optional().nullable().transform(val => val !== null && val !== undefined && val !== '' ? Number(val) : null)
   })
 )
 
@@ -53,6 +63,7 @@ interface Props {
   customerId: number
   open: boolean
   contact?: ContactResponse | null
+  availableContacts?: ContactResponse[] // For reports_to field
 }
 
 interface Emits {
@@ -73,12 +84,14 @@ const { handleSubmit, resetForm, setValues, values } = useForm({
     is_decision_maker: false,
     mobile: '',
     email: '',
-    wechat_id: ''
+    wechat_id: '',
+    remark: '',
+    reports_to: null
   }
 })
 
 // Use useField for RadioGroup and Switch to handle type compatibility
-const { value: genderValue } = useField<string | undefined>('gender')
+const { value: genderValue } = useField<string>('gender', undefined, { initialValue: '' })
 const { value: isDecisionMakerValue } = useField<boolean>('is_decision_maker')
 
 // State
@@ -112,7 +125,9 @@ watch(() => props.open, (newOpen) => {
         is_decision_maker: props.contact.is_decision_maker,
         mobile: props.contact.mobile,
         email: props.contact.email ?? '',
-        wechat_id: props.contact.wechat_id ?? ''
+        wechat_id: props.contact.wechat_id ?? '',
+        remark: props.contact.remark ?? '',
+        reports_to: props.contact.reports_to?.toString() ?? null
       })
     } else {
       // Create mode: reset form
@@ -124,7 +139,9 @@ watch(() => props.open, (newOpen) => {
           is_decision_maker: false,
           mobile: '',
           email: '',
-          wechat_id: ''
+          wechat_id: '',
+          remark: '',
+          reports_to: null
         }
       })
     }
@@ -146,7 +163,9 @@ const onSubmit = handleSubmit(async (formValues) => {
       is_decision_maker: formValues.is_decision_maker ?? false,
       mobile: formValues.mobile,
       email: formValues.email ?? null,
-      wechat_id: formValues.wechat_id ?? null
+      wechat_id: formValues.wechat_id ?? null,
+      remark: formValues.remark ?? null,
+      reports_to: formValues.reports_to ?? null
     }
 
     if (isEdit.value && props.contact) {
@@ -202,7 +221,7 @@ function continueEditing(): void {
             <FormLabel>姓名 <span class="text-destructive">*</span></FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField"
+                v-bind="componentField as any"
                 placeholder="请输入姓名"
                 class="h-11 sm:h-8"
               />
@@ -235,7 +254,7 @@ function continueEditing(): void {
             <FormLabel>职位</FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField"
+                v-bind="componentField as any"
                 placeholder="请输入职位"
                 class="h-11 sm:h-8"
               />
@@ -248,7 +267,8 @@ function continueEditing(): void {
         <div class="flex items-center space-x-2">
           <Switch
             id="is_decision_maker"
-            v-model:checked="isDecisionMakerValue"
+            :checked="isDecisionMakerValue"
+            @update:checked="isDecisionMakerValue = $event"
           />
           <Label for="is_decision_maker" class="cursor-pointer">是否决策者</Label>
         </div>
@@ -259,7 +279,7 @@ function continueEditing(): void {
             <FormLabel>手机号 <span class="text-destructive">*</span></FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField"
+                v-bind="componentField as any"
                 type="tel"
                 autocomplete="tel"
                 placeholder="请输入手机号"
@@ -276,7 +296,7 @@ function continueEditing(): void {
             <FormLabel>邮箱</FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField"
+                v-bind="componentField as any"
                 type="email"
                 autocomplete="email"
                 placeholder="请输入邮箱"
@@ -293,9 +313,48 @@ function continueEditing(): void {
             <FormLabel>微信号</FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField"
+                v-bind="componentField as any"
                 placeholder="请输入微信号"
                 class="h-11 sm:h-8"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
+        <!-- Reports To (Select) -->
+        <FormField v-if="props.availableContacts && props.availableContacts.length > 0" v-slot="{ componentField }" name="reports_to">
+          <FormItem>
+            <FormLabel>汇报对象</FormLabel>
+            <Select v-bind="componentField as any">
+              <FormControl>
+                <SelectTrigger class="h-11 sm:h-8">
+                  <SelectValue placeholder="选择汇报对象" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem
+                  v-for="contact in props.availableContacts?.filter(c => c.id !== props.contact?.id)"
+                  :key="contact.id"
+                  :value="contact.id.toString()"
+                >
+                  {{ contact.name }}{{ contact.position ? ` (${contact.position})` : '' }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
+        <!-- Remark -->
+        <FormField v-slot="{ componentField }" name="remark">
+          <FormItem>
+            <FormLabel>备注</FormLabel>
+            <FormControl>
+              <Textarea
+                v-bind="componentField as any"
+                placeholder="请输入备注"
+                class="min-h-[80px] resize-none"
               />
             </FormControl>
             <FormMessage />

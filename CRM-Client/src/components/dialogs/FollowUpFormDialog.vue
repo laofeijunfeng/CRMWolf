@@ -195,7 +195,7 @@ function continueEditing(): void {
             <FormLabel>跟进内容 *</FormLabel>
             <FormControl>
               <Textarea
-                v-bind="componentField"
+                v-bind="componentField as any"
                 :rows="4"
                 placeholder="请输入跟进内容"
                 class="resize-none"
@@ -211,7 +211,7 @@ function continueEditing(): void {
             <FormLabel>下次跟进时间</FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField"
+                v-bind="componentField as any"
                 type="date"
                 class="h-11 sm:h-8"
               />
@@ -226,7 +226,7 @@ function continueEditing(): void {
             <FormLabel>下一步动作</FormLabel>
             <FormControl>
               <Textarea
-                v-bind="componentField"
+                v-bind="componentField as any"
                 :rows="3"
                 placeholder="请输入下一步动作（可选）"
                 class="resize-none"
