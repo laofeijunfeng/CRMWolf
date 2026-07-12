@@ -17,7 +17,7 @@
  * - ✅ 移除 Element Plus 组件
  * - ✅ 保留业务逻辑（领取、分配、退回公海、标记无效、转化客户等）
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
@@ -431,9 +431,8 @@ watchEffect(() => {
   }
 })
 
-onUnmounted(() => {
-  headerStore.clear()
-})
+// ✅ 不调用 headerStore.clear()
+// 让新页面直接覆盖旧状态，避免页面切换时 TopBar 短暂显示标题
 </script>
 
 <template>

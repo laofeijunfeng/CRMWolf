@@ -92,7 +92,7 @@ watch(initialValues, (): void => {
 }, { deep: true })
 
 // 编辑模式：加载线索详情
-watch([(): boolean => props.open, (): number | undefined => props.leadId], async ([open, leadId]): void => {
+watch([(): boolean => props.open, (): number | undefined => props.leadId], async ([open, leadId]): Promise<void> => {
   if (open && props.mode === 'edit' && leadId !== undefined && leadId !== null) {
     loading.value = true
     try {
@@ -120,7 +120,7 @@ watch([(): boolean => props.open, (): number | undefined => props.leadId], async
 }, { immediate: true })
 
 // 表单提交处理
-const handleSubmit = async (values: GenericObject): void => {
+const handleSubmit = async (values: GenericObject): Promise<void> => {
   submitting.value = true
   try {
     const formData = values as LeadForm

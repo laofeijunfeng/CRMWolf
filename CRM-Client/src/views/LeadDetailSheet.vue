@@ -96,6 +96,9 @@ const followUpForm = reactive({
 const showEditDialog = ref(false)
 
 const handleEditSuccess = (): void => {
+  // 刷新 Sheet 内部数据（遵循 UX Feedback: Submit Feedback）
+  fetchLeadDetail()
+  // 同时通知父组件刷新列表（保持一致性）
   emit('refresh')
 }
 

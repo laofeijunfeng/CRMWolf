@@ -497,11 +497,23 @@ onMounted(async () => {
 
 // ==================== z-index 层级管理 ====================
 // MASTER.md 5.5 + UI/UX Pro Max §5
+// 详细规范：docs/LAYOUT.md - z-index 层级管理
+//
+// 层级关系：
+// z-1000: Dialog, Dropdown (Modal 层，最高)
+// z-200:  Sheet, Drawer (Drawer 层，遮挡导航)
+// z-100:  Sidebar, BottomNav (主导航)
+// z-90:   TopBar (固定导航栏)
+// z-50:   Toast, Notifications (临时通知)
+// z-20:   Tooltip, Popover (悬浮元素)
+//
+// 关键公式：
+// Dialog (z-1000) > Sheet (z-200) > TopBar (z-90) > Sidebar (z-100)
 $z-index-sidebar: 100;
 $z-index-topbar: 90;
 $z-index-context-tabs: 85;
-$z-index-dropdown: 1000;
-$z-index-modal: 1000;
+$z-index-dropdown: 1000;  // 与 Modal 同层
+$z-index-modal: 1000;     // Dialog, AlertDialog 最高层级
 $z-index-bottom-nav: 100;
 
 // ==================== App Layout ====================

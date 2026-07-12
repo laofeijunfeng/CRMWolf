@@ -64,4 +64,4 @@ Claude **绝对禁止推断**以下业务常量，必须查阅代码定义：
 
 ---
 
-**详细规范（按需查阅）**：`docs/TYPESCRIPT.md`, `docs/COMPONENTS.md`, `docs/STATE-MANAGEMENT.md`
+**详细规范（按需查阅）**：`docs/TYPESCRIPT.md`, `docs/COMPONENTS.md`, `docs/STATE-MANAGEMENT.md`, `docs/LAYOUT.md`

@@ -41,7 +41,7 @@ interface StatusConfigItem {
 }
 
 const props = defineProps<{
-  status: LeadStatus | CustomerStatus | OpportunityStatus | ContractStatus | InvoiceStatus | PaymentPlanStatus | PaymentRecordStatus | GenericStatus | SourceType | AuthorizationModeType | ProcurementTypeType | IndustryType | CompanyScaleType
+  status: LeadStatus | CustomerStatus | OpportunityStatus | ContractStatus | InvoiceStatus | PaymentPlanStatus | PaymentRecordStatus | GenericStatus | SourceType | AuthorizationModeType | ProcurementTypeType | string // 行业字段允许任意 string
   type?: StatusType
   size?: 'default' | 'small'
 }>()
@@ -123,15 +123,11 @@ const STATUS_CONFIG = {
     'EXPANSION': { label: '增购', color: 'success' }
   },
   industry: {
-    'IT/互联网': { label: 'IT/互联网', color: 'warning' },
-    '金融': { label: '金融', color: 'success' },
-    '教育': { label: '教育', color: 'warning' },
-    '医疗': { label: '医疗', color: 'success' },
-    '制造': { label: '制造', color: 'warning' },
-    '零售': { label: '零售', color: 'warning' },
-    '房地产': { label: '房地产', color: 'warning' },
-    '其他': { label: '其他', color: 'neutral' }
-  },
+    // 行业字段统一使用 neutral 颜色
+    // 因为行业数据存储在数据库中，可能动态变化
+    // 不硬编码所有可能的值，统一视觉风格
+    '__default__': { label: '__LABEL__', color: 'neutral' }
+  } as Record<string, StatusConfigItem>,
   companyScale: {
     '1-10人': { label: '1-10人', color: 'neutral' },
     '11-50人': { label: '11-50人', color: 'neutral' },
@@ -145,6 +141,15 @@ const STATUS_CONFIG = {
 // 获取状态配置
 const config = computed<StatusConfigItem>(() => {
   const typeConfig = STATUS_CONFIG[type.value] as Record<string, StatusConfigItem>
+
+  // 行业字段特殊处理：动态显示，统一颜色
+  if (type.value === 'industry') {
+    return {
+      label: String(props.status),
+      color: 'neutral' as StatusColor
+    }
+  }
+
   const statusConfig = typeConfig[props.status]
   return statusConfig ?? { label: '未知', color: 'neutral' }
 })
