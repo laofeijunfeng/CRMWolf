@@ -63,7 +63,7 @@ const isActive = (key: string): boolean => {
 </script>
 
 <template>
-  <SidebarProvider>
+  <SidebarProvider class="!min-h-full !w-full h-full">
     <Sidebar class="border-r-0">
       <SidebarContent>
         <SidebarGroup>

@@ -11,6 +11,7 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
+  SheetDescription,
   SheetFooter
 } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
@@ -381,6 +382,7 @@ watch(() => props.visible, (visible): void => {
           <div class="title-avatar">客</div>
           <div class="flex-1">
             <SheetTitle class="text-base font-semibold">客户详情</SheetTitle>
+            <SheetDescription class="sr-only">查看客户详细信息、跟进记录、联系人和商机</SheetDescription>
             <div class="flex items-center gap-2 mt-1">
               <Badge>状态</Badge>
             </div>
@@ -396,6 +398,7 @@ watch(() => props.visible, (visible): void => {
           <div class="flex items-center gap-4 mb-3">
             <div class="title-avatar">客</div>
             <SheetTitle class="text-base font-semibold">客户详情</SheetTitle>
+            <SheetDescription class="sr-only">查看客户详细信息、跟进记录、联系人和商机</SheetDescription>
           </div>
           <Select v-model="activePanel">
             <SelectTrigger class="w-full h-12">
