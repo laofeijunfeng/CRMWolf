@@ -1,4 +1,20 @@
 <script setup lang="ts">
+/**
+ * SheetContent - Drawer Component
+ *
+ * z-index: z-[200] (Drawer 层，介于 Navigation 和 Modal)
+ *
+ * 层级关系（详见 docs/LAYOUT.md）：
+ * - Dialog (z-1000) > Sheet (z-200) > TopBar (z-90)
+ * - Drawer 遮挡导航，但允许 Modal 在其上方打开
+ *
+ * Portal: 通过 DialogPortal 渲染到 <body>，避免 stacking context 冲突
+ *
+ * 规范依据：
+ * - docs/LAYOUT.md - z-index 层级管理
+ * - UI/UX Pro Max §5: z-index-management
+ * - AppLayout.vue $z-index-modal: 1000
+ */
 import type { DialogContentEmits, DialogContentProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import type { SheetVariants } from "."
@@ -33,10 +49,13 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
 
 <template>
+  <!-- DialogPortal: 渲染到 <body>，避免 stacking context -->
   <DialogPortal>
+    <!-- DialogOverlay: Scrim (遮罩层) z-[200] -->
     <DialogOverlay
-      class="fixed inset-0 z-[1000] bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+      class="fixed inset-0 z-[200] bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
     />
+    <!-- DialogContent: Sheet 主体 z-[201]（在 Overlay 之上） -->
     <DialogContent
       :class="cn(sheetVariants({ side }), props.class)"
       v-bind="{ ...forwarded, ...$attrs }"
