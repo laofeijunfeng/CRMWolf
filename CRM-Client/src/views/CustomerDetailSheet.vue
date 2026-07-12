@@ -369,7 +369,7 @@ watch(() => props.visible, (visible): void => {
   <Sheet :open="visible" @update:open="$emit('update:visible', $event)">
     <SheetContent
       side="right"
-      class="w-3/4 max-w-[1200px] p-0 flex flex-col bg-white dark:bg-slate-900"
+      class="w-2/3 max-w-[880px] sm:max-w-[880px] p-0 flex flex-col bg-white dark:bg-slate-900"
     >
       <!-- Header -->
       <SheetHeader class="p-6 border-b border-wolf-border-default-v2">
