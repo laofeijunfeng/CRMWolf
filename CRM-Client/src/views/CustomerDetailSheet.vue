@@ -26,13 +26,30 @@ import {
   AccordionContent
 } from '@/components/ui/accordion'
 import CustomerDetailSidebar from '@/components/CustomerDetailSidebar.vue'
+
+// Panels
+import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
+import ContactsPanel from '@/components/panels/ContactsPanel.vue'
+import OpportunitiesPanel from '@/components/panels/OpportunitiesPanel.vue'
+import ContractsPanel from '@/components/panels/ContractsPanel.vue'
+import PaymentsPanel from '@/components/panels/PaymentsPanel.vue'
+import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
+import LicensePanel from '@/components/panels/LicensePanel.vue'
+
+// Dialogs
+import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
+import ContactFormDialog from '@/components/dialogs/ContactFormDialog.vue'
+import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
+import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
+import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
+
 import { Plus, Pencil, Flame, Zap, CheckCircle, TrendingDown, HelpCircle, RefreshCw, Loader2 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
-import customerApi, { type CustomerDetailResponse } from '@/api/customer'
+import customerApi, { type CustomerDetailResponse, type ContactResponse } from '@/api/customer'
 import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
-import contractApi, { type ContractListResponse } from '@/api/contract'
+import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
@@ -54,6 +71,18 @@ const emit = defineEmits<{
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
 const activePanel = ref('followup')  // Sidebar 导航切换
 const regeneratingProfile = ref(false)  // 档案重新生成状态
+
+// ==================== Dialog States ====================
+const followUpDialogOpen = ref(false)
+const contactDialogOpen = ref(false)
+const opportunityDialogOpen = ref(false)
+const contractDialogOpen = ref(false)
+const invoiceTitleDialogOpen = ref(false)
+
+// ==================== Edit States ====================
+const editingContact = ref<ContactResponse | null>(null)
+const editingContract = ref<ContractResponse | null>(null)
+const editingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
@@ -183,6 +212,141 @@ const handleRegenerateProfile = async (): Promise<void> => {
   } finally {
     regeneratingProfile.value = false
   }
+}
+
+// ==================== Dialog Handlers ====================
+// FollowUp handlers
+const handleFollowUpSuccess = (): void => {
+  followUpDialogOpen.value = false
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+// Contact handlers
+const handleEditContact = (contact: ContactResponse): void => {
+  editingContact.value = contact
+  contactDialogOpen.value = true
+}
+
+const handleContactDialogClose = (open: boolean): void => {
+  contactDialogOpen.value = open
+  if (!open) {
+    editingContact.value = null
+  }
+}
+
+const handleContactSuccess = (): void => {
+  contactDialogOpen.value = false
+  editingContact.value = null
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+const handleDeleteContact = async (contactId: number): Promise<void> => {
+  try {
+    await customerApi.deleteContact(contactId)
+    toast.success('联系人已删除')
+    if (props.customerId !== null) {
+      loadAllData(props.customerId)
+    }
+  } catch (error) {
+    handleApiError(error, '删除联系人')
+  }
+}
+
+const handleSetPrimaryContact = async (contactId: number): Promise<void> => {
+  try {
+    await customerApi.setPrimaryContact(contactId)
+    toast.success('已设为主要联系人')
+    if (props.customerId !== null) {
+      loadAllData(props.customerId)
+    }
+  } catch (error) {
+    handleApiError(error, '设置主要联系人')
+  }
+}
+
+// Opportunity handlers
+const handleOpportunitySuccess = (): void => {
+  opportunityDialogOpen.value = false
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+// Contract handlers
+const handleContractDialogClose = (open: boolean): void => {
+  contractDialogOpen.value = open
+  if (!open) {
+    editingContract.value = null
+  }
+}
+
+const handleContractSuccess = (): void => {
+  contractDialogOpen.value = false
+  editingContract.value = null
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+// Invoice Title handlers
+const handleEditInvoiceTitle = (invoiceTitle: InvoiceTitleResponse): void => {
+  editingInvoiceTitle.value = invoiceTitle
+  invoiceTitleDialogOpen.value = true
+}
+
+const handleInvoiceTitleDialogClose = (open: boolean): void => {
+  invoiceTitleDialogOpen.value = open
+  if (!open) {
+    editingInvoiceTitle.value = null
+  }
+}
+
+const handleInvoiceTitleSuccess = (): void => {
+  invoiceTitleDialogOpen.value = false
+  editingInvoiceTitle.value = null
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+const handleDeleteInvoiceTitle = async (titleId: number): Promise<void> => {
+  try {
+    await invoiceApi.deleteInvoiceTitle(titleId)
+    toast.success('发票抬头已删除')
+    if (props.customerId !== null) {
+      loadAllData(props.customerId)
+    }
+  } catch (error) {
+    handleApiError(error, '删除发票抬头')
+  }
+}
+
+const handleSetDefaultInvoiceTitle = async (titleId: number): Promise<void> => {
+  try {
+    await invoiceApi.setDefaultInvoiceTitle(titleId)
+    toast.success('已设为默认发票抬头')
+    if (props.customerId !== null) {
+      loadAllData(props.customerId)
+    }
+  } catch (error) {
+    handleApiError(error, '设置默认发票抬头')
+  }
+}
+
+// Payment handlers
+const handleRecordPayment = (): void => {
+  // TODO: 打开回款记录对话框
+  toast.info('回款记录功能开发中')
+}
+
+// License handlers
+const handleApplyLicense = (): void => {
+  // TODO: 打开许可证申请对话框
+  toast.info('许可证申请功能开发中')
 }
 
 // ==================== Watch ====================
@@ -452,8 +616,61 @@ watch(() => props.visible, (visible): void => {
               </AccordionItem>
             </Accordion>
 
-            <!-- 内容面板（待后续实现） -->
-            <div class="text-sm text-wolf-text-secondary-v2">面板内容: {{ activePanel }}</div>
+            <!-- 根据 activePanel 显示对应面板 -->
+            <FollowUpPanel
+              v-if="activePanel === 'followup'"
+              :follow-ups="followUps"
+              @add="followUpDialogOpen = true"
+            />
+
+            <ContactsPanel
+              v-if="activePanel === 'contacts'"
+              :customer-id="customerId ?? 0"
+              :contacts="customer?.contacts ?? []"
+              @add="contactDialogOpen = true"
+              @edit="handleEditContact"
+              @delete="handleDeleteContact"
+              @set-primary="handleSetPrimaryContact"
+            />
+
+            <OpportunitiesPanel
+              v-if="activePanel === 'opportunities'"
+              :customer-id="customerId ?? 0"
+              :opportunities="opportunities"
+              @add="opportunityDialogOpen = true"
+            />
+
+            <ContractsPanel
+              v-if="activePanel === 'contracts'"
+              :customer-id="customerId ?? 0"
+              :contracts="contracts"
+              @add="contractDialogOpen = true"
+            />
+
+            <PaymentsPanel
+              v-if="activePanel === 'payments'"
+              :customer-id="customerId ?? 0"
+              :payments="[]"
+              @record="handleRecordPayment"
+            />
+
+            <InvoicesPanel
+              v-if="activePanel === 'invoices'"
+              :customer-id="customerId ?? 0"
+              :invoice-titles="invoiceTitles"
+              @add="invoiceTitleDialogOpen = true"
+              @edit="handleEditInvoiceTitle"
+              @delete="handleDeleteInvoiceTitle"
+              @set-default="handleSetDefaultInvoiceTitle"
+            />
+
+            <LicensePanel
+              v-if="activePanel === 'license-management'"
+              :customer-id="customerId ?? 0"
+              :license-applications="licenseApplications"
+              :deployments="deployments"
+              @apply="handleApplyLicense"
+            />
           </div>
         </ScrollArea>
       </div>
@@ -475,6 +692,51 @@ watch(() => props.visible, (visible): void => {
       </SheetFooter>
     </SheetContent>
   </Sheet>
+
+  <!-- Dialogs -->
+  <FollowUpFormDialog
+    v-if="customerId !== null"
+    :customer-id="customerId"
+    :open="followUpDialogOpen"
+    @update:open="followUpDialogOpen = $event"
+    @success="handleFollowUpSuccess"
+  />
+
+  <ContactFormDialog
+    v-if="customerId !== null"
+    :customer-id="customerId"
+    :open="contactDialogOpen"
+    :contact="editingContact"
+    :available-contacts="customer?.contacts ?? []"
+    @update:open="handleContactDialogClose"
+    @success="handleContactSuccess"
+  />
+
+  <OpportunityFormDialog
+    v-if="customerId !== null"
+    :customer-id="customerId"
+    :open="opportunityDialogOpen"
+    @update:open="opportunityDialogOpen = $event"
+    @success="handleOpportunitySuccess"
+  />
+
+  <ContractFormDialog
+    v-if="customerId !== null"
+    :customer-id="customerId"
+    :open="contractDialogOpen"
+    :contract="editingContract"
+    @update:open="handleContractDialogClose"
+    @success="handleContractSuccess"
+  />
+
+  <InvoiceTitleFormDialog
+    v-if="customerId !== null"
+    :customer-id="customerId"
+    :open="invoiceTitleDialogOpen"
+    :invoice-title="editingInvoiceTitle"
+    @update:open="handleInvoiceTitleDialogClose"
+    @success="handleInvoiceTitleSuccess"
+  />
 </template>
 
 <style scoped lang="scss">
