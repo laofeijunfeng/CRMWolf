@@ -3,11 +3,16 @@
     <!-- 内容区 -->
     <div class="detail-content">
       <div v-loading="loading" class="content-wrapper">
-        <el-card v-if="!contractInfo" shadow="never" class="info-card">
-          <el-empty description="合同信息加载失败" />
-        </el-card>
+        <Card v-if="!contractInfo" class="info-card">
+          <CardContent class="flex items-center justify-center min-h-[200px]">
+            <div class="text-center text-muted-foreground">
+              合同信息加载失败
+            </div>
+          </CardContent>
+        </Card>
 
-        <el-card v-else shadow="never" class="info-card">
+        <Card v-else class="info-card">
+          <CardContent>
           <!-- 基本信息 -->
           <div class="basic-info">
             <!-- 标题区 -->
@@ -122,7 +127,8 @@
               </div>
             </div>
           </div>
-        </el-card>
+          </CardContent>
+        </Card>
 
         <!-- 核心功能区 -->
         <div class="core-section">
@@ -135,9 +141,13 @@
               @plan-updated="handlePaymentPlanUpdated"
               ref="paymentPlansRef"
             />
-            <el-card v-else shadow="never" class="placeholder-card">
-              <el-empty description="回款计划仅在已签署、生效或已到期的合同中显示" />
-            </el-card>
+            <Card v-else class="placeholder-card">
+              <CardContent class="flex items-center justify-center min-h-[200px]">
+                <div class="text-center text-muted-foreground">
+                  回款计划仅在已签署、生效或已到期的合同中显示
+                </div>
+              </CardContent>
+            </Card>
           </div>
 
           <div class="approval-section">
@@ -148,9 +158,13 @@
               @approve="handleApprove"
               @reject="handleReject"
             />
-            <el-card v-else shadow="never" class="placeholder-card">
-              <el-empty :description="getApprovalPlaceholderText()" />
-            </el-card>
+            <Card v-else class="placeholder-card">
+              <CardContent class="flex items-center justify-center min-h-[200px]">
+                <div class="text-center text-muted-foreground">
+                  {{ getApprovalPlaceholderText() }}
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </div>
@@ -227,6 +241,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Card, CardContent } from '@/components/ui/card'
 import contractApi, { type ContractResponse } from '@/api/contract'
 import approvalApi from '@/api/approval'
 import ApprovalProgressCompact from '@/components/ApprovalProgressCompact.vue'
@@ -772,10 +787,6 @@ onUnmounted(() => {
   box-shadow: $wolf-shadow-card-v2;
 }
 
-.info-card :deep(.el-card__body) {
-  padding: $wolf-space-lg-v2;
-}
-
 // 基本信息
 .basic-info {
   padding: 0;
@@ -906,11 +917,6 @@ onUnmounted(() => {
     flex-direction: column;
     gap: $wolf-space-xs-v2;
     width: 100%;
-
-    .el-button {
-      width: 100%;
-      justify-content: center;
-    }
   }
 }
 
@@ -973,28 +979,14 @@ onUnmounted(() => {
 .payment-section,
 .approval-section {
   min-height: 400px;
-
-  .el-card {
-    height: 100%;
-  }
 }
 
 .placeholder-card {
   height: 100%;
   min-height: 400px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: $wolf-bg-card-v2;
   border-radius: $wolf-radius-v2;
   box-shadow: $wolf-shadow-card-v2;
-
-  :deep(.el-card__body) {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
 }
 
 // 响应式
