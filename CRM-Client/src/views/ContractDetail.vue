@@ -35,12 +35,25 @@
                   <div class="amount-value">¥{{ formatAmount(contractInfo?.total_amount || '0') }}</div>
                 </div>
                 <div class="action-buttons">
-                  <el-button v-if="canSubmitApproval" type="primary" class="primary-btn" @click="handleSubmitApproval" :loading="submitting">
+                  <Button
+                    v-if="canSubmitApproval"
+                    @click="handleSubmitApproval"
+                    :disabled="submitting"
+                    class="w-full"
+                  >
+                    <Loader2 v-if="submitting" class="w-4 h-4 mr-2 animate-spin" />
                     提交审批
-                  </el-button>
-                  <el-button v-if="canWithdraw" class="default-btn" @click="handleWithdrawApproval" :loading="withdrawing">
+                  </Button>
+                  <Button
+                    v-if="canWithdraw"
+                    variant="outline"
+                    @click="handleWithdrawApproval"
+                    :disabled="withdrawing"
+                    class="w-full"
+                  >
+                    <Loader2 v-if="withdrawing" class="w-4 h-4 mr-2 animate-spin" />
                     撤回审批
-                  </el-button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -180,8 +193,10 @@ import {
   PenLine,
   Coins,
   Calendar,
-  Users
+  Users,
+  Loader2
 } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
 import contractApi, { type ContractResponse } from '@/api/contract'
 import approvalApi from '@/api/approval'
 import ApprovalProgressCompact from '@/components/ApprovalProgressCompact.vue'
@@ -703,35 +718,10 @@ onUnmounted(() => {
   min-height: calc(100vh - 48px);
 }
 
-.primary-btn {
-  background: $wolf-primary-v2;
-  color: $wolf-text-inverse-v2;
-  border-radius: $wolf-radius-sm-v2;
-
-  &:hover {
-    background: $wolf-primary-hover-v2;
-  }
+// 内容区
+.detail-content {
+  padding: $wolf-page-padding-v2;
 }
-
-.default-btn {
-  background: $wolf-bg-card-v2;
-  color: $wolf-text-secondary-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-sm-v2;
-
-  &:hover {
-    background: $wolf-bg-hover-v2;
-    border-color: $wolf-border-hover-v2;
-  }
-}
-
-.danger-btn {
-  background: $wolf-danger-v2;
-  color: $wolf-text-inverse-v2;
-  border-radius: $wolf-radius-sm-v2;
-
-  &:hover {
-    background: $wolf-danger-v2;
   }
 }
 
