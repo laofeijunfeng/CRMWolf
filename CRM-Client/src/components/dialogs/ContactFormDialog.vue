@@ -146,10 +146,8 @@ watch(() => props.open, (newOpen) => {
         }
       })
     }
-    // Reset dirty state after form is populated/reset
-    setTimeout(() => {
-      isDirty.value = false
-    }, 100)
+    // Reset dirty state immediately (no setTimeout)
+    isDirty.value = false
   }
 })
 
