@@ -1144,7 +1144,7 @@ class ApprovalCRUD:
                     contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
                     contract_name = contract.contract_name if contract else None
                 summaries[(BusinessType.PAYMENT, pr.id)] = {
-                    "application_number": f"PAY-{pr.id}",
+                    "application_number": pr.record_number or f"PAY-{pr.id}",
                     "entity_name": contract_name,
                     "entity_amount": float(pr.actual_amount) if pr.actual_amount is not None else None,
                 }
