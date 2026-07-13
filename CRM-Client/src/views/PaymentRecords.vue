@@ -15,13 +15,12 @@
  * - 页面 padding: 24px
  * - gap: 24px（组件间距）
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2 } from 'lucide-vue-next'
 import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
-import { Button } from '@/components/ui/button'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import paymentApi, {
@@ -108,7 +107,7 @@ const fetchPaymentRecords = async (): Promise<void> => {
 
         switch (activeTab.value) {
           case 'pending_submit':
-            return confirmationStatus === 'PENDING' && !record.approval_id
+            return confirmationStatus === 'PENDING' && record.approval_id == null
           case 'pending_approval':
             return approvalStatus === 'PENDING'
           case 'confirmed':
@@ -141,7 +140,7 @@ const fetchPaymentRecords = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, any>): void => {
+const handleSearch = (values: Record<string, unknown>): void => {
   Object.assign(filterValues, values)
   pagination.current = 1
   fetchPaymentRecords()
@@ -252,6 +251,11 @@ watchEffect(() => {
       empty-title="暂无回款记录"
       @update:page="handlePageChange"
     >
+      <!-- 记录编号 -->
+      <template #cell-record_number="{ row }">
+        <span class="record-number-cell">{{ row.record_number || '-' }}</span>
+      </template>
+
       <!-- 客户名称 -->
       <template #cell-customer_name="{ row }">
         <span class="customer-name-link">{{ row.customer_name || '-' }}</span>
@@ -326,6 +330,12 @@ watchEffect(() => {
 
 // 金额单元格
 .amount-cell {
+  font-family: $wolf-font-mono-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+// 记录编号单元格
+.record-number-cell {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
 }
