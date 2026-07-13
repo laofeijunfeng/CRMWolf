@@ -81,80 +81,94 @@
       </div>
     </div>
 
-    <el-drawer
-      v-model="drawerVisible"
-      :width="720"
-      title="发票申请详情"
-    >
-      <div v-if="currentRecord" class="invoice-detail-content">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="申请单号" :span="2">
+    <Sheet v-model:open="drawerVisible">
+      <DetailSheetContent>
+        <SheetHeader>
+          <SheetTitle>发票申请详情</SheetTitle>
+          <SheetDescription v-if="currentRecord">
             {{ currentRecord.application_number }}
-          </el-descriptions-item>
-          <el-descriptions-item label="客户名称">
-            {{ currentRecord.customer_info?.account_name }}
-          </el-descriptions-item>
-          <el-descriptions-item label="合同名称">
-            {{ currentRecord.contract_info?.contract_name || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="发票类型">
-            {{ getInvoiceTypeName(currentRecord.invoice_type) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="开票金额">
-            ¥{{ formatAmount(parseFloat(currentRecord.amount)) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="开票抬头" :span="2">
-            {{ currentRecord.invoice_title_info?.title }}
-          </el-descriptions-item>
-          <el-descriptions-item label="纳税人识别号" :span="2">
-            {{ currentRecord.invoice_title_info?.taxpayer_id }}
-          </el-descriptions-item>
-          <el-descriptions-item label="申请时间">
-            {{ currentRecord.created_time }}
-          </el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <span class="status-tag" :class="getStatusClass(currentRecord.status)">
-              {{ getStatusName(currentRecord.status) }}
-            </span>
-          </el-descriptions-item>
-          <el-descriptions-item label="备注" :span="2">
-            {{ currentRecord.remark || '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
+          </SheetDescription>
+        </SheetHeader>
 
-        <el-divider />
+        <ScrollArea v-if="currentRecord" class="flex-1 px-6">
+          <div class="space-y-4">
+            <!-- 基本信息 -->
+            <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-1">
+                <Label class="text-muted-foreground">客户名称</Label>
+                <p class="font-medium">{{ currentRecord.customer_info?.account_name || '-' }}</p>
+              </div>
+              <div class="space-y-1">
+                <Label class="text-muted-foreground">合同名称</Label>
+                <p class="font-medium">{{ currentRecord.contract_info?.contract_name || '-' }}</p>
+              </div>
+              <div class="space-y-1">
+                <Label class="text-muted-foreground">发票类型</Label>
+                <p class="font-medium">{{ getInvoiceTypeName(currentRecord.invoice_type) }}</p>
+              </div>
+              <div class="space-y-1">
+                <Label class="text-muted-foreground">开票金额</Label>
+                <p class="font-medium font-mono">¥{{ formatAmount(parseFloat(currentRecord.amount)) }}</p>
+              </div>
+              <div class="space-y-1 col-span-2">
+                <Label class="text-muted-foreground">开票抬头</Label>
+                <p class="font-medium">{{ currentRecord.invoice_title_info?.title || '-' }}</p>
+              </div>
+              <div class="space-y-1 col-span-2">
+                <Label class="text-muted-foreground">纳税人识别号</Label>
+                <p class="font-mono text-sm">{{ currentRecord.invoice_title_info?.taxpayer_id || '-' }}</p>
+              </div>
+              <div class="space-y-1">
+                <Label class="text-muted-foreground">申请时间</Label>
+                <p class="font-medium">{{ currentRecord.created_time }}</p>
+              </div>
+              <div class="space-y-1">
+                <Label class="text-muted-foreground">状态</Label>
+                <StatusBadge :status="mapInvoiceStatus(currentRecord.status)" type="invoice" />
+              </div>
+              <div class="space-y-1 col-span-2">
+                <Label class="text-muted-foreground">备注</Label>
+                <p class="text-sm">{{ currentRecord.remark || '-' }}</p>
+              </div>
+            </div>
 
-        <!-- Task 6: 已上传发票文件显示 -->
-        <div v-if="currentRecord.invoice_file_path" class="uploaded-file-info">
-          <div class="file-header">
-            <el-icon><Document /></el-icon>
-            <span>发票文件</span>
+            <!-- 发票文件 -->
+            <div v-if="currentRecord.invoice_file_path" class="p-4 bg-muted rounded-lg">
+              <div class="flex items-center gap-2 mb-2">
+                <FileText class="w-4 h-4 text-muted-foreground" />
+                <span class="text-sm font-medium">发票文件</span>
+              </div>
+              <div class="flex items-center gap-4">
+                <span v-if="currentRecord.invoice_number" class="text-sm text-muted-foreground">
+                  发票号码：{{ currentRecord.invoice_number }}
+                </span>
+                <Button variant="link" size="sm" @click="downloadDrawerFile">
+                  <Download class="w-4 h-4 mr-1" />
+                  下载
+                </Button>
+              </div>
+            </div>
+
+            <!-- 审批操作 -->
+            <div v-if="currentRecord.status === 'PENDING_REVIEW'" class="pt-4 border-t">
+              <InvoiceFileUpload
+                ref="drawerFileUploadRef"
+                :invoice-id="currentRecord.id"
+                :approval-status="currentRecord.status"
+                @uploaded="handleDrawerFileUploaded"
+                @error="handleDrawerUploadError"
+                @rejected="handleDrawerRejected"
+                @status-changed="handleDrawerFileUploaded"
+              />
+            </div>
           </div>
-          <div class="file-content">
-            <span v-if="currentRecord.invoice_number" class="invoice-number">
-              发票号码：{{ currentRecord.invoice_number }}
-            </span>
-            <el-button link type="primary" size="small" @click="downloadDrawerFile">
-              <el-icon><Download /></el-icon>
-              下载发票文件
-            </el-button>
-          </div>
-        </div>
+        </ScrollArea>
 
-        <!-- Task 6: 审批操作区域替换为文件上传审批 -->
-        <div v-if="currentRecord.status === 'PENDING_REVIEW'" class="approval-actions">
-          <InvoiceFileUpload
-            ref="drawerFileUploadRef"
-            :invoice-id="currentRecord.id"
-            :approval-status="currentRecord.status"
-            @uploaded="handleDrawerFileUploaded"
-            @error="handleDrawerUploadError"
-            @rejected="handleDrawerRejected"
-            @status-changed="handleDrawerFileUploaded"
-          />
-        </div>
-      </div>
-    </el-drawer>
+        <SheetFooter>
+          <Button variant="outline" @click="drawerVisible = false">关闭</Button>
+        </SheetFooter>
+      </DetailSheetContent>
+    </Sheet>
 
     <el-dialog
       v-model="rejectModalVisible"
@@ -185,8 +199,20 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { toast } from 'vue-sonner'
-import { Refresh, Search, Check, X, Eye, Download } from 'lucide-vue-next'
+import { Refresh, Search, Check, X, Eye, Download, FileText } from 'lucide-vue-next'
 import { DataTable, FilterPanel, TableRowActions, StatusBadge } from '@/components/crmwolf'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter
+} from '@/components/ui/sheet'
+import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import invoiceApi, { type InvoiceApplicationResponse, type InvoiceApplicationQueryParams } from '@/api/invoice'
