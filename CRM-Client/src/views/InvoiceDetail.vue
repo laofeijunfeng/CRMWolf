@@ -228,17 +228,35 @@
       </div>
     </div>
 
-    <el-dialog v-model="invoicedModalVisible" title="标记开票" width="480px" :close-on-click-modal="false" class="wolf-modal">
-      <el-form :model="invoicedForm" label-position="top">
-        <el-form-item label="发票号码" required>
-          <el-input v-model="invoicedForm.invoice_number" placeholder="请输入发票号码" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button class="wolf-btn wolf-btn--default" @click="invoicedModalVisible = false">取消</el-button>
-        <el-button type="primary" class="wolf-btn wolf-btn--primary" @click="handleConfirmInvoiced" :loading="marking">确定</el-button>
-      </template>
-    </el-dialog>
+    <Dialog v-model:open="invoicedModalVisible">
+      <DialogContent class="sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle>标记开票</DialogTitle>
+          <DialogDescription>
+            请输入发票号码以完成开票标记
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="space-y-4">
+          <div class="space-y-2">
+            <Label for="invoice-number">发票号码 <span class="text-destructive">*</span></Label>
+            <Input
+              id="invoice-number"
+              v-model="invoicedForm.invoice_number"
+              placeholder="请输入发票号码"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="invoicedModalVisible = false">取消</Button>
+          <Button @click="handleConfirmInvoiced" :disabled="marking">
+            <Loader2 v-if="marking" class="w-4 h-4 mr-2 animate-spin" />
+            确定
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -263,8 +281,20 @@ import {
   Phone,
   Download,
   CheckCircle2,
-  Image
+  Image,
+  Loader2
 } from 'lucide-vue-next'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
