@@ -883,7 +883,10 @@ $z-index-bottom-nav: 100;
 
 // ==================== Main Content ====================
 .main-content {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  min-height: 0;
   margin-left: $wolf-sidebar-width-v2;  // 220px（Sidebar 固定）
   overflow: auto;
   background: $wolf-bg-page-v2;  // #F8FAFC
