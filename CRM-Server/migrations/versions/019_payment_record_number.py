@@ -61,7 +61,8 @@ def upgrade():
                 """), {"record_number": record_number, "id": record_id})
 
     # Step 4: Set NOT NULL constraint after backfill
-    op.alter_column('crm_payment_records', 'record_number', nullable=False)
+    op.alter_column('crm_payment_records', 'record_number',
+                    existing_type=sa.String(50), nullable=False)
 
     # Step 5: Add unique constraint
     op.create_unique_constraint('uq_payment_record_number', 'crm_payment_records', ['record_number'])

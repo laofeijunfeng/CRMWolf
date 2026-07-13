@@ -156,27 +156,37 @@
       </div>
 
       <!-- 拒绝审批弹窗 -->
-      <el-dialog v-model="rejectModalVisible" title="拒绝审批" width="600px" :close-on-click-modal="false">
-        <el-alert v-if="approvalDetail" type="warning" :show-icon="true" style="margin-bottom: 16px" :closable="false">
-          您正在拒绝该合同的审批申请，此操作不可撤销。
-        </el-alert>
-        <el-form :model="rejectForm" label-position="top">
-          <el-form-item label="拒绝原因" required>
-            <el-input
-              v-model="rejectForm.reason"
-              type="textarea"
-              :rows="4"
-              placeholder="请输入拒绝原因"
-              maxlength="500"
-              show-word-limit
-            />
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button class="default-btn" @click="rejectModalVisible = false">取消</el-button>
-          <el-button type="danger" class="danger-btn" @click="confirmReject" :loading="rejecting">确认拒绝</el-button>
-        </template>
-      </el-dialog>
+      <Dialog v-model:open="rejectModalVisible">
+        <DialogContent class="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>拒绝审批</DialogTitle>
+            <DialogDescription>
+              您正在拒绝该合同的审批申请，此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div class="space-y-4">
+            <div class="space-y-2">
+              <Label for="reject-reason">拒绝原因 <span class="text-destructive">*</span></Label>
+              <Textarea
+                id="reject-reason"
+                v-model="rejectForm.reason"
+                placeholder="请输入拒绝原因"
+                :maxlength="500"
+                rows="4"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" @click="rejectModalVisible = false">取消</Button>
+            <Button variant="destructive" @click="confirmReject" :disabled="rejecting">
+              <Loader2 v-if="rejecting" class="w-4 h-4 mr-2 animate-spin" />
+              确认拒绝
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   </div>
 </template>
@@ -196,7 +206,27 @@ import {
   Users,
   Loader2
 } from 'lucide-vue-next'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import contractApi, { type ContractResponse } from '@/api/contract'
 import approvalApi from '@/api/approval'
 import ApprovalProgressCompact from '@/components/ApprovalProgressCompact.vue'
