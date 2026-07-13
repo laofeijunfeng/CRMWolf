@@ -48,7 +48,7 @@ last_updated: 2026-07-13
   - `src/components/ui/detail-sheet/DetailSheetContent.vue` - 调整宽度为 `w-3/4 max-w-[1080px]`
 
 - **保留文件**：
-  - `src/views/Settings.vue` - 保留用于个人账户管理（后续迁移到用户下拉菜单）
+  - `src/views/Settings.vue` - 保留用于个人账户管理（后续迁移到用户下拉菜单，本次重构不涉及）
 
 ---
 
