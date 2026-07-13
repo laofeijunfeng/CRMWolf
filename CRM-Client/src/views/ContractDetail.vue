@@ -761,7 +761,8 @@ onUnmounted(() => {
 .contract-detail-page {
   padding: 0;
   background: $wolf-bg-page-v2;
-  min-height: calc(100vh - 48px);
+  min-height: 0;
+  flex: 1;
 }
 
 // 内容区
