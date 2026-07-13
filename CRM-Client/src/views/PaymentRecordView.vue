@@ -481,9 +481,10 @@ watch(() => paymentPlansStore.pendingApprovalMeCount, () => {
 @use '@/styles/payment.scss' as *;
 
 .payment-record-view {
+  flex: 1;
+  min-height: 0;
   padding: $wolf-page-padding;
   background: $wolf-bg-page;
-  min-height: calc(100vh - 48px);
 }
 
 // Filter-tabs bar (Contracts.vue pattern - no icons, neutral active state)
