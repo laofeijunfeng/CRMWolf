@@ -39,56 +39,56 @@
             <div class="attributes-grid">
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <User class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                  <User class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">客户名称</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.customer_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <FileText class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                  <FileText class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">关联合同</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.contract_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <Clock class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                  <Clock class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">回款阶段</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.payment_plan_stage_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <UserCircle class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                  <UserCircle class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">申请人</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.applicant_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <Calendar class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                  <Calendar class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">申请时间</span>
                 </div>
                 <span class="attribute-value secondary">{{ formatDateTime(invoiceInfo?.created_time) }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <UserCircle class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                  <UserCircle class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">审批人</span>
                 </div>
                 <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.reviewer_name }">{{ invoiceInfo?.reviewer_name || '-' }}</span>
               </div>
               <div class="attribute-item" v-if="invoiceInfo?.invoice_number">
                 <div class="attribute-header">
-                  <Ticket class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                  <Ticket class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">发票号码</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.invoice_number }}</span>
               </div>
               <div class="attribute-item" v-if="invoiceInfo?.reviewed_time">
                 <div class="attribute-header">
-                  <Calendar class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                  <Calendar class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">审批时间</span>
                 </div>
                 <span class="attribute-value secondary">{{ formatDateTime(invoiceInfo?.reviewed_time) }}</span>
@@ -104,15 +104,21 @@
         class="issued-file-highlight"
       >
         <div class="highlight-header">
-          <CheckCircle2 class="success-icon w-5 h-5" /></el-icon>
+          <CheckCircle2 class="success-icon w-5 h-5" />
           <span class="highlight-title">已开票</span>
           <span v-if="invoiceInfo?.invoice_number" class="invoice-number-badge">
             {{ invoiceInfo.invoice_number }}
           </span>
         </div>
         <div class="file-download-area">
-          <FileText v-if="isPdf(invoiceInfo.invoice_file_path)" :class="['file-type-icon', 'w-5 h-5']" />
-          <Image v-else :class="['file-type-icon', 'w-5 h-5']" />
+          <FileText
+            v-if="isPdf(invoiceInfo.invoice_file_path)"
+            :class="['file-type-icon', getFileIconClass(invoiceInfo.invoice_file_path), 'w-5 h-5']"
+          />
+          <Image
+            v-else
+            :class="['file-type-icon', getFileIconClass(invoiceInfo.invoice_file_path), 'w-5 h-5']"
+          />
           <span class="file-type-label">{{ getFileTypeLabel(invoiceInfo.invoice_file_path) }}</span>
           <el-button
             type="primary"
@@ -135,7 +141,7 @@
             <div class="attributes-grid">
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <Building2 class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                    <Building2 class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">抬头类型</span>
                   </div>
                   <el-tag :class="['wolf-tag', invoiceInfo?.invoice_title_type === 'COMPANY' ? 'wolf-tag--info' : 'wolf-tag--gray']" size="small">
@@ -144,42 +150,42 @@
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <FileText class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                    <FileText class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">开票抬头</span>
                   </div>
                   <span class="attribute-value">{{ invoiceInfo?.invoice_title_text || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <Key class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                    <Key class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">纳税人识别号</span>
                   </div>
                   <span class="attribute-value">{{ invoiceInfo?.invoice_taxpayer_id || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <CreditCard class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                    <CreditCard class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">开户行</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_bank_name }">{{ invoiceInfo?.invoice_bank_name || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <Wallet class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                    <Wallet class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">开户账号</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_bank_account }">{{ invoiceInfo?.invoice_bank_account || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <MapPin class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                    <MapPin class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">开票地址</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_address }">{{ invoiceInfo?.invoice_address || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <Phone class="attribute-icon w-3.5 h-3.5" /></el-icon>
+                    <Phone class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">电话</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_phone }">{{ invoiceInfo?.invoice_phone || '-' }}</span>
@@ -215,12 +221,12 @@
             <span class="card-title">发票文件</span>
           </div>
           <div class="file-info">
-            <FileText class="file-icon w-4 h-4" /></el-icon>
+            <FileText class="file-icon w-4 h-4" />
             <span v-if="invoiceInfo?.invoice_number" class="invoice-number">
               发票号码：{{ invoiceInfo.invoice_number }}
             </span>
             <el-button link type="primary" size="small" @click="downloadInvoiceFile">
-              <Download class="w-4 h-4" /></el-icon>
+              <Download class="w-4 h-4" />
               下载发票文件
             </el-button>
           </div>
@@ -264,7 +270,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { showError, showSuccess } from '@/utils/errorMessages'
+import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import {
   User,
@@ -384,7 +390,7 @@ const getInvoiceTypeText = (type: string | undefined): string => {
 }
 
 const fetchInvoiceDetail = async (): Promise<void> => {
-  const invoiceId = route.params.id as string
+  const invoiceId = String(route.params['id'] ?? '')
   loading.value = true
   try {
     const data = await invoiceApi.getInvoiceApplication(Number(invoiceId))
@@ -393,7 +399,7 @@ const fetchInvoiceDetail = async (): Promise<void> => {
     setTitle(data.application_number || '发票申请详情')
   } catch (error) {
     logger.error('[InvoiceDetail]', '获取发票申请详情失败', { error })
-    showError(error, '获取发票申请详情')
+    handleApiError(error, '获取发票申请详情')
   } finally {
     loading.value = false
   }
@@ -419,12 +425,12 @@ const handleDelete = async (): Promise<void> => {
       }
     )
     await invoiceApi.deleteInvoiceApplication(invoiceInfo.value.id)
-    showSuccess('删除', '发票申请')
+    toast.success('发票申请删除成功')
     router.push('/invoices')
   } catch (error: unknown) {
     if (error !== 'cancel') {
       logger.error('[InvoiceDetail]', '删除失败', { error })
-      showError(error, '删除发票申请')
+      handleApiError(error, '删除发票申请')
     }
   }
 }
@@ -444,13 +450,13 @@ const handleConfirmInvoiced = async (): Promise<void> => {
   try {
     marking.value = true
     await invoiceApi.markAsInvoiced(invoiceInfo.value.id, invoicedForm.value.invoice_number)
-    showSuccess('标记开票', '发票申请')
+    toast.success('发票申请已标记开票')
     invoicedModalVisible.value = false
     invoicedForm.value.invoice_number = ''
     fetchInvoiceDetail()
   } catch (error) {
     logger.error('[InvoiceDetail]', '标记开票失败', { error })
-    showError(error, '标记开票')
+    handleApiError(error, '标记开票')
   } finally {
     marking.value = false
   }
@@ -783,6 +789,49 @@ onUnmounted(() => {
       color: $wolf-text-placeholder-v2;
     }
   }
+}
+
+// Element Plus tag compatibility while the template still uses el-tag.
+.wolf-tag {
+  height: auto !important;
+  padding: $wolf-space-xs-v2 $wolf-space-sm-v2 !important;
+  border-width: $wolf-focus-ring-width-subtle-v2 !important;
+  border-radius: $wolf-radius-sm-v2 !important;
+  font-size: $wolf-font-size-caption-v2 !important;
+  font-weight: $wolf-font-weight-medium-v2 !important;
+  line-height: $wolf-line-height-body-v2 !important;
+}
+
+.wolf-tag--primary,
+.wolf-tag--info {
+  color: $wolf-primary-v2 !important;
+  background-color: $wolf-primary-light-v2 !important;
+  border-color: $wolf-primary-v2 !important;
+}
+
+.wolf-tag--success {
+  color: $wolf-success-text-v2 !important;
+  background-color: $wolf-success-bg-v2 !important;
+  border-color: $wolf-success-v2 !important;
+}
+
+.wolf-tag--warning {
+  color: $wolf-warning-text-v2 !important;
+  background-color: $wolf-warning-bg-v2 !important;
+  border-color: $wolf-warning-v2 !important;
+}
+
+.wolf-tag--danger {
+  color: $wolf-danger-text-v2 !important;
+  background-color: $wolf-danger-bg-v2 !important;
+  border-color: $wolf-danger-v2 !important;
+}
+
+.wolf-tag--gray,
+.wolf-tag--purple {
+  color: $wolf-text-secondary-v2 !important;
+  background-color: $wolf-bg-hover-v2 !important;
+  border-color: $wolf-border-default-v2 !important;
 }
 
 // Task 6: 发票文件显示区域样式
