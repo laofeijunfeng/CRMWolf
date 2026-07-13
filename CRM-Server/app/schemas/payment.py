@@ -146,6 +146,7 @@ class PaymentRecordUpdate(BaseModel):
 class PaymentRecordResponse(PaymentRecordBase):
     id: int
     payment_plan_id: int
+    record_number: str = Field(..., description="回款记录编号")
     creator_id: str
     creator_name: Optional[str]
     created_time: datetime

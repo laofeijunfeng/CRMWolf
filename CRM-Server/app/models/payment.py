@@ -95,6 +95,10 @@ class PaymentRecord(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
+
+    # 新增：记录编号
+    record_number = Column(String(50), unique=True, nullable=False, comment="回款记录编号（系统自动生成）")
+
     payment_plan_id = Column(BigInteger, ForeignKey('crm_contract_payment_plans.id', ondelete='CASCADE'), nullable=False, comment="关联的回款计划ID")
     actual_amount = Column(Numeric(12, 2), nullable=False, comment="实际回款金额")
     payment_date = Column(Date, nullable=False, comment="实际回款日期")
@@ -124,6 +128,7 @@ class PaymentRecord(Base):
 
     __table_args__ = (
         Index('idx_payment_record_team_id', 'team_id'),
+        Index('idx_payment_record_number', 'record_number'),
     )
 
     def __repr__(self):
