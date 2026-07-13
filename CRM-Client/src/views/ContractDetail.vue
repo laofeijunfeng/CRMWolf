@@ -208,8 +208,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
+import { toast } from 'vue-sonner'
 import {
   Ticket,
   User,
@@ -659,7 +660,7 @@ const handleReject = () => {
 
 const confirmReject = async () => {
   if (!rejectForm.reason.trim()) {
-    ElMessage.warning('请输入拒绝原因')
+    toast.warning('请输入拒绝原因')
     return
   }
   
