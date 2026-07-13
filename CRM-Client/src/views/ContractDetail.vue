@@ -695,65 +695,65 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
 .contract-detail-page {
   padding: 0;
-  background: $wolf-bg-page;
+  background: $wolf-bg-page-v2;
   min-height: calc(100vh - 48px);
 }
 
 .primary-btn {
-  background: $wolf-primary;
-  color: $wolf-text-inverse;
-  border-radius: $wolf-radius-sm;
+  background: $wolf-primary-v2;
+  color: $wolf-text-inverse-v2;
+  border-radius: $wolf-radius-sm-v2;
 
   &:hover {
-    background: $wolf-primary-hover;
+    background: $wolf-primary-hover-v2;
   }
 }
 
 .default-btn {
-  background: $wolf-bg-card;
-  color: $wolf-text-secondary;
-  border: 1px solid $wolf-border-color;
-  border-radius: $wolf-radius-sm;
+  background: $wolf-bg-card-v2;
+  color: $wolf-text-secondary-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-sm-v2;
 
   &:hover {
-    background: $wolf-bg-hover;
-    border-color: $wolf-border-hover;
+    background: $wolf-bg-hover-v2;
+    border-color: $wolf-border-hover-v2;
   }
 }
 
 .danger-btn {
-  background: $wolf-danger;
-  color: $wolf-text-inverse;
-  border-radius: $wolf-radius-sm;
+  background: $wolf-danger-v2;
+  color: $wolf-text-inverse-v2;
+  border-radius: $wolf-radius-sm-v2;
 
   &:hover {
-    background: $wolf-danger-hover;
+    background: $wolf-danger-v2;
   }
 }
 
 // 内容区
 .detail-content {
-  padding: $wolf-page-padding;
+  padding: $wolf-page-padding-v2;
 }
 
 .content-wrapper {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg;
+  gap: $wolf-space-lg-v2;
 }
 
 .info-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .info-card :deep(.el-card__body) {
-  padding: $wolf-space-lg;
+  padding: $wolf-space-lg-v2;
 }
 
 // 基本信息
@@ -764,27 +764,27 @@ onUnmounted(() => {
 .info-top {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  gap: $wolf-space-lg;
+  gap: $wolf-space-lg-v2;
 }
 
 .info-left {
   .title-section {
     display: flex;
-    gap: $wolf-space-md;
+    gap: $wolf-space-md-v2;
     align-items: flex-start;
   }
 
   .contract-avatar {
     width: 48px;
     height: 48px;
-    border-radius: $wolf-radius-full;
-    background: $wolf-primary-light;
+    border-radius: $wolf-radius-full-v2;
+    background: $wolf-primary-light-v2;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 20px;
-    font-weight: $wolf-font-weight-semibold;
-    color: $wolf-primary;
+    font-weight: $wolf-font-weight-semibold-v2;
+    color: $wolf-primary-v2;
     flex-shrink: 0;
   }
 
@@ -792,16 +792,16 @@ onUnmounted(() => {
     flex: 1;
 
     .contract-name {
-      margin: 0 0 $wolf-space-sm 0;
-      font-size: $wolf-font-size-card-title;
-      font-weight: $wolf-font-weight-semibold;
-      color: $wolf-text-primary;
-      line-height: $wolf-line-height-tight;
+      margin: 0 0 $wolf-space-sm-v2 0;
+      font-size: $wolf-font-size-title-v2;
+      font-weight: $wolf-font-weight-semibold-v2;
+      color: $wolf-text-primary-v2;
+      line-height: $wolf-line-height-title-v2;
     }
 
     .status-tags {
       display: flex;
-      gap: $wolf-space-xs;
+      gap: $wolf-space-xs-v2;
       flex-wrap: wrap;
     }
   }
@@ -809,49 +809,49 @@ onUnmounted(() => {
 
 .info-divider {
   height: 1px;
-  background: $wolf-border-light;
-  margin: $wolf-space-lg 0;
+  background: $wolf-border-light-v2;
+  margin: $wolf-space-lg-v2 0;
 }
 
 .info-bottom {
   .attributes-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: $wolf-space-md $wolf-space-lg;
+    gap: $wolf-space-md-v2 $wolf-space-lg-v2;
   }
 
   .attribute-item {
     display: flex;
     flex-direction: column;
-    gap: $wolf-space-xs;
+    gap: $wolf-space-xs-v2;
   }
 
   .attribute-header {
     display: flex;
     align-items: center;
-    gap: $wolf-space-xs;
+    gap: $wolf-space-xs-v2;
   }
 
   .attribute-icon {
     font-size: 14px;
-    color: $wolf-text-tertiary;
+    color: $wolf-text-tertiary-v2;
     flex-shrink: 0;
   }
 
   .attribute-label {
-    font-size: $wolf-font-size-auxiliary;
-    color: $wolf-text-tertiary;
-    font-weight: $wolf-font-weight-normal;
+    font-size: $wolf-font-size-auxiliary-v2;
+    color: $wolf-text-tertiary-v2;
+    font-weight: $wolf-font-weight-normal-v2;
   }
 
   .attribute-value {
-    font-size: $wolf-font-size-body;
-    color: $wolf-text-primary;
-    font-weight: $wolf-font-weight-medium;
-    line-height: $wolf-line-height-normal;
+    font-size: $wolf-font-size-body-v2;
+    color: $wolf-text-primary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
+    line-height: $wolf-line-height-body-v2;
 
     &.value-empty {
-      color: $wolf-text-placeholder;
+      color: $wolf-text-placeholder-v2;
     }
   }
 }
@@ -861,29 +861,29 @@ onUnmounted(() => {
   flex-direction: column;
   justify-content: space-between;
   align-items: flex-end;
-  gap: $wolf-space-md;
+  gap: $wolf-space-md-v2;
 
   .amount-section {
     text-align: right;
 
     .amount-label {
-      font-size: $wolf-font-size-auxiliary;
-      color: $wolf-text-tertiary;
-      margin-bottom: $wolf-space-xs;
+      font-size: $wolf-font-size-auxiliary-v2;
+      color: $wolf-text-tertiary-v2;
+      margin-bottom: $wolf-space-xs-v2;
     }
 
     .amount-value {
       font-size: 24px;
-      font-weight: $wolf-font-weight-semibold;
-      color: $wolf-primary;
-      line-height: $wolf-line-height-tight;
+      font-weight: $wolf-font-weight-semibold-v2;
+      color: $wolf-primary-v2;
+      line-height: $wolf-line-height-title-v2;
     }
   }
 
   .action-buttons {
     display: flex;
     flex-direction: column;
-    gap: $wolf-space-xs;
+    gap: $wolf-space-xs-v2;
     width: 100%;
 
     .el-button {
@@ -897,56 +897,56 @@ onUnmounted(() => {
 .status-tag {
   display: inline-flex;
   padding: 4px 8px;
-  font-size: $wolf-font-size-caption;
-  font-weight: $wolf-font-weight-normal;
-  border-radius: $wolf-radius-sm;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-normal-v2;
+  border-radius: $wolf-radius-sm-v2;
 }
 
 .status-draft {
-  background: $wolf-bg-hover;
-  color: $wolf-text-tertiary;
+  background: $wolf-bg-hover-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
 .status-pending {
-  background: $wolf-warning-bg;
-  color: $wolf-warning-text;
+  background: $wolf-warning-bg-v2;
+  color: $wolf-warning-text-v2;
 }
 
 .status-signed {
-  background: $wolf-bg-hover;
-  color: $wolf-text-secondary;
+  background: $wolf-bg-hover-v2;
+  color: $wolf-text-secondary-v2;
 }
 
 .status-effective {
-  background: $wolf-success-bg;
-  color: $wolf-success-text;
+  background: $wolf-success-bg-v2;
+  color: $wolf-success-text-v2;
 }
 
 .status-expired {
-  background: $wolf-danger-bg;
-  color: $wolf-danger-text;
+  background: $wolf-danger-bg-v2;
+  color: $wolf-danger-text-v2;
 }
 
 .status-terminated {
-  background: $wolf-bg-hover;
-  color: $wolf-text-placeholder;
+  background: $wolf-bg-hover-v2;
+  color: $wolf-text-placeholder-v2;
 }
 
 .status-subscription {
-  background: $wolf-bg-hover;
-  color: $wolf-text-tertiary;
+  background: $wolf-bg-hover-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
 .status-perpetual {
-  background: $wolf-bg-hover;
-  color: $wolf-text-secondary;
+  background: $wolf-bg-hover-v2;
+  color: $wolf-text-secondary-v2;
 }
 
 // 核心功能区
 .core-section {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: $wolf-space-lg;
+  gap: $wolf-space-lg-v2;
 }
 
 .payment-section,
@@ -964,9 +964,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-v2;
+  box-shadow: $wolf-shadow-card-v2;
 
   :deep(.el-card__body) {
     width: 100%;
@@ -1022,7 +1022,7 @@ onUnmounted(() => {
   }
 
   .detail-content {
-    padding: $wolf-space-md;
+    padding: $wolf-space-md-v2;
   }
 }
 </style>
