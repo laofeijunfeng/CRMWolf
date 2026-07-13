@@ -21,6 +21,7 @@ class BusinessNumberGenerator:
     TABLE_MAPPING = {
         'CT': ('crm_contracts', 'contract_number'),
         'PAY': ('crm_payment_records', 'record_number'),
+        'PP': ('crm_contract_payment_plans', 'plan_number'),
     }
 
     @classmethod

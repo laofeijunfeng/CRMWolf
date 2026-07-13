@@ -15,7 +15,7 @@
  * - 页面 padding: 24px
  * - gap: 24px（组件间距）
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
@@ -93,7 +93,8 @@ const filterValues = reactive({
 
 // ==================== DataTable 配置 ====================
 const columns = [
-  { key: 'plan_number', title: '计划编号', width: '120px' },
+  { key: 'plan_number', title: '计划编号', width: '150px' },
+  { key: 'stage_name', title: '阶段名称', width: '120px' },
   { key: 'customer_name', title: '客户名称' },
   { key: 'contract_name', title: '合同名称' },
   { key: 'plan_amount', title: '计划金额', align: 'right' as const },
@@ -157,7 +158,7 @@ const fetchPaymentPlans = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, any>): void => {
+const handleSearch = (values: Record<string, unknown>): void => {
   Object.assign(filterValues, values)
   pagination.current = 1
   fetchPaymentPlans()
@@ -273,6 +274,11 @@ watchEffect(() => {
       empty-title="暂无回款计划"
       @update:page="handlePageChange"
     >
+      <!-- 计划编号 -->
+      <template #cell-plan_number="{ row }">
+        <span class="number-cell">{{ row.plan_number || '-' }}</span>
+      </template>
+
       <!-- 客户名称 -->
       <template #cell-customer_name="{ row }">
         <span class="customer-name-link">{{ row.customer_name || '-' }}</span>
@@ -353,6 +359,12 @@ watchEffect(() => {
 
 // 金额单元格
 .amount-cell {
+  font-family: $wolf-font-mono-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+// 编号单元格
+.number-cell {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
 }

@@ -81,6 +81,7 @@ class PaymentRecordInfo(BaseModel):
 class PaymentPlanResponse(PaymentPlanBase):
     id: int
     contract_id: int
+    plan_number: Optional[str] = Field(None, description="回款计划编号")
     status: PaymentPlanStatusEnum
     status_name: Optional[str] = Field(None, description="状态名称")
     created_time: datetime

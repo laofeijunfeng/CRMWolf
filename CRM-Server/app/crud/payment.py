@@ -97,9 +97,13 @@ class PaymentPlanCRUD:
         return plans, total
     
     def create(self, db: Session, contract_id: int, obj_in: PaymentPlanCreate, team_id: int) -> PaymentPlan:
+        # 生成计划编号
+        plan_number = BusinessNumberGenerator.generate('PP', db)
+
         db_plan = PaymentPlan(
             contract_id=contract_id,
             team_id=team_id,
+            plan_number=plan_number,
             **obj_in.model_dump()
         )
         db.add(db_plan)
@@ -125,9 +129,13 @@ class PaymentPlanCRUD:
 
         plans = []
         for plan_data in plans_data:
+            # 生成计划编号
+            plan_number = BusinessNumberGenerator.generate('PP', db)
+
             db_plan = PaymentPlan(
                 contract_id=contract_id,
                 team_id=team_id,
+                plan_number=plan_number,
                 **plan_data.model_dump()
             )
             db.add(db_plan)

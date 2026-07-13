@@ -28,6 +28,10 @@ class PaymentPlan(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='CASCADE'), nullable=False, comment="关联的合同ID")
+
+    # 新增：计划编号
+    plan_number = Column(String(50), unique=True, nullable=False, comment="回款计划编号（系统自动生成）")
+
     stage_name = Column(String(100), nullable=False, comment="回款阶段名，如：首付款、中期款、尾款")
     planned_amount = Column(Numeric(12, 2), nullable=False, comment="计划回款金额")
     due_date = Column(Date, nullable=False, comment="计划回款日期")
@@ -42,6 +46,7 @@ class PaymentPlan(Base):
 
     __table_args__ = (
         Index('idx_payment_plan_team_id', 'team_id'),
+        Index('idx_payment_plan_number', 'plan_number'),
     )
 
     @property

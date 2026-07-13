@@ -68,6 +68,7 @@ export type PaymentStatus = 'UNPAID' | 'PARTIAL' | 'COMPLETED' | 'OVERDUE'
 export interface PaymentPlanResponse {
   id: number
   contract_id: number
+  plan_number?: string  // 回款计划编号
   stage_name: string
   planned_amount: number
   due_date: string
