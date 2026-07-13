@@ -52,56 +52,56 @@
               <div class="attributes-grid">
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><Ticket /></el-icon>
+                    <Ticket class="attribute-icon" />
                     <span class="attribute-label">合同编号</span>
                   </div>
                   <span class="attribute-value">{{ contractInfo?.contract_number || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><User /></el-icon>
+                    <User class="attribute-icon" />
                     <span class="attribute-label">关联客户</span>
                   </div>
                   <span class="attribute-value">{{ contractInfo?.customer_info?.account_name || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><TrendCharts /></el-icon>
+                    <TrendingUp class="attribute-icon" />
                     <span class="attribute-label">关联商机</span>
                   </div>
                   <span class="attribute-value">{{ contractInfo?.opportunity_info?.opportunity_name || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><EditPen /></el-icon>
+                    <PenLine class="attribute-icon" />
                     <span class="attribute-label">签约人</span>
                   </div>
                   <span class="attribute-value" :class="{ 'value-empty': !signingContactName || signingContactName === '-' }">{{ signingContactName }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><UserFilled /></el-icon>
+                    <Users class="attribute-icon" />
                     <span class="attribute-label">采购用户数</span>
                   </div>
                   <span class="attribute-value">{{ contractInfo?.user_count || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><Coin /></el-icon>
+                    <Coins class="attribute-icon" />
                     <span class="attribute-label">标准单价</span>
                   </div>
                   <span class="attribute-value">¥{{ formatAmount(contractInfo?.standard_unit_price || '0') }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><Calendar /></el-icon>
+                    <Calendar class="attribute-icon" />
                     <span class="attribute-label">订阅年限</span>
                   </div>
                   <span class="attribute-value">{{ contractInfo?.subscription_years ? contractInfo.subscription_years + '年' : '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><UserFilled /></el-icon>
+                    <Users class="attribute-icon" />
                     <span class="attribute-label">创建人</span>
                   </div>
                   <span class="attribute-value" :class="{ 'value-empty': !contractInfo?.creator_info?.name }">{{ contractInfo?.creator_info?.name || '-' }}</span>
@@ -176,12 +176,12 @@ import { showError, showSuccess } from '@/utils/errorMessages'
 import {
   Ticket,
   User,
-  TrendCharts,
-  EditPen,
-  Coin,
+  TrendingUp,
+  PenLine,
+  Coins,
   Calendar,
-  UserFilled
-} from '@element-plus/icons-vue'
+  Users
+} from 'lucide-vue-next'
 import contractApi, { type ContractResponse } from '@/api/contract'
 import approvalApi from '@/api/approval'
 import ApprovalProgressCompact from '@/components/ApprovalProgressCompact.vue'
@@ -833,7 +833,8 @@ onUnmounted(() => {
   }
 
   .attribute-icon {
-    font-size: 14px;
+    width: 14px;
+    height: 14px;
     color: $wolf-text-tertiary-v2;
     flex-shrink: 0;
   }
