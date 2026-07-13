@@ -1,103 +1,61 @@
 <template>
   <div class="page-container">
-    <div class="tabs-card">
-      <el-tabs v-model="activeTab" @tab-change="handleTabChange">
-        <el-tab-pane label="待审批" name="pending" />
-        <el-tab-pane label="已通过" name="approved" />
-        <el-tab-pane label="已拒绝" name="rejected" />
-        <el-tab-pane label="全部" name="all" />
-      </el-tabs>
-    </div>
+    <!-- FilterPanel -->
+    <FilterPanel
+      :fields="filterFields"
+      @search="handleSearch"
+      @reset="handleReset"
+    />
 
-    <div class="filter-card">
-      <el-form :model="searchForm" :inline="true">
-        <el-form-item label="客户名称">
-          <el-input v-model="searchForm.customer_name" placeholder="请输入客户名称" clearable />
-        </el-form-item>
-        <el-form-item label="合同名称">
-          <el-input v-model="searchForm.contract_name" placeholder="请输入合同名称" clearable />
-        </el-form-item>
-        <el-form-item label="发票类型">
-          <el-select v-model="searchForm.invoice_type" placeholder="请选择发票类型" clearable style="width: 150px">
-            <el-option value="VAT_SPECIAL" label="增值税专用发票" />
-            <el-option value="VAT_ORDINARY" label="增值税普通发票" />
-            <el-option value="VAT_ELECTRONIC" label="增值税电子普通发票" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button size="small" :icon="Search" @click="handleSearch">搜索</el-button>
-        </el-form-item>
-        <el-form-item>
-          <el-button size="small" @click="handleReset">重置</el-button>
-        </el-form-item>
-      </el-form>
-    </div>
+    <!-- DataTable -->
+    <DataTable
+      :columns="columns"
+      :data="tableData"
+      :loading="loading"
+      :page="pagination.current"
+      :page-size="pagination.pageSize"
+      :total="pagination.total"
+      empty-title="暂无发票审批"
+      @update:page="handlePageChange"
+      @update:page-size="handlePageSizeChange"
+    >
+      <!-- 申请单号（可点击） -->
+      <template #cell-application_number="{ row }">
+        <span class="link-text cursor-pointer text-primary hover:underline" @click.stop="viewDetail(row)">
+          {{ row.application_number }}
+        </span>
+      </template>
 
-    <div class="table-card">
-      <div class="card-header">
-        <div class="card-title-group">
-          <span class="card-title">审批列表</span>
-          <span v-if="selectedRowKeys.length > 0" class="card-tag primary">已选择 {{ selectedRowKeys.length }} 项</span>
-        </div>
-        <div class="card-actions" v-if="selectedRowKeys.length > 0 && activeTab === 'pending'">
-          <el-button size="small" :icon="Check" @click="handleBatchApprove">批量同意</el-button>
-          <el-button size="small" :icon="Close" @click="handleBatchReject">批量拒绝</el-button>
-        </div>
-      </div>
+      <!-- 客户名称 -->
+      <template #cell-customer_name="{ row }">
+        {{ row.customer_info?.account_name || '-' }}
+      </template>
 
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        :border="false"
-        stripe
-        row-key="id"
-        style="width: 100%"
-        @selection-change="handleSelectionChange"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column label="申请单号" width="180">
-          <template #default="{ row }">
-            <el-link type="primary" @click="viewDetail(row)">
-              {{ row.application_number }}
-            </el-link>
-          </template>
-        </el-table-column>
-        <el-table-column label="客户名称" width="150">
-          <template #default="{ row }">
-            {{ row.customer_info?.account_name }}
-          </template>
-        </el-table-column>
-        <el-table-column label="合同名称" width="150">
-          <template #default="{ row }">
-            {{ row.contract_info?.contract_name || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="发票类型" width="150">
-          <template #default="{ row }">
-            <span class="type-tag">{{ getInvoiceTypeName(row.invoice_type) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="开票金额" width="120">
-          <template #default="{ row }">
-            <span class="amount">¥{{ formatAmount(parseFloat(row.amount)) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="申请时间" width="120" prop="created_time" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <span class="status-tag" :class="getStatusClass(row.status)">
-              {{ getStatusName(row.status) }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="viewDetail(row)">查看详情</el-button>
-            <el-button
-              v-if="row.status === 'PENDING_REVIEW'"
-              link
-              size="small"
-              @click="handleApprove(row)"
+      <!-- 合同名称 -->
+      <template #cell-contract_name="{ row }">
+        {{ row.contract_info?.contract_name || '-' }}
+      </template>
+
+      <!-- 发票类型 -->
+      <template #cell-invoice_type="{ row }">
+        <span class="type-tag">{{ getInvoiceTypeName(row.invoice_type) }}</span>
+      </template>
+
+      <!-- 金额格式化 -->
+      <template #cell-amount="{ row }">
+        <span class="amount-cell font-mono">¥{{ formatAmount(parseFloat(row.amount)) }}</span>
+      </template>
+
+      <!-- 状态 -->
+      <template #cell-status="{ row }">
+        <StatusBadge :status="mapInvoiceStatus(row.status)" type="invoice" />
+      </template>
+
+      <!-- 操作 -->
+      <template #cell-actions="{ row }">
+        <TableRowActions :row="row" v-bind="getRowActions(row)" />
+      </template>
+    </DataTable>
             >同意</el-button>
             <el-button
               v-if="row.status === 'PENDING_REVIEW'"
@@ -223,15 +181,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Search, Check, Close, Document, Download } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
+import { toast } from 'vue-sonner'
+import { Refresh, Search, Check, X, Eye, Download } from 'lucide-vue-next'
+import { DataTable, FilterPanel, TableRowActions, StatusBadge } from '@/components/crmwolf'
+import { useHeaderStore } from '@/stores/header'
+import { usePageTitle } from '@/composables/usePageTitle'
 import invoiceApi, { type InvoiceApplicationResponse, type InvoiceApplicationQueryParams } from '@/api/invoice'
 import InvoiceFileUpload from '@/components/InvoiceFileUpload.vue'
 import { getInvoiceFileUrl } from '@/api/fileUpload'
 
+usePageTitle()
+
 const router = useRouter()
+const headerStore = useHeaderStore()
 
 const loading = ref(false)
 const tableData = ref<InvoiceApplicationResponse[]>([])
@@ -253,11 +218,48 @@ const pagination = reactive({
   total: 0
 })
 
+// ContextTabs 配置
+const tabs = [
+  { key: 'pending', label: '待审批' },
+  { key: 'approved', label: '已通过' },
+  { key: 'rejected', label: '已拒绝' },
+  { key: 'all', label: '全部' }
+]
+
+// FilterPanel 配置
+const filterFields = [
+  { key: 'customer_name', type: 'text' as const, label: '客户名称', placeholder: '搜索客户名称' },
+  { key: 'contract_name', type: 'text' as const, label: '合同名称', placeholder: '搜索合同名称' },
+  {
+    key: 'invoice_type',
+    type: 'select' as const,
+    label: '发票类型',
+    placeholder: '全部类型',
+    options: [
+      { value: 'VAT_SPECIAL', label: '增值税专用发票' },
+      { value: 'VAT_ORDINARY', label: '增值税普通发票' },
+      { value: 'VAT_ELECTRONIC', label: '增值税电子普通发票' }
+    ]
+  }
+]
+
 const searchForm = reactive({
   customer_name: '',
   contract_name: '',
   invoice_type: ''
 })
+
+// DataTable 配置
+const columns = [
+  { key: 'application_number', title: '申请单号', width: '180px' },
+  { key: 'customer_name', title: '客户名称', width: '150px' },
+  { key: 'contract_name', title: '合同名称', width: '150px' },
+  { key: 'invoice_type', title: '发票类型', width: '150px' },
+  { key: 'amount', title: '开票金额', align: 'right' as const, width: '120px' },
+  { key: 'created_time', title: '申请时间', width: '120px' },
+  { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
+  { key: 'actions', title: '操作', align: 'center' as const, width: '140px' }
+]
 
 const fetchData = async () => {
     loading.value = true
@@ -282,19 +284,14 @@ const fetchData = async () => {
       pagination.total = response.total || 0
     } catch (error) {
       console.error('获取发票列表失败', error)
-      ElMessage.error('获取数据失败')
+      toast.error('获取数据失败')
     } finally {
       loading.value = false
     }
   }
 
-const handleTabChange = () => {
-  pagination.current = 1
-  selectedRowKeys.value = []
-  fetchData()
-}
-
-const handleSearch = () => {
+const handleSearch = (values: Record<string, any>) => {
+  Object.assign(searchForm, values)
   pagination.current = 1
   fetchData()
 }
@@ -303,7 +300,8 @@ const handleReset = () => {
   searchForm.customer_name = ''
   searchForm.contract_name = ''
   searchForm.invoice_type = ''
-  handleSearch()
+  pagination.current = 1
+  fetchData()
 }
 
 const handlePageChange = (page: number) => {
@@ -317,37 +315,34 @@ const handlePageSizeChange = (pageSize: number) => {
   fetchData()
 }
 
-const handleSelectionChange = (selection: InvoiceApplicationResponse[]) => {
-  selectedRowKeys.value = selection.map(item => item.id)
-}
-
 const viewDetail = (record: InvoiceApplicationResponse) => {
   currentRecord.value = record
   drawerVisible.value = true
 }
 
 const handleApprove = async (record: InvoiceApplicationResponse) => {
-  ElMessageBox.confirm(
-    '确认同意此发票申请吗？',
-    '确认同意',
-    {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'success'
+  try {
+    await ElMessageBox.confirm(
+      '确认同意此发票申请吗？',
+      '确认同意',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'success'
+      }
+    )
+    await invoiceApi.financeApprovalInvoiceApplication(record.id, {
+      approved: true,
+      remark: '财务审批通过'
+    })
+    toast.success('审批成功')
+    drawerVisible.value = false
+    fetchData()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      toast.error('审批失败')
     }
-  ).then(async () => {
-    try {
-      await invoiceApi.financeApprovalInvoiceApplication(record.id, {
-        approved: true,
-        remark: '财务审批通过'
-      })
-      ElMessage.success('审批成功')
-      drawerVisible.value = false
-      fetchData()
-    } catch (error) {
-      ElMessage.error('审批失败')
-    }
-  })
+  }
 }
 
 const handleReject = (record?: InvoiceApplicationResponse) => {
@@ -361,7 +356,7 @@ const handleReject = (record?: InvoiceApplicationResponse) => {
 
 const confirmReject = async () => {
   if (!rejectForm.reason.trim()) {
-    ElMessage.warning('请输入拒绝原因')
+    toast.warning('请输入拒绝原因')
     return
   }
 
@@ -373,96 +368,117 @@ const confirmReject = async () => {
       })
     )
     await Promise.all(promises)
-    ElMessage.success('操作成功')
+    toast.success('操作成功')
     rejectModalVisible.value = false
     rejectForm.reason = ''
     selectedRowKeys.value = []
     drawerVisible.value = false
     fetchData()
   } catch (error) {
-    ElMessage.error('操作失败')
+    toast.error('操作失败')
   }
 }
 
-const handleBatchApprove = () => {
-  ElMessageBox.confirm(
-    `确认同意选中的 ${selectedRowKeys.value.length} 个发票申请吗？`,
-    '批量同意',
-    {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'success'
+const handleBatchApprove = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `确认同意选中的 ${selectedRowKeys.value.length} 个发票申请吗？`,
+      '批量同意',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'success'
+      }
+    )
+    const promises = selectedRowKeys.value.map(id =>
+      invoiceApi.financeApprovalInvoiceApplication(id, {
+        approved: true,
+        remark: '财务审批通过'
+      })
+    )
+    await Promise.all(promises)
+    toast.success('批量审批成功')
+    selectedRowKeys.value = []
+    fetchData()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      toast.error('批量审批失败')
     }
-  ).then(async () => {
-    try {
-      const promises = selectedRowKeys.value.map(id =>
-        invoiceApi.financeApprovalInvoiceApplication(id, {
-          approved: true,
-          remark: '批量审批通过'
-        })
-      )
-      await Promise.all(promises)
-      ElMessage.success('操作成功')
-      selectedRowKeys.value = []
-      fetchData()
-    } catch (error) {
-      ElMessage.error('操作失败')
-    }
-  })
+  }
 }
 
-const handleBatchReject = () => {
-  handleReject()
-}
-
+// 辅助函数
 const getInvoiceTypeName = (type: string) => {
-  const typeMap: Record<string, string> = {
+  const map: Record<string, string> = {
     'VAT_SPECIAL': '增值税专用发票',
     'VAT_ORDINARY': '增值税普通发票',
     'VAT_ELECTRONIC': '增值税电子普通发票'
   }
-  return typeMap[type] || type
-}
-
-const getStatusName = (status: string) => {
-  const statusMap: Record<string, string> = {
-    'DRAFT': '草稿',
-    'PENDING_REVIEW': '待财务审批',
-    'APPROVED': '已通过',
-    'REJECTED': '已拒绝',
-    'ISSUED': '已开票'
-  }
-  return statusMap[status] || status
-}
-
-const getStatusType = (status: string) => {
-  const typeMap: Record<string, any> = {
-    'DRAFT': 'info',
-    'PENDING_REVIEW': 'warning',
-    'APPROVED': 'success',
-    'REJECTED': 'danger',
-    'ISSUED': 'primary'
-  }
-  return typeMap[status] || 'info'
-}
-
-const getStatusClass = (status: string) => {
-  const classMap: Record<string, string> = {
-    'DRAFT': 'default',
-    'PENDING_REVIEW': 'warning',
-    'APPROVED': 'success',
-    'REJECTED': 'danger',
-    'ISSUED': 'primary'
-  }
-  return classMap[status] || 'default'
+  return map[type] || type
 }
 
 const formatAmount = (amount: number) => {
-  return amount.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })
+  return amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
+
+const mapInvoiceStatus = (status: string) => {
+  const map: Record<string, string> = {
+    'PENDING_REVIEW': 'pending',
+    'APPROVED': 'approved',
+    'REJECTED': 'rejected'
+  }
+  return map[status] || 'pending'
+}
+
+// TableRowActions 配置
+const getRowActions = (row: InvoiceApplicationResponse) => ({
+  primaryActions: [
+    {
+      label: '查看',
+      handler: () => viewDetail(row),
+      icon: Eye
+    }
+  ],
+  secondaryActions: row.status === 'PENDING_REVIEW' ? [
+    {
+      label: '同意',
+      handler: () => handleApprove(row),
+      icon: Check
+    },
+    {
+      label: '拒绝',
+      handler: () => handleReject(row),
+      icon: X,
+      destructive: true,
+      separator: true
+    }
+  ] : []
+})
+
+// headerStore 集成
+import { watchEffect } from 'vue'
+
+watchEffect(() => {
+  headerStore.setTabs(tabs, activeTab.value)
+})
+
+// 监听 headerStore.activeTab 变化
+watchEffect(() => {
+  if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
+    activeTab.value = headerStore.activeTab
+    pagination.current = 1
+    selectedRowKeys.value = []
+    fetchData()
+  }
+})
+
+onMounted(() => {
+  fetchData()
+})
+
+onUnmounted(() => {
+  headerStore.clear()
+})
 
 // Task 6: 发票文件下载
 const downloadDrawerFile = (): void => {
@@ -479,7 +495,7 @@ const handleDrawerFileUploaded = (): void => {
 
 // Task 6: 处理文件上传错误
 const handleDrawerUploadError = (message: string): void => {
-  ElMessage.error(message.length > 0 ? message : '文件上传失败')
+  toast.error(message.length > 0 ? message : '文件上传失败')
 }
 
 // Task 6: 处理拒绝审批（由 InvoiceFileUpload 触发）
@@ -488,10 +504,6 @@ const handleDrawerRejected = (): void => {
   drawerVisible.value = false
   fetchData()
 }
-
-onMounted(() => {
-  fetchData()
-})
 </script>
 
 <style scoped lang="scss">
