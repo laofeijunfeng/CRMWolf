@@ -39,56 +39,56 @@
             <div class="attributes-grid">
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <el-icon class="attribute-icon"><User /></el-icon>
+                  <User class="attribute-icon w-3.5 h-3.5" /></el-icon>
                   <span class="attribute-label">客户名称</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.customer_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Document /></el-icon>
+                  <FileText class="attribute-icon w-3.5 h-3.5" /></el-icon>
                   <span class="attribute-label">关联合同</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.contract_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Clock /></el-icon>
+                  <Clock class="attribute-icon w-3.5 h-3.5" /></el-icon>
                   <span class="attribute-label">回款阶段</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.payment_plan_stage_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Avatar /></el-icon>
+                  <UserCircle class="attribute-icon w-3.5 h-3.5" /></el-icon>
                   <span class="attribute-label">申请人</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.applicant_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Calendar /></el-icon>
+                  <Calendar class="attribute-icon w-3.5 h-3.5" /></el-icon>
                   <span class="attribute-label">申请时间</span>
                 </div>
                 <span class="attribute-value secondary">{{ formatDateTime(invoiceInfo?.created_time) }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Avatar /></el-icon>
+                  <UserCircle class="attribute-icon w-3.5 h-3.5" /></el-icon>
                   <span class="attribute-label">审批人</span>
                 </div>
                 <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.reviewer_name }">{{ invoiceInfo?.reviewer_name || '-' }}</span>
               </div>
               <div class="attribute-item" v-if="invoiceInfo?.invoice_number">
                 <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Ticket /></el-icon>
+                  <Ticket class="attribute-icon w-3.5 h-3.5" /></el-icon>
                   <span class="attribute-label">发票号码</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.invoice_number }}</span>
               </div>
               <div class="attribute-item" v-if="invoiceInfo?.reviewed_time">
                 <div class="attribute-header">
-                  <el-icon class="attribute-icon"><Calendar /></el-icon>
+                  <Calendar class="attribute-icon w-3.5 h-3.5" /></el-icon>
                   <span class="attribute-label">审批时间</span>
                 </div>
                 <span class="attribute-value secondary">{{ formatDateTime(invoiceInfo?.reviewed_time) }}</span>
@@ -104,17 +104,15 @@
         class="issued-file-highlight"
       >
         <div class="highlight-header">
-          <el-icon class="success-icon"><CircleCheckFilled /></el-icon>
+          <CheckCircle2 class="success-icon w-5 h-5" /></el-icon>
           <span class="highlight-title">已开票</span>
           <span v-if="invoiceInfo?.invoice_number" class="invoice-number-badge">
             {{ invoiceInfo.invoice_number }}
           </span>
         </div>
         <div class="file-download-area">
-          <el-icon :class="['file-type-icon', getFileIconClass(invoiceInfo.invoice_file_path)]">
-            <Document v-if="isPdf(invoiceInfo.invoice_file_path)" />
-            <Picture v-else />
-          </el-icon>
+          <FileText v-if="isPdf(invoiceInfo.invoice_file_path)" :class="['file-type-icon', 'w-5 h-5']" />
+          <Image v-else :class="['file-type-icon', 'w-5 h-5']" />
           <span class="file-type-label">{{ getFileTypeLabel(invoiceInfo.invoice_file_path) }}</span>
           <el-button
             type="primary"
@@ -122,7 +120,7 @@
             aria-label="下载发票文件"
             @click="handleDownloadWithFeedback"
           >
-            <el-icon><Download /></el-icon>
+            <Download class="w-4 h-4" />
             下载发票文件
           </el-button>
         </div>
@@ -137,7 +135,7 @@
             <div class="attributes-grid">
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><OfficeBuilding /></el-icon>
+                    <Building2 class="attribute-icon w-3.5 h-3.5" /></el-icon>
                     <span class="attribute-label">抬头类型</span>
                   </div>
                   <el-tag :class="['wolf-tag', invoiceInfo?.invoice_title_type === 'COMPANY' ? 'wolf-tag--info' : 'wolf-tag--gray']" size="small">
@@ -146,42 +144,42 @@
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><Document /></el-icon>
+                    <FileText class="attribute-icon w-3.5 h-3.5" /></el-icon>
                     <span class="attribute-label">开票抬头</span>
                   </div>
                   <span class="attribute-value">{{ invoiceInfo?.invoice_title_text || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><Key /></el-icon>
+                    <Key class="attribute-icon w-3.5 h-3.5" /></el-icon>
                     <span class="attribute-label">纳税人识别号</span>
                   </div>
                   <span class="attribute-value">{{ invoiceInfo?.invoice_taxpayer_id || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><CreditCard /></el-icon>
+                    <CreditCard class="attribute-icon w-3.5 h-3.5" /></el-icon>
                     <span class="attribute-label">开户行</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_bank_name }">{{ invoiceInfo?.invoice_bank_name || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><Wallet /></el-icon>
+                    <Wallet class="attribute-icon w-3.5 h-3.5" /></el-icon>
                     <span class="attribute-label">开户账号</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_bank_account }">{{ invoiceInfo?.invoice_bank_account || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><Location /></el-icon>
+                    <MapPin class="attribute-icon w-3.5 h-3.5" /></el-icon>
                     <span class="attribute-label">开票地址</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_address }">{{ invoiceInfo?.invoice_address || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <el-icon class="attribute-icon"><Phone /></el-icon>
+                    <Phone class="attribute-icon w-3.5 h-3.5" /></el-icon>
                     <span class="attribute-label">电话</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_phone }">{{ invoiceInfo?.invoice_phone || '-' }}</span>
@@ -217,12 +215,12 @@
             <span class="card-title">发票文件</span>
           </div>
           <div class="file-info">
-            <el-icon class="file-icon"><Document /></el-icon>
+            <FileText class="file-icon w-4 h-4" /></el-icon>
             <span v-if="invoiceInfo?.invoice_number" class="invoice-number">
               发票号码：{{ invoiceInfo.invoice_number }}
             </span>
             <el-button link type="primary" size="small" @click="downloadInvoiceFile">
-              <el-icon><Download /></el-icon>
+              <Download class="w-4 h-4" /></el-icon>
               下载发票文件
             </el-button>
           </div>
@@ -247,25 +245,26 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { showError, showSuccess } from '@/utils/errorMessages'
+import { toast } from 'vue-sonner'
 import {
   User,
-  Document,
+  FileText,
   Clock,
-  Avatar,
+  UserCircle,
   Calendar,
   Ticket,
-  OfficeBuilding,
+  Building2,
   Key,
   CreditCard,
   Wallet,
-  Location,
+  MapPin,
   Phone,
   Download,
-  CircleCheckFilled,
-  Picture
-} from '@element-plus/icons-vue'
+  CheckCircle2,
+  Image
+} from 'lucide-vue-next'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
@@ -406,7 +405,7 @@ const handleMarkInvoiced = (): void => {
 
 const handleConfirmInvoiced = async (): Promise<void> => {
   if (invoicedForm.value.invoice_number.trim().length === 0) {
-    ElMessage.warning('请输入发票号码')
+    toast.warning('请输入发票号码')
     return
   }
 
@@ -498,10 +497,7 @@ const getFileTypeLabel = (filePath: string | null): string => {
 const handleDownloadWithFeedback = (): void => {
   if (!invoiceInfo.value) return
 
-  ElMessage.success({
-    message: '发票文件下载成功',
-    duration: 2000
-  })
+  toast.success('发票文件下载成功')
 
   downloadInvoiceFile()
 }
