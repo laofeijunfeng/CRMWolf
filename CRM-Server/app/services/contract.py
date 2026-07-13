@@ -1,48 +1,9 @@
+"""合同相关服务"""
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-import threading
 
-
-class ContractNumberGenerator:
-    """合同编号生成器（线程安全）"""
-    
-    _lock = threading.Lock()
-    
-    @classmethod
-    def generate_contract_number(cls, db: Session) -> str:
-        """
-        生成合同编号
-        格式：CT + YYYYMMDD + 四位流水号
-        例如：CT202602060001
-        
-        Args:
-            db: 数据库会话
-            
-        Returns:
-            str: 合同编号
-        """
-        with cls._lock:
-            today = datetime.now()
-            date_str = today.strftime("%Y%m%d")
-            
-            result = db.execute(text("""
-                SELECT contract_number 
-                FROM crm_contracts 
-                WHERE contract_number LIKE :pattern 
-                ORDER BY id DESC 
-                LIMIT 1
-            """), {"pattern": f"CT{date_str}%"}).fetchone()
-            
-            if result:
-                last_number = result[0]
-                sequence = int(last_number[-4:]) + 1
-            else:
-                sequence = 1
-            
-            return f"CT{date_str}{sequence:04d}"
+# ContractNumberGenerator 已迁移到 business_number_generator.py
 
 
 class ContractPricingService:

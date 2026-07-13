@@ -7,7 +7,8 @@ import logging
 
 from app.models.contract import Contract, ContractStatus
 from app.schemas.contract import ContractCreate, ContractUpdate, ContractStatusUpdate
-from app.services.contract import ContractNumberGenerator, ContractPricingService
+from app.services.business_number_generator import BusinessNumberGenerator
+from app.services.contract import ContractPricingService
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +212,7 @@ class ContractCRUD:
         
         contract_data = obj_in.model_dump()
         
-        contract_number = ContractNumberGenerator.generate_contract_number(db)
+        contract_number = BusinessNumberGenerator.generate('CT', db)
         
         standard_unit_price = ContractPricingService.calculate_standard_unit_price(
             total_amount=contract_data['total_amount'],
@@ -284,7 +285,7 @@ class ContractCRUD:
         if not opportunity:
             raise ValueError("商机不存在")
 
-        contract_number = ContractNumberGenerator.generate_contract_number(db)
+        contract_number = BusinessNumberGenerator.generate('CT', db)
 
         actual_amount = opportunity.actual_amount if opportunity.actual_amount else Decimal('0')
         standard_unit_price = ContractPricingService.calculate_standard_unit_price(
