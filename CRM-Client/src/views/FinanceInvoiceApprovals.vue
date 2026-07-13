@@ -495,162 +495,163 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
 .page-container {
-  padding: $wolf-page-padding;
-  background: $wolf-bg-page;
-  min-height: calc(100vh - 48px);
+  padding: $wolf-page-padding-v2;
+  background: $wolf-bg-page-v2;
+  min-height: 0;
+  flex: 1;
 }
 
 .tabs-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-space-sm $wolf-card-padding;
-  margin-bottom: $wolf-card-gap;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-lg-v2;
+  padding: $wolf-space-sm-v2 $wolf-card-padding-v2;
+  margin-bottom: $wolf-card-gap-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .filter-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-card-padding;
-  margin-bottom: $wolf-card-gap;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-lg-v2;
+  padding: $wolf-card-padding-v2;
+  margin-bottom: $wolf-card-gap-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .table-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-card-padding;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-lg-v2;
+  padding: $wolf-card-padding-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: $wolf-space-md;
+  margin-bottom: $wolf-space-md-v2;
 }
 
 .card-title-group {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md;
+  gap: $wolf-space-md-v2;
 }
 
 .card-title {
-  font-size: $wolf-font-size-body;
-  font-weight: $wolf-font-weight-medium;
-  color: $wolf-text-primary;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-primary-v2;
 }
 
 .card-tag {
-  font-size: $wolf-font-size-caption;
+  font-size: $wolf-font-size-caption-v2;
   padding: 2px 8px;
-  border-radius: $wolf-radius-sm;
+  border-radius: $wolf-radius-sm-v2;
 
   &.primary {
-    color: $wolf-primary;
-    background: $wolf-primary-light;
+    color: $wolf-primary-v2;
+    background: $wolf-primary-light-v2;
   }
 }
 
 .card-actions {
   display: flex;
-  gap: $wolf-button-gap;
+  gap: $wolf-space-sm-v2;
 }
 
 .pagination-bar {
   display: flex;
   justify-content: flex-end;
-  padding: $wolf-space-md 0;
+  padding: $wolf-space-md-v2 0;
 }
 
 .type-tag {
-  font-size: $wolf-font-size-caption;
-  color: $wolf-text-secondary;
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-secondary-v2;
 }
 
 .amount {
-  font-weight: $wolf-font-weight-medium;
-  color: $wolf-warning-text;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-warning-text-v2;
 }
 
 .status-tag {
-  font-size: $wolf-font-size-caption;
+  font-size: $wolf-font-size-caption-v2;
   padding: 2px 8px;
-  border-radius: $wolf-radius-sm;
+  border-radius: $wolf-radius-sm-v2;
 
   &.default {
-    color: $wolf-text-tertiary;
-    background: $wolf-bg-hover;
+    color: $wolf-text-tertiary-v2;
+    background: $wolf-bg-hover-v2;
   }
 
   &.warning {
-    color: $wolf-warning-text;
-    background: $wolf-warning-bg;
+    color: $wolf-warning-text-v2;
+    background: $wolf-warning-bg-v2;
   }
 
   &.success {
-    color: $wolf-success-text;
-    background: $wolf-success-bg;
+    color: $wolf-success-text-v2;
+    background: $wolf-success-bg-v2;
   }
 
   &.danger {
-    color: $wolf-danger-text;
-    background: $wolf-danger-bg;
+    color: $wolf-danger-text-v2;
+    background: $wolf-danger-bg-v2;
   }
 
   &.primary {
-    color: $wolf-primary;
-    background: $wolf-primary-light;
+    color: $wolf-primary-v2;
+    background: $wolf-primary-light-v2;
   }
 }
 
 .reject-btn {
-  color: $wolf-danger-text;
+  color: $wolf-danger-text-v2;
 
   &:hover {
-    color: $wolf-danger-text;
+    color: $wolf-danger-text-v2;
   }
 }
 
 .invoice-detail-content {
-  padding: $wolf-space-md 0;
+  padding: $wolf-space-md-v2 0;
 }
 
 .approval-actions {
-  margin-top: $wolf-space-lg;
+  margin-top: $wolf-space-lg-v2;
   display: flex;
-  gap: $wolf-button-gap;
+  gap: $wolf-space-sm-v2;
   justify-content: flex-end;
 }
 
 // Task 6: 已上传文件显示区域样式
 .uploaded-file-info {
-  margin-top: $wolf-space-md;
-  background: $wolf-bg-hover;
-  border-radius: $wolf-radius-sm;
-  padding: $wolf-space-md;
+  margin-top: $wolf-space-md-v2;
+  background: $wolf-bg-hover-v2;
+  border-radius: $wolf-radius-sm-v2;
+  padding: $wolf-space-md-v2;
 
   .file-header {
     display: flex;
     align-items: center;
-    gap: $wolf-space-xs;
-    margin-bottom: $wolf-space-sm;
-    color: $wolf-text-secondary;
-    font-weight: $wolf-font-weight-medium;
+    gap: $wolf-space-xs-v2;
+    margin-bottom: $wolf-space-sm-v2;
+    color: $wolf-text-secondary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
   }
 
   .file-content {
     display: flex;
     align-items: center;
-    gap: $wolf-space-md;
+    gap: $wolf-space-md-v2;
 
     .invoice-number {
-      font-size: $wolf-font-size-caption;
-      color: $wolf-text-tertiary;
+      font-size: $wolf-font-size-caption-v2;
+      color: $wolf-text-tertiary-v2;
     }
   }
 }
