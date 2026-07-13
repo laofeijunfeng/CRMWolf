@@ -11,6 +11,7 @@ from app.schemas.payment import (
     PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate,
     PaymentRecordCreate, PaymentRecordUpdate
 )
+from app.services.business_number_generator import BusinessNumberGenerator
 
 
 class PaymentPlanCRUD:
@@ -404,9 +405,13 @@ class PaymentRecordCRUD:
         if total_paid + obj_in.actual_amount > planned:
             raise ValueError(f"回款金额超出计划，计划金额: {planned}，已回款: {total_paid}，本次: {obj_in.actual_amount}")
 
+        # 生成记录编号
+        record_number = BusinessNumberGenerator.generate('PAY', db)
+
         db_record = PaymentRecord(
             payment_plan_id=plan_id,
             team_id=team_id,
+            record_number=record_number,
             **obj_in.model_dump(),
             creator_id=creator_id,
             creator_name=creator_name
