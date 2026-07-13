@@ -536,26 +536,27 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
 .invoice-detail-container {
   padding: 0;
-  min-height: calc(100vh - 48px);
-  background: $wolf-bg-page;
+  min-height: 0;
+  flex: 1;
+  background: $wolf-bg-page-v2;
 }
 
 .invoice-content {
-  padding: $wolf-page-padding;
+  padding: $wolf-page-padding-v2;
   display: flex;
   flex-direction: column;
-  gap: $wolf-section-gap;
+  gap: $wolf-section-gap-v2;
 }
 
 .invoice-info-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-card-padding;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-lg-v2;
+  padding: $wolf-card-padding-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .invoice-basic-info {
