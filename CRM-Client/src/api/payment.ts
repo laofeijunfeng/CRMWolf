@@ -122,7 +122,7 @@ export interface PaymentRecordUpdate {
 export interface PaymentRecordResponse {
   id: number
   payment_plan_id: number  // 修复：与后端 schema 字段名一致
-  record_number: string  // 回款记录编号
+  record_number?: string  // 回款记录编号（可选，兼容旧数据）
   actual_amount: number
   payment_date: string
   proof_attachment?: string
