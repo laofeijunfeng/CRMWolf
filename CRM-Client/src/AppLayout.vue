@@ -896,6 +896,7 @@ $z-index-bottom-nav: 100;
 // MASTER.md 6.2: 高度 56px + 三段式
 .top-bar {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;  // 三段式布局
   height: $wolf-topbar-height-v2;  // 56px

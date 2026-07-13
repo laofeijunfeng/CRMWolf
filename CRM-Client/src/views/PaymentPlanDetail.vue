@@ -624,9 +624,10 @@ const handleEditAndResubmit = async (): Promise<void> => {
 @use '@/styles/variables.scss' as *;
 
 .payment-plan-detail {
+  flex: 1;
+  min-height: 0;
   padding: $wolf-page-padding;
   background: $wolf-bg-page;
-  min-height: calc(100vh - 48px);
 }
 
 .plan-info-card,
