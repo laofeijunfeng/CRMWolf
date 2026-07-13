@@ -592,28 +592,28 @@ onUnmounted(() => {
 .info-top {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  gap: $wolf-space-lg;
+  gap: $wolf-space-lg-v2;
   margin-bottom: 0;
 }
 
 .info-left {
   .invoice-title-section {
     display: flex;
-    gap: $wolf-card-padding;
+    gap: $wolf-card-padding-v2;
     align-items: flex-start;
   }
 
   .invoice-avatar {
     width: 48px;
     height: 48px;
-    border-radius: $wolf-radius-full;
-    background: $wolf-primary;
+    border-radius: $wolf-radius-full-v2;
+    background: $wolf-primary-v2;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 20px;
-    font-weight: $wolf-font-weight-semibold;
-    color: $wolf-text-inverse;
+    font-weight: $wolf-font-weight-semibold-v2;
+    color: $wolf-text-inverse-v2;
     flex-shrink: 0;
   }
 
@@ -621,16 +621,16 @@ onUnmounted(() => {
     flex: 1;
 
     .invoice-name {
-      margin: 0 0 $wolf-space-sm 0;
-      font-size: $wolf-font-size-body;
-      font-weight: $wolf-font-weight-semibold;
-      color: $wolf-text-primary;
-      line-height: $wolf-line-height-title;
+      margin: 0 0 $wolf-space-sm-v2 0;
+      font-size: $wolf-font-size-body-v2;
+      font-weight: $wolf-font-weight-semibold-v2;
+      color: $wolf-text-primary-v2;
+      line-height: $wolf-line-height-title-v2;
     }
 
     .invoice-tags {
       display: flex;
-      gap: $wolf-space-sm;
+      gap: $wolf-space-sm-v2;
       flex-wrap: wrap;
     }
   }
@@ -638,53 +638,53 @@ onUnmounted(() => {
 
 .info-divider {
   height: 1px;
-  background: $wolf-border-divider;
-  margin: $wolf-space-lg 0;
+  background: $wolf-border-divider-v2;
+  margin: $wolf-space-lg-v2 0;
 }
 
 .info-bottom {
   .attributes-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: $wolf-card-padding $wolf-space-lg;
+    gap: $wolf-card-padding-v2 $wolf-space-lg-v2;
   }
 
   .attribute-item {
     display: flex;
     flex-direction: column;
-    gap: $wolf-space-xs;
+    gap: $wolf-space-xs-v2;
   }
 
   .attribute-header {
     display: flex;
     align-items: center;
-    gap: $wolf-space-xs;
+    gap: $wolf-space-xs-v2;
   }
 
   .attribute-icon {
     font-size: 14px;
-    color: $wolf-text-tertiary;
+    color: $wolf-text-tertiary-v2;
     flex-shrink: 0;
   }
 
   .attribute-label {
-    font-size: $wolf-font-size-caption;
-    color: $wolf-text-tertiary;
-    font-weight: $wolf-font-weight-normal;
+    font-size: $wolf-font-size-caption-v2;
+    color: $wolf-text-tertiary-v2;
+    font-weight: $wolf-font-weight-normal-v2;
   }
 
   .attribute-value {
-    font-size: $wolf-font-size-body;
-    color: $wolf-text-primary;
-    font-weight: $wolf-font-weight-medium;
-    line-height: $wolf-line-height-body;
+    font-size: $wolf-font-size-body-v2;
+    color: $wolf-text-primary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
+    line-height: $wolf-line-height-body-v2;
 
     &.secondary {
-      color: $wolf-text-secondary;
+      color: $wolf-text-secondary-v2;
     }
 
     &.not-filled {
-      color: $wolf-text-placeholder;
+      color: $wolf-text-placeholder-v2;
     }
   }
 }
@@ -694,23 +694,23 @@ onUnmounted(() => {
   flex-direction: column;
   justify-content: center;
   align-items: flex-end;
-  gap: $wolf-card-padding;
+  gap: $wolf-card-padding-v2;
 
   .amount-section {
     text-align: right;
 
     .amount-label {
-      font-size: $wolf-font-size-caption;
-      color: $wolf-text-tertiary;
-      margin-bottom: $wolf-space-xs;
-      font-weight: $wolf-font-weight-normal;
+      font-size: $wolf-font-size-caption-v2;
+      color: $wolf-text-tertiary-v2;
+      margin-bottom: $wolf-space-xs-v2;
+      font-weight: $wolf-font-weight-normal-v2;
     }
 
     .amount-value {
       font-size: 24px;
-      font-weight: $wolf-font-weight-semibold;
-      color: $wolf-primary;
-      line-height: $wolf-line-height-title;
+      font-weight: $wolf-font-weight-semibold-v2;
+      color: $wolf-primary-v2;
+      line-height: $wolf-line-height-title-v2;
     }
   }
 }
@@ -718,14 +718,14 @@ onUnmounted(() => {
 .core-section {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: $wolf-section-gap;
+  gap: $wolf-section-gap-v2;
 }
 
 .section-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-md;
-  padding: $wolf-card-padding;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-v2;
+  padding: $wolf-card-padding-v2;
+  box-shadow: $wolf-shadow-card-v2;
   min-height: 300px;
 }
 
@@ -733,203 +733,56 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: $wolf-space-md;
+  margin-bottom: $wolf-space-md-v2;
 }
 
 .card-title {
-  font-size: $wolf-font-size-body;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
 }
 
 .invoice-title-content-detail {
   .attributes-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: $wolf-card-padding $wolf-space-lg;
+    gap: $wolf-card-padding-v2 $wolf-space-lg-v2;
   }
 
   .attribute-item {
     display: flex;
     flex-direction: column;
-    gap: $wolf-space-xs;
+    gap: $wolf-space-xs-v2;
   }
 
   .attribute-header {
     display: flex;
     align-items: center;
-    gap: $wolf-space-xs;
+    gap: $wolf-space-xs-v2;
   }
 
   .attribute-icon {
     font-size: 14px;
-    color: $wolf-text-tertiary;
+    color: $wolf-text-tertiary-v2;
     flex-shrink: 0;
   }
 
   .attribute-label {
-    font-size: $wolf-font-size-caption;
-    color: $wolf-text-tertiary;
-    font-weight: $wolf-font-weight-normal;
+    font-size: $wolf-font-size-caption-v2;
+    color: $wolf-text-tertiary-v2;
+    font-weight: $wolf-font-weight-normal-v2;
   }
 
   .attribute-value {
-    font-size: $wolf-font-size-body;
-    color: $wolf-text-primary;
-    font-weight: $wolf-font-weight-medium;
-    line-height: $wolf-line-height-body;
+    font-size: $wolf-font-size-body-v2;
+    color: $wolf-text-primary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
+    line-height: $wolf-line-height-body-v2;
 
     &.not-filled {
-      color: $wolf-text-placeholder;
+      color: $wolf-text-placeholder-v2;
     }
   }
-}
-
-.approval-timeline {
-  padding: $wolf-space-sm 0;
-}
-
-.wolf-timeline {
-  position: relative;
-}
-
-.wolf-timeline__item {
-  position: relative;
-  padding-left: 40px;
-  padding-bottom: $wolf-space-lg;
-}
-
-.wolf-timeline__item:last-child {
-  padding-bottom: 0;
-}
-
-.wolf-timeline__line {
-  position: absolute;
-  left: 15px;
-  top: 32px;
-  bottom: 0;
-  width: 2px;
-  background: $wolf-border-default;
-}
-
-.wolf-timeline__item:last-child .wolf-timeline__line {
-  display: none;
-}
-
-.wolf-timeline__dot {
-  position: absolute;
-  left: 0;
-  top: 2px;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 14px;
-  font-weight: $wolf-font-weight-medium;
-}
-
-.wolf-timeline__dot--primary {
-  background-color: $wolf-primary;
-}
-
-.wolf-timeline__dot--success {
-  background-color: $wolf-success-text;
-}
-
-.wolf-timeline__dot--info {
-  background-color: $wolf-info;
-}
-
-.wolf-timeline__dot--danger {
-  background-color: $wolf-danger-text;
-}
-
-.wolf-timeline__dot--gray {
-  background-color: $wolf-purple;
-}
-
-.wolf-timeline__content {
-  padding-top: $wolf-space-xs;
-}
-
-.wolf-timeline__header {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-  margin-bottom: $wolf-space-xs;
-}
-
-.wolf-timeline__title {
-  font-weight: $wolf-font-weight-medium;
-  color: $wolf-text-primary;
-  font-size: $wolf-font-size-body;
-}
-
-.wolf-timeline__meta {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm;
-  font-size: $wolf-font-size-auxiliary;
-  color: $wolf-text-tertiary;
-}
-
-.wolf-timeline__result {
-  margin-top: $wolf-space-sm;
-}
-
-.wolf-tag {
-  border-radius: $wolf-radius-sm !important;
-  padding: 2px 8px !important;
-  font-size: $wolf-font-size-caption !important;
-  font-weight: $wolf-font-weight-medium !important;
-  height: auto !important;
-  line-height: 1.5 !important;
-  border-width: 1px !important;
-}
-
-.wolf-tag--primary {
-  background-color: $wolf-info-bg !important;
-  border-color: $wolf-info-border !important;
-  color: $wolf-info !important;
-}
-
-.wolf-tag--success {
-  background-color: $wolf-success-bg !important;
-  border-color: $wolf-success-border !important;
-  color: $wolf-success-text !important;
-}
-
-.wolf-tag--warning {
-  background-color: $wolf-warning-bg !important;
-  border-color: $wolf-warning-border !important;
-  color: $wolf-warning-text !important;
-}
-
-.wolf-tag--danger {
-  background-color: $wolf-danger-bg !important;
-  border-color: $wolf-danger-border !important;
-  color: $wolf-danger-text !important;
-}
-
-.wolf-tag--gray {
-  background-color: $wolf-purple-bg !important;
-  border-color: $wolf-purple-border !important;
-  color: $wolf-purple !important;
-}
-
-.wolf-tag--purple {
-  background-color: $wolf-purple-bg !important;
-  border-color: $wolf-purple-border !important;
-  color: $wolf-purple !important;
-}
-
-.wolf-tag--info {
-  background-color: $wolf-info-bg !important;
-  border-color: $wolf-info-border !important;
-  color: $wolf-info !important;
 }
 
 // Task 6: 发票文件显示区域样式
@@ -937,80 +790,80 @@ onUnmounted(() => {
   .file-info {
     display: flex;
     align-items: center;
-    gap: $wolf-space-md;
-    padding: $wolf-space-md;
-    background: $wolf-bg-hover;
-    border-radius: $wolf-radius-sm;
+    gap: $wolf-space-md-v2;
+    padding: $wolf-space-md-v2;
+    background: $wolf-bg-hover-v2;
+    border-radius: $wolf-radius-sm-v2;
   }
 
   .file-icon {
     font-size: 24px;
-    color: $wolf-primary;
+    color: $wolf-primary-v2;
   }
 
   .invoice-number {
-    font-size: $wolf-font-size-body;
-    color: $wolf-text-secondary;
-    font-weight: $wolf-font-weight-medium;
+    font-size: $wolf-font-size-body-v2;
+    color: $wolf-text-secondary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
   }
 }
 
 // Task 7: ISSUED 状态高亮文件区域样式
 .issued-file-highlight {
-  margin-top: $wolf-space-lg;
-  padding: $wolf-card-padding;
-  background: linear-gradient(135deg, $wolf-success-bg 0%, $wolf-bg-card 100%);
-  border: 2px solid $wolf-success-border;
-  border-radius: $wolf-radius-md;
+  margin-top: $wolf-space-lg-v2;
+  padding: $wolf-card-padding-v2;
+  background: linear-gradient(135deg, $wolf-success-bg-v2 0%, $wolf-bg-card-v2 100%);
+  border: 2px solid $wolf-success-v2;
+  border-radius: $wolf-radius-v2;
 
   .highlight-header {
     display: flex;
     align-items: center;
-    gap: $wolf-space-sm;
-    margin-bottom: $wolf-space-md;
+    gap: $wolf-space-sm-v2;
+    margin-bottom: $wolf-space-md-v2;
 
     .success-icon {
       font-size: 20px;
-      color: $wolf-success-text;
+      color: $wolf-success-text-v2;
     }
 
     .highlight-title {
-      font-size: $wolf-font-size-body;
-      font-weight: $wolf-font-weight-semibold;
-      color: $wolf-success-text;
+      font-size: $wolf-font-size-body-v2;
+      font-weight: $wolf-font-weight-semibold-v2;
+      color: $wolf-success-text-v2;
     }
 
     .invoice-number-badge {
-      font-size: $wolf-font-size-caption;
-      padding: 2px 8px;
-      background: $wolf-success-text;
-      color: $wolf-text-inverse;
-      border-radius: $wolf-radius-sm;
-      font-weight: $wolf-font-weight-medium;
+      font-size: $wolf-font-size-caption-v2;
+      padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
+      background: $wolf-success-text-v2;
+      color: $wolf-text-inverse-v2;
+      border-radius: $wolf-radius-sm-v2;
+      font-weight: $wolf-font-weight-medium-v2;
     }
   }
 
   .file-download-area {
     display: flex;
     align-items: center;
-    gap: $wolf-space-md;
-    padding: $wolf-space-md;
-    background: $wolf-bg-card;
-    border-radius: $wolf-radius-sm;
+    gap: $wolf-space-md-v2;
+    padding: $wolf-space-md-v2;
+    background: $wolf-bg-card-v2;
+    border-radius: $wolf-radius-sm-v2;
 
     .file-type-icon {
       font-size: 32px;
 
-      &.pdf-icon { color: #E53935; }  // PDF 红色
-      &.image-icon { color: #43A047; }  // 图片绿色
-      &.ofd-icon { color: $wolf-primary; }  // OFD 蓝色
-      &.default-icon { color: $wolf-text-tertiary; }
+      &.pdf-icon { color: $wolf-danger-v2; }
+      &.image-icon { color: $wolf-success-v2; }
+      &.ofd-icon { color: $wolf-primary-v2; }  // OFD 蓝色
+      &.default-icon { color: $wolf-text-tertiary-v2; }
     }
 
     .file-type-label {
-      font-size: $wolf-font-size-body;
-      color: $wolf-text-secondary;
-      font-weight: $wolf-font-weight-medium;
+      font-size: $wolf-font-size-body-v2;
+      color: $wolf-text-secondary-v2;
+      font-weight: $wolf-font-weight-medium-v2;
     }
 
     // UX: touch-target-size (CRITICAL) - 最小 44px
