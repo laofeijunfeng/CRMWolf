@@ -396,6 +396,6 @@ module.exports = {
 ## 📚 参考资料
 
 - **设计系统文档**：`docs/design-system-migration-roadmap.md`
-- **实施路线图**：`docs/CRM-Docs/design-system/README.md`
+- **实施路线图**：`CRM-Docs/design-system/README.md`
 - **UI/UX Pro Max**：`python3 skills/ui-ux-pro-max/scripts/search.py --design-system`
 - **原型效果图**：`navigation-redesign-v3.html`

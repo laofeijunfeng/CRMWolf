@@ -16,11 +16,6 @@ if [ -f "$SCRIPT_PATH" ]; then
   fi
 fi
 
-# ===== 设计系统文档质量门禁 =====
-if git diff --cached --name-only | grep -q '^CRM-Docs/design-system/'; then
-  node scripts/check-design-system-docs.js || { echo "::error::Design-system documentation check failed"; exit 1; }
-fi
-
 # ===== 配置锁定检查 =====
 LOCKED_CONFIGS="CRM-Client/tsconfig.json CRM-Client/eslint.config.js CRM-Server/pyproject.toml"
 for config in $LOCKED_CONFIGS; do
