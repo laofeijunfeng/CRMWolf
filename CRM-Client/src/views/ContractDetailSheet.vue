@@ -55,7 +55,7 @@ const contractData = ref<ContractResponse | null>(null)
 
 // ==================== Methods ====================
 const fetchContractDetail = async (): Promise<void> => {
-  if (!props.recordId) return
+  if (props.recordId === null) return
 
   loading.value = true
   try {
@@ -118,13 +118,14 @@ const getLicenseTypeClass = (licenseType: LicenseType | undefined): string => {
 
 // ==================== Format Helpers ====================
 const formatAmount = (amount: string | number | undefined): string => {
-  if (!amount) return '0.00'
+  if (amount === undefined || amount === null) return '0.00'
+  if (amount === '') return '0.00'
   const num = typeof amount === 'string' ? parseFloat(amount) : amount
   return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-const formatDate = (dateStr: string | undefined): string => {
-  if (!dateStr) return '-'
+const formatDate = (dateStr: string | null | undefined): string => {
+  if (dateStr === undefined || dateStr === null || dateStr === '') return '-'
   const date = new Date(dateStr)
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -134,12 +135,13 @@ const formatDate = (dateStr: string | undefined): string => {
 
 // ==================== Computed ====================
 const signingContactName = computed((): string => {
-  return contractData.value?.contact_info?.name || '-'
+  const name = contractData.value?.contact_info?.name
+  return name !== undefined && name !== '' ? name : '-'
 })
 
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
-  if (visible && props.recordId) {
+  if (visible && props.recordId !== null) {
     fetchContractDetail()
   } else if (!visible) {
     // Clear state when closed

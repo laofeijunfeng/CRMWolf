@@ -22,6 +22,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Edit, Send, Trash2 } from 'lucide-vue-next'
 import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import type { ActionConfig } from '@/components/crmwolf/TableRowActions.vue'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import contractApi, {
@@ -167,7 +168,7 @@ const fetchContractList = async (): Promise<void> => {
 const handleSearch = (values: Record<string, string>): void => {
   Object.assign(filterValues, values)
   // 使用 FilterPanel 状态筛选时，清除 Tab 状态
-  if (values['status']) {
+  if (values['status'] !== '' && values['status'] !== null && values['status'] !== undefined) {
     activeTab.value = 'all'
   }
   pagination.current = 1
@@ -200,7 +201,8 @@ const handleCreate = (): void => {
 // ==================== DetailSheet 相关 ====================
 const handleViewDetail = (record: ContractListResponse, event?: MouseEvent): void => {
   // 保存触发元素
-  triggerElementRef.value = (event?.target as HTMLElement) || null
+  const target = event?.target
+  triggerElementRef.value = target instanceof HTMLElement ? target : null
 
   // 设置选择状态（使用业务编号）
   selectedContractNumber.value = record.contract_number
@@ -258,16 +260,23 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
 }
 
 // ==================== TableRowActions 配置 ====================
-const getRowActions = (row: ContractListResponse) => ({
+const getRowActions = (row: ContractListResponse): {
+  primaryActions: ActionConfig[]
+  secondaryActions: ActionConfig[]
+} => ({
   primaryActions: [
     {
       label: '查看',
-      handler: (record: ContractListResponse) => handleViewDetail(record),
+      handler: (record: Record<string, unknown>): void => {
+        handleViewDetail(record as unknown as ContractListResponse)
+      },
       icon: Eye
     },
     {
       label: '编辑',
-      handler: handleEdit,
+      handler: (record: Record<string, unknown>): void => {
+        handleEdit(record as unknown as ContractListResponse)
+      },
       icon: Edit,
       visible: canEditRow(row)
     }
@@ -275,13 +284,17 @@ const getRowActions = (row: ContractListResponse) => ({
   secondaryActions: [
     {
       label: '提交审批',
-      handler: handleSubmitApproval,
+      handler: (record: Record<string, unknown>): void => {
+        handleSubmitApproval(record as unknown as ContractListResponse)
+      },
       icon: Send,
       visible: canSubmitApproval(row)
     },
     {
       label: '删除',
-      handler: handleDelete,
+      handler: (record: Record<string, unknown>): void => {
+        void handleDelete(record as unknown as ContractListResponse)
+      },
       icon: Trash2,
       destructive: true,
       separator: true,

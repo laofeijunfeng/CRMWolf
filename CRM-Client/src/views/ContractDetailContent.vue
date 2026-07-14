@@ -137,7 +137,7 @@
               v-if="contractInfo && ['SIGNED', 'EFFECTIVE', 'EXPIRED'].includes(contractInfo.status || '')"
               :contract-id="contractInfo.id"
               :contract-status="contractInfo.status"
-              :contract-info="contractInfo"
+              :contract-info="paymentPlansContractInfo"
               @plan-updated="handlePaymentPlanUpdated"
               ref="paymentPlansRef"
             />
@@ -252,12 +252,14 @@ const emit = defineEmits<{
 // Stores
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
-const currentUserId = userStore.userInfo?.id ? String(userStore.userInfo.id) : ''
+const currentUserId = userStore.userInfo?.id !== null && userStore.userInfo?.id !== undefined
+  ? String(userStore.userInfo.id)
+  : ''
 
 // State
 const contractInfo = ref<ContractResponse | null>(null)
 const approvalDetail = ref<ApprovalDetail | null>(null)
-const paymentPlansRef = ref<InstanceType<typeof PaymentPlans> | null>(null)
+const paymentPlansRef = ref<{ refresh: () => void } | null>(null)
 const loading = ref(false)
 const submitting = ref(false)
 const withdrawing = ref(false)
@@ -270,7 +272,34 @@ const rejectForm = reactive({
 
 // Computed
 const signingContactName = computed(() => {
-  return contractInfo.value?.contact_info?.name || '-'
+  const name = contractInfo.value?.contact_info?.name
+  return name !== null && name !== undefined && name !== '' ? name : '-'
+})
+
+const paymentPlansContractInfo = computed(() => {
+  if (contractInfo.value === null || contractInfo.value === undefined) return undefined
+  const info: {
+    contract_name: string
+    contract_number: string
+    total_amount: number
+    customer_info?: { account_name: string }
+    effective_date?: string
+    signing_date?: string
+  } = {
+    contract_name: contractInfo.value.contract_name,
+    contract_number: contractInfo.value.contract_number,
+    total_amount: parseFloat(contractInfo.value.total_amount)
+  }
+  if (contractInfo.value.customer_info !== undefined) {
+    info.customer_info = { account_name: contractInfo.value.customer_info.account_name }
+  }
+  if (contractInfo.value.effective_date !== null && contractInfo.value.effective_date !== undefined) {
+    info.effective_date = contractInfo.value.effective_date
+  }
+  if (contractInfo.value.signing_date !== null && contractInfo.value.signing_date !== undefined) {
+    info.signing_date = contractInfo.value.signing_date
+  }
+  return info
 })
 
 const canEditContract = computed(() => {
@@ -349,7 +378,8 @@ const getStatusText = (status: string): string => {
     EXPIRED: '已到期',
     TERMINATED: '已终止'
   }
-  return map[status] || '未知'
+  const result = map[status]
+  return result !== undefined ? result : '未知'
 }
 
 const getStatusClass = (status: string): string => {
@@ -361,7 +391,8 @@ const getStatusClass = (status: string): string => {
     EXPIRED: 'status-expired',
     TERMINATED: 'status-terminated'
   }
-  return map[status] || 'status-draft'
+  const result = map[status]
+  return result !== undefined ? result : 'status-draft'
 }
 
 const formatAmount = (amount: number | string): string => {
@@ -374,9 +405,7 @@ const fetchContractInfo = async (): Promise<void> => {
   try {
     const data = await contractApi.getContract(props.recordId)
     contractInfo.value = data
-    console.log('合同详情数据:', data)
-  } catch (error: unknown) {
-    console.error('获取合同详情失败', error)
+  } catch {
     toast.error('获取合同详情失败')
   } finally {
     loading.value = false
@@ -392,28 +421,17 @@ const fetchApprovalDetail = async (): Promise<void> => {
   }
 
   try {
-    const response = await approvalApi.getContractApprovalDetail(contractInfo.value.id)
-    const data = response.data || response
-    approvalDetail.value = transformApprovalData(data as ApprovalDetailFromAPI)
-  } catch (error: unknown) {
-    if (error.response?.status !== 404) {
-      console.error('获取审批详情失败', error)
+    const response = await approvalApi.getContractApprovalDetail(contractInfo.value.id) as {
+      data?: ApprovalDetailFromAPI
     }
+    const apiData = response.data !== undefined ? response.data : (response as unknown as ApprovalDetailFromAPI)
+    approvalDetail.value = transformApprovalData(apiData)
+  } catch {
     approvalDetail.value = null
   }
 }
 
 // Approval Data Types
-interface ApprovalRecordFromAPI {
-  record_id: number
-  node_name: string
-  approver_id: string
-  approver_name: string
-  action: string
-  comment?: string
-  created_at?: string
-}
-
 interface ApprovalDetailFromAPI {
   approval_id: number
   contract_id: number
@@ -476,25 +494,32 @@ interface ApprovalDetail {
 }
 
 const transformApprovalData = (apiData: ApprovalDetailFromAPI): ApprovalDetail | null => {
-  if (!apiData) return null
+  if (apiData === null || apiData === undefined) return null
 
-  const nodes = apiData.flow?.nodes || []
+  const nodes = apiData.flow?.nodes ?? []
   const nodeMap = new Map<number, ApprovalStep>()
 
   const submitRecord = apiData.records.find(r => r.action === 'SUBMIT')
+
+  const createApprovalRecord = (r: { approver_id: string; approver_name: string; action: string; created_time: string; comment: string | null }): ApprovalRecord => {
+    const record: ApprovalRecord = {
+      approver_id: r.approver_id,
+      approver_name: r.approver_name,
+      action: r.action,
+      created_time: r.created_time
+    }
+    if (r.comment !== null) {
+      record.comment = r.comment
+    }
+    return record
+  }
 
   const submittedStep: ApprovalStep = {
     step_order: 0,
     step_name: '已提交',
     approver_role: '',
     status: 'APPROVED',
-    approval_records: submitRecord ? [{
-      approver_id: submitRecord.approver_id,
-      approver_name: submitRecord.approver_name,
-      action: submitRecord.action,
-      created_time: submitRecord.created_time,
-      comment: submitRecord.comment ?? undefined
-    }] : []
+    approval_records: submitRecord ? [createApprovalRecord(submitRecord)] : []
   }
 
   nodeMap.set(-1, submittedStep)
@@ -514,13 +539,7 @@ const transformApprovalData = (apiData: ApprovalDetailFromAPI): ApprovalDetail |
       step_name: node.node_name,
       approver_role: node.approve_role,
       status: stepStatus,
-      approval_records: nodeRecords.map(r => ({
-        approver_id: r.approver_id,
-        approver_name: r.approver_name,
-        action: r.action,
-        created_time: r.created_time,
-        comment: r.comment ?? undefined
-      }))
+      approval_records: nodeRecords.map(r => createApprovalRecord(r))
     })
   })
 
@@ -559,9 +578,9 @@ const transformApprovalData = (apiData: ApprovalDetailFromAPI): ApprovalDetail |
     current_step: Math.max(0, currentStepIndex),
     approval_steps: stepsArray,
     status: apiData.status,
-    submitter_name: apiData.submitter_name,
+    ...(apiData.submitter_name !== undefined ? { submitter_name: apiData.submitter_name } : {}),
     submitted_at: apiData.created_time,
-    flow_name: apiData.flow?.flow_name
+    ...(apiData.flow?.flow_name !== undefined ? { flow_name: apiData.flow.flow_name } : {})
   }
 
   return transformed
@@ -585,8 +604,7 @@ const handleSubmitApproval = async (): Promise<void> => {
     await fetchContractInfo()
     await fetchApprovalDetail()
     emit('refresh')
-  } catch (error: unknown) {
-    console.error('提交审批失败', error)
+  } catch {
     toast.error('提交审批失败')
   } finally {
     submitting.value = false
@@ -610,8 +628,7 @@ const handleWithdrawApproval = async (): Promise<void> => {
     await fetchContractInfo()
     approvalDetail.value = null
     emit('refresh')
-  } catch (error: unknown) {
-    console.error('撤回失败', error)
+  } catch {
     toast.error('撤回审批失败')
   } finally {
     withdrawing.value = false
@@ -635,8 +652,7 @@ const handleApprove = async (): Promise<void> => {
     await fetchContractInfo()
     await fetchApprovalDetail()
     emit('refresh')
-  } catch (error: unknown) {
-    console.error('审批失败', error)
+  } catch {
     toast.error('审批失败')
   } finally {
     approving.value = false
@@ -666,8 +682,7 @@ const confirmReject = async (): Promise<void> => {
     await fetchContractInfo()
     await fetchApprovalDetail()
     emit('refresh')
-  } catch (error: unknown) {
-    console.error('拒绝失败', error)
+  } catch {
     toast.error('拒绝审批失败')
   } finally {
     rejecting.value = false
@@ -675,13 +690,13 @@ const confirmReject = async (): Promise<void> => {
 }
 
 const handlePaymentPlanUpdated = (): void => {
-  if (paymentPlansRef.value) {
+  if (paymentPlansRef.value !== null) {
     paymentPlansRef.value.refresh()
   }
 }
 
 const getApprovalPlaceholderText = (): string => {
-  if (!contractInfo.value) return '暂无审批信息'
+  if (contractInfo.value === null || contractInfo.value === undefined) return '暂无审批信息'
 
   const statusTextMap: Record<string, string> = {
     'DRAFT': '草稿状态的合同尚未提交审批',
@@ -692,7 +707,9 @@ const getApprovalPlaceholderText = (): string => {
     'TERMINATED': '已终止合同的审批记录'
   }
 
-  return statusTextMap[contractInfo.value.status] || '暂无审批信息'
+  const status = contractInfo.value.status
+  const result = statusTextMap[status]
+  return result !== undefined ? result : '暂无审批信息'
 }
 
 // Expose methods for parent component
