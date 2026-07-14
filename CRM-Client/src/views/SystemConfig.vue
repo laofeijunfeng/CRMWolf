@@ -20,7 +20,7 @@
 import { computed, ref, defineAsyncComponent } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
-import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users } from 'lucide-vue-next'
 
 // 懒加载 Sheet 组件（性能优化）
@@ -114,11 +114,11 @@ fetchUserRoles()
         class="system-config-card"
         @click="openSheet('roles')"
       >
-        <CardHeader>
-          <Shield class="system-config-card__icon" />
-          <CardTitle>角色管理</CardTitle>
-          <CardDescription>配置角色与权限</CardDescription>
-        </CardHeader>
+        <CardContent class="p-6">
+          <Shield class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">角色管理</h3>
+          <p class="text-sm text-wolf-text-secondary">配置角色与权限</p>
+        </CardContent>
       </Card>
 
       <!-- 审批流程 -->
@@ -127,11 +127,11 @@ fetchUserRoles()
         class="system-config-card"
         @click="openSheet('approval-flows')"
       >
-        <CardHeader>
-          <Workflow class="system-config-card__icon" />
-          <CardTitle>审批流程</CardTitle>
-          <CardDescription>配置审批流程模板</CardDescription>
-        </CardHeader>
+        <CardContent class="p-6">
+          <Workflow class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">审批流程管理</h3>
+          <p class="text-sm text-wolf-text-secondary">配置审批流程与节点</p>
+        </CardContent>
       </Card>
 
       <!-- 采购配置 -->
@@ -140,11 +140,11 @@ fetchUserRoles()
         class="system-config-card"
         @click="openSheet('procurement')"
       >
-        <CardHeader>
-          <ShoppingCart class="system-config-card__icon" />
-          <CardTitle>采购配置</CardTitle>
-          <CardDescription>管理采购方式</CardDescription>
-        </CardHeader>
+        <CardContent class="p-6">
+          <ShoppingCart class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">采购方式管理</h3>
+          <p class="text-sm text-wolf-text-secondary">配置采购方式与阶段模板</p>
+        </CardContent>
       </Card>
 
       <!-- AI配置 -->
@@ -153,11 +153,11 @@ fetchUserRoles()
         class="system-config-card"
         @click="openSheet('ai-config')"
       >
-        <CardHeader>
-          <Cpu class="system-config-card__icon" />
-          <CardTitle>AI 配置</CardTitle>
-          <CardDescription>大模型服务参数设置</CardDescription>
-        </CardHeader>
+        <CardContent class="p-6">
+          <Cpu class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">AI 配置</h3>
+          <p class="text-sm text-wolf-text-secondary">配置大模型服务接口</p>
+        </CardContent>
       </Card>
 
       <!-- 通知配置 -->
@@ -166,11 +166,11 @@ fetchUserRoles()
         class="system-config-card"
         @click="openSheet('notification')"
       >
-        <CardHeader>
-          <Bell class="system-config-card__icon" />
-          <CardTitle>通知配置</CardTitle>
-          <CardDescription>配置飞书群聊通知</CardDescription>
-        </CardHeader>
+        <CardContent class="p-6">
+          <Bell class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">通知配置</h3>
+          <p class="text-sm text-wolf-text-secondary">配置审批流程的飞书群通知</p>
+        </CardContent>
       </Card>
 
       <!-- 团队成员 -->
@@ -179,11 +179,11 @@ fetchUserRoles()
         class="system-config-card"
         @click="openSheet('team-members')"
       >
-        <CardHeader>
-          <Users class="system-config-card__icon" />
-          <CardTitle>团队成员</CardTitle>
-          <CardDescription>管理团队成员与邀请</CardDescription>
-        </CardHeader>
+        <CardContent class="p-6">
+          <Users class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">团队成员</h3>
+          <p class="text-sm text-wolf-text-secondary">管理团队成员与角色分配</p>
+        </CardContent>
       </Card>
     </div>
 
@@ -242,14 +242,6 @@ fetchUserRoles()
   &:active {
     transform: scale(0.98);
     box-shadow: $wolf-shadow-card-v2;
-  }
-
-  // 卡片图标
-  &__icon {
-    width: 32px;
-    height: 32px;
-    margin-bottom: $wolf-space-sm-v2;
-    color: $wolf-primary-v2;
   }
 }
 </style>
