@@ -9,9 +9,17 @@
  * - 统一样式（行高 44px、表头背景 #F1F5FD 等）
  */
 import { computed, ref, watch } from 'vue'
-import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from '@/components/ui/pagination'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationPrevious,
+  PaginationNext
+} from '@/components/ui/pagination'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import EmptyState from './EmptyState.vue'
+import { buildPaginationEntries, type PaginationEntry } from './paginationWindow'
 
 // ==================== Props ====================
 interface Column {
@@ -72,7 +80,10 @@ const emit = defineEmits<{
 }>()
 
 // ==================== Computed ====================
-const totalPages = computed(() => Math.ceil(props.total / props.pageSize))
+const totalPages = computed<number>(() => Math.ceil(props.total / props.pageSize))
+const paginationEntries = computed<PaginationEntry[]>(() =>
+  buildPaginationEntries(props.page, totalPages.value)
+)
 
 /**
  * 计算固定列配置
@@ -99,27 +110,12 @@ const processedColumns = computed(() => {
   return cols
 })
 
-// 固定左侧列
-const fixedLeftColumns = computed(() =>
-  processedColumns.value.filter(col => col.fixed === 'left')
-)
-
-// 固定右侧列
-const fixedRightColumns = computed(() =>
-  processedColumns.value.filter(col => col.fixed === 'right')
-)
-
-// 滚动区列（中间列）
-const scrollColumns = computed(() =>
-  processedColumns.value.filter(col => !col.fixed)
-)
-
 /**
  * 计算固定列的 left/right 偏移
  * - 固定左侧列累加前面的固定列宽度
  * - 固定右侧列累加后面的固定列宽度
  */
-const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | 'right' }) => {
+const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | 'right' }): string | undefined => {
   if (col.fixed === 'left') {
     // 累加前面所有左侧固定列的宽度
     let offset = 0
@@ -127,7 +123,7 @@ const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | '
       const prevCol = processedColumns.value[i]
       if (prevCol.fixed === 'left') {
         // 解析宽度（如 "150px" → 150）
-        const widthValue = parseInt(prevCol.width?.replace('px', '') || '120', 10)
+        const widthValue = parseInt(prevCol.width?.replace('px', '') ?? '120', 10)
         offset += widthValue
       }
     }
@@ -140,7 +136,7 @@ const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | '
     for (let i = processedColumns.value.length - 1; i > col.index; i--) {
       const nextCol = processedColumns.value[i]
       if (nextCol.fixed === 'right') {
-        const widthValue = parseInt(nextCol.width?.replace('px', '') || '120', 10)
+        const widthValue = parseInt(nextCol.width?.replace('px', '') ?? '120', 10)
         offset += widthValue
       }
     }
@@ -161,17 +157,17 @@ const showLeftShadow = computed(() => scrollLeft.value > 0)
 const showRightShadow = computed(() => scrollLeft.value < maxScrollLeft.value - 1)
 
 // ==================== Methods ====================
-function handlePageChange(p: number) {
+function handlePageChange(p: number): void {
   emit('update:page', p)
 }
 
-function handlePageSizeChange(event: Event) {
+function handlePageSizeChange(event: Event): void {
   const target = event.target as HTMLSelectElement
   emit('update:pageSize', parseInt(target.value, 10))
   emit('update:page', 1)  // 重置到第一页
 }
 
-function handleRowClick(row: T) {
+function handleRowClick(row: T): void {
   emit('row-click', row)
 }
 
@@ -187,7 +183,7 @@ function getAlignClass(align?: string): string {
 }
 
 // 监听滚动位置
-function handleScroll(event: Event) {
+function handleScroll(event: Event): void {
   const target = event.target as HTMLElement
   scrollLeft.value = target.scrollLeft
   maxScrollLeft.value = target.scrollWidth - target.clientWidth
@@ -295,14 +291,18 @@ watch(() => props.data, () => {
         >
           <PaginationContent>
             <PaginationPrevious />
-            <PaginationItem
-              v-for="i in totalPages"
-              :key="i"
-              :value="i"
-              :is-active="i === page"
-            >
-              {{ i }}
-            </PaginationItem>
+            <template v-for="entry in paginationEntries" :key="entry.key">
+              <PaginationItem
+                v-if="entry.type === 'page'"
+                :value="entry.value"
+                :is-active="entry.value === page"
+                :aria-label="`第 ${entry.value} 页`"
+                :aria-current="entry.value === page ? 'page' : undefined"
+              >
+                {{ entry.value }}
+              </PaginationItem>
+              <PaginationEllipsis v-else />
+            </template>
             <PaginationNext />
           </PaginationContent>
         </Pagination>
@@ -413,7 +413,9 @@ watch(() => props.data, () => {
 .data-table-cell {
   font-size: $wolf-font-size-body-v2;
   color: $wolf-text-secondary-v2;
-  padding: 12px 16px;
+  height: $wolf-touch-target-min-v2;
+  padding: 0 $wolf-space-md-v2;
+  vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -494,7 +496,7 @@ watch(() => props.data, () => {
 
   // 单元格：更紧凑的 padding
   .data-table-cell {
-    padding: $wolf-table-cell-padding-mobile-v2;  // 8px 4px
+    padding: 0 $wolf-space-xs-v2;
   }
 
   // 固定列阴影：移动端更明显（便于感知边界）

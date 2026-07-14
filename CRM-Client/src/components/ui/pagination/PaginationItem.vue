@@ -10,6 +10,8 @@ interface Props {
   value: number
   isActive?: boolean
   class?: HTMLAttributes['class']
+  ariaLabel?: string
+  ariaCurrent?: 'page'
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -24,6 +26,8 @@ const emit = defineEmits<{
 <template>
   <PaginationListItem
     :value="props.value"
+    :aria-label="props.ariaLabel"
+    :aria-current="props.ariaCurrent"
     :class="cn(
       'inline-flex h-11 w-11 items-center justify-center rounded-wolf text-sm font-medium transition-colors cursor-pointer',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2',

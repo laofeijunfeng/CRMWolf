@@ -13,8 +13,10 @@ const { orientation, canScrollPrev, scrollPrev } = useCarousel()
 <template>
   <Button
     :disabled="!canScrollPrev"
+    size="icon"
+    aria-label="上一张"
     :class="cn(
-      'touch-manipulation absolute h-8 w-8 rounded-full p-0',
+      'touch-manipulation absolute size-11 rounded-full p-0',
       orientation === 'horizontal'
         ? '-left-12 top-1/2 -translate-y-1/2'
         : '-top-12 left-1/2 -translate-x-1/2 rotate-90',
@@ -24,8 +26,7 @@ const { orientation, canScrollPrev, scrollPrev } = useCarousel()
     @click="scrollPrev"
   >
     <slot>
-      <ArrowLeft class="h-4 w-4 text-current" />
-      <span class="sr-only">Previous Slide</span>
+      <ArrowLeft class="h-4 w-4 text-current" aria-hidden="true" />
     </slot>
   </Button>
 </template>

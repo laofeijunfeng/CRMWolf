@@ -20,6 +20,10 @@ import { Button } from '@/components/ui/button'
 import { Search, X } from 'lucide-vue-next'
 
 // ==================== Types ====================
+type FilterValue = string | number | null
+
+type FilterValues = Record<string, FilterValue>
+
 interface FilterField {
   /** 字段唯一标识 */
   key: string
@@ -37,7 +41,7 @@ interface Props {
   /** 筛选字段列表 */
   fields: FilterField[]
   /** 筛选值（v-model） */
-  values?: Record<string, any>
+  values?: FilterValues
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -45,14 +49,14 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
-  'update:values': [value: Record<string, any>]
-  'search': [value: Record<string, any>]
+  'update:values': [value: FilterValues]
+  'search': [value: FilterValues]
   'reset': []
-  'change': [key: string, value: any]
+  'change': [key: string, value: FilterValue]
 }>()
 
 // ==================== Reactive State ====================
-const form = reactive<Record<string, any>>({ ...props.values })
+const form = reactive<FilterValues>({ ...props.values })
 
 // 监听 props.values 变化，同步到 form
 watch(() => props.values, (newValues) => {
@@ -77,18 +81,6 @@ function handleReset(): void {
   emit('update:values', { ...form })
   emit('reset')
 }
-
-function handleFieldChange(key: string, value: any): void {
-  form[key] = value
-  emit('update:values', { ...form })
-  emit('change', key, value)
-}
-
-// Auto-search on field change (optional)
-// function handleFieldChangeWithSearch(key: string, value: any): void {
-//   handleFieldChange(key, value)
-//   handleSearch()
-// }
 
 function handleSubmit(event: Event): void {
   event.preventDefault()
@@ -253,7 +245,8 @@ function handleSubmit(event: Event): void {
 .filter-date {
   flex: 1;
   min-width: 120px;
-  height: 32px;  // 桌面端高度（MASTER.md §5.2）
+  min-height: $wolf-touch-target-min-v2;
+  height: $wolf-touch-target-min-v2;
   padding: 0 $wolf-space-sm-v2;
   border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-v2;

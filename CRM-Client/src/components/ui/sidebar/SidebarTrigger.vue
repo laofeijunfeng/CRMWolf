@@ -17,10 +17,10 @@ const { toggleSidebar } = useSidebar()
     data-sidebar="trigger"
     variant="ghost"
     size="icon"
-    :class="cn('h-7 w-7', props.class)"
+    :class="cn('size-11', props.class)"
+    aria-label="切换侧边栏"
     @click="toggleSidebar"
   >
-    <PanelLeft />
-    <span class="sr-only">Toggle Sidebar</span>
+    <PanelLeft aria-hidden="true" />
   </Button>
 </template>

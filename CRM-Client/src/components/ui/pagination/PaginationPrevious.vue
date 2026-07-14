@@ -2,7 +2,9 @@
 /**
  * PaginationPrevious - Previous page button
  */
-import { PaginationPrev } from 'radix-vue'
+import { Primitive } from 'radix-vue'
+import { inject } from 'vue'
+import { localPaginationContextKey } from './context'
 import { ChevronLeft } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
@@ -12,11 +14,24 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const pagination = inject(localPaginationContextKey)
+if (pagination === undefined) {
+  throw new Error('PaginationPrevious must be used within Pagination')
+}
+
+const handleClick = (): void => {
+  if (pagination.disabled.value || pagination.page.value <= 1) return
+  pagination.onPageChange(pagination.page.value - 1)
+}
 </script>
 
 <template>
-  <PaginationPrev
+  <Primitive
+    as="button"
+    type="button"
     aria-label="上一页"
+    :disabled="pagination.disabled.value || pagination.page.value <= 1"
+    @click="handleClick"
     :class="cn(
       'inline-flex h-11 w-11 items-center justify-center rounded-wolf border border-wolf-border-default',
       'bg-wolf-bg-card text-wolf-text-secondary hover:bg-wolf-bg-hover',
@@ -27,5 +42,5 @@ const props = defineProps<Props>()
     )"
   >
     <ChevronLeft class="h-4 w-4" aria-hidden="true" />
-  </PaginationPrev>
+  </Primitive>
 </template>
