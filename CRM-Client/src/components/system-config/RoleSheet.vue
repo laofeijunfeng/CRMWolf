@@ -491,7 +491,7 @@ function formatDate(dateStr: string): string {
             <FormLabel>角色代码 <span class="text-destructive">*</span></FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField as any"
+                v-bind="componentField as unknown as Record<string, unknown>"
                 placeholder="如：SALES_DIRECTOR"
                 :disabled="isEditMode"
                 class="uppercase"
@@ -507,7 +507,7 @@ function formatDate(dateStr: string): string {
             <FormLabel>角色名称 <span class="text-destructive">*</span></FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField as any"
+                v-bind="componentField as unknown as Record<string, unknown>"
                 placeholder="如：销售总监"
               />
             </FormControl>
@@ -521,7 +521,7 @@ function formatDate(dateStr: string): string {
             <FormLabel>描述</FormLabel>
             <FormControl>
               <Textarea
-                v-bind="componentField as any"
+                v-bind="componentField as unknown as Record<string, unknown>"
                 placeholder="请输入角色描述"
                 :rows="3"
               />
