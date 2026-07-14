@@ -31,6 +31,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import PaymentPlanDetailSheet from './PaymentPlanDetailSheet.vue'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -42,6 +43,12 @@ const headerStore = useHeaderStore()
 // ==================== State ====================
 const loading = ref(false)
 const tableData = ref<PaymentPlanWithDetails[]>([])
+
+// DetailSheet 状态
+const sheetVisible = ref(false)
+const selectedPlanNumber = ref<string | null>(null)
+const selectedRecordId = ref<number | null>(null)
+const triggerElementRef = ref<HTMLElement | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -180,8 +187,38 @@ const handleCreatePlan = (): void => {
   router.push('/payments/create')
 }
 
-const handleViewDetail = (row: PaymentPlanWithDetails): void => {
-  router.push(`/payments/plans/${row.id}`)
+// ==================== DetailSheet 相关 ====================
+const handleViewDetail = (record: PaymentPlanWithDetails, event?: MouseEvent): void => {
+  // 保存触发元素
+  const target = event?.target
+  triggerElementRef.value = target instanceof HTMLElement ? target : null
+
+  // 设置选择状态（使用业务编号）
+  selectedPlanNumber.value = record.plan_number ?? null
+  selectedRecordId.value = record.id
+
+  // 打开 Sheet
+  sheetVisible.value = true
+}
+
+const handleSheetClose = (): void => {
+  sheetVisible.value = false
+  selectedPlanNumber.value = null
+  selectedRecordId.value = null
+
+  // 焦点回归
+  if (triggerElementRef.value && document.body.contains(triggerElementRef.value)) {
+    triggerElementRef.value.focus()
+  }
+  triggerElementRef.value = null
+}
+
+const handleSheetRefresh = (): void => {
+  fetchPaymentPlans()
+}
+
+const handleSheetDeleted = (): void => {
+  fetchPaymentPlans()
 }
 
 const handleEdit = (row: PaymentPlanWithDetails): void => {
@@ -301,7 +338,7 @@ watchEffect(() => {
           :primary-actions="[
             {
               label: '查看详情',
-              handler: (r) => handleViewDetail(r as unknown as PaymentPlanWithDetails),
+              handler: (r, e) => handleViewDetail(r as unknown as PaymentPlanWithDetails, e as MouseEvent | undefined),
               icon: Eye
             },
             {
@@ -330,6 +367,17 @@ watchEffect(() => {
         />
       </template>
     </DataTable>
+
+    <!-- PaymentPlanDetailSheet -->
+    <PaymentPlanDetailSheet
+      :visible="sheetVisible"
+      :plan-number="selectedPlanNumber"
+      :record-id="selectedRecordId"
+      @update:visible="sheetVisible = $event"
+      @refresh="handleSheetRefresh"
+      @deleted="handleSheetDeleted"
+      @closed="handleSheetClose"
+    />
   </div>
 </template>
 

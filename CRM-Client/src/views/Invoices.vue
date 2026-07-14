@@ -14,13 +14,15 @@
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
+ * - ✅ 列表内 DetailSheet（不再跳转路由）
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Download, Eye, Pencil, Trash2, Send, RotateCcw, Stamp } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import type { ActionConfig } from '@/components/crmwolf/TableRowActions.vue'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -35,6 +37,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import InvoiceDetailSheet from './InvoiceDetailSheet.vue'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -46,7 +49,13 @@ const headerStore = useHeaderStore()
 // ==================== State ====================
 const loading = ref(false)
 const tableData = ref<InvoiceApplicationResponse[]>([])
-const customerOptions = ref<any[]>([])
+const customerOptions = ref<unknown[]>([])
+
+// DetailSheet 状态
+const sheetVisible = ref(false)
+const selectedApplicationNumber = ref<string | null>(null)
+const selectedRecordId = ref<number | null>(null)
+const triggerElementRef = ref<HTMLElement | null>(null)
 
 // 标记开票弹窗
 const invoicedModalVisible = ref(false)
@@ -181,8 +190,37 @@ const handleCreate = (): void => {
   router.push('/invoices/create')
 }
 
-const handleViewDetail = (record: InvoiceApplicationResponse): void => {
-  router.push(`/invoices/${record.id}`)
+const handleViewDetail = (record: InvoiceApplicationResponse, event?: MouseEvent): void => {
+  // 保存触发元素
+  const target = event?.target
+  triggerElementRef.value = target instanceof HTMLElement ? target : null
+
+  // 设置选择状态
+  selectedApplicationNumber.value = record.application_number
+  selectedRecordId.value = record.id
+
+  // 打开 Sheet
+  sheetVisible.value = true
+}
+
+const handleSheetClose = (): void => {
+  sheetVisible.value = false
+  selectedApplicationNumber.value = null
+  selectedRecordId.value = null
+
+  // 焦点回归
+  if (triggerElementRef.value && document.body.contains(triggerElementRef.value)) {
+    triggerElementRef.value.focus()
+  }
+  triggerElementRef.value = null
+}
+
+const handleSheetRefresh = (): void => {
+  fetchInvoiceApplications()
+}
+
+const handleSheetDeleted = (): void => {
+  fetchInvoiceApplications()
 }
 
 const handleEdit = (record: InvoiceApplicationResponse): void => {
@@ -260,6 +298,66 @@ const downloadInvoiceFile = (row: InvoiceApplicationResponse): void => {
   const url = getInvoiceFileUrl(row.id)
   window.open(url, '_blank')
 }
+
+// ==================== TableRowActions 配置 ====================
+const getRowActions = (row: InvoiceApplicationResponse): {
+  primaryActions: ActionConfig[]
+  secondaryActions: ActionConfig[]
+} => ({
+  primaryActions: [
+    {
+      label: '查看',
+      handler: (record: Record<string, unknown>): void => {
+        handleViewDetail(record as unknown as InvoiceApplicationResponse)
+      },
+      icon: Eye
+    },
+    {
+      label: '编辑',
+      handler: (record: Record<string, unknown>): void => {
+        handleEdit(record as unknown as InvoiceApplicationResponse)
+      },
+      visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice.value,
+      icon: Pencil
+    }
+  ],
+  secondaryActions: [
+    {
+      label: '提交',
+      handler: (record: Record<string, unknown>): void => {
+        void handleSubmitApproval(record as unknown as InvoiceApplicationResponse)
+      },
+      visible: row.status === 'DRAFT' && canCreateInvoice.value,
+      icon: Send
+    },
+    {
+      label: '撤回',
+      handler: (record: Record<string, unknown>): void => {
+        void handleWithdraw(record as unknown as InvoiceApplicationResponse)
+      },
+      visible: row.status === 'PENDING_REVIEW',
+      icon: RotateCcw
+    },
+    {
+      label: '开票',
+      handler: (record: Record<string, unknown>): void => {
+        handleMarkInvoiced(record as unknown as InvoiceApplicationResponse)
+      },
+      visible: row.status === 'APPROVED' && canMarkInvoiced.value,
+      icon: Stamp
+    },
+    {
+      label: '删除',
+      handler: (record: Record<string, unknown>): void => {
+        void handleDelete(record as unknown as InvoiceApplicationResponse)
+      },
+      visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice.value,
+      icon: Trash2,
+      destructive: true,
+      separator: true
+    }
+  ]
+})
 
 // ==================== 格式化函数 ====================
 const mapInvoiceStatus = (status: string): 'draft' | 'pending_review' | 'approved' | 'rejected' | 'issued' | 'cancelled' => {
@@ -365,7 +463,7 @@ watchEffect(() => {
       <!-- 申请单号 -->
       <template #cell-application_number="{ row }">
         <div class="application-number-cell">
-          <span class="link-text" @click.stop="handleViewDetail(row)">
+          <span class="link-text" @click.stop="handleViewDetail(row, $event)">
             {{ row.application_number }}
           </span>
           <!-- ISSUED 状态 + 有文件：显示下载入口 -->
@@ -428,50 +526,7 @@ watchEffect(() => {
 
       <!-- 操作 -->
       <template #cell-actions="{ row }">
-        <TableRowActions
-          :row="row"
-          :primary-actions="[
-            {
-              label: '查看',
-              handler: handleViewDetail,
-              icon: Eye
-            },
-            {
-              label: '编辑',
-              handler: handleEdit,
-              visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
-              icon: Pencil
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '提交',
-              handler: handleSubmitApproval,
-              visible: row.status === 'DRAFT' && canCreateInvoice,
-              icon: Send
-            },
-            {
-              label: '撤回',
-              handler: handleWithdraw,
-              visible: row.status === 'PENDING_REVIEW',
-              icon: RotateCcw
-            },
-            {
-              label: '开票',
-              handler: handleMarkInvoiced,
-              visible: row.status === 'APPROVED' && canMarkInvoiced,
-              icon: Stamp
-            },
-            {
-              label: '删除',
-              handler: handleDelete,
-              visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
-              icon: Trash2,
-              destructive: true,
-              separator: true
-            }
-          ]"
-        />
+        <TableRowActions :row="row" v-bind="getRowActions(row)" />
       </template>
     </DataTable>
 
@@ -494,6 +549,17 @@ watchEffect(() => {
         </div>
       </div>
     </div>
+
+    <!-- InvoiceDetailSheet -->
+    <InvoiceDetailSheet
+      :visible="sheetVisible"
+      :application-number="selectedApplicationNumber"
+      :record-id="selectedRecordId"
+      @update:visible="sheetVisible = $event"
+      @refresh="handleSheetRefresh"
+      @deleted="handleSheetDeleted"
+      @closed="handleSheetClose"
+    />
   </div>
 </template>
 
