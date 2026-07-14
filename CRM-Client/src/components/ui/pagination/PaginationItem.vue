@@ -25,7 +25,7 @@ const emit = defineEmits<{
   <PaginationListItem
     :value="props.value"
     :class="cn(
-      'inline-flex h-8 w-8 items-center justify-center rounded-wolf text-sm font-medium transition-colors cursor-pointer',
+      'inline-flex h-11 w-11 items-center justify-center rounded-wolf text-sm font-medium transition-colors cursor-pointer',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2',
       'disabled:pointer-events-none disabled:opacity-50',
       props.isActive

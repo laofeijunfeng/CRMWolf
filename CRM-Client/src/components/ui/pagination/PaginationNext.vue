@@ -16,8 +16,9 @@ const props = defineProps<Props>()
 
 <template>
   <RadixNext
+    aria-label="下一页"
     :class="cn(
-      'inline-flex h-8 w-8 items-center justify-center rounded-wolf border border-wolf-border-default',
+      'inline-flex h-11 w-11 items-center justify-center rounded-wolf border border-wolf-border-default',
       'bg-wolf-bg-card text-wolf-text-secondary hover:bg-wolf-bg-hover',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2',
       'disabled:pointer-events-none disabled:opacity-50',
@@ -25,6 +26,6 @@ const props = defineProps<Props>()
       props.class
     )"
   >
-    <ChevronRight class="h-4 w-4" />
+    <ChevronRight class="h-4 w-4" aria-hidden="true" />
   </RadixNext>
 </template>

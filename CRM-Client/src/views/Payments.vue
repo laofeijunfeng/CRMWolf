@@ -13,6 +13,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { Plus, ExternalLink, CircleCheck } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { DataTable, FilterPanel, TableRowActions, StatusBadge } from '@/components/crmwolf'
+import { Button } from '@/components/ui/button'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
@@ -230,9 +231,15 @@ onUnmounted(() => {
     >
       <!-- 合同名称（可点击） -->
       <template #cell-contract_name="{ row }">
-        <span class="link-text cursor-pointer text-primary hover:underline" @click.stop="viewContract(row)">
+        <Button
+          type="button"
+          variant="link"
+          class="table-link"
+          :aria-label="`查看合同 ${row.contract_name}`"
+          @click.stop="viewContract(row)"
+        >
           {{ row.contract_name }}
-        </span>
+        </Button>
       </template>
 
       <!-- 金额格式化 -->
@@ -272,5 +279,15 @@ onUnmounted(() => {
   gap: $wolf-section-gap-v2;
   min-height: 0;
   flex: 1;
+}
+
+.table-link {
+  min-height: $wolf-touch-target-min-v2;
+  padding-inline: 0;
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+  }
 }
 </style>

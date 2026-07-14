@@ -263,10 +263,10 @@ function handleSubmit(event: Event): void {
   transition: border-color 150ms ease-out;
 
   // Focus 状态（MASTER.md §8.2）
-  &:focus {
-    outline: none;
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
     border-color: $wolf-primary-v2;
-    box-shadow: 0 0 0 2px rgba($wolf-primary-v2, 0.3);
   }
 
   // 移动端 Touch Target 合规

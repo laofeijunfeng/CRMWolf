@@ -120,15 +120,14 @@
             :class="['file-type-icon', getFileIconClass(invoiceInfo.invoice_file_path), 'w-5 h-5']"
           />
           <span class="file-type-label">{{ getFileTypeLabel(invoiceInfo.invoice_file_path) }}</span>
-          <el-button
-            type="primary"
+          <Button
             class="download-btn"
             aria-label="下载发票文件"
             @click="handleDownloadWithFeedback"
           >
-            <Download class="w-4 h-4" />
+            <Download class="w-4 h-4" aria-hidden="true" />
             下载发票文件
-          </el-button>
+          </Button>
         </div>
       </div>
 
@@ -225,10 +224,15 @@
             <span v-if="invoiceInfo?.invoice_number" class="invoice-number">
               发票号码：{{ invoiceInfo.invoice_number }}
             </span>
-            <el-button link type="primary" size="small" @click="downloadInvoiceFile">
-              <Download class="w-4 h-4" />
+            <Button
+              variant="link"
+              size="sm"
+              aria-label="下载发票文件"
+              @click="downloadInvoiceFile"
+            >
+              <Download class="w-4 h-4" aria-hidden="true" />
               下载发票文件
-            </el-button>
+            </Button>
           </div>
         </div>
       </div>

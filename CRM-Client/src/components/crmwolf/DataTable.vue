@@ -309,6 +309,7 @@ watch(() => props.data, () => {
         <select
           class="page-size-select"
           :value="pageSize"
+          aria-label="每页显示条数"
           @change="handlePageSizeChange"
         >
           <option v-for="size in pageSizes" :key="size" :value="size">
@@ -460,7 +461,7 @@ watch(() => props.data, () => {
 }
 
 .page-size-select {
-  height: 32px;
+  min-height: $wolf-touch-target-min-v2;
   padding: 0 $wolf-space-sm-v2;
   border-radius: $wolf-radius-v2;
   border: 1px solid $wolf-border-default-v2;
@@ -469,9 +470,9 @@ watch(() => props.data, () => {
   color: $wolf-text-secondary-v2;
   cursor: pointer;
 
-  &:focus {
-    outline: 2px solid $wolf-primary-v2;
-    outline-offset: 2px;
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
   }
 }
 
