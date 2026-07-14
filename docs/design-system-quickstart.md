@@ -243,7 +243,7 @@ const meta: Meta<typeof SidebarV2> = {
         component: `
 # SidebarV2 设计说明
 
-**引用规则**：design-system/crmwolf/MASTER.md
+**引用规则**：CRM-Docs/design-system/README.md
 
 **核心视觉特征**：
 - 左侧指示条设计（hover 3px，active 4px）

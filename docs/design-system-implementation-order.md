@@ -30,7 +30,7 @@
 | 文件 | 内容 | 工作量 | 输出 |
 |------|------|--------|------|
 | **variables-v2.scss** | 颜色、圆角、间距、阴影 Tokens | 2天 | 设计系统基础 |
-| **MASTER.md** | 设计规则文档（UI/UX Pro Max生成） | 1天 | 唯一规则来源 |
+| **CRM-Docs/design-system/README.md** | 设计规则文档（UI/UX Pro Max生成） | 1天 | 唯一规则来源 |
 | **element-plus-theme-v2.scss** | Element Plus 主题适配 | 1天 | UI框架适配 |
 
 **关键原则**：

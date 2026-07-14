@@ -48,7 +48,7 @@
 #### 输出成果
 
 - `src/styles/variables-v2.scss`（新设计系统）
-- `docs/design-system/MASTER.md`（设计系统文档）
+- `CRM-Docs/design-system/README.md`（设计系统文档）
 - `docs/design-system/MIGRATION.md`（迁移指南）
 - Storybook 新旧对比展示
 
