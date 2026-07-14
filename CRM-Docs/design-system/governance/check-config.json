@@ -1,0 +1,19 @@
+{
+  "managedReadmes": [
+    "README.md",
+    "foundations/README.md",
+    "components/README.md",
+    "patterns/README.md",
+    "migration/README.md",
+    "governance/README.md"
+  ],
+  "ignoredFiles": [],
+  "forbiddenText": [
+    "MASTER.md",
+    "ELEMENT-PLUS-MIGRATION.md",
+    "pages/list-page.md",
+    "pages/detail-page.md",
+    "pages/form-page.md",
+    "pages/approval-center.md"
+  ]
+}
