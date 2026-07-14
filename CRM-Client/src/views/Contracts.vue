@@ -14,8 +14,9 @@
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
+ * - ✅ 列表内 DetailSheet（不再跳转路由）
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
@@ -32,6 +33,7 @@ import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import ContractDetailSheet from './ContractDetailSheet.vue'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -45,6 +47,12 @@ const headerStore = useHeaderStore()
 const loading = ref(false)
 const tableData = ref<ContractListResponse[]>([])
 const activeTab = ref('all')
+
+// DetailSheet 状态
+const sheetVisible = ref(false)
+const selectedContractNumber = ref<string | null>(null)
+const selectedRecordId = ref<number | null>(null)
+const triggerElementRef = ref<HTMLElement | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -156,7 +164,7 @@ const fetchContractList = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, any>): void => {
+const handleSearch = (values: Record<string, string>): void => {
   Object.assign(filterValues, values)
   // 使用 FilterPanel 状态筛选时，清除 Tab 状态
   if (values['status']) {
@@ -189,8 +197,37 @@ const handleCreate = (): void => {
   router.push('/contracts/create')
 }
 
-const handleViewDetail = (record: ContractListResponse): void => {
-  router.push(`/contracts/${record.id}`)
+// ==================== DetailSheet 相关 ====================
+const handleViewDetail = (record: ContractListResponse, event?: MouseEvent): void => {
+  // 保存触发元素
+  triggerElementRef.value = (event?.target as HTMLElement) || null
+
+  // 设置选择状态（使用业务编号）
+  selectedContractNumber.value = record.contract_number
+  selectedRecordId.value = record.id
+
+  // 打开 Sheet
+  sheetVisible.value = true
+}
+
+const handleSheetClose = (): void => {
+  sheetVisible.value = false
+  selectedContractNumber.value = null
+  selectedRecordId.value = null
+
+  // 焦点回归
+  if (triggerElementRef.value && document.body.contains(triggerElementRef.value)) {
+    triggerElementRef.value.focus()
+  }
+  triggerElementRef.value = null
+}
+
+const handleSheetRefresh = (): void => {
+  fetchContractList()
+}
+
+const handleSheetDeleted = (): void => {
+  fetchContractList()
 }
 
 const handleEdit = (record: ContractListResponse): void => {
@@ -225,7 +262,7 @@ const getRowActions = (row: ContractListResponse) => ({
   primaryActions: [
     {
       label: '查看',
-      handler: handleViewDetail,
+      handler: (record: ContractListResponse) => handleViewDetail(record),
       icon: Eye
     },
     {
@@ -341,7 +378,7 @@ watchEffect(() => {
 
       <!-- 合同名称 -->
       <template #cell-contract_name="{ row }">
-        <span class="link-text" @click.stop="handleViewDetail(row)">
+        <span class="link-text" @click.stop="handleViewDetail(row, $event)">
           {{ row.contract_name }}
         </span>
       </template>
@@ -388,6 +425,17 @@ watchEffect(() => {
         <TableRowActions :row="row" v-bind="getRowActions(row)" />
       </template>
     </DataTable>
+
+    <!-- ContractDetailSheet -->
+    <ContractDetailSheet
+      :visible="sheetVisible"
+      :contract-number="selectedContractNumber"
+      :record-id="selectedRecordId"
+      @update:visible="sheetVisible = $event"
+      @refresh="handleSheetRefresh"
+      @deleted="handleSheetDeleted"
+      @closed="handleSheetClose"
+    />
   </div>
 </template>
 
