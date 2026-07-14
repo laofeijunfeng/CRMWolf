@@ -106,8 +106,9 @@ const providerDefaults: Record<string, { api_host: string; model_name: string }>
 }
 
 // ==================== Provider Change ====================
-const handleProviderChange = (provider: string): void => {
-  const defaults = providerDefaults[provider]
+const handleProviderChange = (provider: unknown): void => {
+  const providerStr = String(provider)
+  const defaults = providerDefaults[providerStr]
   if (defaults) {
     resetForm({
       values: {

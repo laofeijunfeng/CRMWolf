@@ -52,7 +52,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog, confirmDelete } from '@/utils/confirmDialog'
-import teamApi, {
+import {
+  teamApi,
   type TeamMemberResponse,
   type TeamResponse,
   type RoleSimpleResponse
@@ -136,7 +137,7 @@ interface Column {
 }
 
 // ==================== Computed ====================
-const currentUserId = computed(() => userStore.userInfo?.id)
+const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
 const teamId = computed(() => teamStore.currentTeam?.id)
 
 const isTeamAdmin = computed(() => {

@@ -39,7 +39,7 @@ import { Switch } from '@/components/ui/switch'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { handleApiError } from '@/utils/errorHandler'
-import { notificationConfigApi, type NotificationConfigResponse } from '@/api/notificationConfig'
+import { notificationConfigApi, type NotificationConfigResponse, type NotificationConfigUpdate } from '@/api/notificationConfig'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -167,12 +167,19 @@ const fetchConfig = async (): Promise<void> => {
 const onSubmit = handleSubmit(async (formValues) => {
   saving.value = true
   try {
-    const response = await notificationConfigApi.updateConfig({
-      notification_method: 'webhook',
-      feishu_webhook_url: formValues.feishu_webhook_url,
-      feishu_webhook_enabled: formValues.feishu_webhook_enabled,
-      notification_group_name: formValues.notification_group_name
-    })
+    const updateData: NotificationConfigUpdate = {
+      notification_method: 'webhook'
+    }
+    if (formValues.feishu_webhook_url) {
+      updateData.feishu_webhook_url = formValues.feishu_webhook_url
+    }
+    if (formValues.feishu_webhook_enabled !== undefined) {
+      updateData.feishu_webhook_enabled = formValues.feishu_webhook_enabled
+    }
+    if (formValues.notification_group_name) {
+      updateData.notification_group_name = formValues.notification_group_name
+    }
+    const response = await notificationConfigApi.updateConfig(updateData)
 
     configInfo.value = response
     savedUrl.value = formValues.feishu_webhook_url || ''
