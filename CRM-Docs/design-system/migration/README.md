@@ -1,12 +1,18 @@
-# 迁移资料
+# 迁移文档索引
 
-本领域拥有遗留框架到目标组件体系的映射、兼容边界和实施状态。
+本目录包含 Element Plus 到 shadcn-vue 的迁移指南。
 
-| 主题 | 使用场景 |
-| --- | --- |
-| [迁移概览](overview.md) | 判断迁移范围和目标状态。 |
-| [框架映射](element-plus-to-shadcn-vue.md) | 替换遗留组件实现。 |
-| [兼容策略](compatibility.md) | 管理临时别名与移除条件。 |
-| [实施状态](implementation-status.md) | 查阅有证据的当前进展。 |
+---
 
-[返回设计系统根入口](../README.md)
+## 文档清单
+
+| 文档 | 内容 |
+|------|------|
+| [overview.md](./overview.md) | 迁移范围与目标状态 |
+| [element-plus-to-shadcn-vue.md](./element-plus-to-shadcn-vue.md) | 组件映射与代码示例 |
+| [compatibility.md](./compatibility.md) | 兼容性别名与移除条件 |
+| [implementation-status.md](./implementation-status.md) | 日期戳记的实现状态 |
+
+---
+
+**最后更新**：2026-07-14
