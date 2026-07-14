@@ -8,6 +8,11 @@ if [ -f "$SCRIPT_PATH" ]; then
   if git diff --cached --name-only | grep -q "^CRM-Docs/"; then
     chmod +x "$SCRIPT_PATH"
     "$SCRIPT_PATH" || { echo "::error::Document location check failed (CRM-Docs 根目录只允许 README.md)"; exit 1; }
+
+    # ===== 设计系统文档质量门禁 =====
+    if git diff --cached --name-only | grep -q '^CRM-Docs/design-system/'; then
+      node scripts/check-design-system-docs.js
+    fi
   fi
 fi
 
