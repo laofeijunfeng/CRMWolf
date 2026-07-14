@@ -33,7 +33,8 @@ function validateDesignSystem({ rootDir, configPath }) {
   for (const file of files) {
     const source = fs.readFileSync(file, 'utf8')
     const fileName = relative(file)
-    if (source.split('\n').length > 100) violations.push(`${fileName}: exceeds 100 lines`)
+    const lineCount = source.endsWith('\n') ? source.slice(0, -1).split('\n').length : source.split('\n').length
+    if (lineCount > 100) violations.push(`${fileName}: exceeds 100 lines`)
     for (const forbidden of config.forbiddenText) {
       if (source.includes(forbidden)) violations.push(`${fileName}: forbidden text ${forbidden}`)
     }

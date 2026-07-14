@@ -30,6 +30,7 @@ assert.deepStrictEqual(check({
   'foundations/README.md': '[Color](color.md)\n',
   'foundations/color.md': '# Color\n'
 }), [])
+assert.deepStrictEqual(check({ 'README.md': 'x\n'.repeat(100) }), [])
 assert.match(check({ 'README.md': `${'x\n'.repeat(101)}` })[0], /exceeds 100 lines/)
 assert.match(check({ 'README.md': '[Missing](missing.md)\n' })[0], /broken link/)
 assert.match(check({ 'README.md': '[Section](other.md#missing)\n', 'other.md': '# Present\n' })[0], /missing anchor/)
