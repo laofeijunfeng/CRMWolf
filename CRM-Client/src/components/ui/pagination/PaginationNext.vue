@@ -1,32 +1,36 @@
 <script setup lang="ts">
-/**
- * PaginationNext - Next page control with localized accessible name.
- */
-import type { PrimitiveProps } from 'radix-vue'
-import { Primitive } from 'radix-vue'
+/** PaginationNext - controlled next-page element. */
+import { computed, useAttrs } from 'vue'
 import { ChevronRight } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
 import {
+  filterSafePaginationAttrs,
   guardPaginationInteraction,
   usePaginationControl,
-  usePaginationRenderedElement
+  usePaginationElement,
+  type PaginationElement
 } from './usePaginationControl'
 
-interface Props extends PrimitiveProps {
+defineOptions({ inheritAttrs: false })
+
+interface Props {
+  as?: PaginationElement
   class?: HTMLAttributes['class']
+  href?: string
+  target?: string
+  rel?: string
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  as: 'button',
-  asChild: false
-})
+const props = withDefaults(defineProps<Props>(), { as: 'button' })
+const attrs = useAttrs()
+const safeAttrs = computed(() => filterSafePaginationAttrs(attrs))
+const element = computed<PaginationElement>(() => props.as)
 const { pagination, disabled } = usePaginationControl(
   'PaginationNext',
   context => context.page.value >= context.pageCount.value
 )
-
-const renderedElement = usePaginationRenderedElement(props, disabled)
+const elementState = usePaginationElement(element, disabled)
 
 const handleClick = (event: MouseEvent): void => {
   if (!guardPaginationInteraction(event, disabled.value)) return
@@ -35,13 +39,16 @@ const handleClick = (event: MouseEvent): void => {
 </script>
 
 <template>
-  <Primitive
-    :as="props.as"
-    :as-child="props.asChild"
-    :type="renderedElement.buttonType.value"
-    :disabled="renderedElement.nativeDisabled.value"
-    :aria-disabled="renderedElement.ariaDisabled.value"
-    :tabindex="renderedElement.tabIndex.value"
+  <component
+    :is="element"
+    v-bind="safeAttrs"
+    :type="elementState.buttonType.value"
+    :disabled="elementState.nativeDisabled.value"
+    :aria-disabled="elementState.ariaDisabled.value"
+    :tabindex="elementState.tabIndex.value"
+    :href="element === 'a' ? props.href : undefined"
+    :target="element === 'a' ? props.target : undefined"
+    :rel="element === 'a' ? props.rel : undefined"
     aria-label="下一页"
     :class="cn(
       'inline-flex h-11 w-11 items-center justify-center rounded-wolf border border-wolf-border-default',
@@ -53,8 +60,6 @@ const handleClick = (event: MouseEvent): void => {
     )"
     @click="handleClick"
   >
-    <slot>
-      <ChevronRight class="h-4 w-4" aria-hidden="true" />
-    </slot>
-  </Primitive>
+    <slot><ChevronRight class="h-4 w-4" aria-hidden="true" /></slot>
+  </component>
 </template>

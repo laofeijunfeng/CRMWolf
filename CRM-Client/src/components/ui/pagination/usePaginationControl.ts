@@ -1,19 +1,21 @@
 import { computed, inject, type ComputedRef } from 'vue'
-import type { PrimitiveProps } from 'radix-vue'
 import { localPaginationContextKey, type LocalPaginationContext } from './context'
+
+export type PaginationElement = 'button' | 'a'
 
 export interface PaginationControlState {
   pagination: LocalPaginationContext
   disabled: ComputedRef<boolean>
 }
 
-export interface PaginationRenderedElementState {
-  isNativeButton: ComputedRef<boolean>
+export interface PaginationElementState {
   nativeDisabled: ComputedRef<boolean | undefined>
   ariaDisabled: ComputedRef<'true' | undefined>
   tabIndex: ComputedRef<number | undefined>
   buttonType: ComputedRef<'button' | undefined>
 }
+
+export type SafePaginationAttrs = Record<string, unknown>
 
 export const usePaginationControl = (
   controlName: string,
@@ -30,29 +32,33 @@ export const usePaginationControl = (
   }
 }
 
-export const usePaginationRenderedElement = (
-  props: Readonly<PrimitiveProps>,
+export const usePaginationElement = (
+  as: ComputedRef<PaginationElement>,
   disabled: ComputedRef<boolean>
-): PaginationRenderedElementState => {
-  const isNativeButton = computed<boolean>(() => props.asChild !== true && props.as === 'button')
-  const isDisabledCustomElement = computed<boolean>(() => disabled.value && !isNativeButton.value)
+): PaginationElementState => {
+  const isButton = computed<boolean>(() => as.value === 'button')
 
   return {
-    isNativeButton,
     nativeDisabled: computed<boolean | undefined>(() =>
-      isNativeButton.value ? disabled.value : undefined
+      isButton.value ? disabled.value : undefined
     ),
     ariaDisabled: computed<'true' | undefined>(() =>
-      isDisabledCustomElement.value ? 'true' : undefined
+      !isButton.value && disabled.value ? 'true' : undefined
     ),
     tabIndex: computed<number | undefined>(() =>
-      isDisabledCustomElement.value ? -1 : undefined
+      !isButton.value && disabled.value ? -1 : undefined
     ),
     buttonType: computed<'button' | undefined>(() =>
-      isNativeButton.value ? 'button' : undefined
+      isButton.value ? 'button' : undefined
     )
   }
 }
+
+export const filterSafePaginationAttrs = (
+  attrs: Readonly<Record<string, unknown>>
+): SafePaginationAttrs => Object.fromEntries(
+  Object.entries(attrs).filter(([key]) => key === 'id' || key.startsWith('data-'))
+)
 
 export const guardPaginationInteraction = (
   event: MouseEvent,

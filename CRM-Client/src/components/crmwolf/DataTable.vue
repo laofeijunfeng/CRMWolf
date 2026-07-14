@@ -295,9 +295,7 @@ watch(() => props.data, () => {
               <PaginationItem
                 v-if="entry.type === 'page'"
                 :value="entry.value"
-                :is-active="entry.value === page"
                 :aria-label="`第 ${entry.value} 页`"
-                :aria-current="entry.value === page ? 'page' : undefined"
               >
                 {{ entry.value }}
               </PaginationItem>

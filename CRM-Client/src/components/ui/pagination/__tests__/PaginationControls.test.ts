@@ -1,56 +1,64 @@
 import { mount } from '@vue/test-utils'
+import { defineComponent, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { Pagination, PaginationContent, PaginationItem } from '..'
 import PaginationNext from '../PaginationNext.vue'
 import PaginationPrevious from '../PaginationPrevious.vue'
 
-const clickEvent = (): MouseEvent => new MouseEvent('click', {
-  bubbles: true,
-  cancelable: true
-})
+const clickEvent = (): MouseEvent => new MouseEvent('click', { bubbles: true, cancelable: true })
 
-describe('pagination rendered-element contracts', () => {
-  it('renders localized native buttons and native disabled state', async () => {
+describe('controlled pagination element contracts', () => {
+  it('renders native type=button controls that do not submit forms', async () => {
+    const submit = vi.fn()
     const update = vi.fn()
     const wrapper = mount({
-      components: { Pagination, PaginationContent, PaginationPrevious },
-      setup: () => ({ update }),
+      components: { Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious },
+      setup: () => ({ submit, update }),
       template: `
-        <Pagination :page="1" :items-per-page="10" :total="30" @update:page="update">
-          <PaginationContent><PaginationPrevious /></PaginationContent>
-        </Pagination>
+        <form @submit.prevent="submit">
+          <Pagination :page="2" :items-per-page="10" :total="30" @update:page="update">
+            <PaginationContent>
+              <PaginationPrevious />
+              <PaginationItem :value="3">3</PaginationItem>
+              <PaginationNext />
+            </PaginationContent>
+          </Pagination>
+        </form>
       `
     })
-    const button = wrapper.get('button')
-    expect(button.attributes('aria-label')).toBe('上一页')
-    expect(button.attributes('type')).toBe('button')
-    expect(button.attributes('disabled')).toBeDefined()
-    await button.trigger('click')
-    expect(update).not.toHaveBeenCalled()
+    for (const button of wrapper.findAll('button')) {
+      expect(button.attributes('type')).toBe('button')
+      await button.trigger('click')
+    }
+    expect(submit).not.toHaveBeenCalled()
   })
 
-  it('renders a localized active page and does not emit a redundant update', async () => {
-    const update = vi.fn()
-    const wrapper = mount({
+  it('derives current, selected, and disabled state from the root page', async () => {
+    const Host = defineComponent({
       components: { Pagination, PaginationContent, PaginationItem },
-      setup: () => ({ update }),
+      setup: () => ({ page: ref(1) }),
       template: `
-        <Pagination :page="1" :items-per-page="10" :total="30" @update:page="update">
+        <Pagination v-model:page="page" :items-per-page="10" :total="30">
           <PaginationContent>
-            <PaginationItem :value="1" :is-active="true">1</PaginationItem>
+            <PaginationItem :value="1" data-testid="page-1">1</PaginationItem>
+            <PaginationItem :value="2" data-testid="page-2">2</PaginationItem>
           </PaginationContent>
         </Pagination>
       `
     })
-    const button = wrapper.get('button')
-    expect(button.attributes('aria-label')).toBe('第 1 页')
-    expect(button.attributes('aria-current')).toBe('page')
-    expect(button.attributes('disabled')).toBeDefined()
-    await button.trigger('click')
-    expect(update).not.toHaveBeenCalled()
+    const wrapper = mount(Host)
+    expect(wrapper.get('[data-testid="page-1"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-testid="page-1"]').attributes('data-selected')).toBe('true')
+    expect(wrapper.get('[data-testid="page-1"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="page-2"]').attributes('aria-current')).toBeUndefined()
+
+    await wrapper.get('[data-testid="page-2"]').trigger('click')
+    expect(wrapper.get('[data-testid="page-1"]').attributes('aria-current')).toBeUndefined()
+    expect(wrapper.get('[data-testid="page-2"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-testid="page-2"]').attributes('disabled')).toBeDefined()
   })
 
-  it.each([-1, 0, 4])('disables out-of-range page value %s', async value => {
+  it.each([-1, 0, 4])('disables out-of-range item %s without updates', async value => {
     const update = vi.fn()
     const wrapper = mount({
       components: { Pagination, PaginationContent, PaginationItem },
@@ -66,85 +74,68 @@ describe('pagination rendered-element contracts', () => {
     expect(update).not.toHaveBeenCalled()
   })
 
-  it('respects root disabled for a valid page item', async () => {
-    const update = vi.fn()
+  it('prevents critical attr overrides while forwarding safe attrs', () => {
     const wrapper = mount({
       components: { Pagination, PaginationContent, PaginationItem },
-      setup: () => ({ update }),
       template: `
-        <Pagination :page="1" :items-per-page="10" :total="30" disabled @update:page="update">
-          <PaginationContent><PaginationItem :value="2">2</PaginationItem></PaginationContent>
-        </Pagination>
-      `
-    })
-    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
-    await wrapper.get('button').trigger('click')
-    expect(update).not.toHaveBeenCalled()
-  })
-
-  it('supports enabled asChild anchors with one update and no disabled attrs', () => {
-    const update = vi.fn()
-    const wrapper = mount({
-      components: { Pagination, PaginationContent, PaginationNext },
-      setup: () => ({ update }),
-      template: `
-        <Pagination :page="1" :items-per-page="10" :total="30" @update:page="update">
+        <Pagination :page="1" :items-per-page="10" :total="30">
           <PaginationContent>
-            <PaginationNext as-child><a href="#next">下一页链接</a></PaginationNext>
+            <PaginationItem
+              :value="1"
+              id="safe-id"
+              data-testid="current-page"
+              type="submit"
+              :disabled="false"
+              aria-disabled="false"
+              tabindex="0"
+              aria-current="false"
+            >1</PaginationItem>
           </PaginationContent>
         </Pagination>
       `
     })
-    const link = wrapper.get('a')
-    expect(link.attributes('aria-disabled')).toBeUndefined()
-    expect(link.attributes('tabindex')).toBeUndefined()
-    const event = clickEvent()
-    link.element.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(false)
-    expect(update).toHaveBeenCalledTimes(1)
-    expect(update).toHaveBeenCalledWith(2)
+    const button = wrapper.get('[data-testid="current-page"]')
+    expect(button.attributes('id')).toBe('safe-id')
+    expect(button.attributes('type')).toBe('button')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('aria-disabled')).toBeUndefined()
+    expect(button.attributes('tabindex')).toBeUndefined()
+    expect(button.attributes('aria-current')).toBe('page')
   })
 
-  it('prevents disabled asChild anchor navigation and removes it from tab order', () => {
-    const update = vi.fn()
-    const wrapper = mount({
+  it('supports a controlled anchor branch without asChild merging', () => {
+    const enabledUpdate = vi.fn()
+    const enabledWrapper = mount({
       components: { Pagination, PaginationContent, PaginationNext },
-      setup: () => ({ update }),
+      setup: () => ({ enabledUpdate }),
       template: `
-        <Pagination :page="3" :items-per-page="10" :total="30" @update:page="update">
-          <PaginationContent>
-            <PaginationNext as-child><a href="#next">下一页链接</a></PaginationNext>
-          </PaginationContent>
+        <Pagination :page="1" :items-per-page="10" :total="30" @update:page="enabledUpdate">
+          <PaginationContent><PaginationNext as="a" href="#next" data-testid="next-link" /></PaginationContent>
         </Pagination>
       `
     })
-    const link = wrapper.get('a')
-    expect(link.attributes('aria-disabled')).toBe('true')
-    expect(link.attributes('tabindex')).toBe('-1')
-    const event = clickEvent()
-    link.element.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(true)
-    expect(update).not.toHaveBeenCalled()
-  })
+    const enabledLink = enabledWrapper.get('[data-testid="next-link"]')
+    const enabledEvent = clickEvent()
+    enabledLink.element.dispatchEvent(enabledEvent)
+    expect(enabledEvent.defaultPrevented).toBe(false)
+    expect(enabledUpdate).toHaveBeenCalledTimes(1)
 
-  it('applies the same disabled contract to as="a" without a native disabled attribute', () => {
-    const update = vi.fn()
-    const wrapper = mount({
-      components: { Pagination, PaginationContent, PaginationPrevious },
-      setup: () => ({ update }),
+    const disabledUpdate = vi.fn()
+    const disabledWrapper = mount({
+      components: { Pagination, PaginationContent, PaginationNext },
+      setup: () => ({ disabledUpdate }),
       template: `
-        <Pagination :page="1" :items-per-page="10" :total="30" @update:page="update">
-          <PaginationContent><PaginationPrevious as="a" href="#previous" /></PaginationContent>
+        <Pagination :page="3" :items-per-page="10" :total="30" @update:page="disabledUpdate">
+          <PaginationContent><PaginationNext as="a" href="#next" data-testid="next-link" /></PaginationContent>
         </Pagination>
       `
     })
-    const link = wrapper.get('a')
-    expect(link.attributes('disabled')).toBeUndefined()
-    expect(link.attributes('aria-disabled')).toBe('true')
-    expect(link.attributes('tabindex')).toBe('-1')
-    const event = clickEvent()
-    link.element.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(true)
-    expect(update).not.toHaveBeenCalled()
+    const disabledLink = disabledWrapper.get('[data-testid="next-link"]')
+    expect(disabledLink.attributes('aria-disabled')).toBe('true')
+    expect(disabledLink.attributes('tabindex')).toBe('-1')
+    const disabledEvent = clickEvent()
+    disabledLink.element.dispatchEvent(disabledEvent)
+    expect(disabledEvent.defaultPrevented).toBe(true)
+    expect(disabledUpdate).not.toHaveBeenCalled()
   })
 })

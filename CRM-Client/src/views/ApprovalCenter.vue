@@ -282,15 +282,8 @@
                 v-for="item in getPageItems()"
                 :key="item"
                 :value="item"
-                as-child
               >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  :class="page === item ? 'bg-primary text-primary-foreground' : ''"
-                >
-                  {{ item }}
-                </Button>
+                {{ item }}
               </PaginationItem>
               <PaginationNext />
             </PaginationContent>
