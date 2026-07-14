@@ -34,16 +34,21 @@ function validateDesignSystem({ rootDir, configPath }) {
     const source = fs.readFileSync(file, 'utf8')
     const fileName = relative(file)
     const lineCount = source.endsWith('\n') ? source.slice(0, -1).split('\n').length : source.split('\n').length
-    if (lineCount > 100) violations.push(`${fileName}: exceeds 100 lines`)
+    if (lineCount > 100) violations.push({ file: fileName, line: 0, category: 'line-limit', message: 'exceeds 100 lines' })
     for (const forbidden of config.forbiddenText) {
-      if (source.includes(forbidden)) violations.push(`${fileName}: forbidden text ${forbidden}`)
+      const lines = source.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(forbidden)) {
+          violations.push({ file: fileName, line: i + 1, category: 'forbidden-text', message: `forbidden text ${forbidden}` })
+        }
+      }
     }
     for (const { target, line } of parseMarkdownLinks(source)) {
       if (/^(https?:|mailto:)/.test(target)) continue
       const [rawPath, rawAnchor] = target.split('#', 2)
       const targetFile = rawPath ? path.resolve(path.dirname(file), rawPath) : file
       if (!fs.existsSync(targetFile)) {
-        violations.push(`${fileName}:${line}: broken link ${target}`)
+        violations.push({ file: fileName, line, category: 'broken-link', message: `broken link ${target}` })
         continue
       }
       if (rawAnchor) {
@@ -51,7 +56,9 @@ function validateDesignSystem({ rootDir, configPath }) {
         const targetAnchors = new Set(targetSource.split('\n')
           .filter(item => /^#{1,6}\s+/.test(item))
           .map(item => slugify(item.replace(/^#{1,6}\s+/, ''))))
-        if (!targetAnchors.has(rawAnchor)) violations.push(`${fileName}:${line}: missing anchor ${target}`)
+        if (!targetAnchors.has(rawAnchor)) {
+          violations.push({ file: fileName, line, category: 'missing-anchor', message: `missing anchor ${target}` })
+        }
       }
       if (targetFile.endsWith('.md')) graph.get(fileName).add(relative(targetFile))
     }
@@ -68,7 +75,7 @@ function validateDesignSystem({ rootDir, configPath }) {
   for (const file of files) {
     const name = relative(file)
     if (!config.ignoredFiles.includes(name) && !visited.has(name)) {
-      violations.push(`${name}: not reachable from README.md`)
+      violations.push({ file: name, line: 0, category: 'unreachable', message: 'not reachable from README.md' })
     }
   }
   return violations
@@ -79,7 +86,9 @@ if (require.main === module) {
   const configPath = path.join(rootDir, 'governance', 'check-config.json')
   const violations = validateDesignSystem({ rootDir, configPath })
   if (violations.length) {
-    console.error(violations.map(item => `✗ ${item}`).join('\n'))
+    for (const { file, line, category, message } of violations) {
+      console.error(`✗ ${file}:${line} [${category}] ${message}`)
+    }
     process.exit(1)
   }
   console.log(`✓ ${collectMarkdownFiles(rootDir).length} design-system Markdown files passed`)
