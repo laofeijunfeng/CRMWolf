@@ -404,5 +404,6 @@ $wolf-shadow-hover: $wolf-shadow-hover-v2;
 $--transition-base: $wolf-transition-v2;
 
 // ==================== Typography 统一样式导入 ====================
-// 必须在所有变量定义之后导入
-@import '_typography.scss';
+// 注释掉：避免 V1/V2 混用
+// Typography 样式现在在各自的页面中内联定义（如 Roles.vue）
+// @import '_typography.scss';
