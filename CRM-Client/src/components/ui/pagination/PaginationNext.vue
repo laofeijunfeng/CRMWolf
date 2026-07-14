@@ -1,37 +1,41 @@
 <script setup lang="ts">
 /**
- * PaginationNext - Next page button
+ * PaginationNext - Next page control with localized accessible name.
  */
+import type { PrimitiveProps } from 'radix-vue'
 import { Primitive } from 'radix-vue'
-import { inject } from 'vue'
-import { localPaginationContextKey } from './context'
 import { ChevronRight } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
+import { usePaginationControl } from './usePaginationControl'
 
-interface Props {
+interface Props extends PrimitiveProps {
   class?: HTMLAttributes['class']
 }
 
-const props = defineProps<Props>()
-const pagination = inject(localPaginationContextKey)
-if (pagination === undefined) {
-  throw new Error('PaginationNext must be used within Pagination')
-}
+const props = withDefaults(defineProps<Props>(), {
+  as: 'button',
+  asChild: false
+})
+const { pagination, disabled } = usePaginationControl(
+  'PaginationNext',
+  context => context.page.value >= context.pageCount.value
+)
 
 const handleClick = (): void => {
-  if (pagination.disabled.value || pagination.page.value >= pagination.pageCount.value) return
+  if (disabled.value) return
   pagination.onPageChange(pagination.page.value + 1)
 }
 </script>
 
 <template>
   <Primitive
-    as="button"
-    type="button"
+    :as="props.as"
+    :as-child="props.asChild"
+    :type="!props.asChild && props.as === 'button' ? 'button' : undefined"
+    :disabled="!props.asChild ? disabled : undefined"
+    :aria-disabled="props.asChild && disabled ? 'true' : undefined"
     aria-label="下一页"
-    :disabled="pagination.disabled.value || pagination.page.value >= pagination.pageCount.value"
-    @click="handleClick"
     :class="cn(
       'inline-flex h-11 w-11 items-center justify-center rounded-wolf border border-wolf-border-default',
       'bg-wolf-bg-card text-wolf-text-secondary hover:bg-wolf-bg-hover',
@@ -40,7 +44,10 @@ const handleClick = (): void => {
       'transition-colors',
       props.class
     )"
+    @click="handleClick"
   >
-    <ChevronRight class="h-4 w-4" aria-hidden="true" />
+    <slot>
+      <ChevronRight class="h-4 w-4" aria-hidden="true" />
+    </slot>
   </Primitive>
 </template>

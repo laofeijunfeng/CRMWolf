@@ -18,13 +18,15 @@ import { reactive, computed, watch } from 'vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Search, X } from 'lucide-vue-next'
+import {
+  buildResetValues,
+  type FilterValue,
+  type FilterValues
+} from './filterPanelValues'
 
 // ==================== Types ====================
-type FilterValue = string | number | null
 
-type FilterValues = Record<string, FilterValue>
-
-interface FilterField {
+export interface FilterField {
   /** 字段唯一标识 */
   key: string
   /** 字段标签（用于 aria-label） */
@@ -56,7 +58,8 @@ const emit = defineEmits<{
 }>()
 
 // ==================== Reactive State ====================
-const form = reactive<FilterValues>({ ...props.values })
+const initialValues = buildResetValues(props.fields, props.values)
+const form = reactive<FilterValues>({ ...initialValues, ...props.values })
 
 // 监听 props.values 变化，同步到 form
 watch(() => props.values, (newValues) => {
@@ -65,20 +68,27 @@ watch(() => props.values, (newValues) => {
 
 // ==================== Computed ====================
 const hasActiveFilters = computed((): boolean => {
-  return Object.values(form).some(v => v !== null && v !== undefined && v !== '')
+  return Object.values(form).some(value => value !== '')
 })
 
 // ==================== Methods ====================
+function getFilterValue(key: string): FilterValue {
+  return form[key] ?? ''
+}
+
+function setFilterValue(key: string, value: FilterValue): void {
+  form[key] = value
+}
+
 function handleSearch(): void {
   emit('update:values', { ...form })
   emit('search', { ...form })
 }
 
 function handleReset(): void {
-  Object.keys(form).forEach(key => {
-    form[key] = null
-  })
-  emit('update:values', { ...form })
+  const resetValues = buildResetValues(props.fields, form)
+  Object.assign(form, resetValues)
+  emit('update:values', resetValues)
   emit('reset')
 }
 
@@ -100,7 +110,8 @@ function handleSubmit(event: Event): void {
       <div v-if="fields.some(f => f.key === 'keyword')" class="search-input-wrapper">
         <Search class="search-icon" aria-hidden="true" />
         <Input
-          v-model="form['keyword']"
+          :model-value="getFilterValue('keyword')"
+          @update:model-value="setFilterValue('keyword', $event)"
           type="text"
           :placeholder="fields.find(f => f.key === 'keyword')?.placeholder ?? '搜索...'"
           autocomplete="off"
@@ -116,8 +127,9 @@ function handleSubmit(event: Event): void {
         <!-- 文本输入 -->
         <Input
           v-if="field.type === 'text'"
-          v-model="form[field.key]"
+          :model-value="getFilterValue(field.key)"
           type="text"
+          @update:model-value="setFilterValue(field.key, $event)"
           :placeholder="field.placeholder ?? ''"
           autocomplete="off"
           :ariaLabel="field.label"

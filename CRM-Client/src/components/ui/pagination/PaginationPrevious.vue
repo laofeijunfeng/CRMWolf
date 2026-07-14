@@ -1,37 +1,41 @@
 <script setup lang="ts">
 /**
- * PaginationPrevious - Previous page button
+ * PaginationPrevious - Previous page control with localized accessible name.
  */
+import type { PrimitiveProps } from 'radix-vue'
 import { Primitive } from 'radix-vue'
-import { inject } from 'vue'
-import { localPaginationContextKey } from './context'
 import { ChevronLeft } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
+import { usePaginationControl } from './usePaginationControl'
 
-interface Props {
+interface Props extends PrimitiveProps {
   class?: HTMLAttributes['class']
 }
 
-const props = defineProps<Props>()
-const pagination = inject(localPaginationContextKey)
-if (pagination === undefined) {
-  throw new Error('PaginationPrevious must be used within Pagination')
-}
+const props = withDefaults(defineProps<Props>(), {
+  as: 'button',
+  asChild: false
+})
+const { pagination, disabled } = usePaginationControl(
+  'PaginationPrevious',
+  context => context.page.value <= 1
+)
 
 const handleClick = (): void => {
-  if (pagination.disabled.value || pagination.page.value <= 1) return
+  if (disabled.value) return
   pagination.onPageChange(pagination.page.value - 1)
 }
 </script>
 
 <template>
   <Primitive
-    as="button"
-    type="button"
+    :as="props.as"
+    :as-child="props.asChild"
+    :type="!props.asChild && props.as === 'button' ? 'button' : undefined"
+    :disabled="!props.asChild ? disabled : undefined"
+    :aria-disabled="props.asChild && disabled ? 'true' : undefined"
     aria-label="上一页"
-    :disabled="pagination.disabled.value || pagination.page.value <= 1"
-    @click="handleClick"
     :class="cn(
       'inline-flex h-11 w-11 items-center justify-center rounded-wolf border border-wolf-border-default',
       'bg-wolf-bg-card text-wolf-text-secondary hover:bg-wolf-bg-hover',
@@ -40,7 +44,10 @@ const handleClick = (): void => {
       'transition-colors',
       props.class
     )"
+    @click="handleClick"
   >
-    <ChevronLeft class="h-4 w-4" aria-hidden="true" />
+    <slot>
+      <ChevronLeft class="h-4 w-4" aria-hidden="true" />
+    </slot>
   </Primitive>
 </template>

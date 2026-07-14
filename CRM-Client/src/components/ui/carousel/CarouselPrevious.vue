@@ -18,8 +18,8 @@ const { orientation, canScrollPrev, scrollPrev } = useCarousel()
     :class="cn(
       'touch-manipulation absolute size-11 rounded-full p-0',
       orientation === 'horizontal'
-        ? '-left-12 top-1/2 -translate-y-1/2'
-        : '-top-12 left-1/2 -translate-x-1/2 rotate-90',
+        ? '-left-[54px] top-1/2 -translate-y-1/2'
+        : '-top-[54px] left-1/2 -translate-x-1/2 rotate-90',
       props.class,
     )"
     variant="outline"
