@@ -11,10 +11,11 @@
  * - 使用 defineAsyncComponent 懒加载 Sheet 组件
  * - 减少初始加载体积，只在需要时才加载
  *
- * 设计规范：
- * - 使用 variables-v2.scss Design Token
- * - 使用 Lucide Icons
- * - 响应式布局：lg 3列，md 2列，sm 1列
+ * 设计规范（V2）：
+ * - 使用 variables-v2.scss Design Token（颜色、间距、阴影、圆角）
+ * - 使用 Lucide Icons（SVG 图标）
+ * - 响应式布局：移动优先，375px 1列，768px 2列，1024px 3列
+ * - 交互状态：hover 阴影、active scale 反馈
  */
 import { computed, ref, defineAsyncComponent } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
@@ -101,20 +102,20 @@ fetchUserRoles()
 </script>
 
 <template>
-  <div class="system-config-page p-6">
+  <div class="system-config-page">
     <!-- 页面标题 -->
-    <h1 class="wolf-page-title mb-6">系统配置</h1>
+    <h1 class="wolf-page-title">系统配置</h1>
 
     <!-- 配置卡片网格 -->
-    <div class="grid grid-cols-3 gap-6 lg:grid-cols-3 md:grid-cols-2 sm:grid-cols-1">
+    <div class="system-config-grid">
       <!-- 角色管理 -->
       <Card
         v-if="canManageRoles"
-        class="cursor-pointer hover:shadow-md transition-shadow duration-200"
+        class="system-config-card"
         @click="openSheet('roles')"
       >
         <CardHeader>
-          <Shield class="w-10 h-10 mb-2 text-primary" />
+          <Shield class="system-config-card__icon" />
           <CardTitle>角色管理</CardTitle>
           <CardDescription>配置角色与权限</CardDescription>
         </CardHeader>
@@ -123,11 +124,11 @@ fetchUserRoles()
       <!-- 审批流程 -->
       <Card
         v-if="canManageApprovalFlows"
-        class="cursor-pointer hover:shadow-md transition-shadow duration-200"
+        class="system-config-card"
         @click="openSheet('approval-flows')"
       >
         <CardHeader>
-          <Workflow class="w-10 h-10 mb-2 text-primary" />
+          <Workflow class="system-config-card__icon" />
           <CardTitle>审批流程</CardTitle>
           <CardDescription>配置审批流程模板</CardDescription>
         </CardHeader>
@@ -136,11 +137,11 @@ fetchUserRoles()
       <!-- 采购配置 -->
       <Card
         v-if="canManageProcurementMethods"
-        class="cursor-pointer hover:shadow-md transition-shadow duration-200"
+        class="system-config-card"
         @click="openSheet('procurement')"
       >
         <CardHeader>
-          <ShoppingCart class="w-10 h-10 mb-2 text-primary" />
+          <ShoppingCart class="system-config-card__icon" />
           <CardTitle>采购配置</CardTitle>
           <CardDescription>管理采购方式</CardDescription>
         </CardHeader>
@@ -149,11 +150,11 @@ fetchUserRoles()
       <!-- AI配置 -->
       <Card
         v-if="canManageAIConfig"
-        class="cursor-pointer hover:shadow-md transition-shadow duration-200"
+        class="system-config-card"
         @click="openSheet('ai-config')"
       >
         <CardHeader>
-          <Cpu class="w-10 h-10 mb-2 text-primary" />
+          <Cpu class="system-config-card__icon" />
           <CardTitle>AI 配置</CardTitle>
           <CardDescription>大模型服务参数设置</CardDescription>
         </CardHeader>
@@ -162,11 +163,11 @@ fetchUserRoles()
       <!-- 通知配置 -->
       <Card
         v-if="canManageApprovalFlows"
-        class="cursor-pointer hover:shadow-md transition-shadow duration-200"
+        class="system-config-card"
         @click="openSheet('notification')"
       >
         <CardHeader>
-          <Bell class="w-10 h-10 mb-2 text-primary" />
+          <Bell class="system-config-card__icon" />
           <CardTitle>通知配置</CardTitle>
           <CardDescription>配置飞书群聊通知</CardDescription>
         </CardHeader>
@@ -175,11 +176,11 @@ fetchUserRoles()
       <!-- 团队成员 -->
       <Card
         v-if="canManageTeam"
-        class="cursor-pointer hover:shadow-md transition-shadow duration-200"
+        class="system-config-card"
         @click="openSheet('team-members')"
       >
         <CardHeader>
-          <Users class="w-10 h-10 mb-2 text-primary" />
+          <Users class="system-config-card__icon" />
           <CardTitle>团队成员</CardTitle>
           <CardDescription>管理团队成员与邀请</CardDescription>
         </CardHeader>
@@ -202,5 +203,53 @@ fetchUserRoles()
 .system-config-page {
   background: $wolf-bg-page-v2;
   min-height: calc(100vh - 56px);
+  padding: $wolf-page-padding-v2;
+}
+
+.wolf-page-title {
+  margin-bottom: $wolf-section-gap-v2;
+}
+
+// 配置卡片网格
+// 响应式布局：移动优先，根据设计规范断点调整列数
+.system-config-grid {
+  display: grid;
+  gap: $wolf-card-gap-v2; // 16px
+  grid-template-columns: 1fr; // 默认 1 列（移动端）
+
+  // 平板竖屏 (768px+)：2 列
+  @media (min-width: $wolf-breakpoint-sm-v2) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  // 平板横屏/小桌面 (1024px+)：3 列
+  @media (min-width: $wolf-breakpoint-md-v2) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+// 配置卡片
+// 使用设计 Token：阴影、过渡、圆角
+.system-config-card {
+  cursor: $wolf-cursor-clickable-v2;
+  transition: $wolf-transition-hover-v2;
+  border-radius: $wolf-radius-v2;
+
+  &:hover {
+    box-shadow: $wolf-shadow-hover-v2;
+  }
+
+  &:active {
+    transform: scale(0.98);
+    box-shadow: $wolf-shadow-card-v2;
+  }
+
+  // 卡片图标
+  &__icon {
+    width: 32px;
+    height: 32px;
+    margin-bottom: $wolf-space-sm-v2;
+    color: $wolf-primary-v2;
+  }
 }
 </style>
