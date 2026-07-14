@@ -369,7 +369,7 @@ module.exports = {
 2. **创建 ContextTabsV2 组件**（上下文标签栏）
 3. **创建 UserInfoDropdownV2 组件**（用户下拉菜单）
 4. **创建 ButtonV2 组件**（统一按钮样式）
-5. **创建完整的设计系统文档**（design-system/crmwolf/MASTER.md）
+5. **创建完整的设计系统文档**（CRM-Docs/design-system/README.md）
 
 ---
 
@@ -396,6 +396,6 @@ module.exports = {
 ## 📚 参考资料
 
 - **设计系统文档**：`docs/design-system-migration-roadmap.md`
-- **实施路线图**：`docs/design-system/crmwolf/MASTER.md`
+- **实施路线图**：`docs/CRM-Docs/design-system/README.md`
 - **UI/UX Pro Max**：`python3 skills/ui-ux-pro-max/scripts/search.py --design-system`
 - **原型效果图**：`navigation-redesign-v3.html`

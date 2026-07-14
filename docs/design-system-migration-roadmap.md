@@ -39,7 +39,7 @@
 | **1.2 创建过渡方案** | P0 | 1天 | 1.1 |
 | 编写迁移指南，列出旧变量→新变量的映射关系 | | | |
 | **1.3 创建 Design System 文档** | P0 | 2天 | 1.1 |
-| 使用 UI/UX Pro Max 的 `--design-system --persist` 生成 MASTER.md | | | |
+| 使用 UI/UX Pro Max 的 `--design-system --persist` 建立模块化设计规范 | | | |
 | **1.4 创建视觉对比文档** | P1 | 1天 | 1.1 |
 | 使用 Storybook 创建新旧设计的对比展示 | | | |
 | **1.5 更新 Element Plus 主题** | P0 | 1天 | 1.1 |
@@ -82,7 +82,7 @@
 
 每个组件必须包含：
 - `.stories.ts` 文件（展示组件的所有状态）
-- 设计说明（引用 MASTER.md 的设计规则）
+- 设计说明（引用 CRM-Docs/design-system/ 的设计规则）
 - 交互测试（hover/active/disabled 状态）
 
 #### 输出成果
@@ -207,9 +207,9 @@ module.exports = {
 
 ### 3.2 如何确保"统一标准"
 
-**策略**：Design System MASTER.md + 组件模板
+**策略**：模块化设计规范 + 组件模板
 
-#### Design System MASTER.md
+#### 模块化设计规范
 
 使用 UI/UX Pro Max 生成：
 
@@ -222,8 +222,8 @@ python3 skills/ui-ux-pro-max/scripts/search.py \
 ```
 
 输出：
-- `design-system/MASTER.md`（所有设计规则的唯一来源）
-- `design-system/pages/`（页面特定规则的覆盖）
+- `CRM-Docs/design-system/README.md`（设计系统入口）
+- `CRM-Docs/design-system/patterns/`（页面组合规则）
 
 #### 组件模板（CLAUDE.md）
 
@@ -232,7 +232,7 @@ python3 skills/ui-ux-pro-max/scripts/search.py \
 ```markdown
 # Button 组件设计说明
 
-**引用规则**：design-system/MASTER.md §4.4（按钮尺寸）
+**引用规则**：CRM-Docs/design-system/components/button.md
 
 **必须遵守**：
 - 圆角：6px（$wolf-radius-v2）
@@ -277,7 +277,7 @@ CRM-Client/src/components/
 每个组件必须包含：
 1. **单元测试**（`.spec.ts`）：测试所有功能、状态、交互
 2. **Storybook**（`.stories.ts`）：展示所有状态、变体
-3. **设计说明**（`.md`）：引用 MASTER.md 的设计规则
+3. **设计说明**（`.md`）：引用 CRM-Docs/design-system/ 的设计规则
 
 #### Storybook 配置
 
@@ -297,7 +297,7 @@ const meta: Meta<typeof Button> = {
     },
     docs: {
       description: {
-        component: '引用规则：design-system/MASTER.md §4.4（按钮尺寸）'
+        component: '引用规则：CRM-Docs/design-system/components/button.md'
       }
     }
   }
@@ -363,7 +363,7 @@ module.exports = {
 
 | 角色 | 负责内容 | 产出 |
 |------|---------|------|
-| **设计负责人** | 设计系统制定、视觉评审 | MASTER.md、设计稿 |
+| **设计负责人** | 设计系统制定、视觉评审 | CRM-Docs/design-system/、设计稿 |
 | **前端负责人** | 组件库建设、页面替换 | 组件代码、Storybook |
 | **测试负责人** | 自动化测试、验收测试 | 测试报告、覆盖率报告 |
 | **全员** | 功能测试、评审 | 反馈、改进建议 |
@@ -379,7 +379,7 @@ Storybook 展示 → 全员评审 → 测试负责人测试 →
 ### 5.3 评审标准
 
 每个组件合并前必须通过：
-- ✅ 设计负责人视觉评审（符合 MASTER.md）
+- ✅ 设计负责人视觉评审（符合设计系统规范）
 - ✅ 前端负责人代码评审（符合组件规范）
 - ✅ 测试负责人测试评审（单元测试 + Storybook）
 
@@ -416,7 +416,7 @@ $wolf-primary: $wolf-primary-v2;  // 兼容旧代码
 | 标准 | 目标 | 验证方式 |
 |------|------|---------|
 | **整体替换** | 100% 页面使用新设计系统 | ESLint + Stylelint 检查 |
-| **统一标准** | 所有组件引用 MASTER.md | Storybook docs |
+| **统一标准** | 所有组件引用设计系统规范 | Storybook docs |
 | **组件化** | 所有页面使用组件库 | 代码审查 |
 | **功能完整** | 所有功能正常工作 | 单元测试 + 手动测试 |
 | **性能合规** | CLS < 0.1 | Lighthouse |

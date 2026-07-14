@@ -55,7 +55,7 @@
 **关键原则**：
 - ✅ 每个组件必须有 `.stories.ts`（Storybook展示）
 - ✅ 每个组件必须有 `.spec.ts`（单元测试）
-- ✅ 每个组件必须引用 `MASTER.md` 的设计规则
+- ✅ 每个组件必须引用 `CRM-Docs/design-system/README.md` 的设计规则
 
 ---
 
@@ -124,7 +124,7 @@
 |------|--------|------|
 | **删除旧变量** | 1天 | 移除 variables.scss 的旧变量别名 |
 | **删除旧组件** | 2天 | 删除旧的 Button、Table、Sidebar 等 |
-| **更新文档** | 1天 | 更新所有组件文档，引用 MASTER.md |
+| **更新文档** | 1天 | 更新所有组件文档，引用 CRM-Docs/design-system/ 的模块化规范 |
 
 ---
 
@@ -155,7 +155,7 @@
 - ✅ 所有阴影变量已定义（中等强度）
 - ✅ 向后兼容别名已添加（`$wolf-primary: $wolf-primary-v2`）
 - ✅ `element-plus-theme-v2.scss` 已适配
-- ✅ `MASTER.md` 已生成（UI/UX Pro Max）
+- ✅ `CRM-Docs/design-system/README.md` 已生成（UI/UX Pro Max）
 
 ### **基础组件检查**
 
@@ -216,7 +216,7 @@ $wolf-shadow-hover-v2: 0 2px 8px rgba(0, 0, 0, 0.15);
 $wolf-primary: $wolf-primary-v2;
 ```
 
-#### Day 3：生成 `MASTER.md`
+#### Day 3：生成 `CRM-Docs/design-system/README.md`
 
 ```bash
 python3 skills/ui-ux-pro-max/scripts/search.py \
@@ -320,7 +320,7 @@ const meta: Meta<typeof ButtonV2> = {
   parameters: {
     docs: {
       description: {
-        component: '引用规则：design-system/crmwolf/MASTER.md'
+        component: '引用规范：CRM-Docs/design-system/README.md'
       }
     }
   }
