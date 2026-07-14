@@ -2,7 +2,7 @@
  * Stylelint 配置 - CRMWolf
  *
  * @description 强制使用 Design Tokens，禁止硬编码样式
- * @规则来源: CRM-Docs/design-system/MASTER.md §9（禁止事项）
+ * @规则来源: CRM-Docs/design-system/README.md（设计系统根入口）
  */
 
 export default {

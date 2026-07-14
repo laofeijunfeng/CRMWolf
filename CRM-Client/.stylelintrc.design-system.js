@@ -1,7 +1,7 @@
 /**
  * Stylelint 设计系统强制规则 - CRMWolf V2
  *
- * @规则来源: CRM-Docs/design-system/MASTER.md §9（禁止事项）
+ * @规则来源: CRM-Docs/design-system/README.md（设计系统根入口）
  * @核心规则:
  *   1. 禁止硬编码颜色（必须使用 Design Tokens）
  *   2. 禁止旧圆角值（统一 6px）

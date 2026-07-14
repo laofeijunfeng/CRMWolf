@@ -200,3 +200,16 @@ jobs:
           if [ "$type_changed" -gt 0 ] && [ "$typescript_doc_changed" -eq 0 ]; then
             echo "::warning::Schema files changed but TYPESCRIPT.md not updated"
           fi
+
+  # ===== 设计系统文档检查 =====
+  design-system-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Test design-system documentation checker
+        run: node scripts/tests/check-design-system-docs.test.js
+      - name: Check design-system documentation
+        run: node scripts/check-design-system-docs.js
