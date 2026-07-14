@@ -391,8 +391,8 @@ function formatDate(dateStr: string): string {
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
     <SheetHeader>
-      <SheetTitle>角色管理</SheetTitle>
-      <SheetDescription>配置系统角色与权限</SheetDescription>
+      <SheetTitle class="text-base font-semibold text-wolf-text-primary">角色管理</SheetTitle>
+      <SheetDescription class="text-sm text-wolf-text-secondary">配置系统角色与权限</SheetDescription>
     </SheetHeader>
     <DetailSheetContent>
       <ScrollArea class="h-full">

@@ -399,8 +399,8 @@ function handleRoleChange(roleId: number, checked: boolean): void {
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
     <SheetHeader>
-      <SheetTitle>团队成员</SheetTitle>
-      <SheetDescription>管理团队成员与角色分配</SheetDescription>
+      <SheetTitle class="text-base font-semibold text-wolf-text-primary">团队成员</SheetTitle>
+      <SheetDescription class="text-sm text-wolf-text-secondary">管理团队成员与角色分配</SheetDescription>
     </SheetHeader>
     <DetailSheetContent>
       <ScrollArea class="h-full">

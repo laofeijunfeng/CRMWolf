@@ -229,8 +229,8 @@ watch(() => props.open, (open) => {
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
     <SheetHeader>
-      <SheetTitle>通知配置</SheetTitle>
-      <SheetDescription>配置审批流程的飞书群通知</SheetDescription>
+      <SheetTitle class="text-base font-semibold text-wolf-text-primary">通知配置</SheetTitle>
+      <SheetDescription class="text-sm text-wolf-text-secondary">配置审批流程的飞书群通知</SheetDescription>
     </SheetHeader>
     <DetailSheetContent>
       <ScrollArea class="h-full">

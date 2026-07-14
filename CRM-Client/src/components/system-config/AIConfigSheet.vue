@@ -223,8 +223,8 @@ watch(() => props.open, (open) => {
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
     <SheetHeader>
-      <SheetTitle>AI 配置</SheetTitle>
-      <SheetDescription>配置大模型服务接口</SheetDescription>
+      <SheetTitle class="text-base font-semibold text-wolf-text-primary">AI 配置</SheetTitle>
+      <SheetDescription class="text-sm text-wolf-text-secondary">配置大模型服务接口</SheetDescription>
     </SheetHeader>
     <DetailSheetContent>
       <ScrollArea class="h-full">

@@ -302,8 +302,8 @@ function formatDate(dateStr: string): string {
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
     <SheetHeader>
-      <SheetTitle>采购方式管理</SheetTitle>
-      <SheetDescription>配置采购方式与阶段模板</SheetDescription>
+      <SheetTitle class="text-base font-semibold text-wolf-text-primary">采购方式管理</SheetTitle>
+      <SheetDescription class="text-sm text-wolf-text-secondary">配置采购方式与阶段模板</SheetDescription>
     </SheetHeader>
     <DetailSheetContent>
       <ScrollArea class="h-full">
