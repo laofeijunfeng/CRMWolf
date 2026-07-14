@@ -14,12 +14,13 @@
  * 技术壁垒判定（MASTER.md §3.4）：
  * - shadcn-vue 无 Select 组件 → 使用原生 <select>
  */
-import { reactive, computed, watch } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Search, X } from 'lucide-vue-next'
 import {
   buildResetValues,
+  syncFilterValues,
   type FilterValue,
   type FilterValues
 } from './filterPanelValues'
@@ -58,36 +59,39 @@ const emit = defineEmits<{
 }>()
 
 // ==================== Reactive State ====================
-const initialValues = buildResetValues(props.fields, props.values)
-const form = reactive<FilterValues>({ ...initialValues, ...props.values })
+const form: Ref<FilterValues> = ref(syncFilterValues(props.fields, props.values))
 
-// 监听 props.values 变化，同步到 form
-watch(() => props.values, (newValues) => {
-  Object.assign(form, newValues)
-}, { deep: true })
+// 监听外部 values/fields，完整替换本地状态，避免已删除 key 残留
+watch(
+  [(): FilterValues => props.values, (): FilterField[] => props.fields],
+  ([newValues, newFields]): void => {
+    form.value = syncFilterValues(newFields, newValues)
+  },
+  { deep: true }
+)
 
 // ==================== Computed ====================
 const hasActiveFilters = computed((): boolean => {
-  return Object.values(form).some(value => value !== '')
+  return Object.values(form.value).some(value => value !== '')
 })
 
 // ==================== Methods ====================
 function getFilterValue(key: string): FilterValue {
-  return form[key] ?? ''
+  return form.value[key] ?? ''
 }
 
 function setFilterValue(key: string, value: FilterValue): void {
-  form[key] = value
+  form.value[key] = value
 }
 
 function handleSearch(): void {
-  emit('update:values', { ...form })
-  emit('search', { ...form })
+  emit('update:values', { ...form.value })
+  emit('search', { ...form.value })
 }
 
 function handleReset(): void {
-  const resetValues = buildResetValues(props.fields, form)
-  Object.assign(form, resetValues)
+  const resetValues = buildResetValues(props.fields, form.value)
+  form.value = resetValues
   emit('update:values', resetValues)
   emit('reset')
 }

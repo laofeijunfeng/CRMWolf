@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildResetValues } from '../filterPanelValues'
+import {
+  buildResetValues,
+  syncFilterValues
+} from '../filterPanelValues'
 
 const fields = [
   { key: 'keyword' },
@@ -7,22 +10,19 @@ const fields = [
   { key: 'due_date' }
 ]
 
-describe('buildResetValues', () => {
-  it('resets text, select, and date filter values to empty strings', () => {
-    expect(buildResetValues(fields, {
-      keyword: '客户',
-      status: 'PENDING',
-      due_date: '2026-07-14'
-    })).toEqual({
+describe('FilterPanel value reducers', () => {
+  it('fills missing field keys with empty strings', () => {
+    expect(syncFilterValues(fields, { status: 'PENDING' })).toEqual({
       keyword: '',
-      status: '',
+      status: 'PENDING',
       due_date: ''
     })
   })
 
-  it('preserves controlled caller keys while resetting them safely', () => {
+  it('resets field and currently controlled extra keys to empty strings', () => {
     expect(buildResetValues(fields, {
       keyword: '客户',
+      status: 'PENDING',
       external_filter: 2
     })).toEqual({
       keyword: '',

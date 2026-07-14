@@ -7,7 +7,11 @@ import { Primitive } from 'radix-vue'
 import { ChevronRight } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
-import { usePaginationControl } from './usePaginationControl'
+import {
+  guardPaginationInteraction,
+  usePaginationControl,
+  usePaginationRenderedElement
+} from './usePaginationControl'
 
 interface Props extends PrimitiveProps {
   class?: HTMLAttributes['class']
@@ -22,8 +26,10 @@ const { pagination, disabled } = usePaginationControl(
   context => context.page.value >= context.pageCount.value
 )
 
-const handleClick = (): void => {
-  if (disabled.value) return
+const renderedElement = usePaginationRenderedElement(props, disabled)
+
+const handleClick = (event: MouseEvent): void => {
+  if (!guardPaginationInteraction(event, disabled.value)) return
   pagination.onPageChange(pagination.page.value + 1)
 }
 </script>
@@ -32,15 +38,16 @@ const handleClick = (): void => {
   <Primitive
     :as="props.as"
     :as-child="props.asChild"
-    :type="!props.asChild && props.as === 'button' ? 'button' : undefined"
-    :disabled="!props.asChild ? disabled : undefined"
-    :aria-disabled="props.asChild && disabled ? 'true' : undefined"
+    :type="renderedElement.buttonType.value"
+    :disabled="renderedElement.nativeDisabled.value"
+    :aria-disabled="renderedElement.ariaDisabled.value"
+    :tabindex="renderedElement.tabIndex.value"
     aria-label="下一页"
     :class="cn(
       'inline-flex h-11 w-11 items-center justify-center rounded-wolf border border-wolf-border-default',
       'bg-wolf-bg-card text-wolf-text-secondary hover:bg-wolf-bg-hover',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2',
-      'disabled:pointer-events-none disabled:opacity-50',
+      'disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50',
       'transition-colors',
       props.class
     )"
