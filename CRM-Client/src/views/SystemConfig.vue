@@ -7,22 +7,40 @@
  * - 点击卡片打开对应的 Sheet 抽屉
  * - 权限控制：无权限的卡片不显示
  *
+ * 性能优化：
+ * - 使用 defineAsyncComponent 懒加载 Sheet 组件
+ * - 减少初始加载体积，只在需要时才加载
+ *
  * 设计规范：
  * - 使用 variables-v2.scss Design Token
  * - 使用 Lucide Icons
  * - 响应式布局：lg 3列，md 2列，sm 1列
  */
-import { computed, ref } from 'vue'
+import { computed, ref, defineAsyncComponent } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users } from 'lucide-vue-next'
-import RoleSheet from '@/components/system-config/RoleSheet.vue'
-import ApprovalFlowSheet from '@/components/system-config/ApprovalFlowSheet.vue'
-import ProcurementSheet from '@/components/system-config/ProcurementSheet.vue'
-import AIConfigSheet from '@/components/system-config/AIConfigSheet.vue'
-import NotificationSheet from '@/components/system-config/NotificationSheet.vue'
-import TeamMemberSheet from '@/components/system-config/TeamMemberSheet.vue'
+
+// 懒加载 Sheet 组件（性能优化）
+const RoleSheet = defineAsyncComponent(() =>
+  import('@/components/system-config/RoleSheet.vue')
+)
+const ApprovalFlowSheet = defineAsyncComponent(() =>
+  import('@/components/system-config/ApprovalFlowSheet.vue')
+)
+const ProcurementSheet = defineAsyncComponent(() =>
+  import('@/components/system-config/ProcurementSheet.vue')
+)
+const AIConfigSheet = defineAsyncComponent(() =>
+  import('@/components/system-config/AIConfigSheet.vue')
+)
+const NotificationSheet = defineAsyncComponent(() =>
+  import('@/components/system-config/NotificationSheet.vue')
+)
+const TeamMemberSheet = defineAsyncComponent(() =>
+  import('@/components/system-config/TeamMemberSheet.vue')
+)
 
 const permissionStore = usePermissionStore()
 

@@ -65,7 +65,7 @@ const notificationSchema = toTypedSchema(
   z.object({
     feishu_webhook_enabled: z.boolean().default(false),
     feishu_webhook_url: z.string()
-      .refine((val) => {
+      .refine((_val) => {
         // 如果未启用，不校验
         return true
       }, '请输入 Webhook URL')

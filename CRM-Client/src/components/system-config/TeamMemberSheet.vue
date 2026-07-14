@@ -61,7 +61,6 @@ import userApi, { type UserSearchResult } from '@/api/user'
 import roleApi, { type RoleResponse } from '@/api/role'
 import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
-import { authApi } from '@/api/auth'
 
 // ==================== Props & Emits ====================
 interface Props {

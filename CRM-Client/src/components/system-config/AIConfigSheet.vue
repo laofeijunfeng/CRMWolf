@@ -105,22 +105,6 @@ const providerDefaults: Record<string, { api_host: string; model_name: string }>
   custom: { api_host: '', model_name: '' }
 }
 
-const providerLabels: Record<string, string> = {
-  deepseek: 'DeepSeek',
-  openai: 'OpenAI',
-  zhipu: '智谱 AI (GLM)',
-  aliyun: '阿里云通义',
-  baidu: '百度文心',
-  custom: '自定义'
-}
-
-const providerDocs: Record<string, string> = {
-  deepseek: 'https://platform.deepseek.com/api-docs/',
-  openai: 'https://platform.openai.com/docs/api-reference/chat',
-  zhipu: 'https://open.bigmodel.cn/dev/api',
-  aliyun: 'https://help.aliyun.com/document_detail/610000.html'
-}
-
 // ==================== Provider Change ====================
 const handleProviderChange = (provider: string): void => {
   const defaults = providerDefaults[provider]

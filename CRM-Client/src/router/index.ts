@@ -285,6 +285,21 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'system-config',
+        name: 'SystemConfig',
+        component: () => import(
+          /* webpackChunkName: "system-config" */
+          '@/views/SystemConfig.vue'
+        ),
+        meta: { requiresAuth: true, title: '系统配置' }
+      },
+      {
+        path: 'account',
+        name: 'AccountSettings',
+        component: () => import('@/views/AccountSettings.vue'),
+        meta: { requiresAuth: true, title: '账户设置' }
+      },
+      {
         path: 'ai-config',
         name: 'AIConfig',
         component: () => import('@/views/AIConfig.vue'),
