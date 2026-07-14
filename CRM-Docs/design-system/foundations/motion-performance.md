@@ -23,10 +23,10 @@
 
 ## 性能预算
 
-| 交互 | 最大延迟 | 目标 |
+| 令牌名称 | 解析显示值 | 用途 |
 | --- | --- | --- |
-| 轻触反馈 | `100ms` | 操作立即可感知。 |
-| 悬停反馈 | `150ms` | 指针反馈连贯。 |
-| 加载提示 | `300ms` | 延迟时及时提示。 |
+| `$wolf-response-tap-v2` | `100ms` | 轻触反馈预算；操作立即可感知。 |
+| `$wolf-response-hover-v2` | `150ms` | 悬停反馈预算；指针反馈连贯。 |
+| `$wolf-response-loading-v2` | `300ms` | 加载提示预算；延迟时及时提示。 |
 
-优先动画化 `transform` 与 `opacity`，避免导致布局重排的属性；复杂动效与绘制同步。焦点、禁用等状态的可访问性规则见[无障碍](accessibility.md)。
+轻触、悬停与加载提示分别引用 `$wolf-response-tap-v2`、`$wolf-response-hover-v2` 与 `$wolf-response-loading-v2`。优先动画化 `transform` 与 `opacity`，避免导致布局重排的属性；复杂动效与绘制同步。焦点、禁用等状态的可访问性规则见[无障碍](accessibility.md)。
