@@ -157,6 +157,12 @@ const handlePageChange = (page: number): void => {
   fetchPaymentRecords()
 }
 
+const handlePageSizeChange = (pageSize: number): void => {
+  pagination.pageSize = pageSize
+  pagination.current = 1
+  fetchPaymentRecords()
+}
+
 const handleCreateRecord = (): void => {
   // 需要先选择回款计划
   toast.info('请在回款计划列表中选择要登记的计划')
@@ -172,7 +178,11 @@ const handleEdit = (record: PaymentRecordWithDetails): void => {
 }
 
 const handleDelete = async (record: PaymentRecordWithDetails): Promise<void> => {
-  const confirmed = await confirmDelete(`回款记录 "${record.record_number || record.id}"`)
+  const hasRecordNumber = (record.record_number?.trim().length ?? 0) > 0
+  const recordLabel = hasRecordNumber && record.record_number !== undefined
+    ? record.record_number
+    : String(record.id)
+  const confirmed = await confirmDelete(`回款记录 "${recordLabel}"`)
   if (!confirmed) return
 
   try {
@@ -250,6 +260,7 @@ watchEffect(() => {
       :total="pagination.total"
       empty-title="暂无回款记录"
       @update:page="handlePageChange"
+      @update:page-size="handlePageSizeChange"
     >
       <!-- 记录编号 -->
       <template #cell-record_number="{ row }">

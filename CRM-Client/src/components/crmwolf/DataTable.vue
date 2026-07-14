@@ -60,6 +60,8 @@ interface Props {
   fixedLeftCount?: number
   /** 默认固定右侧列数（默认 1，优先级低于 column.fixed） */
   fixedRightCount?: number
+  /** 行是否可作为整体交互目标 */
+  rowInteractive?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -70,6 +72,7 @@ const props = withDefaults(defineProps<Props>(), {
   emptyTitle: '暂无数据',
   fixedLeftCount: 1,
   fixedRightCount: 1,
+  rowInteractive: false,
 })
 
 // ==================== Emits ====================
@@ -168,7 +171,18 @@ function handlePageSizeChange(event: Event): void {
 }
 
 function handleRowClick(row: T): void {
+  if (!props.rowInteractive) return
   emit('row-click', row)
+}
+
+function handleRowKeydown(event: KeyboardEvent, row: T): void {
+  if (!props.rowInteractive) return
+  if (event.key === 'Enter') {
+    emit('row-click', row)
+  } else if (event.key === ' ') {
+    event.preventDefault()
+    emit('row-click', row)
+  }
 }
 
 function getAlignClass(align?: string): string {
@@ -249,7 +263,11 @@ watch(() => props.data, () => {
               v-for="(row, index) in data"
               :key="row[rowKey] || index"
               class="data-table-row"
+              :class="{ 'is-interactive': rowInteractive }"
+              :role="rowInteractive ? 'button' : undefined"
+              :tabindex="rowInteractive ? 0 : undefined"
               @click="handleRowClick(row)"
+              @keydown="handleRowKeydown($event, row)"
             >
               <td
                 v-for="col in processedColumns"
@@ -394,7 +412,6 @@ watch(() => props.data, () => {
 // 表格行
 .data-table-row {
   height: 44px;  // 行高（list-page.md 3.2）
-  cursor: pointer;
   transition: background 150ms ease;
   border-bottom: 1px solid #E4ECFC;  // 行分割线（list-page.md 3.2）
 
@@ -404,6 +421,15 @@ watch(() => props.data, () => {
 
   &:last-child {
     border-bottom: none;
+  }
+
+  &.is-interactive {
+    cursor: pointer;
+  }
+
+  &.is-interactive:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: -$wolf-focus-ring-width-v2;
   }
 }
 

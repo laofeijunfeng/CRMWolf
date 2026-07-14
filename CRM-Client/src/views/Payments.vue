@@ -13,12 +13,17 @@ import { useRouter, useRoute } from 'vue-router'
 import { Plus, ExternalLink, CircleCheck } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { DataTable, FilterPanel, TableRowActions, StatusBadge } from '@/components/crmwolf'
+import type { ActionConfig } from '@/components/crmwolf/TableRowActions.vue'
 import { Button } from '@/components/ui/button'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { handleApiError } from '@/utils/errorHandler'
-import paymentApi, { type PaymentPlanResponse, type PaymentRecordResponse } from '@/api/payment'
+import paymentApi, {
+  type PaymentPlanResponse,
+  type PaymentPlanStatus,
+  type PaymentRecordResponse
+} from '@/api/payment'
 
 usePageTitle()
 
@@ -30,7 +35,9 @@ const headerStore = useHeaderStore()
 // State
 const activeTab = ref((route.query['nav'] as string) || 'plans') // 'plans' | 'records'
 const loading = ref(false)
-const tableData = ref<any[]>([])
+type PaymentTableRow = PaymentPlanResponse | PaymentRecordResponse
+
+const tableData = ref<PaymentTableRow[]>([])
 const pagination = reactive({
   current: 1,
   pageSize: 20,
@@ -93,26 +100,40 @@ const columns = computed(() => activeTab.value === 'plans'
 )
 
 // Methods
-const fetchData = async () => {
+const getSelectedPlanStatus = (): PaymentPlanStatus | undefined => {
+  const status = filterValues.status
+  return status === 'PENDING' || status === 'OVERDUE' || status === 'PARTIAL' || status === 'COMPLETED'
+    ? status
+    : undefined
+}
+
+const getContractName = (item: PaymentTableRow): string => {
+  return 'contract_name' in item && typeof item.contract_name === 'string' ? item.contract_name : ''
+}
+
+const filterByKeyword = <T extends PaymentTableRow>(items: T[]): T[] => {
+  const keyword = filterValues.keyword.trim().toLowerCase()
+  if (keyword.length === 0) return items
+  return items.filter(item => getContractName(item).toLowerCase().includes(keyword))
+}
+
+const fetchData = async (): Promise<void> => {
   loading.value = true
   try {
     if (activeTab.value === 'plans') {
       const response = await paymentApi.listPaymentPlans({
-        skip: (pagination.current - 1) * pagination.pageSize,
-        limit: pagination.pageSize,
-        keyword: filterValues.keyword || undefined,
-        status: filterValues.status as any || undefined
+        page: pagination.current,
+        page_size: pagination.pageSize,
+        status: getSelectedPlanStatus()
       })
-      tableData.value = response.items
+      tableData.value = filterByKeyword(response.items)
       pagination.total = response.total
     } else {
       const response = await paymentApi.listPaymentRecords({
-        skip: (pagination.current - 1) * pagination.pageSize,
-        limit: pagination.pageSize,
-        keyword: filterValues.keyword || undefined,
-        status: filterValues.status as any || undefined
+        page: pagination.current,
+        page_size: pagination.pageSize
       })
-      tableData.value = response.items
+      tableData.value = filterByKeyword(response.items)
       pagination.total = response.total
     }
   } catch (error) {
@@ -122,38 +143,52 @@ const fetchData = async () => {
   }
 }
 
-const handleSearch = (values: Record<string, any>) => {
+const handleSearch = (values: Record<string, string | number>): void => {
   Object.assign(filterValues, values)
   pagination.current = 1
   fetchData()
 }
 
-const handleReset = () => {
+const handleReset = (): void => {
   filterValues.keyword = ''
   filterValues.status = ''
   pagination.current = 1
   fetchData()
 }
 
-const viewContract = (row: any) => {
-  router.push(`/contracts/${row.contract_id}`)
+const handlePageChange = (page: number): void => {
+  pagination.current = page
+  fetchData()
 }
 
-const formatCurrency = (amount: number | string) => {
+const handlePageSizeChange = (pageSize: number): void => {
+  pagination.pageSize = pageSize
+  pagination.current = 1
+  fetchData()
+}
+
+const viewContract = (row: Record<string, unknown>): void => {
+  if (typeof row['contract_id'] === 'number') router.push(`/contracts/${row['contract_id']}`)
+}
+
+const formatCurrency = (amount: number | string): string => {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount
   return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-const mapPaymentStatus = (status: string) => {
+const mapPaymentStatus = (status: string): string => {
   const map: Record<string, string> = {
     'PENDING': 'pending',
     'OVERDUE': 'overdue',
     'COMPLETED': 'completed'
   }
-  return map[status] || 'pending'
+  return map[status] ?? 'pending'
 }
 
-const getRowActions = (row: any) => ({
+const getRowActions = (row: PaymentTableRow): {
+  primaryActions: ActionConfig[]
+  secondaryActions: ActionConfig[]
+} => ({
   primaryActions: [
     {
       label: '查看合同',
@@ -181,7 +216,7 @@ watchEffect(() => {
       label: '新建回款计划',
       icon: Plus,
       type: 'primary',
-      handler: () => {
+      handler: (): void => {
         if (permissionStore.hasPermission('payment:create')) {
           router.push('/payments/create')
         } else {
@@ -227,7 +262,8 @@ onUnmounted(() => {
       :page-size="pagination.pageSize"
       :total="pagination.total"
       empty-title="暂无回款数据"
-      @update:page="pagination.current = $event"
+      @update:page="handlePageChange"
+      @update:page-size="handlePageSizeChange"
     >
       <!-- 合同名称（可点击） -->
       <template #cell-contract_name="{ row }">
@@ -257,7 +293,10 @@ onUnmounted(() => {
 
       <!-- 状态 -->
       <template #cell-status="{ row }">
-        <StatusBadge :status="mapPaymentStatus(row.status)" type="payment" />
+        <StatusBadge
+          :status="mapPaymentStatus(row.status)"
+          :type="activeTab === 'plans' ? 'paymentPlan' : 'paymentRecord'"
+        />
       </template>
 
       <!-- 操作 -->

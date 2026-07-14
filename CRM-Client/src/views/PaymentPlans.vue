@@ -176,6 +176,12 @@ const handlePageChange = (page: number): void => {
   fetchPaymentPlans()
 }
 
+const handlePageSizeChange = (pageSize: number): void => {
+  pagination.pageSize = pageSize
+  pagination.current = 1
+  fetchPaymentPlans()
+}
+
 const handleCreatePlan = (): void => {
   router.push('/payments/create')
 }
@@ -273,6 +279,7 @@ watchEffect(() => {
       :total="pagination.total"
       empty-title="暂无回款计划"
       @update:page="handlePageChange"
+      @update:page-size="handlePageSizeChange"
     >
       <!-- 计划编号 -->
       <template #cell-plan_number="{ row }">
