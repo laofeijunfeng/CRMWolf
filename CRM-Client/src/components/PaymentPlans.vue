@@ -512,15 +512,16 @@ watch(
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem @click.stop="editPlan(item)">
+          <DropdownMenuItem class="min-h-11" @click.stop="editPlan(item)">
             <Pencil class="w-4 h-4 mr-2" aria-hidden="true" />
             编辑
           </DropdownMenuItem>
           <DropdownMenuItem
+            class="min-h-11"
             :disabled="item.payment_records.length > 0"
             @click.stop="requestDeletePlan(item)"
           >
-            <Trash2 class="w-4 h-4 mr-2 text-wolf-danger-text-v2" aria-hidden="true" />
+            <Trash2 class="w-4 h-4 mr-2 text-wolf-danger-text" aria-hidden="true" />
             删除
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -566,6 +567,7 @@ watch(
             step="0.01"
             placeholder="请输入回款金额"
             aria-label="回款金额"
+            class="h-11"
           />
           <p v-if="currentPlan" class="field-hint">
             待回款：{{ formatCurrency(currentPlan.remaining_amount ?? 0) }}
@@ -577,6 +579,7 @@ watch(
           <DatePicker
             :model-value="toDateValue(paymentForm.payment_date)"
             placeholder="请选择回款日期"
+            class="h-11"
             @update:model-value="(date: Date | null) => { paymentForm.payment_date = date === null ? '' : formatLocalDate(date) }"
           />
         </div>
@@ -588,6 +591,7 @@ watch(
             v-model="paymentForm.proof_attachment"
             placeholder="附件 URL（可选）"
             aria-label="凭证附件"
+            class="h-11"
           />
         </div>
 
@@ -599,6 +603,7 @@ watch(
             maxlength="200"
             placeholder="备注信息（可选）"
             aria-label="回款备注"
+            class="min-h-20"
           />
         </div>
       </div>
@@ -643,6 +648,7 @@ watch(
             v-model="editForm.stage_name"
             placeholder="阶段名称"
             aria-label="阶段名称"
+            class="h-11"
           />
         </div>
 
@@ -656,6 +662,7 @@ watch(
             step="0.01"
             placeholder="计划金额"
             aria-label="计划金额"
+            class="h-11"
           />
         </div>
 
@@ -664,6 +671,7 @@ watch(
           <DatePicker
             :model-value="toDateValue(editForm.due_date)"
             placeholder="计划回款日期"
+            class="h-11"
             @update:model-value="(date: Date | null) => { editForm.due_date = date === null ? '' : formatLocalDate(date) }"
           />
         </div>
@@ -676,6 +684,7 @@ watch(
             maxlength="200"
             placeholder="备注（可选）"
             aria-label="计划备注"
+            class="min-h-20"
           />
         </div>
       </div>

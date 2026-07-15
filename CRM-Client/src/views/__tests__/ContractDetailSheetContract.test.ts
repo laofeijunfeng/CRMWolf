@@ -34,4 +34,13 @@ describe('ContractDetailSheet Task 2 contract', () => {
     expect(source).toContain('编辑合同')
     expect(source).toContain('关闭')
   })
+
+  it('gates draft edit by all permission or own permission plus creator match', () => {
+    const source = readSource('src/views/ContractDetailSheet.vue')
+
+    expect(source).toContain("if (contract?.status !== 'DRAFT') return false")
+    expect(source).toContain("if (permissionStore.canEditAll('contract')) return true")
+    expect(source).toContain("return permissionStore.canEditOwn('contract') && contract.creator_id === currentUserId.value")
+    expect(source).not.toContain("permissionStore.canEditOwn('contract') || permissionStore.canEditAll('contract')")
+  })
 })

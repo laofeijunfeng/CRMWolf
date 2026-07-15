@@ -163,8 +163,10 @@ const currentUserId = computed<string>(() => {
 })
 
 const canEditContract = computed<boolean>(() => {
-  if (contractInfo.value?.status !== 'DRAFT') return false
-  return permissionStore.canEditOwn('contract') || permissionStore.canEditAll('contract')
+  const contract = contractInfo.value
+  if (contract?.status !== 'DRAFT') return false
+  if (permissionStore.canEditAll('contract')) return true
+  return permissionStore.canEditOwn('contract') && contract.creator_id === currentUserId.value
 })
 
 const canSubmitApproval = computed<boolean>(() => {
