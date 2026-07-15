@@ -79,7 +79,7 @@ export interface PaymentPlanResponse {
   remaining_amount?: number
   payment_records: PaymentRecordInfo[]
   contract_name?: string
-  customer_id?: number
+  customer_id?: number | null
   customer_name?: string
   opportunity_id?: number
   opportunity_name?: string
@@ -91,7 +91,7 @@ export interface PaymentPlanResponse {
   last_modified_time: string
   // Task 8.2: Approval info for latest payment record
   latest_record_id?: number
-  latest_approval?: ApprovalInfo
+  latest_approval?: ApprovalInfo | null
 }
 
 export interface ContractPaymentSummary {

@@ -170,6 +170,7 @@ const paymentPlanFixture = (overrides: Partial<PaymentPlanResponse> = {}): Payme
   id: 101,
   contract_id: 202,
   customer_id: 303,
+  latest_approval: null,
   plan_number: 'PAY-2026-001',
   stage_name: '二期尾款',
   planned_amount: 120000,
@@ -255,6 +256,37 @@ describe('PaymentPlanDetailSheet', () => {
     expect(wrapper.emitted('submit-approval')?.[0]).toEqual([plan, 501])
   })
 
+  it('does not render or emit the customer navigation seam when customer_id is null', async () => {
+    paymentApi.getPaymentPlanDetail.mockResolvedValue(paymentPlanFixture({
+      customer_id: null,
+      customer_name: '上海测试客户',
+    }))
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      props: {
+        visible: true,
+        planId: 101,
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('[aria-label="查看客户 上海测试客户"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text().includes('上海测试客户'))).toBe(false)
+    expect(wrapper.emitted('view-customer')).toBeUndefined()
+  })
+
+  it('does not render the register payment action without a loaded plan', () => {
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      props: {
+        visible: true,
+        planId: null,
+      },
+    })
+
+    expect(wrapper.find('[data-testid="record-register"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some((button) => button.text().includes('登记回款'))).toBe(false)
+  })
+
   it('renders rejected approval progress and emits the resubmit approval seam', async () => {
     const rejectedPlan = paymentPlanFixture({
       latest_approval: {
@@ -306,5 +338,6 @@ describe('PaymentPlanDetailSheet', () => {
     expect(source).not.toContain('element-plus')
     expect(source).not.toContain('@element-plus')
     expect(source).not.toContain('variables.scss')
+    expect(source).not.toMatch(/(?:48|60|20|12|560|280)px/)
   })
 })

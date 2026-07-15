@@ -82,13 +82,13 @@ const latestRecord = computed<PaymentRecordInfo | null>(() => {
 })
 
 const hasPendingRecord = computed<boolean>(() => latestRecord.value?.confirmation_status === 'PENDING')
-const latestApproval = computed<ApprovalInfo | undefined>(() => paymentPlan.value?.latest_approval)
+const latestApproval = computed<ApprovalInfo | null>(() => paymentPlan.value?.latest_approval ?? null)
 const hasRejectedApproval = computed<boolean>(() => latestApproval.value?.status === 'REJECTED')
 const hasPendingApproval = computed<boolean>(() => latestApproval.value?.status === 'PENDING')
 const hasApprovedApproval = computed<boolean>(() => latestApproval.value?.status === 'APPROVED')
-const canRegisterPayment = computed<boolean>(() => paymentPlan.value?.status !== 'COMPLETED')
+const canRegisterPayment = computed<boolean>(() => paymentPlan.value !== null && paymentPlan.value.status !== 'COMPLETED')
 const canSubmitApproval = computed<boolean>(() => {
-  return paymentPlan.value !== null && canRegisterPayment.value && hasPendingRecord.value && latestApproval.value === undefined
+  return paymentPlan.value !== null && canRegisterPayment.value && hasPendingRecord.value && latestApproval.value === null
 })
 const canResubmitApproval = computed<boolean>(() => {
   return paymentPlan.value !== null && canRegisterPayment.value && hasRejectedApproval.value
@@ -96,7 +96,7 @@ const canResubmitApproval = computed<boolean>(() => {
 
 const rejectionReason = computed<string | null>(() => {
   const approval = latestApproval.value
-  if (approval === undefined || approval.status !== 'REJECTED') return null
+  if (approval === null || approval.status !== 'REJECTED') return null
   if (approval.reject_reason !== undefined && approval.reject_reason.trim() !== '') return approval.reject_reason
 
   const rejectedNode = approval.nodes.find((node) => node.status === 'REJECT' || node.status === 'REJECTED')
@@ -105,7 +105,7 @@ const rejectionReason = computed<string | null>(() => {
 
 const currentApproverName = computed<string>(() => {
   const approval = latestApproval.value
-  if (approval === undefined || approval.status !== 'PENDING') return '-'
+  if (approval === null || approval.status !== 'PENDING') return '-'
 
   const pendingNode = approval.nodes.find((node) => node.status === 'PENDING')
   return pendingNode?.approver_name ?? '待分配'
@@ -181,7 +181,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 const handleViewCustomer = (): void => {
   const plan = paymentPlan.value
   const customerId = plan?.customer_id
-  if (plan === null || customerId === undefined) return
+  if (plan === null || typeof customerId !== 'number') return
   emit('view-customer', customerId, plan)
 }
 
@@ -369,7 +369,7 @@ watch(
                   <div class="attribute-item">
                     <span class="attribute-label">客户名称</span>
                     <Button
-                      v-if="paymentPlan.customer_id !== undefined"
+                      v-if="typeof paymentPlan.customer_id === 'number'"
                       variant="link"
                       type="button"
                       class="attribute-link"
@@ -556,10 +556,16 @@ watch(
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
+$payment-border-width: $wolf-focus-ring-width-subtle-v2;
+$payment-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
+$payment-header-mobile-indent: calc($payment-title-avatar-size + $wolf-space-md-v2);
+$payment-sheet-min-height: ($wolf-touch-target-min-v2 * 12) + $wolf-space-2xl-v2;
+$payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
+
 .payment-sheet-header {
   padding: $wolf-space-xl-v2;
   padding-bottom: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
+  border-bottom: $payment-border-width solid $wolf-border-default-v2;
 }
 
 .payment-header-summary {
@@ -575,15 +581,15 @@ watch(
 }
 
 .title-avatar {
-  width: 48px;
-  height: 48px;
+  width: $payment-title-avatar-size;
+  height: $payment-title-avatar-size;
   border-radius: $wolf-radius-full-v2;
   background: $wolf-primary-light-v2;
   color: $wolf-primary-v2;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: $wolf-topbar-title-font-size-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   flex-shrink: 0;
 }
@@ -617,7 +623,7 @@ watch(
   @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
     grid-template-columns: 1fr;
     width: 100%;
-    padding-left: 60px;
+    padding-left: $payment-header-mobile-indent;
   }
 }
 
@@ -626,7 +632,7 @@ watch(
   flex-direction: column;
   gap: $wolf-space-xs-v2;
   padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border: 1px solid $wolf-border-light-v2;
+  border: $payment-border-width solid $wolf-border-light-v2;
   border-radius: $wolf-radius-v2;
   background: $wolf-bg-muted-v2;
 
@@ -657,7 +663,7 @@ watch(
   display: flex;
   flex-direction: column;
   gap: $wolf-space-xl-v2;
-  min-height: 560px;
+  min-height: $payment-sheet-min-height;
 
   @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
     padding: $wolf-space-md-v2;
@@ -675,14 +681,14 @@ watch(
 .approval-card,
 .state-card {
   background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
+  border: $payment-border-width solid $wolf-border-default-v2;
   border-radius: $wolf-radius-lg-v2;
   box-shadow: $wolf-shadow-card-v2;
 }
 
 .section-heading {
   padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  border-bottom: $payment-border-width solid $wolf-border-light-v2;
   display: flex;
   flex-direction: column;
   gap: $wolf-space-xs-v2;
@@ -819,8 +825,8 @@ watch(
 }
 
 .node-marker {
-  width: 12px;
-  height: 12px;
+  width: $wolf-space-md-v2;
+  height: $wolf-space-md-v2;
   margin-top: $wolf-space-xs-v2;
   border-radius: $wolf-radius-full-v2;
   background: $wolf-border-default-v2;
@@ -877,7 +883,7 @@ watch(
 }
 
 .state-card-content {
-  min-height: 280px;
+  min-height: $payment-empty-min-height;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -888,7 +894,7 @@ watch(
 
 .payment-sheet-footer {
   padding: $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-default-v2;
+  border-top: $payment-border-width solid $wolf-border-default-v2;
   display: flex;
   flex-direction: row;
   justify-content: flex-end;
