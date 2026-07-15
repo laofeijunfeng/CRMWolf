@@ -8,8 +8,9 @@
  * - Loading, error/empty, responsive states
  * - Dialogs intentionally remain outside this Sheet; approve/reject events are seams for later tasks.
  */
-import { ref, watch } from 'vue'
-import { AlertCircle, FileText, RefreshCw, X } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { AlertCircle, FileText, Loader2, Pencil, ReceiptText, RefreshCw, Send, Undo2, X } from 'lucide-vue-next'
 import {
   Sheet,
   SheetHeader,
@@ -31,10 +32,16 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProgressCompact from '@/components/ApprovalProgressCompact.vue'
+import PaymentPlans from '@/components/PaymentPlans.vue'
+import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import contractApi, { type ContractResponse, type ContractStatus, type LicenseType } from '@/api/contract'
 import approvalApi from '@/api/approval'
+import { useUserStore } from '@/stores/user'
+import { usePermissionStore } from '@/stores/permissions'
 import { handleApiError } from '@/utils/errorHandler'
+import { confirmDialog } from '@/utils/confirmDialog'
 import { formatCurrency } from '@/utils/format'
+import { toast } from 'vue-sonner'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -77,6 +84,7 @@ interface ApprovalFlowFromAPI {
 
 interface ApprovalDetailFromAPI {
   status: string
+  submitter_id: string
   submitter_name: string
   created_time: string
   current_node_id: number | null
@@ -104,18 +112,35 @@ interface ApprovalDetail {
   current_step: number
   approval_steps: ApprovalStep[]
   status: string
+  submitter_id?: string
   submitter_name?: string
   submitted_at?: string
   flow_name?: string
 }
 
+interface PaymentContractInfo {
+  contract_name: string
+  contract_number: string
+  total_amount: number
+  customer_info?: { account_name: string }
+  effective_date?: string
+  signing_date?: string
+}
+
 // ==================== State ====================
+const userStore = useUserStore()
+const permissionStore = usePermissionStore()
+const { userInfo } = storeToRefs(userStore)
+
 const loading = ref(false)
 const approvalLoading = ref(false)
 const contractInfo = ref<ContractResponse | null>(null)
 const approvalDetail = ref<ApprovalDetail | null>(null)
 const errorMessage = ref('')
 const activeRequestId = ref(0)
+const submittingApproval = ref<boolean>(false)
+const withdrawingApproval = ref<boolean>(false)
+const editDialogOpen = ref<boolean>(false)
 
 const statusesWithApproval: readonly ContractStatus[] = [
   'PENDING_REVIEW',
@@ -124,6 +149,69 @@ const statusesWithApproval: readonly ContractStatus[] = [
   'EXPIRED',
   'TERMINATED'
 ]
+
+
+const statusesWithPaymentPlans: readonly ContractStatus[] = [
+  'SIGNED',
+  'EFFECTIVE',
+  'EXPIRED'
+]
+
+const currentUserId = computed<string>(() => {
+  const id = userInfo.value?.id
+  return id === undefined || id === null ? '' : String(id)
+})
+
+const canEditContract = computed<boolean>(() => {
+  if (contractInfo.value?.status !== 'DRAFT') return false
+  return permissionStore.canEditOwn('contract') || permissionStore.canEditAll('contract')
+})
+
+const canSubmitApproval = computed<boolean>(() => {
+  return contractInfo.value?.status === 'DRAFT' && permissionStore.canSubmitApproval('contract')
+})
+
+const canWithdrawApproval = computed<boolean>(() => {
+  if (contractInfo.value?.status !== 'PENDING_REVIEW') return false
+
+  const submitterId = approvalDetail.value?.submitter_id
+  return submitterId !== undefined &&
+    submitterId !== '' &&
+    submitterId === currentUserId.value &&
+    permissionStore.canCancelApproval('contract')
+})
+
+const canShowPaymentPlans = computed<boolean>(() => {
+  const status = contractInfo.value?.status
+  return status !== undefined && statusesWithPaymentPlans.includes(status)
+})
+
+const paymentContractInfo = computed<PaymentContractInfo | undefined>(() => {
+  const contract = contractInfo.value
+  if (contract === null) return undefined
+
+  const totalAmount = Number.parseFloat(contract.total_amount)
+
+  const info: PaymentContractInfo = {
+    contract_name: contract.contract_name,
+    contract_number: contract.contract_number,
+    total_amount: Number.isFinite(totalAmount) ? totalAmount : 0
+  }
+
+  if (contract.customer_info !== undefined) {
+    info.customer_info = contract.customer_info
+  }
+
+  if (contract.effective_date !== null) {
+    info.effective_date = contract.effective_date
+  }
+
+  if (contract.signing_date !== null) {
+    info.signing_date = contract.signing_date
+  }
+
+  return info
+})
 
 // ==================== Data Loading ====================
 const fetchContractDetail = async (contractId: number): Promise<void> => {
@@ -203,6 +291,75 @@ const handleRetry = (): void => {
   if (props.contractId !== null) {
     void fetchContractDetail(props.contractId)
   }
+}
+
+const refreshCurrentContract = async (): Promise<void> => {
+  const contractId = contractInfo.value?.id
+  if (contractId !== undefined) {
+    await fetchContractDetail(contractId)
+  }
+}
+
+const handleEditContract = (): void => {
+  if (!canEditContract.value) return
+  editDialogOpen.value = true
+}
+
+const handleEditSuccess = async (): Promise<void> => {
+  editDialogOpen.value = false
+  await refreshCurrentContract()
+}
+
+const handleSubmitApproval = async (): Promise<void> => {
+  const contract = contractInfo.value
+  if (contract === null || !canSubmitApproval.value) return
+
+  const confirmed = await confirmDialog(
+    `确定要提交合同“${contract.contract_name}”进行审批吗？`,
+    '提交审批确认',
+    { confirmText: '提交审批', cancelText: '取消' }
+  )
+
+  if (!confirmed) return
+
+  submittingApproval.value = true
+  try {
+    await approvalApi.submitContractApproval(contract.id)
+    toast.success('合同已提交审批')
+    await fetchContractDetail(contract.id)
+  } catch (error: unknown) {
+    handleApiError(error, '提交审批')
+  } finally {
+    submittingApproval.value = false
+  }
+}
+
+const handleWithdrawApproval = async (): Promise<void> => {
+  const contract = contractInfo.value
+  if (contract === null || !canWithdrawApproval.value) return
+
+  const confirmed = await confirmDialog(
+    `确定要撤回合同“${contract.contract_name}”的审批申请吗？`,
+    '撤回审批确认',
+    { confirmText: '撤回审批', cancelText: '取消' }
+  )
+
+  if (!confirmed) return
+
+  withdrawingApproval.value = true
+  try {
+    await approvalApi.cancelContractApproval(contract.id)
+    toast.success('审批申请已撤回')
+    await fetchContractDetail(contract.id)
+  } catch (error: unknown) {
+    handleApiError(error, '撤回审批')
+  } finally {
+    withdrawingApproval.value = false
+  }
+}
+
+const handlePaymentPlanUpdated = async (): Promise<void> => {
+  await refreshCurrentContract()
 }
 
 const handleApprovalApprove = (): void => {
@@ -386,6 +543,7 @@ const parseApprovalDetailFromApi = (value: unknown): ApprovalDetailFromAPI | nul
 
   return {
     status,
+    submitter_id: getStringField(payload, 'submitter_id') ?? '',
     submitter_name: getStringField(payload, 'submitter_name') ?? '',
     created_time: getStringField(payload, 'created_time') ?? '',
     current_node_id: getNumberField(payload, 'current_node_id'),
@@ -476,6 +634,10 @@ const transformApprovalData = (apiData: ApprovalDetailFromAPI): ApprovalDetail =
     current_step: currentStep,
     approval_steps: approvalSteps,
     status: apiData.status
+  }
+
+  if (apiData.submitter_id !== '') {
+    transformed.submitter_id = apiData.submitter_id
   }
 
   if (apiData.submitter_name !== '') {
@@ -663,6 +825,28 @@ watch(
               @approve="handleApprovalApprove"
               @reject="handleApprovalReject"
             />
+
+            <!-- 回款计划卡片 -->
+            <PaymentPlans
+              v-if="canShowPaymentPlans && paymentContractInfo !== undefined"
+              :contract-id="contractInfo.id"
+              :contract-status="contractInfo.status"
+              :contract-info="paymentContractInfo"
+              @plan-updated="handlePaymentPlanUpdated"
+            />
+            <Card v-else class="state-card">
+              <CardContent class="payment-placeholder-content">
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <ReceiptText class="w-10 h-10" />
+                    </EmptyMedia>
+                  </EmptyHeader>
+                  <EmptyTitle>回款计划暂不可用</EmptyTitle>
+                  <EmptyDescription>合同签署后可创建和登记回款计划。</EmptyDescription>
+                </Empty>
+              </CardContent>
+            </Card>
           </template>
 
           <template v-else>
@@ -685,13 +869,49 @@ watch(
 
       <!-- Footer -->
       <SheetFooter class="p-4 border-t border-wolf-border-default-v2 footer-actions">
+        <Button
+          v-if="canEditContract"
+          variant="outline"
+          :disabled="submittingApproval || withdrawingApproval"
+          @click="handleEditContract"
+        >
+          <Pencil class="w-4 h-4 mr-2" aria-hidden="true" />
+          编辑合同
+        </Button>
+        <Button
+          v-if="canWithdrawApproval"
+          variant="outline"
+          :disabled="withdrawingApproval"
+          @click="handleWithdrawApproval"
+        >
+          <Loader2 v-if="withdrawingApproval" class="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+          <Undo2 v-else class="w-4 h-4 mr-2" aria-hidden="true" />
+          撤回审批
+        </Button>
+        <Button
+          v-if="canSubmitApproval"
+          :disabled="submittingApproval"
+          @click="handleSubmitApproval"
+        >
+          <Loader2 v-if="submittingApproval" class="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+          <Send v-else class="w-4 h-4 mr-2" aria-hidden="true" />
+          提交审批
+        </Button>
         <Button variant="outline" @click="closeSheet">
-          <X class="w-4 h-4 mr-2" />
+          <X class="w-4 h-4 mr-2" aria-hidden="true" />
           关闭
         </Button>
       </SheetFooter>
     </DetailSheetContent>
   </Sheet>
+
+  <ContractFormDialog
+    v-if="contractInfo"
+    v-model:open="editDialogOpen"
+    :customer-id="contractInfo.customer_id"
+    :contract="contractInfo"
+    @success="handleEditSuccess"
+  />
 </template>
 
 <style scoped lang="scss">
@@ -834,7 +1054,8 @@ watch(
   }
 }
 
-.state-card-content {
+.state-card-content,
+.payment-placeholder-content {
   min-height: 280px;
   display: flex;
   flex-direction: column;
@@ -849,6 +1070,13 @@ watch(
   flex-direction: row;
   justify-content: flex-end;
   gap: $wolf-space-sm-v2;
+  flex-wrap: wrap;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    :deep(button) {
+      flex: 1 1 100%;
+    }
+  }
 }
 
 // 状态 Badge
