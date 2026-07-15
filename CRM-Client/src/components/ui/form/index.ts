@@ -1,3 +1,4 @@
+export { default as ErrorMessage } from "./ErrorMessage.vue"
 export { default as FormControl } from "./FormControl.vue"
 export { default as FormDescription } from "./FormDescription.vue"
 export { default as FormItem } from "./FormItem.vue"
