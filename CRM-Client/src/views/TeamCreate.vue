@@ -1,211 +1,284 @@
 <template>
-  <div class="onboarding-container">
-    <div class="logout-btn">
-      <el-button text @click="handleLogout">
-        <el-icon><SwitchButton /></el-icon>
-        退出登录
-      </el-button>
-    </div>
-    <div class="onboarding-card">
-      <div class="card-body">
+  <main class="onboarding-container" role="main" aria-label="创建新团队">
+    <Button
+      variant="ghost"
+      size="sm"
+      class="logout-btn"
+      aria-label="退出登录"
+      @click="handleLogout"
+    >
+      <LogOut class="mr-2 h-4 w-4" aria-hidden="true" />
+      退出登录
+    </Button>
+
+    <Card class="onboarding-card">
+      <CardContent class="card-body">
         <div class="logo">
-          <img src="/logo.png" alt="CRM Logo" />
+          <img
+            src="/logo.png"
+            alt="CRMWolf 智能客户关系管理系统 Logo"
+            width="64"
+            height="64"
+          />
           <p>智能客户关系管理系统</p>
         </div>
 
-        <div class="header">
-          <h2>创建新团队</h2>
+        <header class="header">
+          <h1 class="text-2xl font-semibold">创建新团队</h1>
           <p>创建团队后，您将成为团队管理员</p>
-        </div>
+        </header>
 
-        <el-form
-          ref="formRef"
-          :model="form"
-          :rules="rules"
-          class="create-form"
-          @submit.prevent="handleSubmit"
-        >
-          <el-form-item prop="name">
-            <el-input
-              v-model="form.name"
-              placeholder="请输入团队名称"
-              size="large"
-              maxlength="50"
-              show-word-limit
-            />
-          </el-form-item>
+        <form class="create-form" @submit.prevent="onSubmit" novalidate>
+          <FormField v-slot="{ componentField, errorMessage }" name="name">
+            <FormItem>
+              <FormLabel for="team-name">团队名称</FormLabel>
+              <FormControl>
+                <Input
+                  id="team-name"
+                  type="text"
+                  placeholder="请输入团队名称"
+                  maxlength="50"
+                  :aria-invalid="!!errorMessage"
+                  :aria-describedby="errorMessage ? 'team-name-error team-name-hint' : 'team-name-hint'"
+                  v-bind="componentField"
+                />
+              </FormControl>
+              <!-- UI/UX Pro Max: 帮助文本 -->
+              <FormDescription id="team-name-hint">
+                团队名称长度为 2-50 个字符
+              </FormDescription>
+              <!-- UI/UX Pro Max: 错误消息使用 ErrorMessage（自动 aria-live） -->
+              <ErrorMessage id="team-name-error" :message="errorMessage" />
+            </FormItem>
+          </FormField>
 
-          <el-button
-            type="primary"
-            size="large"
+          <Button
+            type="submit"
+            size="lg"
             class="submit-btn"
-            :loading="loading"
-            @click="handleSubmit"
+            :disabled="loading"
+            :aria-busy="loading"
           >
-            创建团队
-          </el-button>
-        </el-form>
+            <span v-if="loading">创建中...</span>
+            <span v-else>创建团队</span>
+          </Button>
+        </form>
 
-        <div class="back-link">
-          <el-button text @click="goBack">
-            <el-icon><ArrowLeft /></el-icon>
-            返回上一步
-          </el-button>
-        </div>
-      </div>
-    </div>
-  </div>
+        <Button variant="ghost" size="sm" class="back-link" @click="goBack">
+          <ArrowLeft class="mr-2 h-4 w-4" aria-hidden="true" />
+          返回上一步
+        </Button>
+      </CardContent>
+    </Card>
+
+    <!-- 退出登录确认对话框 -->
+    <AlertDialog v-model:open="showLogoutDialog">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认退出</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要退出登录吗？退出后需要重新登录才能继续使用系统。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction @click="confirmLogout">确认退出</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  </main>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ArrowLeft, SwitchButton } from '@element-plus/icons-vue'
+import { toast } from 'vue-sonner'
+import { toTypedSchema } from '@vee-validate/zod'
+import { useForm } from 'vee-validate'
+import { ArrowLeft, LogOut } from 'lucide-vue-next'
+import { Button, Card, CardContent, Input } from '@/components/crmwolf'
+import {
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormDescription,
+} from '@/components/ui/form'
+import ErrorMessage from '@/components/ui/form/ErrorMessage.vue'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
-import type { FormInstance, FormRules } from 'element-plus'
+import { teamCreateSchema, type TeamCreateFormValues } from '@/schemas/team-create.schema'
+import { handleApiError } from '@/utils/errorHandler'
 
 const router = useRouter()
 const teamStore = useTeamStore()
 const userStore = useUserStore()
 
-const formRef = ref<FormInstance>()
 const loading = ref(false)
+const showLogoutDialog = ref(false)
 
-const form = reactive({
-  name: ''
+const { handleSubmit } = useForm<TeamCreateFormValues>({
+  validationSchema: toTypedSchema(teamCreateSchema),
+  initialValues: {
+    name: '',
+  },
 })
 
-const rules: FormRules = {
-  name: [
-    { required: true, message: '请输入团队名称', trigger: 'blur' },
-    { min: 2, max: 50, message: '团队名称长度为2-50个字符', trigger: 'blur' }
-  ]
+// UI/UX Pro Max: 验证失败后聚焦第一个无效字段
+const focusFirstInvalidField = async (): Promise<void> => {
+  await nextTick()
+  const firstInvalid = document.querySelector<HTMLInputElement>('input[aria-invalid="true"]')
+  firstInvalid?.focus()
 }
 
-const handleSubmit = async () => {
-  try {
-    await formRef.value?.validate()
-  } catch {
-    return
-  }
-
+const onSubmit = handleSubmit(async (values): Promise<void> => {
   loading.value = true
   try {
-    await teamStore.createTeam(form.name)
-    ElMessage.success('团队创建成功')
+    await teamStore.createTeam(values.name)
+    toast.success('团队创建成功')
     router.push('/leads')
   } catch (error: unknown) {
-    console.error('创建团队失败', error)
-    ElMessage.error(error.response?.data?.detail || error.message || '创建团队失败')
+    handleApiError(error, '创建团队')
   } finally {
     loading.value = false
   }
-}
+}, focusFirstInvalidField) // 验证失败时聚焦
 
-const goBack = () => {
+const goBack = (): void => {
   router.push('/onboarding')
 }
 
-const handleLogout = () => {
+const handleLogout = (): void => {
+  showLogoutDialog.value = true
+}
+
+const confirmLogout = (): void => {
   userStore.logout()
   router.push('/login')
 }
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
 .onboarding-container {
-  min-height: 100vh;
+  // UI/UX Pro Max: 使用动态视口高度
+  min-height: $wolf-viewport-height-mobile-v2;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: $wolf-bg-page;
-  padding: $wolf-space-lg;
+  background: $wolf-bg-page-v2;
+  padding: $wolf-space-lg-v2;
+  // UI/UX Pro Max: Safe area 支持
+  padding-top: calc($wolf-space-lg-v2 + $wolf-safe-area-top-v2);
+  padding-bottom: calc($wolf-space-lg-v2 + $wolf-safe-area-bottom-v2);
+  position: relative;
 }
 
 .logout-btn {
   position: absolute;
-  top: $wolf-space-lg;
-  right: $wolf-space-lg;
-}
-
-.logout-btn .el-button {
-  color: $wolf-text-secondary;
-  font-size: $wolf-font-size-caption;
+  top: calc($wolf-space-lg-v2 + $wolf-safe-area-top-v2);
+  right: $wolf-space-lg-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  min-height: $wolf-touch-target-min-v2;
 }
 
 .onboarding-card {
   width: 100%;
   max-width: 480px;
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-lg;
-  box-shadow: $wolf-shadow-card;
-  overflow: hidden;
 }
 
 .card-body {
-  padding: $wolf-space-8 $wolf-space-lg;
+  padding: $wolf-space-2xl-v2 $wolf-space-lg-v2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .logo {
   text-align: center;
-  margin-bottom: $wolf-space-8;
+  margin-bottom: $wolf-space-2xl-v2;
 }
 
 .logo img {
   width: 64px;
   height: 64px;
   object-fit: contain;
-  margin-bottom: $wolf-space-md;
+  margin-bottom: $wolf-space-md-v2;
 }
 
 .logo p {
-  font-size: $wolf-font-size-title;
-  color: $wolf-text-primary;
+  font-size: $wolf-font-size-title-v2;
+  color: $wolf-text-primary-v2;
   margin: 0;
-  font-weight: $wolf-font-weight-semibold;
+  font-weight: $wolf-font-weight-semibold-v2;
 }
 
 .header {
   text-align: center;
-  margin-bottom: $wolf-space-8;
-}
+  margin-bottom: $wolf-space-2xl-v2;
 
-.header h2 {
-  font-size: 24px;
-  color: $wolf-text-primary;
-  margin: 0 0 $wolf-space-sm 0;
-  font-weight: $wolf-font-weight-semibold;
-}
+  h1 {
+    color: $wolf-text-primary-v2;
+    margin: 0 0 $wolf-space-sm-v2 0;
+  }
 
-.header p {
-  font-size: $wolf-font-size-body;
-  color: $wolf-text-secondary;
-  margin: 0;
+  p {
+    font-size: $wolf-font-size-body-v2;
+    color: $wolf-text-secondary-v2;
+    margin: 0;
+  }
 }
 
 .create-form {
-  margin-bottom: $wolf-space-lg;
+  width: 100%;
+  margin-bottom: $wolf-space-lg-v2;
 }
 
 .submit-btn {
   width: 100%;
-  height: 48px;
-  font-size: $wolf-font-size-body;
-  font-weight: $wolf-font-weight-medium;
-  border-radius: $wolf-radius-sm;
-  margin-top: $wolf-space-md;
+  height: $wolf-button-height-lg-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  margin-top: $wolf-space-md-v2;
 }
 
 .back-link {
-  text-align: center;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  min-height: $wolf-touch-target-min-v2;
 }
 
-.back-link .el-button {
-  color: $wolf-text-secondary;
-  font-size: $wolf-font-size-caption;
+// UI/UX Pro Max: Mobile breakpoint
+@media (max-width: $wolf-breakpoint-xs-v2) {
+  .onboarding-container {
+    padding: $wolf-page-padding-mobile-v2;
+    padding-top: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-top-v2);
+    padding-bottom: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
+  }
+
+  .logout-btn {
+    top: calc($wolf-space-md-v2 + $wolf-safe-area-top-v2);
+    right: $wolf-space-md-v2;
+  }
+
+  .card-body {
+    padding: $wolf-space-xl-v2 $wolf-card-padding-mobile-v2;
+  }
+
+  .header h1 {
+    font-size: $wolf-font-size-title-mobile-v2;
+  }
 }
 </style>
