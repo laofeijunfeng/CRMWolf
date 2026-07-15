@@ -145,13 +145,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ContractCreate.vue'),
         meta: { requiresAuth: true }
       },
-      {
-        path: 'contracts/:id',
-        name: 'ContractDetail',
-        component: () => import('@/views/ContractDetail.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
+            {
         path: 'contracts/edit/:id',
         name: 'ContractEdit',
         component: () => import('@/views/ContractCreate.vue'),
@@ -224,13 +218,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/PaymentPlanCreate.vue'),
         meta: { requiresAuth: true, title: '新建回款计划' }
       },
-      {
-        path: 'payments/plans/:id',
-        name: 'PaymentPlanDetail',
-        component: () => import('@/views/PaymentPlanDetail.vue'),
-        meta: { requiresAuth: true, title: '回款计划详情' }
-      },
-      {
+            {
         path: 'invoices',
         name: 'Invoices',
         component: () => import('@/views/Invoices.vue'),
@@ -248,13 +236,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/InvoiceForm.vue'),
         meta: { requiresAuth: true }
       },
-      {
-        path: 'invoices/:id',
-        name: 'InvoiceDetail',
-        component: () => import('@/views/InvoiceDetail.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
+            {
         path: 'procurement-methods',
         name: 'ProcurementMethods',
         component: () => import('@/views/ProcurementMethods.vue'),
