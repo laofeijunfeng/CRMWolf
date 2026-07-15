@@ -39,56 +39,56 @@
             <div class="attributes-grid">
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <User class="attribute-icon w-3.5 h-3.5" />
+                  <User aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">客户名称</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.customer_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <FileText class="attribute-icon w-3.5 h-3.5" />
+                  <FileText aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">关联合同</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.contract_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <Clock class="attribute-icon w-3.5 h-3.5" />
+                  <Clock aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">回款阶段</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.payment_plan_stage_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <UserCircle class="attribute-icon w-3.5 h-3.5" />
+                  <UserCircle aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">申请人</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.applicant_name || '-' }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <Calendar class="attribute-icon w-3.5 h-3.5" />
+                  <Calendar aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">申请时间</span>
                 </div>
                 <span class="attribute-value secondary">{{ formatDateTime(invoiceInfo?.created_time) }}</span>
               </div>
               <div class="attribute-item">
                 <div class="attribute-header">
-                  <UserCircle class="attribute-icon w-3.5 h-3.5" />
+                  <UserCircle aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">审批人</span>
                 </div>
                 <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.reviewer_name }">{{ invoiceInfo?.reviewer_name || '-' }}</span>
               </div>
               <div class="attribute-item" v-if="invoiceInfo?.invoice_number">
                 <div class="attribute-header">
-                  <Ticket class="attribute-icon w-3.5 h-3.5" />
+                  <Ticket aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">发票号码</span>
                 </div>
                 <span class="attribute-value">{{ invoiceInfo?.invoice_number }}</span>
               </div>
               <div class="attribute-item" v-if="invoiceInfo?.reviewed_time">
                 <div class="attribute-header">
-                  <Calendar class="attribute-icon w-3.5 h-3.5" />
+                  <Calendar aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                   <span class="attribute-label">审批时间</span>
                 </div>
                 <span class="attribute-value secondary">{{ formatDateTime(invoiceInfo?.reviewed_time) }}</span>
@@ -104,7 +104,7 @@
         class="issued-file-highlight"
       >
         <div class="highlight-header">
-          <CheckCircle2 class="success-icon w-5 h-5" />
+          <CheckCircle2 aria-hidden="true" class="success-icon w-5 h-5" />
           <span class="highlight-title">已开票</span>
           <span v-if="invoiceInfo?.invoice_number" class="invoice-number-badge">
             {{ invoiceInfo.invoice_number }}
@@ -113,22 +113,23 @@
         <div class="file-download-area">
           <FileText
             v-if="isPdf(invoiceInfo.invoice_file_path)"
+            aria-hidden="true"
             :class="['file-type-icon', getFileIconClass(invoiceInfo.invoice_file_path), 'w-5 h-5']"
           />
           <Image
             v-else
+            aria-hidden="true"
             :class="['file-type-icon', getFileIconClass(invoiceInfo.invoice_file_path), 'w-5 h-5']"
           />
           <span class="file-type-label">{{ getFileTypeLabel(invoiceInfo.invoice_file_path) }}</span>
-          <el-button
-            type="primary"
+          <Button
             class="download-btn"
             aria-label="下载发票文件"
             @click="handleDownloadWithFeedback"
           >
-            <Download class="w-4 h-4" />
+            <Download class="w-4 h-4" aria-hidden="true" />
             下载发票文件
-          </el-button>
+          </Button>
         </div>
       </div>
 
@@ -141,7 +142,7 @@
             <div class="attributes-grid">
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <Building2 class="attribute-icon w-3.5 h-3.5" />
+                    <Building2 aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">抬头类型</span>
                   </div>
                   <el-tag :class="['wolf-tag', invoiceInfo?.invoice_title_type === 'COMPANY' ? 'wolf-tag--info' : 'wolf-tag--gray']" size="small">
@@ -150,42 +151,42 @@
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <FileText class="attribute-icon w-3.5 h-3.5" />
+                    <FileText aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">开票抬头</span>
                   </div>
                   <span class="attribute-value">{{ invoiceInfo?.invoice_title_text || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <Key class="attribute-icon w-3.5 h-3.5" />
+                    <Key aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">纳税人识别号</span>
                   </div>
                   <span class="attribute-value">{{ invoiceInfo?.invoice_taxpayer_id || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <CreditCard class="attribute-icon w-3.5 h-3.5" />
+                    <CreditCard aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">开户行</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_bank_name }">{{ invoiceInfo?.invoice_bank_name || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <Wallet class="attribute-icon w-3.5 h-3.5" />
+                    <Wallet aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">开户账号</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_bank_account }">{{ invoiceInfo?.invoice_bank_account || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <MapPin class="attribute-icon w-3.5 h-3.5" />
+                    <MapPin aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">开票地址</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_address }">{{ invoiceInfo?.invoice_address || '-' }}</span>
                 </div>
                 <div class="attribute-item">
                   <div class="attribute-header">
-                    <Phone class="attribute-icon w-3.5 h-3.5" />
+                    <Phone aria-hidden="true" class="attribute-icon w-3.5 h-3.5" />
                     <span class="attribute-label">电话</span>
                   </div>
                   <span class="attribute-value" :class="{ 'not-filled': !invoiceInfo?.invoice_phone }">{{ invoiceInfo?.invoice_phone || '-' }}</span>
@@ -221,14 +222,19 @@
             <span class="card-title">发票文件</span>
           </div>
           <div class="file-info">
-            <FileText class="file-icon w-4 h-4" />
+            <FileText aria-hidden="true" class="file-icon w-4 h-4" />
             <span v-if="invoiceInfo?.invoice_number" class="invoice-number">
               发票号码：{{ invoiceInfo.invoice_number }}
             </span>
-            <el-button link type="primary" size="small" @click="downloadInvoiceFile">
-              <Download class="w-4 h-4" />
+            <Button
+              variant="link"
+              size="sm"
+              aria-label="下载发票文件"
+              @click="downloadInvoiceFile"
+            >
+              <Download class="w-4 h-4" aria-hidden="true" />
               下载发票文件
-            </el-button>
+            </Button>
           </div>
         </div>
       </div>
@@ -257,7 +263,7 @@
         <DialogFooter>
           <Button variant="outline" @click="invoicedModalVisible = false">取消</Button>
           <Button @click="handleConfirmInvoiced" :disabled="marking">
-            <Loader2 v-if="marking" class="w-4 h-4 mr-2 animate-spin" />
+            <Loader2 v-if="marking" aria-hidden="true" class="w-4 h-4 mr-2 animate-spin" />
             确定
           </Button>
         </DialogFooter>

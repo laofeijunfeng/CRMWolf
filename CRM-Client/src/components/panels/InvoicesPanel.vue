@@ -2,15 +2,14 @@
 /**
  * InvoicesPanel.vue - 发票抬头面板组件
  *
- * 用于 CustomerDetailSheet 中的发票抬头列表展示
- * 支持新建、编辑、删除、设置默认等操作
- *
+ * 使用 ListCard 组件确保风格统一
  * 技术栈：shadcn-vue + variables-v2.scss
+ * 无障碍：所有图标按钮均有 aria-label
  */
 import { Plus, Pencil, Trash2, Star, Building2, User } from 'lucide-vue-next'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { InvoiceTitleResponse, TitleType } from '@/api/invoice'
 
 // ==================== Props & Emits ====================
@@ -64,99 +63,88 @@ const maskTaxId = (taxId: string): string => {
 </script>
 
 <template>
-  <Card class="invoices-panel">
-    <CardHeader class="p-4 border-b border-wolf-border-light-v2 flex flex-row items-center justify-between">
-      <h3 class="text-sm font-semibold text-wolf-text-primary-v2">发票抬头</h3>
+  <ListCard
+    title="发票抬头"
+    :items="invoiceTitles"
+    empty-text="暂无发票抬头"
+  >
+    <template #headerActions>
       <Button size="sm" @click="handleAdd">
         <Plus class="w-4 h-4 mr-1" />
         新建抬头
       </Button>
-    </CardHeader>
-    <CardContent class="p-0">
-      <!-- Empty State -->
-      <div v-if="invoiceTitles.length === 0" class="p-8 text-center text-wolf-text-tertiary-v2">
-        暂无发票抬头
+    </template>
+
+    <template #itemMain="{ item }">
+      <!-- Title header with type and default badge -->
+      <div class="flex items-center gap-2 mb-2">
+        <component
+          :is="item.title_type === 'COMPANY' ? Building2 : User"
+          class="w-4 h-4 text-wolf-text-secondary-v2"
+        />
+        <span class="font-medium text-wolf-text-primary-v2">{{ item.title }}</span>
+        <Badge :class="getTitleTypeInfo(item.title_type).color" class="text-xs">
+          {{ getTitleTypeInfo(item.title_type).label }}
+        </Badge>
+        <Badge v-if="item.is_default" variant="secondary" class="text-xs">
+          <Star class="w-3 h-3 mr-1" />
+          默认
+        </Badge>
       </div>
 
-      <!-- Invoice Title List -->
-      <div v-else class="divide-y divide-wolf-border-light-v2">
-        <div
-          v-for="title in invoiceTitles"
-          :key="title.id"
-          class="p-4 hover:bg-wolf-bg-hover-v2 transition-colors"
-        >
-          <!-- Header -->
-          <div class="flex items-start justify-between mb-2">
-            <div class="flex-1">
-              <div class="flex items-center gap-2 mb-1">
-                <component
-                  :is="title.title_type === 'COMPANY' ? Building2 : User"
-                  class="w-4 h-4 text-wolf-text-secondary-v2"
-                />
-                <span class="font-medium text-wolf-text-primary-v2">{{ title.title }}</span>
-                <Badge
-                  :class="getTitleTypeInfo(title.title_type).color"
-                  class="text-xs"
-                >
-                  {{ getTitleTypeInfo(title.title_type).label }}
-                </Badge>
-                <Badge
-                  v-if="title.is_default"
-                  variant="secondary"
-                  class="text-xs"
-                >
-                  <Star class="w-3 h-3 mr-1" />
-                  默认
-                </Badge>
-              </div>
-            </div>
-          </div>
-
-          <!-- Details -->
-          <div class="text-sm text-wolf-text-secondary-v2 space-y-1 mb-3">
-            <div class="flex items-center gap-2">
-              <span class="text-wolf-text-tertiary-v2 w-16">税号:</span>
-              <span class="font-mono">{{ maskTaxId(title.taxpayer_id) }}</span>
-            </div>
-            <div v-if="title.bank_name" class="flex items-center gap-2">
-              <span class="text-wolf-text-tertiary-v2 w-16">银行:</span>
-              <span>{{ title.bank_name }}</span>
-            </div>
-            <div v-if="title.bank_account" class="flex items-center gap-2">
-              <span class="text-wolf-text-tertiary-v2 w-16">账号:</span>
-              <span class="font-mono">{{ title.bank_account }}</span>
-            </div>
-            <div v-if="title.address" class="flex items-center gap-2">
-              <span class="text-wolf-text-tertiary-v2 w-16">地址:</span>
-              <span>{{ title.address }}</span>
-            </div>
-            <div v-if="title.phone" class="flex items-center gap-2">
-              <span class="text-wolf-text-tertiary-v2 w-16">电话:</span>
-              <span>{{ title.phone }}</span>
-            </div>
-          </div>
-
-          <!-- Actions -->
-          <div class="flex justify-end gap-2">
-            <Button
-              v-if="!title.is_default"
-              variant="ghost"
-              size="sm"
-              @click="handleSetDefault(title.id)"
-            >
-              <Star class="w-4 h-4" />
-            </Button>
-            <Button variant="ghost" size="sm" @click="handleEdit(title)">
-              <Pencil class="w-4 h-4" />
-            </Button>
-            <Button variant="ghost" size="sm" @click="handleDelete(title.id)">
-              <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
-            </Button>
-          </div>
+      <!-- Details -->
+      <div class="text-sm text-wolf-text-secondary-v2 space-y-1">
+        <div class="flex items-center gap-2">
+          <span class="text-wolf-text-tertiary-v2 w-16">税号:</span>
+          <span class="font-mono">{{ maskTaxId(item.taxpayer_id) }}</span>
+        </div>
+        <div v-if="item.bank_name" class="flex items-center gap-2">
+          <span class="text-wolf-text-tertiary-v2 w-16">银行:</span>
+          <span>{{ item.bank_name }}</span>
+        </div>
+        <div v-if="item.bank_account" class="flex items-center gap-2">
+          <span class="text-wolf-text-tertiary-v2 w-16">账号:</span>
+          <span class="font-mono">{{ item.bank_account }}</span>
+        </div>
+        <div v-if="item.address" class="flex items-center gap-2">
+          <span class="text-wolf-text-tertiary-v2 w-16">地址:</span>
+          <span>{{ item.address }}</span>
+        </div>
+        <div v-if="item.phone" class="flex items-center gap-2">
+          <span class="text-wolf-text-tertiary-v2 w-16">电话:</span>
+          <span>{{ item.phone }}</span>
         </div>
       </div>
-    </CardContent>
-  </Card>
+    </template>
+
+    <template #itemActions="{ item }">
+      <Button
+        v-if="!item.is_default"
+        variant="ghost"
+        size="sm"
+        :aria-label="`将 ${item.title} 设为默认发票抬头`"
+        @click.stop="handleSetDefault(item.id)"
+      >
+        <Star class="w-4 h-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        :aria-label="`编辑发票抬头 ${item.title}`"
+        @click.stop="handleEdit(item)"
+      >
+        <Pencil class="w-4 h-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        :aria-label="`删除发票抬头 ${item.title}`"
+        @click.stop="handleDelete(item.id)"
+      >
+        <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
+      </Button>
+    </template>
+  </ListCard>
 </template>
 
 <style scoped lang="scss">

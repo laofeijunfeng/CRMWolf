@@ -21,9 +21,15 @@
     >
       <!-- 申请单号（可点击） -->
       <template #cell-application_number="{ row }">
-        <span class="link-text cursor-pointer text-primary hover:underline" @click.stop="viewDetail(row)">
+        <Button
+          type="button"
+          variant="link"
+          class="table-link"
+          :aria-label="`查看发票申请 ${row.application_number}`"
+          @click.stop="viewDetail(row)"
+        >
           {{ row.application_number }}
-        </span>
+        </Button>
       </template>
 
       <!-- 客户名称 -->
@@ -56,30 +62,6 @@
         <TableRowActions :row="row" v-bind="getRowActions(row)" />
       </template>
     </DataTable>
-            >同意</el-button>
-            <el-button
-              v-if="row.status === 'PENDING_REVIEW'"
-              link
-              size="small"
-              class="reject-btn"
-              @click="handleReject(row)"
-            >拒绝</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div class="pagination-bar">
-        <el-pagination
-          v-model:current-page="pagination.current"
-          v-model:page-size="pagination.pageSize"
-          :total="pagination.total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @current-change="handlePageChange"
-          @size-change="handlePageSizeChange"
-        />
-      </div>
-    </div>
 
     <Sheet v-model:open="drawerVisible">
       <DetailSheetContent>
@@ -135,15 +117,15 @@
             <!-- 发票文件 -->
             <div v-if="currentRecord.invoice_file_path" class="p-4 bg-muted rounded-lg">
               <div class="flex items-center gap-2 mb-2">
-                <FileText class="w-4 h-4 text-muted-foreground" />
+                <FileText class="w-4 h-4 text-muted-foreground" aria-hidden="true" />
                 <span class="text-sm font-medium">发票文件</span>
               </div>
               <div class="flex items-center gap-4">
                 <span v-if="currentRecord.invoice_number" class="text-sm text-muted-foreground">
                   发票号码：{{ currentRecord.invoice_number }}
                 </span>
-                <Button variant="link" size="sm" @click="downloadDrawerFile">
-                  <Download class="w-4 h-4 mr-1" />
+                <Button variant="link" size="sm" aria-label="下载发票文件" @click="downloadDrawerFile">
+                  <Download class="w-4 h-4 mr-1" aria-hidden="true" />
                   下载
                 </Button>
               </div>
@@ -170,27 +152,31 @@
       </DetailSheetContent>
     </Sheet>
 
-    <el-dialog
-      v-model="rejectModalVisible"
-      title="拒绝发票申请"
-      width="500px"
-    >
-      <el-form :model="rejectForm" label-position="top">
-        <el-form-item label="拒绝原因" required>
-          <el-input
-            v-model="rejectForm.reason"
-            type="textarea"
-            placeholder="请输入拒绝原因"
-            :maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button size="small" @click="rejectModalVisible = false">取消</el-button>
-        <el-button type="primary" size="small" @click="confirmReject">确定</el-button>
-      </template>
-    </el-dialog>
+    <Dialog v-model:open="rejectModalVisible">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>拒绝发票申请</DialogTitle>
+          <DialogDescription>
+            请填写拒绝原因，申请人将据此修改后重新提交。
+          </DialogDescription>
+        </DialogHeader>
+        <el-form :model="rejectForm" label-position="top">
+          <el-form-item label="拒绝原因" required>
+            <el-input
+              v-model="rejectForm.reason"
+              type="textarea"
+              placeholder="请输入拒绝原因"
+              :maxlength="500"
+              show-word-limit
+            />
+          </el-form-item>
+        </el-form>
+        <DialogFooter>
+          <Button variant="outline" @click="rejectModalVisible = false">取消</Button>
+          <Button @click="confirmReject">确定</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
@@ -203,12 +189,19 @@ import { Refresh, Search, Check, X, Eye, Download, FileText } from 'lucide-vue-n
 import { DataTable, FilterPanel, TableRowActions, StatusBadge } from '@/components/crmwolf'
 import {
   Sheet,
-  SheetContent,
   SheetHeader,
   SheetTitle,
   SheetDescription,
   SheetFooter
 } from '@/components/ui/sheet'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -540,6 +533,16 @@ const handleDrawerRejected = (): void => {
   background: $wolf-bg-page-v2;
   min-height: 0;
   flex: 1;
+}
+
+.table-link {
+  min-height: $wolf-touch-target-min-v2;
+  padding-inline: 0;
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+  }
 }
 
 .tabs-card {

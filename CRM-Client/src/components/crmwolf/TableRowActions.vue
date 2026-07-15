@@ -95,8 +95,9 @@ const executeAction = (action: ActionConfig): void => {
       :disabled="action.disabled"
       :class="['action-button', { 'action-destructive': action.destructive }]"
       @click.stop="executeAction(action)"
+      :aria-label="action.label"
     >
-      <component :is="action.icon" v-if="action.icon" class="action-icon" />
+      <component :is="action.icon" v-if="action.icon" class="action-icon" aria-hidden="true" />
       {{ action.label }}
     </Button>
 
@@ -110,12 +111,12 @@ const executeAction = (action: ActionConfig): void => {
           aria-label="更多操作"
           @click.stop
         >
-          <MoreHorizontal class="action-icon" />
+          <MoreHorizontal class="action-icon" aria-hidden="true" />
         </Button>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" class="dropdown-content">
-        <template v-for="(action, index) in visibleSecondaryActions" :key="action.label">
+        <template v-for="action in visibleSecondaryActions" :key="action.label">
           <!-- 分隔线 -->
           <DropdownMenuSeparator v-if="action.separator" />
 
@@ -125,7 +126,7 @@ const executeAction = (action: ActionConfig): void => {
             :class="['dropdown-item', { 'dropdown-item-destructive': action.destructive }]"
             @click.stop="executeAction(action)"
           >
-            <component :is="action.icon" v-if="action.icon" class="dropdown-icon" />
+            <component :is="action.icon" v-if="action.icon" class="dropdown-icon" aria-hidden="true" />
             {{ action.label }}
           </DropdownMenuItem>
         </template>
@@ -148,7 +149,8 @@ const executeAction = (action: ActionConfig): void => {
 .action-button {
   // Touch target size 扩展（UI/UX Pro Max §2）
   // shadcn-vue Button sm: 36px，需要扩展到 ≥44px
-  min-height: 36px;
+  min-height: $wolf-touch-target-min-v2;
+  min-width: $wolf-touch-target-min-v2;
   padding: 0 $wolf-space-sm-v2;
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-medium-v2;

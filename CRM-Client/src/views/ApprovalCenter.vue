@@ -71,20 +71,24 @@
         :loading="loading"
         height="calc(100vh - 320px)"
         empty-title="暂无待审批事项"
+        row-interactive
         @update:page="page = $event; fetchList()"
         @update:page-size="pageSize = $event; page = 1; fetchList()"
         @row-click="openDetail"
       >
         <!-- 单号列：mono font + 点击复制 -->
         <template #cell-application_number="{ row }">
-          <span
-            class="font-mono text-primary cursor-pointer hover:underline"
+          <Button
+            type="button"
+            variant="link"
+            class="font-mono px-0"
             data-testid="copy-number"
-            :title="`点击复制 ${row.application_number}`"
+            :aria-label="`复制审批单号 ${row.application_number}`"
             @click.stop="copyNumber(row.application_number)"
           >
+            <Copy class="w-4 h-4" aria-hidden="true" />
             {{ row.application_number }}
-          </span>
+          </Button>
         </template>
 
         <!-- 类型列 -->
@@ -282,15 +286,8 @@
                 v-for="item in getPageItems()"
                 :key="item"
                 :value="item"
-                as-child
               >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  :class="page === item ? 'bg-primary text-primary-foreground' : ''"
-                >
-                  {{ item }}
-                </Button>
+                {{ item }}
               </PaginationItem>
               <PaginationNext />
             </PaginationContent>
@@ -429,7 +426,7 @@ import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch, reactive } 
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Clock } from 'lucide-vue-next'
+import { Clock, Copy } from 'lucide-vue-next'
 import { ContextTabs, FilterPanel, DataTable, Badge, Separator } from '@/components/crmwolf'
 import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from '@/components/ui/pagination'
 import { Button } from '@/components/ui/button'

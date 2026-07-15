@@ -103,12 +103,12 @@
           <div class="nav-section-title">管理工具</div>
           <a
             class="nav-item"
-            :class="{ active: currentPath.startsWith('/settings') }"
+            :class="{ active: currentPath.startsWith('/system-config') }"
             role="menuitem"
-            :aria-current="currentPath.startsWith('/settings') ? 'page' : undefined"
-            :aria-label="`系统配置${currentPath.startsWith('/settings') ? '（当前页面）' : ''}`"
-            @click="handleMenuClick('/settings')"
-            @keydown.enter="handleMenuClick('/settings')"
+            :aria-current="currentPath.startsWith('/system-config') ? 'page' : undefined"
+            :aria-label="`系统配置${currentPath.startsWith('/system-config') ? '（当前页面）' : ''}`"
+            @click="handleMenuClick('/system-config')"
+            @keydown.enter="handleMenuClick('/system-config')"
           >
             <component :is="Settings" class="nav-item-icon" aria-hidden="true" />
             <span class="nav-item-text">系统配置</span>
@@ -116,108 +116,55 @@
         </div>
       </nav>
 
-      <!-- 用户信息区域（含团队切换下拉） -->
+      <!-- 用户信息区域（含团队切换与账户操作） -->
       <div class="sidebar-footer">
-        <div
-          class="user-info"
-          role="button"
-          aria-label="用户设置"
-          :aria-expanded="showUserDropdown"
-          @click="toggleUserDropdown"
-          @mouseenter="handleUserInfoHover"
-          @mouseleave="handleUserInfoLeave"
-          @keydown.enter="toggleUserDropdown"
-        >
-          <!-- 用户头像 -->
-          <div class="user-avatar">
-            <img v-if="userStore.userInfo?.avatar_url" :src="userStore.userInfo.avatar_url" alt="用户头像" />
-            <span v-else class="avatar-placeholder">{{ userStore.userInfo?.name?.charAt(0) || 'U' }}</span>
-          </div>
+        <DropdownMenu v-model:open="showUserDropdown">
+          <DropdownMenuTrigger as-child>
+            <button
+              type="button"
+              class="user-info"
+              aria-label="用户设置"
+            >
+              <Avatar class="user-avatar">
+                <AvatarImage v-if="userStore.userInfo?.avatar_url" :src="userStore.userInfo.avatar_url" :alt="`${userStore.userInfo?.name || '用户'}的头像`" />
+                <AvatarFallback class="avatar-placeholder">{{ userStore.userInfo?.name?.charAt(0) || 'U' }}</AvatarFallback>
+              </Avatar>
+              <span class="user-details">
+                <span class="user-name">{{ userStore.userInfo?.name || '未登录' }}</span>
+                <span class="user-team">{{ teamStore.currentTeam?.name || '未选择团队' }}</span>
+              </span>
+              <ChevronDown class="user-chevron" :class="{ 'rotate-180': showUserDropdown }" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
 
-          <!-- 用户详情 -->
-          <div class="user-details">
-            <div class="user-name">{{ userStore.userInfo?.name || '未登录' }}</div>
-            <div class="user-team">{{ teamStore.currentTeam?.name || '未选择团队' }}</div>
-          </div>
+          <DropdownMenuContent side="top" align="start" class="user-dropdown">
+            <div class="dropdown-header-label">切换团队</div>
+            <DropdownMenuItem
+              v-for="team in teamStore.teams"
+              :key="team.id"
+              class="dropdown-item"
+              :class="{ active: team.id === teamStore.currentTeam?.id }"
+              :aria-label="`${team.name}${team.id === teamStore.currentTeam?.id ? '（当前）' : ''}`"
+              @select="handleSwitchTeam(team.id)"
+            >
+              <Building2 class="dropdown-icon" aria-hidden="true" />
+              <span class="dropdown-label">{{ team.name }}</span>
+              <Check v-if="team.id === teamStore.currentTeam?.id" class="dropdown-active-indicator" aria-hidden="true" />
+            </DropdownMenuItem>
+            <span v-if="teamStore.teams.length === 0" class="no-teams">暂无团队</span>
 
-          <!-- 下拉箭头 -->
-          <component
-            :is="ChevronDown"
-            class="user-chevron"
-            :class="{ 'rotate-180': showUserDropdown }"
-            aria-hidden="true"
-          />
-
-          <!-- 用户下拉菜单（向上展开） -->
-          <Transition name="dropdown">
-            <div v-if="showUserDropdown" class="user-dropdown" role="menu" aria-label="用户菜单">
-              <!-- 切换团队 section -->
-              <div class="dropdown-header">
-                <div class="dropdown-header-label">切换团队</div>
-              </div>
-              <a
-                v-for="team in teamStore.teams"
-                :key="team.id"
-                class="dropdown-item"
-                :class="{ active: team.id === teamStore.currentTeam?.id }"
-                role="menuitem"
-                :aria-label="`${team.name}${team.id === teamStore.currentTeam?.id ? '（当前）' : ''}`"
-                @click="handleSwitchTeam(team.id)"
-                @keydown.enter="handleSwitchTeam(team.id)"
-              >
-                <component :is="Building2" class="dropdown-icon" aria-hidden="true" />
-                <div class="dropdown-label">{{ team.name }}</div>
-                <component
-                  v-if="team.id === teamStore.currentTeam?.id"
-                  :is="Check"
-                  class="dropdown-active-indicator"
-                  aria-hidden="true"
-                />
-              </a>
-              <div v-if="teamStore.teams.length === 0" class="no-teams">
-                暂无团队
-              </div>
-
-              <!-- 分隔线 -->
-              <div class="dropdown-separator"></div>
-
-              <!-- 个人设置 section -->
-              <div class="dropdown-header">
-                <div class="dropdown-header-label">个人设置</div>
-              </div>
-              <a
-                class="dropdown-item"
-                role="menuitem"
-                aria-label="个人资料"
-                @click="handleUserProfile"
-                @keydown.enter="handleUserProfile"
-              >
-                <component :is="User" class="dropdown-icon" aria-hidden="true" />
-                <div class="dropdown-label">个人资料</div>
-              </a>
-              <a
-                class="dropdown-item"
-                role="menuitem"
-                aria-label="账户设置"
-                @click="handleAccountSettings"
-                @keydown.enter="handleAccountSettings"
-              >
-                <component :is="Settings" class="dropdown-icon" aria-hidden="true" />
-                <div class="dropdown-label">账户设置</div>
-              </a>
-              <a
-                class="dropdown-item"
-                role="menuitem"
-                aria-label="退出登录"
-                @click="handleLogout"
-                @keydown.enter="handleLogout"
-              >
-                <component :is="LogOut" class="dropdown-icon" aria-hidden="true" />
-                <div class="dropdown-label">退出登录</div>
-              </a>
-            </div>
-          </Transition>
-        </div>
+            <DropdownMenuSeparator />
+            <div class="dropdown-header-label">个人设置</div>
+            <DropdownMenuItem class="dropdown-item" aria-label="账户设置" @select="handleAccountSettings">
+              <Settings class="dropdown-icon" aria-hidden="true" />
+              <span class="dropdown-label">账户设置</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem class="dropdown-item dropdown-item--destructive" aria-label="退出登录" @select="requestLogout">
+              <LogOut class="dropdown-icon" aria-hidden="true" />
+              <span class="dropdown-label">退出登录</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </aside>
 
@@ -304,7 +251,7 @@
     </main>
 
     <!-- Bottom Navigation (Mobile <768px) -->
-    <BottomNav />
+    <BottomNav @logout="requestLogout" />
   </div>
 </template>
 
@@ -318,7 +265,7 @@
  * - UI/UX Pro Max §1 Accessibility (aria-labels, keyboard-nav)
  * - §1.5 shadcn-vue 优先原则（Button 替换 el-button）
  */
-import { computed, onMounted, ref, watchEffect } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/stores/user'
@@ -329,6 +276,17 @@ import { useHeaderStore } from '@/stores/header'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/crmwolf'
+import { confirmLogout } from '@/utils/confirmDialog'
+import {
   Flag,
   Building2,
   TrendingUp,
@@ -338,7 +296,6 @@ import {
   Stamp,
   Settings,
   LogOut,
-  User,
   ChevronDown,
   Check,
   ArrowLeft,
@@ -363,8 +320,6 @@ const headerHasTabs = computed(() => headerStore.hasTabs)
 
 // UserInfoDropdown state
 const showUserDropdown = ref(false)
-const isMobile = computed(() => window.innerWidth < 768)
-
 const currentPath = computed(() => {
   const path = route.path
   if (path.startsWith('/leads/public')) return '/leads/public'
@@ -379,39 +334,22 @@ const handleMenuClick = (key: string): void => {
   router.push(key)
 }
 
-const toggleUserDropdown = (): void => {
-  if (isMobile.value) {
-    showUserDropdown.value = !showUserDropdown.value
-  }
-}
-
-const handleUserInfoHover = (): void => {
-  if (!isMobile.value) {
-    showUserDropdown.value = true
-  }
-}
-
-const handleUserInfoLeave = (): void => {
-  if (!isMobile.value) {
-    showUserDropdown.value = false
-  }
-}
-
-const handleUserProfile = (): void => {
-  showUserDropdown.value = false
-  router.push('/settings/profile')
-}
-
 const handleAccountSettings = (): void => {
   showUserDropdown.value = false
-  router.push('/settings/account')
+  router.push('/account')
 }
 
-const handleLogout = (): void => {
+const requestLogout = async (): Promise<void> => {
   showUserDropdown.value = false
+  if (!await confirmLogout()) return
+
   userStore.logout()
-  router.push('/login')
   toast.success('已退出登录')
+  try {
+    await router.replace('/login')
+  } catch {
+    window.location.assign('/login')
+  }
 }
 
 /**

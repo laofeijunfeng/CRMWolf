@@ -14,13 +14,20 @@
  * 技术壁垒判定（MASTER.md §3.4）：
  * - shadcn-vue 无 Select 组件 → 使用原生 <select>
  */
-import { reactive, computed, watch } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Search, X } from 'lucide-vue-next'
+import {
+  buildResetValues,
+  syncFilterValues,
+  type FilterValue,
+  type FilterValues
+} from './filterPanelValues'
 
 // ==================== Types ====================
-interface FilterField {
+
+export interface FilterField {
   /** 字段唯一标识 */
   key: string
   /** 字段标签（用于 aria-label） */
@@ -37,7 +44,7 @@ interface Props {
   /** 筛选字段列表 */
   fields: FilterField[]
   /** 筛选值（v-model） */
-  values?: Record<string, any>
+  values?: FilterValues
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -45,50 +52,49 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
-  'update:values': [value: Record<string, any>]
-  'search': [value: Record<string, any>]
+  'update:values': [value: FilterValues]
+  'search': [value: FilterValues]
   'reset': []
-  'change': [key: string, value: any]
+  'change': [key: string, value: FilterValue]
 }>()
 
 // ==================== Reactive State ====================
-const form = reactive<Record<string, any>>({ ...props.values })
+const form: Ref<FilterValues> = ref(syncFilterValues(props.fields, props.values))
 
-// 监听 props.values 变化，同步到 form
-watch(() => props.values, (newValues) => {
-  Object.assign(form, newValues)
-}, { deep: true })
+// 监听外部 values/fields，完整替换本地状态，避免已删除 key 残留
+watch(
+  [(): FilterValues => props.values, (): FilterField[] => props.fields],
+  ([newValues, newFields]): void => {
+    form.value = syncFilterValues(newFields, newValues)
+  },
+  { deep: true }
+)
 
 // ==================== Computed ====================
 const hasActiveFilters = computed((): boolean => {
-  return Object.values(form).some(v => v !== null && v !== undefined && v !== '')
+  return Object.values(form.value).some(value => value !== '')
 })
 
 // ==================== Methods ====================
+function getFilterValue(key: string): FilterValue {
+  return form.value[key] ?? ''
+}
+
+function setFilterValue(key: string, value: FilterValue): void {
+  form.value[key] = value
+}
+
 function handleSearch(): void {
-  emit('update:values', { ...form })
-  emit('search', { ...form })
+  emit('update:values', { ...form.value })
+  emit('search', { ...form.value })
 }
 
 function handleReset(): void {
-  Object.keys(form).forEach(key => {
-    form[key] = null
-  })
-  emit('update:values', { ...form })
+  const resetValues = buildResetValues(props.fields, form.value)
+  form.value = resetValues
+  emit('update:values', resetValues)
   emit('reset')
 }
-
-function handleFieldChange(key: string, value: any): void {
-  form[key] = value
-  emit('update:values', { ...form })
-  emit('change', key, value)
-}
-
-// Auto-search on field change (optional)
-// function handleFieldChangeWithSearch(key: string, value: any): void {
-//   handleFieldChange(key, value)
-//   handleSearch()
-// }
 
 function handleSubmit(event: Event): void {
   event.preventDefault()
@@ -108,7 +114,8 @@ function handleSubmit(event: Event): void {
       <div v-if="fields.some(f => f.key === 'keyword')" class="search-input-wrapper">
         <Search class="search-icon" aria-hidden="true" />
         <Input
-          v-model="form['keyword']"
+          :model-value="getFilterValue('keyword')"
+          @update:model-value="setFilterValue('keyword', $event)"
           type="text"
           :placeholder="fields.find(f => f.key === 'keyword')?.placeholder ?? '搜索...'"
           autocomplete="off"
@@ -124,8 +131,9 @@ function handleSubmit(event: Event): void {
         <!-- 文本输入 -->
         <Input
           v-if="field.type === 'text'"
-          v-model="form[field.key]"
+          :model-value="getFilterValue(field.key)"
           type="text"
+          @update:model-value="setFilterValue(field.key, $event)"
           :placeholder="field.placeholder ?? ''"
           autocomplete="off"
           :ariaLabel="field.label"
@@ -253,7 +261,8 @@ function handleSubmit(event: Event): void {
 .filter-date {
   flex: 1;
   min-width: 120px;
-  height: 32px;  // 桌面端高度（MASTER.md §5.2）
+  min-height: $wolf-touch-target-min-v2;
+  height: $wolf-touch-target-min-v2;
   padding: 0 $wolf-space-sm-v2;
   border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-v2;
@@ -263,10 +272,10 @@ function handleSubmit(event: Event): void {
   transition: border-color 150ms ease-out;
 
   // Focus 状态（MASTER.md §8.2）
-  &:focus {
-    outline: none;
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
     border-color: $wolf-primary-v2;
-    box-shadow: 0 0 0 2px rgba($wolf-primary-v2, 0.3);
   }
 
   // 移动端 Touch Target 合规
