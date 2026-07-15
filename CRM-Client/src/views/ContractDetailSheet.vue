@@ -498,9 +498,11 @@ const transformApprovalData = (apiData: ApprovalDetailFromAPI): ApprovalDetail =
 watch(
   [(): boolean => props.visible, (): number | null => props.contractId],
   ([visible, contractId]): void => {
-    if (visible && contractId !== null) {
+    if (!visible) {
+      resetState()
+    } else if (contractId !== null) {
       void fetchContractDetail(contractId)
-    } else if (!visible) {
+    } else {
       resetState()
     }
   },
