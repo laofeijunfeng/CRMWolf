@@ -13,19 +13,15 @@
 
     <Card class="onboarding-card">
       <CardContent class="card-body">
-        <div class="logo">
+        <!-- Logo Section - consistent with Login.vue -->
+        <div class="logo-section">
           <img
             src="/logo.png"
-            alt="CRMWolf 智能客户关系管理系统 Logo"
-            width="64"
-            height="64"
+            alt="CRM Logo"
+            class="w-16 h-16 object-contain"
           />
-          <p>智能客户关系管理系统</p>
-        </div>
-
-        <div class="welcome-text">
-          <h1 class="text-2xl font-semibold">欢迎使用 CRMWolf</h1>
-          <p>开始使用前，您需要先创建或加入一个团队</p>
+          <h1 class="text-wolf-title font-wolf-semibold text-wolf-text-primary">智能客户关系管理系统</h1>
+          <p class="welcome-subtitle">欢迎使用 CRMWolf，开始使用前您需要先创建或加入一个团队</p>
         </div>
 
         <div class="action-buttons" role="group" aria-label="团队操作选项">
@@ -141,35 +137,23 @@ const confirmLogout = (): void => {
   align-items: center;
 }
 
-.logo {
-  text-align: center;
-  margin-bottom: $wolf-space-2xl-v2;
-}
-
-.logo img {
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
-  margin-bottom: $wolf-space-md-v2;
-}
-
-.logo p {
-  font-size: $wolf-font-size-title-v2;
-  color: $wolf-text-primary-v2;
-  margin: 0;
-  font-weight: $wolf-font-weight-semibold-v2;
-}
-
-.welcome-text {
+// Logo section - consistent with Login.vue
+.logo-section {
   text-align: center;
   margin-bottom: $wolf-space-2xl-v2;
 
-  h1 {
-    color: $wolf-text-primary-v2;
-    margin: 0 0 $wolf-space-sm-v2 0;
+  img {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    margin-bottom: $wolf-space-md-v2;
   }
 
-  p {
+  h1 {
+    margin: 0 0 $wolf-space-md-v2 0;
+  }
+
+  .welcome-subtitle {
     font-size: $wolf-font-size-body-v2;
     color: $wolf-text-secondary-v2;
     margin: 0;

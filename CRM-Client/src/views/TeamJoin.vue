@@ -92,18 +92,18 @@ const confirmLogout = (): void => {
 
     <Card class="onboarding-card">
       <CardContent class="card-body">
-        <div class="logo">
+        <!-- Logo Section - consistent with Login.vue -->
+        <div class="logo-section">
           <img
             src="/logo.png"
-            alt="CRMWolf 智能客户关系管理系统 Logo"
-            width="64"
-            height="64"
+            alt="CRM Logo"
+            class="w-16 h-16 object-contain"
           />
-          <p>智能客户关系管理系统</p>
+          <h1 class="text-wolf-title font-wolf-semibold text-wolf-text-primary">智能客户关系管理系统</h1>
         </div>
 
         <header class="header">
-          <h1 class="text-2xl font-semibold">加入已有团队</h1>
+          <h2 class="text-xl font-semibold">加入已有团队</h2>
           <p>请输入团队邀请码，加入您的团队</p>
         </header>
 
@@ -208,30 +208,28 @@ const confirmLogout = (): void => {
   align-items: center;
 }
 
-.logo {
+// Logo section - consistent with Login.vue
+.logo-section {
   text-align: center;
-  margin-bottom: $wolf-space-2xl-v2;
-}
+  margin-bottom: $wolf-space-xl-v2;
 
-.logo img {
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
-  margin-bottom: $wolf-space-md-v2;
-}
+  img {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    margin-bottom: $wolf-space-md-v2;
+  }
 
-.logo p {
-  font-size: $wolf-font-size-title-v2;
-  color: $wolf-text-primary-v2;
-  margin: 0;
-  font-weight: $wolf-font-weight-semibold-v2;
+  h1 {
+    margin: 0 0 $wolf-space-sm-v2 0;
+  }
 }
 
 .header {
   text-align: center;
   margin-bottom: $wolf-space-2xl-v2;
 
-  h1 {
+  h2 {
     color: $wolf-text-primary-v2;
     margin: 0 0 $wolf-space-sm-v2 0;
   }
