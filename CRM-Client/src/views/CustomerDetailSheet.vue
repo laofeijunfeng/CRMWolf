@@ -256,9 +256,12 @@ const loadAllData = async (customerId: number): Promise<void> => {
       return
     }
     console.error('🔍 [loadAllData] 捕获到错误:', error)
-    console.error('🔍 [loadAllData] 错误类型:', error?.constructor?.name)
-    console.error('🔍 [loadAllData] 错误名称:', error?.name)
-    console.error('🔍 [loadAllData] 错误消息:', error?.message)
+    const errorType = error instanceof Error ? error.constructor.name : typeof error
+    const errorName = error instanceof Error ? error.name : '-'
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.error('🔍 [loadAllData] 错误类型:', errorType)
+    console.error('🔍 [loadAllData] 错误名称:', errorName)
+    console.error('🔍 [loadAllData] 错误消息:', errorMessage)
     handleApiError(error, '加载客户详情')
   } finally {
     if (loadRequestId === latestLoadRequestId) {
