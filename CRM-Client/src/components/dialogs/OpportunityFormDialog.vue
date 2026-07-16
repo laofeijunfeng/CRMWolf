@@ -39,12 +39,18 @@ import {
 } from '@/components/ui/select'
 import { handleApiError } from '@/utils/errorHandler'
 import { opportunityApi, type OpportunityCreate, LicenseType, PurchaseType } from '@/api/opportunity'
-import userApi, { type UserResponse, UserStatus } from '@/api/user'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
+import customerApi, { type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
+import userApi, { type UserResponse, UserStatus } from '@/api/user'
+import { useUserStore } from '@/stores/user'
 
-// Zod schema for form validation - use coerce for number fields
+// Zod schema for form validation
 const schema = toTypedSchema(
   z.object({
+    customer_id: z.string().min(1, '请选择客户').refine((value) => {
+      const parsed = Number(value)
+      return Number.isInteger(parsed) && parsed > 0
+    }, '请选择客户'),
     opportunity_name: z.string().min(1, '请输入商机名称').max(100, '商机名称不能超过100字'),
     total_amount: z.coerce.number().min(0, '金额不能为负数'),
     user_count: z.coerce.number().int('用户数必须为整数').min(1, '用户数至少为1'),
@@ -59,7 +65,9 @@ const schema = toTypedSchema(
 )
 
 interface Props {
-  customerId: number
+  customerId?: number | undefined
+  customerName?: string | undefined
+  customerLocked?: boolean
   open: boolean
 }
 
@@ -68,8 +76,16 @@ interface Emits {
   (e: 'success'): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  customerId: undefined,
+  customerName: undefined,
+  customerLocked: false,
+  open: false
+})
 const emit = defineEmits<Emits>()
+
+// 当前用户信息
+const userStore = useUserStore()
 
 // Get default date (30 days from now)
 function getDefaultDate(): string {
@@ -79,9 +95,10 @@ function getDefaultDate(): string {
 }
 
 // VeeValidate form setup
-const { handleSubmit, resetForm, values } = useForm({
+const { handleSubmit, resetForm, values, setFieldValue } = useForm({
   validationSchema: schema,
   initialValues: {
+    customer_id: '',
     opportunity_name: '',
     total_amount: 0,
     user_count: 1,
@@ -103,6 +120,9 @@ const users = ref<UserResponse[]>([])
 const procurementMethods = ref<ProcurementMethodOption[]>([])
 const loadingUsers = ref(false)
 const loadingMethods = ref(false)
+const customers = ref<CustomerOption[]>([])
+const loadingCustomers = ref(false)
+const customerSearchKeyword = ref('')
 
 // Computed property for dialog visibility
 const visible = computed({
@@ -122,6 +142,48 @@ const purchaseTypeOptions = [
   { value: PurchaseType.RENEWAL, label: '续购' },
   { value: PurchaseType.EXPANSION, label: '增购' }
 ]
+
+interface CustomerOption {
+  id: number
+  account_name: string
+}
+
+type CustomerListResponse = CustomerResponse[] | { data?: { items?: CustomerResponse[] } }
+
+const toCustomerOption = (customer: CustomerOption): CustomerOption => ({
+  id: customer.id,
+  account_name: customer.account_name,
+})
+
+const normalizeCustomerList = (response: CustomerListResponse): CustomerOption[] => {
+  if (Array.isArray(response)) {
+    return response.map(toCustomerOption)
+  }
+  return response.data?.items?.map(toCustomerOption) ?? []
+}
+
+const isLicenseType = (value: string | null | undefined): value is LicenseType => (
+  value === LicenseType.SUBSCRIPTION || value === LicenseType.PERPETUAL
+)
+
+const isPurchaseType = (value: string | null | undefined): value is PurchaseType => (
+  value === PurchaseType.NEW || value === PurchaseType.RENEWAL || value === PurchaseType.EXPANSION
+)
+
+const getLockedCustomerOption = (): CustomerOption | null => {
+  if (props.customerId === undefined) return null
+  const trimmedName = props.customerName?.trim()
+  return {
+    id: props.customerId,
+    account_name: trimmedName !== undefined && trimmedName !== '' ? trimmedName : `客户 #${props.customerId}`,
+  }
+}
+
+const setLockedCustomerOption = (): void => {
+  const lockedCustomer = getLockedCustomerOption()
+  if (lockedCustomer === null) return
+  customers.value = [lockedCustomer]
+}
 
 // Fetch users for owner selection
 async function fetchUsers(): Promise<void> {
@@ -147,16 +209,46 @@ async function fetchProcurementMethods(): Promise<void> {
   }
 }
 
+// Fetch customers for dropdown
+async function fetchCustomers(keyword?: string): Promise<void> {
+  loadingCustomers.value = true
+  try {
+    const params: { limit: number; keyword?: string } = { limit: 50 }
+    const normalizedKeyword = keyword?.trim()
+    if (normalizedKeyword !== undefined && normalizedKeyword !== '') {
+      params.keyword = normalizedKeyword
+    }
+    const response = await customerApi.getCustomers(params)
+    customers.value = normalizeCustomerList(response)
+  } catch (error) {
+    handleApiError(error, '获取客户列表')
+  } finally {
+    loadingCustomers.value = false
+  }
+}
+
+// Handle customer search
+async function handleCustomerSearch(keyword: string | number): Promise<void> {
+  const normalizedKeyword = String(keyword).trim()
+  customerSearchKeyword.value = normalizedKeyword
+  await fetchCustomers(normalizedKeyword || undefined)
+}
+
 // Watch for form changes
 watch(values, () => {
   isDirty.value = true
 }, { deep: true })
 
 // Reset form when dialog opens
-watch(() => props.open, (newOpen) => {
+watch(() => props.open, async (newOpen) => {
   if (newOpen) {
+    const currentUserId = userStore.userInfo?.id !== undefined ? userStore.userInfo.id.toString() : ''
+    const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
+    customerSearchKeyword.value = ''
+
     resetForm({
       values: {
+        customer_id: initialCustomerId,
         opportunity_name: '',
         total_amount: 0,
         user_count: 1,
@@ -165,10 +257,57 @@ watch(() => props.open, (newOpen) => {
         purchase_type: PurchaseType.NEW,
         expected_closing_date: getDefaultDate(),
         procurement_method_id: null,
-        owner_id: '',
+        owner_id: currentUserId,
         decision_maker_count: null
       }
     })
+
+    if (props.customerLocked && props.customerId !== undefined) {
+      setLockedCustomerOption()
+    }
+
+    if (props.customerId === undefined) {
+      await fetchCustomers()
+    } else {
+      try {
+        const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(props.customerId)
+        customers.value = [toCustomerOption(customerDetail)]
+
+        setFieldValue('opportunity_name', `${customerDetail.account_name}项目`)
+        if (customerDetail.default_opportunity) {
+          setFieldValue('total_amount', customerDetail.default_opportunity.total_amount ?? 0)
+          setFieldValue('user_count', customerDetail.default_opportunity.user_count ?? 1)
+          setFieldValue(
+            'license_type',
+            isLicenseType(customerDetail.default_opportunity.license_type)
+              ? customerDetail.default_opportunity.license_type
+              : LicenseType.SUBSCRIPTION
+          )
+          setFieldValue('subscription_years', customerDetail.default_opportunity.subscription_years ?? 1)
+          setFieldValue(
+            'purchase_type',
+            isPurchaseType(customerDetail.default_opportunity.purchase_type)
+              ? customerDetail.default_opportunity.purchase_type
+              : PurchaseType.NEW
+          )
+          if (customerDetail.default_opportunity.expected_closing_date !== null) {
+            setFieldValue('expected_closing_date', customerDetail.default_opportunity.expected_closing_date)
+          }
+          if (customerDetail.default_opportunity.procurement_method_id !== null) {
+            setFieldValue('procurement_method_id', customerDetail.default_opportunity.procurement_method_id)
+          }
+        }
+        if (customerDetail.default_procurement_method_id !== null) {
+          setFieldValue('procurement_method_id', customerDetail.default_procurement_method_id)
+        }
+      } catch (error) {
+        if (props.customerLocked) {
+          setLockedCustomerOption()
+        }
+        handleApiError(error, '获取客户详情')
+      }
+    }
+
     isDirty.value = false
   }
 })
@@ -185,7 +324,7 @@ const onSubmit = handleSubmit(async (formValues) => {
   try {
     const data: OpportunityCreate = {
       opportunity_name: formValues['opportunity_name'],
-      customer_id: props.customerId,
+      customer_id: Number(formValues['customer_id']),
       total_amount: formValues['total_amount'],
       user_count: formValues['user_count'],
       license_type: formValues['license_type'],
@@ -233,12 +372,57 @@ function continueEditing(): void {
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent class="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+    <DialogContent class="max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>新建商机</DialogTitle>
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
+        <!-- Customer (required) -->
+        <FormField v-slot="{ value, handleChange }" name="customer_id">
+          <FormItem>
+            <FormLabel>所属客户 <span class="text-destructive">*</span></FormLabel>
+            <Select
+              :model-value="value"
+              :disabled="customerLocked === true"
+              @update:model-value="handleChange"
+              @update:open="(open: boolean) => { if (open && !customerLocked) fetchCustomers(customerSearchKeyword) }"
+            >
+              <FormControl>
+                <SelectTrigger class="h-11 sm:h-8">
+                  <SelectValue :placeholder="customerLocked ? '' : '请选择客户'" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <div v-if="!customerLocked" class="p-2 border-b">
+                  <Input
+                    :model-value="customerSearchKeyword"
+                    placeholder="搜索客户名称"
+                    class="h-9"
+                    @update:model-value="handleCustomerSearch"
+                    @keydown.stop
+                    @pointerdown.stop
+                  />
+                </div>
+                <div v-if="loadingCustomers" class="px-2 py-1.5 text-sm text-muted-foreground">
+                  加载中...
+                </div>
+                <div v-else-if="customers.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
+                  暂无客户
+                </div>
+                <SelectItem
+                  v-for="customer in customers"
+                  :key="customer.id"
+                  :value="customer.id.toString()"
+                >
+                  {{ customer.account_name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
         <!-- Opportunity Name (required) -->
         <FormField v-slot="{ componentField }" name="opportunity_name">
           <FormItem>
@@ -395,16 +579,22 @@ function continueEditing(): void {
         </FormField>
 
         <!-- Owner (required) -->
-        <FormField v-slot="{ componentField }" name="owner_id">
+        <FormField v-slot="{ value, handleChange }" name="owner_id">
           <FormItem>
             <FormLabel>负责人 <span class="text-destructive">*</span></FormLabel>
-            <Select v-bind="componentField as any">
+            <Select :model-value="value" @update:model-value="handleChange">
               <FormControl>
                 <SelectTrigger class="h-11 sm:h-8">
                   <SelectValue placeholder="请选择负责人" />
                 </SelectTrigger>
               </FormControl>
               <SelectContent>
+                <div v-if="loadingUsers" class="px-2 py-1.5 text-sm text-muted-foreground">
+                  加载中...
+                </div>
+                <div v-else-if="users.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
+                  暂无负责人
+                </div>
                 <SelectItem
                   v-for="user in users"
                   :key="user.id"

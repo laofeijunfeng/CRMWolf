@@ -8,12 +8,13 @@
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
 import { ref, watch } from 'vue'
+import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
 import {
   Sheet,
-  SheetContent,
   SheetHeader,
   SheetFooter
 } from '@/components/ui/sheet'
+import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -31,6 +32,7 @@ import {
 import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
 import ContactsPanel from '@/components/panels/ContactsPanel.vue'
 import OpportunitiesPanel from '@/components/panels/OpportunitiesPanel.vue'
+import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
 import ContractsPanel from '@/components/panels/ContractsPanel.vue'
 import PaymentsPanel from '@/components/panels/PaymentsPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
@@ -43,7 +45,8 @@ import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vu
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
 
-import { Plus, Pencil, Flame, Zap, CheckCircle, TrendingDown, HelpCircle, RefreshCw, Loader2 } from 'lucide-vue-next'
+import { Plus, Pencil, RefreshCw, Loader2 } from 'lucide-vue-next'
+import ScoreIndicator from '@/components/ScoreIndicator.vue'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerDetailResponse, type ContactResponse } from '@/api/customer'
@@ -62,15 +65,26 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-const emit = defineEmits<{
+defineEmits<{
   'update:visible': [value: boolean]
   'refresh': []
 }>()
+
+const route = useRoute()
+const router = useRouter()
 
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
 const activePanel = ref('followup')  // Sidebar 导航切换
 const regeneratingProfile = ref(false)  // 档案重新生成状态
+
+type DrilldownView =
+  | { type: 'none' }
+  | { type: 'opportunity'; id: number }
+
+const drilldownView = ref<DrilldownView>({ type: 'none' })
+const lastViewedOpportunityId = ref<number | null>(null)
+const restoreFocusOpportunityId = ref<number | null>(null)
 
 // ==================== Dialog States ====================
 const followUpDialogOpen = ref(false)
@@ -93,6 +107,7 @@ const contracts = ref<ContractListResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
 const licenseApplications = ref<LicenseApplicationResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
+let latestLoadRequestId = 0
 
 // ==================== Navigation Tabs ====================
 interface NavTabItem {
@@ -110,10 +125,110 @@ const navTabs: NavTabItem[] = [
   { key: 'license-management', label: 'License' }
 ]
 
+const defaultPanel = 'followup'
+
+const isNavTabKey = (value: string | null): boolean => {
+  if (value === null) return false
+  return navTabs.some(tab => tab.key === value)
+}
+
+const getSingleQueryValue = (query: LocationQuery, key: string): string | null => {
+  const value = query[key]
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (Array.isArray(value)) {
+    return value.find((item): item is string => typeof item === 'string' && item.trim() !== '') ?? null
+  }
+  return null
+}
+
+const parsePositiveIntegerQueryValue = (value: string | null): number | null => {
+  if (value === null) return null
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+const copyRouteQuery = (query: LocationQuery): LocationQueryRaw => {
+  const nextQuery: LocationQueryRaw = {}
+  Object.entries(query).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      nextQuery[key] = value
+    } else if (Array.isArray(value)) {
+      const values = value.filter((item): item is string => typeof item === 'string')
+      if (values.length > 0) {
+        nextQuery[key] = values
+      }
+    } else if (value === null) {
+      nextQuery[key] = value
+    }
+  })
+  return nextQuery
+}
+
+const routeOpportunityId = (): number | null => parsePositiveIntegerQueryValue(getSingleQueryValue(route.query, 'opportunityId'))
+
+const routePanel = (): string => {
+  if (routeOpportunityId() !== null) return 'opportunities'
+  const tab = getSingleQueryValue(route.query, 'tab')
+  if (isNavTabKey(tab) && tab !== null) return tab
+  return defaultPanel
+}
+
+const buildCustomerDetailQueryLocation = (panel: string, opportunityId: number | null = null): { path: string; query: LocationQueryRaw } => {
+  const query = copyRouteQuery(route.query)
+  if (props.customerId !== null) {
+    query['customerId'] = String(props.customerId)
+  }
+
+  if (panel === defaultPanel) {
+    delete query['tab']
+  } else {
+    query['tab'] = panel
+  }
+
+  if (opportunityId === null) {
+    delete query['opportunityId']
+  } else {
+    query['opportunityId'] = String(opportunityId)
+  }
+
+  return { path: route.path, query }
+}
+
+const pushCustomerDetailQuery = (panel: string, opportunityId: number | null = null): void => {
+  router.push(buildCustomerDetailQueryLocation(panel, opportunityId))
+}
+
+const replaceCustomerDetailQuery = (panel: string, opportunityId: number | null = null): void => {
+  router.replace(buildCustomerDetailQueryLocation(panel, opportunityId))
+}
+
+const applyRouteNavigationState = (): void => {
+  if (!props.visible) return
+
+  const panel = routePanel()
+  activePanel.value = panel
+
+  if (panel !== 'opportunities') {
+    drilldownView.value = { type: 'none' }
+    restoreFocusOpportunityId.value = null
+    return
+  }
+
+  const opportunityId = routeOpportunityId()
+  if (opportunityId === null) {
+    drilldownView.value = { type: 'none' }
+    return
+  }
+
+  lastViewedOpportunityId.value = opportunityId
+  restoreFocusOpportunityId.value = null
+  drilldownView.value = { type: 'opportunity', id: opportunityId }
+}
+
 // ==================== Methods ====================
 const handleCreateOpportunity = (): void => {
-  // TODO: 打开新建商机弹窗，成功后刷新
-  emit('refresh')
+  // 打开新建商机弹窗
+  opportunityDialogOpen.value = true
 }
 
 const handleCreateContract = (): void => {
@@ -127,11 +242,14 @@ const handleEdit = (): void => {
 // 占位方法：Sidebar 面板切换（Task 4 实现）
 const setActivePanel = (panel: string): void => {
   activePanel.value = panel
+  drilldownView.value = { type: 'none' }
+  restoreFocusOpportunityId.value = null
+  pushCustomerDetailQuery(panel)
 }
 
 // ==================== Helper Functions ====================
 const formatDate = (dateStr: string | undefined): string => {
-  if (!dateStr) return '-'
+  if (dateStr === undefined || dateStr.trim() === '') return '-'
   const date = new Date(dateStr)
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -141,6 +259,8 @@ const formatDate = (dateStr: string | undefined): string => {
 
 // ==================== Data Loading ====================
 const loadAllData = async (customerId: number): Promise<void> => {
+  const loadRequestId = latestLoadRequestId + 1
+  latestLoadRequestId = loadRequestId
   loading.value = true
   try {
     const [
@@ -156,12 +276,14 @@ const loadAllData = async (customerId: number): Promise<void> => {
       customerApi.getCustomerDetail(customerId),
       getCustomerScore(customerId).catch(() => null),
       customerFollowUpApi.getFollowUps(customerId).catch(() => []),
-      opportunityApi.getAvailableForContract(customerId).catch(() => []),
+      opportunityApi.getOpportunities({ customer_id: customerId }).catch(() => []),
       contractApi.getCustomerContracts(customerId).catch(() => []),
       invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
       licenseApplicationApi.list(customerId).catch(() => []),
       deploymentApi.list(customerId).catch(() => [])
     ])
+
+    if (loadRequestId !== latestLoadRequestId) return
 
     customer.value = customerDetail
     score.value = scoreData
@@ -172,35 +294,24 @@ const loadAllData = async (customerId: number): Promise<void> => {
     licenseApplications.value = licenseApplicationsData
     deployments.value = deploymentsData
   } catch (error) {
+    if (loadRequestId !== latestLoadRequestId) return
     handleApiError(error, '加载客户详情')
   } finally {
-    loading.value = false
+    if (loadRequestId === latestLoadRequestId) {
+      loading.value = false
+    }
   }
 }
 
 // ==================== Score Helpers ====================
-const getScoreIcon = (scoreValue: number | null): typeof Flame => {
-  if (scoreValue === null) return HelpCircle
-  if (scoreValue >= 80) return Flame
-  if (scoreValue >= 60) return Zap
-  if (scoreValue >= 40) return CheckCircle
-  return TrendingDown
-}
-
+// 获取分数对应颜色（用于 Progress 组件的 CSS variable）
+// 颜色映射与 Leads.vue 保持一致
 const getScoreColorValue = (scoreValue: number | null): string => {
-  if (scoreValue === null) return '#94A3B8'
-  if (scoreValue >= 80) return '#10B981'
-  if (scoreValue >= 60) return '#F59E0B'
-  if (scoreValue >= 40) return '#3B82F6'
-  return '#64748B'
-}
-
-const getScoreLevelText = (scoreValue: number | null): string => {
-  if (scoreValue === null) return '未知'
-  if (scoreValue >= 80) return '高'
-  if (scoreValue >= 60) return '中'
-  if (scoreValue >= 40) return '低'
-  return '危险'
+  if (scoreValue === null) return '#94A3B8' // gray-400
+  if (scoreValue >= 80) return '#DC2626'    // danger (高/热)
+  if (scoreValue >= 60) return '#F59E0B'    // warning
+  if (scoreValue >= 40) return '#10B981'    // success
+  return '#94A3B8'                           // gray-400 (低/未知)
 }
 
 const scoreDetailsDialogOpen = ref(false)
@@ -281,6 +392,46 @@ const handleOpportunitySuccess = (): void => {
   }
 }
 
+const handleViewOpportunity = (opportunityId: number): void => {
+  activePanel.value = 'opportunities'
+  lastViewedOpportunityId.value = opportunityId
+  restoreFocusOpportunityId.value = null
+  drilldownView.value = { type: 'opportunity', id: opportunityId }
+  pushCustomerDetailQuery('opportunities', opportunityId)
+}
+
+const backToOpportunityList = (): void => {
+  activePanel.value = 'opportunities'
+  restoreFocusOpportunityId.value = lastViewedOpportunityId.value
+  drilldownView.value = { type: 'none' }
+  replaceCustomerDetailQuery('opportunities')
+}
+
+const openOpportunityFullPage = (opportunityId: number): void => {
+  router.push(`/opportunities/${opportunityId}`)
+}
+
+const refreshAfterOpportunityChange = (): void => {
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+const handleEditOpportunity = (opportunityId: number): void => {
+  router.push(`/opportunities/${opportunityId}/edit`)
+}
+
+const handleCreateContractFromOpportunity = (opportunityId: number): void => {
+  router.push({
+    path: '/contracts/create',
+    query: { opportunityId: String(opportunityId) }
+  })
+}
+
+const handleViewContract = (contractId: number): void => {
+  router.push(`/contracts/${contractId}`)
+}
+
 // Contract handlers
 const handleContractDialogClose = (open: boolean): void => {
   contractDialogOpen.value = open
@@ -358,9 +509,13 @@ const handleApplyLicense = (): void => {
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
     loadAllData(props.customerId)
-    setActivePanel('followup')
+    applyRouteNavigationState()
   } else if (!visible) {
     // 清理状态
+    activePanel.value = defaultPanel
+    drilldownView.value = { type: 'none' }
+    lastViewedOpportunityId.value = null
+    restoreFocusOpportunityId.value = null
     customer.value = null
     score.value = null
     followUps.value = []
@@ -370,22 +525,29 @@ watch(() => props.visible, (visible): void => {
     licenseApplications.value = []
     deployments.value = []
   }
+}, { immediate: true })
+
+watch(() => props.customerId, (customerId, previousCustomerId): void => {
+  if (!props.visible || customerId === null || customerId === previousCustomerId) return
+  loadAllData(customerId)
+  applyRouteNavigationState()
+})
+
+watch(() => route.query, (): void => {
+  applyRouteNavigationState()
 })
 </script>
 
 <template>
   <Sheet :open="visible" @update:open="$emit('update:visible', $event)">
-    <SheetContent
-      side="right"
-      class="w-2/3 max-w-[880px] sm:max-w-[880px] p-0 flex flex-col bg-white dark:bg-slate-900"
-    >
+    <DetailSheetContent>
       <!-- Header -->
       <SheetHeader class="p-6 border-b border-wolf-border-default-v2">
         <!-- ContextTabs 导航 -->
         <ContextTabs
           :tabs="navTabs"
           :active-tab="activePanel"
-          @update:active-tab="activePanel = $event"
+          @update:active-tab="setActivePanel"
           class="w-full"
         />
       </SheetHeader>
@@ -440,44 +602,41 @@ watch(() => props.visible, (visible): void => {
 
             <!-- 热力值卡片 -->
             <Card v-if="score" class="score-card">
-              <CardContent class="p-4">
-                <div class="flex items-center gap-4">
-                  <div class="flex-shrink-0">
-                    <component :is="getScoreIcon(score.score)" class="w-8 h-8" :style="{ color: getScoreColorValue(score.score) }" />
-                  </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2 mb-2">
-                      <span class="text-2xl font-bold text-wolf-text-primary-v2">
-                        {{ score.score ?? '--' }}
-                      </span>
-                      <span class="text-sm text-wolf-text-tertiary-v2 bg-wolf-bg-muted-v2 px-2 py-0.5 rounded">
-                        {{ getScoreLevelText(score.score) }}
-                      </span>
+              <CardContent class="p-0">
+                <div class="p-4 border-b border-wolf-border-light-v2">
+                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">热力值</h3>
+                </div>
+                <div class="p-4">
+                  <div class="flex items-center gap-4">
+                    <div class="flex-shrink-0">
+                      <ScoreIndicator :score="score.score" mode="card" show-level />
                     </div>
-                    <Progress
-                      :model-value="score.score || 0"
-                      class="h-2"
-                      :style="{ '--progress-background': getScoreColorValue(score.score) }"
-                    />
-                    <div class="flex items-center gap-2 mt-2 text-xs text-wolf-text-tertiary-v2">
-                      <template v-for="(detail, idx) in score.details?.slice(0, 2)" :key="detail.id">
-                        <span>
-                          {{ detail.factor_name }}:
-                          <span :class="detail.score_change >= 0 ? 'text-wolf-success-text-v2' : 'text-wolf-danger-text-v2'">
-                            {{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}
+                    <div class="flex-1">
+                      <Progress
+                        :model-value="score.score || 0"
+                        class="h-2"
+                        :style="{ '--progress-background': getScoreColorValue(score.score) }"
+                      />
+                      <div class="flex items-center gap-2 mt-3 text-xs text-wolf-text-tertiary-v2">
+                        <template v-for="(detail, idx) in score.details?.slice(0, 2)" :key="detail.id">
+                          <span>
+                            {{ detail.factor_name }}:
+                            <span :class="detail.score_change >= 0 ? 'text-wolf-success-text-v2' : 'text-wolf-danger-text-v2'">
+                              {{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}
+                            </span>
                           </span>
-                        </span>
-                        <span v-if="idx < 1 && score.details?.length > 1">·</span>
-                      </template>
-                      <Button
-                        v-if="score.details?.length > 0"
-                        variant="link"
-                        size="sm"
-                        class="h-auto p-0 text-xs"
-                        @click="scoreDetailsDialogOpen = true"
-                      >
-                        详情
-                      </Button>
+                          <span v-if="idx < 1 && score.details?.length > 1">·</span>
+                        </template>
+                        <Button
+                          v-if="score.details?.length > 0"
+                          variant="link"
+                          size="sm"
+                          class="h-auto p-0 text-xs"
+                          @click="scoreDetailsDialogOpen = true"
+                        >
+                          详情
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -603,12 +762,36 @@ watch(() => props.visible, (visible): void => {
               @set-primary="handleSetPrimaryContact"
             />
 
-            <OpportunitiesPanel
-              v-if="activePanel === 'opportunities'"
-              :customer-id="customerId ?? 0"
-              :opportunities="opportunities"
-              @add="opportunityDialogOpen = true"
-            />
+            <Transition name="drilldown-fade" mode="out-in">
+              <OpportunitiesPanel
+                v-if="activePanel === 'opportunities' && drilldownView.type === 'none'"
+                key="opportunities-list"
+                :customer-id="customerId ?? 0"
+                :opportunities="opportunities"
+                :highlighted-opportunity-id="lastViewedOpportunityId"
+                :restore-focus-opportunity-id="restoreFocusOpportunityId"
+                @add="opportunityDialogOpen = true"
+                @view-opportunity="handleViewOpportunity"
+                @open-full-page="openOpportunityFullPage"
+              />
+
+              <OpportunityDetailContent
+                v-else-if="activePanel === 'opportunities' && drilldownView.type === 'opportunity'"
+                key="opportunity-detail"
+                :opportunity-id="drilldownView.id"
+                embedded
+                :customer-context="{
+                  customerId: customerId ?? 0,
+                  customerName: customer?.account_name
+                }"
+                @back="backToOpportunityList"
+                @refresh="refreshAfterOpportunityChange"
+                @open-full-page="openOpportunityFullPage"
+                @edit="handleEditOpportunity"
+                @view-contract="handleViewContract"
+                @create-contract="handleCreateContractFromOpportunity"
+              />
+            </Transition>
 
             <ContractsPanel
               v-if="activePanel === 'contracts'"
@@ -659,7 +842,7 @@ watch(() => props.visible, (visible): void => {
             编辑
           </Button>
         </SheetFooter>
-      </SheetContent>
+      </DetailSheetContent>
     </Sheet>
 
   <!-- Dialogs -->
@@ -684,6 +867,8 @@ watch(() => props.visible, (visible): void => {
   <OpportunityFormDialog
     v-if="customerId !== null"
     :customer-id="customerId"
+    :customer-name="customer?.account_name"
+    :customer-locked="true"
     :open="opportunityDialogOpen"
     @update:open="opportunityDialogOpen = $event"
     @success="handleOpportunitySuccess"
@@ -789,6 +974,42 @@ watch(() => props.visible, (visible): void => {
 
   &:hover {
     color: $wolf-text-link-hover-v2;
+  }
+}
+
+// Score card styles
+.score-card {
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-lg-v2;
+  background: $wolf-bg-card-v2;
+}
+
+.drilldown-fade-enter-active,
+.drilldown-fade-leave-active {
+  transition:
+    opacity $wolf-motion-state-duration-v2 ease,
+    transform $wolf-motion-state-duration-v2 ease;
+}
+
+.drilldown-fade-enter-from {
+  opacity: 0;
+  transform: translateX($wolf-space-md-v2);
+}
+
+.drilldown-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-$wolf-space-md-v2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drilldown-fade-enter-active,
+  .drilldown-fade-leave-active {
+    transition-duration: $wolf-reduced-motion-duration-v2;
+  }
+
+  .drilldown-fade-enter-from,
+  .drilldown-fade-leave-to {
+    transform: none;
   }
 }
 </style>

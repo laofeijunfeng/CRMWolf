@@ -17,17 +17,20 @@
  * - ✅ 移除活跃筛选汇总区
  * - ✅ 保留业务逻辑（退回公海、输单、赢单等）
  */
-import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, watchEffect, type Component } from 'vue'
+import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import { FilterPanel, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import AICustomerCreateDialog from '@/components/AICustomerCreateDialog.vue'
+import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
+import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
+import ScoreIndicator from '@/components/ScoreIndicator.vue'
 import customerApi, {
   type CustomerResponse,
   type CustomerStatus,
@@ -43,20 +46,89 @@ import { usePageTitle } from '@/composables/usePageTitle'
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
 
+interface CustomerTableRow extends CustomerResponse {
+  score?: number | null
+}
+
 // ==================== State ====================
 const loading = ref(false)
-const tableData = ref<CustomerResponse[]>([])
+const tableData = ref<CustomerTableRow[]>([])
 const selectedCustomer = ref<CustomerResponse | null>(null)
 const showAICustomerCreate = ref(false)
+const showCustomerForm = ref(false)
+const editingCustomerId = ref<number | null>(null)
 
-// CustomerDetailSheet 状态
-const sheetVisible = ref(false)
-const selectedCustomerId = ref<number | null>(null)
+// CustomerDetailSheet URL query 状态
+const customerDetailQueryKeys = ['customerId', 'tab', 'opportunityId'] as const
+
+const isCustomerDetailQueryKey = (key: string): boolean => customerDetailQueryKeys.some(queryKey => queryKey === key)
+
+const getSingleQueryValue = (query: LocationQuery, key: string): string | null => {
+  const value = query[key]
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (Array.isArray(value)) {
+    return value.find((item): item is string => typeof item === 'string' && item.trim() !== '') ?? null
+  }
+  return null
+}
+
+const parsePositiveIntegerQueryValue = (value: string | null): number | null => {
+  if (value === null) return null
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+const copyQueryWithoutCustomerDetailKeys = (query: LocationQuery): LocationQueryRaw => {
+  const nextQuery: LocationQueryRaw = {}
+  Object.entries(query).forEach(([key, value]) => {
+    if (isCustomerDetailQueryKey(key)) return
+    if (typeof value === 'string') {
+      nextQuery[key] = value
+    } else if (Array.isArray(value)) {
+      const values = value.filter((item): item is string => typeof item === 'string')
+      if (values.length > 0) {
+        nextQuery[key] = values
+      }
+    } else if (value === null) {
+      nextQuery[key] = value
+    }
+  })
+  return nextQuery
+}
+
+const openCustomerDetail = (customerId: number): void => {
+  const query = copyQueryWithoutCustomerDetailKeys(route.query)
+  query['customerId'] = String(customerId)
+  router.push({ path: route.path, query })
+}
+
+const closeCustomerDetail = (): void => {
+  router.push({
+    path: route.path,
+    query: copyQueryWithoutCustomerDetailKeys(route.query)
+  })
+}
+
+const selectedCustomerId = computed(() => parsePositiveIntegerQueryValue(getSingleQueryValue(route.query, 'customerId')))
+const sheetVisible = computed({
+  get: () => selectedCustomerId.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) {
+      closeCustomerDetail()
+    }
+  }
+})
+
+// 商机弹窗状态
+const opportunityDialogOpen = ref(false)
+const opportunityCustomerId = ref<number | null>(null)
+const opportunityCustomerName = ref('')
 
 const pagination = reactive({
   current: 1,
@@ -149,11 +221,87 @@ const canDeleteRow = (row: CustomerResponse): boolean => {
 
 const canReturnRow = (row: CustomerResponse): boolean => {
   if (!canReturnCustomer.value) return false
-  if (!row['owner_id']) return false
+  if (row.owner_id === null || row.owner_id.trim() === '') return false
   if (canEditAllCustomer.value) return true
-  if (canEditOwnCustomer.value && row['owner_id'] === String(userStore.userInfo?.id)) return true
+  if (canEditOwnCustomer.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false
 }
+
+interface CustomerListEnvelope {
+  data?: {
+    items?: CustomerTableRow[]
+    total?: number
+  }
+  items?: CustomerTableRow[]
+  total?: number
+  length?: number
+}
+
+const isCustomerListEnvelope = (response: CustomerTableRow[] | CustomerListEnvelope): response is CustomerListEnvelope => !Array.isArray(response)
+
+const normalizeCustomerList = (response: CustomerTableRow[] | CustomerListEnvelope): { items: CustomerTableRow[]; total: number } => {
+  if (Array.isArray(response)) {
+    return { items: response, total: response.length }
+  }
+
+  const nestedItems = response.data?.items
+  if (nestedItems !== undefined) {
+    return { items: nestedItems, total: response.data?.total ?? nestedItems.length }
+  }
+
+  const items = response.items ?? []
+  return { items, total: response.total ?? response.length ?? items.length }
+}
+
+const normalizeCustomerListResponse = (response: CustomerTableRow[] | CustomerListEnvelope): { items: CustomerTableRow[]; total: number } => {
+  if (isCustomerListEnvelope(response)) {
+    return normalizeCustomerList(response)
+  }
+  return normalizeCustomerList(response)
+}
+
+interface FilterValues {
+  keyword?: string
+  status?: string
+}
+
+const getIndustryBadgeStatus = (row: CustomerResponse): string => {
+  const industryName = row.industry_info?.name
+  if (industryName === undefined || industryName === null || industryName.trim() === '') return '-'
+  const segments = industryName.split('/')
+  return segments.length > 1 ? segments[1] ?? industryName : industryName
+}
+
+const isCustomerResponse = (row: unknown): row is CustomerResponse => {
+  if (typeof row !== 'object' || row === null) return false
+  const record = row as Record<string, unknown>
+  return typeof record['id'] === 'number' &&
+    typeof record['account_name'] === 'string' &&
+    typeof record['city'] === 'string' &&
+    typeof record['status'] === 'number'
+}
+
+const asCustomerActionHandler = (handler: (record: CustomerResponse) => void | Promise<void>): ActionConfig['handler'] => {
+  return (row: Record<string, unknown>): void => {
+    if (!isCustomerResponse(row)) return
+    void handler(row)
+  }
+}
+
+const customerFormDialogProps = computed(() => {
+  if (editingCustomerId.value === null) {
+    return {
+      open: showCustomerForm.value,
+      mode: 'create' as const
+    }
+  }
+
+  return {
+    open: showCustomerForm.value,
+    mode: 'edit' as const,
+    customerId: editingCustomerId.value
+  }
+})
 
 // ==================== Methods ====================
 const fetchCustomerList = async (): Promise<void> => {
@@ -176,8 +324,9 @@ const fetchCustomerList = async (): Promise<void> => {
       }
 
       const response = await customerApi.getCustomers(params)
-      tableData.value = (response as any).data?.items || response || []
-      pagination.total = (response as any).data?.total || (response as any).length || 0
+      const normalized = normalizeCustomerListResponse(response)
+      tableData.value = normalized.items
+      pagination.total = normalized.total
     }
   } catch (error) {
     handleApiError(error, '获取客户列表')
@@ -186,7 +335,7 @@ const fetchCustomerList = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, any>): void => {
+const handleSearch = (values: FilterValues): void => {
   Object.assign(filterValues, values)
   pagination.current = 1
   fetchCustomerList()
@@ -211,8 +360,7 @@ const handlePageSizeChange = (pageSize: number): void => {
 }
 
 const handleViewDetail = (record: CustomerResponse): void => {
-  selectedCustomerId.value = record.id
-  sheetVisible.value = true
+  openCustomerDetail(record.id)
 }
 
 const handleSheetRefresh = (): void => {
@@ -220,11 +368,37 @@ const handleSheetRefresh = (): void => {
 }
 
 const handleEdit = (record: CustomerResponse): void => {
-  router.push(`/customers/${record.id}/edit`)
+  editingCustomerId.value = record.id
+  showCustomerForm.value = true
+}
+
+const handleCustomerFormSuccess = (): void => {
+  showCustomerForm.value = false
+  editingCustomerId.value = null
+  fetchCustomerList()
+}
+
+const clearOpportunityCustomer = (): void => {
+  opportunityCustomerId.value = null
+  opportunityCustomerName.value = ''
 }
 
 const handleCreateOpportunity = (record: CustomerResponse): void => {
-  router.push(`/customers/${record.id}/opportunities/create`)
+  opportunityCustomerId.value = record.id
+  opportunityCustomerName.value = record.account_name
+  opportunityDialogOpen.value = true
+}
+
+const handleOpportunityDialogOpenChange = (open: boolean): void => {
+  opportunityDialogOpen.value = open
+  if (!open) {
+    clearOpportunityCustomer()
+  }
+}
+
+const handleOpportunitySuccess = (): void => {
+  handleOpportunityDialogOpenChange(false)
+  fetchCustomerList()
 }
 
 const handleClaim = async (record: CustomerResponse): Promise<void> => {
@@ -328,7 +502,7 @@ const handleDelete = async (record: CustomerResponse): Promise<void> => {
 
 // ==================== 格式化函数 ====================
 const formatDateTime = (dateStr?: string): string => {
-  if (!dateStr) return '-'
+  if (dateStr === undefined || dateStr.trim() === '') return '-'
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN', {
     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -345,22 +519,6 @@ const mapCustomerStatus = (status: number): 'following' | 'won' | 'lost' | 'expi
     3: 'expired'
   }
   return map[status] || 'following'
-}
-
-const getScoreIcon = (score: number | null): string => {
-  if (score === null) return '❓'
-  if (score >= 80) return '🔥'
-  if (score >= 60) return '⚡'
-  if (score >= 40) return '✅'
-  return '❄️'
-}
-
-const getScoreColor = (score: number | null): string => {
-  if (score === null) return '#d9d9d9'
-  if (score >= 80) return '#ff4d4f'
-  if (score >= 60) return '#faad14'
-  if (score >= 40) return '#52c41a'
-  return '#d9d9d9'
 }
 
 // ==================== Lifecycle ====================
@@ -380,7 +538,7 @@ watchEffect(() => {
       label: 'AI 创建客户',
       icon: Sparkles,
       type: 'primary',
-      handler: () => { showAICustomerCreate.value = true },
+      handler: (): void => { showAICustomerCreate.value = true },
       visible: canCreateCustomer.value,
       ariaLabel: 'AI 创建客户'
     },
@@ -389,7 +547,10 @@ watchEffect(() => {
       label: '手动创建',
       icon: Plus,
       type: 'default',
-      handler: () => router.push('/customers/create'),
+      handler: (): void => {
+        editingCustomerId.value = null
+        showCustomerForm.value = true
+      },
       visible: canCreateCustomer.value,
       ariaLabel: '手动创建客户'
     }
@@ -437,11 +598,11 @@ watchEffect(() => {
         </span>
       </template>
 
-      <!-- 行业 -->
+      <!-- 行业：有二级行业时只显示二级（解析 name 中的 "/"），否则显示完整路径 -->
       <template #cell-industry="{ row }">
         <StatusBadge
           v-if="row.industry_info?.name"
-          :status="row.industry_info.name"
+          :status="getIndustryBadgeStatus(row)"
           type="industry"
         />
         <span v-else class="text-muted-foreground">-</span>
@@ -477,14 +638,9 @@ watchEffect(() => {
         <StatusBadge :status="mapCustomerStatus(row.status)" type="customer" />
       </template>
 
-      // 热力值
+      <!-- 热力值 -->
       <template #cell-score="{ row }">
-        <div class="score-cell">
-          <span class="score-icon" :style="{ color: getScoreColor((row as any).score) }">
-            {{ getScoreIcon((row as any).score) }}
-          </span>
-          <span class="score-number">{{ (row as any).score ?? '--' }}</span>
-        </div>
+        <ScoreIndicator :score="row.score ?? null" mode="badge" />
       </template>
 
       <!-- 默认采购方式 -->
@@ -526,50 +682,50 @@ watchEffect(() => {
           :primary-actions="[
             {
               label: '新建商机',
-              handler: handleCreateOpportunity,
+              handler: asCustomerActionHandler(handleCreateOpportunity),
               visible: canCreateOpportunity,
-              icon: Sparkles
+              icon: Sparkles as Component
             },
             {
               label: '编辑',
-              handler: handleEdit,
+              handler: asCustomerActionHandler(handleEdit),
               visible: canEditRow(row),
-              icon: Pencil
+              icon: Pencil as Component
             }
           ]"
           :secondary-actions="[
             {
               label: '退回公海',
-              handler: handleReturn,
+              handler: asCustomerActionHandler(handleReturn),
               visible: canReturnRow(row),
-              icon: ArrowRightLeft
+              icon: ArrowRightLeft as Component
             },
             {
               label: '赢单',
-              handler: handleWin,
+              handler: asCustomerActionHandler(handleWin),
               visible: canEditRow(row),
-              icon: TrendingUp
+              icon: TrendingUp as Component
             },
             {
               label: '输单',
-              handler: handleLose,
+              handler: asCustomerActionHandler(handleLose),
               visible: canEditRow(row),
-              icon: TrendingDown,
+              icon: TrendingDown as Component,
               destructive: true,
               separator: true  // 在输单前添加分隔线，分隔普通操作和危险操作
             },
             {
               label: '失效',
-              handler: handleInvalid,
+              handler: asCustomerActionHandler(handleInvalid),
               visible: canEditRow(row),
-              icon: XCircle,
+              icon: XCircle as Component,
               destructive: true
             },
             {
               label: '删除',
-              handler: handleDelete,
+              handler: asCustomerActionHandler(handleDelete),
               visible: canDeleteRow(row),
-              icon: Trash2,
+              icon: Trash2 as Component,
               destructive: true
             }
           ]"
@@ -635,11 +791,29 @@ watchEffect(() => {
       @success="fetchCustomerList"
     />
 
+    <!-- 手动创建/编辑客户弹窗 -->
+    <CustomerFormDialog
+      v-bind="customerFormDialogProps"
+      @update:open="showCustomerForm = $event"
+      @success="handleCustomerFormSuccess"
+    />
+
     <!-- 客户详情抽屉 -->
     <CustomerDetailSheet
       v-model:visible="sheetVisible"
       :customer-id="selectedCustomerId ?? null"
       @refresh="handleSheetRefresh"
+    />
+
+    <!-- 新建商机弹窗 -->
+    <OpportunityFormDialog
+      v-if="opportunityCustomerId !== null"
+      :customer-id="opportunityCustomerId"
+      :customer-name="opportunityCustomerName"
+      :customer-locked="true"
+      :open="opportunityDialogOpen"
+      @update:open="handleOpportunityDialogOpenChange"
+      @success="handleOpportunitySuccess"
     />
   </div>
 </template>
@@ -666,23 +840,6 @@ watchEffect(() => {
   &:hover {
     color: $wolf-text-link-hover-v2;
   }
-}
-
-// 热力值单元格
-.score-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-
-.score-icon {
-  font-size: 16px;
-}
-
-.score-number {
-  font-weight: $wolf-font-weight-medium-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
 }
 
 // 简易弹窗样式（临时使用，后续替换为 shadcn-vue Dialog）

@@ -1,4 +1,46 @@
 import request from '@/utils/request'
+import { z } from 'zod'
+import {
+  ConvertResponseSchema,
+  CustomerResponseSchema,
+  CustomerDetailResponseSchema,
+  ContactResponseSchema,
+  CustomerStatisticsSchema,
+  CustomerReturnResponseSchema
+} from '@/schemas/customer'
+
+/**
+ * 验证 API 响应数据
+ *
+ * @description 包装 request 方法并使用 Zod Schema 校验响应数据
+ * 此辅助函数内部调用 request 方法，Zod 校验由调用方按需传入 schema 参数处理
+ */
+const api = {
+  get: <T>(url: string, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = request.get<T>(url, config)
+    return schema ? response.then(data => schema.parse(data) as T) : response
+  },
+  post: <T>(url: string, data?: unknown, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = request.post<T>(url, data, config)
+    return schema ? response.then(d => schema.parse(d) as T) : response
+  },
+  put: <T>(url: string, data?: unknown, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = request.put<T>(url, data, config)
+    return schema ? response.then(d => schema.parse(d) as T) : response
+  },
+  delete: <T>(url: string, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = request.delete<T>(url, config)
+    return schema ? response.then(d => schema.parse(d) as T) : response
+  },
+  patch: <T>(url: string, data?: unknown, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
+    const response = request.patch<T>(url, data, config)
+    return schema ? response.then(d => schema.parse(d) as T) : response
+  }
+}
 
 export interface CustomerIndustryOption {
   value: string
@@ -109,6 +151,16 @@ export interface ContactResponse {
   created_time: string
 }
 
+export interface CustomerDefaultOpportunity {
+  total_amount: number | null
+  user_count: number | null
+  license_type: string | null
+  subscription_years: number | null
+  purchase_type: string | null
+  expected_closing_date: string | null
+  procurement_method_id: number | null
+}
+
 export interface CustomerDetailResponse {
   id: number
   account_name: string
@@ -123,6 +175,7 @@ export interface CustomerDetailResponse {
   source_lead_id: number | null
   default_procurement_method_id: number | null
   default_procurement_method_info?: ProcurementMethodInfo | null
+  default_opportunity?: CustomerDefaultOpportunity | null
   creator_id: string
   created_time: string
   last_modified_time: string
@@ -306,103 +359,77 @@ export interface InvoiceApplicationResponse {
 }
 
 const customerApi = {
-  convertLeadToCustomer: (data: ConvertLeadToCustomer) => {
-    return request.post<ConvertResponse>('/v1/customers/convert-from-lead', data)
-  },
+  convertLeadToCustomer: (data: ConvertLeadToCustomer): Promise<ConvertResponse> =>
+    api.post('/v1/customers/convert-from-lead', data, undefined, ConvertResponseSchema),
 
-  createCustomer: (data: CustomerCreate) => {
-    return request.post<CustomerResponse>('/v1/customers/', data)
-  },
+  createCustomer: (data: CustomerCreate): Promise<CustomerResponse> =>
+    api.post('/v1/customers/', data, undefined, CustomerResponseSchema),
 
-  getCustomers: (params?: CustomerQueryParams) => {
-    return request.get<CustomerResponse[]>('/v1/customers/', { params })
-  },
+  getCustomers: (params?: CustomerQueryParams): Promise<CustomerResponse[]> =>
+    api.get<CustomerResponse[]>('/v1/customers/', { params }),
 
-  getCustomerDetail: (customerId: number) => {
-    return request.get<CustomerDetailResponse>(`/v1/customers/${customerId}`)
-  },
+  getCustomerDetail: (customerId: number): Promise<CustomerDetailResponse> =>
+    api.get('/v1/customers/' + customerId, undefined, CustomerDetailResponseSchema),
 
-  updateCustomer: (customerId: number, data: CustomerUpdate) => {
-    return request.put<CustomerResponse>(`/v1/customers/${customerId}`, data)
-  },
+  updateCustomer: (customerId: number, data: CustomerUpdate): Promise<CustomerResponse> =>
+    api.put('/v1/customers/' + customerId, data, undefined, CustomerResponseSchema),
 
-  updateCustomerStatus: (customerId: number, data: CustomerStatusUpdate) => {
-    return request.patch<CustomerResponse>(`/v1/customers/${customerId}/status`, data)
-  },
+  updateCustomerStatus: (customerId: number, data: CustomerStatusUpdate): Promise<CustomerResponse> =>
+    api.patch('/v1/customers/' + customerId + '/status', data, undefined, CustomerResponseSchema),
 
-  markAsLost: (customerId: number, data: CustomerLoseRequest) => {
-    return request.patch<CustomerResponse>(`/v1/customers/${customerId}/lose`, data)
-  },
+  markAsLost: (customerId: number, data: CustomerLoseRequest): Promise<CustomerResponse> =>
+    api.patch('/v1/customers/' + customerId + '/lose', data, undefined, CustomerResponseSchema),
 
-  deleteCustomer: (customerId: number) => {
-    return request.delete<{ message: string }>(`/v1/customers/${customerId}`)
-  },
+  deleteCustomer: (customerId: number): Promise<{ message: string }> =>
+    api.delete('/v1/customers/' + customerId),
 
-  returnToPool: (customerId: number, data: CustomerReturnRequest) => {
-    return request.post<CustomerReturnResponse>(`/v1/customers/${customerId}/return-to-pool`, data)
-  },
+  returnToPool: (customerId: number, data: CustomerReturnRequest): Promise<CustomerReturnResponse> =>
+    api.post('/v1/customers/' + customerId + '/return-to-pool', data, undefined, CustomerReturnResponseSchema),
 
-  claimCustomer: (customerId: number, data: CustomerClaimRequest) => {
-    return request.post<CustomerResponse>(`/v1/customers/${customerId}/claim`, data)
-  },
+  claimCustomer: (customerId: number, data: CustomerClaimRequest): Promise<CustomerResponse> =>
+    api.post('/v1/customers/' + customerId + '/claim', data, undefined, CustomerResponseSchema),
 
-  getPublicCustomers: (params?: PublicCustomerQueryParams) => {
-    return request.get<CustomerResponse[]>('/v1/customers/public/list', { params })
-  },
+  getPublicCustomers: (params?: PublicCustomerQueryParams): Promise<CustomerResponse[]> =>
+    api.get<CustomerResponse[]>('/v1/customers/public/list', { params }),
 
-  getOwnerFilterOptions: () => {
-    return request.get<OwnerFilterOption[]>('/v1/filter-options/owners')
-  },
+  getOwnerFilterOptions: (): Promise<OwnerFilterOption[]> =>
+    api.get<OwnerFilterOption[]>('/v1/filter-options/owners'),
 
-  getIndustryOptions: () => {
-    return request.get<CustomerIndustryOption[]>('/v1/customers/industries')
-  },
+  getIndustryOptions: (): Promise<CustomerIndustryOption[]> =>
+    api.get<CustomerIndustryOption[]>('/v1/customers/industries'),
 
-  createContact: (customerId: number, data: ContactCreate) => {
-    return request.post<ContactResponse>(`/v1/customers/${customerId}/contacts`, data)
-  },
+  createContact: (customerId: number, data: ContactCreate): Promise<ContactResponse> =>
+    api.post('/v1/customers/' + customerId + '/contacts', data, undefined, ContactResponseSchema),
 
-  getContacts: (customerId: number) => {
-    return request.get<ContactResponse[]>(`/v1/customers/${customerId}/contacts`)
-  },
+  getContacts: (customerId: number): Promise<ContactResponse[]> =>
+    api.get<ContactResponse[]>('/v1/customers/' + customerId + '/contacts'),
 
-  updateContact: (contactId: number, data: ContactUpdate) => {
-    return request.put<ContactResponse>(`/v1/customers/contacts/${contactId}`, data)
-  },
+  updateContact: (contactId: number, data: ContactUpdate): Promise<ContactResponse> =>
+    api.put('/v1/customers/contacts/' + contactId, data, undefined, ContactResponseSchema),
 
-  setPrimaryContact: (contactId: number) => {
-    return request.patch<ContactResponse>(`/v1/customers/contacts/${contactId}/set-primary`)
-  },
+  setPrimaryContact: (contactId: number): Promise<ContactResponse> =>
+    api.patch('/v1/customers/contacts/' + contactId + '/set-primary', undefined, undefined, ContactResponseSchema),
 
-  deleteContact: (contactId: number) => {
-    return request.delete<{ message: string }>(`/v1/customers/contacts/${contactId}`)
-  },
+  deleteContact: (contactId: number): Promise<{ message: string }> =>
+    api.delete('/v1/customers/contacts/' + contactId),
 
-  getStatistics: () => {
-    return request.get<CustomerStatistics>('/v1/customers/statistics/summary')
-  },
+  getStatistics: (): Promise<CustomerStatistics> =>
+    api.get('/v1/customers/statistics/summary', undefined, CustomerStatisticsSchema),
 
-  getTrend: (days = 30) => {
-    return request.get<CustomerTrend[]>('/v1/customers/statistics/trend', {
-      params: { days }
-    })
-  },
+  getTrend: (days = 30): Promise<CustomerTrend[]> =>
+    api.get<CustomerTrend[]>('/v1/customers/statistics/trend', { params: { days } }),
 
-  getContracts: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }) => {
-    return request.get<ContractListResponse[]>(`/v1/customers/${customerId}/contracts`, { params })
-  },
+  getContracts: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }): Promise<ContractListResponse[]> =>
+    api.get<ContractListResponse[]>('/v1/customers/' + customerId + '/contracts', { params }),
 
-  getPaymentPlans: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }) => {
-    return request.get<PaymentPlanResponse[]>(`/v1/customers/${customerId}/payment-plans`, { params })
-  },
+  getPaymentPlans: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }): Promise<PaymentPlanResponse[]> =>
+    api.get<PaymentPlanResponse[]>('/v1/customers/' + customerId + '/payment-plans', { params }),
 
-  getInvoices: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }) => {
-    return request.get<InvoiceApplicationResponse[]>(`/v1/customers/${customerId}/invoices`, { params })
-  },
+  getInvoices: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }): Promise<InvoiceApplicationResponse[]> =>
+    api.get<InvoiceApplicationResponse[]>('/v1/customers/' + customerId + '/invoices', { params }),
 
-  regenerateProfile: (customerId: number) => {
-    return request.post<{ message: string }>(`/v1/customers/${customerId}/regenerate-profile`)
-  }
+  regenerateProfile: (customerId: number): Promise<{ message: string }> =>
+    api.post('/v1/customers/' + customerId + '/regenerate-profile')
 }
 
 export default customerApi
