@@ -166,12 +166,7 @@ const loadAllData = async (customerId: number): Promise<void> => {
   latestLoadRequestId = loadRequestId
   loading.value = true
 
-  // 🔍 调试日志：开始加载数据
-  console.log('🔍 [loadAllData] 开始加载客户详情, customerId:', customerId, 'loadRequestId:', loadRequestId)
-
   try {
-    console.log('🔍 [loadAllData] 开始并发请求所有 API...')
-
     const [
       customerDetail,
       scoreData,
@@ -182,49 +177,20 @@ const loadAllData = async (customerId: number): Promise<void> => {
       licenseApplicationsData,
       deploymentsData
     ] = await Promise.all([
-      customerApi.getCustomerDetail(customerId).then(data => {
-        console.log('🔍 [loadAllData] getCustomerDetail 成功:', data)
-        return data
-      }).catch(error => {
-        console.error('🔍 [loadAllData] getCustomerDetail 失败:', error)
-        throw error
-      }),
-      getCustomerScore(customerId).catch((error) => {
-        console.log('🔍 [loadAllData] getCustomerScore 失败（已处理）:', error)
-        return null
-      }),
-      customerFollowUpApi.getFollowUps(customerId).catch((error) => {
-        console.log('🔍 [loadAllData] getFollowUps 失败（已处理）:', error)
-        return []
-      }),
-      opportunityApi.getOpportunities({ customer_id: customerId }).catch((error) => {
-        console.log('🔍 [loadAllData] getOpportunities 失败（已处理）:', error)
-        return []
-      }),
-      contractApi.getCustomerContracts(customerId).catch((error) => {
-        console.log('🔍 [loadAllData] getCustomerContracts 失败（已处理）:', error)
-        return []
-      }),
-      invoiceApi.getInvoiceTitles(customerId).catch((error) => {
-        console.log('🔍 [loadAllData] getInvoiceTitles 失败（已处理）:', error)
-        return { invoice_titles: [] }
-      }),
-      licenseApplicationApi.list(customerId).catch((error) => {
-        console.log('🔍 [loadAllData] licenseApplicationApi.list 失败（已处理）:', error)
-        return []
-      }),
-      deploymentApi.list(customerId).catch((error) => {
-        console.log('🔍 [loadAllData] deploymentApi.list 失败（已处理）:', error)
-        return []
-      })
+      customerApi.getCustomerDetail(customerId),
+      getCustomerScore(customerId).catch(() => null),
+      customerFollowUpApi.getFollowUps(customerId).catch(() => []),
+      opportunityApi.getOpportunities({ customer_id: customerId }).catch(() => []),
+      contractApi.getCustomerContracts(customerId).catch(() => []),
+      invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
+      licenseApplicationApi.list(customerId).catch(() => []),
+      deploymentApi.list(customerId).catch(() => [])
     ])
 
     if (loadRequestId !== latestLoadRequestId) {
-      console.log('🔍 [loadAllData] 请求被取消，loadRequestId 不匹配')
       return
     }
 
-    console.log('🔍 [loadAllData] 所有请求成功，开始赋值数据...')
     customer.value = customerDetail
     score.value = scoreData
     followUps.value = followUpsData
@@ -233,40 +199,28 @@ const loadAllData = async (customerId: number): Promise<void> => {
     invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
     licenseApplications.value = licenseApplicationsData
     deployments.value = deploymentsData
-    console.log('🔍 [loadAllData] 数据赋值完成')
 
-    // Load payment plans for each contract
     if (contractsData.length > 0) {
-      console.log('🔍 [loadAllData] 开始加载回款计划...')
       const paymentPlanPromises = contractsData.map((contract) =>
         paymentApi.getPaymentPlans(contract.id).catch(() => [])
       )
       const paymentPlanResults = await Promise.all(paymentPlanPromises)
       if (loadRequestId !== latestLoadRequestId) {
-        console.log('🔍 [loadAllData] 请求被取消，loadRequestId 不匹配')
         return
       }
       paymentPlans.value = paymentPlanResults.flat()
-      console.log('🔍 [loadAllData] 回款计划加载完成，数量:', paymentPlans.value.length)
+    } else {
+      paymentPlans.value = []
     }
 
   } catch (error) {
     if (loadRequestId !== latestLoadRequestId) {
-      console.log('🔍 [loadAllData] 错误被取消，loadRequestId 不匹配')
       return
     }
-    console.error('🔍 [loadAllData] 捕获到错误:', error)
-    const errorType = error instanceof Error ? error.constructor.name : typeof error
-    const errorName = error instanceof Error ? error.name : '-'
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    console.error('🔍 [loadAllData] 错误类型:', errorType)
-    console.error('🔍 [loadAllData] 错误名称:', errorName)
-    console.error('🔍 [loadAllData] 错误消息:', errorMessage)
     handleApiError(error, '加载客户详情')
   } finally {
     if (loadRequestId === latestLoadRequestId) {
       loading.value = false
-      console.log('🔍 [loadAllData] 加载完成')
     }
   }
 }
