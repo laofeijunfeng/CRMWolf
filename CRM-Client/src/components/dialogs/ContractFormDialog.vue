@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -41,11 +41,15 @@ import {
 import { handleApiError } from '@/utils/errorHandler'
 import contractApi, { type ContractCreate, type ContractUpdate, type ContractResponse, type LicenseType } from '@/api/contract'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
-import customerApi, { type ContactResponse } from '@/api/customer'
+import customerApi, { type ContactResponse, type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
 
 // Zod schema for form validation - use coerce for number fields
 const schema = toTypedSchema(
   z.object({
+    customer_id: z.string().min(1, '请选择客户').refine((value) => {
+      const parsed = Number(value)
+      return Number.isInteger(parsed) && parsed > 0
+    }, '请选择客户'),
     contract_name: z.string().min(1, '请输入合同名称').max(100, '合同名称不能超过100字'),
     opportunity_id: z.coerce.number().min(1, '请选择商机'),
     signing_contact_id: z.coerce.number().min(1, '请选择签署联系人'),
@@ -59,7 +63,9 @@ const schema = toTypedSchema(
 )
 
 interface Props {
-  customerId: number
+  customerId?: number | undefined
+  customerName?: string | undefined
+  customerLocked?: boolean
   open: boolean
   contract?: ContractResponse | null
 }
@@ -69,13 +75,20 @@ interface Emits {
   (e: 'success'): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  customerId: undefined,
+  customerName: undefined,
+  customerLocked: false,
+  open: false,
+  contract: null
+})
 const emit = defineEmits<Emits>()
 
 // VeeValidate form setup
-const { handleSubmit, resetForm, setValues, values } = useForm({
+const { handleSubmit, resetForm, setValues, setFieldValue, values } = useForm({
   validationSchema: schema,
   initialValues: {
+    customer_id: '',
     contract_name: '',
     user_count: 1,
     total_amount: 0,
@@ -92,6 +105,38 @@ const opportunities = ref<OpportunityListResponse[]>([])
 const contacts = ref<ContactResponse[]>([])
 const loadingOpportunities = ref(false)
 const loadingContacts = ref(false)
+const customers = ref<CustomerOption[]>([])
+const loadingCustomers = ref(false)
+const customerSearchKeyword = ref('')
+
+interface CustomerOption {
+  id: number
+  account_name: string
+}
+
+type CustomerListResponse = CustomerResponse[] | { data?: { items?: CustomerResponse[] } }
+
+const normalizeCustomerList = (response: CustomerListResponse): CustomerOption[] => {
+  if (Array.isArray(response)) {
+    return response.map(c => ({ id: c.id, account_name: c.account_name }))
+  }
+  return response.data?.items?.map(c => ({ id: c.id, account_name: c.account_name })) ?? []
+}
+
+const getLockedCustomerOption = (): CustomerOption | null => {
+  if (props.customerId === undefined) return null
+  const trimmedName = props.customerName?.trim()
+  return {
+    id: props.customerId,
+    account_name: trimmedName !== undefined && trimmedName !== '' ? trimmedName : `客户 #${props.customerId}`,
+  }
+}
+
+const setLockedCustomerOption = (): void => {
+  const lockedCustomer = getLockedCustomerOption()
+  if (lockedCustomer === null) return
+  customers.value = [lockedCustomer]
+}
 
 // Computed property for edit mode
 const isEdit = computed(() => !!props.contract)
@@ -109,10 +154,10 @@ const licenseTypeOptions = [
 ]
 
 // Fetch available opportunities for this customer
-async function fetchOpportunities(): Promise<void> {
+async function fetchOpportunities(customerId: number): Promise<void> {
   loadingOpportunities.value = true
   try {
-    opportunities.value = await opportunityApi.getAvailableForContract(props.customerId)
+    opportunities.value = await opportunityApi.getAvailableForContract(customerId)
   } catch (error) {
     handleApiError(error, '获取商机列表')
   } finally {
@@ -121,15 +166,40 @@ async function fetchOpportunities(): Promise<void> {
 }
 
 // Fetch contacts for this customer
-async function fetchContacts(): Promise<void> {
+async function fetchContacts(customerId: number): Promise<void> {
   loadingContacts.value = true
   try {
-    contacts.value = await customerApi.getContacts(props.customerId)
+    contacts.value = await customerApi.getContacts(customerId)
   } catch (error) {
     handleApiError(error, '获取联系人列表')
   } finally {
     loadingContacts.value = false
   }
+}
+
+// Fetch customers for dropdown
+async function fetchCustomers(keyword?: string): Promise<void> {
+  loadingCustomers.value = true
+  try {
+    const params: { limit: number; keyword?: string } = { limit: 50 }
+    const normalizedKeyword = keyword?.trim()
+    if (normalizedKeyword !== undefined && normalizedKeyword !== '') {
+      params.keyword = normalizedKeyword
+    }
+    const response = await customerApi.getCustomers(params)
+    customers.value = normalizeCustomerList(response)
+  } catch (error) {
+    handleApiError(error, '获取客户列表')
+  } finally {
+    loadingCustomers.value = false
+  }
+}
+
+// Handle customer search
+async function handleCustomerSearch(keyword: string | number): Promise<void> {
+  const normalizedKeyword = String(keyword).trim()
+  customerSearchKeyword.value = normalizedKeyword
+  await fetchCustomers(normalizedKeyword || undefined)
 }
 
 // Watch for form changes
@@ -138,11 +208,14 @@ watch(values, () => {
 }, { deep: true })
 
 // Reset or populate form when dialog opens
-watch(() => props.open, (newOpen) => {
+watch(() => props.open, async (newOpen) => {
   if (newOpen) {
+    customerSearchKeyword.value = ''
+
     if (props.contract) {
       // Edit mode: populate form with contract data
       setValues({
+        customer_id: props.contract.customer_id.toString(),
         contract_name: props.contract.contract_name,
         opportunity_id: props.contract.opportunity_id,
         signing_contact_id: props.contract.signing_contact_id,
@@ -153,10 +226,27 @@ watch(() => props.open, (newOpen) => {
         signing_date: props.contract.signing_date ?? null,
         effective_date: props.contract.effective_date ?? null
       })
+
+      // Fetch customer for display
+      if (props.contract.customer_id) {
+        try {
+          const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(props.contract.customer_id)
+          customers.value = [{ id: customerDetail.id, account_name: customerDetail.account_name }]
+        } catch (error) {
+          handleApiError(error, '获取客户详情')
+        }
+      }
+
+      // Fetch opportunities and contacts for this customer
+      await fetchOpportunities(props.contract.customer_id)
+      await fetchContacts(props.contract.customer_id)
     } else {
       // Create mode: reset form
+      const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
+
       resetForm({
         values: {
+          customer_id: initialCustomerId,
           contract_name: '',
           user_count: 1,
           total_amount: 0,
@@ -164,7 +254,32 @@ watch(() => props.open, (newOpen) => {
           subscription_years: 1
         }
       })
+
+      if (props.customerLocked && props.customerId !== undefined) {
+        setLockedCustomerOption()
+        await fetchOpportunities(props.customerId)
+        await fetchContacts(props.customerId)
+      } else if (props.customerId === undefined) {
+        await fetchCustomers()
+      } else {
+        // customerId provided but not locked - fetch customer detail and dependent data
+        try {
+          const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(props.customerId)
+          customers.value = [{ id: customerDetail.id, account_name: customerDetail.account_name }]
+          await fetchOpportunities(props.customerId)
+          await fetchContacts(props.customerId)
+
+          // Auto-fill contract name based on customer
+          setFieldValue('contract_name', `${customerDetail.account_name}合同`)
+        } catch (error) {
+          if (props.customerLocked) {
+            setLockedCustomerOption()
+          }
+          handleApiError(error, '获取客户详情')
+        }
+      }
     }
+
     // Reset dirty state after form is populated/reset
     setTimeout(() => {
       isDirty.value = false
@@ -172,10 +287,18 @@ watch(() => props.open, (newOpen) => {
   }
 })
 
-// Fetch data on mount
-onMounted(() => {
-  fetchOpportunities()
-  fetchContacts()
+// Watch customer_id changes to fetch opportunities and contacts
+watch(() => values.customer_id, async (newCustomerId) => {
+  const customerId = Number(newCustomerId)
+  if (customerId > 0 && !props.customerLocked) {
+    // Clear previous selections
+    setFieldValue('opportunity_id', undefined as unknown as number)
+    setFieldValue('signing_contact_id', undefined as unknown as number)
+
+    // Fetch dependent data
+    await fetchOpportunities(customerId)
+    await fetchContacts(customerId)
+  }
 })
 
 // Form submission
@@ -200,7 +323,7 @@ const onSubmit = handleSubmit(async (formValues) => {
       // Create mode
       const data: ContractCreate = {
         contract_name: formValues['contract_name'],
-        customer_id: props.customerId,
+        customer_id: Number(formValues['customer_id']),
         opportunity_id: formValues['opportunity_id'],
         signing_contact_id: formValues['signing_contact_id'],
         user_count: formValues['user_count'],
@@ -253,6 +376,51 @@ function continueEditing(): void {
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
+        <!-- Customer (required, only in create mode) -->
+        <FormField v-if="!isEdit" v-slot="{ value, handleChange }" name="customer_id">
+          <FormItem>
+            <FormLabel>所属客户 <span class="text-destructive">*</span></FormLabel>
+            <Select
+              :model-value="value"
+              :disabled="customerLocked === true"
+              @update:model-value="handleChange"
+              @update:open="(open: boolean) => { if (open && !customerLocked) fetchCustomers(customerSearchKeyword) }"
+            >
+              <FormControl>
+                <SelectTrigger class="h-11 sm:h-8">
+                  <SelectValue :placeholder="customerLocked ? '' : '请选择客户'" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <div v-if="!customerLocked" class="p-2 border-b">
+                  <Input
+                    :model-value="customerSearchKeyword"
+                    placeholder="搜索客户名称"
+                    class="h-9"
+                    @update:model-value="handleCustomerSearch"
+                    @keydown.stop
+                    @pointerdown.stop
+                  />
+                </div>
+                <div v-if="loadingCustomers" class="px-2 py-1.5 text-sm text-muted-foreground">
+                  加载中...
+                </div>
+                <div v-else-if="customers.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
+                  暂无客户
+                </div>
+                <SelectItem
+                  v-for="customer in customers"
+                  :key="customer.id"
+                  :value="customer.id.toString()"
+                >
+                  {{ customer.account_name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
         <!-- Contract Name (required) -->
         <FormField v-slot="{ componentField }" name="contract_name">
           <FormItem>
