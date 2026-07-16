@@ -56,7 +56,6 @@ const emit = defineEmits<{
   'refresh': []
   'open-full-page': [opportunityId: number]
   'edit': [opportunityId: number]
-  'view-contract': [contractId: number]
   'create-contract': [{
     opportunityId: number
     customerId: number
@@ -227,8 +226,7 @@ function handleCreateContract(): void {
 }
 
 function handleViewContract(): void {
-  if (!relatedContract.value) return
-  emit('view-contract', relatedContract.value.id)
+  toast.info('请在合同列表查看合同详情')
 }
 
 // TODO: 打开完整详情功能待优化，暂时用 toast 提示

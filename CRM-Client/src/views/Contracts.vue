@@ -33,6 +33,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
+import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -49,6 +50,7 @@ const activeTab = ref('all')
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const editingContract = ref<ContractListResponse | null>(null)
+const viewingContractId = ref<number | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -198,7 +200,7 @@ const handleCreateSuccess = (): void => {
 }
 
 const handleViewDetail = (record: ContractListResponse): void => {
-  router.push(`/contracts/${record.id}`)
+  viewingContractId.value = record.id
 }
 
 const handleEdit = (record: ContractListResponse): void => {
@@ -429,6 +431,13 @@ watchEffect(() => {
       v-model:open="showEditDialog"
       :contract="editingContract"
       @success="handleEditSuccess"
+    />
+
+    <!-- Contract Detail Sheet -->
+    <ContractDetailSheet
+      :contract-id="viewingContractId"
+      :visible="viewingContractId !== null"
+      @update:visible="(v: boolean) => { if (!v) viewingContractId = null }"
     />
   </div>
 </template>

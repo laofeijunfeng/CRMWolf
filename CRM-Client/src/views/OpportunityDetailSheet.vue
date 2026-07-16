@@ -63,11 +63,6 @@ function handleContractSuccess(): void {
   // Refresh opportunity data if needed
   handleRefresh()
 }
-
-function handleViewContract(contractId: number): void {
-  closeSheet()
-  router.push(`/contracts/${contractId}`)
-}
 </script>
 
 <template>
@@ -78,7 +73,6 @@ function handleViewContract(contractId: number): void {
         :opportunity-id="opportunityId"
         @close="closeSheet"
         @refresh="handleRefresh"
-        @view-contract="handleViewContract"
         @create-contract="handleCreateContract"
       />
     </DetailSheetContent>
