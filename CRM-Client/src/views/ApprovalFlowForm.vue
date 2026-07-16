@@ -340,7 +340,7 @@ const form = ref<ApprovalFlow & { nodes: NodeWithRequired[] }>({
   min_amount: null,
   max_amount: null,
   license_type: '',
-  business_type: 'CONTRACT',
+  business_type: '' as 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' | '',
   is_active: 1,
   nodes: []
 })
@@ -352,6 +352,9 @@ const rules = {
   flow_code: [
     { required: true, message: '请输入流程编码' },
     { pattern: /^[A-Z_][A-Z0-9_]*$/, message: '流程编码只能包含大写字母、数字和下划线，且必须以字母或下划线开头' }
+  ],
+  business_type: [
+    { required: true, message: '请选择适用单据类型', trigger: 'change' }
   ]
 }
 
