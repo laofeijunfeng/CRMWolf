@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 class ApprovalService:
     """审批服务"""
-    
+
     @staticmethod
-    def submit_for_approval(db: Session, contract_id: int):
+    def submit_for_approval(db: Session, contract_id: int) -> Optional['Approval']:
         """
         创建合同后自动提交审批
 
@@ -26,34 +26,35 @@ class ApprovalService:
         - 只有草稿状态的合同可以提交
         - 系统自动匹配对应的审批流程
         - 创建审批实例并流转到第一个节点
-        - 向首个节点的审批人发送通知（通过 notification_service）
+        - 向首个节点的审批人发送通知（由 API 层异步发送）
 
         注意：
         - 保留撤回功能，用户可以手动撤回审批
         - 撤回后合同回到草稿状态，可以修改后重新提交
+
+        Returns:
+            Approval: 创建的审批实例（如果成功），None（如果失败或跳过）
         """
-        import asyncio
         from app.models.contract import Contract
         from app.models.approval import ApprovalFlow, Approval, ApprovalStatus, ApprovalAction, BusinessType
         from app.crud.approval import approval_flow_crud, approval_crud
-        from app.services.notification import notification_service_factory
 
         contract = db.query(Contract).filter(Contract.id == contract_id).first()
         if not contract:
-            return
+            return None
 
         if contract.status != ContractStatus.DRAFT:
-            return
+            return None
 
         existing_approval = approval_crud.get_by_contract_id(db, contract_id)
         if existing_approval and existing_approval.status == ApprovalStatus.PENDING:
-            return
+            return None
 
         # A5 修复：match_flow(contract) 返回 tuple (flow, error_msg)，需要正确解构
         flow, error_msg = approval_flow_crud.match_flow(db, contract)
         if not flow:
             logger.warning(f"合同自动提交审批失败：{error_msg or '未匹配审批流程'}")
-            return
+            return None
 
         try:
             from app.crud.user import user_crud
@@ -72,33 +73,15 @@ class ApprovalService:
 
             db.refresh(approval)
 
-            # 发送审批通知
-            try:
-                current_node = approval.current_node
-                if current_node and current_node.approver_ids:
-                    approver_id = current_node.approver_ids[0]
-                    approver = user_crud.get_by_id(db, int(approver_id))
+            # 注意：通知发送移至 API 层（异步上下文）
+            # CRUD 层不再包含异步通知逻辑，避免 "no running event loop" 错误
+            # API 层通过返回的 approval 对象发送通知
 
-                    if approver:
-                        notification_service = notification_service_factory(db, contract.team_id)
-                        asyncio.run(
-                            notification_service.notify_approval_pending(
-                                entity_type=BusinessType.CONTRACT.value,
-                                entity_name=contract.contract_name,
-                                flow_name=flow.name if flow else "",
-                                node_name=current_node.name if current_node else "",
-                                approver_open_id=approver.open_id or "",
-                                approver_name=approver.name or "",
-                                business_id=contract.id,
-                            )
-                        )
-                        logger.info(f"合同审批通知发送成功（contract_id={contract_id}）")
-            except Exception as e:
-                # 通知失败不阻断业务流程
-                logger.error(f"合同审批通知发送失败（contract_id={contract_id}）: {e}", exc_info=True)
+            return approval
 
         except Exception as e:
             logger.error(f"合同提交审批异常（contract_id={contract_id}）: {e}", exc_info=True)
+            return None
 
 
 class ContractCRUD:
@@ -289,9 +272,10 @@ class ContractCRUD:
                 "customerName": customer.account_name if customer else None
             }
         )
-        
-        ApprovalService.submit_for_approval(db, db_obj.id)
-        
+
+        # 注意：审批提交移至 API 层（异步上下文）
+        # API 层调用 ApprovalService.submit_for_approval() 获取 approval 后发送通知
+
         return db_obj
     
     def create_from_opportunity(
@@ -339,9 +323,9 @@ class ContractCRUD:
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
-        
-        ApprovalService.submit_for_approval(db, db_obj.id)
-        
+
+        # 注意：审批提交移至 API 层（异步上下文）
+
         return db_obj
     
     def update(

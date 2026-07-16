@@ -25,6 +25,7 @@ import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { opportunityApi, type Opportunity, type OpportunityListParams } from '@/api/opportunity'
 import customerApi from '@/api/customer'
+import type { CustomerListResponse } from '@/schemas/customer'
 import procurementApi from '@/api/procurement'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
@@ -33,6 +34,8 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
+import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
+import OpportunityLoseDialog from '@/components/dialogs/OpportunityLoseDialog.vue'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -45,7 +48,7 @@ const headerStore = useHeaderStore()
 // ==================== State ====================
 const loading = ref(false)
 const tableData = ref<Opportunity[]>([])
-const customers = ref<any[]>([])
+const customers = ref<CustomerListResponse[]>([])
 
 // 抽屉状态
 const sheetVisible = ref(false)
@@ -57,6 +60,14 @@ const opportunityDialogOpen = ref(false)
 // 编辑商机弹窗状态
 const editDialogOpen = ref(false)
 const editingOpportunity = ref<Opportunity | null>(null)
+
+// 赢单弹窗
+const winDialogOpen = ref(false)
+const selectedOpportunityIdForWin = ref<number | null>(null)
+
+// 输单弹窗
+const loseDialogOpen = ref(false)
+const selectedOpportunityIdForLose = ref<number | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -145,7 +156,7 @@ const canDeleteRow = (row: Opportunity): boolean => {
 const fetchCustomers = async (): Promise<void> => {
   try {
     const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
-    customers.value = response || []
+    customers.value = response ?? []
   } catch (error) {
     handleApiError(error, '获取客户列表')
   }
@@ -184,7 +195,7 @@ const fetchOpportunities = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, any>): void => {
+const handleSearch = (values: Record<string, string>): void => {
   Object.assign(filterValues, values)
   pagination.current = 1
   fetchOpportunities()
@@ -322,14 +333,24 @@ const handleAdvanceStage = async (record: Opportunity): Promise<void> => {
   }
 }
 
-const handleMarkAsWon = async (record: Opportunity): Promise<void> => {
-  // TODO: Show dialog to input actual_amount and actual_closing_date
-  router.push(`/opportunities/${record.id}/win`)
+const handleMarkAsWon = (record: Opportunity): void => {
+  selectedOpportunityIdForWin.value = record.id
+  winDialogOpen.value = true
 }
 
-const handleMarkAsLost = async (record: Opportunity): Promise<void> => {
-  // TODO: Show dialog to input loss_reason
-  router.push(`/opportunities/${record.id}/lose`)
+const handleMarkAsLost = (record: Opportunity): void => {
+  selectedOpportunityIdForLose.value = record.id
+  loseDialogOpen.value = true
+}
+
+const handleWinSuccess = (): void => {
+  winDialogOpen.value = false
+  fetchOpportunities()
+}
+
+const handleLoseSuccess = (): void => {
+  loseDialogOpen.value = false
+  fetchOpportunities()
 }
 
 // ==================== TableRowActions 配置 ====================
@@ -417,7 +438,7 @@ watchEffect(() => {
       label: '新建商机',
       icon: Plus,
       type: 'primary',
-      handler: () => { opportunityDialogOpen.value = true },
+      handler: (): void => { opportunityDialogOpen.value = true },
       visible: canCreateOpportunity.value,
       ariaLabel: '新建商机'
     }
@@ -560,6 +581,22 @@ watchEffect(() => {
       customer-locked
       @update:open="editDialogOpen = $event"
       @success="handleEditSuccess"
+    />
+
+    <!-- 赢单弹窗 -->
+    <OpportunityWinDialog
+      :opportunity-id="selectedOpportunityIdForWin"
+      :open="winDialogOpen"
+      @update:open="winDialogOpen = $event"
+      @success="handleWinSuccess"
+    />
+
+    <!-- 输单弹窗 -->
+    <OpportunityLoseDialog
+      :opportunity-id="selectedOpportunityIdForLose"
+      :open="loseDialogOpen"
+      @update:open="loseDialogOpen = $event"
+      @success="handleLoseSuccess"
     />
   </div>
 </template>
