@@ -89,7 +89,7 @@ const licenseApplicationApi = {
   },
 
   deleteApplication: (applicationId: number) => {
-    return request.delete<void>(`/v1/license-applications/${applicationId}`)
+    return request.delete(`/v1/license-applications/${applicationId}`)
   },
 
   submitApplication: (applicationId: number) => {
