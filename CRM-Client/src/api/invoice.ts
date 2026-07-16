@@ -179,6 +179,31 @@ const invoiceApi = {
     })
   },
 
+  /**
+   * 发票开票（审批通过后调用）
+   * @param applicationId 发票申请 ID
+   * @param data 开票数据（文件和发票号均为可选）
+   */
+  markIssued: (applicationId: number, data: {
+    file?: File
+    invoice_number?: string
+  }): Promise<InvoiceApplicationResponse> => {
+    const formData = new FormData()
+    if (data.file) {
+      formData.append('file', data.file)
+    }
+    if (data.invoice_number) {
+      formData.append('invoice_number', data.invoice_number)
+    }
+    return request.post<InvoiceApplicationResponse>(
+      `/v1/invoice-applications/${applicationId}/mark-issued`,
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      }
+    )
+  },
+
   getPaymentPlanInvoices: (paymentPlanId: number) => {
     return request.get<InvoiceApplicationResponse[]>(`/v1/payment-plans/${paymentPlanId}/invoices`)
   }

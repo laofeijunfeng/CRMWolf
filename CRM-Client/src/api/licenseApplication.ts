@@ -116,6 +116,21 @@ const licenseApplicationApi = {
     return request.get(`/v1/license-applications/${applicationId}/export`, {
       responseType: 'blob'
     })
+  },
+
+  /**
+   * 发放 License（审批通过后调用）
+   * @param applicationId License 申请 ID
+   * @param data 发放数据（license_info 必填）
+   */
+  issueLicense: (applicationId: number, data: {
+    license_info: string
+    comment?: string
+  }): Promise<LicenseApplicationResponse> => {
+    return request.post<LicenseApplicationResponse>(
+      `/v1/license-applications/${applicationId}/issue`,
+      data
+    )
   }
 }
 
