@@ -418,6 +418,13 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- 合同编辑弹窗 -->
+    <ContractFormDialog
+      v-model:open="contractEditVisible"
+      :contract="editingContract"
+      @success="handleContractEditSuccess"
+    />
   </div>
 </template>
 
@@ -443,11 +450,14 @@ import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import WolfEmpty from '@/components/WolfEmpty.vue'
+import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import { useApprovalStore } from '@/stores/approval'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency, formatDateRelative } from '@/utils/format'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
+import contractApi from '@/api/contract'
 import type { EntityType, ApprovalListItem } from '@/schemas/approvalGeneric'
+import type { ContractResponse } from '@/api/contract'
 
 type Tab = 'pending' | 'processed' | 'submitted'
 type LoadError = null | 'error' | 'forbidden'
@@ -476,6 +486,11 @@ const triggerRowIndex = ref<number>(-1)
 const focusedRowEl = ref<HTMLElement | null>(null)
 
 const resubmitPendingId = ref<number | null>(null)
+
+// 合同编辑弹窗状态
+const contractEditVisible = ref<boolean>(false)
+const editingContract = ref<ContractResponse | null>(null)
+const contractLoading = ref<boolean>(false)
 
 // 移动端检测（响应式）
 const isMobile = ref<boolean>(false)
@@ -719,11 +734,26 @@ const onApprovalActionDone = (): void => {
 // 对应编辑页（PAYMENT 无独立编辑页，跳列表页 + info 提示），避免审批中心耦合
 // 各实体的 update API（COMPONENTS.md「视图不直接发业务 update」亦不在此处内嵌
 // 多条合同/回款/发票的 update 调用，保持中心单一职责）。
-// 修复（Important #1）：原 window.location.assign(`#...`) 在 createWebHistory 模式
-// 下不切 SPA 路由（仅改 hash 不导航）；改用 router.push 走真实 SPA 路由跳转。
+// 修复：合同编辑使用弹窗而非路由跳转
 const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
   resubmitPendingId.value = row.id
   try {
+    // 合同类型：直接打开编辑弹窗
+    if (row.business_type === 'CONTRACT') {
+      contractLoading.value = true
+      try {
+        const contract = await contractApi.getContract(row.business_id)
+        editingContract.value = contract
+        contractEditVisible.value = true
+      } catch (error) {
+        toast.error('获取合同信息失败')
+      } finally {
+        contractLoading.value = false
+      }
+      return
+    }
+
+    // 其他实体类型：路由跳转
     const confirmed = await createConfirmDialog({
       title: '修改并重新提交',
       message: `将跳转到 ${businessTypeLabel(row.business_type)} 编辑页修改后重新提交审批。是否继续？`,
@@ -732,17 +762,16 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
       variant: 'default'
     })
     if (!confirmed) return
-    // 跳转到对应实体编辑页（route 由路由层声明，审批中心不内嵌 update 逻辑）
-    const route: Record<EntityType, string> = {
+    // 跳转到对应实体编辑页
+    const route: Record<Exclude<EntityType, 'CONTRACT'>, string> = {
       INVOICE: `/invoices/edit/${row.business_id}`,
-      CONTRACT: `/contracts/edit/${row.business_id}`,
       // 回款无独立编辑页（/payments 为列表页）：跳列表页 + info 提示，
       // 保证不白屏/不断旅程；用户在列表内修改后重新提交审批。
       PAYMENT: `/payments`,
       // License 申请在客户详情页的 License 管理 Tab 编辑
       LICENSE: `/customers/${row.customer_id}?tab=license-management`
     }
-    const target = route[row.business_type]
+    const target = route[row.business_type as Exclude<EntityType, 'CONTRACT'>]
     await router.push(target)
     // PAYMENT 目标是列表页，无法直接进入驳回回款的编辑入口——补 info 引导，
     // 旅程不断（比原 window.location.assign hash bug 强）。
@@ -757,6 +786,14 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
   } finally {
     resubmitPendingId.value = null
   }
+}
+
+// 合同编辑成功回调
+const handleContractEditSuccess = (): void => {
+  contractEditVisible.value = false
+  editingContract.value = null
+  toast.success('合同已修改，请重新提交审批')
+  fetchList()
 }
 
 // 移动端快速审批：同意（单条，无抽屉）
