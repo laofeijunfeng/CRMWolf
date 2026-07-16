@@ -29,6 +29,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { DatePicker } from '@/components/ui/date-picker'
 import OpportunityStageStepper from '@/components/OpportunityStageStepper.vue'
+import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import { opportunityApi, type Opportunity, type OpportunityWinRequest, type OpportunityLossRequest } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import { usePermissionStore } from '@/stores/permissions'
@@ -56,7 +57,11 @@ const emit = defineEmits<{
   'open-full-page': [opportunityId: number]
   'edit': [opportunityId: number]
   'view-contract': [contractId: number]
-  'create-contract': [opportunityId: number]
+  'create-contract': [{
+    opportunityId: number
+    customerId: number
+    customerName: string
+  }]
 }>()
 
 const permissionStore = usePermissionStore()
@@ -80,6 +85,9 @@ const loseForm = ref<OpportunityLossRequest>({
   loss_reason: ''
 })
 const loseSubmitting = ref(false)
+
+// 编辑弹窗状态
+const editDialogOpen = ref(false)
 
 const canEdit = computed(() =>
   permissionStore.hasAnyPermission(['opportunity:update', 'opportunity:edit_own', 'opportunity:edit_all'])
@@ -142,9 +150,17 @@ async function fetchRelatedContract(opportunityId: number): Promise<void> {
   }
 }
 
+// 编辑功能
 function handleEdit(): void {
   if (!opportunity.value) return
-  emit('edit', opportunity.value.id)
+  editDialogOpen.value = true
+}
+
+// 编辑成功回调
+function handleEditSuccess(): void {
+  editDialogOpen.value = false
+  fetchOpportunityDetail()
+  emit('refresh')
 }
 
 function handleShowWinDialog(): void {
@@ -203,7 +219,11 @@ async function handleLoseConfirm(): Promise<void> {
 
 function handleCreateContract(): void {
   if (!opportunity.value) return
-  emit('create-contract', opportunity.value.id)
+  emit('create-contract', {
+    opportunityId: opportunity.value.id,
+    customerId: opportunity.value.customer_id,
+    customerName: opportunity.value.customer_info?.account_name ?? opportunity.value.customer_name ?? ''
+  })
 }
 
 function handleViewContract(): void {
@@ -211,8 +231,10 @@ function handleViewContract(): void {
   emit('view-contract', relatedContract.value.id)
 }
 
+// TODO: 打开完整详情功能待优化，暂时用 toast 提示
 function handleOpenFullPage(): void {
-  emit('open-full-page', props.opportunityId)
+  toast.info('完整详情功能优化中')
+  // emit('open-full-page', props.opportunityId)
 }
 
 async function focusBackButton(): Promise<void> {
@@ -226,15 +248,15 @@ function retryFetchOpportunityDetail(): void {
   fetchOpportunityDetail()
 }
 
-function formatDate(dateStr: string | undefined): string {
-  if (dateStr === undefined || dateStr.trim() === '') return '-'
+function formatDate(dateStr: string | undefined | null): string {
+  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return '-'
   const date = new Date(dateStr)
   if (Number.isNaN(date.getTime())) return '-'
   return formatLocalDate(date)
 }
 
-function formatDateTime(dateStr: string | undefined): string {
-  if (dateStr === undefined || dateStr.trim() === '') return '-'
+function formatDateTime(dateStr: string | undefined | null): string {
+  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return '-'
   const date = new Date(dateStr)
   if (Number.isNaN(date.getTime())) return '-'
   const year = date.getFullYear()
@@ -664,6 +686,16 @@ watch(() => props.opportunityId, () => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- 编辑商机弹窗 -->
+    <OpportunityFormDialog
+      v-if="opportunity"
+      :open="editDialogOpen"
+      :opportunity="opportunity"
+      customer-locked
+      @update:open="editDialogOpen = $event"
+      @success="handleEditSuccess"
+    />
   </div>
 </template>
 

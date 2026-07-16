@@ -5,13 +5,20 @@
  * 仅负责 Sheet 容器与外层导航动作，详情内容由
  * OpportunityDetailContent.vue 复用组件承载。
  */
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Sheet
 } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
+import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
+
+interface CreateContractPayload {
+  opportunityId: number
+  customerId: number
+  customerName: string
+}
 
 interface Props {
   opportunityId: number | null
@@ -26,6 +33,11 @@ const emit = defineEmits<{
 
 const router = useRouter()
 
+// Contract dialog state
+const showContractDialog = ref(false)
+const contractDialogCustomerId = ref<number | undefined>(undefined)
+const contractDialogCustomerName = ref<string | undefined>(undefined)
+
 const visibleModel = computed({
   get: () => props.visible,
   set: (value: boolean) => emit('update:visible', value)
@@ -39,27 +51,22 @@ function handleRefresh(): void {
   emit('refresh')
 }
 
-function handleEdit(opportunityId: number): void {
-  closeSheet()
-  router.push(`/opportunities/${opportunityId}/edit`)
+function handleCreateContract(payload: CreateContractPayload): void {
+  // Open contract dialog with locked customer
+  contractDialogCustomerId.value = payload.customerId
+  contractDialogCustomerName.value = payload.customerName
+  showContractDialog.value = true
 }
 
-function handleCreateContract(opportunityId: number): void {
-  closeSheet()
-  router.push({
-    path: '/contracts/create',
-    query: { opportunityId: String(opportunityId) }
-  })
+function handleContractSuccess(): void {
+  showContractDialog.value = false
+  // Refresh opportunity data if needed
+  handleRefresh()
 }
 
 function handleViewContract(contractId: number): void {
   closeSheet()
   router.push(`/contracts/${contractId}`)
-}
-
-function handleOpenFullPage(opportunityId: number): void {
-  closeSheet()
-  router.push(`/opportunities/${opportunityId}`)
 }
 </script>
 
@@ -71,11 +78,18 @@ function handleOpenFullPage(opportunityId: number): void {
         :opportunity-id="opportunityId"
         @close="closeSheet"
         @refresh="handleRefresh"
-        @edit="handleEdit"
         @view-contract="handleViewContract"
         @create-contract="handleCreateContract"
-        @open-full-page="handleOpenFullPage"
       />
     </DetailSheetContent>
   </Sheet>
+
+  <!-- Contract Create Dialog -->
+  <ContractFormDialog
+    v-model:open="showContractDialog"
+    :customer-id="contractDialogCustomerId"
+    :customer-name="contractDialogCustomerName"
+    :customer-locked="true"
+    @success="handleContractSuccess"
+  />
 </template>

@@ -47,6 +47,8 @@ const loading = ref(false)
 const tableData = ref<ContractListResponse[]>([])
 const activeTab = ref('all')
 const showCreateDialog = ref(false)
+const showEditDialog = ref(false)
+const editingContract = ref<ContractListResponse | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -200,7 +202,14 @@ const handleViewDetail = (record: ContractListResponse): void => {
 }
 
 const handleEdit = (record: ContractListResponse): void => {
-  router.push(`/contracts/edit/${record.id}`)
+  editingContract.value = record
+  showEditDialog.value = true
+}
+
+const handleEditSuccess = (): void => {
+  showEditDialog.value = false
+  editingContract.value = null
+  fetchContractList()
 }
 
 const handleDelete = async (record: ContractListResponse): Promise<void> => {
@@ -413,6 +422,13 @@ watchEffect(() => {
     <ContractFormDialog
       v-model:open="showCreateDialog"
       @success="handleCreateSuccess"
+    />
+
+    <!-- Contract Edit Dialog -->
+    <ContractFormDialog
+      v-model:open="showEditDialog"
+      :contract="editingContract"
+      @success="handleEditSuccess"
     />
   </div>
 </template>
