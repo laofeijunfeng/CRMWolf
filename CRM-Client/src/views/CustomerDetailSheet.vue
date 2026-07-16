@@ -8,7 +8,7 @@
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
 import { ref, watch } from 'vue'
-import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
+import { useRouter } from 'vue-router'
 import {
   Sheet,
   SheetHeader,
@@ -57,7 +57,8 @@ import customerApi, { type CustomerDetailResponse, type ContactResponse } from '
 import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
-import type { PaymentPlanResponse, PaymentRecordInfo } from '@/api/payment'
+import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite } from '@/api/payment'
+import paymentApi from '@/api/payment'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
@@ -75,7 +76,6 @@ defineEmits<{
   'refresh': []
 }>()
 
-const route = useRoute()
 const router = useRouter()
 
 // ==================== State ====================
@@ -100,7 +100,7 @@ const selectedContractId = ref<number | null>(null)
 const contractSheetVisible = ref(false)
 const selectedPlanId = ref<number | null>(null)
 const planSheetVisible = ref(false)
-const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string } | null>(null)
+const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string; approval: ApprovalInfo | ApprovalInfoLite | null } | null>(null)
 const recordSheetVisible = ref(false)
 
 // ==================== Data Loading State ====================
@@ -234,6 +234,21 @@ const loadAllData = async (customerId: number): Promise<void> => {
     licenseApplications.value = licenseApplicationsData
     deployments.value = deploymentsData
     console.log('🔍 [loadAllData] 数据赋值完成')
+
+    // Load payment plans for each contract
+    if (contractsData.length > 0) {
+      console.log('🔍 [loadAllData] 开始加载回款计划...')
+      const paymentPlanPromises = contractsData.map((contract) =>
+        paymentApi.getPaymentPlans(contract.id).catch(() => [])
+      )
+      const paymentPlanResults = await Promise.all(paymentPlanPromises)
+      if (loadRequestId !== latestLoadRequestId) {
+        console.log('🔍 [loadAllData] 请求被取消，loadRequestId 不匹配')
+        return
+      }
+      paymentPlans.value = paymentPlanResults.flat()
+      console.log('🔍 [loadAllData] 回款计划加载完成，数量:', paymentPlans.value.length)
+    }
 
   } catch (error) {
     if (loadRequestId !== latestLoadRequestId) {
@@ -444,11 +459,52 @@ const handleRecordClick = (record: PaymentRecordInfo): void => {
   const plan = paymentPlans.value.find((p) =>
     p.payment_records?.some((r) => r.id === record.id)
   )
+  // Get approval from record or from plan's latest approval if this is the latest record
+  const approval = record.approval ?? (plan?.latest_record_id === record.id ? plan.latest_approval : null) ?? null
   selectedRecord.value = {
     record,
-    stageName: plan?.stage_name ?? ''
+    stageName: plan?.stage_name ?? '',
+    approval
   }
   recordSheetVisible.value = true
+}
+
+// Contract detail sheet approval handlers (Task 6 fix)
+const handleContractApprove = (): void => {
+  // ContractDetailSheet handles the action internally, just refresh parent data
+  handleContractSheetRefresh()
+}
+
+const handleContractReject = (): void => {
+  // ContractDetailSheet handles the action internally, just refresh parent data
+  handleContractSheetRefresh()
+}
+
+// Payment plan detail sheet nested event handlers (Task 6 fix)
+const handlePaymentPlanViewContract = (contractId: number): void => {
+  // Close the plan sheet and open contract sheet
+  planSheetVisible.value = false
+  selectedPlanId.value = null
+  // Open contract sheet
+  handleViewContract(contractId)
+}
+
+const handlePaymentPlanViewCustomer = (customerId: number): void => {
+  // If same customer, close nested sheets and return focus to current customer
+  if (customerId === props.customerId) {
+    planSheetVisible.value = false
+    selectedPlanId.value = null
+    recordSheetVisible.value = false
+    selectedRecord.value = null
+    return
+  }
+  // Navigate to different customer using router
+  router.push({ path: '/customers', query: { customerId: String(customerId) } })
+}
+
+const handlePaymentPlanViewApproval = (record: PaymentRecordInfo): void => {
+  // Reuse handleRecordClick to open PaymentRecordDetailSheet
+  handleRecordClick(record)
 }
 
 // ==================== Watch ====================
@@ -823,6 +879,8 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     :visible="contractSheetVisible"
     @update:visible="contractSheetVisible = $event"
     @refresh="handleContractSheetRefresh"
+    @approve="handleContractApprove"
+    @reject="handleContractReject"
   />
 
   <!-- Payment Plan Detail Sheet (Task 6) -->
@@ -832,14 +890,18 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     @update:visible="planSheetVisible = $event"
     @refresh="handlePlanSheetRefresh"
     @record-click="handleRecordClick"
+    @view-contract="handlePaymentPlanViewContract"
+    @view-customer="handlePaymentPlanViewCustomer"
+    @view-approval="handlePaymentPlanViewApproval"
   />
 
   <!-- Payment Record Detail Sheet (Task 6) -->
   <PaymentRecordDetailSheet
-    :record-id="null"
+    :record-id="selectedRecord?.record.id ?? null"
     :visible="recordSheetVisible"
     :record="selectedRecord?.record ?? null"
     :stage-name="selectedRecord?.stageName ?? ''"
+    :approval="selectedRecord?.approval ?? null"
     @update:visible="recordSheetVisible = $event"
   />
 </template>

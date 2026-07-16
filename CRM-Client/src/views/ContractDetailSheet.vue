@@ -58,6 +58,7 @@ const emit = defineEmits<{
   'update:visible': [value: boolean]
   'approve': [contractId: number]
   'reject': [contractId: number]
+  'refresh': []
 }>()
 
 // ==================== Approval Types ====================
@@ -310,6 +311,7 @@ const handleEditContract = (): void => {
 const handleEditSuccess = async (): Promise<void> => {
   editDialogOpen.value = false
   await refreshCurrentContract()
+  emit('refresh')
 }
 
 const handleSubmitApproval = async (): Promise<void> => {
@@ -329,6 +331,7 @@ const handleSubmitApproval = async (): Promise<void> => {
     await approvalApi.submitContractApproval(contract.id)
     toast.success('合同已提交审批')
     await fetchContractDetail(contract.id)
+    emit('refresh')
   } catch (error: unknown) {
     handleApiError(error, '提交审批')
   } finally {
@@ -353,6 +356,7 @@ const handleWithdrawApproval = async (): Promise<void> => {
     await approvalApi.cancelContractApproval(contract.id)
     toast.success('审批申请已撤回')
     await fetchContractDetail(contract.id)
+    emit('refresh')
   } catch (error: unknown) {
     handleApiError(error, '撤回审批')
   } finally {
@@ -362,6 +366,7 @@ const handleWithdrawApproval = async (): Promise<void> => {
 
 const handlePaymentPlanUpdated = async (): Promise<void> => {
   await refreshCurrentContract()
+  emit('refresh')
 }
 
 const handleApprovalApprove = (): void => {

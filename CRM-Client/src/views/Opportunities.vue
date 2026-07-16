@@ -21,10 +21,11 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
 import { FilterPanel, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
-import { confirmDelete } from '@/utils/confirmDialog'
+import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { opportunityApi, type Opportunity, type OpportunityListParams } from '@/api/opportunity'
 import customerApi from '@/api/customer'
+import procurementApi from '@/api/procurement'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
@@ -52,6 +53,10 @@ const selectedOpportunityId = ref<number | null>(null)
 
 // 新建商机弹窗状态
 const opportunityDialogOpen = ref(false)
+
+// 编辑商机弹窗状态
+const editDialogOpen = ref(false)
+const editingOpportunity = ref<Opportunity | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -224,6 +229,19 @@ const handleOpportunitySuccess = (): void => {
   fetchOpportunities()
 }
 
+// 编辑商机成功回调
+const handleEditSuccess = (): void => {
+  editDialogOpen.value = false
+  editingOpportunity.value = null
+  fetchOpportunities()
+}
+
+// 打开编辑商机弹窗
+const openEditDialog = (row: Opportunity): void => {
+  editingOpportunity.value = row
+  editDialogOpen.value = true
+}
+
 const handleDelete = async (record: Opportunity): Promise<void> => {
   const confirmed = await confirmDelete(`商机 "${record.opportunity_name}"`)
   if (!confirmed) return
@@ -237,9 +255,71 @@ const handleDelete = async (record: Opportunity): Promise<void> => {
   }
 }
 
-const handleAdvanceStage = (record: Opportunity): void => {
-  // Navigate to stage advancement page
-  router.push(`/opportunities/${record.id}/advance-stage`)
+const handleAdvanceStage = async (record: Opportunity): Promise<void> => {
+  try {
+    // 1. 获取可推进阶段
+    const stages = await procurementApi.getOpportunityProcurementStages(record.id)
+
+    if (stages.length === 0) {
+      toast.warning('未配置采购阶段')
+      return
+    }
+
+    // 2. 找到当前阶段
+    const currentStage = stages.find(s => s.is_current)
+
+    // 3. 新商机：设置起始阶段
+    if (!currentStage) {
+      const defaultStage = stages.find(s => s.is_default_start)
+      if (!defaultStage) {
+        toast.warning('未配置默认起始阶段')
+        return
+      }
+
+      const confirmed = await confirmDialog(
+        `确定将商机的起始阶段设置为「${defaultStage.stage_name}」？赢率将从 0% 变为 ${defaultStage.win_probability}%`,
+        '设置起始阶段'
+      )
+
+      if (!confirmed) return
+
+      await procurementApi.moveOpportunityStage(record.id, {
+        stage_template_id: defaultStage.id
+      })
+
+      toast.success('起始阶段已设置')
+      fetchOpportunities()
+      return
+    }
+
+    // 4. 找到下一阶段
+    const nextStage = stages.find(s =>
+      s.sort_order > currentStage.sort_order && !s.is_current
+    )
+
+    if (!nextStage) {
+      toast.warning('已是最终阶段')
+      return
+    }
+
+    // 5. 确认推进
+    const confirmed = await confirmDialog(
+      `确定将商机推进到「${nextStage.stage_name}」？赢率将从 ${currentStage.win_probability}% 变为 ${nextStage.win_probability}%`,
+      '推进阶段'
+    )
+
+    if (!confirmed) return
+
+    // 6. 执行推进
+    await procurementApi.moveOpportunityStage(record.id, {
+      stage_template_id: nextStage.id
+    })
+
+    toast.success('阶段已推进')
+    fetchOpportunities()
+  } catch (error) {
+    handleApiError(error, '推进阶段')
+  }
 }
 
 const handleMarkAsWon = async (record: Opportunity): Promise<void> => {
@@ -257,7 +337,7 @@ const getPrimaryActions = (row: Opportunity): ActionConfig[] => [
   {
     label: '编辑',
     icon: Pencil,
-    handler: () => router.push(`/opportunities/${row.id}/edit`),
+    handler: () => openEditDialog(row),
     visible: canEditRow(row)
   },
   {
@@ -471,6 +551,15 @@ watchEffect(() => {
       :open="opportunityDialogOpen"
       @update:open="opportunityDialogOpen = $event"
       @success="handleOpportunitySuccess"
+    />
+
+    <!-- 编辑商机弹窗 -->
+    <OpportunityFormDialog
+      :open="editDialogOpen"
+      :opportunity="editingOpportunity"
+      customer-locked
+      @update:open="editDialogOpen = $event"
+      @success="handleEditSuccess"
     />
   </div>
 </template>
