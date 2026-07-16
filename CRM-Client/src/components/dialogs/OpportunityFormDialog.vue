@@ -54,11 +54,10 @@ const schema = toTypedSchema(
     total_amount: z.coerce.number().min(0, '金额不能为负数'),
     user_count: z.coerce.number().int('用户数必须为整数').min(1, '用户数至少为1'),
     license_type: z.nativeEnum(LicenseType, { errorMap: () => ({ message: '请选择授权类型' }) }),
-    subscription_years: z.coerce.number().int('订阅年限必须为整数').min(1, '订阅年限至少为1年').optional().nullable(),
+    subscription_years: z.coerce.number().int('订阅年限必须为整数').min(1, '订阅年限至少为1年'),
     purchase_type: z.nativeEnum(PurchaseType, { errorMap: () => ({ message: '请选择采购类型' }) }),
     expected_closing_date: z.string().min(1, '请选择预计成交日期'),
-    procurement_method_id: z.coerce.number().optional().nullable(),
-    decision_maker_count: z.coerce.number().int('决策人数必须为整数').min(0, '决策人数不能为负数').optional().nullable()
+    procurement_method_id: z.coerce.number().optional().nullable()
   })
 )
 
@@ -103,8 +102,7 @@ const { handleSubmit, resetForm, values, setFieldValue } = useForm({
     subscription_years: 1,
     purchase_type: PurchaseType.NEW,
     expected_closing_date: getDefaultDate(),
-    procurement_method_id: null,
-    decision_maker_count: null
+    procurement_method_id: null
   }
 })
 
@@ -242,8 +240,7 @@ watch(() => props.open, async (newOpen) => {
           subscription_years: opp.subscription_years ?? 1,
           purchase_type: opp.purchase_type,
           expected_closing_date: opp.expected_closing_date,
-          procurement_method_id: opp.procurement_method_id,
-          decision_maker_count: opp.decision_maker_count ?? null
+          procurement_method_id: opp.procurement_method_id
         }
       })
 
@@ -272,8 +269,7 @@ watch(() => props.open, async (newOpen) => {
           subscription_years: 1,
           purchase_type: PurchaseType.NEW,
           expected_closing_date: getDefaultDate(),
-          procurement_method_id: null,
-          decision_maker_count: null
+          procurement_method_id: null
         }
       })
 
@@ -346,8 +342,7 @@ const onSubmit = handleSubmit(async (formValues) => {
       subscription_years: formValues['license_type'] === LicenseType.SUBSCRIPTION ? formValues['subscription_years'] ?? null : null,
       purchase_type: formValues['purchase_type'],
       expected_closing_date: formValues['expected_closing_date'],
-      procurement_method_id: formValues['procurement_method_id'] ?? null,
-      decision_maker_count: formValues['decision_maker_count'] ?? null
+      procurement_method_id: formValues['procurement_method_id'] ?? null
     }
 
     if (isEdit.value && props.opportunity) {
@@ -516,10 +511,10 @@ function continueEditing(): void {
           </FormItem>
         </FormField>
 
-        <!-- Subscription Years (optional, only for SUBSCRIPTION) -->
+        <!-- Subscription Years (required, only for SUBSCRIPTION) -->
         <FormField v-if="values.license_type === LicenseType.SUBSCRIPTION" v-slot="{ componentField }" name="subscription_years">
           <FormItem>
-            <FormLabel>订阅年限</FormLabel>
+            <FormLabel>订阅年限 <span class="text-destructive">*</span></FormLabel>
             <FormControl>
               <Input
                 v-bind="componentField as any"
@@ -593,23 +588,6 @@ function continueEditing(): void {
                 </SelectItem>
               </SelectContent>
             </Select>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- Decision Maker Count (optional) -->
-        <FormField v-slot="{ componentField }" name="decision_maker_count">
-          <FormItem>
-            <FormLabel>决策人数</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="number"
-                min="0"
-                placeholder="请输入决策人数"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
