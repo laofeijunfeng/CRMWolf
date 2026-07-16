@@ -769,13 +769,6 @@ onUnmounted(() => {
 .detail-content {
   padding: $wolf-page-padding-v2;
 }
-  }
-}
-
-// 内容区
-.detail-content {
-  padding: $wolf-page-padding-v2;
-}
 
 .content-wrapper {
   display: flex;

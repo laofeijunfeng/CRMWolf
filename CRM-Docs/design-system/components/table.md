@@ -3,7 +3,7 @@
 - **用途：**展示可比较、可扫描的信息密集型记录。
 - **适用范围：**components 领域。
 - **权威性：**本主题是表格表头、行、对齐与交互的唯一事实来源。
-- **相关规范：**[组件索引](README.md) · [间距与布局](../foundations/spacing-layout.md) · [排版](../foundations/typography.md) · [颜色令牌](../foundations/color-tokens.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md)
+- **相关规范：**[组件索引](README.md) · [列表卡片](list-card.md)（受限空间替代方案） · [间距与布局](../foundations/spacing-layout.md) · [排版](../foundations/typography.md) · [颜色令牌](../foundations/color-tokens.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md)
 
 ## 结构与内容
 

@@ -908,6 +908,7 @@ def list_payment_records(
             item_dict = {
                 "id": record.id,
                 "payment_plan_id": record.payment_plan_id,
+                "record_number": record.record_number,
                 "actual_amount": float(record.actual_amount),
                 "payment_date": record.payment_date.isoformat(),
                 "proof_attachment": record.proof_attachment,

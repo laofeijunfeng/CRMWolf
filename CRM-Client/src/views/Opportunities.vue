@@ -15,7 +15,7 @@
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
@@ -31,6 +31,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
+import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -48,6 +49,9 @@ const customers = ref<any[]>([])
 // 抽屉状态
 const sheetVisible = ref(false)
 const selectedOpportunityId = ref<number | null>(null)
+
+// 新建商机弹窗状态
+const opportunityDialogOpen = ref(false)
 
 const pagination = reactive({
   current: 1,
@@ -214,6 +218,12 @@ const handleSheetRefresh = (): void => {
   fetchOpportunities()
 }
 
+// 新建商机成功回调
+const handleOpportunitySuccess = (): void => {
+  opportunityDialogOpen.value = false
+  fetchOpportunities()
+}
+
 const handleDelete = async (record: Opportunity): Promise<void> => {
   const confirmed = await confirmDelete(`商机 "${record.opportunity_name}"`)
   if (!confirmed) return
@@ -327,7 +337,7 @@ watchEffect(() => {
       label: '新建商机',
       icon: Plus,
       type: 'primary',
-      handler: () => router.push('/opportunities/create'),
+      handler: () => { opportunityDialogOpen.value = true },
       visible: canCreateOpportunity.value,
       ariaLabel: '新建商机'
     }
@@ -454,6 +464,13 @@ watchEffect(() => {
       v-model:visible="sheetVisible"
       :opportunity-id="selectedOpportunityId"
       @refresh="handleSheetRefresh"
+    />
+
+    <!-- 新建商机弹窗 -->
+    <OpportunityFormDialog
+      :open="opportunityDialogOpen"
+      @update:open="opportunityDialogOpen = $event"
+      @success="handleOpportunitySuccess"
     />
   </div>
 </template>

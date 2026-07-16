@@ -432,6 +432,16 @@ onMounted(() => {
 <style scoped lang="scss">
 @use '@/styles/variables.scss' as *;
 
+// 页面标题样式（IBM Plex Sans）
+.wolf-page-title {
+  font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 20px;
+  font-weight: $wolf-font-weight-semibold;
+  color: $wolf-text-primary;
+  line-height: 1.2;
+  margin: 0 0 $wolf-space-lg 0;
+}
+
 .roles-container {
   padding: $wolf-page-padding;
   background: $wolf-bg-page;

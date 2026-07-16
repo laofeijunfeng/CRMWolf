@@ -203,24 +203,25 @@ const ariaLabel = computed(() => config.value.label)
   font-size: 11px;
 }
 
-// 深色背景 + 白色文字（WCAG AA 4.5:1+）
+// 状态徽章样式 - 遵循 V2 设计规范：浅底色 + 同色系文字
+// 规则来源: CRM-Docs/design-system/foundations/color-tokens.md
 .status-neutral {
-  background: #475569;  // Slate-600
-  color: #FFFFFF;
+  background: $wolf-bg-hover-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
 .status-warning {
-  background: #D97706;  // Amber-600（对比度 5.2:1）
-  color: #FFFFFF;
+  background: $wolf-warning-bg-v2;
+  color: $wolf-warning-text-v2;
 }
 
 .status-success {
-  background: #059669;  // Emerald-600（对比度 5.5:1）
-  color: #FFFFFF;
+  background: $wolf-success-bg-v2;
+  color: $wolf-success-text-v2;
 }
 
 .status-danger {
-  background: #B91C1C;  // Red-700（对比度 5.8:1）
-  color: #FFFFFF;
+  background: $wolf-danger-bg-v2;
+  color: $wolf-danger-text-v2;
 }
 </style>

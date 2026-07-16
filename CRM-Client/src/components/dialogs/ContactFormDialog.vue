@@ -109,6 +109,18 @@ const visible = computed({
   set: (val) => emit('update:open', val)
 })
 
+function mapContactGenderToForm(gender: number | null): '男' | '女' | undefined {
+  if (gender === 1) return '男'
+  if (gender === 2) return '女'
+  return undefined
+}
+
+function mapContactGenderToApi(gender: string | undefined): '1' | '2' | null {
+  if (gender === '男') return '1'
+  if (gender === '女') return '2'
+  return null
+}
+
 // Watch for form changes
 watch(values, () => {
   isDirty.value = true
@@ -121,7 +133,7 @@ watch(() => props.open, (newOpen) => {
       // Edit mode: populate form with contact data
       setValues({
         name: props.contact.name,
-        gender: props.contact.gender === 1 ? '男' : props.contact.gender === 0 ? '女' : undefined,
+        gender: mapContactGenderToForm(props.contact.gender),
         position: props.contact.position ?? '',
         is_decision_maker: props.contact.is_decision_maker,
         mobile: props.contact.mobile,
@@ -149,7 +161,7 @@ watch(() => props.open, (newOpen) => {
     // Reset dirty state immediately (no setTimeout)
     isDirty.value = false
   }
-})
+}, { immediate: true })
 
 // Form submission
 const onSubmit = handleSubmit(async (formValues) => {
@@ -157,7 +169,7 @@ const onSubmit = handleSubmit(async (formValues) => {
   try {
     const data: ContactCreate | ContactUpdate = {
       name: formValues.name,
-      gender: formValues.gender ?? null,
+      gender: mapContactGenderToApi(formValues.gender),
       position: formValues.position ?? null,
       is_decision_maker: formValues.is_decision_maker ?? false,
       mobile: formValues.mobile,
@@ -208,7 +220,7 @@ function continueEditing(): void {
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent class="sm:max-w-[500px]">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑联系人' : '新建联系人' }}</DialogTitle>
         <DialogDescription class="sr-only">填写联系人信息</DialogDescription>

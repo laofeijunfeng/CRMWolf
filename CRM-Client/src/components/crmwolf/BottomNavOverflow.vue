@@ -8,48 +8,52 @@
  * - §7 MEDIUM: Animation duration 150ms
  * - §7 MEDIUM: Reduced motion support
  */
-import { ref, computed } from 'vue'
+import { computed, type Component } from 'vue'
 import { useRoute } from 'vue-router'
-import { More } from '@element-plus/icons-vue'
+import { MoreHorizontal } from 'lucide-vue-next'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import type { Component } from 'vue'
 
-interface NavItem {
+interface RouteNavItem {
+  kind: 'route'
   route: string
   icon: Component
   label: string
 }
 
+interface ActionNavItem {
+  kind: 'action'
+  action: 'logout'
+  icon: Component
+  label: string
+}
+
+type NavItem = RouteNavItem | ActionNavItem
+
 interface Props {
-  /** Overflow navigation items */
+  /** Overflow navigation and action items */
   items: NavItem[]
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  navigate: [route: string]
+  select: [item: NavItem]
 }>()
 
 const route = useRoute()
-const popoverVisible = ref(false)
 
-// Check if any overflow item is active
-const isActive = computed((): boolean => {
-  return props.items.some(item => route.path.startsWith(item.route))
-})
-
-function handleItemClick(itemRoute: string): void {
-  emit('navigate', itemRoute)
-  popoverVisible.value = false  // Close popover after navigation
+function isItemActive(item: NavItem): boolean {
+  return item.kind === 'route' && route.path.startsWith(item.route)
 }
 
-function handleItemKeyDown(event: KeyboardEvent, itemRoute: string): void {
-  if (event.key === 'Enter' || event.key === ' ') {
-    event.preventDefault()
-    handleItemClick(itemRoute)
-  }
-}
+// Check if any overflow route item is active
+const isActive = computed((): boolean => props.items.some(isItemActive))
 
 const overflowButtonClasses = computed((): string =>
   cn(
@@ -76,59 +80,38 @@ const overflowButtonClasses = computed((): string =>
 </script>
 
 <template>
-  <el-popover
-    v-model:visible="popoverVisible"
-    placement="top"
-    :width="200"
-    trigger="click"
-    :show-arrow="false"
-    :offset="8"
-    popper-class="bottom-nav-overflow-popover"
-  >
-    <!-- Trigger Button -->
-    <template #reference>
+  <DropdownMenu>
+    <DropdownMenuTrigger as-child>
       <button
         :class="overflowButtonClasses"
         aria-label="更多"
         :aria-current="isActive ? 'page' : undefined"
-        :aria-expanded="popoverVisible"
-        aria-haspopup="menu"
         type="button"
       >
-        <el-icon class="bottom-nav-icon text-wolf-icon-lg mb-wolf-xs">
-          <More />
-        </el-icon>
+        <MoreHorizontal class="bottom-nav-icon text-wolf-icon-lg mb-wolf-xs" />
         <span class="bottom-nav-label text-wolf-caption">
           更多
         </span>
       </button>
-    </template>
+    </DropdownMenuTrigger>
 
-    <!-- Overflow Menu Content -->
-    <div
-      class="overflow-menu"
-      role="menu"
-      aria-label="次要导航"
-    >
-      <div
-        v-for="item in items"
-        :key="item.route"
-        class="overflow-item"
-        :class="{ 'overflow-item-active': route.path.startsWith(item.route) }"
-        role="menuitem"
-        tabindex="0"
-        :aria-label="item.label"
-        :aria-current="route.path.startsWith(item.route) ? 'page' : undefined"
-        @click="handleItemClick(item.route)"
-        @keydown="handleItemKeyDown($event, item.route)"
-      >
-        <el-icon class="overflow-icon">
-          <component :is="item.icon" />
-        </el-icon>
-        <span class="overflow-label">{{ item.label }}</span>
+    <DropdownMenuContent side="top" align="end" :side-offset="8" class="overflow-menu">
+      <div role="group" aria-label="次要导航">
+        <DropdownMenuItem
+          v-for="item in items"
+          :key="item.label"
+          class="overflow-item"
+          :class="{ 'overflow-item-active': isItemActive(item) }"
+          :aria-label="item.label"
+          :aria-current="isItemActive(item) ? 'page' : undefined"
+          @select="emit('select', item)"
+        >
+          <component :is="item.icon" class="overflow-icon" />
+          <span class="overflow-label">{{ item.label }}</span>
+        </DropdownMenuItem>
       </div>
-    </div>
-  </el-popover>
+    </DropdownMenuContent>
+  </DropdownMenu>
 </template>
 
 <style scoped lang="scss">
@@ -227,27 +210,12 @@ const overflowButtonClasses = computed((): string =>
 }
 
 .overflow-icon {
-  font-size: 18px;
+  width: 18px;
+  height: 18px;
   color: $wolf-text-tertiary-v2;
 }
 
 .overflow-label {
   font-size: $wolf-font-size-body-v2;  // 14px
-}
-</style>
-
-<style lang="scss">
-@use '@/styles/variables-v2.scss' as *;
-
-/**
- * Global Popover Styles (scoped styles don't apply to el-popover)
- * Element Plus Popover is rendered outside component scope
- */
-.bottom-nav-overflow-popover {
-  background: $wolf-bg-card-v2 !important;
-  border: 1px solid $wolf-border-default-v2 !important;
-  border-radius: $wolf-radius-v2 !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
-  padding: 0 !important;
 }
 </style>

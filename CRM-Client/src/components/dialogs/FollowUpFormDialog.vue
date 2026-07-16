@@ -32,8 +32,8 @@ import {
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { DatePicker } from '@/components/ui/date-picker'
 import customerFollowUpApi from '@/api/customerFollowUp'
 
 // Compute default date: 3 days from now
@@ -165,7 +165,7 @@ function continueEditing(): void {
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent class="sm:max-w-[500px]">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>添加跟进记录</DialogTitle>
         <DialogDescription class="sr-only">记录本次跟进的详细信息</DialogDescription>
@@ -207,15 +207,15 @@ function continueEditing(): void {
           </FormItem>
         </FormField>
 
-        <!-- Next Follow-up Time (Input type="date") -->
-        <FormField v-slot="{ componentField }" name="next_follow_time">
+        <!-- Next Follow-up Time -->
+        <FormField v-slot="{ value, handleChange }" name="next_follow_time">
           <FormItem>
             <FormLabel>下次跟进时间</FormLabel>
             <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="date"
-                class="h-11 sm:h-8"
+              <DatePicker
+                :model-value="value ? new Date(value as string) : null"
+                placeholder="请选择下次跟进时间"
+                @update:model-value="(date: Date | null) => handleChange(date ? date.toISOString().split('T')[0] : null)"
               />
             </FormControl>
             <FormMessage />

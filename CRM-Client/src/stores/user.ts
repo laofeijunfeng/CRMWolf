@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { authApi, type UserResponse } from '@/api/auth'
 import { usePermissionStore } from './permissions'
+import { useTeamStore } from './team'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>(localStorage.getItem('token') || '')
@@ -61,10 +62,15 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  const logout = () => {
+  const logout = (): void => {
+    const permissionStore = usePermissionStore()
+    const teamStore = useTeamStore()
+
     token.value = ''
     userInfo.value = null
     localStorage.removeItem('token')
+    permissionStore.clearPermissions()
+    teamStore.clearTeam()
   }
 
   const isLoggedIn = () => {

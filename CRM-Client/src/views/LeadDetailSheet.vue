@@ -16,23 +16,22 @@
  * - 热力值明细 Dialog
  */
 import { ref, reactive, watch, computed } from 'vue'
-import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil, TrendingUp, Clock, CheckCircle } from 'lucide-vue-next'
+import { Plus, Pencil, TrendingUp, Clock, CheckCircle, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
+import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import {
   Sheet,
-  SheetContent,
   SheetHeader,
   SheetTitle,
   SheetDescription,
   SheetFooter
 } from '@/components/ui/sheet'
+import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -43,9 +42,9 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { DatePicker } from '@/components/ui/date-picker'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Table, TableHeader, TableRow, TableCell } from '@/components/ui/table'
 import {
@@ -73,7 +72,6 @@ const emit = defineEmits<{
   'refresh': []
 }>()
 
-const router = useRouter()
 const userStore = useUserStore()
 
 // ==================== State ====================
@@ -94,6 +92,9 @@ const followUpForm = reactive({
 
 // 编辑弹窗
 const showEditDialog = ref(false)
+
+// 转化为客户弹窗
+const showConvertDialog = ref(false)
 
 const handleEditSuccess = (): void => {
   // 刷新 Sheet 内部数据（遵循 UX Feedback: Submit Feedback）
@@ -132,8 +133,14 @@ const fetchLeadDetail = async () => {
 // ==================== 操作方法 ====================
 const handleConvert = () => {
   if (!leadData.value) return
+  showConvertDialog.value = true
+}
+
+const handleConvertSuccess = (): void => {
+  // 关闭 Sheet
   closeSheet()
-  router.push(`/leads/${leadData.value.id}/convert`)
+  // 通知父组件刷新列表
+  emit('refresh')
 }
 
 // ==================== 添加跟进 ====================
@@ -233,20 +240,22 @@ const getStatusClass = (status: number | undefined): string => {
   return map[status] || 'status-default'
 }
 
-const getScoreColorValue = (score: number | undefined): string => {
-  if (score === undefined || score === null) return '#94A3B8'
-  if (score >= 80) return '#10B981'
-  if (score >= 60) return '#F59E0B'
-  if (score >= 40) return '#3B82F6'
-  return '#64748B'
+// 热力值颜色 - 使用 V2 设计令牌语义
+const getScoreColorClass = (score: number | undefined | null): string => {
+  if (score === undefined || score === null) return 'score-unknown'
+  if (score >= 80) return 'score-high'
+  if (score >= 60) return 'score-medium-high'
+  if (score >= 40) return 'score-medium'
+  return 'score-low'
 }
 
-const getScoreIconEmoji = (score: number | undefined): string => {
-  if (score === undefined || score === null) return '📋'
-  if (score >= 80) return '🔥'
-  if (score >= 60) return '⭐'
-  if (score >= 40) return '📈'
-  return '📋'
+// 热力值图标 - 使用 Lucide SVG 图标，遵循设计规范（禁止 emoji）
+const getScoreIconComponent = (score: number | undefined | null): typeof Flame => {
+  if (score === undefined || score === null) return HelpCircle
+  if (score >= 80) return Flame       // 高分/火爆
+  if (score >= 60) return Zap          // 中高分/潜力
+  if (score >= 40) return CheckCircle  // 中分/稳定
+  return Thermometer                   // 低分/冷淡
 }
 
 // ==================== Watch ====================
@@ -260,10 +269,7 @@ watch(() => props.visible, (visible) => {
 <template>
   <!-- 线索详情抽屉 -->
   <Sheet :open="visible" @update:open="$emit('update:visible', $event)">
-    <SheetContent
-      side="right"
-      class="w-2/3 max-w-[880px] sm:max-w-[880px] p-0 flex flex-col bg-white dark:bg-slate-900"
-    >
+    <DetailSheetContent>
       <!-- Header -->
       <SheetHeader class="p-6 pb-4 border-b border-wolf-border-default-v2">
         <div class="flex items-center gap-4">
@@ -351,8 +357,11 @@ watch(() => props.visible, (visible) => {
             <Card class="score-card">
               <CardContent class="p-4">
                 <div class="flex items-center gap-4">
-                  <div class="flex-shrink-0 text-2xl">
-                    {{ getScoreIconEmoji(leadScore) }}
+                  <div class="flex-shrink-0">
+                    <component
+                      :is="getScoreIconComponent(leadScore)"
+                      :class="['w-6 h-6', getScoreColorClass(leadScore)]"
+                    />
                   </div>
                   <div class="flex-1">
                     <div class="flex items-center gap-2 mb-2">
@@ -363,11 +372,12 @@ watch(() => props.visible, (visible) => {
                         {{ getScoreLevel(leadScore) }}
                       </span>
                     </div>
-                    <Progress
-                      :model-value="leadScore || 0"
-                      class="h-2"
-                      :style="{ '--progress-background': getScoreColorValue(leadScore) }"
-                    />
+                    <div :class="['progress-wrapper', getScoreColorClass(leadScore)]">
+                      <Progress
+                        :model-value="leadScore || 0"
+                        class="h-2"
+                      />
+                    </div>
                     <div class="flex items-center gap-2 mt-2 text-xs text-wolf-text-tertiary-v2">
                       <template v-for="(detail, idx) in scoreDetails.slice(0, 2)" :key="detail.id">
                         <span>
@@ -394,7 +404,6 @@ watch(() => props.visible, (visible) => {
             </Card>
 
             <!-- 跟进记录卡片 -->
-            <Separator />
             <Card class="follow-up-card">
               <CardHeader class="p-4 border-b border-wolf-border-light-v2 flex flex-row items-center justify-between">
                 <h3 class="text-sm font-semibold text-wolf-text-primary-v2">跟进记录</h3>
@@ -403,7 +412,7 @@ watch(() => props.visible, (visible) => {
                   添加跟进
                 </Button>
               </CardHeader>
-              <CardContent class="p-0">
+              <CardContent class="p-0 max-h-[400px] overflow-y-auto">
                 <FollowUpList
                   :follow-ups="followUps"
                   :loading="false"
@@ -451,7 +460,7 @@ watch(() => props.visible, (visible) => {
           编辑
         </Button>
       </SheetFooter>
-    </SheetContent>
+    </DetailSheetContent>
   </Sheet>
 
   <!-- 添加跟进记录弹窗 -->
@@ -502,10 +511,10 @@ watch(() => props.visible, (visible) => {
 
         <div class="grid gap-2">
           <Label for="next_follow_time">下次跟进时间</Label>
-          <Input
-            id="next_follow_time"
-            type="date"
-            v-model="followUpForm.next_follow_time"
+          <DatePicker
+            :model-value="followUpForm.next_follow_time ? new Date(followUpForm.next_follow_time) : null"
+            placeholder="请选择下次跟进时间"
+            @update:model-value="(date: Date | null) => followUpForm.next_follow_time = date ? date.toISOString().split('T')[0] : ''"
           />
         </div>
 
@@ -582,6 +591,13 @@ watch(() => props.visible, (visible) => {
       </DialogFooter>
     </DialogContent>
   </Dialog>
+
+  <!-- 转化为客户弹窗 -->
+  <LeadConvertDialog
+    v-model:open="showConvertDialog"
+    :lead-id="leadId"
+    @success="handleConvertSuccess"
+  />
 </template>
 
 <style scoped lang="scss">
@@ -671,6 +687,42 @@ watch(() => props.visible, (visible) => {
     padding: 0;
     background: transparent;
   }
+}
+
+// 热力值进度条颜色 - 使用 V2 设计令牌
+.progress-wrapper {
+  &.score-high {
+    --progress-background: #{$wolf-danger-v2};     // 高分(≥80): 危险红
+  }
+  &.score-medium-high {
+    --progress-background: #{$wolf-warning-v2};    // 中高分(≥60): 警告橙
+  }
+  &.score-medium {
+    --progress-background: #{$wolf-success-v2};    // 中分(≥40): 成功绿
+  }
+  &.score-low,
+  &.score-unknown {
+    --progress-background: #{$wolf-text-tertiary-v2}; // 低分/未知: 中性灰
+  }
+
+  :deep([role="progressbar"]) {
+    background: var(--progress-background);
+  }
+}
+
+// 热力值图标颜色 - 使用 V2 设计令牌
+.score-high {
+  color: $wolf-danger-v2;           // 高分(≥80): 危险红
+}
+.score-medium-high {
+  color: $wolf-warning-v2;          // 中高分(≥60): 警告橙
+}
+.score-medium {
+  color: $wolf-success-v2;          // 中分(≥40): 成功绿
+}
+.score-low,
+.score-unknown {
+  color: $wolf-text-tertiary-v2;    // 低分/未知: 中性灰
 }
 
 // Reduced Motion 支持

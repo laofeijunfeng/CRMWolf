@@ -13,7 +13,7 @@ const props = withDefaults(defineProps<Props>(), {})
 </script>
 
 <template>
-  <div :class="cn('flex flex-col space-y-wolf-sm p-wolf-lg', props.class)">
+  <div :class="cn('flex flex-col space-y-2 p-wolf-lg', props.class)">
     <slot />
   </div>
 </template>

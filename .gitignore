@@ -69,3 +69,4 @@ uploads/*
 
 # Docker images
 *.tar
+.gstack/

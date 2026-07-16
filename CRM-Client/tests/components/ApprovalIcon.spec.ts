@@ -13,15 +13,15 @@
 import { mount } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useRouter } from 'vue-router'
-import ElementPlus from 'element-plus'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 
+const routerPush = vi.hoisted(() => vi.fn())
+
 // Mock vue-router
 vi.mock('vue-router', () => ({
-  useRouter: vi.fn(),
+  useRouter: () => ({ push: routerPush }),
 }))
 
 // Mock permission directive setup
@@ -34,17 +34,23 @@ vi.mock('@/directives/permission', () => ({
  * permissionSet 是 computed（readonly），必须通过 permissions 数组设置
  */
 function setApprovalPermissions(permissionStore: ReturnType<typeof usePermissionStore>, codes: string[]) {
-  permissionStore.permissions = codes.map(code => ({
+  permissionStore.permissions = codes.map((code, index) => ({
+    id: index + 1,
     code,
     name: code,
-    resource: code.split(':')[0],
-    action: code.split(':')[1] || 'unknown'
+    resource: code.split(':')[0] ?? code,
+    action: code.split(':')[1] ?? 'unknown',
+    scope: null,
+    description: null,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
   }))
 }
 
 describe('ApprovalIcon', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    routerPush.mockReset()
   })
 
   it('renders when user has approval permissions', async () => {
@@ -54,17 +60,14 @@ describe('ApprovalIcon', () => {
     const permissionStore = usePermissionStore()
     setApprovalPermissions(permissionStore, ['invoice:approve'])
 
-    const mockRouter = { push: vi.fn() }
-    vi.mocked(useRouter).mockReturnValue(mockRouter as any)
-
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [pinia, ElementPlus],
+        plugins: [pinia],
       },
     })
 
     // 应该渲染
-    expect(wrapper.find('[data-testid="approval-icon"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="approval-button"]').exists()).toBe(true)
   })
 
   // 注意：权限门控测试跳过，因为 Vue Test Utils 环境中指令的 removeChild 不生效
@@ -78,7 +81,7 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [pinia, ElementPlus],
+        plugins: [pinia],
       },
     })
 
@@ -98,7 +101,7 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [pinia, ElementPlus],
+        plugins: [pinia],
       },
     })
 
@@ -119,13 +122,13 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [pinia, ElementPlus],
+        plugins: [pinia],
       },
     })
 
-    // Badge 应该存在但隐藏
+    // Badge 在无待办时不渲染
     const badge = wrapper.find('[data-testid="approval-badge"]')
-    expect(badge.exists()).toBe(true)
+    expect(badge.exists()).toBe(false)
   })
 
   it('navigates to /approvals when clicked', async () => {
@@ -135,12 +138,9 @@ describe('ApprovalIcon', () => {
     const permissionStore = usePermissionStore()
     setApprovalPermissions(permissionStore, ['invoice:approve'])
 
-    const mockRouter = { push: vi.fn() }
-    vi.mocked(useRouter).mockReturnValue(mockRouter as any)
-
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [pinia, ElementPlus],
+        plugins: [pinia],
       },
     })
 
@@ -148,7 +148,7 @@ describe('ApprovalIcon', () => {
     await wrapper.find('[data-testid="approval-button"]').trigger('click')
 
     // 应该跳转到 /approvals
-    expect(mockRouter.push).toHaveBeenCalledWith('/approvals')
+    expect(routerPush).toHaveBeenCalledWith('/approvals')
   })
 
   it('has aria-label with pending count', async () => {
@@ -163,7 +163,7 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [pinia, ElementPlus],
+        plugins: [pinia],
       },
     })
 
@@ -184,7 +184,7 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [pinia, ElementPlus],
+        plugins: [pinia],
       },
     })
 
@@ -203,11 +203,11 @@ describe('ApprovalIcon', () => {
 
     const wrapper = mount(ApprovalIcon, {
       global: {
-        plugins: [pinia, ElementPlus],
+        plugins: [pinia],
       },
     })
 
     // 应该渲染（合同审批人能看到）
-    expect(wrapper.find('[data-testid="approval-icon"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="approval-button"]').exists()).toBe(true)
   })
 })

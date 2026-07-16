@@ -1,165 +1,33 @@
-<template>
-  <div class="customer-edit-page">
-    <!-- 表单内容 -->
-    <div class="form-container" v-loading="loading">
-      <!-- 基本信息卡片 -->
-      <div class="form-card">
-        <div class="card-title">基本信息</div>
-        <el-form
-          :model="form"
-          :rules="formRules"
-          label-position="top"
-          ref="formRef"
-        >
-          <div class="form-grid">
-            <el-form-item label="客户名称" prop="account_name" required>
-              <el-input
-                v-model="form.account_name"
-                placeholder="请输入客户公司名称"
-              />
-            </el-form-item>
-
-            <el-form-item label="所在城市" prop="city" required>
-              <el-input
-                v-model="form.city"
-                placeholder="请输入所在城市"
-              />
-            </el-form-item>
-          </div>
-
-          <div class="form-grid">
-            <el-form-item label="客户来源" prop="source">
-              <el-select
-                v-model="form.source"
-                placeholder="请选择客户来源"
-                clearable
-                style="width: 100%"
-              >
-                <el-option label="线上注册" value="线上注册" />
-                <el-option label="市场活动" value="市场活动" />
-                <el-option label="客户推荐" value="客户推荐" />
-                <el-option label="电话营销" value="电话营销" />
-                <el-option label="网站咨询" value="网站咨询" />
-                <el-option label="展会" value="展会" />
-                <el-option label="其他" value="其他" />
-                <el-option label="线索转化" value="线索转化" />
-              </el-select>
-            </el-form-item>
-
-            <el-form-item label="公司规模" prop="company_scale">
-              <el-select
-                v-model="form.company_scale"
-                placeholder="请选择公司规模"
-                clearable
-                style="width: 100%"
-              >
-                <el-option label="1-50人" value="1-50人" />
-                <el-option label="51-200人" value="51-200人" />
-                <el-option label="201-500人" value="201-500人" />
-                <el-option label="501-1000人" value="501-1000人" />
-                <el-option label="1000人以上" value="1000人以上" />
-              </el-select>
-            </el-form-item>
-          </div>
-
-          <div class="form-grid">
-            <el-form-item label="默认采购方式" prop="default_procurement_method_id">
-              <el-select
-                v-model="form.default_procurement_method_id"
-                placeholder="请选择默认采购方式"
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="option in procurementMethodOptions"
-                  :key="option.id"
-                  :label="option.name"
-                  :value="option.id"
-                />
-              </el-select>
-            </el-form-item>
-
-            <el-form-item label="公司地址" prop="address">
-              <el-input
-                v-model="form.address"
-                placeholder="请输入公司地址"
-              />
-            </el-form-item>
-          </div>
-        </el-form>
-      </div>
-
-      <!-- 客户档案卡片（仅编辑模式显示） -->
-      <div v-if="isEdit && hasProfile" class="form-card">
-        <div class="card-title">
-          <span>客户档案</span>
-          <el-tag size="small" :type="profileStatusType">{{ profileStatusText }}</el-tag>
-        </div>
-
-        <el-form label-position="top">
-          <div class="form-grid">
-            <el-form-item label="公司官网">
-              <el-input
-                v-model="form.company_website"
-                placeholder="请输入公司官网地址"
-              />
-            </el-form-item>
-          </div>
-
-          <div class="form-section">
-            <el-form-item label="企业背景">
-              <el-input
-                v-model="form.company_background"
-                type="textarea"
-                :rows="4"
-                placeholder="请输入企业背景介绍"
-              />
-            </el-form-item>
-          </div>
-
-          <div class="form-section">
-            <el-form-item label="主营业务">
-              <el-input
-                v-model="form.main_business"
-                type="textarea"
-                :rows="4"
-                placeholder="请输入主营业务描述"
-              />
-            </el-form-item>
-          </div>
-
-          <div class="form-section">
-            <el-form-item label="项目需求背景">
-              <el-input
-                v-model="form.project_background"
-                type="textarea"
-                :rows="4"
-                placeholder="请输入项目需求背景"
-              />
-            </el-form-item>
-          </div>
-        </el-form>
-      </div>
-
-      <!-- 表单操作 -->
-      <div class="form-actions-card">
-        <el-button @click="handleGoBack">取消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="submitting">
-          {{ isEdit ? '保存' : '创建' }}
-        </el-button>
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { showError, showSuccess } from '@/utils/errorMessages'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import { toast } from 'vue-sonner'
+import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useHeaderStore } from '@/stores/header'
+import {
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { customerFormSchema, customerSourceOptions, companyScaleOptions, type CustomerForm } from '@/schemas/customer-form'
 
 usePageTitle()
 
@@ -177,52 +45,41 @@ onUnmounted(() => {
 
 const loading = ref(false)
 const submitting = ref(false)
-const formRef = ref()
 const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
 
-const customerId = computed(() => Number(route.params.id))
+const customerId = computed(() => Number(route.params['id']))
 const isEdit = computed(() => !!customerId.value)
 
-// 档案状态相关
+// Profile status related
 const profileStatus = ref<string | null>(null)
 const hasProfile = computed(() => profileStatus.value === 'COMPLETED')
-const profileStatusType = computed(() => {
+
+const profileStatusConfig = computed(() => {
   switch (profileStatus.value) {
-    case 'COMPLETED': return 'success'
-    case 'GENERATING': return 'warning'
-    case 'PENDING': return 'info'
-    case 'FAILED': return 'danger'
-    default: return 'info'
-  }
-})
-const profileStatusText = computed(() => {
-  switch (profileStatus.value) {
-    case 'COMPLETED': return '已生成'
-    case 'GENERATING': return '生成中'
-    case 'PENDING': return '待生成'
-    case 'FAILED': return '生成失败'
-    default: return '未生成'
+    case 'COMPLETED': return { label: '已生成', variant: 'default' as const }
+    case 'GENERATING': return { label: '生成中', variant: 'secondary' as const }
+    case 'PENDING': return { label: '待生成', variant: 'outline' as const }
+    case 'FAILED': return { label: '生成失败', variant: 'destructive' as const }
+    default: return { label: '未生成', variant: 'outline' as const }
   }
 })
 
-const form = reactive({
-  account_name: '',
-  city: '',
-  address: '',
-  company_scale: '',
-  source: '',
-  default_procurement_method_id: undefined as number | undefined,
-  // 档案字段
-  company_background: '',
-  company_website: '',
-  main_business: '',
-  project_background: ''
+// VeeValidate form setup
+const { handleSubmit, setValues } = useForm({
+  validationSchema: toTypedSchema(customerFormSchema),
+  initialValues: {
+    account_name: '',
+    city: '',
+    address: '',
+    company_scale: undefined,
+    source: undefined,
+    default_procurement_method_id: undefined,
+    company_background: '',
+    company_website: '',
+    main_business: '',
+    project_background: ''
+  }
 })
-
-const formRules = {
-  account_name: [{ required: true, message: '请输入客户名称', trigger: 'blur' }],
-  city: [{ required: true, message: '请输入所在城市', trigger: 'blur' }]
-}
 
 const fetchCustomerDetail = async () => {
   if (!isEdit.value) return
@@ -230,14 +87,13 @@ const fetchCustomerDetail = async () => {
   loading.value = true
   try {
     const res = await customerApi.getCustomerDetail(customerId.value)
-    Object.assign(form, {
+    setValues({
       account_name: res.account_name || '',
       city: res.city || '',
       address: res.address || '',
-      company_scale: res.company_scale || '',
-      source: res.source || '',
+      company_scale: (res.company_scale || undefined) as CustomerForm['company_scale'],
+      source: (res.source || undefined) as CustomerForm['source'],
       default_procurement_method_id: res.default_procurement_method_id || undefined,
-      // 档案字段
       company_background: res.company_background || '',
       company_website: res.company_website || '',
       main_business: res.main_business || '',
@@ -245,7 +101,7 @@ const fetchCustomerDetail = async () => {
     })
     profileStatus.value = res.profile_status
   } catch (error: unknown) {
-    showError(error, '获取客户详情')
+    handleApiError(error, '获取客户详情')
     router.back()
   } finally {
     loading.value = false
@@ -261,50 +117,44 @@ const fetchOptions = async () => {
   }
 }
 
-const handleSubmit = async () => {
-  try {
-    await formRef.value?.validate()
-  } catch {
-    return
-  }
-
+// Form submission
+const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
   submitting.value = true
   try {
     if (isEdit.value) {
-      const updateData: CustomerUpdate = {
-        account_name: form.account_name || undefined,
-        city: form.city || undefined,
-        address: form.address || undefined,
-        company_scale: form.company_scale || undefined,
-        source: form.source || undefined,
-        default_procurement_method_id: form.default_procurement_method_id || undefined,
-        // 档案字段
-        company_background: form.company_background || undefined,
-        company_website: form.company_website || undefined,
-        main_business: form.main_business || undefined,
-        project_background: form.project_background || undefined
-      }
+      const updateData = {
+        account_name: formValues.account_name || null,
+        city: formValues.city || null,
+        address: formValues.address || null,
+        company_scale: formValues.company_scale || null,
+        source: formValues.source || null,
+        default_procurement_method_id: formValues.default_procurement_method_id || null,
+        company_background: formValues.company_background || null,
+        company_website: formValues.company_website || null,
+        main_business: formValues.main_business || null,
+        project_background: formValues.project_background || null
+      } as CustomerUpdate
       await customerApi.updateCustomer(customerId.value, updateData)
-      showSuccess('更新', '客户')
+      toast.success('客户更新成功')
     } else {
-      const createData: CustomerCreate = {
-        account_name: form.account_name,
-        city: form.city,
-        address: form.address || undefined,
-        company_scale: form.company_scale || undefined,
-        source: form.source || undefined,
-        default_procurement_method_id: form.default_procurement_method_id || undefined
-      }
+      const createData = {
+        account_name: formValues.account_name,
+        city: formValues.city,
+        address: formValues.address || null,
+        company_scale: formValues.company_scale || null,
+        source: formValues.source || null,
+        default_procurement_method_id: formValues.default_procurement_method_id || null
+      } as CustomerCreate
       await customerApi.createCustomer(createData)
-      showSuccess('创建', '客户')
+      toast.success('客户创建成功')
     }
     router.back()
   } catch (error: unknown) {
-    showError(error, isEdit.value ? '更新客户' : '创建客户')
+    handleApiError(error, isEdit.value ? '更新客户' : '创建客户')
   } finally {
     submitting.value = false
   }
-}
+})
 
 const handleGoBack = () => {
   if (window.history.length > 1) {
@@ -322,96 +172,320 @@ onMounted(async () => {
 })
 </script>
 
+<template>
+  <div class="customer-edit-page">
+    <!-- Loading State -->
+    <div v-if="loading" class="loading-container">
+      <div class="loading-spinner" />
+    </div>
+
+    <!-- Form Content -->
+    <div v-else class="form-container">
+      <!-- Basic Info Card -->
+      <div class="form-card">
+        <div class="card-title">基本信息</div>
+        <form class="space-y-4" @submit="onSubmit">
+          <div class="form-grid">
+            <!-- Customer Name -->
+            <FormField v-slot="{ componentField }" name="account_name">
+              <FormItem>
+                <FormLabel>客户名称 <span class="text-destructive">*</span></FormLabel>
+                <FormControl>
+                  <Input
+                    v-bind="componentField as any"
+                    placeholder="请输入客户公司名称"
+                    class="h-11 sm:h-8"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+
+            <!-- City -->
+            <FormField v-slot="{ componentField }" name="city">
+              <FormItem>
+                <FormLabel>所在城市 <span class="text-destructive">*</span></FormLabel>
+                <FormControl>
+                  <Input
+                    v-bind="componentField as any"
+                    placeholder="请输入所在城市"
+                    class="h-11 sm:h-8"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+          </div>
+
+          <div class="form-grid">
+            <!-- Source -->
+            <FormField v-slot="{ componentField }" name="source">
+              <FormItem>
+                <FormLabel>客户来源</FormLabel>
+                <Select v-bind="componentField as any">
+                  <FormControl>
+                    <SelectTrigger class="h-11 sm:h-8">
+                      <SelectValue placeholder="请选择客户来源" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="option in customerSourceOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+
+            <!-- Company Scale -->
+            <FormField v-slot="{ componentField }" name="company_scale">
+              <FormItem>
+                <FormLabel>公司规模</FormLabel>
+                <Select v-bind="componentField as any">
+                  <FormControl>
+                    <SelectTrigger class="h-11 sm:h-8">
+                      <SelectValue placeholder="请选择公司规模" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="option in companyScaleOptions"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+          </div>
+
+          <div class="form-grid">
+            <!-- Default Procurement Method -->
+            <FormField v-slot="{ componentField }" name="default_procurement_method_id">
+              <FormItem>
+                <FormLabel>默认采购方式</FormLabel>
+                <Select v-bind="componentField as any">
+                  <FormControl>
+                    <SelectTrigger class="h-11 sm:h-8">
+                      <SelectValue placeholder="请选择默认采购方式" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="option in procurementMethodOptions"
+                      :key="option['id']"
+                      :value="option['id']"
+                    >
+                      {{ option.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+
+            <!-- Address -->
+            <FormField v-slot="{ componentField }" name="address">
+              <FormItem>
+                <FormLabel>公司地址</FormLabel>
+                <FormControl>
+                  <Input
+                    v-bind="componentField as any"
+                    placeholder="请输入公司地址"
+                    class="h-11 sm:h-8"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+          </div>
+        </form>
+      </div>
+
+      <!-- Profile Card (Edit mode only) -->
+      <div v-if="isEdit && hasProfile" class="form-card">
+        <div class="card-title">
+          <span>客户档案</span>
+          <Badge :variant="profileStatusConfig.variant">
+            {{ profileStatusConfig.label }}
+          </Badge>
+        </div>
+
+        <form class="space-y-4">
+          <div class="form-grid">
+            <!-- Company Website -->
+            <FormField v-slot="{ componentField }" name="company_website">
+              <FormItem>
+                <FormLabel>公司官网</FormLabel>
+                <FormControl>
+                  <Input
+                    v-bind="componentField as any"
+                    type="url"
+                    placeholder="请输入公司官网地址"
+                    class="h-11 sm:h-8"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+          </div>
+
+          <!-- Company Background -->
+          <FormField v-slot="{ componentField }" name="company_background">
+            <FormItem>
+              <FormLabel>企业背景</FormLabel>
+              <FormControl>
+                <Textarea
+                  v-bind="componentField as any"
+                  :rows="4"
+                  placeholder="请输入企业背景介绍"
+                  class="resize-none"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </FormField>
+
+          <!-- Main Business -->
+          <FormField v-slot="{ componentField }" name="main_business">
+            <FormItem>
+              <FormLabel>主营业务</FormLabel>
+              <FormControl>
+                <Textarea
+                  v-bind="componentField as any"
+                  :rows="4"
+                  placeholder="请输入主营业务描述"
+                  class="resize-none"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </FormField>
+
+          <!-- Project Background -->
+          <FormField v-slot="{ componentField }" name="project_background">
+            <FormItem>
+              <FormLabel>项目需求背景</FormLabel>
+              <FormControl>
+                <Textarea
+                  v-bind="componentField as any"
+                  :rows="4"
+                  placeholder="请输入项目需求背景"
+                  class="resize-none"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </FormField>
+        </form>
+      </div>
+
+      <!-- Form Actions -->
+      <div class="form-actions-card">
+        <Button variant="outline" type="button" @click="handleGoBack">
+          取消
+        </Button>
+        <Button type="submit" :loading="submitting" @click="onSubmit">
+          {{ isEdit ? '保存' : '创建' }}
+        </Button>
+      </div>
+    </div>
+  </div>
+</template>
+
 <style scoped lang="scss">
-@use '@/styles/variables.scss' as *;
+@use '@/styles/variables-v2.scss' as *;
 
 .customer-edit-page {
   padding: 0;
-  background: $wolf-bg-page;
-  min-height: calc(100vh - 48px);
+  background: $wolf-bg-page-v2;
+  min-height: calc(100vh - 56px);
 }
 
-// 表单容器（撑满页面宽度）
+// Loading state
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  padding: $wolf-page-padding-v2;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid $wolf-border-default-v2;
+  border-top-color: $wolf-primary-v2;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// Form container (full width)
 .form-container {
-  padding: $wolf-page-padding;
+  padding: $wolf-page-padding-v2;
 }
 
-// 表单卡片（撑满页面宽度）
+// Form card (full width)
 .form-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-lg;
-  padding: $wolf-space-md;
-  margin-bottom: $wolf-space-md;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-lg-v2;
+  padding: $wolf-card-padding-v2;
+  margin-bottom: $wolf-space-lg-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .card-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: $wolf-font-size-body;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
-  margin-bottom: $wolf-space-md;
-  padding-bottom: $wolf-space-sm;
-  border-bottom: 1px solid $wolf-border-light;
+  font-size: $wolf-font-size-title-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  margin-bottom: $wolf-space-lg-v2;
+  padding-bottom: $wolf-space-sm-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
 }
 
-// 表单网格（两列布局）
+// Form grid (two columns)
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: $wolf-space-md;
+  gap: $wolf-form-item-gap-v2;
 }
 
-.form-section {
-  margin-bottom: $wolf-space-md;
-}
-
-// 表单操作卡片
+// Form actions card
 .form-actions-card {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-lg;
-  padding: $wolf-space-md;
-  box-shadow: $wolf-shadow-card;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-lg-v2;
+  padding: $wolf-card-padding-v2;
+  box-shadow: $wolf-shadow-card-v2;
   display: flex;
   justify-content: flex-end;
-  gap: $wolf-space-sm;
+  gap: $wolf-space-sm-v2;
 }
 
-// 表单标签样式
-:deep(.el-form-item__label) {
-  font-weight: $wolf-font-weight-medium;
-  color: $wolf-text-secondary;
-  font-size: $wolf-font-size-body;
-  padding-bottom: $wolf-space-xs;
-}
-
-// 输入框样式
-:deep(.el-input__wrapper),
-:deep(.el-textarea__inner) {
-  border-radius: $wolf-radius-md;
-  transition: all 0.2s ease;
-
-  &:hover {
-    border-color: $wolf-border-hover;
-  }
-
-  &.is-focus,
-  &:focus {
-    border-color: $wolf-primary;
-    box-shadow: 0 0 0 2px rgba($wolf-primary, 0.1);
-  }
-}
-
-// 响应式
+// Responsive
 @media (max-width: 768px) {
   .form-container {
-    padding: $wolf-space-md;
+    padding: $wolf-page-padding-mobile-v2;
   }
 
   .form-card {
-    padding: $wolf-space-md;
+    padding: $wolf-card-padding-mobile-v2;
   }
 
   .form-grid {
@@ -420,10 +494,6 @@ onMounted(async () => {
 
   .form-actions-card {
     flex-direction: column-reverse;
-
-    .el-button {
-      width: 100%;
-    }
   }
 }
 </style>

@@ -185,7 +185,7 @@ const continueEditing = (): void => {
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent class="sm:max-w-[600px]">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建线索' : '编辑线索' }}</DialogTitle>
       </DialogHeader>

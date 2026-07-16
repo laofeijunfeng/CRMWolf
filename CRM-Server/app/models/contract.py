@@ -32,7 +32,7 @@ class Contract(Base):
 
     customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
     opportunity_id = Column(BigInteger, ForeignKey('crm_opportunities.id', ondelete='CASCADE'), nullable=False, comment="关联商机ID")
-    signing_contact_id = Column(BigInteger, ForeignKey('crm_contacts.id', ondelete='SET NULL'), nullable=False, comment="客户签约人ID")
+    signing_contact_id = Column(BigInteger, ForeignKey('crm_contacts.id', ondelete='SET NULL'), nullable=True, comment="客户签约人ID")
 
     user_count = Column(Integer, nullable=False, comment="采购用户数")
     total_amount = Column(Numeric(12, 2), nullable=False, comment="合同总金额")

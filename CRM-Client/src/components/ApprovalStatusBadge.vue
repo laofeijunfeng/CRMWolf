@@ -1,13 +1,15 @@
 /**
- * ApprovalStatusBadge — 审批状态徽章（Phase C 唯一状态语言，C-DSG-1）
+ * ApprovalStatusBadge — 审批状态徽章
  *
- * 设计目的（C-DSG-1）：取代散落在 ApprovalTimeline /
- * ApprovalProgressCompact / FinanceInvoiceApprovals 的三套 statusMap，
- * 让 PENDING/APPROVED/REJECTED/CANCELLED 在所有界面颜色一致、可调试。
+ * 基于 V2 设计规范：
+ * - 使用 variables-v2.scss 语义 Token
+ * - 浅底色 + 同色系文字（符合 MASTER.md 功能色规则）
+ * - 支持 WCAG AA 对比度标准
  *
- * 无障碍（C-DSG-6）：role="status" + aria-label 含中文文案；颜色非唯一指示
- * （必有图标 + 文字），符合 WCAG AA。approved/rejected/pending/cancelled
- * 的颜色取 $wolf-approval-* 语义 token（映射到既有功能色，无新色相）。
+ * 无障碍：
+ * - role="status" 标记状态信息
+ * - aria-label 包含中文文案
+ * - 颜色非唯一指示（图标 + 文字）
  */
 <script setup lang="ts">
 import { computed } from 'vue'
@@ -16,42 +18,16 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
-  Minus
+  MinusCircle
 } from 'lucide-vue-next'
 import type { ApprovalStatus } from '@/schemas/approvalGeneric'
 
+// ==================== Types ====================
 interface StatusConfig {
   label: string
   icon: Component
-  textVar: string
-  bgVar: string
-}
-
-const STATUS_MAP: Record<ApprovalStatus, StatusConfig> = {
-  PENDING: {
-    label: '待审批',
-    icon: Clock,
-    textVar: '--wolf-approval-pending-text',
-    bgVar: '--wolf-approval-pending-bg'
-  },
-  APPROVED: {
-    label: '已通过',
-    icon: CheckCircle2,
-    textVar: '--wolf-approval-approved-text',
-    bgVar: '--wolf-approval-approved-bg'
-  },
-  REJECTED: {
-    label: '已驳回',
-    icon: XCircle,
-    textVar: '--wolf-approval-rejected-text',
-    bgVar: '--wolf-approval-rejected-bg'
-  },
-  CANCELLED: {
-    label: '已撤回',
-    icon: Minus,
-    textVar: '--wolf-approval-cancelled-text',
-    bgVar: '--wolf-approval-cancelled-bg'
-  }
+  textClass: string
+  bgClass: string
 }
 
 const props = defineProps({
@@ -65,12 +41,37 @@ const props = defineProps({
   }
 })
 
-const config = computed<StatusConfig>(() => STATUS_MAP[props.status])
+// ==================== Status Config ====================
+// 使用 Tailwind wolf 颜色配置：浅底色 + 同色系文字
+const STATUS_CONFIG: Record<ApprovalStatus, StatusConfig> = {
+  PENDING: {
+    label: '待审批',
+    icon: Clock,
+    textClass: 'text-wolf-warning-text',
+    bgClass: 'bg-wolf-warning-bg'
+  },
+  APPROVED: {
+    label: '已通过',
+    icon: CheckCircle2,
+    textClass: 'text-wolf-success-text',
+    bgClass: 'bg-wolf-success-bg'
+  },
+  REJECTED: {
+    label: '已驳回',
+    icon: XCircle,
+    textClass: 'text-wolf-danger-text',
+    bgClass: 'bg-wolf-danger-bg'
+  },
+  CANCELLED: {
+    label: '已撤回',
+    icon: MinusCircle,
+    textClass: 'text-wolf-text-tertiary',
+    bgClass: 'bg-wolf-bg-muted'
+  }
+}
 
-const badgeStyle = computed<Record<string, string>>(() => ({
-  color: `var(${config.value.textVar})`,
-  backgroundColor: `var(${config.value.bgVar})`
-}))
+// ==================== Computed ====================
+const config = computed<StatusConfig>(() => STATUS_CONFIG[props.status])
 
 const ariaLabel = computed<string>(() => config.value.label)
 </script>
@@ -78,8 +79,11 @@ const ariaLabel = computed<string>(() => config.value.label)
 <template>
   <span
     class="approval-status-badge"
-    :class="[`approval-status-badge--${size}`, `approval-status-badge--${status}`]"
-    :style="badgeStyle"
+    :class="[
+      config.textClass,
+      config.bgClass,
+      size === 'small' ? 'approval-status-badge--small' : ''
+    ]"
     role="status"
     :aria-label="ariaLabel"
   >
@@ -95,6 +99,7 @@ const ariaLabel = computed<string>(() => config.value.label)
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
+// ==================== 状态徽章基础样式 ====================
 .approval-status-badge {
   display: inline-flex;
   align-items: center;
@@ -103,25 +108,34 @@ const ariaLabel = computed<string>(() => config.value.label)
   padding: $wolf-tag-padding-v2;
   border-radius: $wolf-radius-v2;
   font-size: $wolf-tag-font-size-v2;
-  font-weight: $wolf-font-weight-normal-v2;
+  font-weight: $wolf-font-weight-medium-v2;
   line-height: $wolf-line-height-body-v2;
   white-space: nowrap;
-  // 视觉对齐：图标与文字基线
   vertical-align: middle;
+  transition: all $wolf-transition-v2;
 
-  &.approval-status-badge--small {
-    height: 18px;
-    padding: 2px 6px;
-    font-size: 11px;
-  }
-
+  // 图标样式
   .approval-status-badge__icon {
     flex-shrink: 0;
   }
 
+  // 文字样式（颜色继承父级）
   .approval-status-badge__label {
-    // 文字颜色继承父级 color（由 inline style 注入 token CSS 变量）
     color: inherit;
+  }
+}
+
+// ==================== Small 尺寸 ====================
+.approval-status-badge--small {
+  height: $wolf-tag-height-sm-v2;
+  padding: $wolf-tag-padding-sm-v2;
+  font-size: $wolf-tag-font-size-sm-v2;
+}
+
+// ==================== Reduced Motion ====================
+@media (prefers-reduced-motion: reduce) {
+  .approval-status-badge {
+    transition-duration: $wolf-reduced-motion-duration-v2;
   }
 }
 </style>

@@ -3,19 +3,42 @@ import { mount } from '@vue/test-utils'
 import EmptyState from '../EmptyState.vue'
 
 // Mock localStorage
+let storageState = new Map<string, string>()
 const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  clear: vi.fn()
-}
+  get length(): number {
+    return storageState.size
+  },
+  clear: vi.fn((): void => {
+    storageState = new Map<string, string>()
+  }),
+  getItem: vi.fn((key: string): string | null => storageState.get(key) ?? null),
+  key: vi.fn((index: number): string | null => Array.from(storageState.keys())[index] ?? null),
+  removeItem: vi.fn((key: string): void => {
+    storageState.delete(key)
+  }),
+  setItem: vi.fn((key: string, value: string): void => {
+    storageState.set(key, value)
+  }),
+} satisfies Storage
 Object.defineProperty(global, 'localStorage', {
   value: localStorageMock
 })
 
 describe('EmptyState.vue', () => {
   beforeEach(() => {
-    localStorageMock.clear()
+    storageState = new Map<string, string>()
     vi.clearAllMocks()
+    localStorageMock.getItem.mockImplementation((key: string): string | null => storageState.get(key) ?? null)
+    localStorageMock.key.mockImplementation((index: number): string | null => Array.from(storageState.keys())[index] ?? null)
+    localStorageMock.removeItem.mockImplementation((key: string): void => {
+      storageState.delete(key)
+    })
+    localStorageMock.setItem.mockImplementation((key: string, value: string): void => {
+      storageState.set(key, value)
+    })
+    localStorageMock.clear.mockImplementation((): void => {
+      storageState = new Map<string, string>()
+    })
   })
 
   describe('渲染测试', () => {

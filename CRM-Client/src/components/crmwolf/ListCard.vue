@@ -21,25 +21,36 @@ interface Props {
   loading?: boolean
   /** 行是否可点击 */
   rowInteractive?: boolean
+  /** 需要高亮并可被外层恢复焦点的行 ID */
+  highlightedItemId?: number | null | undefined
 }
 
 const props = withDefaults(defineProps<Props>(), {
   emptyText: '暂无数据',
   loading: false,
-  rowInteractive: false
+  rowInteractive: false,
+  highlightedItemId: null
 })
 
 const emit = defineEmits<{
   'row-click': [item: T]
 }>()
 
-const handleRowClick = (item: T): void => {
+const handleRowClick = (event: MouseEvent, item: T): void => {
+  if (isNestedInteractiveElement(event.target, event.currentTarget)) return
   if (props.rowInteractive) {
     emit('row-click', item)
   }
 }
 
+const isNestedInteractiveElement = (target: EventTarget | null, currentTarget: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement) || !(currentTarget instanceof HTMLElement)) return false
+  if (target === currentTarget) return false
+  return target.closest('button, a, input, select, textarea, [role="button"], [role="link"]') !== null
+}
+
 const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
+  if (isNestedInteractiveElement(event.target, event.currentTarget)) return
   if (props.rowInteractive && (event.key === 'Enter' || event.key === ' ')) {
     event.preventDefault()
     emit('row-click', item)
@@ -67,7 +78,9 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 
       <!-- Empty State -->
       <div v-else-if="items.length === 0" class="list-card-empty">
-        {{ emptyText }}
+        <slot name="empty">
+          {{ emptyText }}
+        </slot>
       </div>
 
       <!-- List Items -->
@@ -76,10 +89,15 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
           v-for="item in items"
           :key="item.id"
           class="list-card-item"
-          :class="{ 'is-interactive': rowInteractive }"
+          :class="{
+            'is-interactive': rowInteractive,
+            'is-highlighted': highlightedItemId === item.id
+          }"
+          :data-list-card-row-id="item.id"
+          :data-highlighted="highlightedItemId === item.id ? 'true' : undefined"
           :role="rowInteractive ? 'button' : undefined"
           :tabindex="rowInteractive ? 0 : undefined"
-          @click="handleRowClick(item)"
+          @click="handleRowClick($event, item)"
           @keydown="handleRowKeydown($event, item)"
         >
           <div class="list-card-item-main">
@@ -236,6 +254,16 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   // Interactive row cursor
   &.is-interactive {
     cursor: pointer;
+  }
+
+  &.is-highlighted {
+    background: $wolf-primary-light-v2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .list-card-item {
+    transition-duration: $wolf-reduced-motion-duration-v2;
   }
 }
 

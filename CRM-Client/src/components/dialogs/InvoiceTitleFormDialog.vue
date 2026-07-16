@@ -197,7 +197,7 @@ function continueEditing(): void {
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent class="sm:max-w-[500px]">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑发票抬头' : '新建发票抬头' }}</DialogTitle>
       </DialogHeader>

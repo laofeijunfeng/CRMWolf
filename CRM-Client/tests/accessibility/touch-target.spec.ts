@@ -3,77 +3,48 @@
  * UI/UX Pro Max CRITICAL §2: Touch Target Minimum 44×44pt
  *
  * Tests verify:
- * - All interactive elements meet 44px minimum on mobile
- * - Hit-slop extension works for small visual sizes
- * - Touch-action manipulation removes 300ms delay
+ * - Button variants meet 44px minimum touch targets
+ * - TouchInput mobile/default sizing remains explicit
+ * - Mobile base layer applies global touch target safety
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import TouchButton from '@/components/crmwolf/TouchButton.vue'
+import { Button } from '@/components/ui/button'
 import TouchInput from '@/components/crmwolf/TouchInput.vue'
 import fs from 'fs'
 import path from 'path'
 
 describe('Touch Target Compliance (UI/UX Pro Max §2)', () => {
-  describe('TouchButton', () => {
-    it('size="touch" has explicit 44px height', () => {
-      const wrapper = mount(TouchButton, {
-        props: { size: 'touch' },
-        slots: { default: 'Button' }
+  describe('Button', () => {
+    it('default size has 44px height and min width', () => {
+      const wrapper = mount(Button, {
+        slots: { default: 'Button' },
       })
 
       const button = wrapper.find('button')
-      const classList = button.classes()
-
-      expect(
-        classList.some(c =>
-          c.includes('h-touch-target') ||
-          c.includes('min-h-touch-target') ||
-          c.includes('h-\\[44px\\]')
-        )
-      ).toBe(true)
+      expect(button.classes()).toContain('h-11')
+      expect(button.classes()).toContain('min-w-11')
     })
 
-    it('size="sm" uses hit-slop to achieve 44px touch area', () => {
-      const wrapper = mount(TouchButton, {
+    it('icon size has a square 44px target', () => {
+      const wrapper = mount(Button, {
+        props: { size: 'icon' },
+        slots: { default: 'Icon' },
+      })
+
+      const button = wrapper.find('button')
+      expect(button.classes()).toContain('size-11')
+    })
+
+    it('small size still keeps a 44px touch target', () => {
+      const wrapper = mount(Button, {
         props: { size: 'sm' },
-        slots: { default: 'Small' }
+        slots: { default: 'Small' },
       })
 
       const button = wrapper.find('button')
-
-      // sm button should have hit-slop class
-      expect(button.classes().some(c => c.includes('hit-slop'))).toBe(true)
-    })
-
-    it('size="lg" always has 44px height', () => {
-      const wrapper = mount(TouchButton, {
-        props: { size: 'lg' },
-        slots: { default: 'Large' }
-      })
-
-      const button = wrapper.find('button')
-      expect(button.classes().some(c => c.includes('touch') || c.includes('44'))).toBe(true)
-    })
-
-    it('has touch-action: manipulation', () => {
-      const wrapper = mount(TouchButton, {
-        props: { size: 'touch' },
-        slots: { default: 'Button' }
-      })
-
-      const button = wrapper.find('button')
-      expect(button.classes().some(c => c.includes('touch-manipulation'))).toBe(true)
-    })
-
-    it('press feedback active:scale-[0.98] applied', () => {
-      const wrapper = mount(TouchButton, {
-        props: { size: 'touch' },
-        slots: { default: 'Button' }
-      })
-
-      const button = wrapper.find('button')
-      expect(button.classes().some(c => c.includes('press-feedback') || c.includes('active:scale'))).toBe(true)
+      expect(button.classes()).toContain('h-11')
+      expect(button.classes()).toContain('min-w-11')
     })
   })
 
@@ -82,43 +53,37 @@ describe('Touch Target Compliance (UI/UX Pro Max §2)', () => {
       const wrapper = mount(TouchInput, {
         props: {
           label: 'Mobile Input',
-          size: 'mobile'
-        }
+          size: 'mobile',
+        },
       })
 
       const inputWrapper = wrapper.find('.input-wrapper')
-      expect(inputWrapper.classes().some(c => c.includes('h-input-mobile'))).toBe(true)
+      expect(inputWrapper.classes()).toContain('h-input-mobile')
     })
 
-    it('mobile input has 16px font-size (iOS auto-zoom prevention)', () => {
-      const wrapper = mount(TouchInput, {
-        props: {
-          label: 'Mobile',
-          size: 'mobile'
-        }
-      })
+    it('mobile input has 16px font-size protection through base layer', () => {
+      const baseCssPath = path.resolve(__dirname, '../../src/styles/base.css')
+      const baseCss = fs.readFileSync(baseCssPath, 'utf-8')
 
-      // This is enforced via CSS base layer @media (max-width: 767px)
-      const input = wrapper.find('input')
-      expect(input.exists()).toBe(true)
+      expect(baseCss).toContain('@media (max-width: 767px)')
+      expect(baseCss).toContain('font-size: 16px')
     })
 
     it('default size has 32px height for desktop', () => {
       const wrapper = mount(TouchInput, {
         props: {
           label: 'Desktop',
-          size: 'default'
-        }
+          size: 'default',
+        },
       })
 
       const inputWrapper = wrapper.find('.input-wrapper')
-      expect(inputWrapper.classes().some(c => c.includes('h-input-desktop'))).toBe(true)
+      expect(inputWrapper.classes()).toContain('h-input-desktop')
     })
   })
 
   describe('Global Base Layer', () => {
     it('base.css applies min-h-touch-target on mobile', () => {
-      // Check that base.css contains the rule
       const baseCssPath = path.resolve(__dirname, '../../src/styles/base.css')
       const baseCss = fs.readFileSync(baseCssPath, 'utf-8')
 

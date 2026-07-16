@@ -4,42 +4,24 @@
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import TouchButton from '@/components/crmwolf/TouchButton.vue'
+import { Button } from '@/components/ui/button'
 import TouchInput from '@/components/crmwolf/TouchInput.vue'
 import fs from 'fs'
 import path from 'path'
 
 describe('Focus Ring Compliance (UI/UX Pro Max §1)', () => {
-  describe('TouchButton', () => {
-    it('has focus-visible state', async () => {
-      const wrapper = mount(TouchButton, {
-        props: { size: 'touch' },
+  describe('Button', () => {
+    it('has focus-visible ring classes', () => {
+      const wrapper = mount(Button, {
+        props: { size: 'icon' },
         slots: { default: 'Button' },
-        attachTo: document.body
       })
 
       const button = wrapper.find('button')
 
-      // Focus the button
-      await button.trigger('focus')
-
-      // Check for focus-ring class or focus-visible outline
-      expect(button.classes().some(c => c.includes('focus-ring') || c.includes('focus-visible'))).toBe(true)
-
-      wrapper.unmount()
-    })
-
-    it('focus ring uses wolf primary color', () => {
-      const wrapper = mount(TouchButton, {
-        props: { size: 'touch' },
-        slots: { default: 'Button' }
-      })
-
-      const button = wrapper.find('button')
-
-      // Focus ring color should be wolf-primary/50 (rgba)
-      // This is verified via CSS, class presence indicates compliance
-      expect(button.classes().some(c => c.includes('focus-ring'))).toBe(true)
+      expect(button.classes()).toContain('focus-visible:ring-2')
+      expect(button.classes()).toContain('focus-visible:ring-ring')
+      expect(button.classes()).toContain('focus-visible:ring-offset-2')
     })
   })
 
@@ -47,14 +29,14 @@ describe('Focus Ring Compliance (UI/UX Pro Max §1)', () => {
     it('shows focus ring on focus', async () => {
       const wrapper = mount(TouchInput, {
         props: { label: 'Focus Test' },
-        attachTo: document.body
+        attachTo: document.body,
       })
 
       const input = wrapper.find('input')
       await input.trigger('focus')
 
       const inputWrapper = wrapper.find('.input-wrapper')
-      expect(inputWrapper.classes().some(c => c.includes('focus-ring'))).toBe(true)
+      expect(inputWrapper.classes()).toContain('focus-ring')
 
       wrapper.unmount()
     })
@@ -63,22 +45,21 @@ describe('Focus Ring Compliance (UI/UX Pro Max §1)', () => {
       const wrapper = mount(TouchInput, {
         props: {
           label: 'Error',
-          error: 'Required field'
+          error: 'Required field',
         },
-        attachTo: document.body
+        attachTo: document.body,
       })
 
       const input = wrapper.find('input')
       await input.trigger('focus')
 
       const inputWrapper = wrapper.find('.input-wrapper')
-      expect(inputWrapper.classes().some(c => c.includes('border-wolf-danger'))).toBe(true)
+      expect(inputWrapper.classes()).toContain('border-wolf-danger')
 
       wrapper.unmount()
     })
 
     it('focus ring width is 2px (WCAG compliant)', () => {
-      // Verify via CSS config
       const baseCssPath = path.resolve(__dirname, '../../src/styles/base.css')
       const baseCss = fs.readFileSync(baseCssPath, 'utf-8')
 

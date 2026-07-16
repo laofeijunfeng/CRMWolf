@@ -10,10 +10,12 @@
  * - Active：主色文字 + 加粗
  * - Hover：淡蓝色背景（非激活态）
  * - Touch Target：44px（移动端合规）
+ * - Badge：支持显示待办数量（红色徽标）
  * - 参考 shadcn-vue 官网顶部导航样式
  */
 import { computed } from 'vue'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 // ==================== Types ====================
@@ -24,6 +26,8 @@ interface TabItem {
   label: string
   /** 是否禁用 */
   disabled?: boolean
+  /** 徽标内容（如待办数量） */
+  badge?: number | string
 }
 
 interface Props {
@@ -67,7 +71,16 @@ function handleTabChange(key: string): void {
         :disabled="tab.disabled ?? false"
         class="tabs-trigger-underline"
       >
-        {{ tab.label }}
+        <span class="inline-flex items-center gap-2">
+          {{ tab.label }}
+          <Badge
+            v-if="tab.badge"
+            variant="destructive"
+            class="ml-1 tab-badge"
+          >
+            {{ tab.badge }}
+          </Badge>
+        </span>
       </TabsTrigger>
     </TabsList>
   </Tabs>
@@ -193,5 +206,18 @@ function handleTabChange(key: string): void {
   .tabs-trigger-underline {
     transition-duration: $wolf-reduced-motion-duration-v2;  // 0.01ms
   }
+}
+
+// ==================== Badge 徽标样式 ====================
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: $wolf-font-weight-semibold-v2;  // 600
+  border-radius: $wolf-radius-full-v2;  // 50%
 }
 </style>

@@ -9,13 +9,12 @@
  *
  * Mock 策略：mock `@/api/approvalGeneric` 整个模块（store action 内部走 Zod 校验
  * 后落入 currentApprovalDetail），用真实 Pinia store + storeToRefs 保证响应性
- * 与生产路径一致。ElMessage / ElMessageBox 用 vi.spyOn 监听文案。
+ * 与生产路径一致。shadcn-vue Dialog/Button 做轻量 passthrough，toast 用 vi.fn 监听文案。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import ElementPlus from 'element-plus'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { defineComponent, h } from 'vue'
 
 // ===== Mock approvalGeneric API：actions 为可监听 vi.fn；store 内部走 Zod =====
 const api = vi.hoisted(() => ({
@@ -26,6 +25,12 @@ const api = vi.hoisted(() => ({
   bulkApprove: vi.fn()
 }))
 
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+}))
+
 vi.mock('@/api/approvalGeneric', () => ({
   default: api,
   submitApproval: api.submitApproval,
@@ -34,6 +39,122 @@ vi.mock('@/api/approvalGeneric', () => ({
   getApprovalDetail: api.getApprovalDetail,
   bulkApprove: api.bulkApprove
 }))
+
+vi.mock('vue-sonner', () => ({ toast }))
+
+vi.mock('@/components/ui/dialog', () => {
+  const passthrough = (name: string) => defineComponent({
+    name,
+    setup: (_, { slots }) => () => h('div', slots.default?.()),
+  })
+
+  return {
+    Dialog: defineComponent({
+      name: 'Dialog',
+      props: { open: Boolean },
+      emits: ['update:open'],
+      setup: (props, { slots }) => () => props.open ? h('div', { 'data-testid': 'reject-dialog' }, slots.default?.()) : null,
+    }),
+    DialogContent: passthrough('DialogContent'),
+    DialogHeader: passthrough('DialogHeader'),
+    DialogTitle: passthrough('DialogTitle'),
+    DialogDescription: passthrough('DialogDescription'),
+    DialogFooter: passthrough('DialogFooter'),
+  }
+})
+
+vi.mock('@/components/ui/alert-dialog', () => {
+  const passthrough = (name: string) => defineComponent({
+    name,
+    setup: (_, { slots }) => () => h('div', slots.default?.()),
+  })
+
+  return {
+    AlertDialog: defineComponent({
+      name: 'AlertDialog',
+      props: { open: Boolean },
+      emits: ['update:open'],
+      setup: (props, { slots }) => () => props.open ? h('div', slots.default?.()) : null,
+    }),
+    AlertDialogAction: defineComponent({
+      name: 'AlertDialogAction',
+      setup: (_, { slots, attrs }) => () => h('button', { ...attrs, type: 'button' }, slots.default?.()),
+    }),
+    AlertDialogCancel: defineComponent({
+      name: 'AlertDialogCancel',
+      setup: (_, { slots, attrs }) => () => h('button', { ...attrs, type: 'button' }, slots.default?.()),
+    }),
+    AlertDialogContent: passthrough('AlertDialogContent'),
+    AlertDialogDescription: passthrough('AlertDialogDescription'),
+    AlertDialogFooter: passthrough('AlertDialogFooter'),
+    AlertDialogHeader: passthrough('AlertDialogHeader'),
+    AlertDialogTitle: passthrough('AlertDialogTitle'),
+  }
+})
+
+vi.mock('@/components/ui/button', () => ({
+  Button: defineComponent({
+    name: 'Button',
+    props: { type: String, variant: String, size: String, disabled: Boolean },
+    setup: (props, { slots, attrs }) => () => h('button', {
+      ...attrs,
+      type: props.type ?? 'button',
+      disabled: props.disabled,
+    }, slots.default?.()),
+  }),
+}))
+
+vi.mock('@/components/ui/textarea', () => ({
+  Textarea: defineComponent({
+    name: 'Textarea',
+    props: { modelValue: String, rows: Number, maxlength: Number },
+    emits: ['update:modelValue'],
+    setup: (props, { emit, attrs }) => () => h('textarea', {
+      ...attrs,
+      value: props.modelValue ?? '',
+      rows: props.rows,
+      maxlength: props.maxlength,
+      onInput: (event: Event) => {
+        const target = event.target as HTMLTextAreaElement | null
+        emit('update:modelValue', target?.value ?? '')
+      },
+    }),
+  }),
+}))
+
+vi.mock('@/components/ui/skeleton', () => ({
+  Skeleton: defineComponent({ name: 'Skeleton', setup: () => () => h('div') }),
+}))
+
+vi.mock('@/components/ApprovalProcessStepper.vue', () => ({
+  default: defineComponent({ name: 'ApprovalProcessStepper', setup: () => () => h('div') }),
+}))
+
+vi.mock('@/components/ApprovalStatusBadge.vue', () => ({
+  default: defineComponent({ name: 'ApprovalStatusBadge', setup: () => () => h('span') }),
+}))
+
+vi.mock('@/components/InvoiceFileUpload.vue', () => ({
+  default: defineComponent({ name: 'InvoiceFileUpload', setup: () => () => h('div') }),
+}))
+
+vi.mock('@/components/ErrorState.vue', () => ({
+  default: defineComponent({
+    name: 'ErrorState',
+    props: { title: String, description: String },
+    setup: (props, { slots }) => () => h('div', [props.title, props.description, slots.action?.()]),
+  }),
+}))
+
+vi.mock('@/components/WolfEmpty.vue', () => ({
+  default: defineComponent({
+    name: 'WolfEmpty',
+    props: { title: String, description: String },
+    setup: (props, { slots }) => () => h('div', [props.title, props.description, slots.action?.()]),
+  }),
+}))
+
+vi.mock('@/api/fileUpload', () => ({ getInvoiceFileUrl: vi.fn(() => '/files/invoice') }))
 
 // ===== Mock 权限 / user store（v-permission 指令依赖 usePermissionStore，
 // 且 request.ts 拦截器引用 useUserStore，虽本测试不触发 axios 但仍需提供）=====
@@ -106,7 +227,6 @@ const mountComp = (props: Record<string, unknown>) =>
   mount(ApprovalProcessGeneric, {
     props,
     global: {
-      plugins: [ElementPlus],
       directives: {
         // no-op：始终保留元素（权限由 mock hasPermission=true 决定）
         permission: { mounted: () => undefined, updated: () => undefined }
@@ -122,10 +242,9 @@ describe('ApprovalProcessGeneric', () => {
     api.cancelApproval.mockReset()
     api.getApprovalDetail.mockReset()
     api.bulkApprove.mockReset()
-    vi.spyOn(ElMessage, 'success').mockImplementation(() => ({}) as never)
-    vi.spyOn(ElMessage, 'warning').mockImplementation(() => ({}) as never)
-    vi.spyOn(ElMessage, 'error').mockImplementation(() => ({}) as never)
-    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm')
+    toast.success.mockReset()
+    toast.warning.mockReset()
+    toast.error.mockReset()
   })
 
   it('shows submit CTA empty state when no approval exists (404 → WolfEmpty)', async () => {
@@ -169,7 +288,7 @@ describe('ApprovalProcessGeneric', () => {
     expect(w.find('[data-testid="reject-btn"]').exists()).toBe(false)
   })
 
-  it('reject requires reason (synchronous guard before action)', async () => {
+  it('reject confirm stays disabled without a reason', async () => {
     api.getApprovalDetail.mockResolvedValue(buildDetail({ status: 'PENDING' }))
     const w = mountComp({
       entityType: 'PAYMENT',  // INVOICE 会触发 InvoiceFileUpload UI，隐藏按钮
@@ -184,12 +303,11 @@ describe('ApprovalProcessGeneric', () => {
     await flushPromises()
     expect(w.find('[data-testid="reject-dialog"]').exists()).toBe(true)
 
-    // 不填理由直接点确定 → 应触发 warning 且不调 approveEntity
+    // 不填理由时确认按钮保持 disabled，避免提交空驳回理由
     await w.find('[data-testid="reject-reason"]').setValue('')
-    await w.find('[data-testid="reject-confirm-btn"]').trigger('click')
     await flushPromises()
 
-    expect(ElMessage.warning).toHaveBeenCalledWith('请填写驳回理由，提交人将据此修改')
+    expect(w.find('[data-testid="reject-confirm-btn"]').attributes('disabled')).toBeDefined()
     expect(api.approveEntity).not.toHaveBeenCalled()
   })
 
@@ -215,9 +333,9 @@ describe('ApprovalProcessGeneric', () => {
     await approveBtn.trigger('click')
     await flushPromises()
 
-    // action pending 期间按钮应 disabled + 带 loading 标识
+    // action pending 期间按钮应 disabled + 显示 loading 图标
     expect(approveBtn.attributes('disabled')).toBeDefined()
-    expect(approveBtn.classes()).toContain('is-loading')
+    expect(approveBtn.find('.animate-spin').exists()).toBe(true)
 
     // 完成 action 后恢复
     resolveApprove(buildDetail({ status: 'APPROVED' }))
@@ -245,7 +363,7 @@ describe('ApprovalProcessGeneric', () => {
     await flushPromises()
 
     // C-DSG-7 条8：保留已输入理由（弹窗未关闭 + reason 未清空）
-    expect(ElMessage.warning).toHaveBeenCalledWith('该审批已被他人处理，你的填写已保留')
+    expect(toast.warning).toHaveBeenCalledWith('该审批已被他人处理，你的填写已保留')
     expect(api.approveEntity).toHaveBeenCalledWith(
       'PAYMENT', 1, 'REJECT', '请补充材料', '2026-07-01T10:00:00'
     )

@@ -235,7 +235,7 @@ export interface OpportunityListResponse {
 
 export const opportunityApi = {
   getOpportunities: (params?: OpportunityListParams) => {
-    return request.get<Opportunity[]>(`/v1/opportunities/`, { params })
+    return request.get<OpportunityListResponse[]>(`/v1/opportunities/`, { params })
   },
 
   getOpportunity: (opportunityId: number) => {
@@ -255,19 +255,19 @@ export const opportunityApi = {
   },
 
   moveOpportunityStage: (opportunityId: number, data: OpportunityMoveStageRequest) => {
-    return request.post<void>(`/v1/opportunities/${opportunityId}/move-stage`, data)
+    return request.post<null>(`/v1/opportunities/${opportunityId}/move-stage`, data)
   },
 
   markAsWon: (opportunityId: number, data: OpportunityWinRequest) => {
-    return request.patch<void>(`/v1/opportunities/${opportunityId}/win`, data)
+    return request.patch<null>(`/v1/opportunities/${opportunityId}/win`, data)
   },
 
   markAsLost: (opportunityId: number, data: OpportunityLossRequest) => {
-    return request.patch<void>(`/v1/opportunities/${opportunityId}/lose`, data)
+    return request.patch<null>(`/v1/opportunities/${opportunityId}/lose`, data)
   },
 
   deleteOpportunity: (opportunityId: number) => {
-    return request.delete<void>(`/v1/opportunities/${opportunityId}`)
+    return request.delete<null>(`/v1/opportunities/${opportunityId}`)
   },
 
   getSalesFunnel: () => {

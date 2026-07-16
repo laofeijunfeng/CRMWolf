@@ -20,6 +20,13 @@ const config: Config = {
     'text-wolf-primary',
     'border-wolf-border-default',
     'border-wolf-border-hover',
+    // Status colors (for ApprovalStatusBadge)
+    'text-wolf-success-text',
+    'bg-wolf-success-bg',
+    'text-wolf-warning-text',
+    'bg-wolf-warning-bg',
+    'text-wolf-danger-text',
+    'bg-wolf-danger-bg',
     // Radius
     'rounded-wolf',
     'rounded-wolf-sm',

@@ -34,11 +34,17 @@ status: active
 | 组件类型 | z-index | Portal | 原因 |
 |---------|---------|--------|------|
 | **Dialog** | `z-[1000]` | ✅ 必须 | 最高层级，遮挡一切 |
-| **AlertDialog** | `z-[1000]` | ✅ 必须 | 与 Dialog 同层 |
-| **Dropdown** | `z-[1000]` | ✅ 必须 | 与 Modal 同层（AppLayout 定义） |
+| **AlertDialog** | `z-[1000]` | ✅ 必须 | 与 Dialog 同层，确认对话框 |
+| **DropdownMenu** | `z-[1000]` | ✅ 必须 | 下拉菜单，与 Modal 同层 |
+| **ContextMenu** | `z-[1000]` | ✅ 必须 | 右键菜单，与 Modal 同层 |
+| **Select** | `z-[1000]` | ✅ 必须 | 下拉选择框，与 Modal 同层 |
+| **Combobox** | `z-[1000]` | ✅ 必须 | 组合框，与 Modal 同层 |
+| **Popover** | `z-[1000]` | ✅ 必须 | 弹出框，与 Modal 同层 |
+| **Menubar** | `z-[1000]` | ✅ 必须 | 菜单栏，与 Modal 同层 |
 | **Sheet** | `z-[200]` | ✅ 必须 | Drawer 层，遮挡导航但不遮挡 Modal |
 | **Drawer** | `z-[200]` | ✅ 必须 | 与 Sheet 同层 |
-| **Popover** | `z-20` | ✅ 推荐 | 悬浮元素，通常依附于触发元素 |
+| **Tooltip** | `z-20` | ✅ 推荐 | 悬浮提示，依附于触发元素 |
+| **HoverCard** | `z-20` | ✅ 推荐 | 悬浮卡片，依附于触发元素 |
 
 ### 1.3 层级关系图
 

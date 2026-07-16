@@ -11,7 +11,7 @@ Task 1.4: PaymentRecord List Endpoint with approval_status filtering
 - pending_approval_me_count 计算逻辑
 """
 import pytest
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.compiler import compiles
@@ -335,6 +335,41 @@ def test_payment_record_list_all(client, patched_deps):
     assert "items" in data
     assert "total" in data
     assert "pending_approval_me_count" in data
+
+
+def test_payment_record_list_includes_record_number(
+    client, patched_deps, monkeypatch
+):
+    """回款记录列表应返回数据库中已生成的 PAY 编号"""
+    patched_deps(["payment:view:all"])
+    record = SimpleNamespace(
+        id=1,
+        payment_plan_id=1,
+        record_number="PAY202607130001",
+        actual_amount=10000,
+        payment_date=date(2026, 7, 13),
+        proof_attachment=None,
+        notes=None,
+        creator_id="1",
+        creator_name="销售李",
+        confirmation_status=PaymentConfirmationStatus.PENDING,
+        created_time=datetime(2026, 7, 13, 10, 0, 0),
+        approval_id=None,
+        approval=None,
+        payment_plan=None,
+    )
+    monkeypatch.setattr(
+        "app.api.payments.payment_record_crud.list_records",
+        lambda *args, **kwargs: ([record], 1),
+    )
+    monkeypatch.setattr(
+        "app.api.payments.query_pending_approval_me",
+        lambda *args, **kwargs: 0,
+    )
+
+    response = client.get("/v1/payments/payment-records")
+    assert response.status_code == 200, response.text
+    assert response.json()["items"][0]["record_number"] == record.record_number
 
 
 def test_payment_record_list_filter_pending_submit(

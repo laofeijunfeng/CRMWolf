@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DatePicker } from '@/components/ui/date-picker'
 import {
   Select,
   SelectContent,
@@ -246,7 +247,7 @@ function continueEditing(): void {
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent class="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+    <DialogContent class="max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑合同' : '新建合同' }}</DialogTitle>
       </DialogHeader>
@@ -393,14 +394,14 @@ function continueEditing(): void {
         </FormField>
 
         <!-- Signing Date (optional) -->
-        <FormField v-slot="{ componentField }" name="signing_date">
+        <FormField v-slot="{ value, handleChange }" name="signing_date">
           <FormItem>
             <FormLabel>签署日期</FormLabel>
             <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="date"
-                class="h-11 sm:h-8"
+              <DatePicker
+                :model-value="value ? new Date(value as string) : null"
+                placeholder="请选择签署日期"
+                @update:model-value="(date: Date | null) => handleChange(date ? date.toISOString().split('T')[0] : null)"
               />
             </FormControl>
             <FormMessage />
@@ -408,14 +409,14 @@ function continueEditing(): void {
         </FormField>
 
         <!-- Effective Date (optional) -->
-        <FormField v-slot="{ componentField }" name="effective_date">
+        <FormField v-slot="{ value, handleChange }" name="effective_date">
           <FormItem>
             <FormLabel>生效日期</FormLabel>
             <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="date"
-                class="h-11 sm:h-8"
+              <DatePicker
+                :model-value="value ? new Date(value as string) : null"
+                placeholder="请选择生效日期"
+                @update:model-value="(date: Date | null) => handleChange(date ? date.toISOString().split('T')[0] : null)"
               />
             </FormControl>
             <FormMessage />

@@ -32,6 +32,8 @@ export interface TabItem {
   label: string
   /** 是否禁用 */
   disabled?: boolean
+  /** 徽标内容（如待办数量） */
+  badge?: number | string
 }
 
 export interface HeaderConfig {

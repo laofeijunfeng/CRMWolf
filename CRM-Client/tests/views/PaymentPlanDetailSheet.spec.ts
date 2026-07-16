@@ -2,12 +2,21 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h, type PropType } from 'vue'
-import type { PaymentPlanResponse, PaymentRecordInfo } from '@/api/payment'
+import type { PaymentPlanResponse, PaymentRecordInfo, PaymentRecordCreate, PaymentRecordUpdate } from '@/api/payment'
 
 const paymentApi = vi.hoisted(() => ({
   getPaymentPlanDetail: vi.fn(),
+  createPaymentRecord: vi.fn(),
+  updatePaymentRecord: vi.fn(),
 }))
 const handleApiError = vi.hoisted(() => vi.fn())
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+}))
+const approvalStore = vi.hoisted(() => ({
+  submitEntity: vi.fn(),
+}))
 
 vi.mock('@/api/payment', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/payment')>()
@@ -18,6 +27,12 @@ vi.mock('@/api/payment', async (importOriginal) => {
 })
 
 vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
+
+vi.mock('vue-sonner', () => ({ toast }))
+
+vi.mock('@/stores/approval', () => ({
+  useApprovalStore: () => approvalStore,
+}))
 
 vi.mock('@/components/ui/sheet', () => {
   const passthrough = (name: string) => defineComponent({
@@ -145,12 +160,63 @@ vi.mock('@/components/PaymentRecordList.vue', () => ({
       const firstRecord = props.records[0]
       if (firstRecord !== undefined) {
         children.push(h('button', { 'data-testid': 'record-click', onClick: () => emit('record-click', firstRecord) }, '记录点击'))
+        children.push(h('button', { 'data-testid': 'edit-record-btn', onClick: () => emit('edit-record', firstRecord) }, '编辑'))
       }
       return h('div', {
         'data-testid': 'payment-record-list',
         'data-record-count': String(props.records.length),
         'data-can-register': String(props.canRegister),
       }, children)
+    },
+  }),
+}))
+
+// Mock PaymentRecordDialog
+vi.mock('@/components/dialogs/PaymentRecordDialog.vue', () => ({
+  default: defineComponent({
+    name: 'PaymentRecordDialog',
+    props: {
+      open: Boolean,
+      defaultAmount: [Number, null] as PropType<number | null>,
+      submitting: Boolean,
+    },
+    emits: ['update:open', 'submit'],
+    setup: (props, { emit }) => () => {
+      if (!props.open) return null
+      return h('div', { 'data-testid': 'payment-record-dialog' }, [
+        h('button', {
+          'data-testid': 'dialog-submit-btn',
+          disabled: props.submitting,
+          onClick: () => emit('submit', { actual_amount: 50000, payment_date: '2026-07-15' } as PaymentRecordCreate),
+        }, '提交'),
+      ])
+    },
+  }),
+}))
+
+// Mock EditRecordDialog
+vi.mock('@/components/dialogs/EditRecordDialog.vue', () => ({
+  default: defineComponent({
+    name: 'EditRecordDialog',
+    props: {
+      open: Boolean,
+      record: { type: Object as PropType<PaymentRecordInfo | null>, default: null },
+      submitting: Boolean,
+    },
+    emits: ['update:open', 'submit'],
+    setup: (props, { emit }) => () => {
+      if (!props.open) return null
+      return h('div', { 'data-testid': 'edit-record-dialog' }, [
+        h('button', {
+          'data-testid': 'dialog-submit-btn',
+          disabled: props.submitting,
+          onClick: () => {
+            if (props.record) {
+              emit('submit', props.record.id, { actual_amount: 55000, payment_date: '2026-07-16' } as PaymentRecordUpdate)
+            }
+          },
+        }, '提交'),
+      ])
     },
   }),
 }))
@@ -205,6 +271,9 @@ describe('PaymentPlanDetailSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     paymentApi.getPaymentPlanDetail.mockResolvedValue(paymentPlanFixture())
+    paymentApi.createPaymentRecord.mockResolvedValue({ id: 601 })
+    paymentApi.updatePaymentRecord.mockResolvedValue({ id: 501 })
+    approvalStore.submitEntity.mockResolvedValue({ approval_id: 100, status: 'PENDING' })
   })
 
   it('loads and renders the payment plan single-panel sheet foundation', async () => {
@@ -231,7 +300,7 @@ describe('PaymentPlanDetailSheet', () => {
     expect(wrapper.get('[data-testid="payment-record-list"]').attributes('data-record-count')).toBe('1')
   })
 
-  it('emits navigation, register, record click, and submit approval seams without routing', async () => {
+  it('emits navigation seams (view-customer, view-contract, record-click) without routing', async () => {
     const plan = paymentPlanFixture()
     paymentApi.getPaymentPlanDetail.mockResolvedValue(plan)
     const wrapper = mount(PaymentPlanDetailSheet, {
@@ -245,15 +314,175 @@ describe('PaymentPlanDetailSheet', () => {
 
     await wrapper.get('[aria-label="查看客户 上海测试客户"]').trigger('click')
     await wrapper.get('[aria-label="查看合同 年度服务合同"]').trigger('click')
-    await wrapper.get('[data-testid="record-register"]').trigger('click')
     await wrapper.get('[data-testid="record-click"]').trigger('click')
-    await getButtonByText(wrapper, '提交审批').trigger('click')
 
     expect(wrapper.emitted('view-customer')?.[0]).toEqual([303, plan])
     expect(wrapper.emitted('view-contract')?.[0]).toEqual([202, plan])
-    expect(wrapper.emitted('register-payment')?.[0]).toEqual([plan])
     expect(wrapper.emitted('record-click')?.[0]).toEqual([plan.payment_records[0]])
-    expect(wrapper.emitted('submit-approval')?.[0]).toEqual([plan, 501])
+  })
+
+  it('opens register dialog on register click and submits payment record', async () => {
+    const plan = paymentPlanFixture()
+    paymentApi.getPaymentPlanDetail.mockResolvedValue(plan)
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      props: {
+        visible: true,
+        planId: 101,
+      },
+    })
+
+    await flushPromises()
+
+    // Click register button
+    await wrapper.get('[data-testid="record-register"]').trigger('click')
+    await flushPromises()
+
+    // Dialog should be open
+    expect(wrapper.find('[data-testid="payment-record-dialog"]').exists()).toBe(true)
+
+    // Submit the dialog
+    await wrapper.get('[data-testid="dialog-submit-btn"]').trigger('click')
+    await flushPromises()
+
+    // Should call API
+    expect(paymentApi.createPaymentRecord).toHaveBeenCalledWith(101, { actual_amount: 50000, payment_date: '2026-07-15' })
+    expect(toast.success).toHaveBeenCalledWith('回款登记成功')
+
+    // Should reload and emit refresh
+    expect(paymentApi.getPaymentPlanDetail).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('submits approval and shows success toast', async () => {
+    const plan = paymentPlanFixture()
+    paymentApi.getPaymentPlanDetail.mockResolvedValue(plan)
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      props: {
+        visible: true,
+        planId: 101,
+      },
+    })
+
+    await flushPromises()
+
+    // Click submit approval
+    await getButtonByText(wrapper, '提交审批').trigger('click')
+    await flushPromises()
+
+    // Should call approval store
+    expect(approvalStore.submitEntity).toHaveBeenCalledWith('PAYMENT', 501)
+    expect(toast.success).toHaveBeenCalledWith('已提交审批，等待审批人处理')
+
+    // Should reload and emit refresh
+    expect(paymentApi.getPaymentPlanDetail).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('shows special toast when approval_id is 0 (no approval flow)', async () => {
+    const plan = paymentPlanFixture()
+    paymentApi.getPaymentPlanDetail.mockResolvedValue(plan)
+    approvalStore.submitEntity.mockResolvedValue({ approval_id: 0, status: 'APPROVED' })
+
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      props: {
+        visible: true,
+        planId: 101,
+      },
+    })
+
+    await flushPromises()
+
+    await getButtonByText(wrapper, '提交审批').trigger('click')
+    await flushPromises()
+
+    expect(toast.success).toHaveBeenCalledWith('未配置审批流，已转为财务确认')
+  })
+
+  it('opens edit dialog for resubmit and submits update + approval', async () => {
+    const rejectedPlan = paymentPlanFixture({
+      latest_approval: {
+        id: 7001,
+        status: 'REJECTED',
+        submitter_id: 'u-1',
+        submitter_name: '张三',
+        created_time: '2026-07-10T09:30:00.000Z',
+        reject_reason: '金额凭证不一致',
+        nodes: [
+          {
+            id: 1,
+            node_order: 1,
+            node_name: '财务复核',
+            approve_role: 'FINANCE_MANAGER',
+            status: 'REJECT',
+            approver_name: '财务经理',
+            approved_time: '2026-07-10T10:00:00.000Z',
+            comment: '金额凭证不一致',
+          },
+        ],
+      },
+    })
+    paymentApi.getPaymentPlanDetail.mockResolvedValue(rejectedPlan)
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      props: {
+        visible: true,
+        planId: 101,
+      },
+    })
+
+    await flushPromises()
+
+    // Click resubmit button
+    await getButtonByText(wrapper, '重新提交审批').trigger('click')
+    await flushPromises()
+
+    // Dialog should be open
+    expect(wrapper.find('[data-testid="edit-record-dialog"]').exists()).toBe(true)
+
+    // Submit the dialog
+    await wrapper.get('[data-testid="dialog-submit-btn"]').trigger('click')
+    await flushPromises()
+
+    // Should call update then submit
+    expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(501, { actual_amount: 55000, payment_date: '2026-07-16' })
+    expect(approvalStore.submitEntity).toHaveBeenCalledWith('PAYMENT', 501)
+    expect(toast.success).toHaveBeenCalledWith('已重新提交审批')
+
+    // Should reload and emit refresh
+    expect(paymentApi.getPaymentPlanDetail).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+  })
+
+  it('opens edit dialog for normal edit and submits update without approval', async () => {
+    const plan = paymentPlanFixture()
+    paymentApi.getPaymentPlanDetail.mockResolvedValue(plan)
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      props: {
+        visible: true,
+        planId: 101,
+      },
+    })
+
+    await flushPromises()
+
+    // Click edit from record list
+    await wrapper.get('[data-testid="edit-record-btn"]').trigger('click')
+    await flushPromises()
+
+    // Dialog should be open
+    expect(wrapper.find('[data-testid="edit-record-dialog"]').exists()).toBe(true)
+
+    // Submit the dialog
+    await wrapper.get('[data-testid="dialog-submit-btn"]').trigger('click')
+    await flushPromises()
+
+    // Should call update only, not approval
+    expect(paymentApi.updatePaymentRecord).toHaveBeenCalledWith(501, { actual_amount: 55000, payment_date: '2026-07-16' })
+    expect(approvalStore.submitEntity).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith('回款记录已更新')
+
+    // Should reload and emit refresh
+    expect(paymentApi.getPaymentPlanDetail).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
   })
 
   it('does not render or emit the customer navigation seam when customer_id is null', async () => {
@@ -287,7 +516,7 @@ describe('PaymentPlanDetailSheet', () => {
     expect(wrapper.findAll('button').some((button) => button.text().includes('登记回款'))).toBe(false)
   })
 
-  it('renders rejected approval progress and emits the resubmit approval seam', async () => {
+  it('renders rejected approval progress with rejection reason', async () => {
     const rejectedPlan = paymentPlanFixture({
       latest_approval: {
         id: 7001,
@@ -324,10 +553,6 @@ describe('PaymentPlanDetailSheet', () => {
     expect(wrapper.text()).toContain('审批被驳回')
     expect(wrapper.text()).toContain('金额凭证不一致')
     expect(wrapper.text()).toContain('财务复核')
-
-    await getButtonByText(wrapper, '重新提交审批').trigger('click')
-
-    expect(wrapper.emitted('resubmit-approval')?.[0]).toEqual([rejectedPlan, 501])
   })
 
   it('keeps the sheet source on V2 primitives without Element Plus imports', () => {
@@ -339,5 +564,27 @@ describe('PaymentPlanDetailSheet', () => {
     expect(source).not.toContain('@element-plus')
     expect(source).not.toContain('variables.scss')
     expect(source).not.toMatch(/(?:48|60|20|12|560|280)px/)
+  })
+
+  it('does not emit removed seam events (register-payment, edit-record, submit-approval, resubmit-approval)', async () => {
+    const plan = paymentPlanFixture()
+    paymentApi.getPaymentPlanDetail.mockResolvedValue(plan)
+    const wrapper = mount(PaymentPlanDetailSheet, {
+      props: {
+        visible: true,
+        planId: 101,
+      },
+    })
+
+    await flushPromises()
+
+    // Trigger all the actions that used to emit seam events
+    await wrapper.get('[data-testid="record-register"]').trigger('click')
+    await getButtonByText(wrapper, '提交审批').trigger('click')
+
+    // These seam events should NOT be emitted
+    expect(wrapper.emitted('register-payment')).toBeUndefined()
+    expect(wrapper.emitted('submit-approval')).toBeUndefined()
+    expect(wrapper.emitted('resubmit-approval')).toBeUndefined()
   })
 })

@@ -3,7 +3,9 @@
   <Toast position="top-center" :duration="4000" />
   <!-- UI/UX Pro Max §8: Confirm dialog container (global) -->
   <ConfirmDialog />
-  <router-view />
+  <TooltipProvider>
+    <router-view />
+  </TooltipProvider>
 </template>
 
 <script setup lang="ts">
@@ -15,7 +17,7 @@
  * - Toast container at root level - §8 toast-accessibility
  * - z-index: 1000 (highest) - §5 z-index-management
  */
-import { Toast, ConfirmDialog } from '@/components/crmwolf'
+import { Toast, ConfirmDialog, TooltipProvider } from '@/components/crmwolf'
 </script>
 
 <style>

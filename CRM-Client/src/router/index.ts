@@ -44,39 +44,9 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '线索管理' }
       },
       {
-        path: 'leads/:id',
-        name: 'LeadDetail',
-        component: () => import('@/views/LeadDetail.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'leads/public',
-        name: 'PublicLeads',
-        component: () => import('@/views/PublicLeads.vue'),
-        meta: { requiresAuth: true, title: '公海线索' }
-      },
-      {
-        path: 'leads/my',
-        name: 'MyLeads',
-        component: () => import('@/views/MyLeads.vue'),
-        meta: { requiresAuth: true, title: '我的线索' }
-      },
-      {
         path: 'leads/reminder',
         name: 'FollowUpReminder',
         component: () => import('@/views/FollowUpReminder.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'leads/:id/convert',
-        name: 'LeadConvert',
-        component: () => import('@/views/LeadConvert.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'leads/convert',
-        name: 'LeadConvertFromList',
-        component: () => import('@/views/LeadConvert.vue'),
         meta: { requiresAuth: true }
       },
       {
@@ -110,20 +80,8 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '商机管理' }
       },
       {
-        path: 'opportunities/create',
-        name: 'OpportunityCreate',
-        component: () => import('@/views/OpportunityEdit.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
         path: 'opportunities/:id/edit',
         name: 'OpportunityEdit',
-        component: () => import('@/views/OpportunityEdit.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'customers/:customerId/opportunities/create',
-        name: 'CustomerOpportunityCreate',
         component: () => import('@/views/OpportunityEdit.vue'),
         meta: { requiresAuth: true }
       },

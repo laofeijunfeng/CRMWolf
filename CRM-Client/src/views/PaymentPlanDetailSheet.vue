@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { toast } from 'vue-sonner'
 import {
   AlertCircle,
   FileText,
@@ -40,14 +41,19 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import StatusBadge, { type PaymentPlanStatus as PaymentPlanBadgeStatus } from '@/components/StatusBadge.vue'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
+import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
+import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import paymentApi, {
   type ApprovalInfo,
   type ApprovalNodeInfo,
   type ApprovalStatus,
   type PaymentPlanResponse,
   type PaymentPlanStatus,
-  type PaymentRecordInfo
+  type PaymentRecordInfo,
+  type PaymentRecordCreate,
+  type PaymentRecordUpdate
 } from '@/api/payment'
+import { useApprovalStore } from '@/stores/approval'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
 
@@ -61,20 +67,33 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   refresh: []
-  'register-payment': [plan: PaymentPlanResponse]
   'record-click': [record: PaymentRecordInfo]
-  'edit-record': [record: PaymentRecordInfo]
   'view-approval': [record: PaymentRecordInfo]
   'view-customer': [customerId: number, plan: PaymentPlanResponse]
   'view-contract': [contractId: number, plan: PaymentPlanResponse]
-  'submit-approval': [plan: PaymentPlanResponse, recordId: number]
-  'resubmit-approval': [plan: PaymentPlanResponse, recordId: number]
 }>()
+
+const approvalStore = useApprovalStore()
 
 const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
 const paymentPlan = ref<PaymentPlanResponse | null>(null)
 const activeRequestId = ref<number>(0)
+
+// Dialog state
+const registerDialogOpen = ref<boolean>(false)
+const editDialogOpen = ref<boolean>(false)
+const selectedRecord = ref<PaymentRecordInfo | null>(null)
+const registerSubmitting = ref<boolean>(false)
+const editSubmitting = ref<boolean>(false)
+const approvalSubmitting = ref<boolean>(false)
+const isResubmitMode = ref<boolean>(false)
+
+// Default amount for register dialog
+const registerDefaultAmount = computed<number | null>(() => {
+  if (paymentPlan.value === null) return null
+  return paymentPlan.value.remaining_amount ?? paymentPlan.value.planned_amount ?? 0
+})
 
 const latestRecord = computed<PaymentRecordInfo | null>(() => {
   const records = paymentPlan.value?.payment_records ?? []
@@ -163,7 +182,25 @@ const handleRetry = (): void => {
 
 const handleRegisterPayment = (): void => {
   if (paymentPlan.value === null || !canRegisterPayment.value) return
-  emit('register-payment', paymentPlan.value)
+  registerDialogOpen.value = true
+}
+
+const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void> => {
+  const plan = paymentPlan.value
+  if (plan === null) return
+
+  registerSubmitting.value = true
+  try {
+    await paymentApi.createPaymentRecord(plan.id, payload)
+    toast.success('回款登记成功')
+    registerDialogOpen.value = false
+    await fetchPaymentPlanDetail(plan.id)
+    emit('refresh')
+  } catch (error: unknown) {
+    handleApiError(error, '登记回款')
+  } finally {
+    registerSubmitting.value = false
+  }
 }
 
 const handleRecordClick = (record: PaymentRecordInfo): void => {
@@ -171,7 +208,41 @@ const handleRecordClick = (record: PaymentRecordInfo): void => {
 }
 
 const handleEditRecord = (record: PaymentRecordInfo): void => {
-  emit('edit-record', record)
+  selectedRecord.value = record
+  isResubmitMode.value = false
+  editDialogOpen.value = true
+}
+
+const handleEditSubmit = async (recordId: number, payload: PaymentRecordUpdate): Promise<void> => {
+  const plan = paymentPlan.value
+  if (plan === null) return
+
+  editSubmitting.value = true
+  try {
+    await paymentApi.updatePaymentRecord(recordId, payload)
+
+    // If resubmit mode, also submit approval
+    if (isResubmitMode.value) {
+      const res = await approvalStore.submitEntity('PAYMENT', recordId)
+      if (res.approval_id === 0) {
+        toast.success('未配置审批流，已转为财务确认')
+      } else {
+        toast.success('已重新提交审批')
+      }
+    } else {
+      toast.success('回款记录已更新')
+    }
+
+    editDialogOpen.value = false
+    selectedRecord.value = null
+    isResubmitMode.value = false
+    await fetchPaymentPlanDetail(plan.id)
+    emit('refresh')
+  } catch (error: unknown) {
+    handleApiError(error, isResubmitMode.value ? '重新提交审批' : '修改回款记录')
+  } finally {
+    editSubmitting.value = false
+  }
 }
 
 const handleViewApproval = (record: PaymentRecordInfo): void => {
@@ -191,18 +262,34 @@ const handleViewContract = (): void => {
   emit('view-contract', plan.contract_id, plan)
 }
 
-const handleSubmitApproval = (): void => {
+const handleSubmitApproval = async (): Promise<void> => {
   const plan = paymentPlan.value
   const record = latestRecord.value
   if (plan === null || record === null || !canSubmitApproval.value) return
-  emit('submit-approval', plan, record.id)
+
+  approvalSubmitting.value = true
+  try {
+    const res = await approvalStore.submitEntity('PAYMENT', record.id)
+    if (res.approval_id === 0) {
+      toast.success('未配置审批流，已转为财务确认')
+    } else {
+      toast.success('已提交审批，等待审批人处理')
+    }
+    await fetchPaymentPlanDetail(plan.id)
+    emit('refresh')
+  } catch (error: unknown) {
+    handleApiError(error, '提交审批')
+  } finally {
+    approvalSubmitting.value = false
+  }
 }
 
 const handleResubmitApproval = (): void => {
-  const plan = paymentPlan.value
   const record = latestRecord.value
-  if (plan === null || record === null || !canResubmitApproval.value) return
-  emit('resubmit-approval', plan, record.id)
+  if (record === null || !canResubmitApproval.value) return
+  selectedRecord.value = record
+  isResubmitMode.value = true
+  editDialogOpen.value = true
 }
 
 const mapPaymentPlanStatus = (status: PaymentPlanStatus): PaymentPlanBadgeStatus => {
@@ -504,18 +591,22 @@ watch(
           v-if="canResubmitApproval"
           variant="outline"
           type="button"
+          :disabled="editSubmitting"
           @click="handleResubmitApproval"
         >
-          <Undo2 data-icon="inline-start" aria-hidden="true" />
-          重新提交审批
+          <Loader2 v-if="editSubmitting" data-icon="inline-start" aria-hidden="true" class="animate-spin" />
+          <Undo2 v-else data-icon="inline-start" aria-hidden="true" />
+          {{ editSubmitting ? '提交中...' : '重新提交审批' }}
         </Button>
         <Button
           v-if="canSubmitApproval"
           type="button"
+          :disabled="approvalSubmitting"
           @click="handleSubmitApproval"
         >
-          <Send data-icon="inline-start" aria-hidden="true" />
-          提交审批
+          <Loader2 v-if="approvalSubmitting" data-icon="inline-start" aria-hidden="true" class="animate-spin" />
+          <Send v-else data-icon="inline-start" aria-hidden="true" />
+          {{ approvalSubmitting ? '提交中...' : '提交审批' }}
         </Button>
         <Button
           v-if="hasPendingApproval"
@@ -539,6 +630,7 @@ watch(
           v-if="canRegisterPayment"
           variant="outline"
           type="button"
+          :disabled="registerSubmitting"
           @click="handleRegisterPayment"
         >
           <ReceiptText data-icon="inline-start" aria-hidden="true" />
@@ -551,6 +643,24 @@ watch(
       </SheetFooter>
     </DetailSheetContent>
   </Sheet>
+
+  <!-- Register payment dialog -->
+  <PaymentRecordDialog
+    :open="registerDialogOpen"
+    :default-amount="registerDefaultAmount"
+    :submitting="registerSubmitting"
+    @update:open="registerDialogOpen = $event"
+    @submit="handleRegisterSubmit"
+  />
+
+  <!-- Edit record dialog (also used for resubmit) -->
+  <EditRecordDialog
+    :open="editDialogOpen"
+    :record="selectedRecord"
+    :submitting="editSubmitting"
+    @update:open="(value) => { editDialogOpen = value; if (!value) { isResubmitMode = false; selectedRecord = null; } }"
+    @submit="handleEditSubmit"
+  />
 </template>
 
 <style scoped lang="scss">

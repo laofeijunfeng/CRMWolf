@@ -12,46 +12,61 @@
  * - §5 HIGH: Safe area handling (iOS notch / Android gesture bar)
  * - §1 CRITICAL: aria-label, aria-current
  */
-import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  OfficeBuilding,
-  TrendCharts,
-  Document,
-  Flag,
-  Money,
-  Tickets,
+  Banknote,
   Bell,
-  Setting,
-} from '@element-plus/icons-vue'
+  Building2,
+  FileText,
+  Flag,
+  LogOut,
+  ReceiptText,
+  Settings,
+  TrendingUp,
+} from 'lucide-vue-next'
 import BottomNavItem from './BottomNavItem.vue'
 import BottomNavOverflow from './BottomNavOverflow.vue'
 import type { Component } from 'vue'
 
-interface NavItem {
+interface RouteNavItem {
+  kind: 'route'
   route: string
   icon: Component
   label: string
 }
+
+interface ActionNavItem {
+  kind: 'action'
+  action: 'logout'
+  icon: Component
+  label: string
+}
+
+type NavItem = RouteNavItem | ActionNavItem
+
+const emit = defineEmits<{
+  logout: []
+}>()
 
 const route = useRoute()
 const router = useRouter()
 
 // Primary navigation items (§9 bottom-nav-limit: max 5)
 // Only top-level screens (§9 nav-hierarchy)
-const mainNavItems: NavItem[] = [
-  { route: '/payments', icon: Money, label: '回款' },
-  { route: '/customers', icon: OfficeBuilding, label: '客户' },
-  { route: '/opportunities', icon: TrendCharts, label: '商机' },
-  { route: '/contracts', icon: Document, label: '合同' },
+const mainNavItems: RouteNavItem[] = [
+  { kind: 'route', route: '/payments', icon: Banknote, label: '回款' },
+  { kind: 'route', route: '/customers', icon: Building2, label: '客户' },
+  { kind: 'route', route: '/opportunities', icon: TrendingUp, label: '商机' },
+  { kind: 'route', route: '/contracts', icon: FileText, label: '合同' },
 ]
 
 // Overflow navigation items (secondary workflows)
 const overflowItems: NavItem[] = [
-  { route: '/leads', icon: Flag, label: '线索' },
-  { route: '/invoices', icon: Tickets, label: '发票' },
-  { route: '/approvals', icon: Bell, label: '审批' },
-  { route: '/settings', icon: Setting, label: '设置' },
+  { kind: 'route', route: '/leads', icon: Flag, label: '线索' },
+  { kind: 'route', route: '/invoices', icon: ReceiptText, label: '发票' },
+  { kind: 'route', route: '/approvals', icon: Bell, label: '审批' },
+  { kind: 'route', route: '/account', icon: Settings, label: '账户设置' },
+  { kind: 'action', action: 'logout', icon: LogOut, label: '退出登录' },
 ]
 
 /**
@@ -77,10 +92,14 @@ function handleNavClick(itemRoute: string): void {
 }
 
 /**
- * Handle overflow menu navigation
+ * Handle an overflow navigation or action selection.
  */
-function handleOverflowNavigate(itemRoute: string): void {
-  router.push(itemRoute)
+function handleOverflowSelect(item: NavItem): void {
+  if (item.kind === 'route') {
+    router.push(item.route)
+  } else {
+    emit('logout')
+  }
 }
 </script>
 
@@ -103,7 +122,7 @@ function handleOverflowNavigate(itemRoute: string): void {
       <!-- Overflow Menu ("更多") -->
       <BottomNavOverflow
         :items="overflowItems"
-        @navigate="handleOverflowNavigate"
+        @select="handleOverflowSelect"
       />
     </div>
   </nav>

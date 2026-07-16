@@ -72,8 +72,9 @@ export async function confirmDelete(itemName = '该项'): Promise<boolean> {
  */
 export async function confirmLogout(): Promise<boolean> {
   return confirmDialog(
-    '确定要退出登录吗？',
-    '退出确认'
+    '退出后需要重新登录才能继续使用系统。',
+    '退出登录',
+    { variant: 'destructive', confirmText: '退出登录', cancelText: '取消' },
   )
 }
 

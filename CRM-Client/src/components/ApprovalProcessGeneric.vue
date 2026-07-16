@@ -24,13 +24,9 @@
  */
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import type { PropType, Component } from 'vue'
+import type { PropType } from 'vue'
 import { toast } from 'vue-sonner'
 import {
-  Send,
-  CheckCircle2,
-  XCircle,
-  RotateCcw,
   Download,
   FileText,
   Loader2,
@@ -44,6 +40,7 @@ import type {
   ApprovalRecord
 } from '@/schemas/approvalGeneric'
 import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
+import ApprovalProcessStepper from './ApprovalProcessStepper.vue'
 import ErrorState from './ErrorState.vue'
 import WolfEmpty from './WolfEmpty.vue'
 import { Button } from '@/components/ui/button'
@@ -69,23 +66,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import InvoiceFileUpload from './InvoiceFileUpload.vue'
 import { getInvoiceFileUrl } from '@/api/fileUpload'
-
-interface RecordVisual {
-  icon: Component
-  actionLabel: string
-  textVar: string
-}
-
-const RECORD_VISUAL: Record<
-  'SUBMIT' | 'APPROVE' | 'REJECT' | 'ROLLBACK' | 'CANCEL',
-  RecordVisual
-> = {
-  SUBMIT: { icon: Send, actionLabel: '提交', textVar: '--wolf-approval-pending-text' },
-  APPROVE: { icon: CheckCircle2, actionLabel: '同意', textVar: '--wolf-approval-approved-text' },
-  REJECT: { icon: XCircle, actionLabel: '驳回', textVar: '--wolf-approval-rejected-text' },
-  ROLLBACK: { icon: RotateCcw, actionLabel: '撤回', textVar: '--wolf-approval-cancelled-text' },
-  CANCEL: { icon: RotateCcw, actionLabel: '撤回', textVar: '--wolf-approval-cancelled-text' }
-}
 
 const SUBMIT_PERMISSION: Record<EntityType, string> = {
   CONTRACT: 'contract:submit',
@@ -133,7 +113,6 @@ const actionPending = ref<boolean>(false)
 const rejectDialogVisible = ref<boolean>(false)
 const withdrawDialogVisible = ref<boolean>(false)
 const rejectForm = ref<{ reason: string }>({ reason: '' })
-const isWide = ref<boolean>(true)
 const conflictNotice = ref<string>('')
 // Task 6: 发票文件上传组件 ref
 const invoiceFileUploadRef = ref<InstanceType<typeof InvoiceFileUpload>>()
@@ -159,6 +138,8 @@ const showInvoiceFileUpload = computed<boolean>(() =>
   props.canApprove &&
   status.value === 'PENDING' // PENDING 对应后端的 PENDING_REVIEW
 )
+
+const currentApprovalStatus = computed<string>(() => status.value ?? '')
 
 // Task 6: 发票是否已上传文件（用于显示下载链接）
 const hasInvoiceFile = computed<boolean>(() =>
@@ -314,30 +295,8 @@ const downloadInvoiceFile = (): void => {
   window.open(url, '_blank')
 }
 
-const setupResponsive = (): void => {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    isWide.value = true
-    return
-  }
-  const mql = window.matchMedia('(min-width: 1024px)')
-  isWide.value = mql.matches
-  mql.addEventListener('change', (e: MediaQueryListEvent) => {
-    isWide.value = e.matches
-  })
-}
-
-const formatDateTime = (iso: string): string => {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  // YYYY-MM-DD HH:mm
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 // ===== 生命周期 =====
 onMounted(async (): Promise<void> => {
-  setupResponsive()
   await loadDetail()
 })
 </script>
@@ -419,38 +378,12 @@ onMounted(async (): Promise<void> => {
         </div>
       </div>
 
-      <!-- timeline（响应式：宽屏水平 / 窄屏垂直） -->
-      <ul
-        class="approval-process-generic__timeline"
-        :class="{ 'is-wide': isWide }"
+      <!-- 审批流程 Stepper -->
+      <ApprovalProcessStepper
         v-if="records.length > 0"
-      >
-        <li
-          v-for="record in records"
-          :key="record.id"
-          class="approval-process-generic__timeline-item"
-          :style="{ color: `var(${RECORD_VISUAL[record.action ?? 'ROLLBACK'].textVar})` }"
-        >
-          <component
-            :is="RECORD_VISUAL[record.action ?? 'ROLLBACK'].icon"
-            class="approval-process-generic__timeline-icon"
-          />
-          <div class="approval-process-generic__timeline-content">
-            <span class="approval-process-generic__timeline-action">
-              {{ RECORD_VISUAL[record.action ?? 'ROLLBACK'].actionLabel }}
-            </span>
-            <span v-if="record.approver_name" class="approval-process-generic__timeline-user">
-              {{ record.approver_name }}
-            </span>
-            <span class="approval-process-generic__timeline-time">
-              {{ formatDateTime(record.created_time) }}
-            </span>
-            <span v-if="record.comment" class="approval-process-generic__timeline-comment">
-              {{ record.comment }}
-            </span>
-          </div>
-        </li>
-      </ul>
+        :records="records"
+        :is-pending="isPending"
+      />
 
       <!-- 操作区 -->
       <div class="approval-process-generic__actions">
@@ -459,7 +392,7 @@ onMounted(async (): Promise<void> => {
           <InvoiceFileUpload
             ref="invoiceFileUploadRef"
             :invoice-id="entityId"
-            :approval-status="(status as string | undefined)"
+            :approval-status="currentApprovalStatus"
             @uploaded="handleFileUploaded"
             @error="handleUploadError"
             @rejected="() => { emit('rejected'); loadDetail() }"
@@ -540,7 +473,7 @@ onMounted(async (): Promise<void> => {
             <Button
               variant="destructive"
               data-testid="reject-confirm-btn"
-              :disabled="!rejectForm.reason.trim() || actionPending"
+              :disabled="!rejectForm.reason.trim() || actionPending || isLocked"
               @click="confirmReject"
             >
               <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
@@ -632,74 +565,6 @@ onMounted(async (): Promise<void> => {
     color: $wolf-text-secondary-v2;
     font-weight: $wolf-font-weight-medium-v2;
   }
-}
-
-.approval-process-generic__timeline {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-
-  // 宽屏水平
-  &.is-wide {
-    display: flex;
-    align-items: flex-start;
-    gap: $wolf-space-md-v2;
-    flex-wrap: wrap;
-  }
-
-  // 默认（窄屏）垂直
-  &:not(.is-wide) {
-    display: flex;
-    flex-direction: column;
-    gap: $wolf-space-md-v2;
-  }
-}
-
-.approval-process-generic__timeline-item {
-  display: flex;
-  align-items: flex-start;
-  gap: $wolf-space-sm-v2;
-
-  .is-wide & {
-    flex: 1 1 200px;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-}
-
-.approval-process-generic__timeline-icon {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-}
-
-.approval-process-generic__timeline-content {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: $wolf-font-size-auxiliary-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.approval-process-generic__timeline-action {
-  font-weight: $wolf-font-weight-medium-v2;
-  color: inherit;
-}
-
-.approval-process-generic__timeline-user {
-  color: $wolf-text-secondary-v2;
-}
-
-.approval-process-generic__timeline-time {
-  color: $wolf-text-placeholder-v2;
-  font-family: $wolf-font-mono-v2;
-  font-size: $wolf-font-size-caption-v2;
-}
-
-.approval-process-generic__timeline-comment {
-  color: $wolf-text-secondary-v2;
-  margin-top: $wolf-space-xs-v2;
 }
 
 .approval-process-generic__actions {

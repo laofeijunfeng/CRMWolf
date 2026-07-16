@@ -6,12 +6,11 @@
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import ElementPlus from 'element-plus'
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 
 describe('ApprovalStatusBadge', () => {
   const mountBadge = (props: Record<string, unknown>) =>
-    mount(ApprovalStatusBadge, { props, global: { plugins: [ElementPlus] } })
+    mount(ApprovalStatusBadge, { props })
 
   it.each([
     ['PENDING', '待审批'],
@@ -49,10 +48,9 @@ describe('ApprovalStatusBadge', () => {
     expect(w.find('svg').exists()).toBe(true)
   })
 
-  it('applies the approved CSS variable color token via inline style', () => {
+  it('applies the approved semantic color classes', () => {
     const w = mountBadge({ status: 'APPROVED' })
-    // 颜色取 $wolf-approval-approved-text → --wolf-approval-approved-text CSS 变量
-    const style = w.attributes('style') ?? ''
-    expect(style).toContain('--wolf-approval-approved-text')
+    expect(w.classes()).toContain('text-wolf-success-text')
+    expect(w.classes()).toContain('bg-wolf-success-bg')
   })
 })

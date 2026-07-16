@@ -18,15 +18,32 @@
  * - ✅ 保留业务逻辑（领取、分配、退回公海、标记无效、转化客户等）
  */
 import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Sparkles, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus, Eye } from 'lucide-vue-next'
+import { Plus, Sparkles, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
 import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import AILeadCreateDialog from '@/components/AILeadCreateDialog.vue'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
+import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import LeadDetailSheet from './LeadDetailSheet.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { leadApi, type Lead, type LeadListParams } from '@/api/lead'
@@ -39,7 +56,6 @@ import { usePageTitle } from '@/composables/usePageTitle'
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
 
-const router = useRouter()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
@@ -55,6 +71,10 @@ const sheetVisible = ref(false)
 const selectedLeadId = ref<number | undefined>(undefined)
 const showLeadCreateDialog = ref(false)
 const showLeadEditDialog = ref(false)
+
+// 转化为客户弹窗状态
+const showConvertDialog = ref(false)
+const convertLeadId = ref<number | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -246,7 +266,8 @@ const handleViewDetail = (record: Lead): void => {
 }
 
 const handleEdit = (record: Lead): void => {
-  router.push(`/leads/${record.id}/edit`)
+  selectedLeadId.value = record.id
+  showLeadEditDialog.value = true
 }
 
 const handleClaim = async (record: Lead): Promise<void> => {
@@ -325,7 +346,8 @@ const handleInvalidModalOk = async (): Promise<void> => {
 }
 
 const handleConvert = (record: Lead): void => {
-  router.push(`/leads/${record.id}/convert`)
+  convertLeadId.value = record.id
+  showConvertDialog.value = true
 }
 
 const handleDelete = async (record: Lead): Promise<void> => {
@@ -373,20 +395,26 @@ const mapLeadStatus = (status: number): 'new' | 'following' | 'converted' | 'inv
   return map[status] || 'new'
 }
 
-const getScoreIcon = (score: number | undefined): string => {
-  if (score === undefined) return '❓'
-  if (score >= 80) return '🔥'
-  if (score >= 60) return '⚡'
-  if (score >= 40) return '✅'
-  return '❄️'
+// 热力值图标 - 使用 Lucide SVG 图标，遵循设计规范（禁止 emoji）
+const getScoreIcon = (score: number | undefined): typeof Flame => {
+  if (score === undefined) return HelpCircle
+  if (score >= 80) return Flame      // 高分/火爆
+  if (score >= 60) return Zap        // 中高分/潜力
+  if (score >= 40) return CircleCheck // 中分/稳定
+  return Thermometer                  // 低分/冷淡
 }
 
-const getScoreColor = (score: number | undefined): string => {
-  if (score === undefined) return '#d9d9d9'
-  if (score >= 80) return '#ff4d4f'
-  if (score >= 60) return '#faad14'
-  if (score >= 40) return '#52c41a'
-  return '#d9d9d9'
+// 热力值颜色 - 使用 V2 设计令牌语义
+// 高分(≥80): 危险/火爆红 → $wolf-danger-v2
+// 中高分(≥60): 警告/潜力橙 → $wolf-warning-v2
+// 中分(≥40): 成功/稳定绿 → $wolf-success-v2
+// 低分(<40): 中性/冷淡灰 → $wolf-text-tertiary-v2
+const getScoreColorClass = (score: number | undefined): string => {
+  if (score === undefined) return 'score-unknown'
+  if (score >= 80) return 'score-high'
+  if (score >= 60) return 'score-medium-high'
+  if (score >= 40) return 'score-medium'
+  return 'score-low'
 }
 
 // ==================== Lifecycle ====================
@@ -506,8 +534,8 @@ watchEffect(() => {
       <!-- 热力值 -->
       <template #cell-score="{ row }">
         <div class="score-cell">
-          <span class="score-icon" :style="{ color: getScoreColor(row.score) }">
-            {{ getScoreIcon(row.score) }}
+          <span :class="['score-icon', getScoreColorClass(row.score)]">
+            <component :is="getScoreIcon(row.score)" class="w-4 h-4" />
           </span>
           <span class="score-number">{{ row.score ?? '--' }}</span>
         </div>
@@ -541,10 +569,10 @@ watchEffect(() => {
           :row="row"
           :primary-actions="[
             {
-              label: '查看详情',
-              handler: (r) => handleViewDetail(asLead(r)),
-              visible: true,
-              icon: Eye
+              label: '编辑',
+              handler: (r) => handleEdit(asLead(r)),
+              visible: canEditRow(row),
+              icon: Pencil
             },
             {
               label: '转化为客户',
@@ -554,12 +582,6 @@ watchEffect(() => {
             }
           ]"
           :secondary-actions="[
-            {
-              label: '编辑',
-              handler: (r) => handleEdit(asLead(r)),
-              visible: canEditRow(row),
-              icon: Pencil
-            },
             {
               label: '领取',
               handler: (r) => handleClaim(asLead(r)),
@@ -598,46 +620,62 @@ watchEffect(() => {
       </template>
     </DataTable>
 
-    <!-- 分配线索弹窗（临时样式，后续替换为 shadcn-vue Dialog）-->
-    <div v-if="assignModalVisible" class="modal-overlay" @click="assignModalVisible = false">
-      <div class="modal-content" @click.stop>
-        <h3 class="modal-title">分配线索</h3>
-        <div class="modal-body">
-          <label class="form-label">负责人 *</label>
-          <select v-model="assignForm.owner_id" class="form-select">
-            <option value="" disabled>请选择负责人</option>
-            <option v-for="user in userOptions" :key="user.id" :value="String(user.id)">
-              {{ user.name }}
-            </option>
-          </select>
+    <!-- 分配线索弹窗 -->
+    <Dialog v-model:open="assignModalVisible">
+      <DialogContent class="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>分配线索</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-4 py-4">
+          <div class="space-y-2">
+            <Label>负责人 *</Label>
+            <Select v-model="assignForm.owner_id">
+              <SelectTrigger>
+                <SelectValue placeholder="请选择负责人" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="user in userOptions"
+                  :key="user.id"
+                  :value="String(user.id)"
+                >
+                  {{ user.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div class="modal-footer">
+        <DialogFooter>
           <Button variant="outline" @click="assignModalVisible = false">取消</Button>
-          <Button type="button" @click="handleAssignModalOk">确定</Button>
-        </div>
-      </div>
-    </div>
+          <Button @click="handleAssignModalOk">确定</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 标记无效弹窗 -->
-    <div v-if="invalidModalVisible" class="modal-overlay" @click="invalidModalVisible = false">
-      <div class="modal-content" @click.stop>
-        <h3 class="modal-title">标记无效</h3>
-        <div class="modal-body">
-          <label class="form-label">无效原因 *</label>
-          <textarea
-            v-model="invalidForm.reason"
-            class="form-textarea"
-            placeholder="请输入无效原因说明"
-            rows="4"
-            maxlength="500"
-          />
+    <Dialog v-model:open="invalidModalVisible">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>标记无效</DialogTitle>
+          <DialogDescription>请输入线索无效的原因说明</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4 py-4">
+          <div class="space-y-2">
+            <Label>无效原因 *</Label>
+            <Textarea
+              v-model="invalidForm.reason"
+              placeholder="请输入无效原因说明"
+              :rows="4"
+              :maxlength="500"
+            />
+          </div>
         </div>
-        <div class="modal-footer">
+        <DialogFooter>
           <Button variant="outline" @click="invalidModalVisible = false">取消</Button>
-          <Button type="button" @click="handleInvalidModalOk">确定</Button>
-        </div>
-      </div>
-    </div>
+          <Button @click="handleInvalidModalOk">确定</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- AI 创建线索弹窗 -->
     <AILeadCreateDialog
@@ -665,6 +703,13 @@ watchEffect(() => {
       v-model:visible="sheetVisible"
       :lead-id="selectedLeadId ?? null"
       @refresh="fetchLeadList"
+    />
+
+    <!-- 转化为客户弹窗 -->
+    <LeadConvertDialog
+      v-model:open="showConvertDialog"
+      :lead-id="convertLeadId"
+      @success="fetchLeadList"
     />
   </div>
 </template>
@@ -703,77 +748,25 @@ watchEffect(() => {
 
 .score-icon {
   font-size: 16px;
+
+  // 热力值颜色 - 使用 V2 设计令牌
+  &.score-high {
+    color: $wolf-danger-v2;           // 高分(≥80): 危险红
+  }
+  &.score-medium-high {
+    color: $wolf-warning-v2;          // 中高分(≥60): 警告橙
+  }
+  &.score-medium {
+    color: $wolf-success-v2;          // 中分(≥40): 成功绿
+  }
+  &.score-low,
+  &.score-unknown {
+    color: $wolf-text-tertiary-v2;    // 低分/未知: 中性灰
+  }
 }
 
 .score-number {
   font-weight: $wolf-font-weight-medium-v2;
   font-size: $wolf-font-size-auxiliary-v2;
-}
-
-// 简易弹窗样式（临时使用，后续替换为 shadcn-vue Dialog）
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-lg-v2;
-  padding: $wolf-space-lg-v2;
-  min-width: 400px;
-  max-width: 500px;
-}
-
-.modal-title {
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  margin-bottom: $wolf-space-md-v2;
-}
-
-.modal-body {
-  margin-bottom: $wolf-space-lg-v2;
-}
-
-.form-label {
-  display: block;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-secondary-v2;
-  margin-bottom: $wolf-space-xs-v2;
-}
-
-.form-select,
-.form-textarea {
-  width: 100%;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-primary-v2;
-  margin-bottom: $wolf-space-md-v2;
-
-  &:focus {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-  }
-}
-
-.form-textarea {
-  resize: vertical;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
 }
 </style>
