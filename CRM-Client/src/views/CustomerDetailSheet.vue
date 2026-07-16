@@ -44,6 +44,11 @@ import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vu
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
 
+// Detail Sheets (Task 6)
+import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
+import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
+import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
+
 import { Plus, Pencil, RefreshCw, Loader2 } from 'lucide-vue-next'
 import ScoreIndicator from '@/components/ScoreIndicator.vue'
 import { toast } from 'vue-sonner'
@@ -52,6 +57,7 @@ import customerApi, { type CustomerDetailResponse, type ContactResponse } from '
 import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
+import type { PaymentPlanResponse, PaymentRecordInfo } from '@/api/payment'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
@@ -89,12 +95,21 @@ const editingContact = ref<ContactResponse | null>(null)
 const editingContract = ref<ContractResponse | null>(null)
 const editingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
 
+// ==================== Detail Sheet States (Task 6) ====================
+const selectedContractId = ref<number | null>(null)
+const contractSheetVisible = ref(false)
+const selectedPlanId = ref<number | null>(null)
+const planSheetVisible = ref(false)
+const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string } | null>(null)
+const recordSheetVisible = ref(false)
+
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
 const score = ref<ScoreResponse | null>(null)
 const followUps = ref<CustomerFollowUpResponse[]>([])
 const opportunities = ref<OpportunityListResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
+const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
 const licenseApplications = ref<LicenseApplicationResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
@@ -400,6 +415,42 @@ const handleApplyLicense = (): void => {
   toast.info('许可证申请功能开发中')
 }
 
+// Contract detail sheet handlers (Task 6)
+const handleViewContract = (contractId: number): void => {
+  selectedContractId.value = contractId
+  contractSheetVisible.value = true
+}
+
+const handleContractSheetRefresh = (): void => {
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+// Payment plan detail sheet handlers (Task 6)
+const handleViewPaymentPlan = (planId: number): void => {
+  selectedPlanId.value = planId
+  planSheetVisible.value = true
+}
+
+const handlePlanSheetRefresh = (): void => {
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+// Payment record detail sheet handler (Task 6)
+const handleRecordClick = (record: PaymentRecordInfo): void => {
+  const plan = paymentPlans.value.find((p) =>
+    p.payment_records?.some((r) => r.id === record.id)
+  )
+  selectedRecord.value = {
+    record,
+    stageName: plan?.stage_name ?? ''
+  }
+  recordSheetVisible.value = true
+}
+
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
@@ -412,9 +463,17 @@ watch(() => props.visible, (visible): void => {
     followUps.value = []
     opportunities.value = []
     contracts.value = []
+    paymentPlans.value = []
     invoiceTitles.value = []
     licenseApplications.value = []
     deployments.value = []
+    // Clear nested sheet states
+    selectedContractId.value = null
+    contractSheetVisible.value = false
+    selectedPlanId.value = null
+    planSheetVisible.value = false
+    selectedRecord.value = null
+    recordSheetVisible.value = false
   }
 }, { immediate: true })
 
@@ -660,13 +719,15 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               :customer-id="customerId ?? 0"
               :contracts="contracts"
               @add="contractDialogOpen = true"
+              @view="handleViewContract"
             />
 
             <PaymentsPanel
               v-if="activePanel === 'payments'"
               :customer-id="customerId ?? 0"
-              :payments="[]"
+              :payments="paymentPlans"
               @record="handleRecordPayment"
+              @view="handleViewPaymentPlan"
             />
 
             <InvoicesPanel
@@ -754,6 +815,32 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     :invoice-title="editingInvoiceTitle"
     @update:open="handleInvoiceTitleDialogClose"
     @success="handleInvoiceTitleSuccess"
+  />
+
+  <!-- Contract Detail Sheet (Task 6) -->
+  <ContractDetailSheet
+    :contract-id="selectedContractId"
+    :visible="contractSheetVisible"
+    @update:visible="contractSheetVisible = $event"
+    @refresh="handleContractSheetRefresh"
+  />
+
+  <!-- Payment Plan Detail Sheet (Task 6) -->
+  <PaymentPlanDetailSheet
+    :plan-id="selectedPlanId"
+    :visible="planSheetVisible"
+    @update:visible="planSheetVisible = $event"
+    @refresh="handlePlanSheetRefresh"
+    @record-click="handleRecordClick"
+  />
+
+  <!-- Payment Record Detail Sheet (Task 6) -->
+  <PaymentRecordDetailSheet
+    :record-id="null"
+    :visible="recordSheetVisible"
+    :record="selectedRecord?.record ?? null"
+    :stage-name="selectedRecord?.stageName ?? ''"
+    @update:visible="recordSheetVisible = $event"
   />
 </template>
 

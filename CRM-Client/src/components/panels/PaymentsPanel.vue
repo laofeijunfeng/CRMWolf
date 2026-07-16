@@ -5,8 +5,10 @@
  * 使用 ListCard 组件确保风格统一
  * 技术栈：shadcn-vue + variables-v2.scss
  * 无障碍：所有图标按钮均有 aria-label
+ *
+ * Task 6: 添加 'view' 事件用于查看回款计划详情
  */
-import { Plus } from 'lucide-vue-next'
+import { Plus, ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -22,10 +24,15 @@ defineProps<Props>()
 
 const emit = defineEmits<{
   'record': [plan: PaymentPlanResponse]
+  'view': [planId: number]
 }>()
 
 const handleRecord = (plan: PaymentPlanResponse): void => {
   emit('record', plan)
+}
+
+const handleView = (planId: number): void => {
+  emit('view', planId)
 }
 
 const formatCurrency = (amount: number): string => {
@@ -105,6 +112,14 @@ const calculateProgress = (plan: PaymentPlanResponse): number => {
     </template>
 
     <template #itemActions="{ item }">
+      <Button
+        variant="ghost"
+        size="sm"
+        :aria-label="`查看 ${item.stage_name} 详情`"
+        @click.stop="handleView(item.id)"
+      >
+        <ExternalLink class="w-4 h-4" />
+      </Button>
       <Button
         v-if="item.status !== 'COMPLETED'"
         size="sm"

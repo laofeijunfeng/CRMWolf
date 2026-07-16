@@ -5,9 +5,10 @@
  * 使用 ListCard 组件确保风格统一
  * 技术栈：shadcn-vue + variables-v2.scss
  * 无障碍：所有图标按钮均有 aria-label
+ *
+ * Task 6: 改为 emit 'view' 事件，由父组件决定打开 Sheet 或导航
  */
 import { Plus, ExternalLink } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import StatusBadge from '@/components/StatusBadge.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
@@ -22,16 +23,15 @@ defineProps<Props>()
 
 const emit = defineEmits<{
   'add': []
+  'view': [contractId: number]
 }>()
-
-const router = useRouter()
 
 const handleAdd = (): void => {
   emit('add')
 }
 
 const handleView = (contractId: number): void => {
-  router.push(`/contracts/${contractId}`)
+  emit('view', contractId)
 }
 
 const mapStatus = (status: ContractStatus): string => {
