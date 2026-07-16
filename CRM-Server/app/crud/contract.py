@@ -256,6 +256,7 @@ class ContractCRUD:
             secondary_resource_id=db_obj.id,
             operator_id=creator_id,
             operator_name=operator_name,
+            team_id=team_id,
             content={
                 "contractNumber": db_obj.contract_number,
                 "contractName": db_obj.contract_name,
