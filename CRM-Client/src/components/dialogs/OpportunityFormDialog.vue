@@ -37,12 +37,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { DatePicker } from '@/components/ui/date-picker'
 import { handleApiError } from '@/utils/errorHandler'
-import { opportunityApi, type OpportunityCreate, LicenseType, PurchaseType } from '@/api/opportunity'
+import { opportunityApi, type Opportunity, type OpportunityCreate, type OpportunityUpdate, LicenseType, PurchaseType } from '@/api/opportunity'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import customerApi, { type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
-import userApi, { type UserResponse, UserStatus } from '@/api/user'
-import { useUserStore } from '@/stores/user'
 
 // Zod schema for form validation
 const schema = toTypedSchema(
@@ -59,7 +58,6 @@ const schema = toTypedSchema(
     purchase_type: z.nativeEnum(PurchaseType, { errorMap: () => ({ message: '请选择采购类型' }) }),
     expected_closing_date: z.string().min(1, '请选择预计成交日期'),
     procurement_method_id: z.coerce.number().optional().nullable(),
-    owner_id: z.string().min(1, '请选择负责人'),
     decision_maker_count: z.coerce.number().int('决策人数必须为整数').min(0, '决策人数不能为负数').optional().nullable()
   })
 )
@@ -68,6 +66,7 @@ interface Props {
   customerId?: number | undefined
   customerName?: string | undefined
   customerLocked?: boolean
+  opportunity?: Opportunity | null
   open: boolean
 }
 
@@ -80,12 +79,10 @@ const props = withDefaults(defineProps<Props>(), {
   customerId: undefined,
   customerName: undefined,
   customerLocked: false,
+  opportunity: null,
   open: false
 })
 const emit = defineEmits<Emits>()
-
-// 当前用户信息
-const userStore = useUserStore()
 
 // Get default date (30 days from now)
 function getDefaultDate(): string {
@@ -107,7 +104,6 @@ const { handleSubmit, resetForm, values, setFieldValue } = useForm({
     purchase_type: PurchaseType.NEW,
     expected_closing_date: getDefaultDate(),
     procurement_method_id: null,
-    owner_id: '',
     decision_maker_count: null
   }
 })
@@ -116,9 +112,7 @@ const { handleSubmit, resetForm, values, setFieldValue } = useForm({
 const submitting = ref(false)
 const isDirty = ref(false)
 const showConfirmDialog = ref(false)
-const users = ref<UserResponse[]>([])
 const procurementMethods = ref<ProcurementMethodOption[]>([])
-const loadingUsers = ref(false)
 const loadingMethods = ref(false)
 const customers = ref<CustomerOption[]>([])
 const loadingCustomers = ref(false)
@@ -129,6 +123,9 @@ const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
 })
+
+// Computed property for edit mode
+const isEdit = computed(() => !!props.opportunity)
 
 // License type options
 const licenseTypeOptions = [
@@ -185,18 +182,6 @@ const setLockedCustomerOption = (): void => {
   customers.value = [lockedCustomer]
 }
 
-// Fetch users for owner selection
-async function fetchUsers(): Promise<void> {
-  loadingUsers.value = true
-  try {
-    users.value = await userApi.getUsers({ status: UserStatus.ACTIVE })
-  } catch (error) {
-    handleApiError(error, '获取用户列表')
-  } finally {
-    loadingUsers.value = false
-  }
-}
-
 // Fetch procurement methods
 async function fetchProcurementMethods(): Promise<void> {
   loadingMethods.value = true
@@ -242,69 +227,100 @@ watch(values, () => {
 // Reset form when dialog opens
 watch(() => props.open, async (newOpen) => {
   if (newOpen) {
-    const currentUserId = userStore.userInfo?.id !== undefined ? userStore.userInfo.id.toString() : ''
-    const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
     customerSearchKeyword.value = ''
 
-    resetForm({
-      values: {
-        customer_id: initialCustomerId,
-        opportunity_name: '',
-        total_amount: 0,
-        user_count: 1,
-        license_type: LicenseType.SUBSCRIPTION,
-        subscription_years: 1,
-        purchase_type: PurchaseType.NEW,
-        expected_closing_date: getDefaultDate(),
-        procurement_method_id: null,
-        owner_id: currentUserId,
-        decision_maker_count: null
+    // Edit mode: populate form with opportunity data
+    if (isEdit.value && props.opportunity) {
+      const opp = props.opportunity
+      resetForm({
+        values: {
+          customer_id: String(opp.customer_id),
+          opportunity_name: opp.opportunity_name,
+          total_amount: opp.total_amount,
+          user_count: opp.user_count,
+          license_type: opp.license_type,
+          subscription_years: opp.subscription_years ?? 1,
+          purchase_type: opp.purchase_type,
+          expected_closing_date: opp.expected_closing_date,
+          procurement_method_id: opp.procurement_method_id,
+          decision_maker_count: opp.decision_maker_count ?? null
+        }
+      })
+
+      // Set locked customer option for edit mode
+      if (props.customerLocked && props.customerId !== undefined) {
+        setLockedCustomerOption()
+      } else {
+        // Fetch customer detail for display
+        try {
+          const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(opp.customer_id)
+          customers.value = [toCustomerOption(customerDetail)]
+        } catch (error) {
+          handleApiError(error, '获取客户详情')
+        }
       }
-    })
-
-    if (props.customerLocked && props.customerId !== undefined) {
-      setLockedCustomerOption()
-    }
-
-    if (props.customerId === undefined) {
-      await fetchCustomers()
     } else {
-      try {
-        const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(props.customerId)
-        customers.value = [toCustomerOption(customerDetail)]
+      // Create mode
+      const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
+      resetForm({
+        values: {
+          customer_id: initialCustomerId,
+          opportunity_name: '',
+          total_amount: 0,
+          user_count: 1,
+          license_type: LicenseType.SUBSCRIPTION,
+          subscription_years: 1,
+          purchase_type: PurchaseType.NEW,
+          expected_closing_date: getDefaultDate(),
+          procurement_method_id: null,
+          decision_maker_count: null
+        }
+      })
 
-        setFieldValue('opportunity_name', `${customerDetail.account_name}项目`)
-        if (customerDetail.default_opportunity) {
-          setFieldValue('total_amount', customerDetail.default_opportunity.total_amount ?? 0)
-          setFieldValue('user_count', customerDetail.default_opportunity.user_count ?? 1)
-          setFieldValue(
-            'license_type',
-            isLicenseType(customerDetail.default_opportunity.license_type)
-              ? customerDetail.default_opportunity.license_type
-              : LicenseType.SUBSCRIPTION
-          )
-          setFieldValue('subscription_years', customerDetail.default_opportunity.subscription_years ?? 1)
-          setFieldValue(
-            'purchase_type',
-            isPurchaseType(customerDetail.default_opportunity.purchase_type)
-              ? customerDetail.default_opportunity.purchase_type
-              : PurchaseType.NEW
-          )
-          if (customerDetail.default_opportunity.expected_closing_date !== null) {
-            setFieldValue('expected_closing_date', customerDetail.default_opportunity.expected_closing_date)
+      if (props.customerLocked && props.customerId !== undefined) {
+        setLockedCustomerOption()
+      }
+
+      if (props.customerId === undefined) {
+        await fetchCustomers()
+      } else {
+        try {
+          const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(props.customerId)
+          customers.value = [toCustomerOption(customerDetail)]
+
+          setFieldValue('opportunity_name', `${customerDetail.account_name}项目`)
+          if (customerDetail.default_opportunity) {
+            setFieldValue('total_amount', customerDetail.default_opportunity.total_amount ?? 0)
+            setFieldValue('user_count', customerDetail.default_opportunity.user_count ?? 1)
+            setFieldValue(
+              'license_type',
+              isLicenseType(customerDetail.default_opportunity.license_type)
+                ? customerDetail.default_opportunity.license_type
+                : LicenseType.SUBSCRIPTION
+            )
+            setFieldValue('subscription_years', customerDetail.default_opportunity.subscription_years ?? 1)
+            setFieldValue(
+              'purchase_type',
+              isPurchaseType(customerDetail.default_opportunity.purchase_type)
+                ? customerDetail.default_opportunity.purchase_type
+                : PurchaseType.NEW
+            )
+            if (customerDetail.default_opportunity.expected_closing_date !== null) {
+              setFieldValue('expected_closing_date', customerDetail.default_opportunity.expected_closing_date)
+            }
+            if (customerDetail.default_opportunity.procurement_method_id !== null) {
+              setFieldValue('procurement_method_id', customerDetail.default_opportunity.procurement_method_id)
+            }
           }
-          if (customerDetail.default_opportunity.procurement_method_id !== null) {
-            setFieldValue('procurement_method_id', customerDetail.default_opportunity.procurement_method_id)
+          if (customerDetail.default_procurement_method_id !== null) {
+            setFieldValue('procurement_method_id', customerDetail.default_procurement_method_id)
           }
+        } catch (error) {
+          if (props.customerLocked) {
+            setLockedCustomerOption()
+          }
+          handleApiError(error, '获取客户详情')
         }
-        if (customerDetail.default_procurement_method_id !== null) {
-          setFieldValue('procurement_method_id', customerDetail.default_procurement_method_id)
-        }
-      } catch (error) {
-        if (props.customerLocked) {
-          setLockedCustomerOption()
-        }
-        handleApiError(error, '获取客户详情')
       }
     }
 
@@ -314,7 +330,6 @@ watch(() => props.open, async (newOpen) => {
 
 // Fetch data on mount
 onMounted(() => {
-  fetchUsers()
   fetchProcurementMethods()
 })
 
@@ -322,7 +337,7 @@ onMounted(() => {
 const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
   try {
-    const data: OpportunityCreate = {
+    const data: OpportunityCreate | OpportunityUpdate = {
       opportunity_name: formValues['opportunity_name'],
       customer_id: Number(formValues['customer_id']),
       total_amount: formValues['total_amount'],
@@ -332,18 +347,22 @@ const onSubmit = handleSubmit(async (formValues) => {
       purchase_type: formValues['purchase_type'],
       expected_closing_date: formValues['expected_closing_date'],
       procurement_method_id: formValues['procurement_method_id'] ?? null,
-      owner_id: formValues['owner_id'],
       decision_maker_count: formValues['decision_maker_count'] ?? null
     }
 
-    await opportunityApi.createOpportunity(data)
-    toast.success('商机创建成功')
+    if (isEdit.value && props.opportunity) {
+      await opportunityApi.updateOpportunity(props.opportunity.id, data)
+      toast.success('商机更新成功')
+    } else {
+      await opportunityApi.createOpportunity(data as OpportunityCreate)
+      toast.success('商机创建成功')
+    }
 
     isDirty.value = false
     visible.value = false
     emit('success')
   } catch (error) {
-    handleApiError(error, '创建商机')
+    handleApiError(error, isEdit.value ? '更新商机' : '创建商机')
   } finally {
     submitting.value = false
   }
@@ -374,7 +393,7 @@ function continueEditing(): void {
   <Dialog v-model:open="visible">
     <DialogContent class="max-h-[90vh] overflow-y-auto">
       <DialogHeader>
-        <DialogTitle>新建商机</DialogTitle>
+        <DialogTitle>{{ isEdit ? '编辑商机' : '新建商机' }}</DialogTitle>
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
@@ -540,14 +559,14 @@ function continueEditing(): void {
         </FormField>
 
         <!-- Expected Closing Date (required) -->
-        <FormField v-slot="{ componentField }" name="expected_closing_date">
+        <FormField v-slot="{ value, handleChange }" name="expected_closing_date">
           <FormItem>
             <FormLabel>预计成交日期 <span class="text-destructive">*</span></FormLabel>
             <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="date"
-                class="h-11 sm:h-8"
+              <DatePicker
+                :model-value="value ? new Date(value as string) : null"
+                placeholder="请选择预计成交日期"
+                @update:model-value="(date: Date | null) => handleChange(date ? date.toISOString().split('T')[0] : null)"
               />
             </FormControl>
             <FormMessage />
@@ -571,36 +590,6 @@ function continueEditing(): void {
                   :value="method.id.toString()"
                 >
                   {{ method.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- Owner (required) -->
-        <FormField v-slot="{ value, handleChange }" name="owner_id">
-          <FormItem>
-            <FormLabel>负责人 <span class="text-destructive">*</span></FormLabel>
-            <Select :model-value="value" @update:model-value="handleChange">
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="请选择负责人" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <div v-if="loadingUsers" class="px-2 py-1.5 text-sm text-muted-foreground">
-                  加载中...
-                </div>
-                <div v-else-if="users.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
-                  暂无负责人
-                </div>
-                <SelectItem
-                  v-for="user in users"
-                  :key="user.id"
-                  :value="user.id.toString()"
-                >
-                  {{ user.name }}
                 </SelectItem>
               </SelectContent>
             </Select>
