@@ -17,7 +17,6 @@ import {
   AlertCircle,
   Calendar,
   CheckCircle2,
-  Clock,
   ExternalLink,
   FileText,
   Loader2,
@@ -55,6 +54,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import type {
   ApprovalInfo,
+  ApprovalInfoLite,
   ApprovalNodeInfo,
   ApprovalStatus,
   PaymentConfirmationStatus,
@@ -62,12 +62,28 @@ import type {
 } from '@/api/payment'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
 
+/**
+ * Local type extending PaymentRecordInfo for detail sheet display.
+ * Includes record_number from PaymentRecordResponse/PaymentRecordWithDetails
+ * which is not present in the base PaymentRecordInfo type.
+ */
+type PaymentRecordDetailInfo = PaymentRecordInfo & {
+  record_number?: string
+}
+
+/**
+ * Union type for approval prop supporting both full ApprovalInfo (from latest_approval)
+ * and ApprovalInfoLite (from record.approval). The component renders full node details
+ * only when the approval has nodes array populated.
+ */
+type ApprovalInfoInput = ApprovalInfo | ApprovalInfoLite
+
 interface Props {
   recordId: number | null
   visible: boolean
-  record?: PaymentRecordInfo | null
+  record?: PaymentRecordDetailInfo | null
   stageName?: string
-  approval?: ApprovalInfo | null
+  approval?: ApprovalInfoInput | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -90,6 +106,21 @@ const hasApproval = computed<boolean>(() => props.approval !== null)
 const hasProofAttachment = computed<boolean>(() => {
   const attachment = props.record?.proof_attachment
   return typeof attachment === 'string' && attachment.trim().length > 0
+})
+
+/**
+ * Detects if the proof attachment URL points to an image file.
+ * Checks for common image extensions in the URL (case-insensitive).
+ */
+const isImageAttachment = computed<boolean>(() => {
+  const attachment = props.record?.proof_attachment
+  if (typeof attachment !== 'string' || attachment.trim() === '') return false
+  const lowerUrl = attachment.toLowerCase()
+  return /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i.test(lowerUrl)
+})
+
+const proofAttachmentUrl = computed<string>(() => {
+  return props.record?.proof_attachment ?? ''
 })
 
 const approvalStatus = computed<ApprovalStatus | null>(() => props.approval?.status ?? null)
@@ -124,11 +155,22 @@ const currentApproverName = computed<string>(() => {
 const rejectionReason = computed<string | null>(() => {
   const approval = props.approval
   if (approval === null || approval.status !== 'REJECTED') return null
-  if (approval.reject_reason !== undefined && approval.reject_reason.trim() !== '') {
+  // ApprovalInfo has reject_reason, ApprovalInfoLite does not
+  if ('reject_reason' in approval && approval.reject_reason !== undefined && approval.reject_reason.trim() !== '') {
     return approval.reject_reason
   }
   const rejectedNode = approval.nodes.find((node) => node.status === 'REJECT' || node.status === 'REJECTED')
   return rejectedNode?.comment ?? '审批被驳回，请查看详情'
+})
+
+const approvalCreatedTime = computed<string | undefined>(() => {
+  const approval = props.approval
+  if (approval === null) return undefined
+  // ApprovalInfo has created_time, ApprovalInfoLite does not
+  if ('created_time' in approval) {
+    return approval.created_time
+  }
+  return undefined
 })
 
 // Helper functions
@@ -202,7 +244,8 @@ function formatText(value: string | number | boolean | undefined | null): string
   return String(value)
 }
 
-function formatCreator(record: PaymentRecordInfo): string {
+function formatCreator(record: PaymentRecordDetailInfo | null | undefined): string {
+  if (record === null || record === undefined) return '-'
   const creatorName = record.creator_name?.trim()
   return creatorName === undefined || creatorName === '' ? '未知登记人' : creatorName
 }
@@ -329,7 +372,7 @@ watch(
                       <User aria-hidden="true" class="attribute-icon" />
                       登记人
                     </span>
-                    <span class="attribute-value">{{ formatCreator(props.record!) }}</span>
+                    <span class="attribute-value">{{ formatCreator(props.record) }}</span>
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">登记时间</span>
@@ -343,18 +386,44 @@ watch(
                     <FileText aria-hidden="true" class="attribute-icon" />
                     凭证附件
                   </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    class="voucher-link"
-                    :aria-label="`查看凭证附件，将在新标签页打开`"
-                    @click="handleProofClick"
-                  >
-                    <ExternalLink aria-hidden="true" />
-                    查看凭证
-                  </Button>
-                  <p class="voucher-hint">点击按钮在新标签页打开凭证附件</p>
+
+                  <!-- Inline image preview for image URLs with lazy loading -->
+                  <div v-if="isImageAttachment" class="voucher-preview">
+                    <img
+                      :src="proofAttachmentUrl"
+                      alt="凭证附件预览"
+                      loading="lazy"
+                      class="voucher-image"
+                      @click="handleProofClick"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      class="voucher-link"
+                      aria-label="在新标签页打开凭证附件"
+                      @click="handleProofClick"
+                    >
+                      <ExternalLink aria-hidden="true" />
+                      查看原图
+                    </Button>
+                  </div>
+
+                  <!-- Non-image attachments: button only -->
+                  <template v-else>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      class="voucher-link"
+                      :aria-label="`查看凭证附件，将在新标签页打开`"
+                      @click="handleProofClick"
+                    >
+                      <ExternalLink aria-hidden="true" />
+                      查看凭证
+                    </Button>
+                    <p class="voucher-hint">点击按钮在新标签页打开凭证附件</p>
+                  </template>
                 </div>
               </CardContent>
             </Card>
@@ -394,7 +463,7 @@ watch(
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">提交时间</span>
-                    <span class="attribute-value mono-value">{{ formatDateTime(props.approval?.created_time) }}</span>
+                    <span class="attribute-value mono-value">{{ formatDateTime(approvalCreatedTime) }}</span>
                   </div>
                 </div>
 
@@ -682,6 +751,30 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   display: flex;
   flex-direction: column;
   gap: $wolf-space-sm-v2;
+}
+
+.voucher-preview {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-sm-v2;
+}
+
+.voucher-image {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: $wolf-radius-v2;
+  border: $record-border-width solid $wolf-border-light-v2;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+
+  &:hover {
+    transform: scale(1.02);
+  }
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
+    outline-offset: 2px;
+  }
 }
 
 .voucher-link {

@@ -15,7 +15,7 @@
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
@@ -32,6 +32,7 @@ import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -45,6 +46,7 @@ const headerStore = useHeaderStore()
 const loading = ref(false)
 const tableData = ref<ContractListResponse[]>([])
 const activeTab = ref('all')
+const showCreateDialog = ref(false)
 
 const pagination = reactive({
   current: 1,
@@ -156,10 +158,10 @@ const fetchContractList = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, any>): void => {
+const handleSearch = (values: Record<string, unknown>): void => {
   Object.assign(filterValues, values)
   // 使用 FilterPanel 状态筛选时，清除 Tab 状态
-  if (values['status']) {
+  if (values['status'] !== undefined && values['status'] !== null) {
     activeTab.value = 'all'
   }
   pagination.current = 1
@@ -186,7 +188,11 @@ const handlePageSizeChange = (pageSize: number): void => {
 }
 
 const handleCreate = (): void => {
-  router.push('/contracts/create')
+  showCreateDialog.value = true
+}
+
+const handleCreateSuccess = (): void => {
+  fetchContractList()
 }
 
 const handleViewDetail = (record: ContractListResponse): void => {
@@ -221,7 +227,21 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
 }
 
 // ==================== TableRowActions 配置 ====================
-const getRowActions = (row: ContractListResponse) => ({
+interface RowAction {
+  label: string
+  handler: (record: ContractListResponse) => void
+  icon: typeof Eye
+  visible?: boolean
+  destructive?: boolean
+  separator?: boolean
+}
+
+interface RowActions {
+  primaryActions: RowAction[]
+  secondaryActions: RowAction[]
+}
+
+const getRowActions = (row: ContractListResponse): RowActions => ({
   primaryActions: [
     {
       label: '查看',
@@ -388,6 +408,12 @@ watchEffect(() => {
         <TableRowActions :row="row" v-bind="getRowActions(row)" />
       </template>
     </DataTable>
+
+    <!-- Contract Create Dialog -->
+    <ContractFormDialog
+      v-model:open="showCreateDialog"
+      @success="handleCreateSuccess"
+    />
   </div>
 </template>
 
