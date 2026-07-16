@@ -10,27 +10,17 @@ import { RouterLink } from 'vue-router'
 import { Pencil, Trophy, XCircle, ExternalLink, ArrowLeft } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
-import { formatCurrency, getTodayLocalDate, formatLocalDate } from '@/utils/format'
+import { formatCurrency, formatLocalDate } from '@/utils/format'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { DatePicker } from '@/components/ui/date-picker'
 import OpportunityStageStepper from '@/components/OpportunityStageStepper.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
-import { opportunityApi, type Opportunity, type OpportunityWinRequest, type OpportunityLossRequest } from '@/api/opportunity'
+import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
+import OpportunityLoseDialog from '@/components/dialogs/OpportunityLoseDialog.vue'
+import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import { usePermissionStore } from '@/stores/permissions'
 
@@ -73,17 +63,7 @@ const relatedContract = ref<ContractListResponse | null>(null)
 const contractLoading = ref(false)
 
 const winDialogOpen = ref(false)
-const winForm = ref<OpportunityWinRequest>({
-  actual_amount: 0,
-  actual_closing_date: getTodayLocalDate()
-})
-const winSubmitting = ref(false)
-
 const loseDialogOpen = ref(false)
-const loseForm = ref<OpportunityLossRequest>({
-  loss_reason: ''
-})
-const loseSubmitting = ref(false)
 
 // 编辑弹窗状态
 const editDialogOpen = ref(false)
@@ -162,58 +142,18 @@ function handleEditSuccess(): void {
   emit('refresh')
 }
 
-function handleShowWinDialog(): void {
-  if (!opportunity.value) return
-  winForm.value = {
-    actual_amount: opportunity.value.total_amount ?? 0,
-    actual_closing_date: getTodayLocalDate()
-  }
-  winDialogOpen.value = true
+// 赢单成功回调
+function handleWinSuccess(): void {
+  winDialogOpen.value = false
+  fetchOpportunityDetail()
+  emit('refresh')
 }
 
-async function handleWinConfirm(): Promise<void> {
-  if (!opportunity.value) return
-
-  winSubmitting.value = true
-  try {
-    await opportunityApi.markAsWon(opportunity.value.id, winForm.value)
-    toast.success('商机已标记为赢单')
-    winDialogOpen.value = false
-    emit('refresh')
-    await fetchOpportunityDetail()
-    if (!props.embedded) emit('close')
-  } catch (error) {
-    handleApiError(error, '标记赢单')
-  } finally {
-    winSubmitting.value = false
-  }
-}
-
-function handleShowLoseDialog(): void {
-  loseForm.value = { loss_reason: '' }
-  loseDialogOpen.value = true
-}
-
-async function handleLoseConfirm(): Promise<void> {
-  if (!opportunity.value) return
-  if (!loseForm.value.loss_reason?.trim()) {
-    toast.error('请输入输单原因')
-    return
-  }
-
-  loseSubmitting.value = true
-  try {
-    await opportunityApi.markAsLost(opportunity.value.id, loseForm.value)
-    toast.success('商机已标记为输单')
-    loseDialogOpen.value = false
-    emit('refresh')
-    await fetchOpportunityDetail()
-    if (!props.embedded) emit('close')
-  } catch (error) {
-    handleApiError(error, '标记输单')
-  } finally {
-    loseSubmitting.value = false
-  }
+// 输单成功回调
+function handleLoseSuccess(): void {
+  loseDialogOpen.value = false
+  fetchOpportunityDetail()
+  emit('refresh')
 }
 
 function handleCreateContract(): void {
@@ -592,7 +532,7 @@ watch(() => props.opportunityId, () => {
         v-if="isActive && canEdit"
         variant="default"
         class="bg-wolf-success-v2 hover:bg-wolf-success-v2/90"
-        @click="handleShowWinDialog"
+        @click="winDialogOpen = true"
       >
         <Trophy class="w-4 h-4 mr-2" />
         赢单
@@ -601,7 +541,7 @@ watch(() => props.opportunityId, () => {
         v-if="isActive && canEdit"
         variant="outline"
         class="text-wolf-danger-v2 border-wolf-danger-v2 hover:bg-wolf-danger-bg-v2"
-        @click="handleShowLoseDialog"
+        @click="loseDialogOpen = true"
       >
         <XCircle class="w-4 h-4 mr-2" />
         输单
@@ -616,74 +556,21 @@ watch(() => props.opportunityId, () => {
       </Button>
     </div>
 
-    <Dialog v-model:open="winDialogOpen">
-      <DialogContent class="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>标记赢单</DialogTitle>
-          <DialogDescription>请输入实际成交金额和日期</DialogDescription>
-        </DialogHeader>
+    <!-- 赢单弹窗 -->
+    <OpportunityWinDialog
+      :opportunity-id="opportunity?.id ?? null"
+      :open="winDialogOpen"
+      @update:open="winDialogOpen = $event"
+      @success="handleWinSuccess"
+    />
 
-        <div class="grid gap-4 py-4">
-          <div class="grid gap-2">
-            <Label for="actual_amount">实际成交金额</Label>
-            <Input
-              id="actual_amount"
-              v-model.number="winForm.actual_amount"
-              type="number"
-              placeholder="请输入金额"
-            />
-          </div>
-          <div class="grid gap-2">
-            <Label for="actual_closing_date">实际成交日期</Label>
-            <DatePicker
-              :model-value="winForm.actual_closing_date ? new Date(winForm.actual_closing_date) : null"
-              placeholder="请选择实际成交日期"
-              @update:model-value="(date: Date | null) => winForm.actual_closing_date = date ? formatLocalDate(date) : ''"
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" @click="winDialogOpen = false">取消</Button>
-          <Button :disabled="winSubmitting" @click="handleWinConfirm">
-            {{ winSubmitting ? '处理中...' : '确认' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog v-model:open="loseDialogOpen">
-      <DialogContent class="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>标记输单</DialogTitle>
-          <DialogDescription>请输入输单原因</DialogDescription>
-        </DialogHeader>
-
-        <div class="grid gap-4 py-4">
-          <div class="grid gap-2">
-            <Label for="loss_reason">输单原因</Label>
-            <Textarea
-              id="loss_reason"
-              v-model="loseForm.loss_reason"
-              placeholder="请输入输单原因说明"
-              :rows="4"
-              :maxlength="500"
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" @click="loseDialogOpen = false">取消</Button>
-          <Button
-            variant="destructive"
-            :disabled="loseSubmitting"
-            @click="handleLoseConfirm"
-          >
-            {{ loseSubmitting ? '处理中...' : '确认输单' }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <!-- 输单弹窗 -->
+    <OpportunityLoseDialog
+      :opportunity-id="opportunity?.id ?? null"
+      :open="loseDialogOpen"
+      @update:open="loseDialogOpen = $event"
+      @success="handleLoseSuccess"
+    />
 
     <!-- 编辑商机弹窗 -->
     <OpportunityFormDialog
