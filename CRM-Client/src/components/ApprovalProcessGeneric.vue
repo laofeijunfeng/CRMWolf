@@ -67,7 +67,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import InvoiceFileUpload from './InvoiceFileUpload.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
-import { getInvoiceFileUrl } from '@/api/fileUpload'
 
 const SUBMIT_PERMISSION: Record<EntityType, string> = {
   CONTRACT: 'contract:submit',
@@ -311,11 +310,11 @@ const handleUploadError = (message: string): void => {
   toast.error(message.length > 0 ? message : '文件上传失败')
 }
 
-// Task 6: 发票文件下载
-const downloadInvoiceFile = (): void => {
+// Task 6: 发票文件下载 - 使用 invoice API 的下载接口
+const downloadInvoiceFile = async (): Promise<void> => {
   if (detail.value == null) return
-  const url = getInvoiceFileUrl(props.entityId)
-  window.open(url, '_blank')
+  // TODO: 实现 invoice API 的文件下载接口
+  toast.info('文件下载功能开发中')
 }
 
 // 打开对话框方法

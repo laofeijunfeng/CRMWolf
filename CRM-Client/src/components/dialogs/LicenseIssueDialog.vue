@@ -81,12 +81,15 @@ watch(() => props.open, (newOpen) => {
 const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
   try {
-    await licenseApplicationApi.issueLicense(props.applicationId, {
-      license_info: formValues.license_info.trim(),
-      comment: formValues.comment !== undefined && formValues.comment !== ''
-        ? formValues.comment.trim()
-        : undefined
-    })
+    // Build payload conditionally to satisfy exactOptionalPropertyTypes
+    const payload: { license_info: string; comment?: string } = {
+      license_info: formValues.license_info.trim()
+    }
+    const comment = formValues.comment?.trim()
+    if (comment !== undefined && comment !== '') {
+      payload.comment = comment
+    }
+    await licenseApplicationApi.issueLicense(props.applicationId, payload)
 
     toast.success('已发放 License，License 信息已写入')
     emit('issued')

@@ -140,11 +140,15 @@ const onSubmit = handleSubmit(async (formValues) => {
 
   try {
     const invoiceNumber = formValues.invoice_number?.trim()
-    const fileToUpload = selectedFile.value !== null ? selectedFile.value : undefined
-    await invoiceApi.markIssued(props.applicationId, {
-      file: fileToUpload,
-      invoice_number: invoiceNumber !== undefined && invoiceNumber !== '' ? invoiceNumber : undefined
-    })
+    // Build payload conditionally to satisfy exactOptionalPropertyTypes
+    const payload: { file?: File; invoice_number?: string } = {}
+    if (selectedFile.value !== null) {
+      payload.file = selectedFile.value
+    }
+    if (invoiceNumber !== undefined && invoiceNumber !== '') {
+      payload.invoice_number = invoiceNumber
+    }
+    await invoiceApi.markIssued(props.applicationId, payload)
 
     toast.success('已开票，发票文件已上传')
     emit('issued')
@@ -265,7 +269,7 @@ const handleDialogClose = (open: boolean): void => {
             <FormLabel>发票号码</FormLabel>
             <FormControl>
               <Input
-                v-bind="componentField"
+                v-bind="componentField as any"
                 type="text"
                 placeholder="请输入发票号码（可选）"
                 :disabled="submitting"
