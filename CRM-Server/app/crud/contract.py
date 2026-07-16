@@ -32,10 +32,11 @@ class ApprovalService:
         - 保留撤回功能，用户可以手动撤回审批
         - 撤回后合同回到草稿状态，可以修改后重新提交
         """
+        import asyncio
         from app.models.contract import Contract
         from app.models.approval import ApprovalFlow, Approval, ApprovalStatus, ApprovalAction, BusinessType
         from app.crud.approval import approval_flow_crud, approval_crud
-        from app.services.notification import NotificationService
+        from app.services.notification import notification_service_factory
 
         contract = db.query(Contract).filter(Contract.id == contract_id).first()
         if not contract:
@@ -69,12 +70,35 @@ class ApprovalService:
                 submitter_name
             )
 
-            # 注意：通知发送移至 API 层（异步上下文）
-            # CRUD 层不再包含异步通知逻辑，避免 "no running event loop" 错误
-
             db.refresh(approval)
-        except Exception:
-            pass
+
+            # 发送审批通知
+            try:
+                current_node = approval.current_node
+                if current_node and current_node.approver_ids:
+                    approver_id = current_node.approver_ids[0]
+                    approver = user_crud.get_by_id(db, int(approver_id))
+
+                    if approver:
+                        notification_service = notification_service_factory(db, contract.team_id)
+                        asyncio.run(
+                            notification_service.notify_approval_pending(
+                                entity_type=BusinessType.CONTRACT.value,
+                                entity_name=contract.contract_name,
+                                flow_name=flow.name if flow else "",
+                                node_name=current_node.name if current_node else "",
+                                approver_open_id=approver.open_id or "",
+                                approver_name=approver.name or "",
+                                business_id=contract.id,
+                            )
+                        )
+                        logger.info(f"合同审批通知发送成功（contract_id={contract_id}）")
+            except Exception as e:
+                # 通知失败不阻断业务流程
+                logger.error(f"合同审批通知发送失败（contract_id={contract_id}）: {e}", exc_info=True)
+
+        except Exception as e:
+            logger.error(f"合同提交审批异常（contract_id={contract_id}）: {e}", exc_info=True)
 
 
 class ContractCRUD:
