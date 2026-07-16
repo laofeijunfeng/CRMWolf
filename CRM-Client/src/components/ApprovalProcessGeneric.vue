@@ -34,6 +34,7 @@ import {
 } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useApprovalStore } from '@/stores/approval'
+import request from '@/utils/request'
 import type {
   EntityType,
   ApprovalDetail,
@@ -64,7 +65,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
-import InvoiceFileUpload from './InvoiceFileUpload.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
 
@@ -100,8 +100,6 @@ const emit = defineEmits<{
   rejected: []
   withdrawn: []
   resubmit: []
-  // Task 6: 发票文件上传事件
-  uploaded: [file_path: string, invoice_number: string]
 }>()
 
 const store = useApprovalStore()
@@ -115,8 +113,6 @@ const rejectDialogVisible = ref<boolean>(false)
 const withdrawDialogVisible = ref<boolean>(false)
 const rejectForm = ref<{ reason: string }>({ reason: '' })
 const conflictNotice = ref<string>('')
-// Task 6: 发票文件上传组件 ref
-const invoiceFileUploadRef = ref<InstanceType<typeof InvoiceFileUpload>>()
 
 // 开票对话框
 const markIssuedDialogVisible = ref<boolean>(false)
@@ -138,17 +134,7 @@ const records = computed<ApprovalRecord[]>(() => detail.value?.records ?? [])
 
 const submitPermissionCode = computed<string>(() => SUBMIT_PERMISSION[props.entityType])
 
-// Task 6: 发票审批时是否显示文件上传组件
-// 条件：entityType === 'INVOICE' && canApprove && status === 'PENDING_REVIEW'
-const showInvoiceFileUpload = computed<boolean>(() =>
-  props.entityType === 'INVOICE' &&
-  props.canApprove &&
-  status.value === 'PENDING' // PENDING 对应后端的 PENDING_REVIEW
-)
-
-const currentApprovalStatus = computed<string>(() => status.value ?? '')
-
-// Task 6: 发票是否已上传文件（用于显示下载链接）
+// 发票是否已上传文件（用于显示下载链接）
 const hasInvoiceFile = computed<boolean>(() =>
   props.entityType === 'INVOICE' &&
   detail.value?.invoice_file_path != null &&
@@ -298,23 +284,25 @@ const handleResubmit = (): void => {
   emit('resubmit')
 }
 
-// Task 6: 发票文件上传成功处理
-const handleFileUploaded = (file_path: string, invoice_number: string): void => {
-  emit('uploaded', file_path, invoice_number)
-  // 刷新详情以获取最新状态
-  loadDetail()
-}
-
-// Task 6: 发票文件上传错误处理
-const handleUploadError = (message: string): void => {
-  toast.error(message.length > 0 ? message : '文件上传失败')
-}
-
-// Task 6: 发票文件下载 - 使用 invoice API 的下载接口
+// 发票文件下载 - 使用 invoice API 的下载接口
 const downloadInvoiceFile = async (): Promise<void> => {
-  if (detail.value == null) return
-  // TODO: 实现 invoice API 的文件下载接口
-  toast.info('文件下载功能开发中')
+  if (detail.value == null || props.entityType !== 'INVOICE') return
+  try {
+    const response = await request.get<Blob>(
+      `/v1/invoice-applications/${props.entityId}/file`,
+      { responseType: 'blob' }
+    )
+    const url = window.URL.createObjectURL(new Blob([response]))
+    const link = window.document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `invoice-${props.entityId}.pdf`)
+    window.document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  } catch {
+    toast.error('文件下载失败')
+  }
 }
 
 // 打开对话框方法
@@ -435,60 +423,44 @@ watch(
 
       <!-- 操作区 -->
       <div class="approval-process-generic__actions">
-        <!-- Task 6: 发票审批时的文件上传区域（替代原有同意/驳回按钮） -->
-        <div v-if="showInvoiceFileUpload" class="invoice-file-upload-wrapper">
-          <InvoiceFileUpload
-            ref="invoiceFileUploadRef"
-            :invoice-id="entityId"
-            :approval-status="currentApprovalStatus"
-            @uploaded="handleFileUploaded"
-            @error="handleUploadError"
-            @rejected="() => { emit('rejected'); loadDetail() }"
-            @status-changed="loadDetail"
-          />
-        </div>
-
-        <!-- 原有操作按钮（非 INVOICE 或非审批状态时显示） -->
-        <template v-if="!showInvoiceFileUpload">
-          <Button
-            v-if="isSubmitter && isPending"
-            variant="outline"
-            data-testid="withdraw-btn"
-            :disabled="actionPending || isLocked"
-            @click="openWithdrawDialog"
-          >
-            <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
-            撤回审批
-          </Button>
-          <Button
-            v-if="isSubmitter && isRejected"
-            data-testid="resubmit-btn"
-            :disabled="actionPending || isLocked"
-            @click="handleResubmit"
-          >
-            <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
-            修改并重新提交
-          </Button>
-          <Button
-            v-if="canApprove && isPending"
-            data-testid="approve-btn"
-            :disabled="actionPending || isLocked"
-            @click="handleApprove"
-          >
-            <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
-            同意
-          </Button>
-          <Button
-            v-if="canApprove && isPending"
-            variant="destructive"
-            data-testid="reject-btn"
-            :disabled="actionPending || isLocked"
-            @click="openRejectDialog"
-          >
-            <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
-            驳回
-          </Button>
-        </template>
+        <Button
+          v-if="isSubmitter && isPending"
+          variant="outline"
+          data-testid="withdraw-btn"
+          :disabled="actionPending || isLocked"
+          @click="openWithdrawDialog"
+        >
+          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
+          撤回审批
+        </Button>
+        <Button
+          v-if="isSubmitter && isRejected"
+          data-testid="resubmit-btn"
+          :disabled="actionPending || isLocked"
+          @click="handleResubmit"
+        >
+          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
+          修改并重新提交
+        </Button>
+        <Button
+          v-if="canApprove && isPending"
+          data-testid="approve-btn"
+          :disabled="actionPending || isLocked"
+          @click="handleApprove"
+        >
+          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
+          同意
+        </Button>
+        <Button
+          v-if="canApprove && isPending"
+          variant="destructive"
+          data-testid="reject-btn"
+          :disabled="actionPending || isLocked"
+          @click="openRejectDialog"
+        >
+          <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
+          驳回
+        </Button>
 
         <!-- 发票开票区 -->
         <div v-if="showMarkIssued" class="mark-issued-section">
@@ -663,12 +635,7 @@ watch(
   border-top: 1px solid $wolf-border-light-v2;
 }
 
-// Task 6: 发票文件上传区域样式
-.invoice-file-upload-wrapper {
-  width: 100%;
-}
-
-// Task 6: 已上传文件显示区域样式
+// 已上传文件显示区域样式
 .approval-process-generic__file-section {
   background: $wolf-bg-hover-v2;
   border-radius: $wolf-radius-sm-v2;
