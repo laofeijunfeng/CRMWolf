@@ -80,39 +80,15 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '商机管理' }
       },
       {
-        path: 'opportunities/:id/edit',
-        name: 'OpportunityEdit',
-        component: () => import('@/views/OpportunityEdit.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'opportunities/:id',
-        name: 'OpportunityDetail',
-        component: () => import('@/views/OpportunityDetail.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
         path: 'contracts',
         name: 'Contracts',
         component: () => import('@/views/Contracts.vue'),
         meta: { requiresAuth: true, title: '合同管理' }
       },
       {
-        path: 'contracts/create',
-        name: 'ContractCreate',
-        component: () => import('@/views/ContractCreate.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
         path: 'contracts/:id',
         name: 'ContractDetail',
         component: () => import('@/views/ContractDetail.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'contracts/edit/:id',
-        name: 'ContractEdit',
-        component: () => import('@/views/ContractCreate.vue'),
         meta: { requiresAuth: true }
       },
       // 回款计划创建页面 - 高级批量模式
