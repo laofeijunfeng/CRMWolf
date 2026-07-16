@@ -40,6 +40,19 @@ export const CustomerListResponseSchema = PaginatedResponseSchema(
 
 export type CustomerListResponse = z.infer<typeof CustomerListResponseSchema>
 
+// ===== 客户默认商机信息 =====
+export const CustomerDefaultOpportunitySchema = z.object({
+  total_amount: z.number().nullable(),
+  user_count: z.number().int().nullable(),
+  license_type: z.string().nullable(),
+  subscription_years: z.number().int().nullable(),
+  purchase_type: z.string().nullable(),
+  expected_closing_date: z.string().nullable(),
+  procurement_method_id: z.number().int().nullable()
+})
+
+export type CustomerDefaultOpportunity = z.infer<typeof CustomerDefaultOpportunitySchema>
+
 // ===== 客户详情响应 =====
 export const CustomerDetailResponseSchema = CustomerResponseSchema.extend({
   owner_info: UserInfoSchema.nullable(),
@@ -76,19 +89,6 @@ export type CustomerCreate = z.infer<typeof CustomerCreateSchema>
 export const CustomerUpdateSchema = CustomerCreateSchema.partial()
 
 export type CustomerUpdate = z.infer<typeof CustomerUpdateSchema>
-
-// ===== 客户默认商机信息 =====
-export const CustomerDefaultOpportunitySchema = z.object({
-  total_amount: z.number().nullable(),
-  user_count: z.number().int().nullable(),
-  license_type: z.string().nullable(),
-  subscription_years: z.number().int().nullable(),
-  purchase_type: z.string().nullable(),
-  expected_closing_date: z.string().nullable(),
-  procurement_method_id: z.number().int().nullable()
-})
-
-export type CustomerDefaultOpportunity = z.infer<typeof CustomerDefaultOpportunitySchema>
 
 // ===== 线索转换响应 =====
 export const ConvertResponseSchema = z.object({
