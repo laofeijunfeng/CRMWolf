@@ -140,8 +140,9 @@ const onSubmit = handleSubmit(async (formValues) => {
 
   try {
     const invoiceNumber = formValues.invoice_number?.trim()
+    const fileToUpload = selectedFile.value !== null ? selectedFile.value : undefined
     await invoiceApi.markIssued(props.applicationId, {
-      file: selectedFile.value ?? undefined,
+      file: fileToUpload,
       invoice_number: invoiceNumber !== undefined && invoiceNumber !== '' ? invoiceNumber : undefined
     })
 
