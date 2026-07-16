@@ -85,12 +85,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Contracts.vue'),
         meta: { requiresAuth: true, title: '合同管理' }
       },
-      {
-        path: 'contracts/:id',
-        name: 'ContractDetail',
-        component: () => import('@/views/ContractDetail.vue'),
-        meta: { requiresAuth: true }
-      },
       // 回款计划创建页面 - 高级批量模式
       // 推荐：在合同详情页使用 PaymentPlanQuickCreate Modal（快速模式）
       // 此路由保留用于需要复杂批量规划的高级场景
