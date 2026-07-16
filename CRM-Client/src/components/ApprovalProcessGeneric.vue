@@ -23,7 +23,7 @@
  * 不可用时（如 jsdom）回退到水平（isWide=true），不影响功能。
  */
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { PropType } from 'vue'
 import { toast } from 'vue-sonner'
 import {
@@ -65,6 +65,8 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import InvoiceFileUpload from './InvoiceFileUpload.vue'
+import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
+import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
 import { getInvoiceFileUrl } from '@/api/fileUpload'
 
 const SUBMIT_PERMISSION: Record<EntityType, string> = {
@@ -117,6 +119,12 @@ const conflictNotice = ref<string>('')
 // Task 6: 发票文件上传组件 ref
 const invoiceFileUploadRef = ref<InstanceType<typeof InvoiceFileUpload>>()
 
+// 开票对话框
+const markIssuedDialogVisible = ref<boolean>(false)
+
+// License 发放对话框
+const issueLicenseDialogVisible = ref<boolean>(false)
+
 // ===== 计算属性（必须返回类型）=====
 const detail = computed<ApprovalDetail | null>(() => currentApprovalDetail.value)
 
@@ -148,6 +156,20 @@ const hasInvoiceFile = computed<boolean>(() =>
   detail.value.invoice_file_path.length > 0
 )
 
+// 发票开票按钮显示条件
+const showMarkIssued = computed<boolean>(() =>
+  props.entityType === 'INVOICE' &&
+  status.value === 'APPROVED' &&
+  props.canApprove
+)
+
+// License 发放按钮显示条件
+const showIssueLicense = computed<boolean>(() =>
+  props.entityType === 'LICENSE' &&
+  status.value === 'APPROVED' &&
+  props.canApprove
+)
+
 // ===== 错误识别：仅匹配 axios 风格 error.response.status，不用 any =====
 const isAxiosStatus = (err: unknown, code: number): boolean => {
   const r = (err as { response?: { status?: number } } | null)?.response
@@ -159,6 +181,7 @@ const loadDetail = async (): Promise<void> => {
   loadError.value = false
   notFound.value = false
   conflictNotice.value = ''
+  store.clearDetail()
   try {
     await store.fetchDetail(props.entityType, props.entityId)
   } catch (err) {
@@ -295,10 +318,36 @@ const downloadInvoiceFile = (): void => {
   window.open(url, '_blank')
 }
 
+// 打开对话框方法
+const openMarkIssuedDialog = (): void => {
+  markIssuedDialogVisible.value = true
+}
+
+const openIssueDialog = (): void => {
+  issueLicenseDialogVisible.value = true
+}
+
+// 对话框成功回调
+const onMarkIssuedSuccess = (): void => {
+  markIssuedDialogVisible.value = false
+  emit('approved')
+  loadDetail()
+}
+
+const onIssueSuccess = (): void => {
+  issueLicenseDialogVisible.value = false
+  emit('approved')
+  loadDetail()
+}
+
 // ===== 生命周期 =====
-onMounted(async (): Promise<void> => {
-  await loadDetail()
-})
+watch(
+  [(): EntityType => props.entityType, (): number => props.entityId],
+  (): void => {
+    void loadDetail()
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -441,6 +490,30 @@ onMounted(async (): Promise<void> => {
             驳回
           </Button>
         </template>
+
+        <!-- 发票开票区 -->
+        <div v-if="showMarkIssued" class="mark-issued-section">
+          <p class="text-sm text-muted-foreground mb-2">审批已通过，可进行开票操作</p>
+          <Button
+            data-testid="mark-issued-btn"
+            aria-label="开票，审批已通过"
+            @click="openMarkIssuedDialog"
+          >
+            开票
+          </Button>
+        </div>
+
+        <!-- License 发放区 -->
+        <div v-if="showIssueLicense" class="issue-license-section">
+          <p class="text-sm text-muted-foreground mb-2">审批已通过，可进行发放操作</p>
+          <Button
+            data-testid="issue-license-btn"
+            aria-label="发放 License，审批已通过"
+            @click="openIssueDialog"
+          >
+            发放 License
+          </Button>
+        </div>
       </div>
 
       <!-- 驳回弹窗：reason 必填，C-DSG-7 条2 -->
@@ -506,6 +579,20 @@ onMounted(async (): Promise<void> => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <!-- 发票开票对话框 -->
+      <InvoiceMarkIssuedDialog
+        v-model:open="markIssuedDialogVisible"
+        :application-id="entityId"
+        @issued="onMarkIssuedSuccess"
+      />
+
+      <!-- License 发放对话框 -->
+      <LicenseIssueDialog
+        v-model:open="issueLicenseDialogVisible"
+        :application-id="entityId"
+        @issued="onIssueSuccess"
+      />
     </div>
   </div>
 </template>
@@ -612,5 +699,17 @@ onMounted(async (): Promise<void> => {
       color: $wolf-text-tertiary-v2;
     }
   }
+}
+
+// 开票/发放操作区
+.mark-issued-section,
+.issue-license-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: $wolf-space-sm-v2;
+  padding-top: $wolf-space-md-v2;
+  border-top: 1px solid $wolf-border-light-v2;
+  margin-top: $wolf-space-md-v2;
 }
 </style>
