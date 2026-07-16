@@ -19,7 +19,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Eye, Edit, Send, Trash2 } from 'lucide-vue-next'
+import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
 import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -241,7 +241,7 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
 interface RowAction {
   label: string
   handler: (record: ContractListResponse) => void
-  icon: typeof Eye
+  icon: typeof Edit
   visible?: boolean
   destructive?: boolean
   separator?: boolean
@@ -254,11 +254,6 @@ interface RowActions {
 
 const getRowActions = (row: ContractListResponse): RowActions => ({
   primaryActions: [
-    {
-      label: '查看',
-      handler: handleViewDetail,
-      icon: Eye
-    },
     {
       label: '编辑',
       handler: handleEdit,
@@ -367,7 +362,9 @@ watchEffect(() => {
     >
       <!-- 合同编号 -->
       <template #cell-contract_number="{ row }">
-        {{ row.contract_number || '-' }}
+        <span class="link-text" @click.stop="handleViewDetail(row)">
+          {{ row.contract_number || '-' }}
+        </span>
       </template>
 
       <!-- 合同名称 -->
