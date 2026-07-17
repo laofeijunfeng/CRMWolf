@@ -25,6 +25,9 @@ export type ApprovalAction = z.infer<typeof ApprovalActionSchema>
 export const ApprovalStatusEnum = z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'])
 export type ApprovalStatus = z.infer<typeof ApprovalStatusEnum>
 
+export const LicenseApplicationStatusSchema = z.enum(['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'ISSUED'])
+export type LicenseApplicationStatus = z.infer<typeof LicenseApplicationStatusSchema>
+
 // ===== 审批人状态（UserStatus，可空） =====
 export const ApproverStatusSchema = z.enum(['active', 'inactive', 'suspended'])
 export type ApproverStatus = z.infer<typeof ApproverStatusSchema>
@@ -81,7 +84,9 @@ export const ApprovalDetailSchema = z.object({
   // Task 6: 发票文件上传字段（仅 INVOICE 类型）
   invoice_file_path: z.string().nullable().optional(),
   invoice_number: z.string().nullable().optional(),
-  issued_time: z.string().nullable().optional()
+  issued_time: z.string().nullable().optional(),
+  // License 发放状态字段（仅 LICENSE 类型）
+  license_status: LicenseApplicationStatusSchema.nullable().optional()
 })
 
 export type ApprovalDetail = z.infer<typeof ApprovalDetailSchema>
@@ -134,6 +139,7 @@ export const ApprovalListItemSchema = z.object({
   entity_name: z.string().nullable(),
   entity_amount: z.number().nullable(),
   actual_payer_name: z.string().nullable().optional(),
+  license_status: LicenseApplicationStatusSchema.nullable().optional(),
   customer_info: ApprovalCustomerInfoSchema.nullable().optional(),
   submitter_id: z.string().min(1),
   submitter_name: z.string().nullable(),  // 允许 null（发票/回款申请人无姓名字段）

@@ -1059,6 +1059,7 @@ class ApprovalCRUD:
                 "entity_name": summary["entity_name"] if summary else None,
                 "entity_amount": summary["entity_amount"] if summary else None,
                 "actual_payer_name": summary.get("actual_payer_name") if summary else None,
+                "license_status": summary.get("license_status") if summary else None,
                 "customer_info": summary["customer_info"] if summary else None,
                 "submitter_id": ap.submitter_id,
                 "submitter_name": ap.submitter_name,
@@ -1203,6 +1204,7 @@ class ApprovalCRUD:
                     "application_number": lic.application_number or f"LICENSE-{lic.id}",
                     "entity_name": lic.license_type,
                     "entity_amount": None,
+                    "license_status": lic.status,
                     "customer_info": customers_by_id.get(lic.customer_id),
                 }
 

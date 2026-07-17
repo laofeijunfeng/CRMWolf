@@ -1265,6 +1265,7 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
         "flow_is_active": flow_is_active,
         "flow_disabled_warning": flow_disabled_warning,
         "customer_info": summary.get("customer_info") if summary else None,
+        "license_status": summary.get("license_status") if summary else None,
         "records": record_list,
     }
 

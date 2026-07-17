@@ -193,7 +193,7 @@ const showMarkIssued = computed<boolean>(() =>
 const showIssueLicense = computed<boolean>(() =>
   props.entityType === 'LICENSE' &&
   status.value === 'APPROVED' &&
-  props.canApprove
+  detail.value?.license_status !== 'ISSUED'
 )
 
 // ===== 错误识别：仅匹配 axios 风格 error.response.status，不用 any =====
