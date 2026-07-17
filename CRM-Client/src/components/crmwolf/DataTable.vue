@@ -294,7 +294,7 @@ watch(() => props.data, () => {
                   ...(col.fixed ? {
                     position: 'sticky',
                     [col.fixed]: getFixedOffset(col),
-                    zIndex: col.fixed === 'left' ? 20 : 15
+                    zIndex: col.fixed === 'left' ? 45 : 40
                   } : {})
                 }"
               >
@@ -327,7 +327,7 @@ watch(() => props.data, () => {
                   ...(col.fixed ? {
                     position: 'sticky',
                     [col.fixed]: getFixedOffset(col),
-                    zIndex: col.fixed === 'left' ? 20 : 15
+                    zIndex: col.fixed === 'left' ? 6 : 5
                   } : {})
                 }"
               >
@@ -431,11 +431,15 @@ watch(() => props.data, () => {
 .data-table-header {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 30;
   background: #F1F5FD;  // 表头背景（list-page.md 3.2）
 }
 
 .data-table-header-cell {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: #F1F5FD;
   font-size: 13px;  // 表头字号（list-page.md 3.2）
   font-weight: 600;  // 表头字重（list-page.md 3.2）
   color: #64748B;   // 表头文字色（list-page.md 3.2）

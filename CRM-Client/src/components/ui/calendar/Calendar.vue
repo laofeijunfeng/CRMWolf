@@ -3,7 +3,9 @@
  * Calendar - 基于 radix-vue Calendar
  * 官方文档：https://www.radix-vue.com/components/calendar
  */
+import { computed, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { getLocalTimeZone, today, type DateValue } from '@internationalized/date'
 import {
   CalendarRoot,
   CalendarCell,
@@ -14,29 +16,87 @@ import {
   CalendarGridRow,
   CalendarHeadCell,
   CalendarHeader,
-  CalendarHeading,
   CalendarNext,
   CalendarPrev,
 } from 'radix-vue'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 interface Props {
-  modelValue?: any
-  placeholder?: any
-  defaultValue?: any
+  modelValue?: DateValue
+  placeholder?: DateValue
+  defaultValue?: DateValue
   disabled?: boolean
   class?: string
   locale?: string
+  initialFocus?: boolean
+  minYear?: number
+  maxYear?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   disabled: false,
-  locale: 'zh-CN'
+  locale: 'zh-CN',
+  initialFocus: false,
+  minYear: 1900,
+  maxYear: new Date().getFullYear() + 50
 })
 
 const emit = defineEmits<{
-  'update:modelValue': [value: any]
+  'update:modelValue': [value: DateValue | undefined]
 }>()
+
+const calendarPlaceholder = ref<DateValue | undefined>(
+  props.modelValue ?? props.placeholder ?? props.defaultValue ?? today(getLocalTimeZone())
+)
+
+watch(
+  () => props.placeholder,
+  (value) => {
+    if (value && !calendarPlaceholder.value) {
+      calendarPlaceholder.value = value
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.modelValue,
+  (value) => {
+    if (value) {
+      calendarPlaceholder.value = value
+    }
+  },
+  { immediate: true }
+)
+
+const years = computed(() => {
+  const start = Math.min(props.minYear, props.maxYear)
+  const end = Math.max(props.minYear, props.maxYear)
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+})
+
+const selectedMonth = computed({
+  get: () => String(calendarPlaceholder.value?.month ?? 1),
+  set: (value: string) => {
+    if (!calendarPlaceholder.value) return
+    calendarPlaceholder.value = calendarPlaceholder.value.set({ month: Number(value) })
+  }
+})
+
+const selectedYear = computed({
+  get: () => String(calendarPlaceholder.value?.year ?? new Date().getFullYear()),
+  set: (value: string) => {
+    if (!calendarPlaceholder.value) return
+    calendarPlaceholder.value = calendarPlaceholder.value.set({ year: Number(value) })
+  }
+})
 </script>
 
 <template>
@@ -44,21 +104,53 @@ const emit = defineEmits<{
     v-slot="{ weekDays, grid }"
     :model-value="props.modelValue"
     :default-value="props.defaultValue"
-    :placeholder="props.placeholder"
+    :placeholder="calendarPlaceholder"
     :disabled="props.disabled"
     :locale="props.locale"
+    :initial-focus="props.initialFocus"
     :class="cn('p-3', props.class)"
     class="rounded-md border bg-white"
     @update:model-value="emit('update:modelValue', $event)"
+    @update:placeholder="calendarPlaceholder = $event"
   >
-    <CalendarHeader class="relative flex items-center justify-between pt-1">
+    <CalendarHeader class="flex items-center justify-between gap-2 pt-1">
       <CalendarPrev
         class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-wolf-bg-hover hover:text-wolf-text-primary h-7 w-7 bg-transparent p-0 text-wolf-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary disabled:opacity-50"
       >
         <ChevronLeft class="h-4 w-4" />
       </CalendarPrev>
 
-      <CalendarHeading class="text-sm font-medium text-wolf-text-primary" />
+      <div class="flex flex-1 items-center justify-center gap-2">
+        <Select v-model="selectedYear">
+          <SelectTrigger class="h-8 w-[92px] border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent class="max-h-72">
+            <SelectItem
+              v-for="year in years"
+              :key="year"
+              :value="String(year)"
+            >
+              {{ year }}年
+            </SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select v-model="selectedMonth">
+          <SelectTrigger class="h-8 w-[76px] border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="month in 12"
+              :key="month"
+              :value="String(month)"
+            >
+              {{ month }}月
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       <CalendarNext
         class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-wolf-bg-hover hover:text-wolf-text-primary h-7 w-7 bg-transparent p-0 text-wolf-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary disabled:opacity-50"

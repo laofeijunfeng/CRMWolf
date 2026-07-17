@@ -59,6 +59,7 @@ import FollowUpList from '@/components/FollowUpList.vue'
 import { leadApi, type LeadDetail, type LeadFollowUp, type LeadFollowUpCreate } from '@/api/lead'
 import { getLeadScore, getScoreLevel, type ScoreDetail } from '@/api/score'
 import { useUserStore } from '@/stores/user'
+import { formatLocalDate } from '@/utils/format'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -514,7 +515,7 @@ watch(() => props.visible, (visible) => {
           <DatePicker
             :model-value="followUpForm.next_follow_time ? new Date(followUpForm.next_follow_time) : null"
             placeholder="请选择下次跟进时间"
-            @update:model-value="(date: Date | null) => followUpForm.next_follow_time = date ? date.toISOString().split('T')[0] : ''"
+            @update:model-value="(date: Date | null) => followUpForm.next_follow_time = date ? formatLocalDate(date) : ''"
           />
         </div>
 

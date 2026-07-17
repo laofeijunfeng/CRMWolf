@@ -47,6 +47,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import contractApi, { type ContractCreate, type ContractUpdate, type ContractResponse, type LicenseType } from '@/api/contract'
 import { opportunityApi } from '@/api/opportunity'
 import customerApi, { type ContactResponse, type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
+import { formatLocalDate } from '@/utils/format'
 
 // Zod schema for form validation - use coerce for number fields
 const schema = toTypedSchema(
@@ -710,7 +711,7 @@ function continueEditing(): void {
               <DatePicker
                 :model-value="value ? new Date(value as string) : null"
                 placeholder="请选择签署日期"
-                @update:model-value="(date: Date | null) => handleChange(date ? date.toISOString().split('T')[0] : null)"
+                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
               />
             </FormControl>
             <FormMessage />
@@ -725,7 +726,7 @@ function continueEditing(): void {
               <DatePicker
                 :model-value="value ? new Date(value as string) : null"
                 placeholder="请选择生效日期"
-                @update:model-value="(date: Date | null) => handleChange(date ? date.toISOString().split('T')[0] : null)"
+                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
               />
             </FormControl>
             <FormMessage />

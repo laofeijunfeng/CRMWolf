@@ -34,7 +34,7 @@ import paymentApi, {
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { formatCurrency } from '@/utils/format'
+import { formatCurrency, formatLocalDate } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 
 // 自动从 route.meta.title 设置页面标题
@@ -127,7 +127,7 @@ const registerDefaultAmount = computed<number | null>(() => {
 const getUpcomingDate = (days: number): string => {
   const date = new Date()
   date.setDate(date.getDate() + days)
-  return date.toISOString().split('T')[0] ?? ''
+  return formatLocalDate(date)
 }
 
 const fetchPaymentPlans = async (): Promise<void> => {

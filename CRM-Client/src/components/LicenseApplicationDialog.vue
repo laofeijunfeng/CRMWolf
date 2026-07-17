@@ -92,6 +92,7 @@ import contractApi from '@/api/contract'
 import type { DeploymentInfo } from '@/schemas/deployment'
 import type { LicenseApplication } from '@/schemas/licenseApplication'
 import type { ContractListResponse } from '@/api/contract'
+import { formatLocalDate } from '@/utils/format'
 
 // Approved contract statuses (SIGNED = approved, EFFECTIVE = in effect)
 const APPROVED_STATUSES = ['SIGNED', 'EFFECTIVE']
@@ -208,7 +209,7 @@ const formatDate = (date: Date | string): string => {
     return parts[0] ?? ''
   }
   const d = new Date(date)
-  return d.toISOString().split('T')[0] ?? ''
+  return formatLocalDate(d)
 }
 
 watch(() => props.application, (val): void => {

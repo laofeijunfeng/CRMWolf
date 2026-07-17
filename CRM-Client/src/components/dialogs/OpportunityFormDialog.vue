@@ -47,6 +47,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { opportunityApi, type Opportunity, type OpportunityCreate, type OpportunityUpdate, LicenseType, PurchaseType } from '@/api/opportunity'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import customerApi, { type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
+import { formatLocalDate } from '@/utils/format'
 
 // Zod schema for form validation
 const schema = toTypedSchema(
@@ -92,7 +93,7 @@ const emit = defineEmits<Emits>()
 function getDefaultDate(): string {
   const date = new Date()
   date.setDate(date.getDate() + 30)
-  return date.toISOString().split('T')[0] ?? ''
+  return formatLocalDate(date)
 }
 
 // VeeValidate form setup
@@ -568,7 +569,7 @@ function continueEditing(): void {
               <DatePicker
                 :model-value="value ? new Date(value as string) : null"
                 placeholder="请选择预计成交日期"
-                @update:model-value="(date: Date | null) => handleChange(date ? date.toISOString().split('T')[0] : null)"
+                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
               />
             </FormControl>
             <FormMessage />

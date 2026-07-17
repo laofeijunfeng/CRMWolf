@@ -35,13 +35,13 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { DatePicker } from '@/components/ui/date-picker'
 import customerFollowUpApi from '@/api/customerFollowUp'
+import { formatLocalDate } from '@/utils/format'
 
 // Compute default date: 3 days from now
 function getDefaultNextFollowTime(): string {
   const date = new Date()
   date.setDate(date.getDate() + 3)
-  const parts = date.toISOString().split('T')
-  return parts[0] ?? ''
+  return formatLocalDate(date)
 }
 
 // Zod schema for form validation
@@ -215,7 +215,7 @@ function continueEditing(): void {
               <DatePicker
                 :model-value="value ? new Date(value as string) : null"
                 placeholder="请选择下次跟进时间"
-                @update:model-value="(date: Date | null) => handleChange(date ? date.toISOString().split('T')[0] : null)"
+                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
               />
             </FormControl>
             <FormMessage />
