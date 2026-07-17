@@ -19,26 +19,71 @@ const api = {
   get: <T>(url: string, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = request.get<T>(url, config)
-    return schema ? response.then(data => schema.parse(data) as T) : response
+    return schema
+      ? response.then(data => {
+          try {
+            return schema.parse(data) as T
+          } catch (error) {
+            console.error('Zod 验证失败:', url, error)
+            throw error
+          }
+        })
+      : response
   },
   post: <T>(url: string, data?: unknown, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = request.post<T>(url, data, config)
-    return schema ? response.then(d => schema.parse(d) as T) : response
+    return schema
+      ? response.then(d => {
+          try {
+            return schema.parse(d) as T
+          } catch (error) {
+            console.error('Zod 验证失败:', url, error)
+            throw error
+          }
+        })
+      : response
   },
   put: <T>(url: string, data?: unknown, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = request.put<T>(url, data, config)
-    return schema ? response.then(d => schema.parse(d) as T) : response
+    return schema
+      ? response.then(d => {
+          try {
+            return schema.parse(d) as T
+          } catch (error) {
+            console.error('Zod 验证失败:', url, error)
+            throw error
+          }
+        })
+      : response
   },
   delete: <T>(url: string, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = request.delete<T>(url, config)
-    return schema ? response.then(d => schema.parse(d) as T) : response
+    return schema
+      ? response.then(d => {
+          try {
+            return schema.parse(d) as T
+          } catch (error) {
+            console.error('Zod 验证失败:', url, error)
+            throw error
+          }
+        })
+      : response
   },
   patch: <T>(url: string, data?: unknown, config?: Record<string, unknown>, schema?: z.ZodType): Promise<T> => {
     const response = request.patch<T>(url, data, config)
-    return schema ? response.then(d => schema.parse(d) as T) : response
+    return schema
+      ? response.then(d => {
+          try {
+            return schema.parse(d) as T
+          } catch (error) {
+            console.error('Zod 验证失败:', url, error)
+            throw error
+          }
+        })
+      : response
   }
 }
 

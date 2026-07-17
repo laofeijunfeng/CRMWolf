@@ -16,7 +16,6 @@
  * - ✅ Flexbox 高度管理
  */
 import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
@@ -27,6 +26,7 @@ import contractApi, {
   type ContractListResponse,
   type ContractQueryParams
 } from '@/api/contract'
+import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
@@ -38,7 +38,6 @@ import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
 
-const router = useRouter()
 const permissionStore = usePermissionStore()
 const userStore = useUserStore()
 const headerStore = useHeaderStore()
@@ -229,7 +228,7 @@ const handleDelete = async (record: ContractListResponse): Promise<void> => {
 
 const handleSubmitApproval = async (record: ContractListResponse): Promise<void> => {
   try {
-    await contractApi.updateContractStatus(record.id, { status: 'PENDING_REVIEW' })
+    await approvalGenericApi.submitApproval('CONTRACT', record.id)
     toast.success('合同已提交审批')
     fetchContractList()
   } catch (error) {
@@ -259,15 +258,15 @@ const getRowActions = (row: ContractListResponse): RowActions => ({
       handler: handleEdit,
       icon: Edit,
       visible: canEditRow(row)
-    }
-  ],
-  secondaryActions: [
+    },
     {
       label: '提交审批',
       handler: handleSubmitApproval,
       icon: Send,
       visible: canSubmitApproval(row)
-    },
+    }
+  ],
+  secondaryActions: [
     {
       label: '删除',
       handler: handleDelete,

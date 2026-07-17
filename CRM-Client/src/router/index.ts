@@ -46,8 +46,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'leads/reminder',
         name: 'FollowUpReminder',
-        component: () => import('@/views/FollowUpReminder.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/leads'
       },
       {
         path: 'customers',
@@ -70,8 +69,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'public-customers',
         name: 'PublicCustomers',
-        component: () => import('@/views/PublicCustomers.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/customers'
       },
       {
         path: 'opportunities',
@@ -85,20 +83,15 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Contracts.vue'),
         meta: { requiresAuth: true, title: '合同管理' }
       },
-      // 回款计划创建页面 - 高级批量模式
-      // 推荐：在合同详情页使用 PaymentPlanQuickCreate Modal（快速模式）
-      // 此路由保留用于需要复杂批量规划的高级场景
       {
         path: 'contracts/:contractId/payment-plans/create',
         name: 'PaymentPlanCreate',
-        component: () => import('@/views/PaymentPlanCreate.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/contracts'
       },
       {
         path: 'sales-funnel',
         name: 'SalesFunnel',
-        component: () => import('@/views/SalesFunnel.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/opportunities'
       },
       {
         path: 'users',
@@ -109,8 +102,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'roles',
         name: 'Roles',
-        component: () => import('@/views/Roles.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'approval-flows',
@@ -121,14 +113,12 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'approval-flows/create',
         name: 'ApprovalFlowCreate',
-        component: () => import('@/views/ApprovalFlowForm.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'approval-flows/:id/edit',
         name: 'ApprovalFlowEdit',
-        component: () => import('@/views/ApprovalFlowForm.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'payments',
@@ -147,40 +137,18 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '回款管理' }
       },
       {
-        path: 'payments/create',
-        name: 'PaymentPlanCreate',
-        component: () => import('@/views/PaymentPlanCreate.vue'),
-        meta: { requiresAuth: true, title: '新建回款计划' }
-      },
-      {
         path: 'payments/plans/:id',
         name: 'PaymentPlanDetail',
-        component: () => import('@/views/PaymentPlanDetail.vue'),
-        meta: { requiresAuth: true, title: '回款计划详情' }
+        redirect: to => ({
+          path: '/payments/plans',
+          query: { planId: String(to.params['id']) }
+        })
       },
       {
         path: 'invoices',
         name: 'Invoices',
         component: () => import('@/views/Invoices.vue'),
         meta: { requiresAuth: true, title: '发票管理' }
-      },
-      {
-        path: 'invoices/create',
-        name: 'InvoiceCreate',
-        component: () => import('@/views/InvoiceForm.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'invoices/edit/:id',
-        name: 'InvoiceEdit',
-        component: () => import('@/views/InvoiceForm.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'invoices/:id',
-        name: 'InvoiceDetail',
-        component: () => import('@/views/InvoiceDetail.vue'),
-        meta: { requiresAuth: true }
       },
       {
         path: 'procurement-methods',
@@ -209,8 +177,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'settings',
         name: 'Settings',
-        component: () => import('@/views/Settings.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'system-config',
@@ -230,14 +197,12 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'ai-config',
         name: 'AIConfig',
-        component: () => import('@/views/AIConfig.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'notification-config',
         name: 'NotificationConfig',
-        component: () => import('@/views/NotificationConfig.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'team-members',
@@ -270,20 +235,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'finance/payment-confirmations',
         redirect: '/approvals'
-      },
-      // TODO: 财务管理模块 - 等待后端接口实现后启用
-      // {
-      //   path: 'finance/dashboard',
-      //   name: 'FinanceDashboard',
-      //   component: () => import('@/views/FinanceDashboard.vue'),
-      //   meta: { requiresAuth: true }
-      // },
-      // {
-      //   path: 'finance/reports',
-      //   name: 'FinanceReports',
-      //   component: () => import('@/views/FinanceReports.vue'),
-      //   meta: { requiresAuth: true }
-      // }
+      }
     ]
   }
 ]
@@ -293,11 +245,11 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const userStore = useUserStore()
   const teamStore = useTeamStore()
-  const requiresAuth = to.meta.requiresAuth !== false
-  const requiresTeam = to.meta.requiresTeam !== false
+  const requiresAuth = to.meta['requiresAuth'] !== false
+  const requiresTeam = to.meta['requiresTeam'] !== false
 
   if (requiresAuth && !userStore.isLoggedIn()) {
     next('/login')

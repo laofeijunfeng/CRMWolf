@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional
 import os
@@ -10,6 +10,9 @@ from app.models.customer import Customer
 from app.models.contract import Contract
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan
+from app.models.invoice import InvoiceApplicationStatus
+from app.models.approval import ApprovalStatus
+from app.constants.business_types import BusinessType
 from app.schemas.invoice import (
     InvoiceTitleCreate, InvoiceTitleUpdate, InvoiceTitleResponse,
     InvoiceApplicationCreate, InvoiceApplicationUpdate, InvoiceApplicationResponse,
@@ -17,6 +20,7 @@ from app.schemas.invoice import (
     InvoiceTitleListResponse, InvoiceApplicationListResponse, PaymentPlanInvoiceSummary
 )
 from app.crud.invoice import invoice_title_crud, invoice_application_crud
+from app.crud.approval import approval_crud
 from app.services.file_storage import file_storage_service, FileStorageError
 
 router = APIRouter(prefix="/invoice-titles", tags=["开票抬头管理"])
@@ -162,9 +166,13 @@ def create_invoice_application(
 def list_invoice_applications(
     customer_id: Optional[int] = Query(None, description="客户ID"),
     contract_id: Optional[int] = Query(None, description="合同ID"),
-    status: Optional[str] = Query(None, description="申请状态"),
+    payment_plan_id: Optional[int] = Query(None, description="回款计划ID"),
+    application_status: Optional[str] = Query(None, alias="status", description="申请状态"),
     applicant_id: Optional[str] = Query(None, description="申请人ID"),
-    me: bool = Query(False, description="是否只查询当前用户负责的客户的数据"),
+    keyword: Optional[str] = Query(None, description="关键词，支持申请编号、客户、合同、抬头、税号、发票号码"),
+    page: Optional[int] = Query(None, ge=1, description="页码（兼容前端 page/page_size）"),
+    page_size: Optional[int] = Query(None, ge=1, le=100, description="每页记录数（兼容前端 page/page_size）"),
+    me: bool = Query(False, description="是否只查询当前用户申请的数据"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
     team_id: int = Depends(get_current_user_team),
@@ -180,7 +188,6 @@ def list_invoice_applications(
     - 都没有 → 403 Forbidden
     """
     from app.crud.permission import permission_crud
-    from fastapi import HTTPException, status
 
     # 权限检查
     user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
@@ -201,28 +208,33 @@ def list_invoice_applications(
         # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
         current_user_id = str(current_user.id)
 
+    effective_limit = page_size if page_size is not None else limit
+    effective_skip = (page - 1) * effective_limit if page is not None else skip
+
     applications, total = invoice_application_crud.list_applications(
         db,
         team_id=team_id,
-        skip=skip,
-        limit=limit,
+        skip=effective_skip,
+        limit=effective_limit,
         customer_id=customer_id,
         contract_id=contract_id,
-        status=status,
+        payment_plan_id=payment_plan_id,
+        status=application_status,
         applicant_id=applicant_id,
-        current_user_id=current_user_id
+        current_user_id=current_user_id,
+        keyword=keyword,
     )
 
     populated_applications = [_populate_application_info(db, app, team_id) for app in applications]
 
     # 计算页码（skip/limit + 1）
-    current_page = skip // limit + 1 if limit > 0 else 1
+    current_page = page if page is not None else (effective_skip // effective_limit + 1 if effective_limit > 0 else 1)
 
     return {
         "items": populated_applications,
         "total": total,
         "page": current_page,
-        "page_size": limit
+        "page_size": effective_limit
     }
 
 
@@ -268,9 +280,16 @@ def update_invoice_application(
         )
 
 
-@invoice_router.post("/{application_id}/mark-issued", response_model=InvoiceApplicationResponse, summary="标记为已开票", description="将已批准的发票申请标记为已开票状态")
-def mark_invoice_issued(
+@invoice_router.post(
+    "/{application_id}/mark-issued",
+    response_model=InvoiceApplicationResponse,
+    summary="标记为已开票",
+    description="审批通过后执行开票业务动作，可选上传发票文件和填写发票号码",
+)
+async def mark_invoice_issued(
     application_id: int,
+    file: Optional[UploadFile] = File(None, description="发票文件（PDF/JPG/PNG/OFD，可选）"),
+    invoice_number: Optional[str] = Form(None, description="发票号码（可选）"),
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(require_permission("invoice:mark_issued")),
     db: Session = Depends(get_db)
@@ -282,8 +301,45 @@ def mark_invoice_issued(
             detail="发票申请不存在"
         )
 
+    approval = approval_crud.get_by_entity(db, BusinessType.INVOICE, application_id, team_id)
+    if not approval or approval.status != ApprovalStatus.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="发票未通过审批，不可开票"
+        )
+
+    if application.status != InvoiceApplicationStatus.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"发票申请状态为 {application.status}，不可开票"
+        )
+
+    invoice_file_path = None
+    if file is not None:
+        try:
+            content = await file.read()
+            invoice_file_path = file_storage_service.save_invoice_file(
+                team_id=team_id,
+                invoice_id=application_id,
+                filename=file.filename or "",
+                content=content,
+            )
+        except FileStorageError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+
+    normalized_invoice_number = invoice_number.strip() if invoice_number and invoice_number.strip() else None
+
     try:
-        issued_application = invoice_application_crud.mark_issued(db, application_id, team_id=team_id)
+        issued_application = invoice_application_crud.mark_issued(
+            db,
+            application_id,
+            team_id=team_id,
+            invoice_file_path=invoice_file_path,
+            invoice_number=normalized_invoice_number,
+        )
         return _populate_application_info(db, issued_application, team_id)
     except ValueError as e:
         raise HTTPException(

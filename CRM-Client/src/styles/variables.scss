@@ -320,7 +320,7 @@ $wolf-focus-ring-offset: 2px;
 $wolf-reduced-motion-duration: 0.01ms;
 
 // ==================== 审批状态语义色（Phase C 新增，唯一规范）====================
-// 设计债背景（C-DSG-1）：ApprovalTimeline / ApprovalProgressCompact /
+// 设计债背景（C-DSG-1）：ApprovalTimeline /
 // FinanceInvoiceApprovals 三套散落 statusMap 对 PENDING/APPROVED/REJECTED
 // 各自映射不同色相，违背"可调试的品味"原则。本段为唯一引用源，Phase C
 // 全部组件经 ApprovalStatusBadge.vue 统一引用，禁止在业务组件再写 statusMap。

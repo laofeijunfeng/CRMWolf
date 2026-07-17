@@ -45,6 +45,18 @@
           </a>
           <a
             class="nav-item"
+            :class="{ active: currentPath.startsWith('/contracts') }"
+            role="menuitem"
+            :aria-current="currentPath.startsWith('/contracts') ? 'page' : undefined"
+            :aria-label="`合同管理${currentPath.startsWith('/contracts') ? '（当前页面）' : ''}`"
+            @click="handleMenuClick('/contracts')"
+            @keydown.enter="handleMenuClick('/contracts')"
+          >
+            <component :is="FileText" class="nav-item-icon" aria-hidden="true" />
+            <span class="nav-item-text">合同管理</span>
+          </a>
+          <a
+            class="nav-item"
             :class="{ active: currentPath.startsWith('/payments/plans') }"
             role="menuitem"
             :aria-current="currentPath.startsWith('/payments/plans') ? 'page' : undefined"
@@ -60,18 +72,6 @@
         <!-- 财务流程 -->
         <div class="nav-section">
           <div class="nav-section-title">财务流程</div>
-          <a
-            class="nav-item"
-            :class="{ active: currentPath.startsWith('/contracts') }"
-            role="menuitem"
-            :aria-current="currentPath.startsWith('/contracts') ? 'page' : undefined"
-            :aria-label="`合同管理${currentPath.startsWith('/contracts') ? '（当前页面）' : ''}`"
-            @click="handleMenuClick('/contracts')"
-            @keydown.enter="handleMenuClick('/contracts')"
-          >
-            <component :is="FileText" class="nav-item-icon" aria-hidden="true" />
-            <span class="nav-item-text">合同管理</span>
-          </a>
           <a
             class="nav-item"
             :class="{ active: currentPath.startsWith('/payments/records') }"
@@ -324,7 +324,6 @@ const currentPath = computed(() => {
   const path = route.path
   if (path.startsWith('/leads/public')) return '/leads/public'
   if (path.startsWith('/leads/my')) return '/leads/my'
-  if (path.startsWith('/leads/reminder')) return '/leads/reminder'
   if (path.startsWith('/leads/') && path.match(/\/leads\/\d+/)) return '/leads'
   if (path.startsWith('/opportunities/') && path.match(/\/opportunities\/\d+/)) return '/opportunities'
   return path

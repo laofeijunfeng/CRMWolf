@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
+from sqlalchemy import text
 from typing import List, Optional
 
 from app.core.database import get_db
@@ -12,7 +12,6 @@ from app.crud.role import role_crud
 from app.crud.user import user_crud
 from app.models.approval import Approval, ApprovalStatus, ApprovalAction, ApprovalRecord
 from app.models.contract import ContractStatus
-from app.models.invoice import InvoiceApplicationStatus
 from app.models.user import User
 from app.schemas.approval import (
     ApprovalFlowCreate, ApprovalFlowUpdate, ApprovalFlowResponse, ApprovalFlowDetailResponse,
@@ -28,7 +27,6 @@ from app.schemas.approval_generic import (
 from app.constants.business_types import is_valid_business_type, BusinessType
 from app.services.approval_adapter import get_adapter
 from app.services.notification import notification_service_factory
-from app.services.file_storage import file_storage_service, FileStorageError
 from datetime import datetime as _datetime
 
 
@@ -68,7 +66,7 @@ def log_approval_operation(
         notification_status: 通知发送状态（success/failed/skipped）
         reason: 拒绝/撤回原因
         level: 日志级别（默认 INFO）
-        business_type: 业务单据类型（A6 通用端点：CONTRACT/PAYMENT/INVOICE）
+        business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE）
         business_id: 业务单据ID（A6 通用端点）
     """
     message = f"[Approval] {operation}"
@@ -1041,11 +1039,12 @@ def get_approvers_by_role(db: Session, role_code: str):
 
 
 # 自审追加权限校验失败文案（按 entity_type 分发）。
-# CONTRACT 文案与改造前逐字一致（E1 合同回归）；PAYMENT/INVOICE 按 M-3 规范。
+# 按 entity_type 统一分发自审权限提示。
 _SELF_APPROVE_DENY_MSG = {
     BusinessType.CONTRACT: "您没有权限审批自己创建的合同",
     BusinessType.PAYMENT: "您没有权限审批自己创建的回款",
     BusinessType.INVOICE: "您没有权限审批自己创建的发票",
+    BusinessType.LICENSE: "您没有权限审批自己创建的License申请",
 }
 
 
@@ -1100,7 +1099,7 @@ def _check_approve_permissions(
 
     - 角色校验：current_node.approve_role 不在 current_user 角色集 → 403
     - 自审追加：current_user 是单据提交人时需 `<resource>:approve:own` 权限 → 403
-      （CONTRACT/PAYMENT/INVOICE 均校验，泛化自原 CONTRACT-only 逻辑，M-3）
+      （CONTRACT/PAYMENT/INVOICE/LICENSE 均校验，泛化自原 CONTRACT-only 逻辑，M-3）
 
     旧合同端点传 entity_type=BusinessType.CONTRACT / entity_id=contract_id；
     新通用端点传路由参数 entity_type / entity_id。
@@ -1114,7 +1113,7 @@ def _check_approve_permissions(
             detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}",
         )
 
-    # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE 通用，M-3 泛化）
+    # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE/LICENSE 通用）
     if entity_type is not None and entity_id is not None:
         _check_self_approval_permission(
             db, current_user, team_id, entity_type, entity_id
@@ -1167,13 +1166,12 @@ def _check_next_node_has_approvers(
 
 
 # ============================================================================
-# Task A6：通用审批 API 端点（CONTRACT / PAYMENT / INVOICE 统一入口）
+# 通用审批 API 端点（CONTRACT / PAYMENT / INVOICE / LICENSE 统一入口）
 # ============================================================================
 # 设计要点：
 # - 新端点 prefix 沿用既有 router 的 `/v1/approvals`
 # - entity_type 用 is_valid_business_type（A1）校验，非法 → 400
-# - submit：取 adapter.get_entity → None 时 404；match_flow_generic
-#   （决策1：CONTRACT 未匹配报错 / PAYMENT·INVOICE 未匹配直通即免审批）；
+# - submit：取 adapter.get_entity → None 时 404；match_flow_generic 未匹配统一报错；
 #   建 Approval（create_approval_generic）；通知留 TODO 由 Task A8 泛化
 # - approve：get_by_entity 取审批实例 → 复用既有 :611-619 角色校验逻辑
 #   → approval_crud.approve(...) → D3 端点回写：business_type==INVOICE 时
@@ -1245,6 +1243,11 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
                 "审批流程已被管理员禁用，当前审批将继续执行，但新提交审批不会使用该流程"
             )
 
+    summary = None
+    if approval.business_id:
+        summaries = approval_crud._batch_entity_summaries(db, [approval], approval.team_id)
+        summary = summaries.get((approval.business_type, approval.business_id))
+
     return {
         "id": approval.id,
         "business_type": approval.business_type,
@@ -1261,6 +1264,7 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
         "updated_time": approval.updated_time,
         "flow_is_active": flow_is_active,
         "flow_disabled_warning": flow_disabled_warning,
+        "customer_info": summary.get("customer_info") if summary else None,
         "records": record_list,
     }
 
@@ -1270,7 +1274,7 @@ def _validate_entity_type(entity_type: str) -> None:
     if not is_valid_business_type(entity_type):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效的业务单据类型: {entity_type}，仅支持 CONTRACT / PAYMENT / INVOICE",
+            detail=f"无效的业务单据类型: {entity_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE",
         )
 
 
@@ -1279,18 +1283,16 @@ def _validate_entity_type(entity_type: str) -> None:
     response_model=GenericApprovalSubmitResponse,
     summary="提交审批（通用）",
     description="""
-将草稿状态的业务单据（合同/回款/发票）提交到审批流程，统一入口。
+将草稿状态的业务单据（合同/回款/发票/License）提交到审批流程，统一入口。
 
 **功能说明：**
 - 按 entity_type 走对应适配器取实体；不存在 → 404
-- match_flow_generic 匹配审批流程：
-  - CONTRACT：未匹配报错（沿用合同原语义）
-  - PAYMENT/INVOICE：未匹配直通（决策1：免审批）
+- match_flow_generic 匹配审批流程；未匹配统一报错并提示配置审批流程
 - 创建审批实例（create_approval_generic），状态置 PENDING
 - 通知由 Task A8 泛化，本端点暂不发送
 
 **路径参数：**
-- entity_type: CONTRACT / PAYMENT / INVOICE
+- entity_type: CONTRACT / PAYMENT / INVOICE / LICENSE
 - entity_id: 业务单据 ID
 """,
 )
@@ -1315,18 +1317,11 @@ async def submit_generic_approval(
     flow, err = approval_flow_crud.match_flow_generic(
         db, entity_type, team_id, **adapter.match_kwargs(entity)
     )
-    if flow is None and err:
-        # CONTRACT 未匹配分支：err 非空 → 报错阻断
+    if flow is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=err or "未匹配到审批流程",
+            detail=err or "未找到匹配的审批流程，请联系管理员创建或完善审批流程",
         )
-    if flow is None:
-        # PAYMENT/INVOICE 未匹配分支：决策1 直通，无审批流程即免审批
-        # 返回 approval_id=0 + status=APPROVED 标识"免审批直通"语义；
-        # 业务侧据 business_id 与 status 自行处理单据后续状态（由适配器 on_submit
-        # 在 create_approval_generic 中已切，本分支不切单据状态，保留原 DRAFT）。
-        return GenericApprovalSubmitResponse(approval_id=0, status="APPROVED")
 
     submitter_id, submitter_name = adapter.get_submitter(entity)
 
@@ -1395,13 +1390,13 @@ async def submit_generic_approval(
     "/{entity_type}/{entity_id}/approve",
     summary="审批通过/拒绝（通用）",
     description="""
-对当前待审批的业务单据（合同/回款/发票）进行审批操作。
+对当前待审批的业务单据（合同/回款/发票/License）进行审批操作。
 
 **功能说明：**
 - get_by_entity 取审批实例；不存在 → 404
 - 复用既有 :611-619 角色校验：current_node.approve_role 不在用户角色集 → 403
 - approval_crud.approve(...) 内部已调适配器 on_approved/on_rejected 切单据状态
-  （INVOICE 写 status / reviewed_time；PAYMENT 写 confirmation_status；CONTRACT 写 status）
+  （INVOICE 写 status / reviewed_time；PAYMENT 写 confirmation_status；CONTRACT/LICENSE 写 status）
 - **D3 端点回写**：business_type==INVOICE 时，由本端点补写 reviewer_id / review_comment
   两字段（不扩适配器签名，Pre-Flight 定案）
 - 通知由 Task A8 泛化，本端点暂不发送
@@ -1676,7 +1671,7 @@ def detail_generic_approval(
 
 **查询参数：**
 - tab: pending / processed / submitted
-- business_type: 可选 CONTRACT / PAYMENT / INVOICE 维度过滤
+- business_type: 可选 CONTRACT / PAYMENT / INVOICE / LICENSE 维度过滤
 - page / page_size: 分页
 
 **返回字段：**
@@ -1688,7 +1683,7 @@ def detail_generic_approval(
 )
 def list_approvals(
     tab: str = Query("pending", description="过滤维度：pending/processed/submitted"),
-    business_type: Optional[str] = Query(None, description="业务类型过滤 CONTRACT/PAYMENT/INVOICE"),
+    business_type: Optional[str] = Query(None, description="业务类型过滤 CONTRACT/PAYMENT/INVOICE/LICENSE"),
     page: int = Query(1, ge=1, description="页码，1-based"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     team_id: int = Depends(get_current_user_team),
@@ -1704,7 +1699,7 @@ def list_approvals(
     if business_type is not None and not is_valid_business_type(business_type):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效的业务单据类型: {business_type}，仅支持 CONTRACT / PAYMENT / INVOICE",
+            detail=f"无效的业务单据类型: {business_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE",
         )
 
     # 当前用户在该 team 下的角色 code 集合（pending tab 过滤用）
@@ -1727,151 +1722,3 @@ def list_approvals(
         total=total,
         pending_count=pending_count,
     )
-
-
-# ============================================================================
-# Task 4: 发票审批上传文件端点（POST /v1/approvals/INVOICE/{entity_id}/approve-with-file）
-# ============================================================================
-# 设计要点：
-# - 仅支持 INVOICE 类型，其他类型返回 400
-# - entity_id 是发票申请 ID（InvoiceApplication.id）
-# - file: UploadFile（发票文件 PDF/JPG/PNG/OFD）
-# - invoice_number: Optional[str]（发票号码，财务可从文件中查看）
-# - comment: Optional[str]（审批意见）
-# - 权限：invoice:approve（require_permission）
-# - 安全校验：FileStorageService 防路径穿越 + 白名单扩展名
-# - 状态检查：entity.status == PENDING_REVIEW 才可审批
-# - 调用适配器：InvoiceApplicationAdapter.on_approved_with_file
-# - 审批记录：创建 ApprovalRecord（action="approve_with_file")
-# ============================================================================
-
-
-@router.post(
-    "/{entity_type}/{entity_id}/approve-with-file",
-    summary="审批通过并上传发票文件（Task 4）",
-    description="""
-审批发票时上传发票文件，审批通过后自动变为已开票状态。
-
-**功能说明：**
-- 仅支持 INVOICE 类型（其他类型返回 400）
-- 财务人员审批发票时上传发票文件（PDF/JPG/PNG/OFD）
-- 审批通过后自动变为 ISSUED（已开票）状态
-- 发票号码可选（财务可从上传的文件中查看）
-
-**路径参数：**
-- entity_type: INVOICE（仅支持发票类型）
-- entity_id: 发票申请 ID
-
-**请求体（multipart/form-data）：**
-- file: 发票文件（必填）
-- invoice_number: 发票号码（可选）
-- comment: 审批意见（可选）
-
-**权限要求：**
-- invoice:approve 权限
-
-**业务规则：**
-- 发票状态必须为 PENDING_REVIEW（待审批）
-- 文件大小限制：10MB
-- 文件类型限制：PDF/JPG/PNG/OFD
-""",
-)
-async def approve_with_file(
-    entity_type: str,
-    entity_id: int,
-    file: UploadFile = File(..., description="发票文件（PDF/JPG/PNG/OFD）"),
-    invoice_number: Optional[str] = Form(None, description="发票号码（可选，财务可从文件中查看）"),
-    comment: Optional[str] = Form(None, description="审批意见"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:approve")),
-    db: Session = Depends(get_db),
-):
-    """审批发票时上传文件——仅支持 INVOICE 类型"""
-
-    # 只支持发票类型
-    if entity_type != BusinessType.INVOICE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="仅发票类型支持上传文件审批",
-        )
-
-    # 获取适配器和实体
-    adapter = get_adapter(entity_type)
-    entity = adapter.get_entity(db, entity_id, team_id)
-
-    if not entity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"{entity_type} 实体不存在",
-        )
-
-    # 检查状态
-    if entity.status != InvoiceApplicationStatus.PENDING_REVIEW:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"发票状态为 {entity.status}，无法审批",
-        )
-
-    # 读取文件内容
-    file_content = await file.read()
-
-    # 保存文件
-    try:
-        file_path = file_storage_service.save_invoice_file(
-            team_id=team_id,
-            invoice_id=entity_id,
-            filename=file.filename or "invoice.pdf",
-            content=file_content,
-        )
-    except FileStorageError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
-
-    # 调用适配器的 on_approved_with_file
-    adapter.on_approved_with_file(db, entity, file_path, invoice_number)
-
-    # 获取审批实例
-    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
-
-    # 更新审批状态为通过
-    if approval:
-        approval.status = ApprovalStatus.APPROVED
-        approval.current_node_id = None
-
-        # 创建审批操作记录
-        record = ApprovalRecord(
-            approval_id=approval.id,
-            node_id=approval.current_node_id if approval else None,
-            approver_id=str(current_user.id),
-            approver_name=current_user.name,
-            action=ApprovalAction.APPROVE,  # 使用枚举值而非自定义字符串
-            comment=comment or f"审批通过，发票号码：{invoice_number or '未填写'}",
-            created_time=func.now(),
-            team_id=team_id,
-        )
-        db.add(record)
-
-    # 记录日志
-    log_approval_operation(
-        operation="ApproveWithFile",
-        approval_id=approval.id if approval else None,
-        flow_name=approval.flow.flow_name if approval and approval.flow else None,
-        node_name=approval.current_node.node_name if approval and approval.current_node else None,
-        operator=current_user.name,
-        flow_direction="completed",
-        business_type=entity_type,
-        business_id=entity_id,
-        reason=f"file_path={file_path}, invoice_number={invoice_number}",
-    )
-
-    db.commit()
-
-    return {
-        "success": True,
-        "message": "审批成功，发票已上传",
-        "file_path": file_path,
-        "invoice_number": invoice_number,
-        "new_status": InvoiceApplicationStatus.ISSUED,
-    }

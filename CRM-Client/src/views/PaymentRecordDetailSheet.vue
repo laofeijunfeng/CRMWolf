@@ -52,14 +52,15 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'
 import type {
   ApprovalInfo,
   ApprovalInfoLite,
-  ApprovalNodeInfo,
   ApprovalStatus,
   PaymentConfirmationStatus,
   PaymentRecordInfo
 } from '@/api/payment'
+import type { ApprovalRecord } from '@/schemas/approvalGeneric'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
 
 /**
@@ -173,6 +174,52 @@ const approvalCreatedTime = computed<string | undefined>(() => {
   return undefined
 })
 
+const approvalStepperRecords = computed<ApprovalRecord[]>(() => {
+  const approval = props.approval
+  if (approval === null) return []
+
+  const createdTime = approvalCreatedTime.value ?? props.record?.created_time
+  if (createdTime === undefined || createdTime.trim() === '') return []
+
+  const records: ApprovalRecord[] = [
+    {
+      id: approval.id,
+      approval_id: approval.id,
+      node_id: null,
+      node_name: '提交申请',
+      approver_id: 'submitter_id' in approval ? approval.submitter_id : null,
+      approver_name: 'submitter_name' in approval ? approval.submitter_name : formatCreator(props.record),
+      approver_status: null,
+      approver_status_display: null,
+      action: 'SUBMIT',
+      comment: null,
+      created_time: createdTime,
+    },
+  ]
+
+  approval.nodes.forEach((node) => {
+    const isApproved = node.status === 'APPROVE' || node.status === 'APPROVED'
+    const isRejected = node.status === 'REJECT' || node.status === 'REJECTED'
+    if (!isApproved && !isRejected) return
+
+    records.push({
+      id: node.id,
+      approval_id: approval.id,
+      node_id: node.id,
+      node_name: node.node_name,
+      approver_id: node.approver_id ?? null,
+      approver_name: node.approver_name ?? node.approve_role,
+      approver_status: null,
+      approver_status_display: null,
+      action: isRejected ? 'REJECT' : 'APPROVE',
+      comment: node.comment ?? null,
+      created_time: node.approved_time ?? createdTime,
+    })
+  })
+
+  return records
+})
+
 // Helper functions
 function getConfirmationStatusLabel(status: PaymentConfirmationStatus | undefined): string {
   if (status === 'CONFIRMED') return '已确认'
@@ -202,23 +249,6 @@ function getApprovalStatusClass(status: ApprovalStatus): string {
     REJECTED: 'approval-status-danger'
   }
   return statusMap[status] ?? ''
-}
-
-function getApprovalNodeStatusText(node: ApprovalNodeInfo): string {
-  if (node.status === 'SUBMIT') return '已提交'
-  if (node.status === 'APPROVE' || node.status === 'APPROVED') return '已通过'
-  if (node.status === 'REJECT' || node.status === 'REJECTED') return '已驳回'
-  return '待审批'
-}
-
-function getApprovalNodeClass(node: ApprovalNodeInfo): string {
-  if (node.status === 'APPROVE' || node.status === 'APPROVED' || node.status === 'SUBMIT') {
-    return 'node-approved'
-  }
-  if (node.status === 'REJECT' || node.status === 'REJECTED') {
-    return 'node-rejected'
-  }
-  return 'node-pending'
 }
 
 function formatDate(dateStr: string | undefined): string {
@@ -467,26 +497,10 @@ watch(
                   </div>
                 </div>
 
-                <ol v-if="props.approval?.nodes?.length" class="approval-node-list" aria-label="审批节点">
-                  <li
-                    v-for="node in props.approval.nodes"
-                    :key="node.id"
-                    :class="['approval-node', getApprovalNodeClass(node)]"
-                  >
-                    <div class="node-marker" aria-hidden="true" />
-                    <div class="node-content">
-                      <div class="node-title-line">
-                        <span class="node-name">{{ node.node_name }}</span>
-                        <Badge variant="outline">{{ getApprovalNodeStatusText(node) }}</Badge>
-                      </div>
-                      <div class="node-meta">
-                        <span>{{ node.approver_name ?? node.approve_role }}</span>
-                        <span v-if="node.approved_time">{{ formatDateTime(node.approved_time) }}</span>
-                      </div>
-                      <p v-if="node.comment" class="node-comment">{{ node.comment }}</p>
-                    </div>
-                  </li>
-                </ol>
+                <ApprovalProcessStepper
+                  :records="approvalStepperRecords"
+                  :is-pending="isApprovalPending"
+                />
               </CardContent>
             </Card>
           </template>
@@ -811,8 +825,7 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 }
 
 .record-status-badge,
-.approval-status-badge,
-.approval-node :deep([data-slot='badge']) {
+.approval-status-badge {
   white-space: nowrap;
 }
 
@@ -850,80 +863,6 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   border-color: transparent;
 }
 
-.approval-node-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-md-v2;
-}
-
-.approval-node {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: $wolf-space-md-v2;
-  min-height: $wolf-touch-target-min-v2;
-}
-
-.node-marker {
-  width: $wolf-space-md-v2;
-  height: $wolf-space-md-v2;
-  margin-top: $wolf-space-xs-v2;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-border-default-v2;
-}
-
-.node-approved .node-marker {
-  background: $wolf-success-v2;
-}
-
-.node-rejected .node-marker {
-  background: $wolf-danger-v2;
-}
-
-.node-pending .node-marker {
-  background: $wolf-warning-v2;
-}
-
-.node-content {
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  min-width: 0;
-}
-
-.node-title-line {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm-v2;
-  flex-wrap: wrap;
-}
-
-.node-name {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-}
-
-.node-meta,
-.node-comment {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.node-meta {
-  display: flex;
-  gap: $wolf-space-sm-v2;
-  flex-wrap: wrap;
-}
-
-.node-comment {
-  margin: 0;
-  color: $wolf-text-secondary-v2;
-}
-
 .state-card-content {
   min-height: $record-empty-min-height;
   display: flex;
@@ -951,8 +890,7 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .record-header-summary,
-  .approval-node {
+  .record-header-summary {
     transition-duration: $wolf-reduced-motion-duration-v2;
   }
 }

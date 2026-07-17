@@ -10,7 +10,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { AlertCircle, FileText, Loader2, Pencil, ReceiptText, RefreshCw, Send, Undo2, X } from 'lucide-vue-next'
+import { AlertCircle, FileText, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
 import {
   Sheet,
   SheetHeader,
@@ -31,17 +31,14 @@ import {
   EmptyDescription
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
-import ApprovalProgressCompact from '@/components/ApprovalProgressCompact.vue'
-import PaymentPlans from '@/components/PaymentPlans.vue'
+import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
+import ContractPaymentPlans from '@/components/ContractPaymentPlans.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import contractApi, { type ContractResponse, type ContractStatus, type LicenseType } from '@/api/contract'
-import approvalApi from '@/api/approval'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { handleApiError } from '@/utils/errorHandler'
-import { confirmDialog } from '@/utils/confirmDialog'
 import { formatCurrency } from '@/utils/format'
-import { toast } from 'vue-sonner'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -61,64 +58,6 @@ const emit = defineEmits<{
   'refresh': []
 }>()
 
-// ==================== Approval Types ====================
-interface ApprovalRecordFromAPI {
-  node_id: number
-  approver_id: string
-  approver_name: string
-  action: string
-  comment: string | null
-  created_time: string
-}
-
-interface ApprovalNodeFromAPI {
-  id: number
-  node_name: string
-  node_order: number
-  approve_role: string
-}
-
-interface ApprovalFlowFromAPI {
-  flow_name: string
-  nodes: ApprovalNodeFromAPI[]
-}
-
-interface ApprovalDetailFromAPI {
-  status: string
-  submitter_id: string
-  submitter_name: string
-  created_time: string
-  current_node_id: number | null
-  flow: ApprovalFlowFromAPI | null
-  records: ApprovalRecordFromAPI[]
-}
-
-interface ApprovalRecord {
-  approver_id: string
-  approver_name?: string
-  action: string
-  created_time: string
-  comment?: string
-}
-
-interface ApprovalStep {
-  step_order: number
-  step_name: string
-  approver_role: string
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
-  approval_records: ApprovalRecord[]
-}
-
-interface ApprovalDetail {
-  current_step: number
-  approval_steps: ApprovalStep[]
-  status: string
-  submitter_id?: string
-  submitter_name?: string
-  submitted_at?: string
-  flow_name?: string
-}
-
 interface PaymentContractInfo {
   contract_name: string
   contract_number: string
@@ -134,23 +73,10 @@ const permissionStore = usePermissionStore()
 const { userInfo } = storeToRefs(userStore)
 
 const loading = ref(false)
-const approvalLoading = ref(false)
 const contractInfo = ref<ContractResponse | null>(null)
-const approvalDetail = ref<ApprovalDetail | null>(null)
 const errorMessage = ref('')
 const activeRequestId = ref(0)
-const submittingApproval = ref<boolean>(false)
-const withdrawingApproval = ref<boolean>(false)
 const editDialogOpen = ref<boolean>(false)
-
-const statusesWithApproval: readonly ContractStatus[] = [
-  'PENDING_REVIEW',
-  'SIGNED',
-  'EFFECTIVE',
-  'EXPIRED',
-  'TERMINATED'
-]
-
 
 const statusesWithPaymentPlans: readonly ContractStatus[] = [
   'SIGNED',
@@ -170,18 +96,19 @@ const canEditContract = computed<boolean>(() => {
   return permissionStore.canEditOwn('contract') && contract.creator_id === currentUserId.value
 })
 
-const canSubmitApproval = computed<boolean>(() => {
-  return contractInfo.value?.status === 'DRAFT' && permissionStore.canSubmitApproval('contract')
+const contractEntityType = 'CONTRACT' as const
+
+const isSubmitterGeneric = computed<boolean>(() => {
+  return contractInfo.value?.creator_id === currentUserId.value
 })
 
-const canWithdrawApproval = computed<boolean>(() => {
-  if (contractInfo.value?.status !== 'PENDING_REVIEW') return false
-
-  const submitterId = approvalDetail.value?.submitter_id
-  return submitterId !== undefined &&
-    submitterId !== '' &&
-    submitterId === currentUserId.value &&
-    permissionStore.canCancelApproval('contract')
+const canApproveGeneric = computed<boolean>(() => {
+  return contractInfo.value?.status === 'PENDING_REVIEW' &&
+    (
+      props.canApprove ||
+      permissionStore.canApproveAll('contract') ||
+      permissionStore.canApproveOwn('contract')
+    )
 })
 
 const canShowPaymentPlans = computed<boolean>(() => {
@@ -222,22 +149,18 @@ const fetchContractDetail = async (contractId: number): Promise<void> => {
   activeRequestId.value = requestId
 
   loading.value = true
-  approvalLoading.value = false
   errorMessage.value = ''
   contractInfo.value = null
-  approvalDetail.value = null
 
   try {
     const data = await contractApi.getContract(contractId)
     if (requestId !== activeRequestId.value) return
 
     contractInfo.value = data
-    await fetchApprovalDetail(data, requestId)
   } catch (error) {
     if (requestId !== activeRequestId.value) return
 
     contractInfo.value = null
-    approvalDetail.value = null
     errorMessage.value = '合同信息加载失败，请稍后重试'
     handleApiError(error, '获取合同详情')
   } finally {
@@ -247,37 +170,10 @@ const fetchContractDetail = async (contractId: number): Promise<void> => {
   }
 }
 
-const fetchApprovalDetail = async (contract: ContractResponse, requestId: number): Promise<void> => {
-  if (!statusesWithApproval.includes(contract.status)) {
-    approvalDetail.value = null
-    return
-  }
-
-  approvalLoading.value = true
-
-  try {
-    const response: unknown = await approvalApi.getContractApprovalDetail(contract.id)
-    if (requestId !== activeRequestId.value) return
-
-    const apiData = parseApprovalDetailFromApi(response)
-    approvalDetail.value = apiData ? transformApprovalData(apiData) : null
-  } catch {
-    if (requestId !== activeRequestId.value) return
-
-    approvalDetail.value = null
-  } finally {
-    if (requestId === activeRequestId.value) {
-      approvalLoading.value = false
-    }
-  }
-}
-
 const resetState = (): void => {
   activeRequestId.value += 1
   loading.value = false
-  approvalLoading.value = false
   contractInfo.value = null
-  approvalDetail.value = null
   errorMessage.value = ''
 }
 
@@ -314,69 +210,31 @@ const handleEditSuccess = async (): Promise<void> => {
   emit('refresh')
 }
 
-const handleSubmitApproval = async (): Promise<void> => {
-  const contract = contractInfo.value
-  if (contract === null || !canSubmitApproval.value) return
-
-  const confirmed = await confirmDialog(
-    `确定要提交合同“${contract.contract_name}”进行审批吗？`,
-    '提交审批确认',
-    { confirmText: '提交审批', cancelText: '取消' }
-  )
-
-  if (!confirmed) return
-
-  submittingApproval.value = true
-  try {
-    await approvalApi.submitContractApproval(contract.id)
-    toast.success('合同已提交审批')
-    await fetchContractDetail(contract.id)
-    emit('refresh')
-  } catch (error: unknown) {
-    handleApiError(error, '提交审批')
-  } finally {
-    submittingApproval.value = false
-  }
-}
-
-const handleWithdrawApproval = async (): Promise<void> => {
-  const contract = contractInfo.value
-  if (contract === null || !canWithdrawApproval.value) return
-
-  const confirmed = await confirmDialog(
-    `确定要撤回合同“${contract.contract_name}”的审批申请吗？`,
-    '撤回审批确认',
-    { confirmText: '撤回审批', cancelText: '取消' }
-  )
-
-  if (!confirmed) return
-
-  withdrawingApproval.value = true
-  try {
-    await approvalApi.cancelContractApproval(contract.id)
-    toast.success('审批申请已撤回')
-    await fetchContractDetail(contract.id)
-    emit('refresh')
-  } catch (error: unknown) {
-    handleApiError(error, '撤回审批')
-  } finally {
-    withdrawingApproval.value = false
-  }
-}
-
 const handlePaymentPlanUpdated = async (): Promise<void> => {
   await refreshCurrentContract()
   emit('refresh')
 }
 
-const handleApprovalApprove = (): void => {
-  if (contractInfo.value === null) return
-  emit('approve', contractInfo.value.id)
+const handleApprovalActionDone = async (): Promise<void> => {
+  await refreshCurrentContract()
+  emit('refresh')
 }
 
-const handleApprovalReject = (): void => {
+const handleApprovalApproved = async (): Promise<void> => {
+  if (contractInfo.value === null) return
+  emit('approve', contractInfo.value.id)
+  await handleApprovalActionDone()
+}
+
+const handleApprovalRejected = async (): Promise<void> => {
   if (contractInfo.value === null) return
   emit('reject', contractInfo.value.id)
+  await handleApprovalActionDone()
+}
+
+const handleApprovalResubmit = (): void => {
+  if (!isSubmitterGeneric.value) return
+  editDialogOpen.value = true
 }
 
 // ==================== Format Helpers ====================
@@ -447,220 +305,6 @@ const getLicenseTypeText = (type: LicenseType | undefined): string => {
     PERPETUAL: '买断制'
   }
   return map[type]
-}
-
-// ==================== Approval Parsing ====================
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null
-}
-
-const getStringField = (source: Record<string, unknown>, key: string): string | null => {
-  const value = source[key]
-  return typeof value === 'string' ? value : null
-}
-
-const getNumberField = (source: Record<string, unknown>, key: string): number | null => {
-  const value = source[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-const unwrapApiPayload = (value: unknown): unknown => {
-  if (!isRecord(value)) return value
-  return value['data'] === undefined ? value : value['data']
-}
-
-const parseApprovalNode = (value: unknown): ApprovalNodeFromAPI | null => {
-  if (!isRecord(value)) return null
-
-  const id = getNumberField(value, 'id')
-  const nodeName = getStringField(value, 'node_name')
-  const nodeOrder = getNumberField(value, 'node_order')
-
-  if (id === null || nodeName === null || nodeOrder === null) {
-    return null
-  }
-
-  return {
-    id,
-    node_name: nodeName,
-    node_order: nodeOrder,
-    approve_role: getStringField(value, 'approve_role') ?? ''
-  }
-}
-
-const parseApprovalRecord = (value: unknown): ApprovalRecordFromAPI | null => {
-  if (!isRecord(value)) return null
-
-  const nodeId = getNumberField(value, 'node_id')
-  const approverId = getStringField(value, 'approver_id')
-  const approverName = getStringField(value, 'approver_name')
-  const action = getStringField(value, 'action')
-  const createdTime = getStringField(value, 'created_time')
-
-  if (
-    nodeId === null ||
-    approverId === null ||
-    approverName === null ||
-    action === null ||
-    createdTime === null
-  ) {
-    return null
-  }
-
-  return {
-    node_id: nodeId,
-    approver_id: approverId,
-    approver_name: approverName,
-    action,
-    comment: getStringField(value, 'comment'),
-    created_time: createdTime
-  }
-}
-
-const parseApprovalFlow = (value: unknown): ApprovalFlowFromAPI | null => {
-  if (!isRecord(value)) return null
-
-  const nodesValue = value['nodes']
-  const nodes = Array.isArray(nodesValue)
-    ? nodesValue
-      .map(parseApprovalNode)
-      .filter((node): node is ApprovalNodeFromAPI => node !== null)
-    : []
-
-  return {
-    flow_name: getStringField(value, 'flow_name') ?? '',
-    nodes
-  }
-}
-
-const parseApprovalDetailFromApi = (value: unknown): ApprovalDetailFromAPI | null => {
-  const payload = unwrapApiPayload(value)
-  if (!isRecord(payload)) return null
-
-  const status = getStringField(payload, 'status')
-  const recordsValue = payload['records']
-
-  if (status === null || !Array.isArray(recordsValue)) {
-    return null
-  }
-
-  const records = recordsValue
-    .map(parseApprovalRecord)
-    .filter((record): record is ApprovalRecordFromAPI => record !== null)
-
-  return {
-    status,
-    submitter_id: getStringField(payload, 'submitter_id') ?? '',
-    submitter_name: getStringField(payload, 'submitter_name') ?? '',
-    created_time: getStringField(payload, 'created_time') ?? '',
-    current_node_id: getNumberField(payload, 'current_node_id'),
-    flow: parseApprovalFlow(payload['flow']),
-    records
-  }
-}
-
-const toApprovalRecord = (record: ApprovalRecordFromAPI): ApprovalRecord => {
-  const approvalRecord: ApprovalRecord = {
-    approver_id: record.approver_id,
-    action: record.action,
-    created_time: record.created_time
-  }
-
-  if (record.approver_name !== '') {
-    approvalRecord.approver_name = record.approver_name
-  }
-
-  if (record.comment !== null && record.comment !== '') {
-    approvalRecord.comment = record.comment
-  }
-
-  return approvalRecord
-}
-
-const transformApprovalData = (apiData: ApprovalDetailFromAPI): ApprovalDetail => {
-  const nodes = apiData.flow?.nodes ?? []
-  const nodeMap = new Map<number, ApprovalStep>()
-  const submitRecord = apiData.records.find((record) => record.action === 'SUBMIT')
-
-  nodeMap.set(-1, {
-    step_order: 0,
-    step_name: '已提交',
-    approver_role: '',
-    status: 'APPROVED',
-    approval_records: submitRecord ? [toApprovalRecord(submitRecord)] : []
-  })
-
-  nodes.forEach((node) => {
-    const nodeRecords = apiData.records.filter((record) => record.node_id === node.id)
-    let stepStatus: ApprovalStep['status'] = 'PENDING'
-
-    if (nodeRecords.some((record) => record.action === 'APPROVE')) {
-      stepStatus = 'APPROVED'
-    } else if (nodeRecords.some((record) => record.action === 'REJECT')) {
-      stepStatus = 'REJECTED'
-    }
-
-    nodeMap.set(node.id, {
-      step_order: node.node_order,
-      step_name: node.node_name,
-      approver_role: node.approve_role,
-      status: stepStatus,
-      approval_records: nodeRecords.map(toApprovalRecord)
-    })
-  })
-
-  if (['APPROVED', 'REJECTED', 'CANCELLED'].includes(apiData.status)) {
-    const maxOrder = nodes.reduce((currentMax, node) => Math.max(currentMax, node.node_order), 0)
-    const completedStatus = apiData.status === 'APPROVED' || apiData.status === 'REJECTED'
-      ? apiData.status
-      : 'CANCELLED'
-
-    nodeMap.set(-2, {
-      step_order: maxOrder + 1,
-      step_name: '已完成',
-      approver_role: '',
-      status: completedStatus,
-      approval_records: []
-    })
-  }
-
-  const approvalSteps = Array.from(nodeMap.values()).sort((left, right) => left.step_order - right.step_order)
-  let currentStep = 0
-
-  if (apiData.current_node_id !== null) {
-    const currentNode = nodes.find((node) => node.id === apiData.current_node_id)
-    if (currentNode) {
-      const currentIndex = approvalSteps.findIndex((step) => step.step_name === currentNode.node_name)
-      if (currentIndex >= 0) {
-        currentStep = currentIndex
-      }
-    }
-  }
-
-  const transformed: ApprovalDetail = {
-    current_step: currentStep,
-    approval_steps: approvalSteps,
-    status: apiData.status
-  }
-
-  if (apiData.submitter_id !== '') {
-    transformed.submitter_id = apiData.submitter_id
-  }
-
-  if (apiData.submitter_name !== '') {
-    transformed.submitter_name = apiData.submitter_name
-  }
-
-  if (apiData.created_time !== '') {
-    transformed.submitted_at = apiData.created_time
-  }
-
-  const flowName = apiData.flow?.flow_name
-  if (flowName !== undefined && flowName !== '') {
-    transformed.flow_name = flowName
-  }
-
-  return transformed
 }
 
 // ==================== Watch ====================
@@ -821,20 +465,21 @@ watch(
               </CardContent>
             </Card>
 
-            <!-- 审批进度卡片 -->
-            <div v-if="approvalLoading" class="loading-stack" aria-live="polite" aria-busy="true">
-              <Skeleton class="h-48 w-full" />
-            </div>
-            <ApprovalProgressCompact
-              v-else-if="approvalDetail"
-              :approval-detail="approvalDetail"
-              :can-approve="props.canApprove"
-              @approve="handleApprovalApprove"
-              @reject="handleApprovalReject"
+            <!-- 审批进度卡片：复用审批中心同款通用审批组件 -->
+            <ApprovalProcessGeneric
+              :entity-type="contractEntityType"
+              :entity-id="contractInfo.id"
+              :can-approve="canApproveGeneric"
+              :is-submitter="isSubmitterGeneric"
+              @submitted="handleApprovalActionDone"
+              @approved="handleApprovalApproved"
+              @rejected="handleApprovalRejected"
+              @withdrawn="handleApprovalActionDone"
+              @resubmit="handleApprovalResubmit"
             />
 
             <!-- 回款计划卡片 -->
-            <PaymentPlans
+            <ContractPaymentPlans
               v-if="canShowPaymentPlans && paymentContractInfo !== undefined"
               :contract-id="contractInfo.id"
               :contract-status="contractInfo.status"
@@ -879,30 +524,10 @@ watch(
         <Button
           v-if="canEditContract"
           variant="outline"
-          :disabled="submittingApproval || withdrawingApproval"
           @click="handleEditContract"
         >
           <Pencil class="w-4 h-4 mr-2" aria-hidden="true" />
           编辑合同
-        </Button>
-        <Button
-          v-if="canWithdrawApproval"
-          variant="outline"
-          :disabled="withdrawingApproval"
-          @click="handleWithdrawApproval"
-        >
-          <Loader2 v-if="withdrawingApproval" class="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
-          <Undo2 v-else class="w-4 h-4 mr-2" aria-hidden="true" />
-          撤回审批
-        </Button>
-        <Button
-          v-if="canSubmitApproval"
-          :disabled="submittingApproval"
-          @click="handleSubmitApproval"
-        >
-          <Loader2 v-if="submittingApproval" class="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
-          <Send v-else class="w-4 h-4 mr-2" aria-hidden="true" />
-          提交审批
         </Button>
         <Button variant="outline" @click="closeSheet">
           <X class="w-4 h-4 mr-2" aria-hidden="true" />

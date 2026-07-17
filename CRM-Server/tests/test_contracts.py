@@ -130,25 +130,6 @@ def test_get_contract_detail(token, contract_id):
         print(f"❌ 获取合同详情失败: {response.status_code}")
         return None
 
-def test_update_contract_status(token, contract_id):
-    """测试更新合同状态"""
-    print("\n=== 测试更新合同状态 ===")
-    
-    new_status = "SIGNED"
-    response = requests.patch(
-        f"{BASE_URL}/api/v1/contracts/{contract_id}/status",
-        json={"status": new_status},
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if response.status_code == 200:
-        contract = response.json()
-        print(f"✅ 合同状态更新成功: {contract['status']}")
-        return contract
-    else:
-        print(f"❌ 更新合同状态失败: {response.status_code}")
-        return None
-
 def test_customer_contracts(token, customer_id):
     """测试获取客户合同列表"""
     print("\n=== 测试获取客户合同列表 ===")
@@ -246,8 +227,6 @@ def main():
     test_get_contract_detail(token, contract['id'])
     
     test_customer_contracts(token, customer_id)
-    
-    test_update_contract_status(token, contract['id'])
     
     test_subscription_contract(token, customer_id, opportunity_id, signing_contact_id)
     

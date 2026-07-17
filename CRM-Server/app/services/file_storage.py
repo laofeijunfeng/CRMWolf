@@ -2,11 +2,10 @@
 
 import os
 import hashlib
-from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
-from app.schemas.file_upload import FileUploadResponse
+from app.core.config import get_settings
 
 class FileStorageError(Exception):
     """文件存储错误"""
@@ -29,12 +28,12 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 class FileStorageService:
     """发票文件本地存储服务"""
 
-    def __init__(self, base_dir: str = "/app/uploads"):
+    def __init__(self, base_dir: Optional[str] = None):
         """
         Args:
             base_dir: 上传文件基础目录（容器内路径）
         """
-        self.base_dir = base_dir
+        self.base_dir = base_dir or get_settings().UPLOAD_DIR
 
     def _validate_filename(self, filename: str) -> str:
         """校验文件名安全性
@@ -103,13 +102,16 @@ class FileStorageService:
         # 构建目录路径：{base_dir}/invoices/{team_id}/{invoice_id}/
         dir_path = os.path.join(self.base_dir, "invoices", str(team_id), str(invoice_id))
 
-        # 创建目录（如果不存在）
-        os.makedirs(dir_path, exist_ok=True)
+        try:
+            # 创建目录（如果不存在）
+            os.makedirs(dir_path, exist_ok=True)
 
-        # 写文件
-        full_path = os.path.join(dir_path, storage_filename)
-        with open(full_path, "wb") as f:
-            f.write(content)
+            # 写文件
+            full_path = os.path.join(dir_path, storage_filename)
+            with open(full_path, "wb") as f:
+                f.write(content)
+        except OSError as e:
+            raise FileStorageError(f"文件保存失败：{e}") from e
 
         # 返回相对路径
         relative_path = os.path.join("invoices", str(team_id), str(invoice_id), storage_filename)

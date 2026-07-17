@@ -435,7 +435,13 @@ async def create_customer(
             detail="客户名称已存在"
         )
 
-    new_customer = customer_crud.create(db, customer, str(current_user.id), current_user.name, team_id)
+    new_customer = customer_crud.create(
+        db=db,
+        obj_in=customer,
+        creator_id=str(current_user.id),
+        team_id=team_id,
+        operator_name=current_user.name
+    )
 
     # 设置档案状态为 PENDING
     customer_crud.update_profile_status(db, new_customer.id, "PENDING")

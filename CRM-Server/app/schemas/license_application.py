@@ -11,7 +11,7 @@ from enum import Enum
 class LicenseApplicationStatus(str, Enum):
     """License 申请状态枚举"""
     DRAFT = "DRAFT"
-    PENDING = "PENDING"
+    PENDING_REVIEW = "PENDING_REVIEW"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     ISSUED = "ISSUED"
@@ -20,7 +20,7 @@ class LicenseApplicationStatus(str, Enum):
     def description(self):
         descriptions = {
             "DRAFT": "草稿",
-            "PENDING": "待审批",
+            "PENDING_REVIEW": "待审批",
             "APPROVED": "已批准",
             "REJECTED": "已拒绝",
             "ISSUED": "已发放"

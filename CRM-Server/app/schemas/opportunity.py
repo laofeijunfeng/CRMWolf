@@ -128,7 +128,7 @@ class OpportunityCreate(OpportunityBase):
     customer_id: int = Field(..., description="关联客户ID（关联到 crm_customers 表）")
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID（关联到 crm_procurement_methods 表），如果不指定则使用客户的默认采购方式")
     stage_id: Optional[int] = Field(None, description="初始销售阶段ID（关联到 crm_procurement_stage_templates 表），如果不指定则使用采购方式的默认起始阶段")
-    owner_id: str = Field(..., description="负责人（飞书用户ID）")
+    owner_id: Optional[str] = Field(None, description="负责人（飞书用户ID），如果不指定则默认为创建人")
 
 
 class OpportunityUpdate(BaseModel):

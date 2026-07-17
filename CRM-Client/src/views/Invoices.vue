@@ -15,38 +15,46 @@
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Download, Eye, Pencil, Trash2, Send, RotateCcw, Stamp } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { Plus, Eye, Pencil, Trash2, Send, RotateCcw, Stamp, Download } from 'lucide-vue-next'
+import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import type { FilterValues } from '@/components/crmwolf/filterPanelValues'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { getInvoiceFileUrl } from '@/api/fileUpload'
+import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
+import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
+import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
 import invoiceApi, {
   type InvoiceApplicationResponse,
   type InvoiceApplicationQueryParams
 } from '@/api/invoice'
 import customerApi from '@/api/customer'
+import type { CustomerResponse } from '@/api/customer'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
 
-const router = useRouter()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
 
 // ==================== State ====================
 const loading = ref(false)
 const tableData = ref<InvoiceApplicationResponse[]>([])
-const customerOptions = ref<any[]>([])
+const customerOptions = ref<CustomerResponse[]>([])
+const invoiceApplicationDialogOpen = ref(false)
+const invoiceApplicationDialogMode = ref<'create' | 'edit'>('create')
+const editingInvoiceApplication = ref<InvoiceApplicationResponse | null>(null)
+const selectedInvoiceId = ref<number | null>(null)
+const invoiceDetailSheetVisible = ref(false)
 
 // 标记开票弹窗
 const invoicedModalVisible = ref(false)
@@ -153,7 +161,7 @@ const fetchInvoiceApplications = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, any>): void => {
+const handleSearch = (values: FilterValues): void => {
   Object.assign(filterValues, values)
   pagination.current = 1
   fetchInvoiceApplications()
@@ -178,15 +186,44 @@ const handlePageSizeChange = (pageSize: number): void => {
 }
 
 const handleCreate = (): void => {
-  router.push('/invoices/create')
+  invoiceApplicationDialogMode.value = 'create'
+  editingInvoiceApplication.value = null
+  invoiceApplicationDialogOpen.value = true
 }
 
 const handleViewDetail = (record: InvoiceApplicationResponse): void => {
-  router.push(`/invoices/${record.id}`)
+  selectedInvoiceId.value = record.id
+  invoiceDetailSheetVisible.value = true
 }
 
 const handleEdit = (record: InvoiceApplicationResponse): void => {
-  router.push(`/invoices/edit/${record.id}`)
+  invoiceApplicationDialogMode.value = 'edit'
+  editingInvoiceApplication.value = record
+  invoiceApplicationDialogOpen.value = true
+}
+
+const handleInvoiceApplicationDialogClose = (open: boolean): void => {
+  invoiceApplicationDialogOpen.value = open
+  if (!open) {
+    editingInvoiceApplication.value = null
+  }
+}
+
+const handleInvoiceApplicationSuccess = (): void => {
+  invoiceApplicationDialogOpen.value = false
+  editingInvoiceApplication.value = null
+  fetchInvoiceApplications()
+}
+
+const handleInvoiceDetailSheetVisibleChange = (visible: boolean): void => {
+  invoiceDetailSheetVisible.value = visible
+  if (!visible) {
+    selectedInvoiceId.value = null
+  }
+}
+
+const handleInvoiceDetailRefresh = (): void => {
+  fetchInvoiceApplications()
 }
 
 const handleSubmitApproval = async (record: InvoiceApplicationResponse): Promise<void> => {
@@ -237,6 +274,38 @@ const handleMarkInvoiced = (record: InvoiceApplicationResponse): void => {
   invoicedModalVisible.value = true
 }
 
+const toInvoiceRow = (row: Record<string, unknown>): InvoiceApplicationResponse => {
+  return row as unknown as InvoiceApplicationResponse
+}
+
+const viewInvoiceRow = (row: Record<string, unknown>): void => {
+  handleViewDetail(toInvoiceRow(row))
+}
+
+const editInvoiceRow = (row: Record<string, unknown>): void => {
+  handleEdit(toInvoiceRow(row))
+}
+
+const submitInvoiceRow = (row: Record<string, unknown>): void => {
+  void handleSubmitApproval(toInvoiceRow(row))
+}
+
+const withdrawInvoiceRow = (row: Record<string, unknown>): void => {
+  void handleWithdraw(toInvoiceRow(row))
+}
+
+const markIssuedInvoiceRow = (row: Record<string, unknown>): void => {
+  handleMarkInvoiced(toInvoiceRow(row))
+}
+
+const downloadInvoiceRow = (row: Record<string, unknown>): void => {
+  void downloadInvoiceFile(toInvoiceRow(row))
+}
+
+const deleteInvoiceRow = (row: Record<string, unknown>): void => {
+  void handleDelete(toInvoiceRow(row))
+}
+
 const handleConfirmInvoiced = async (): Promise<void> => {
   if (!invoicedForm.value.invoice_number) {
     toast.error('请输入发票号码')
@@ -255,10 +324,16 @@ const handleConfirmInvoiced = async (): Promise<void> => {
   }
 }
 
-const downloadInvoiceFile = (row: InvoiceApplicationResponse): void => {
-  toast.info('正在下载发票文件')
-  const url = getInvoiceFileUrl(row.id)
-  window.open(url, '_blank')
+const downloadInvoiceFile = async (row: InvoiceApplicationResponse): Promise<void> => {
+  try {
+    toast.info('正在下载发票文件')
+    await downloadInvoiceFileApi(
+      row.id,
+      buildInvoiceDownloadFileName(row.customer_name, row.invoice_file_path)
+    )
+  } catch (error) {
+    handleApiError(error, '下载发票文件')
+  }
 }
 
 // ==================== 格式化函数 ====================
@@ -277,6 +352,7 @@ const mapInvoiceStatus = (status: string): 'draft' | 'pending_review' | 'approve
 const getInvoiceTypeText = (type: string): string => {
   const map: Record<string, string> = {
     'VAT_SPECIAL': '增值税专用发票',
+    'VAT_NORMAL': '增值税普通发票',
     'VAT_GENERAL': '增值税普通发票',
     'COMMON': '普通发票'
   }
@@ -286,6 +362,7 @@ const getInvoiceTypeText = (type: string): string => {
 const getInvoiceTypeClass = (type: string): string => {
   const map: Record<string, string> = {
     'VAT_SPECIAL': 'status-primary',
+    'VAT_NORMAL': 'status-success',
     'VAT_GENERAL': 'status-success',
     'COMMON': 'status-default'
   }
@@ -368,19 +445,6 @@ watchEffect(() => {
           <span class="link-text" @click.stop="handleViewDetail(row)">
             {{ row.application_number }}
           </span>
-          <!-- ISSUED 状态 + 有文件：显示下载入口 -->
-          <span
-            v-if="row.status === 'ISSUED' && row.invoice_file_path"
-            class="download-badge"
-            role="button"
-            aria-label="下载发票文件"
-            tabindex="0"
-            @click.stop="downloadInvoiceFile(row)"
-            @keydown.enter="downloadInvoiceFile(row)"
-          >
-            <Download class="download-icon" aria-hidden="true" />
-            <span class="download-link">下载</span>
-          </span>
         </div>
       </template>
 
@@ -433,38 +497,44 @@ watchEffect(() => {
           :primary-actions="[
             {
               label: '查看',
-              handler: handleViewDetail,
+              handler: viewInvoiceRow,
               icon: Eye
             },
             {
               label: '编辑',
-              handler: handleEdit,
+              handler: editInvoiceRow,
               visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
               icon: Pencil
+            },
+            {
+              label: '下载',
+              handler: downloadInvoiceRow,
+              visible: row.status === 'ISSUED' && Boolean(row.invoice_file_path),
+              icon: Download
             }
           ]"
           :secondary-actions="[
             {
               label: '提交',
-              handler: handleSubmitApproval,
+              handler: submitInvoiceRow,
               visible: row.status === 'DRAFT' && canCreateInvoice,
               icon: Send
             },
             {
               label: '撤回',
-              handler: handleWithdraw,
+              handler: withdrawInvoiceRow,
               visible: row.status === 'PENDING_REVIEW',
               icon: RotateCcw
             },
             {
               label: '开票',
-              handler: handleMarkInvoiced,
+              handler: markIssuedInvoiceRow,
               visible: row.status === 'APPROVED' && canMarkInvoiced,
               icon: Stamp
             },
             {
               label: '删除',
-              handler: handleDelete,
+              handler: deleteInvoiceRow,
               visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
               icon: Trash2,
               destructive: true,
@@ -494,6 +564,21 @@ watchEffect(() => {
         </div>
       </div>
     </div>
+
+    <InvoiceApplicationFormDialog
+      :open="invoiceApplicationDialogOpen"
+      :mode="invoiceApplicationDialogMode"
+      :application="editingInvoiceApplication"
+      @update:open="handleInvoiceApplicationDialogClose"
+      @success="handleInvoiceApplicationSuccess"
+    />
+
+    <InvoiceDetailSheet
+      :invoice-id="selectedInvoiceId"
+      :visible="invoiceDetailSheetVisible"
+      @update:visible="handleInvoiceDetailSheetVisibleChange"
+      @refresh="handleInvoiceDetailRefresh"
+    />
   </div>
 </template>
 
@@ -526,57 +611,6 @@ watchEffect(() => {
   display: flex;
   align-items: center;
   gap: $wolf-space-sm-v2;
-}
-
-// 下载徽章（符合 UI/UX Pro Max §2: Touch Target）
-.download-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: $wolf-touch-target-min-v2;  // 44px
-  min-width: $wolf-touch-target-min-v2;
-  padding: 8px 12px;
-  background: $wolf-success-bg-v2;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-caption-v2;
-  cursor: pointer;
-  transition: all $wolf-transition-v2;
-
-  .download-icon {
-    color: $wolf-success-text-v2;
-    width: 14px;
-    height: 14px;
-  }
-
-  .download-link {
-    color: $wolf-success-text-v2;
-    font-weight: $wolf-font-weight-medium-v2;
-  }
-
-  &:hover {
-    background: $wolf-success-bg-v2;
-    transform: translateY(-1px);
-  }
-
-  &:active {
-    transform: scale(0.95);
-    opacity: 0.9;
-  }
-
-  &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    transition: none;
-    transform: none;
-
-    &:hover, &:active {
-      transform: none;
-    }
-  }
 }
 
 // 金额单元格

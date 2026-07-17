@@ -29,6 +29,19 @@ export type ApprovalStatus = z.infer<typeof ApprovalStatusEnum>
 export const ApproverStatusSchema = z.enum(['active', 'inactive', 'suspended'])
 export type ApproverStatus = z.infer<typeof ApproverStatusSchema>
 
+// ===== 关联客户/公司基础信息 =====
+export const ApprovalCustomerInfoSchema = z.object({
+  id: z.number().int().positive(),
+  account_name: z.string().min(1),
+  industry: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  company_scale: z.string().nullable().optional(),
+  source: z.string().nullable().optional(),
+  status: z.number().int().nullable().optional(),
+  owner_id: z.string().nullable().optional()
+})
+export type ApprovalCustomerInfo = z.infer<typeof ApprovalCustomerInfoSchema>
+
 // ===== 审批记录（timeline 节点） =====
 export const ApprovalRecordSchema = z.object({
   id: z.number().int().positive(),
@@ -63,6 +76,7 @@ export const ApprovalDetailSchema = z.object({
   updated_time: z.string().min(1),
   flow_is_active: z.boolean().nullable(),
   flow_disabled_warning: z.string().nullable(),
+  customer_info: ApprovalCustomerInfoSchema.nullable().optional(),
   records: z.array(ApprovalRecordSchema),
   // Task 6: 发票文件上传字段（仅 INVOICE 类型）
   invoice_file_path: z.string().nullable().optional(),
@@ -119,6 +133,7 @@ export const ApprovalListItemSchema = z.object({
   application_number: z.string().min(1),
   entity_name: z.string().nullable(),
   entity_amount: z.number().nullable(),
+  customer_info: ApprovalCustomerInfoSchema.nullable().optional(),
   submitter_id: z.string().min(1),
   submitter_name: z.string().nullable(),  // 允许 null（发票/回款申请人无姓名字段）
   status: ApprovalStatusEnum,

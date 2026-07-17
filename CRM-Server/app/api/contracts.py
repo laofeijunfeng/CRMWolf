@@ -11,7 +11,7 @@ from app.crud.customer import customer_crud, contact_crud
 from app.crud.opportunity import opportunity_crud
 from app.crud.user import user_crud
 from app.schemas.contract import (
-    ContractCreate, ContractUpdate, ContractStatusUpdate,
+    ContractCreate, ContractUpdate,
     ContractResponse, ContractListResponse, ContractDetailResponse,
     ContractStatusEnum, LicenseTypeEnum, MessageResponse
 )
@@ -675,42 +675,6 @@ def update_contract(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-
-
-@router.patch("/{contract_id}/status", response_model=ContractResponse, summary="更新合同状态", description="""
-更新合同状态，推进合同生命周期流程。
-
-**功能说明：**
-- 更新合同的当前状态
-- 实现合同生命周期管理（草稿→待审核→已签署→已生效→已过期/已终止）
-- 状态流转需符合业务规则
-
-**业务场景：**
-- 提交合同审批（DRAFT → PENDING_REVIEW）
-- 标记合同已签署（PENDING_REVIEW → SIGNED）
-- 激活合同使其生效（SIGNED → EFFECTIVE）
-- 处理到期或终止合同
-""")
-def update_contract_status(
-    contract_id: int,
-    status_update: ContractStatusUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    contract = contract_crud.get_by_id(db, contract_id, team_id)
-    if not contract:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="合同不存在"
-        )
-    
-    updated_contract = contract_crud.update_status(
-        db=db,
-        db_obj=contract,
-        obj_in=status_update
-    )
-    return updated_contract
 
 
 @router.delete("/{contract_id}", response_model=MessageResponse, summary="删除合同", description="""

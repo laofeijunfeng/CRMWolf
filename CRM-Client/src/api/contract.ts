@@ -28,10 +28,6 @@ export interface ContractUpdate {
   effective_date?: string | null
 }
 
-export interface ContractStatusUpdate {
-  status: ContractStatus
-}
-
 export interface ContractListResponse {
   id: number
   contract_number: string
@@ -130,8 +126,6 @@ export interface ContractFromOpportunityParams {
   signing_contact_id: number
 }
 
-type ApiResponse<T> = Promise<T>
-
 const contractApi = {
   createContract: async (data: ContractCreate): Promise<ContractResponse> => {
     const response = await request.post<ContractResponse>('/v1/contracts/', data)
@@ -150,11 +144,6 @@ const contractApi = {
 
   updateContract: async (contractId: number, data: ContractUpdate): Promise<ContractResponse> => {
     const response = await request.put<ContractResponse>(`/v1/contracts/${contractId}`, data)
-    return response
-  },
-
-  updateContractStatus: async (contractId: number, data: ContractStatusUpdate): Promise<ContractResponse> => {
-    const response = await request.patch<ContractResponse>(`/v1/contracts/${contractId}/status`, data)
     return response
   },
 

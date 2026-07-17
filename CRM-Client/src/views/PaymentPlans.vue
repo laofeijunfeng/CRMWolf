@@ -15,15 +15,19 @@
  * - 页面 padding: 24px
  * - gap: 24px（组件间距）
  */
-import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
+import { useRoute } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Eye, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
+import { Plus, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
+import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
+import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
+import PaymentPlanFormDialog from '@/components/dialogs/PaymentPlanFormDialog.vue'
 import paymentApi, {
+  type PaymentRecordCreate,
   type PaymentPlanWithDetails,
   type PaymentPlanListParams
 } from '@/api/payment'
@@ -35,13 +39,21 @@ import { formatCurrency } from '@/utils/format'
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
 
-const router = useRouter()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
+const route = useRoute()
 
 // ==================== State ====================
 const loading = ref(false)
 const tableData = ref<PaymentPlanWithDetails[]>([])
+const selectedPlanId = ref<number | null>(null)
+const planSheetVisible = ref(false)
+const selectedConfirmPlan = ref<PaymentPlanWithDetails | null>(null)
+const registerDialogOpen = ref(false)
+const registerSubmitting = ref(false)
+const planFormDialogOpen = ref(false)
+const planFormMode = ref<'create' | 'edit'>('create')
+const editingPlan = ref<PaymentPlanWithDetails | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -108,6 +120,11 @@ const canCreatePlan = computed(() => permissionStore.hasPermission('payment:plan
 const canEditPlan = computed(() => permissionStore.hasPermission('payment:plan:edit'))
 const canDeletePlan = computed(() => permissionStore.hasPermission('payment:plan:delete'))
 const canConfirmPayment = computed(() => permissionStore.hasPermission('payment:confirm'))
+const registerDefaultAmount = computed<number | null>(() => {
+  const plan = selectedConfirmPlan.value
+  if (plan === null) return null
+  return plan.remaining_amount ?? plan.planned_amount ?? null
+})
 
 // ==================== Methods ====================
 const getUpcomingDate = (days: number): string => {
@@ -183,19 +200,80 @@ const handlePageSizeChange = (pageSize: number): void => {
 }
 
 const handleCreatePlan = (): void => {
-  router.push('/payments/create')
+  editingPlan.value = null
+  planFormMode.value = 'create'
+  planFormDialogOpen.value = true
 }
 
 const handleViewDetail = (row: PaymentPlanWithDetails): void => {
-  router.push(`/payments/plans/${row.id}`)
+  selectedPlanId.value = row.id
+  planSheetVisible.value = true
+}
+
+const openPlanDetailFromQuery = (value: unknown): void => {
+  const rawValue = Array.isArray(value) ? value[0] : value
+  if (typeof rawValue !== 'string' || rawValue.trim() === '') return
+
+  const planId = Number(rawValue)
+  if (!Number.isInteger(planId) || planId <= 0) return
+
+  selectedPlanId.value = planId
+  planSheetVisible.value = true
 }
 
 const handleEdit = (row: PaymentPlanWithDetails): void => {
-  router.push(`/payments/plans/${row.id}/edit`)
+  editingPlan.value = row
+  planFormMode.value = 'edit'
+  planFormDialogOpen.value = true
 }
 
 const handleConfirmPayment = (row: PaymentPlanWithDetails): void => {
-  router.push(`/payments/plans/${row.id}?action=confirm`)
+  selectedConfirmPlan.value = row
+  registerDialogOpen.value = true
+}
+
+const handlePlanSheetVisibleChange = (visible: boolean): void => {
+  planSheetVisible.value = visible
+}
+
+const handlePlanSheetRefresh = (): void => {
+  fetchPaymentPlans()
+}
+
+const handlePlanFormSuccess = (): void => {
+  fetchPaymentPlans()
+}
+
+const handlePlanFormOpenChange = (open: boolean): void => {
+  planFormDialogOpen.value = open
+  if (!open) {
+    editingPlan.value = null
+  }
+}
+
+const handleRegisterDialogOpenChange = (open: boolean): void => {
+  registerDialogOpen.value = open
+  if (!open && !registerSubmitting.value) {
+    selectedConfirmPlan.value = null
+  }
+}
+
+const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void> => {
+  const plan = selectedConfirmPlan.value
+  if (plan === null) return
+
+  registerSubmitting.value = true
+  try {
+    await paymentApi.createPaymentRecord(plan.id, payload)
+    toast.success('回款登记成功')
+    registerDialogOpen.value = false
+    selectedConfirmPlan.value = null
+    fetchPaymentPlans()
+  } catch (error) {
+    handleApiError(error, '登记回款')
+  } finally {
+    registerSubmitting.value = false
+  }
 }
 
 const handleDelete = async (row: PaymentPlanWithDetails): Promise<void> => {
@@ -256,6 +334,14 @@ watchEffect(() => {
   }
 })
 
+watch(
+  () => route.query['planId'],
+  (planId) => {
+    openPlanDetailFromQuery(planId)
+  },
+  { immediate: true }
+)
+
 // ✅ 不调用 headerStore.clear()
 // 让新页面直接覆盖旧状态，避免页面切换时 TopBar 短暂显示标题
 </script>
@@ -283,7 +369,14 @@ watchEffect(() => {
     >
       <!-- 计划编号 -->
       <template #cell-plan_number="{ row }">
-        <span class="number-cell">{{ row.plan_number || '-' }}</span>
+        <button
+          type="button"
+          class="number-cell number-cell-link"
+          :aria-label="`查看回款计划 ${row.plan_number || row.stage_name}`"
+          @click.stop="handleViewDetail(row as PaymentPlanWithDetails)"
+        >
+          {{ row.plan_number || `#${row.id}` }}
+        </button>
       </template>
 
       <!-- 客户名称 -->
@@ -307,23 +400,18 @@ watchEffect(() => {
           :row="row"
           :primary-actions="[
             {
-              label: '查看详情',
-              handler: (r) => handleViewDetail(r as unknown as PaymentPlanWithDetails),
-              icon: Eye
-            },
+              label: '确认回款',
+              handler: (r) => handleConfirmPayment(r as unknown as PaymentPlanWithDetails),
+              visible: canConfirmPayment && row.status !== 'COMPLETED',
+              icon: CheckCircle
+            }
+          ]"
+          :secondary-actions="[
             {
               label: '编辑',
               handler: (r) => handleEdit(r as unknown as PaymentPlanWithDetails),
               visible: canEditPlan,
               icon: Pencil
-            }
-          ]"
-          :secondary-actions="[
-            {
-              label: '确认回款',
-              handler: (r) => handleConfirmPayment(r as unknown as PaymentPlanWithDetails),
-              visible: canConfirmPayment && row.status !== 'COMPLETED',
-              icon: CheckCircle
             },
             {
               label: '删除',
@@ -337,6 +425,29 @@ watchEffect(() => {
         />
       </template>
     </DataTable>
+
+    <PaymentPlanDetailSheet
+      :plan-id="selectedPlanId"
+      :visible="planSheetVisible"
+      @update:visible="handlePlanSheetVisibleChange"
+      @refresh="handlePlanSheetRefresh"
+    />
+
+    <PaymentPlanFormDialog
+      :open="planFormDialogOpen"
+      :mode="planFormMode"
+      :plan="editingPlan"
+      @update:open="handlePlanFormOpenChange"
+      @success="handlePlanFormSuccess"
+    />
+
+    <PaymentRecordDialog
+      :open="registerDialogOpen"
+      :default-amount="registerDefaultAmount"
+      :submitting="registerSubmitting"
+      @update:open="handleRegisterDialogOpenChange"
+      @submit="handleRegisterSubmit"
+    />
   </div>
 </template>
 
@@ -374,5 +485,28 @@ watchEffect(() => {
 .number-cell {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
+}
+
+.number-cell-link {
+  min-height: $wolf-touch-target-min-v2;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: $wolf-text-link-v2;
+  cursor: pointer;
+  font-weight: $wolf-font-weight-medium-v2;
+  text-align: left;
+
+  &:hover {
+    color: $wolf-text-link-hover-v2;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+    border-radius: $wolf-radius-sm-v2;
+  }
 }
 </style>

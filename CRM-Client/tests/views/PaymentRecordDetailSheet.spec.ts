@@ -132,6 +132,37 @@ vi.mock('@/components/ui/alert', () => {
   }
 })
 
+vi.mock('@/components/ApprovalProcessStepper.vue', () => ({
+  default: defineComponent({
+    name: 'ApprovalProcessStepper',
+    props: {
+      records: {
+        type: Array as PropType<Array<{
+          node_name: string | null
+          action: string | null
+          approver_name: string | null
+        }>>,
+        default: () => [],
+      },
+      isPending: Boolean,
+    },
+    setup: (props) => () => h(
+      'div',
+      {
+        'data-testid': 'approval-process-stepper',
+        'data-pending': String(props.isPending),
+      },
+      [
+        ...props.records.map((record) => h(
+          'span',
+          [record.node_name, record.action, record.approver_name].filter(Boolean).join(' ')
+        )),
+        props.isPending ? h('span', '审批中') : null,
+      ]
+    ),
+  }),
+}))
+
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 
 const paymentRecordFixture = (overrides: Partial<PaymentRecordDetailInfo> = {}): PaymentRecordDetailInfo => ({
@@ -347,7 +378,7 @@ describe('PaymentRecordDetailSheet', () => {
       expect(wrapper.text()).toContain('审批中')
     })
 
-    it('renders approval nodes', () => {
+    it('renders approval records through ApprovalProcessStepper', () => {
       const record = paymentRecordFixture()
       const approval = approvalInfoFixture({
         nodes: [
@@ -364,8 +395,10 @@ describe('PaymentRecordDetailSheet', () => {
         },
       })
 
+      expect(wrapper.find('[data-testid="approval-process-stepper"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('提交申请')
       expect(wrapper.text()).toContain('财务复核')
-      expect(wrapper.text()).toContain('总经理审批')
+      expect(wrapper.text()).toContain('APPROVE')
     })
 
     it('renders rejection reason when approval is rejected', () => {
@@ -428,7 +461,8 @@ describe('PaymentRecordDetailSheet', () => {
       })
 
       expect(wrapper.text()).toContain('审批进度')
-      expect(wrapper.text()).toContain('财务复核')
+      expect(wrapper.find('[data-testid="approval-process-stepper"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('提交申请')
     })
 
     it('does not crash when ApprovalInfoLite lacks created_time', () => {

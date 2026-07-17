@@ -3,8 +3,12 @@
  * OpportunityWinDialog.vue - 赢单表单弹窗
  *
  * 收集实际成交金额和日期，遵循无障碍和动效规范。
+ * 使用 vee-validate + Zod 进行表单校验。
  */
-import { ref, reactive, watch } from 'vue'
+import { ref, watch } from 'vue'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import {
   Dialog,
@@ -14,13 +18,27 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog'
+import {
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { DatePicker } from '@/components/ui/date-picker'
 import { handleApiError } from '@/utils/errorHandler'
 import { getTodayLocalDate, formatLocalDate } from '@/utils/format'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
+
+// Zod schema for form validation
+const schema = toTypedSchema(
+  z.object({
+    actual_amount: z.number().min(0.01, '实际成交金额必须大于0'),
+    actual_closing_date: z.string().min(1, '请选择实际成交日期')
+  })
+)
 
 interface Props {
   opportunityId: number | null
@@ -35,24 +53,29 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-// 状态
+// VeeValidate form setup
+const { handleSubmit, setFieldValue } = useForm({
+  validationSchema: schema,
+  initialValues: {
+    actual_amount: 0,
+    actual_closing_date: getTodayLocalDate()
+  }
+})
+
+// State
 const loading = ref(false)
 const submitting = ref(false)
 const opportunity = ref<Opportunity | null>(null)
-const form = reactive({
-  actual_amount: 0,
-  actual_closing_date: getTodayLocalDate()
-})
 
-// 监听 open 变化，加载商机详情
+// Watch for dialog open to load opportunity details
 watch(() => props.open, async (newOpen) => {
   if (newOpen && props.opportunityId !== null) {
     loading.value = true
     try {
       opportunity.value = await opportunityApi.getOpportunity(props.opportunityId)
-      // 预填充预计金额
-      form.actual_amount = opportunity.value.total_amount
-      form.actual_closing_date = getTodayLocalDate()
+      // Pre-fill with estimated amount
+      setFieldValue('actual_amount', opportunity.value.total_amount)
+      setFieldValue('actual_closing_date', getTodayLocalDate())
     } catch (error) {
       handleApiError(error, '加载商机详情')
       emit('update:open', false)
@@ -62,26 +85,15 @@ watch(() => props.open, async (newOpen) => {
   }
 })
 
-// 提交赢单
-async function handleSubmit(): Promise<void> {
-  // 前端校验
-  if (!Number.isFinite(form.actual_amount) || form.actual_amount <= 0) {
-    toast.error('实际成交金额必须大于0')
-    return
-  }
-
-  if (!form.actual_closing_date) {
-    toast.error('请选择实际成交日期')
-    return
-  }
-
+// Form submission
+const onSubmit = handleSubmit(async (formValues) => {
   if (props.opportunityId === null) return
 
   submitting.value = true
   try {
     await opportunityApi.markAsWon(props.opportunityId, {
-      actual_amount: form.actual_amount,
-      actual_closing_date: form.actual_closing_date
+      actual_amount: formValues.actual_amount,
+      actual_closing_date: formValues.actual_closing_date
     })
 
     toast.success('商机已标记为赢单')
@@ -92,7 +104,7 @@ async function handleSubmit(): Promise<void> {
   } finally {
     submitting.value = false
   }
-}
+})
 </script>
 
 <template>
@@ -107,35 +119,44 @@ async function handleSubmit(): Promise<void> {
         加载中...
       </div>
 
-      <form v-else class="grid gap-4 py-4">
+      <form v-else class="grid gap-4 py-4" @submit="onSubmit">
         <!-- 实际成交金额 -->
-        <div class="grid gap-2">
-          <Label for="actual_amount">
-            实际成交金额 <span class="text-destructive">*</span>
-          </Label>
-          <Input
-            id="actual_amount"
-            v-model.number="form.actual_amount"
-            type="number"
-            step="0.01"
-            min="0"
-            placeholder="请输入金额"
-            :disabled="submitting"
-          />
-        </div>
+        <FormField v-slot="{ componentField }" name="actual_amount">
+          <FormItem>
+            <FormLabel>
+              实际成交金额 <span class="text-destructive">*</span>
+            </FormLabel>
+            <FormControl>
+              <Input
+                v-bind="componentField"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="请输入金额"
+                :disabled="submitting"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
 
         <!-- 实际成交日期 -->
-        <div class="grid gap-2">
-          <Label for="actual_closing_date">
-            实际成交日期 <span class="text-destructive">*</span>
-          </Label>
-          <DatePicker
-            :model-value="form.actual_closing_date ? new Date(form.actual_closing_date) : null"
-            placeholder="请选择实际成交日期"
-            :disabled="submitting"
-            @update:model-value="(date: Date | null) => form.actual_closing_date = date ? formatLocalDate(date) : ''"
-          />
-        </div>
+        <FormField v-slot="{ value, handleChange }" name="actual_closing_date">
+          <FormItem>
+            <FormLabel>
+              实际成交日期 <span class="text-destructive">*</span>
+            </FormLabel>
+            <FormControl>
+              <DatePicker
+                :model-value="value ? new Date(value) : null"
+                placeholder="请选择实际成交日期"
+                :disabled="submitting"
+                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : '')"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
       </form>
 
       <DialogFooter class="flex-col gap-2 sm:flex-row">
@@ -152,7 +173,7 @@ async function handleSubmit(): Promise<void> {
           :disabled="submitting || loading"
           :loading="submitting"
           class="w-full sm:w-auto"
-          @click="handleSubmit"
+          @click="onSubmit"
         >
           {{ submitting ? '提交中...' : '确认' }}
         </Button>

@@ -6,9 +6,9 @@ const readSource = (relativePath: string): string => {
   return readFileSync(resolve(process.cwd(), relativePath), 'utf-8')
 }
 
-describe('PaymentPlans V2 migration contract', () => {
+describe('ContractPaymentPlans V2 migration contract', () => {
   it('uses ListCard and shadcn-vue primitives without Element Plus imports or tags', () => {
-    const source = readSource('src/components/PaymentPlans.vue')
+    const source = readSource('src/components/ContractPaymentPlans.vue')
 
     expect(source).toContain("@/components/crmwolf/ListCard.vue")
     expect(source).toContain("@/components/ui/button")
@@ -21,7 +21,7 @@ describe('PaymentPlans V2 migration contract', () => {
   })
 
   it('keeps payment-plan dialogs outside the ListCard content shell', () => {
-    const source = readSource('src/components/PaymentPlans.vue')
+    const source = readSource('src/components/ContractPaymentPlans.vue')
     const listCardStart = source.indexOf('<ListCard')
     const listCardEnd = source.indexOf('</ListCard>')
     const firstDialog = source.indexOf('<Dialog')
@@ -32,11 +32,11 @@ describe('PaymentPlans V2 migration contract', () => {
   })
 
   it('keeps payment dialog controls and menu items at accessible touch target sizes', () => {
-    const source = readSource('src/components/PaymentPlans.vue')
+    const source = readSource('src/components/ContractPaymentPlans.vue')
 
     expect(source).toMatch(/<DropdownMenuItem[^>]*class="min-h-11"/)
-    expect(source).toContain('class="h-11"')
-    expect(source).toContain('class="min-h-20"')
+    expect(source).toContain('PaymentRecordDialog')
+    expect(source).toContain('PaymentPlanFormDialog')
     expect(source).toContain('text-wolf-danger-text')
     expect(source).not.toContain('text-wolf-danger-text-v2')
   })

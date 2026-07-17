@@ -301,11 +301,11 @@ function formatDate(dateStr: string): string {
 
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <SheetHeader>
-      <SheetTitle class="text-base font-semibold text-wolf-text-primary">采购方式管理</SheetTitle>
-      <SheetDescription class="text-sm text-wolf-text-secondary">配置采购方式与阶段模板</SheetDescription>
-    </SheetHeader>
     <DetailSheetContent>
+      <SheetHeader class="system-config-sheet-header">
+        <SheetTitle class="text-base font-semibold text-wolf-text-primary">采购方式管理</SheetTitle>
+        <SheetDescription class="text-sm text-wolf-text-secondary">配置采购方式与阶段模板</SheetDescription>
+      </SheetHeader>
       <ScrollArea class="h-full">
         <!-- 搜索/操作栏 -->
         <div class="p-4 border-b space-y-4">
@@ -497,4 +497,11 @@ function formatDate(dateStr: string): string {
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+
+.system-config-sheet-header {
+  padding: $wolf-space-xl-v2;
+  padding-bottom: $wolf-space-lg-v2;
+  border-bottom: 1px solid $wolf-border-default-v2;
+  background: $wolf-bg-card-v2;
+}
 </style>

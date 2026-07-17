@@ -43,6 +43,7 @@ import ContactFormDialog from '@/components/dialogs/ContactFormDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
+import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 
 // Detail Sheets (Task 6)
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
@@ -89,11 +90,13 @@ const contactDialogOpen = ref(false)
 const opportunityDialogOpen = ref(false)
 const contractDialogOpen = ref(false)
 const invoiceTitleDialogOpen = ref(false)
+const invoiceApplicationDialogOpen = ref(false)
 
 // ==================== Edit States ====================
 const editingContact = ref<ContactResponse | null>(null)
 const editingContract = ref<ContractResponse | null>(null)
 const editingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
+const applyingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
 
 // ==================== Detail Sheet States (Task 6) ====================
 const selectedContractId = ref<number | null>(null)
@@ -372,6 +375,26 @@ const handleSetDefaultInvoiceTitle = async (titleId: number): Promise<void> => {
     }
   } catch (error) {
     handleApiError(error, '设置默认发票抬头')
+  }
+}
+
+const handleApplyInvoice = (invoiceTitle: InvoiceTitleResponse): void => {
+  applyingInvoiceTitle.value = invoiceTitle
+  invoiceApplicationDialogOpen.value = true
+}
+
+const handleInvoiceApplicationDialogClose = (open: boolean): void => {
+  invoiceApplicationDialogOpen.value = open
+  if (!open) {
+    applyingInvoiceTitle.value = null
+  }
+}
+
+const handleInvoiceApplicationSuccess = (): void => {
+  invoiceApplicationDialogOpen.value = false
+  applyingInvoiceTitle.value = null
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
   }
 }
 
@@ -751,6 +774,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               @edit="handleEditInvoiceTitle"
               @delete="handleDeleteInvoiceTitle"
               @set-default="handleSetDefaultInvoiceTitle"
+              @apply="handleApplyInvoice"
             />
 
             <LicensePanel
@@ -828,6 +852,16 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     :invoice-title="editingInvoiceTitle"
     @update:open="handleInvoiceTitleDialogClose"
     @success="handleInvoiceTitleSuccess"
+  />
+
+  <InvoiceApplicationFormDialog
+    v-if="customerId !== null && customer !== null"
+    mode="create"
+    :open="invoiceApplicationDialogOpen"
+    :fixed-customer="{ id: customer.id, account_name: customer.account_name }"
+    :fixed-invoice-title="applyingInvoiceTitle"
+    @update:open="handleInvoiceApplicationDialogClose"
+    @success="handleInvoiceApplicationSuccess"
   />
 
   <!-- Contract Detail Sheet (Task 6) -->

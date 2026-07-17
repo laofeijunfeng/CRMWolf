@@ -106,6 +106,7 @@ $wolf-shadow-bottom-v2: 0 -2px 8px rgba(0, 0, 0, 0.1);    // 底部阴影
 $wolf-transition-v2: all 0.15s ease;        // 标准过渡（150ms）
 $wolf-transition-hover-v2: all 0.2s ease;   // hover过渡（200ms）
 $wolf-transition-press-v2: all 0.15s ease;  // press反馈（150ms）
+$wolf-motion-state-duration-v2: 0.15s;      // 状态切换时长（150ms）
 
 // ==================== 组件尺寸（V2）====================
 // UI/UX Pro Max CRITICAL: Touch Target Minimum 44×44pt

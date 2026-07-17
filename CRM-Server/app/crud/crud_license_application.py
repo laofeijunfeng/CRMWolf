@@ -455,8 +455,7 @@ class LicenseApplicationCRUD:
         )
 
         if flow is None:
-            # 未匹配审批流程：强制审批规则，不允许免审批直通
-            # 保留单据（approval_phase = DRAFT），返回错误提示
+            # 未匹配审批流程：保留草稿并提示管理员配置审批流程
             raise ValueError(err or "请先配置审批流程")
 
         # 使用 ApprovalTransactionManager 统一管理事务边界
@@ -476,6 +475,87 @@ class LicenseApplicationCRUD:
         db.refresh(application)
         return application
 
+    def _ensure_approved_for_issue(
+        self,
+        db: Session,
+        team_id: int,
+        application_id: int
+    ) -> Optional[LicenseApplication]:
+        """校验 License 申请已通过通用审批，只有审批通过后才能发放。"""
+        from app.crud.approval import approval_crud
+        from app.constants.business_types import BusinessType
+        from app.models.approval import ApprovalStatus
+
+        application = self.get(db, team_id, application_id)
+        if not application:
+            return None
+
+        approval = approval_crud.get_by_entity(
+            db, BusinessType.LICENSE, application_id, team_id
+        )
+        if not approval or approval.status != ApprovalStatus.APPROVED:
+            raise ValueError("License申请未通过审批，不可发放")
+
+        if application.status == LicenseApplicationStatus.ISSUED:
+            raise ValueError("License申请已发放")
+
+        return application
+
+    def issue(
+        self,
+        db: Session,
+        team_id: int,
+        application_id: int,
+        issue_data: LicenseApplicationApprove,
+        issuer_id: str
+    ) -> Optional[LicenseApplication]:
+        """发放已审批通过的 License 申请（简化版本）。"""
+        application = self._ensure_approved_for_issue(db, team_id, application_id)
+        if not application:
+            return None
+
+        application.status = LicenseApplicationStatus.ISSUED
+        application.license_code = issue_data.license_code
+        application.approver_id = issuer_id
+        application.approved_time = datetime.now()
+
+        db.commit()
+        db.refresh(application)
+
+        self.update_customer_license_info(db, application.customer_id)
+
+        return application
+
+    def issue_full(
+        self,
+        db: Session,
+        team_id: int,
+        application_id: int,
+        issue_data: LicenseApplicationApproveFull,
+        issuer_id: str
+    ) -> Optional[LicenseApplication]:
+        """发放已审批通过的 License 申请（完整版本，解析 License 信息）。"""
+        application = self._ensure_approved_for_issue(db, team_id, application_id)
+        if not application:
+            return None
+
+        parsed_data = parse_license_info(issue_data.license_info)
+
+        application.status = LicenseApplicationStatus.ISSUED
+        application.enterprise_id = parsed_data.get('enterprise_id')
+        application.supported_modules = parsed_data.get('supported_modules')
+        application.server_license_code = parsed_data.get('server_license_code')
+        application.client_license_code = parsed_data.get('client_license_code')
+        application.approver_id = issuer_id
+        application.approved_time = datetime.now()
+
+        db.commit()
+        db.refresh(application)
+
+        self.update_customer_license_info(db, application.customer_id)
+
+        return application
+
     def approve(
         self,
         db: Session,
@@ -484,52 +564,7 @@ class LicenseApplicationCRUD:
         approve_data: LicenseApplicationApprove,
         approver_id: str
     ) -> Optional[LicenseApplication]:
-        """
-        审批通过 License 申请（PENDING → ISSUED）- 简化版本
-
-        审批通过时会：
-        1. 更新状态为 ISSUED
-        2. 填写 license_code 字段
-        3. 记录 approver_id 和 approved_time
-        4. 更新客户 license_expiry_date 和 license_type
-
-        Args:
-            db: 数据库会话
-            team_id: 团队ID
-            application_id: 申请ID
-            approve_data: 审批数据（包含 license_code）
-            approver_id: 审批人飞书用户ID
-
-        Returns:
-            Optional[LicenseApplication]: 更新后的申请，不存在或状态不对则返回 None
-
-        Raises:
-            ValueError: 申请状态不是 PENDING
-
-        Note:
-            推荐使用 approve_full 方法，支持完整 License 信息解析
-        """
-        application = self.get(db, team_id, application_id)
-        if not application:
-            return None
-
-        # 仅 PENDING 状态可审批
-        if application.status != LicenseApplicationStatus.PENDING:
-            raise ValueError("只有待审批状态的申请可以审批")
-
-        # 更新申请状态和信息
-        application.status = LicenseApplicationStatus.ISSUED
-        application.license_code = approve_data.license_code
-        application.approver_id = approver_id
-        application.approved_time = datetime.now()
-
-        db.commit()
-        db.refresh(application)
-
-        # 更新客户 License 信息
-        self.update_customer_license_info(db, application.customer_id)
-
-        return application
+        raise ValueError("License审批请使用通用审批接口，审批通过后调用发放接口")
 
     def approve_full(
         self,
@@ -539,56 +574,7 @@ class LicenseApplicationCRUD:
         approve_data: LicenseApplicationApproveFull,
         approver_id: str
     ) -> Optional[LicenseApplication]:
-        """
-        审批通过 License 申请（PENDING → ISSUED）- 完整版本
-
-        审批通过时会：
-        1. 更新状态为 ISSUED
-        2. 解析 license_info 文本，填充 enterprise_id、supported_modules、
-           server_license_code、client_license_code 字段
-        3. 记录 approver_id 和 approved_time
-        4. 更新客户 license_expiry_date 和 license_type
-
-        Args:
-            db: 数据库会话
-            team_id: 团队ID
-            application_id: 申请ID
-            approve_data: 审批数据（包含完整的 license_info 文本）
-            approver_id: 审批人飞书用户ID
-
-        Returns:
-            Optional[LicenseApplication]: 更新后的申请，不存在或状态不对则返回 None
-
-        Raises:
-            ValueError: 申请状态不是 PENDING
-        """
-        application = self.get(db, team_id, application_id)
-        if not application:
-            return None
-
-        # 仅 PENDING 状态可审批
-        if application.status != LicenseApplicationStatus.PENDING:
-            raise ValueError("只有待审批状态的申请可以审批")
-
-        # 解析 License 信息
-        parsed_data = parse_license_info(approve_data.license_info)
-
-        # 更新申请状态和信息
-        application.status = LicenseApplicationStatus.ISSUED
-        application.enterprise_id = parsed_data.get('enterprise_id')
-        application.supported_modules = parsed_data.get('supported_modules')
-        application.server_license_code = parsed_data.get('server_license_code')
-        application.client_license_code = parsed_data.get('client_license_code')
-        application.approver_id = approver_id
-        application.approved_time = datetime.now()
-
-        db.commit()
-        db.refresh(application)
-
-        # 更新客户 License 信息
-        self.update_customer_license_info(db, application.customer_id)
-
-        return application
+        raise ValueError("License审批请使用通用审批接口，审批通过后调用发放接口")
 
     def reject(
         self,
@@ -597,42 +583,7 @@ class LicenseApplicationCRUD:
         application_id: int,
         reason: str
     ) -> Optional[LicenseApplication]:
-        """
-        审批拒绝 License 申请（PENDING → REJECTED）
-
-        拒绝时会将原因写入 license_code 字段（临时方案，后续可考虑增加 remark 字段）
-
-        Args:
-            db: 数据库会话
-            team_id: 团队ID
-            application_id: 申请ID
-            reason: 拒绝原因
-
-        Returns:
-            Optional[LicenseApplication]: 更新后的申请，不存在或状态不对则返回 None
-
-        Raises:
-            ValueError: 申请状态不是 PENDING
-        """
-        application = self.get(db, team_id, application_id)
-        if not application:
-            return None
-
-        # 仅 PENDING 状态可审批
-        if application.status != LicenseApplicationStatus.PENDING:
-            raise ValueError("只有待审批状态的申请可以审批")
-
-        # 更新申请状态
-        application.status = LicenseApplicationStatus.REJECTED
-        application.approver_id = None  # 拒绝时清空审批人
-        application.approved_time = None
-
-        # 将拒绝原因写入 license_code 字段（临时方案）
-        application.license_code = f"REJECTED: {reason}"
-
-        db.commit()
-        db.refresh(application)
-        return application
+        raise ValueError("License驳回请使用通用审批接口")
 
     def update_customer_license_expiry(
         self,
@@ -793,7 +744,7 @@ def approve_license_application(
     approve_data: LicenseApplicationApprove,
     approver_id: str
 ) -> Optional[LicenseApplication]:
-    """审批通过 License 申请（简化版本）"""
+    """已废弃：License 审批请使用通用审批接口。"""
     return license_application_crud.approve(db, team_id, application_id, approve_data, approver_id)
 
 
@@ -804,7 +755,7 @@ def approve_license_application_full(
     approve_data: LicenseApplicationApproveFull,
     approver_id: str
 ) -> Optional[LicenseApplication]:
-    """审批通过 License 申请（完整版本，解析 License 信息）"""
+    """已废弃：License 审批请使用通用审批接口。"""
     return license_application_crud.approve_full(db, team_id, application_id, approve_data, approver_id)
 
 
@@ -814,5 +765,27 @@ def reject_license_application(
     application_id: int,
     reason: str
 ) -> Optional[LicenseApplication]:
-    """审批拒绝 License 申请"""
+    """已废弃：License 驳回请使用通用审批接口。"""
     return license_application_crud.reject(db, team_id, application_id, reason)
+
+
+def issue_license_application(
+    db: Session,
+    team_id: int,
+    application_id: int,
+    issue_data: LicenseApplicationApprove,
+    issuer_id: str
+) -> Optional[LicenseApplication]:
+    """发放已审批通过的 License 申请（简化版本）。"""
+    return license_application_crud.issue(db, team_id, application_id, issue_data, issuer_id)
+
+
+def issue_license_application_full(
+    db: Session,
+    team_id: int,
+    application_id: int,
+    issue_data: LicenseApplicationApproveFull,
+    issuer_id: str
+) -> Optional[LicenseApplication]:
+    """发放已审批通过的 License 申请（完整版本，解析 License 信息）。"""
+    return license_application_crud.issue_full(db, team_id, application_id, issue_data, issuer_id)

@@ -15,7 +15,6 @@
  * - z-index: Sheet z-[200], Dialog z-[1000]
  */
 import { ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Search, Plus, Eye, Pencil, Power, Wand2 } from 'lucide-vue-next'
 import {
@@ -50,6 +49,7 @@ import approvalFlowApi, {
   type ApprovalFlowDetail,
   type ApprovalNode
 } from '@/api/approvalFlow'
+import ApprovalFlowFormDialog from './ApprovalFlowFormDialog.vue'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -60,15 +60,14 @@ type Emits = (e: 'update:open', value: boolean) => void
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
-const router = useRouter()
 
 // ==================== State ====================
 const loading = ref(false)
 const approvalFlows = ref<ApprovalFlowDetail[]>([])
 const searchText = ref('')
-const filterStatus = ref<string | undefined>(undefined)
-const filterLicenseType = ref<string | undefined>(undefined)
-const filterBusinessType = ref<string | undefined>(undefined)
+const filterStatus = ref('')
+const filterLicenseType = ref('')
+const filterBusinessType = ref('')
 const pagination = ref({
   page: 1,
   pageSize: 20,
@@ -78,6 +77,11 @@ const pagination = ref({
 // 详情 Dialog
 const detailDialogOpen = ref(false)
 const currentFlow = ref<ApprovalFlowDetail | null>(null)
+
+// 新建/编辑 Dialog
+const formDialogOpen = ref(false)
+const formDialogMode = ref<'create' | 'edit'>('create')
+const editingFlowId = ref<number | null>(null)
 
 // ==================== Types ====================
 interface Column {
@@ -154,7 +158,7 @@ const filteredFlows = computed(() => {
     )
   }
 
-  if (filterStatus.value !== undefined) {
+  if (filterStatus.value !== '') {
     filtered = filtered.filter(flow =>
       filterStatus.value === 'true' ? flow.is_active : !flow.is_active
     )
@@ -216,7 +220,9 @@ const handleView = async (record: ApprovalFlowDetail): Promise<void> => {
 
 const handleEdit = (record: ApprovalFlowDetail): void => {
   if (!record.id) return
-  router.push(`/approval-flows/${record.id}/edit`)
+  formDialogMode.value = 'edit'
+  editingFlowId.value = record.id
+  formDialogOpen.value = true
 }
 
 const handleToggleStatus = async (record: ApprovalFlowDetail): Promise<void> => {
@@ -241,12 +247,18 @@ const handleToggleStatus = async (record: ApprovalFlowDetail): Promise<void> => 
 }
 
 const handleManualCreate = (): void => {
-  router.push('/approval-flows/create')
+  formDialogMode.value = 'create'
+  editingFlowId.value = null
+  formDialogOpen.value = true
 }
 
 const handleAICreate = (): void => {
   // TODO: Open AI creation dialog
   toast.info('AI 创建流程功能开发中')
+}
+
+const handleFormSuccess = (): void => {
+  fetchApprovalFlows()
 }
 
 // ==================== Lifecycle ====================
@@ -282,11 +294,11 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
 
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <SheetHeader>
-      <SheetTitle class="text-base font-semibold text-wolf-text-primary">审批流程管理</SheetTitle>
-      <SheetDescription class="text-sm text-wolf-text-secondary">配置审批流程与节点</SheetDescription>
-    </SheetHeader>
     <DetailSheetContent>
+      <SheetHeader class="system-config-sheet-header">
+        <SheetTitle class="text-base font-semibold text-wolf-text-primary">审批流程管理</SheetTitle>
+        <SheetDescription class="text-sm text-wolf-text-secondary">配置审批流程与节点</SheetDescription>
+      </SheetHeader>
       <ScrollArea class="h-full">
         <!-- 搜索/操作栏 -->
         <div class="p-4 border-b space-y-4">
@@ -536,8 +548,22 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
       </div>
     </DialogContent>
   </Dialog>
+
+  <ApprovalFlowFormDialog
+    v-model:open="formDialogOpen"
+    :mode="formDialogMode"
+    :flow-id="editingFlowId"
+    @success="handleFormSuccess"
+  />
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+
+.system-config-sheet-header {
+  padding: $wolf-space-xl-v2;
+  padding-bottom: $wolf-space-lg-v2;
+  border-bottom: 1px solid $wolf-border-default-v2;
+  background: $wolf-bg-card-v2;
+}
 </style>

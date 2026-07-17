@@ -23,23 +23,22 @@
  * 不可用时（如 jsdom）回退到水平（isWide=true），不影响功能。
  */
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { PropType } from 'vue'
 import { toast } from 'vue-sonner'
 import {
-  Download,
-  FileText,
   Loader2,
   AlertTriangle
 } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { useApprovalStore } from '@/stores/approval'
-import request from '@/utils/request'
+import { usePermissionStore } from '@/stores/permissions'
 import type {
   EntityType,
   ApprovalDetail,
   ApprovalRecord
 } from '@/schemas/approvalGeneric'
+import { FileAttachment } from '@/components/crmwolf'
 import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
 import ApprovalProcessStepper from './ApprovalProcessStepper.vue'
 import ErrorState from './ErrorState.vue'
@@ -67,6 +66,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
+import {
+  createInvoiceFileObjectUrl,
+  downloadInvoiceFile as downloadInvoiceFileApi,
+} from '@/api/fileUpload'
+import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 const SUBMIT_PERMISSION: Record<EntityType, string> = {
   CONTRACT: 'contract:submit',
@@ -91,6 +95,10 @@ const props = defineProps({
   isSubmitter: {
     type: Boolean,
     default: false
+  },
+  showInvoiceUploadAction: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -104,6 +112,7 @@ const emit = defineEmits<{
 
 const store = useApprovalStore()
 const { currentApprovalDetail } = storeToRefs(store)
+const permissionStore = usePermissionStore()
 
 // ===== 本地 UI 状态（必须 ref<Type>(...) 显式类型）=====
 const loadError = ref<boolean>(false)
@@ -113,6 +122,9 @@ const rejectDialogVisible = ref<boolean>(false)
 const withdrawDialogVisible = ref<boolean>(false)
 const rejectForm = ref<{ reason: string }>({ reason: '' })
 const conflictNotice = ref<string>('')
+const invoiceFilePreviewUrl = ref<string>('')
+const invoiceFilePreviewLoading = ref<boolean>(false)
+const invoiceFilePreviewRequestId = ref<number>(0)
 
 // 开票对话框
 const markIssuedDialogVisible = ref<boolean>(false)
@@ -141,11 +153,33 @@ const hasInvoiceFile = computed<boolean>(() =>
   detail.value.invoice_file_path.length > 0
 )
 
+const invoiceFiles = computed<FileAttachmentItem[]>(() => {
+  if (!hasInvoiceFile.value || detail.value == null) return []
+
+  const file: FileAttachmentItem = {
+    id: props.entityId,
+    name: getInvoiceFileName(),
+    extension: getFileExtension(detail.value.invoice_file_path ?? ''),
+    status: invoiceFilePreviewLoading.value ? 'processing' : 'done'
+  }
+
+  if (invoiceFilePreviewUrl.value.length > 0) {
+    file.url = invoiceFilePreviewUrl.value
+  }
+
+  if (detail.value.invoice_number != null && detail.value.invoice_number.trim() !== '') {
+    file.description = `发票号码：${detail.value.invoice_number}`
+  }
+
+  return [file]
+})
+
 // 发票开票按钮显示条件
 const showMarkIssued = computed<boolean>(() =>
   props.entityType === 'INVOICE' &&
   status.value === 'APPROVED' &&
-  props.canApprove
+  !hasInvoiceFile.value &&
+  permissionStore.hasPermission('invoice:mark_issued')
 )
 
 // License 发放按钮显示条件
@@ -159,6 +193,39 @@ const showIssueLicense = computed<boolean>(() =>
 const isAxiosStatus = (err: unknown, code: number): boolean => {
   const r = (err as { response?: { status?: number } } | null)?.response
   return typeof r?.status === 'number' && r.status === code
+}
+
+const revokeInvoiceFilePreviewUrl = (): void => {
+  if (invoiceFilePreviewUrl.value.length === 0) return
+  window.URL.revokeObjectURL(invoiceFilePreviewUrl.value)
+  invoiceFilePreviewUrl.value = ''
+}
+
+const loadInvoiceFilePreviewUrl = async (): Promise<void> => {
+  const requestId = invoiceFilePreviewRequestId.value + 1
+  invoiceFilePreviewRequestId.value = requestId
+  revokeInvoiceFilePreviewUrl()
+
+  if (!hasInvoiceFile.value || props.entityType !== 'INVOICE') {
+    invoiceFilePreviewLoading.value = false
+    return
+  }
+
+  invoiceFilePreviewLoading.value = true
+  try {
+    const objectUrl = await createInvoiceFileObjectUrl(props.entityId)
+    if (requestId === invoiceFilePreviewRequestId.value && hasInvoiceFile.value) {
+      invoiceFilePreviewUrl.value = objectUrl
+    } else {
+      window.URL.revokeObjectURL(objectUrl)
+    }
+  } catch {
+    toast.error('发票文件预览加载失败')
+  } finally {
+    if (requestId === invoiceFilePreviewRequestId.value) {
+      invoiceFilePreviewLoading.value = false
+    }
+  }
 }
 
 // ===== 方法（必须参数和返回类型）=====
@@ -288,21 +355,19 @@ const handleResubmit = (): void => {
 const downloadInvoiceFile = async (): Promise<void> => {
   if (detail.value == null || props.entityType !== 'INVOICE') return
   try {
-    const response = await request.get<Blob>(
-      `/v1/invoice-applications/${props.entityId}/file`,
-      { responseType: 'blob' }
-    )
-    const url = window.URL.createObjectURL(new Blob([response]))
-    const link = window.document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `invoice-${props.entityId}.pdf`)
-    window.document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
+    await downloadInvoiceFileApi(props.entityId)
   } catch {
     toast.error('文件下载失败')
   }
+}
+
+const getFileExtension = (filePath: string): string => {
+  return filePath.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
+}
+
+const getInvoiceFileName = (): string => {
+  const extension = getFileExtension(detail.value?.invoice_file_path ?? '')
+  return extension ? `发票文件.${extension}` : '发票文件'
 }
 
 // 打开对话框方法
@@ -335,6 +400,19 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  [hasInvoiceFile, (): number => props.entityId],
+  (): void => {
+    void loadInvoiceFilePreviewUrl()
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount((): void => {
+  invoiceFilePreviewRequestId.value += 1
+  revokeInvoiceFilePreviewUrl()
+})
 </script>
 
 <template>
@@ -399,19 +477,13 @@ watch(
 
       <!-- Task 6: 已上传发票文件显示（仅 INVOICE 类型） -->
       <div v-if="hasInvoiceFile" class="approval-process-generic__file-section">
-        <div class="file-header">
-          <FileText class="h-4 w-4" />
-          <span class="file-title">发票文件</span>
-        </div>
-        <div class="file-info">
-          <span v-if="detail?.invoice_number" class="invoice-number">
-            发票号码：{{ detail.invoice_number }}
-          </span>
-          <Button variant="link" size="sm" @click="downloadInvoiceFile">
-            <Download class="mr-1 h-4 w-4" />
-            下载发票文件
-          </Button>
-        </div>
+        <FileAttachment
+          title="发票文件"
+          mode="readonly"
+          :files="invoiceFiles"
+          empty-text="暂无发票文件"
+          @download="() => downloadInvoiceFile()"
+        />
       </div>
 
       <!-- 审批流程 Stepper -->
@@ -463,14 +535,13 @@ watch(
         </Button>
 
         <!-- 发票开票区 -->
-        <div v-if="showMarkIssued" class="mark-issued-section">
-          <p class="text-sm text-muted-foreground mb-2">审批已通过，可进行开票操作</p>
+        <div v-if="showInvoiceUploadAction && showMarkIssued" class="mark-issued-section">
           <Button
             data-testid="mark-issued-btn"
-            aria-label="开票，审批已通过"
+            aria-label="上传发票文件，审批已通过"
             @click="openMarkIssuedDialog"
           >
-            开票
+            上传发票文件
           </Button>
         </div>
 
@@ -641,30 +712,6 @@ watch(
   border-radius: $wolf-radius-sm-v2;
   padding: $wolf-space-md-v2;
   margin-bottom: $wolf-space-md-v2;
-
-  .file-header {
-    display: flex;
-    align-items: center;
-    gap: $wolf-space-xs-v2;
-    margin-bottom: $wolf-space-sm-v2;
-    color: $wolf-text-secondary-v2;
-    font-weight: $wolf-font-weight-medium-v2;
-  }
-
-  .file-title {
-    font-size: $wolf-font-size-body-v2;
-  }
-
-  .file-info {
-    display: flex;
-    align-items: center;
-    gap: $wolf-space-md-v2;
-
-    .invoice-number {
-      font-size: $wolf-font-size-caption-v2;
-      color: $wolf-text-tertiary-v2;
-    }
-  }
 }
 
 // 开票/发放操作区

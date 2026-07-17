@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 
 from app.models.contract import Contract, ContractStatus
-from app.schemas.contract import ContractCreate, ContractUpdate, ContractStatusUpdate
+from app.schemas.contract import ContractCreate, ContractUpdate
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.contract import ContractPricingService
 
@@ -364,17 +364,6 @@ class ContractCRUD:
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         
-        db.commit()
-        db.refresh(db_obj)
-        return db_obj
-    
-    def update_status(
-        self,
-        db: Session,
-        db_obj: Contract,
-        obj_in: ContractStatusUpdate
-    ) -> Contract:
-        db_obj.status = obj_in.status
         db.commit()
         db.refresh(db_obj)
         return db_obj

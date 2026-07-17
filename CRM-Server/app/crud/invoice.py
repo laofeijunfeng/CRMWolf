@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import Optional, List, Tuple
-from datetime import date
+from datetime import date, datetime
 
 from app.models.invoice import InvoiceTitle, InvoiceApplication, InvoiceApplicationStatus, InvoiceType
 from app.models.payment import PaymentPlan, PaymentRecord
@@ -145,12 +145,12 @@ class InvoiceApplicationCRUD:
         limit: int = 100,
         customer_id: Optional[int] = None,
         contract_id: Optional[int] = None,
+        payment_plan_id: Optional[int] = None,
         status: Optional[str] = None,
         applicant_id: Optional[str] = None,
-        current_user_id: Optional[str] = None
+        current_user_id: Optional[str] = None,
+        keyword: Optional[str] = None
     ) -> Tuple[List[InvoiceApplication], int]:
-        from app.models.user import User
-
         query = db.query(InvoiceApplication).filter(InvoiceApplication.team_id == team_id)
         
         if customer_id:
@@ -158,6 +158,9 @@ class InvoiceApplicationCRUD:
         
         if contract_id:
             query = query.filter(InvoiceApplication.contract_id == contract_id)
+
+        if payment_plan_id:
+            query = query.filter(InvoiceApplication.payment_plan_id == payment_plan_id)
         
         if status:
             query = query.filter(InvoiceApplication.status == status)
@@ -166,8 +169,24 @@ class InvoiceApplicationCRUD:
             query = query.filter(InvoiceApplication.applicant_id == applicant_id)
         
         if current_user_id:
-            query = query.join(Customer, InvoiceApplication.customer_id == Customer.id).filter(
-                Customer.owner_id == current_user_id
+            query = query.filter(InvoiceApplication.applicant_id == current_user_id)
+
+        if keyword and keyword.strip():
+            like_keyword = f"%{keyword.strip()}%"
+            query = (
+                query
+                .join(Customer, InvoiceApplication.customer_id == Customer.id)
+                .join(Contract, InvoiceApplication.contract_id == Contract.id)
+                .filter(
+                    or_(
+                        InvoiceApplication.application_number.ilike(like_keyword),
+                        InvoiceApplication.invoice_title_text.ilike(like_keyword),
+                        InvoiceApplication.invoice_taxpayer_id.ilike(like_keyword),
+                        InvoiceApplication.invoice_number.ilike(like_keyword),
+                        Customer.account_name.ilike(like_keyword),
+                        Contract.contract_name.ilike(like_keyword),
+                    )
+                )
             )
         
         total = query.count()
@@ -259,6 +278,8 @@ class InvoiceApplicationCRUD:
         db: Session,
         application_id: int,
         team_id: Optional[int] = None,
+        invoice_file_path: Optional[str] = None,
+        invoice_number: Optional[str] = None,
     ) -> Optional[InvoiceApplication]:
         """将已通过通用审批引擎审批的发票申请标记为已开票。
 
@@ -272,6 +293,8 @@ class InvoiceApplicationCRUD:
             db: 数据库会话
             application_id: 发票申请 ID
             team_id: 团队 ID（团队隔离；从端点注入，避免误跨团队开票）
+            invoice_file_path: 发票文件相对路径（审批通过后的开票业务附件）
+            invoice_number: 发票号码
         """
         from app.crud.approval import approval_crud
         from app.constants.business_types import BusinessType
@@ -287,7 +310,15 @@ class InvoiceApplicationCRUD:
         if not approval or approval.status != ApprovalStatus.APPROVED:
             raise ValueError("发票未通过审批，不可开票")
 
+        if application.status != InvoiceApplicationStatus.APPROVED:
+            raise ValueError(f"发票申请状态为 {application.status}，不可开票")
+
+        if invoice_file_path is not None:
+            application.invoice_file_path = invoice_file_path
+        if invoice_number is not None:
+            application.invoice_number = invoice_number
         application.status = InvoiceApplicationStatus.ISSUED
+        application.issued_time = datetime.now()
         db.commit()
         db.refresh(application)
         return application

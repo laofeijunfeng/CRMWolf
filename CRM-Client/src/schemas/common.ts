@@ -30,22 +30,24 @@ export interface PaginatedResponse<T> {
 }
 
 // ===== 用户信息类型 =====
+// 与后端 OwnerInfo 保持一致
 export const UserInfoSchema = z.object({
   id: z.string().min(1),        // 飞书 Open ID
   name: z.string().min(1),
-  avatar_url: z.string().url().nullable()
+  avatar_url: z.string().url().nullable().or(z.literal(''))  // 允许 null、有效 URL 或空字符串
 })
 
 export type UserInfo = z.infer<typeof UserInfoSchema>
 
 // ===== 状态枚举 =====
-export const CustomerStatusSchema = z.enum(['0', '1', '2', '3'])
+// 与后端 status: int 保持一致（数字类型）
+export const CustomerStatusSchema = z.number().int().min(0).max(3)
 
-export const CustomerStatusMap: Record<string, string> = {
-  '0': '跟进中',
-  '1': '已成交',
-  '2': '已流失',
-  '3': '非激活'
+export const CustomerStatusMap: Record<number, string> = {
+  0: '跟进中',
+  1: '已成交',
+  2: '已流失',
+  3: '非激活'
 }
 
 export const LeadStatusSchema = z.enum([

@@ -223,10 +223,17 @@ def test_invoice_via_engine_becomes_approved(
 
     # mark_issued：依赖引擎 Approval.status==APPROVED，可执行
     issued = invoice_application_crud.mark_issued(
-        db_session, seed_invoice_draft.id, team_id=seed_invoice_draft.team_id,
+        db_session,
+        seed_invoice_draft.id,
+        team_id=seed_invoice_draft.team_id,
+        invoice_file_path="invoices/1/1/test.pdf",
+        invoice_number="INV-001",
     )
     db_session.refresh(issued)
     assert issued.status == InvoiceApplicationStatus.ISSUED
+    assert issued.invoice_file_path == "invoices/1/1/test.pdf"
+    assert issued.invoice_number == "INV-001"
+    assert issued.issued_time is not None
 
 
 # ---------- E7-2a: 无 Approval 时 mark_issued 阻断 ----------------------------

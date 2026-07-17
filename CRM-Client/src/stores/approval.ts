@@ -63,8 +63,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
   }
 
   /**
-   * 提交审批。返回 { approval_id, status }；PAYMENT/INVOICE 未匹配流程时
-   * 后端直通返回 approval_id=0, status=APPROVED。
+   * 提交审批。返回 { approval_id, status }。
    */
   const submitEntity = async (
     entityType: EntityType,

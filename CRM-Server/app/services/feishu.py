@@ -14,6 +14,7 @@ _ENTITY_TYPE_LABEL = {
     BusinessType.CONTRACT: "合同",
     BusinessType.PAYMENT: "回款登记",
     BusinessType.INVOICE: "发票申请",
+    BusinessType.LICENSE: "License申请",
 }
 
 
@@ -645,7 +646,7 @@ class FeishuService:
     def _entity_detail_url(self, entity_type: str, business_id: Optional[int]) -> Optional[str]:
         """构造业务单据详情页跳转链接。
 
-        旧合同沿用 `/contracts/{id}`；PAYMENT / INVOICE 走各自的模块路由。
+        旧合同沿用 `/contracts/{id}`；PAYMENT / INVOICE / LICENSE 走各自的模块路由。
         business_id 缺省或前端基址未配 → 返回 None（无按钮）。
         """
         frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
@@ -655,6 +656,7 @@ class FeishuService:
             BusinessType.CONTRACT: "contracts",
             BusinessType.PAYMENT: "payments",
             BusinessType.INVOICE: "invoices",
+            BusinessType.LICENSE: "license-applications",
         }
         segment = path_map.get(entity_type, "contracts")
         return f"{frontend_url}/{segment}/{business_id}"
@@ -663,7 +665,7 @@ class FeishuService:
         """构造审批中心跳转链接。
 
         Args:
-            business_type: 可选业务类型筛选（CONTRACT/PAYMENT/INVOICE）
+            business_type: 可选业务类型筛选（CONTRACT/PAYMENT/INVOICE/LICENSE）
 
         Returns:
             审批中心链接，如 {FRONTEND_URL}/approvals?status=PENDING&business_type=PAYMENT

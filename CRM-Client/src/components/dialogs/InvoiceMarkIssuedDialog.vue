@@ -5,7 +5,7 @@
  * 审批通过后，上传发票文件和填写发票号码。
  * 使用 vee-validate + Zod 进行表单校验。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -27,19 +27,13 @@ import {
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { FileAttachment } from '@/components/crmwolf'
 import invoiceApi from '@/api/invoice'
 import { handleApiError } from '@/utils/errorHandler'
+import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 // Constants
-const ALLOWED_FILE_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'application/ofd']
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
-const FILE_TYPE_NAMES: Record<string, string> = {
-  'application/pdf': 'PDF',
-  'image/jpeg': 'JPG',
-  'image/png': 'PNG',
-  'application/ofd': 'OFD'
-}
 
 // Zod schema for form validation
 const schema = toTypedSchema(
@@ -73,65 +67,55 @@ const { handleSubmit } = useForm({
 const submitting = ref(false)
 const selectedFile = ref<File | null>(null)
 const fileError = ref<string | null>(null)
+const selectedFileUrl = ref<string>('')
 
 // File info for display
-const fileInfo = computed(() => {
-  if (selectedFile.value === null) return null
+const selectedFileItems = computed<FileAttachmentItem[]>(() => {
+  if (selectedFile.value === null) return []
   const file = selectedFile.value
-  const sizeInMB = (file.size / (1024 * 1024)).toFixed(2)
-  const typeName = FILE_TYPE_NAMES[file.type] ?? file.type.split('/')[1]?.toUpperCase() ?? '文件'
-  return {
+  const item: FileAttachmentItem = {
+    id: file.name,
     name: file.name,
-    size: `${sizeInMB} MB`,
-    type: typeName
+    size: file.size,
+    mimeType: file.type,
+    extension: getFileExtension(file.name),
+    status: 'idle'
   }
+  if (selectedFileUrl.value) {
+    item.url = selectedFileUrl.value
+  }
+  return [item]
 })
 
-// File validation
-const validateFile = (file: File): string | null => {
-  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-    return `不支持的文件类型：${file.type}。仅支持 PDF、JPG、PNG、OFD 格式`
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    const sizeInMB = (file.size / (1024 * 1024)).toFixed(2)
-    return `文件大小超出限制：${sizeInMB}MB，最大支持 10MB`
-  }
-  return null
+const getFileExtension = (fileName: string): string => {
+  return fileName.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
 }
 
-// Handle file selection
-const handleFileSelect = (event: Event): void => {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
+const revokeSelectedFileUrl = (): void => {
+  if (selectedFileUrl.value) {
+    window.URL.revokeObjectURL(selectedFileUrl.value)
+    selectedFileUrl.value = ''
+  }
+}
 
-  // Reset error
+const handleFileUpload = (files: File[]): void => {
+  const file = files[0]
+  if (!file) return
   fileError.value = null
-
-  if (file === undefined || file === null) {
-    selectedFile.value = null
-    return
-  }
-
-  const error = validateFile(file)
-  if (error !== null) {
-    fileError.value = error
-    selectedFile.value = null
-    // Reset input
-    target.value = ''
-  } else {
-    selectedFile.value = file
-  }
+  revokeSelectedFileUrl()
+  selectedFile.value = file
+  selectedFileUrl.value = window.URL.createObjectURL(file)
 }
 
-// Remove selected file
 const removeFile = (): void => {
   selectedFile.value = null
   fileError.value = null
-  // Reset file input
-  const fileInput = document.getElementById('invoice-file-input') as HTMLInputElement | null
-  if (fileInput !== null) {
-    fileInput.value = ''
-  }
+  revokeSelectedFileUrl()
+}
+
+const handleFileError = (message: string): void => {
+  removeFile()
+  fileError.value = message
 }
 
 // Form submission
@@ -164,11 +148,23 @@ const onSubmit = handleSubmit(async (formValues) => {
 const handleDialogClose = (open: boolean): void => {
   if (!open) {
     // Reset form state
-    selectedFile.value = null
-    fileError.value = null
+    removeFile()
   }
   emit('update:open', open)
 }
+
+watch(
+  (): boolean => props.open,
+  (open): void => {
+    if (!open) {
+      removeFile()
+    }
+  }
+)
+
+onUnmounted(() => {
+  revokeSelectedFileUrl()
+})
 </script>
 
 <template>
@@ -180,88 +176,22 @@ const handleDialogClose = (open: boolean): void => {
       </DialogHeader>
 
       <form class="grid gap-4 py-4" @submit="onSubmit">
-        <!-- 文件上传 -->
-        <div class="space-y-2">
-          <label class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-            发票文件
-          </label>
-
-          <!-- 已选文件显示 -->
-          <div
-            v-if="fileInfo"
-            class="flex items-center gap-3 p-3 rounded-md border bg-muted/50"
-          >
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium truncate">{{ fileInfo.name }}</p>
-              <p class="text-xs text-muted-foreground">{{ fileInfo.type }} · {{ fileInfo.size }}</p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="shrink-0 h-8 w-8 p-0"
-              :disabled="submitting"
-              @click="removeFile"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-              <span class="sr-only">移除文件</span>
-            </Button>
-          </div>
-
-          <!-- 文件选择按钮 -->
-          <div v-else>
-            <label
-              for="invoice-file-input"
-              class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-md cursor-pointer hover:bg-muted/50 transition-colors"
-              :class="{ 'opacity-50 cursor-not-allowed': submitting }"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="text-muted-foreground mb-2"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              <span class="text-sm text-muted-foreground">点击上传发票文件</span>
-              <span class="text-xs text-muted-foreground mt-1">支持 PDF、JPG、PNG、OFD，最大 10MB</span>
-            </label>
-            <input
-              id="invoice-file-input"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.ofd"
-              class="hidden"
-              :disabled="submitting"
-              @change="handleFileSelect"
-            />
-          </div>
-
-          <!-- 文件错误提示 -->
-          <Alert v-if="fileError" variant="destructive" class="mt-2">
-            <AlertDescription>{{ fileError }}</AlertDescription>
-          </Alert>
-        </div>
+        <FileAttachment
+          title="发票文件"
+          description="支持 PDF、JPG、PNG、OFD，最大 10MB"
+          mode="manage"
+          accept=".pdf,.jpg,.jpeg,.png,.ofd"
+          :max-size-mb="MAX_FILE_SIZE / 1024 / 1024"
+          :files="selectedFileItems"
+          :multiple="false"
+          :disabled="submitting"
+          :allow-download="false"
+          empty-text="暂无发票文件"
+          @upload="handleFileUpload"
+          @remove="removeFile"
+          @error="handleFileError"
+        />
+        <p v-if="fileError" class="text-sm text-destructive" role="alert">{{ fileError }}</p>
 
         <!-- 发票号码 -->
         <FormField v-slot="{ componentField }" name="invoice_number">

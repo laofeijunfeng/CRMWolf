@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from app.constants.business_types import BusinessType, is_valid_business_type
+from app.constants.business_types import ALL_BUSINESS_TYPES, is_valid_business_type
 
 
 class ApprovalStatusEnum(str, Enum):
@@ -166,8 +166,8 @@ class ApprovalFlowCreate(BaseModel):
         description="授权类型，如：STANDARD、PROFESSIONAL、ENTERPRISE，用于匹配流程"
     )
     business_type: str = Field(
-        default=BusinessType.CONTRACT,
-        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE"
+        ...,
+        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE"
     )
     nodes: List[ApprovalNodeCreate] = Field(
         ...,
@@ -178,9 +178,10 @@ class ApprovalFlowCreate(BaseModel):
     @field_validator("business_type")
     @classmethod
     def validate_business_type(cls, v):
-        """校验 business_type 合法性，非法值回退默认"""
+        """校验 business_type 合法性。"""
         if not v or not is_valid_business_type(v):
-            return BusinessType.CONTRACT
+            allowed = " / ".join(ALL_BUSINESS_TYPES)
+            raise ValueError(f"无效的流程适用单据类型: {v}，仅支持 {allowed}")
         return v
 
 
@@ -218,7 +219,7 @@ class ApprovalFlowUpdate(BaseModel):
     )
     business_type: Optional[str] = Field(
         None,
-        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE"
+        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE"
     )
     nodes: Optional[List[ApprovalNodeUpdate]] = Field(
         None,
@@ -232,7 +233,8 @@ class ApprovalFlowUpdate(BaseModel):
         if v is None:
             return v  # 更新时允许不修改
         if not is_valid_business_type(v):
-            return BusinessType.CONTRACT
+            allowed = " / ".join(ALL_BUSINESS_TYPES)
+            raise ValueError(f"无效的流程适用单据类型: {v}，仅支持 {allowed}")
         return v
 
 
@@ -367,7 +369,7 @@ class ApprovalListResponse(BaseModel):
 class OverdueApprovalResponse(BaseModel):
     """超时审批响应模型"""
     approval_id: int = Field(..., description="审批实例ID")
-    business_type: str = Field(..., description="业务单据类型：CONTRACT/PAYMENT/INVOICE")
+    business_type: str = Field(..., description="业务单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE")
     business_id: Optional[int] = Field(None, description="业务单据ID（与 business_type 联合定位单据）")
     contract_id: Optional[int] = Field(None, description="关联合同ID（仅 CONTRACT 类非空，PAYMENT/INVOICE 为 None）")
     contract_name: Optional[str] = Field(None, description="合同名称（仅 CONTRACT 类由调用方按需填充）")

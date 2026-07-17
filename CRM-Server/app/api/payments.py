@@ -712,11 +712,13 @@ async def create_payment_record(
         return record
 
     except ValueError as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
+        db.rollback()
         logger.error(f"[Payment] 登记回款失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1090,13 +1092,8 @@ def get_overdue_payments(
 
 # ---------- B1: 回款审批提交 & 财务直确认 -----------------------------------
 #
-# 业务语义 sugar 端点（通用引擎 /v1/approvals/PAYMENT/{id}/submit 已可覆盖；
-# 本端点叠加 payment:submit 权限码 + E5 决策"未匹配流不建 Approval、回款保持
-# PENDING 由财务走 /confirm 直通确认"语义）。
-#
-# 决策1：match_flow_generic(PAYMENT) 未匹配返回 (None, None) —— 不报错。
-# E5：匹配到流→建 Approval 走审批；未匹配→不建 Approval，回款 confirmation_status
-# 保持 PENDING，由财务人员调 /confirm 直接确认入账（非自动 CONFIRMED）。
+# 业务语义 sugar 端点（通用引擎 /v1/approvals/PAYMENT/{id}/submit 已可覆盖）。
+# 本端点叠加 payment:submit 权限码；未匹配审批流程时统一报错并提示管理员配置。
 
 
 @router.post(
@@ -1114,7 +1111,7 @@ def submit_payment_approval(
     db: Session = Depends(get_db),
 ):
     """
-    提交回款审批（重构：统一走审批流程，去掉无审批流逻辑）
+    提交回款审批（统一走审批流程）
 
     所有回款必须走审批流程，审批通过后自动确认入账（confirmation_status=CONFIRMED）。
     """
@@ -1130,7 +1127,7 @@ def submit_payment_approval(
         db, BusinessType.PAYMENT, team_id, record.actual_amount, None
     )
 
-    # 强制匹配审批流：未匹配则报错（去掉无审批流逻辑）
+    # 未匹配审批流时统一报错
     if flow is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
