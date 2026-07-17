@@ -17,12 +17,41 @@ _ENTITY_TYPE_LABEL = {
     BusinessType.LICENSE: "License申请",
 }
 
+_APPROVAL_TYPE_HEADER_TEMPLATE = {
+    BusinessType.CONTRACT: "blue",
+    BusinessType.PAYMENT: "green",
+    BusinessType.INVOICE: "orange",
+    BusinessType.LICENSE: "purple",
+}
+
+_REMINDER_HEADER_TEMPLATE = {
+    "light": "blue",
+    "medium": "orange",
+    "strong": "red",
+}
+
 
 def _entity_label(entity_type: Optional[str]) -> str:
     """取单据类型中文标签；未知类型回退 '单据'。"""
     if not entity_type:
         return "合同"
     return _ENTITY_TYPE_LABEL.get(entity_type, "单据")
+
+
+def _approval_header_template(
+    entity_type: Optional[str],
+    status: str = "pending",
+    reminder_level: Optional[str] = None,
+) -> str:
+    if status == "approved":
+        return "green"
+    if status == "rejected":
+        return "red"
+    if status == "cancelled":
+        return "grey"
+    if status in {"reminder", "timeout"}:
+        return _REMINDER_HEADER_TEMPLATE.get(reminder_level or "", "orange")
+    return _APPROVAL_TYPE_HEADER_TEMPLATE.get(entity_type or BusinessType.CONTRACT, "blue")
 
 
 def _resolve_entity(
@@ -138,7 +167,8 @@ class FeishuService:
         title: str,
         content: str,
         button_url: Optional[str] = None,
-        tenant_access_token: Optional[str] = None
+        tenant_access_token: Optional[str] = None,
+        header_template: str = "blue",
     ) -> bool:
         """发送飞书消息卡片（支持按钮链接）
 
@@ -148,6 +178,7 @@ class FeishuService:
             content: 卡片内容（lark_md 格式）
             button_url: 可选按钮跳转链接
             tenant_access_token: 租户访问令牌
+            header_template: 卡片头部颜色模板
 
         Returns:
             bool: 发送成功返回 True
@@ -200,7 +231,7 @@ class FeishuService:
                                     "tag": "plain_text",
                                     "content": title
                                 },
-                                "template": "blue"
+                                "template": header_template
                             },
                             "elements": elements
                         }
@@ -499,7 +530,13 @@ class FeishuService:
         # 审批通知：跳转到审批中心（而非单据详情页）
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_message_card(user_id, title, content, button_url)
+        return await self.send_message_card(
+            user_id,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(entity_type),
+        )
 
     async def notify_approval_approved(
         self,
@@ -526,7 +563,13 @@ class FeishuService:
         # 审批通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_message_card(user_id, title, content, button_url)
+        return await self.send_message_card(
+            user_id,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(entity_type, "approved"),
+        )
 
     async def notify_approval_rejected(
         self,
@@ -555,7 +598,13 @@ class FeishuService:
         # 审批通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_message_card(user_id, title, content, button_url)
+        return await self.send_message_card(
+            user_id,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(entity_type, "rejected"),
+        )
 
     # ========== Webhook 群聊通知方法 ==========
 
@@ -564,7 +613,8 @@ class FeishuService:
         webhook_url: str,
         title: str,
         content: str,
-        button_url: Optional[str] = None
+        button_url: Optional[str] = None,
+        header_template: str = "blue",
     ) -> bool:
         """通过飞书群聊机器人 Webhook 发送消息卡片
 
@@ -573,6 +623,7 @@ class FeishuService:
             title: 消息卡片标题
             content: 消息卡片内容（支持 lark_md 格式）
             button_url: 可选按钮跳转链接
+            header_template: 卡片头部颜色模板
 
         Returns:
             bool: 发送成功返回 True，失败返回 False
@@ -614,7 +665,7 @@ class FeishuService:
                         "tag": "plain_text",
                         "content": title
                     },
-                    "template": "blue"
+                    "template": header_template
                 },
                 "elements": elements
             }
@@ -732,7 +783,13 @@ class FeishuService:
         # 审批通知：跳转到审批中心（而非单据详情页）
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_webhook_message(webhook_url, title, content, button_url)
+        return await self.send_webhook_message(
+            webhook_url,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(entity_type),
+        )
 
     async def notify_approval_approved_webhook(
         self,
@@ -774,7 +831,13 @@ class FeishuService:
         # 审批通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_webhook_message(webhook_url, title, content, button_url)
+        return await self.send_webhook_message(
+            webhook_url,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(entity_type, "approved"),
+        )
 
     async def notify_approval_rejected_webhook(
         self,
@@ -819,7 +882,13 @@ class FeishuService:
         # 审批通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_webhook_message(webhook_url, title, content, button_url)
+        return await self.send_webhook_message(
+            webhook_url,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(entity_type, "rejected"),
+        )
 
     async def notify_approval_cancelled_webhook(
         self,
@@ -864,7 +933,13 @@ class FeishuService:
         # 审批通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_webhook_message(webhook_url, title, content, button_url)
+        return await self.send_webhook_message(
+            webhook_url,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(entity_type, "cancelled"),
+        )
 
     # ========== 审批催办通知方法 ==========
 
@@ -926,7 +1001,17 @@ class FeishuService:
         # 审批催办通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_message_card(user_id, title, content, button_url)
+        return await self.send_message_card(
+            user_id,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(
+                entity_type,
+                "reminder",
+                reminder_level,
+            ),
+        )
 
     async def notify_approval_reminder_webhook(
         self,
@@ -994,7 +1079,17 @@ class FeishuService:
         # 审批催办通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_webhook_message(webhook_url, title, content, button_url)
+        return await self.send_webhook_message(
+            webhook_url,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(
+                entity_type,
+                "reminder",
+                reminder_level,
+            ),
+        )
 
     async def notify_approval_timeout_alert(
         self,
@@ -1070,7 +1165,17 @@ class FeishuService:
         # 审批超时告警：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_message_card(user_id, title, content, button_url)
+        return await self.send_message_card(
+            user_id,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(
+                entity_type,
+                "timeout",
+                reminder_level,
+            ),
+        )
 
     async def notify_approval_timeout_webhook(
         self,
@@ -1151,7 +1256,17 @@ class FeishuService:
         # 审批超时告警：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_webhook_message(webhook_url, title, content, button_url)
+        return await self.send_webhook_message(
+            webhook_url,
+            title,
+            content,
+            button_url,
+            header_template=_approval_header_template(
+                entity_type,
+                "timeout",
+                reminder_level,
+            ),
+        )
 
 
 feishu_service = FeishuService()
