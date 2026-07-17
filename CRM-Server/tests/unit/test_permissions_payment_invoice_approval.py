@@ -15,6 +15,13 @@ def test_invoice_approve_own_all_exist():
     assert "invoice:approve:all" in codes
 
 
+def test_license_approve_own_all_exist():
+    codes = {p["code"] for p in ALL_PERMISSIONS}
+    assert "license:approve" in codes
+    assert "license:approve:own" in codes
+    assert "license:approve:all" in codes
+
+
 def test_finance_has_payment_approve():
     finance_perms = ROLE_PERMISSIONS_MAPPING["FINANCE"]
     assert "payment:approve" in finance_perms or "payment:approve:all" in finance_perms
@@ -38,6 +45,9 @@ def test_new_permission_codes_have_consistent_fields():
         "payment:approve:all": ("payment", "approve", "all"),
         "invoice:approve:own": ("invoice", "approve", "own"),
         "invoice:approve:all": ("invoice", "approve", "all"),
+        "license:approve": ("license", "approve", None),
+        "license:approve:own": ("license", "approve", "own"),
+        "license:approve:all": ("license", "approve", "all"),
     }
     for code, (resource, action, scope) in expected.items():
         assert code in by_code, f"missing code {code}"
