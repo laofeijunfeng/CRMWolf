@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Optional, List
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 import enum
 
@@ -257,6 +257,9 @@ class CustomerResponse(BaseModel):
     # 热力值字段
     score: Optional[int] = Field(None, description="热力值分数（0-100）")
     score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
+    # License 授权字段
+    license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -312,6 +315,9 @@ class CustomerDetailResponse(BaseModel):
     # 热力值字段
     score: Optional[int] = Field(None, description="热力值分数（0-100）")
     score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
+    # License 授权字段
+    license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
 
     model_config = ConfigDict(from_attributes=True)
 

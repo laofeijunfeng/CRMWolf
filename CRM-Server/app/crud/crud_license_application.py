@@ -3,7 +3,6 @@
 提供 License 申请的数据库操作。
 """
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
 from typing import Optional, List, Tuple, Dict
 from datetime import date, datetime
 
@@ -522,7 +521,7 @@ class LicenseApplicationCRUD:
         db.commit()
         db.refresh(application)
 
-        self.update_customer_license_info(db, application.customer_id)
+        self.update_customer_license_info(db, team_id, application)
 
         return application
 
@@ -552,7 +551,7 @@ class LicenseApplicationCRUD:
         db.commit()
         db.refresh(application)
 
-        self.update_customer_license_info(db, application.customer_id)
+        self.update_customer_license_info(db, team_id, application)
 
         return application
 
@@ -622,37 +621,34 @@ class LicenseApplicationCRUD:
     def update_customer_license_info(
         self,
         db: Session,
-        customer_id: int
+        team_id: int,
+        issued_application: LicenseApplication
     ) -> None:
         """
-        更新客户 License 最晚到期时间和类型
+        更新客户 License 最晚到期时间和类型。
 
-        查询客户所有已发放的 License 申请，按到期时间降序排列，
-        将最晚到期时间和对应的 License 类型更新到客户表。
+        仅当本次发放的 License 到期时间晚于客户当前记录，或客户尚未记录
+        License 到期时间时，才更新客户表。较早到期的试用/正式 License 不会
+        覆盖客户当前更远的授权信息。
 
         Args:
             db: 数据库会话
-            customer_id: 客户ID
+            team_id: 团队ID
+            issued_application: 本次已发放的 License 申请
         """
-        # 查询客户所有已发放的 License 申请，按到期时间降序
-        approved_applications = db.query(LicenseApplication).filter(
-            and_(
-                LicenseApplication.customer_id == customer_id,
-                LicenseApplication.status == LicenseApplicationStatus.ISSUED
-            )
-        ).order_by(LicenseApplication.expiry_date.desc()).all()
+        customer = db.query(Customer).filter(
+            Customer.id == issued_application.customer_id,
+            Customer.team_id == team_id
+        ).first()
+        if not customer:
+            return
 
-        customer = db.query(Customer).filter(Customer.id == customer_id).first()
-        if customer:
-            if approved_applications:
-                # 最晚到期时间对应的 License 类型
-                latest_app = approved_applications[0]
-                customer.license_expiry_date = latest_app.expiry_date
-                customer.license_type = latest_app.license_type
-            else:
-                # 未申请，置空
-                customer.license_expiry_date = None
-                customer.license_type = None
+        if (
+            customer.license_expiry_date is None
+            or issued_application.expiry_date > customer.license_expiry_date
+        ):
+            customer.license_expiry_date = issued_application.expiry_date
+            customer.license_type = issued_application.license_type
             db.commit()
 
 

@@ -176,6 +176,8 @@ export interface CustomerResponse {
   created_time: string
   last_modified_time: string
   version: number
+  license_expiry_date: string | null
+  license_type: string | null
   owner_info?: UserBasicInfo
   creator_info?: UserBasicInfo
 }
@@ -225,6 +227,8 @@ export interface CustomerDetailResponse {
   created_time: string
   last_modified_time: string
   version: number
+  license_expiry_date: string | null
+  license_type: string | null
   contacts: ContactResponse[]
   owner_info?: UserBasicInfo
   creator_info?: UserBasicInfo

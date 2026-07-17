@@ -229,6 +229,8 @@ const columns = [
   { key: 'company_scale', title: '规模', width: '120px' },
   { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
   { key: 'score', title: '热力值', align: 'center' as const, width: '100px' },
+  { key: 'license_status', title: '授权状态', align: 'center' as const, width: '100px' },
+  { key: 'license_expiry_date', title: '授权到期', width: '120px' },
   { key: 'default_procurement_method', title: '默认采购方式', width: '140px' },
   { key: 'owner', title: '负责人', width: '100px' },
   { key: 'creator', title: '创建人', width: '100px' },
@@ -575,6 +577,41 @@ const formatDateTime = (dateStr?: string): string => {
   })
 }
 
+const formatDate = (dateStr?: string | null): string => {
+  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return '-'
+  const date = new Date(dateStr)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  })
+}
+
+const isDateBeforeToday = (dateStr?: string | null): boolean => {
+  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return false
+  const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return date < today
+}
+
+const getLicenseStatusLabel = (row: CustomerResponse): string => {
+  if (row.license_expiry_date === null || row.license_expiry_date.trim() === '') return '未授权'
+  if (isDateBeforeToday(row.license_expiry_date)) return '已过期'
+  if (row.license_type === 'TRIAL') return '试用'
+  if (row.license_type === 'OFFICIAL') return '正式'
+  return '已授权'
+}
+
+const getLicenseStatusClass = (row: CustomerResponse): string => {
+  if (row.license_expiry_date === null || row.license_expiry_date.trim() === '') return 'license-badge--none'
+  if (isDateBeforeToday(row.license_expiry_date)) return 'license-badge--expired'
+  if (row.license_type === 'TRIAL') return 'license-badge--trial'
+  return 'license-badge--official'
+}
+
 // 状态映射函数（数字状态 → 字符串状态）
 const mapCustomerStatus = (status: number): 'following' | 'won' | 'lost' | 'expired' => {
   const map: Record<number, 'following' | 'won' | 'lost' | 'expired'> = {
@@ -706,6 +743,18 @@ watchEffect(() => {
       <!-- 热力值 -->
       <template #cell-score="{ row }">
         <ScoreIndicator :score="row.score ?? null" mode="badge" />
+      </template>
+
+      <!-- 授权状态 -->
+      <template #cell-license_status="{ row }">
+        <span class="license-badge" :class="getLicenseStatusClass(row)">
+          {{ getLicenseStatusLabel(row) }}
+        </span>
+      </template>
+
+      <!-- 授权到期 -->
+      <template #cell-license_expiry_date="{ row }">
+        {{ formatDate(row.license_expiry_date) }}
       </template>
 
       <!-- 默认采购方式 -->
@@ -905,6 +954,45 @@ watchEffect(() => {
   &:hover {
     color: $wolf-text-link-hover-v2;
   }
+}
+
+.license-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 24px;
+  padding: 0 $wolf-space-sm-v2;
+  border-radius: $wolf-radius-v2;
+  border: 1px solid transparent;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.license-badge--official {
+  color: $wolf-success-text-v2;
+  background: $wolf-success-bg-v2;
+  border-color: $wolf-success-bg-v2;
+}
+
+.license-badge--trial {
+  color: $wolf-warning-text-v2;
+  background: $wolf-warning-bg-v2;
+  border-color: $wolf-warning-bg-v2;
+}
+
+.license-badge--expired {
+  color: $wolf-danger-text-v2;
+  background: $wolf-danger-bg-v2;
+  border-color: $wolf-danger-bg-v2;
+}
+
+.license-badge--none {
+  color: $wolf-text-tertiary-v2;
+  background: $wolf-bg-muted-v2;
+  border-color: $wolf-border-light-v2;
 }
 
 // 简易弹窗样式（临时使用，后续替换为 shadcn-vue Dialog）

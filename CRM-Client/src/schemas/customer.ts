@@ -46,7 +46,9 @@ export const CustomerResponseSchema = z.object({
   creator_id: z.string(),
   created_time: z.string(), // 放宽日期格式验证
   last_modified_time: z.string(), // 放宽日期格式验证
-  version: z.number().int().nonnegative()
+  version: z.number().int().nonnegative(),
+  license_expiry_date: z.string().nullable().optional(),
+  license_type: z.string().nullable().optional()
 })
 
 export type CustomerResponse = z.infer<typeof CustomerResponseSchema>

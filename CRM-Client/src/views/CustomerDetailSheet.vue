@@ -166,13 +166,38 @@ const setActivePanel = (panel: string): void => {
 }
 
 // ==================== Helper Functions ====================
-const formatDate = (dateStr: string | undefined): string => {
-  if (dateStr === undefined || dateStr.trim() === '') return '-'
+const formatDate = (dateStr: string | null | undefined): string => {
+  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return '-'
   const date = new Date(dateStr)
+  if (Number.isNaN(date.getTime())) return '-'
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+const isDateBeforeToday = (dateStr: string | null | undefined): boolean => {
+  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return false
+  const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return date < today
+}
+
+const getLicenseStatusLabel = (licenseType: string | null | undefined, expiryDate: string | null | undefined): string => {
+  if (expiryDate === undefined || expiryDate === null || expiryDate.trim() === '') return '未授权'
+  if (isDateBeforeToday(expiryDate)) return '已过期'
+  if (licenseType === 'TRIAL') return '试用'
+  if (licenseType === 'OFFICIAL') return '正式'
+  return '已授权'
+}
+
+const getLicenseStatusClass = (licenseType: string | null | undefined, expiryDate: string | null | undefined): string => {
+  if (expiryDate === undefined || expiryDate === null || expiryDate.trim() === '') return 'license-badge--none'
+  if (isDateBeforeToday(expiryDate)) return 'license-badge--expired'
+  if (licenseType === 'TRIAL') return 'license-badge--trial'
+  return 'license-badge--official'
 }
 
 // ==================== Data Loading ====================
@@ -596,6 +621,21 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                       <div class="attribute-value">{{ customer?.default_procurement_method_info?.name || '-' }}</div>
                     </div>
                     <div class="attribute-item">
+                      <div class="attribute-label">授权状态</div>
+                      <div class="attribute-value">
+                        <span
+                          class="license-badge"
+                          :class="getLicenseStatusClass(customer?.license_type, customer?.license_expiry_date)"
+                        >
+                          {{ getLicenseStatusLabel(customer?.license_type, customer?.license_expiry_date) }}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">授权到期</div>
+                      <div class="attribute-value">{{ formatDate(customer?.license_expiry_date) }}</div>
+                    </div>
+                    <div class="attribute-item">
                       <div class="attribute-label">创建人</div>
                       <div class="attribute-value">{{ customer?.creator_info?.name || '-' }}</div>
                     </div>
@@ -1002,6 +1042,45 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   font-size: $wolf-font-size-body-v2;
   color: $wolf-text-secondary-v2;
   font-weight: $wolf-font-weight-medium-v2;
+}
+
+.license-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 24px;
+  padding: 0 $wolf-space-sm-v2;
+  border-radius: $wolf-radius-v2;
+  border: 1px solid transparent;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.license-badge--official {
+  color: $wolf-success-text-v2;
+  background: $wolf-success-bg-v2;
+  border-color: $wolf-success-bg-v2;
+}
+
+.license-badge--trial {
+  color: $wolf-warning-text-v2;
+  background: $wolf-warning-bg-v2;
+  border-color: $wolf-warning-bg-v2;
+}
+
+.license-badge--expired {
+  color: $wolf-danger-text-v2;
+  background: $wolf-danger-bg-v2;
+  border-color: $wolf-danger-bg-v2;
+}
+
+.license-badge--none {
+  color: $wolf-text-tertiary-v2;
+  background: $wolf-bg-muted-v2;
+  border-color: $wolf-border-light-v2;
 }
 
 // Profile card styles
