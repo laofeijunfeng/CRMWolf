@@ -49,7 +49,7 @@ from sqlalchemy import create_engine, text
 from app.core.config import get_settings
 
 settings = get_settings()
-engine = create_engine(settings.DATABASE_URL)
+engine = create_engine(settings.get_database_url())
 
 with engine.connect() as conn:
     result = conn.execute(text('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = \"users\"'))
@@ -73,7 +73,7 @@ from sqlalchemy import create_engine, text
 from app.core.config import get_settings
 
 settings = get_settings()
-engine = create_engine(settings.DATABASE_URL)
+engine = create_engine(settings.get_database_url())
 
 with engine.connect() as conn:
     result = conn.execute(text('SELECT COUNT(*) FROM roles'))
