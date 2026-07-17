@@ -78,8 +78,20 @@ const { handleSubmit, setValues } = useForm({
     company_website: '',
     main_business: '',
     project_background: ''
-  }
+  } as unknown as CustomerForm
 })
+
+function normalizeCompanyScale(value: string | null): CustomerForm['company_scale'] | undefined {
+  return companyScaleOptions.some(option => option.value === value)
+    ? value as CustomerForm['company_scale']
+    : undefined
+}
+
+function normalizeCustomerSource(value: string | null): CustomerForm['source'] | undefined {
+  return customerSourceOptions.some(option => option.value === value)
+    ? value as CustomerForm['source']
+    : undefined
+}
 
 const fetchCustomerDetail = async () => {
   if (!isEdit.value) return
@@ -91,14 +103,14 @@ const fetchCustomerDetail = async () => {
       account_name: res.account_name || '',
       city: res.city || '',
       address: res.address || '',
-      company_scale: (res.company_scale || undefined) as CustomerForm['company_scale'],
-      source: (res.source || undefined) as CustomerForm['source'],
+      company_scale: normalizeCompanyScale(res.company_scale),
+      source: normalizeCustomerSource(res.source),
       default_procurement_method_id: res.default_procurement_method_id || undefined,
       company_background: res.company_background || '',
       company_website: res.company_website || '',
       main_business: res.main_business || '',
       project_background: res.project_background || ''
-    })
+    } as Partial<CustomerForm>)
     profileStatus.value = res.profile_status
   } catch (error: unknown) {
     handleApiError(error, '获取客户详情')
