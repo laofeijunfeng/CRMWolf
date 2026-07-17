@@ -81,7 +81,7 @@ const { handleSubmit, resetForm, setValues, values } = useForm<CustomerForm | Cu
     company_scale: undefined,
     source: undefined,
     default_procurement_method_id: undefined
-  } as CustomerCreateForm
+  } as unknown as CustomerCreateForm
 })
 
 // State
@@ -150,7 +150,7 @@ watch([(): boolean => props.open, (): number | undefined => props.customerId], a
         company_website: customer.company_website ?? '',
         main_business: customer.main_business ?? '',
         project_background: customer.project_background ?? ''
-      })
+      } as Partial<CustomerForm>)
       // Reset dirty state after loading
       isDirty.value = false
     } catch (error) {
@@ -169,7 +169,7 @@ watch([(): boolean => props.open, (): number | undefined => props.customerId], a
         company_scale: undefined,
         source: undefined,
         default_procurement_method_id: undefined
-      } as CustomerCreateForm
+      } as unknown as CustomerCreateForm
     })
     isDirty.value = false
   }
