@@ -622,6 +622,8 @@ def get_customers(
             'version': customer.version,
             'score': customer.score,
             'score_updated_at': customer.score_updated_at,
+            'license_expiry_date': customer.license_expiry_date,
+            'license_type': customer.license_type,
             'owner_info': users_info.get(customer.owner_id) if customer.owner_id else None,
             'creator_info': users_info.get(customer.creator_id) if customer.creator_id else None,
             'default_procurement_method_info': procurement_methods_info.get(customer.default_procurement_method_id) if customer.default_procurement_method_id else None
