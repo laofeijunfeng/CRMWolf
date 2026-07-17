@@ -136,7 +136,9 @@ def get_payment_plans(
 @router.get("/payment-plans", response_model=PaginatedResponse[PaymentPlanResponse], summary="查询回款计划列表", description="支持按状态、负责人、日期范围等条件筛选并分页查询回款计划。返回计划详情及关联的客户、商机、合同信息。可用于前端表格渲染和数据筛选。")
 def list_payment_plans(
     plan_status: Optional[str] = Query(None, alias="status", description="回款状态筛选：PENDING, OVERDUE, PARTIAL, COMPLETED"),
+    status_exclude: Optional[str] = Query(None, description="排除的回款状态，多个值用逗号分隔"),
     owner_id: Optional[str] = Query(None, description="负责人飞书ID（合同创建人）"),
+    keyword: Optional[str] = Query(None, description="关键词，支持客户、合同、商机、阶段名称"),
     me: bool = Query(False, description="是否只查询当前用户的计划"),
     due_date_start: Optional[date] = Query(None, description="计划回款日期起始（YYYY-MM-DD）"),
     due_date_end: Optional[date] = Query(None, description="计划回款日期结束（YYYY-MM-DD）"),
@@ -184,7 +186,9 @@ def list_payment_plans(
             skip=skip,
             limit=page_size,
             status=plan_status,
+            status_exclude=status_exclude,
             owner_id=owner_id,
+            keyword=keyword,
             due_date_start=due_date_start,
             due_date_end=due_date_end,
             current_user_id=current_user_id
@@ -822,8 +826,10 @@ def list_payment_records(
     payment_date_end: Optional[date] = Query(None, description="回款日期结束（YYYY-MM-DD）"),
     min_amount: Optional[float] = Query(None, ge=0, description="最小回款金额"),
     creator_id: Optional[str] = Query(None, description="登记人飞书ID"),
+    keyword: Optional[str] = Query(None, description="关键词，支持客户、合同、阶段名称"),
     me: bool = Query(False, description="是否只查询当前用户登记的记录"),
-    approval_status: Optional[str] = Query(None, description="审批状态筛选: pending_submit(待提交), pending_approval(审批中), approved(已通过), rejected(已驳回)"),
+    approval_status: Optional[str] = Query(None, description="审批状态筛选: pending_submit(待提交), pending_approval(审批中), approved(已通过), rejected(已驳回)，多个值用逗号分隔"),
+    approval_status_exclude: Optional[str] = Query(None, description="排除的审批状态，多个值用逗号分隔"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     team_id: int = Depends(get_current_user_team),
@@ -873,8 +879,10 @@ def list_payment_records(
             payment_date_end=payment_date_end,
             min_amount=min_amount,
             creator_id=creator_id,
+            keyword=keyword,
             current_user_id=current_user_id,
-            approval_status=approval_status
+            approval_status=approval_status,
+            approval_status_exclude=approval_status_exclude
         )
 
         # Task 1.4: Calculate pending_approval_me_count

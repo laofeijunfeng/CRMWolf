@@ -46,8 +46,8 @@ class ProcurementMethodResponse(BaseModel):
     description: Optional[str] = Field(None, description="采购方式的详细描述说明")
     is_active: int = Field(..., description="是否启用：1=启用, 0=停用")
     sort_order: int = Field(..., description="排序号（数字越小越靠前）")
-    created_by: Optional[str] = Field(None, description="创建人飞书Open ID")
-    updated_by: Optional[str] = Field(None, description="最后更新人飞书Open ID")
+    created_by: Optional[str] = Field(None, description="创建人系统用户ID")
+    updated_by: Optional[str] = Field(None, description="最后更新人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     updated_time: datetime = Field(..., description="最后更新时间")
     
@@ -92,8 +92,8 @@ class ProcurementStageTemplateResponse(BaseModel):
     description: Optional[str] = Field(None, description="阶段的详细描述说明")
     version: int = Field(..., description="版本号（每次修改自动递增）")
     version_lock: int = Field(..., description="乐观锁版本号（用于并发控制）")
-    created_by: Optional[str] = Field(None, description="创建人飞书Open ID")
-    updated_by: Optional[str] = Field(None, description="最后更新人飞书Open ID")
+    created_by: Optional[str] = Field(None, description="创建人系统用户ID")
+    updated_by: Optional[str] = Field(None, description="最后更新人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     updated_time: datetime = Field(..., description="最后更新时间")
     
@@ -125,7 +125,7 @@ class StageTemplateChangeLogResponse(BaseModel):
     change_type: str = Field(..., description="变更类型：CREATE=创建, UPDATE=更新, DELETE=删除, ROLLBACK=回滚")
     old_data: Optional[str] = Field(None, description="变更前的JSON数据")
     new_data: Optional[str] = Field(None, description="变更后的JSON数据")
-    changed_by: str = Field(..., description="变更人飞书Open ID")
+    changed_by: str = Field(..., description="变更人系统用户ID")
     changed_at: datetime = Field(..., description="变更时间")
     reason: Optional[str] = Field(None, description="变更原因（可选）")
     

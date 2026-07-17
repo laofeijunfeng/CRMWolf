@@ -42,8 +42,15 @@
             </template>
           </el-card>
         </el-col>
-        <el-col :xs="24" :sm="12" :md="8" :lg="6" v-if="deployments.length === 0 && !loadingDeployments">
-          <el-empty description="暂无部署信息" :image-size="80" />
+        <el-col :xs="24" v-if="deployments.length === 0 && !loadingDeployments">
+          <Empty class="min-h-[180px] border-0">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Monitor class="h-5 w-5" aria-hidden="true" />
+              </EmptyMedia>
+              <EmptyTitle class="text-sm font-medium">暂无部署信息</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         </el-col>
       </el-row>
     </div>
@@ -106,6 +113,12 @@
 import { ref, onMounted, watch } from 'vue'
 import { Monitor, Key, Plus, Link, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import deploymentApi from '@/api/deployment'
 import licenseApplicationApi from '@/api/licenseApplication'
 import type { DeploymentInfo } from '@/schemas/deployment'
@@ -127,12 +140,16 @@ const applicationDialogVisible = ref(false)
 const currentDeployment = ref<DeploymentInfo | undefined>()
 const currentApplication = ref<LicenseApplication | undefined>()
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  return error instanceof Error ? error.message : fallback
+}
+
 const loadDeployments = async () => {
   loadingDeployments.value = true
   try {
     deployments.value = await deploymentApi.list(props.customerId)
-  } catch (error: any) {
-    ElMessage.error(error.message || '加载部署信息失败')
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error, '加载部署信息失败'))
   } finally {
     loadingDeployments.value = false
   }
@@ -142,8 +159,8 @@ const loadApplications = async () => {
   loadingApplications.value = true
   try {
     applications.value = await licenseApplicationApi.list(props.customerId)
-  } catch (error: any) {
-    ElMessage.error(error.message || '加载 License 申请失败')
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error, '加载 License 申请失败'))
   } finally {
     loadingApplications.value = false
   }
@@ -177,9 +194,9 @@ const handleDeleteDeployment = async (id: number) => {
     await deploymentApi.deleteDeployment(id)
     ElMessage.success('删除成功')
     loadDeployments()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
-      ElMessage.error(error.message || '删除失败')
+      ElMessage.error(getErrorMessage(error, '删除失败'))
     }
   }
 }
@@ -189,8 +206,8 @@ const handleSetDefault = async (id: number) => {
     await deploymentApi.setDefault(id, props.customerId)
     ElMessage.success('设置默认成功')
     loadDeployments()
-  } catch (error: any) {
-    ElMessage.error(error.message || '设置默认失败')
+  } catch (error: unknown) {
+    ElMessage.error(getErrorMessage(error, '设置默认失败'))
   }
 }
 
@@ -200,9 +217,9 @@ const handleDeleteApplication = async (id: number) => {
     await licenseApplicationApi.deleteApplication(id)
     ElMessage.success('删除成功')
     loadApplications()
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== 'cancel') {
-      ElMessage.error(error.message || '删除失败')
+      ElMessage.error(getErrorMessage(error, '删除失败'))
     }
   }
 }

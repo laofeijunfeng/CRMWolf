@@ -109,7 +109,7 @@ class PaymentRecord(Base):
     payment_date = Column(Date, nullable=False, comment="实际回款日期")
     proof_attachment = Column(String(500), comment="回款凭证附件URL")
     notes = Column(Text, comment="备注")
-    creator_id = Column(String(100), nullable=False, comment="创建人（登记人）飞书用户ID")
+    creator_id = Column(String(100), nullable=False, comment="创建人（登记人）系统用户ID")
     creator_name = Column(String(100), comment="创建人姓名")
     confirmation_status = Column(String(20), nullable=False, default=PaymentConfirmationStatus.PENDING, comment="确认状态：PENDING(待确认), CONFIRMED(已确认), DISPUTED(有争议)")
     approval_phase = Column(
@@ -118,7 +118,7 @@ class PaymentRecord(Base):
         default=ApprovalPhase.DRAFT,
         comment="审批流程状态：draft/pending_review/approved/rejected"
     )
-    confirmed_by = Column(String(100), comment="确认人（财务人员）飞书用户ID")
+    confirmed_by = Column(String(100), comment="确认人（财务人员）系统用户ID")
     confirmed_by_name = Column(String(100), comment="确认人姓名")
     confirmed_time = Column(DateTime, comment="确认入账时间")
     confirmation_notes = Column(Text, comment="确认备注")

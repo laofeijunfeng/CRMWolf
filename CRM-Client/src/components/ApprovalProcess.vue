@@ -17,11 +17,14 @@
       </div>
     </template>
 
-    <el-empty v-if="contractStatus === 'DRAFT'" description="此合同尚未提交审批">
-      <template #image>
-        <el-icon :size="60"><Document /></el-icon>
-      </template>
-    </el-empty>
+    <Empty v-if="contractStatus === 'DRAFT'" class="min-h-[180px] border-0">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Document class="h-5 w-5" aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle class="text-sm font-medium">此合同尚未提交审批</EmptyTitle>
+      </EmptyHeader>
+    </Empty>
 
     <div v-else-if="approvalDetail" class="approval-content">
       <ApprovalTimeline 
@@ -41,6 +44,12 @@ import {
   RefreshLeft, 
   Document 
 } from '@element-plus/icons-vue'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import ApprovalTimeline from './ApprovalTimeline.vue'
 import approvalApi from '@/api/approval'
 import { useUserStore } from '@/stores/user'
@@ -316,7 +325,8 @@ const handleCancel = () => {
     } finally {
       cancelling.value = false
     }
-  }).catch(() => {
+  }).catch((error: unknown) => {
+    console.debug('取消撤回审批', error)
   })
 }
 

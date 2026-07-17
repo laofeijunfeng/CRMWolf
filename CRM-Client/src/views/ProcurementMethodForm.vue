@@ -85,13 +85,19 @@
               </el-button>
             </div>
 
-            <div v-if="form.stages.length === 0" class="empty-stages">
-              <el-empty description="设置采购阶段，点击添加按钮定义流程">
+            <Empty v-if="form.stages.length === 0" class="empty-stages">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Plus class="h-5 w-5" aria-hidden="true" />
+                </EmptyMedia>
+                <EmptyTitle class="text-sm font-medium">设置采购阶段，点击添加按钮定义流程</EmptyTitle>
+              </EmptyHeader>
+              <EmptyContent>
                 <el-button type="primary" @click="handleAddStage">
                   添加第一阶段
                 </el-button>
-              </el-empty>
-            </div>
+              </EmptyContent>
+            </Empty>
 
             <div v-else class="stages-list">
               <transition-group name="list">
@@ -261,7 +267,14 @@
                 </div>
               </el-timeline-item>
             </el-timeline>
-            <el-empty v-else description="添加采购阶段，定义采购流程" />
+            <Empty v-else class="min-h-[180px] border-0">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Plus class="h-5 w-5" aria-hidden="true" />
+                </EmptyMedia>
+                <EmptyTitle class="text-sm font-medium">添加采购阶段，定义采购流程</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           </div>
         </el-col>
       </el-row>
@@ -282,6 +295,13 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, ArrowUp, ArrowDown, Delete, RefreshLeft } from '@element-plus/icons-vue'
+import {
+  Empty,
+  EmptyContent,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import procurementApi from '../api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useHeaderStore } from '@/stores/header'
@@ -422,6 +442,11 @@ const handleSubmit = async () => {
   submitting.value = true
 
   try {
+    if (form.value.id == null) {
+      ElMessage.error('采购方式 ID 缺失')
+      return
+    }
+
     if (isEdit.value) {
       const methodData = {
         name: form.value.name,
@@ -443,7 +468,7 @@ const handleSubmit = async () => {
           description: s.description
         }))
 
-      await procurementApi.fullUpdateProcurementMethod(form.value.id!, {
+      await procurementApi.fullUpdateProcurementMethod(form.value.id, {
         method: methodData,
         stages: stagesData
       })
@@ -465,7 +490,7 @@ const handleSubmit = async () => {
         description: s.description
       }))
 
-      await procurementApi.fullUpdateProcurementMethod(form.value.id!, {
+      await procurementApi.fullUpdateProcurementMethod(form.value.id, {
         method: methodData,
         stages: stagesData
       })

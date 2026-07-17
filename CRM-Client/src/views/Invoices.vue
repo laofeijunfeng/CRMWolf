@@ -10,7 +10,7 @@
  * 组件替换：
  * - ✅ TopBar 集成（useHeaderStore）
  * - ✅ ContextTabs 组件（Segmented Control 模式）
- * - ✅ FilterPanel 组件
+ * - ✅ ListFilterPopover 筛选
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
@@ -19,8 +19,8 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2, Send, RotateCcw, Stamp, Download } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
-import type { FilterValues } from '@/components/crmwolf/filterPanelValues'
+import { DataTable, TableRowActions } from '@/components/crmwolf'
+import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -39,6 +39,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -79,26 +80,35 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== FilterPanel 配置 ====================
-const filterFields = [
-  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索申请单号/客户名称' },
+// ==================== 列表筛选配置 ====================
+const filterFields: ListFilterField[] = [
+  { key: 'keyword', type: 'text', label: '关键字' },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 'DRAFT', label: '草稿' },
+      { value: 'PENDING_REVIEW', label: '待审批' },
+      { value: 'APPROVED', label: '已批准' },
+      { value: 'REJECTED', label: '已驳回' },
+      { value: 'ISSUED', label: '已开票' },
+      { value: 'CANCELLED', label: '已取消' }
+    ]
+  },
   {
     key: 'invoice_type',
-    type: 'select' as const,
+    type: 'enum',
     label: '发票类型',
-    placeholder: '全部类型',
     options: [
       { value: 'VAT_SPECIAL', label: '增值税专用发票' },
-      { value: 'VAT_GENERAL', label: '增值税普通发票' },
-      { value: 'COMMON', label: '普通发票' }
+      { value: 'VAT_NORMAL', label: '增值税普通发票' }
     ]
-  }
+  },
+  { key: 'created_time', type: 'date', label: '创建时间' }
 ]
 
-const filterValues = reactive({
-  keyword: '',
-  invoice_type: ''
-})
+const activeFilters = ref<ListFilterCondition[]>([])
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -122,7 +132,7 @@ const canMarkInvoiced = computed(() => permissionStore.hasPermission('invoice:ma
 const fetchCustomers = async (): Promise<void> => {
   try {
     const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
-    customerOptions.value = response || []
+    customerOptions.value = response ?? []
   } catch (error) {
     handleApiError(error, '获取客户列表')
   }
@@ -143,17 +153,41 @@ const fetchInvoiceApplications = async (): Promise<void> => {
       params.status = 'APPROVED'
     } else if (activeTab.value === 'invoiced') {
       params.status = 'ISSUED'
+    } else {
+      const status = getDelimitedFilterValues(activeFilters.value, 'status')
+      const statusExclude = getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains'])
+      if (status !== null) {
+        params.status = status
+      }
+      if (statusExclude !== null) {
+        params.status_exclude = statusExclude
+      }
     }
 
-    // FilterPanel 筛选
-    if (filterValues.keyword) {
-      params.keyword = filterValues.keyword
+    const keyword = getFilterValue(activeFilters.value, 'keyword')
+    const invoiceType = getDelimitedFilterValues(activeFilters.value, 'invoice_type')
+    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
+
+    if (keyword !== null && keyword !== '') {
+      params.keyword = keyword
     }
-    // TODO: invoice_type 需要后端支持
+    if (invoiceType !== null) {
+      params.invoice_type = invoiceType
+    }
+    const invoiceTypeExclude = getDelimitedFilterValues(activeFilters.value, 'invoice_type', ['neq', 'not_contains'])
+    if (invoiceTypeExclude !== null) {
+      params.invoice_type_exclude = invoiceTypeExclude
+    }
+    if (createdTimeBounds.start !== undefined) {
+      params.created_time_start = createdTimeBounds.start
+    }
+    if (createdTimeBounds.end !== undefined) {
+      params.created_time_end = createdTimeBounds.end
+    }
 
     const response = await invoiceApi.getInvoiceApplications(params)
-    tableData.value = response.items || []
-    pagination.total = response.total || 0
+    tableData.value = response.items ?? []
+    pagination.total = response.total ?? 0
   } catch (error) {
     handleApiError(error, '获取发票申请列表')
   } finally {
@@ -161,15 +195,17 @@ const fetchInvoiceApplications = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: FilterValues): void => {
-  Object.assign(filterValues, values)
+const handleFilterApply = (filters: ListFilterCondition[]): void => {
+  activeFilters.value = filters
+  if (filters.some((filter) => filter.field === 'status')) {
+    activeTab.value = 'all'
+  }
   pagination.current = 1
   fetchInvoiceApplications()
 }
 
 const handleReset = (): void => {
-  filterValues.keyword = ''
-  filterValues.invoice_type = ''
+  activeFilters.value = []
   pagination.current = 1
   fetchInvoiceApplications()
 }
@@ -356,7 +392,7 @@ const getInvoiceTypeText = (type: string): string => {
     'VAT_GENERAL': '增值税普通发票',
     'COMMON': '普通发票'
   }
-  return map[type] || type
+  return map[type] ?? type
 }
 
 const getInvoiceTypeClass = (type: string): string => {
@@ -366,7 +402,7 @@ const getInvoiceTypeClass = (type: string): string => {
     'VAT_GENERAL': 'status-success',
     'COMMON': 'status-default'
   }
-  return map[type] || 'status-default'
+  return map[type] ?? 'status-default'
 }
 
 const formatDateTime = (dateStr: string): string => {
@@ -420,13 +456,6 @@ watchEffect(() => {
 
 <template>
   <div class="invoices-page">
-    <!-- FilterPanel -->
-    <FilterPanel
-      :fields="filterFields"
-      @search="handleSearch"
-      @reset="handleReset"
-    />
-
     <!-- DataTable -->
     <DataTable
       :columns="columns"
@@ -435,9 +464,14 @@ watchEffect(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
+      height="calc(100vh - 136px)"
       empty-title="暂无发票申请"
+      v-model:filters="activeFilters"
+      :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      @filter-apply="handleFilterApply"
+      @filter-reset="handleReset"
     >
       <!-- 申请单号 -->
       <template #cell-application_number="{ row }">

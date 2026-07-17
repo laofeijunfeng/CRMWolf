@@ -15,6 +15,12 @@ import {
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -304,11 +310,15 @@ const isPdf = (file: FileAttachmentItem): boolean => getExtension(file) === 'pdf
       </article>
     </div>
 
-    <div v-else class="file-attachment__empty">
-      <CheckCircle2 v-if="mode === 'readonly'" class="file-attachment__empty-icon" aria-hidden="true" />
-      <Upload v-else class="file-attachment__empty-icon" aria-hidden="true" />
-      <span>{{ emptyText }}</span>
-    </div>
+    <Empty v-else class="file-attachment__empty">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <CheckCircle2 v-if="mode === 'readonly'" class="h-5 w-5" aria-hidden="true" />
+          <Upload v-else class="h-5 w-5" aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle class="text-sm font-medium">{{ emptyText }}</EmptyTitle>
+      </EmptyHeader>
+    </Empty>
 
     <Dialog v-model:open="previewOpen">
       <DialogContent class="file-preview-dialog">

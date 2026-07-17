@@ -256,11 +256,18 @@
         </Card>
 
         <!-- 移动端空态 -->
-        <WolfEmpty
+        <Empty
           v-if="rows.length === 0"
-          title="暂无待审批事项"
-          description="所有回款与发票申请都已处理完毕"
-        />
+          class="min-h-[220px] border-0"
+        >
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Clock class="h-5 w-5" aria-hidden="true" />
+            </EmptyMedia>
+            <EmptyTitle>暂无待审批事项</EmptyTitle>
+            <EmptyDescription>所有回款与发票申请都已处理完毕</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
 
         <!-- 移动端分页 -->
         <div v-if="rows.length > 0" class="flex flex-col items-center gap-2 py-4 pb-[env(safe-area-inset-bottom)]">
@@ -484,12 +491,18 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { cn } from '@/lib/utils'
 // Element Plus components for remaining template sections (none remaining after refactor)
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
-import WolfEmpty from '@/components/WolfEmpty.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import { useApprovalStore } from '@/stores/approval'

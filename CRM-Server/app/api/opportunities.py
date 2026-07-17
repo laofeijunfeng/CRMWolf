@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from datetime import date
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, require_permission, get_current_user_team, check_opportunity_edit_permission, check_opportunity_delete_permission
@@ -54,11 +55,21 @@ def create_opportunity(
 def get_opportunities(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
-    status: int = Query(None, ge=0, le=2, description="商机状态：0:跟进中, 1:已赢单, 2:已输单"),
+    opportunity_status: Optional[str] = Query(None, alias="status", description="商机状态：0:跟进中, 1:已赢单, 2:已输单，多个值用逗号分隔"),
+    status_exclude: Optional[str] = Query(None, description="排除的商机状态，多个值用逗号分隔"),
     stage_id: int = Query(None, description="采购阶段ID（已废弃，保留用于兼容）"),
     owner_id: str = Query(None, description="负责人ID"),
+    owner_id_exclude: Optional[str] = Query(None, description="排除的负责人ID，多个值用逗号分隔"),
     customer_id: int = Query(None, description="客户ID"),
     keyword: str = Query(None, description="关键词搜索"),
+    customer_keyword: str = Query(None, description="客户名称关键词"),
+    license_type: str = Query(None, description="授权模式"),
+    license_type_exclude: Optional[str] = Query(None, description="排除的授权模式，多个值用逗号分隔"),
+    purchase_type: str = Query(None, description="采购类型"),
+    purchase_type_exclude: Optional[str] = Query(None, description="排除的采购类型，多个值用逗号分隔"),
+    stage_name: str = Query(None, description="销售阶段名称"),
+    expected_closing_date_start: date = Query(None, description="预计成交日期起始"),
+    expected_closing_date_end: date = Query(None, description="预计成交日期结束"),
     order_by: str = Query(None, description="排序字段"),
     order_dir: str = Query(None, description="排序方向（asc/desc）"),
     team_id: int = Depends(get_current_user_team),
@@ -78,7 +89,8 @@ def get_opportunities(
 
     # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
     actual_owner_id = owner_id
-    if actual_owner_id is not None and actual_owner_id != str(current_user.id):
+    requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+    if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids):
         if not has_view_all:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -94,11 +106,21 @@ def get_opportunities(
         team_id=team_id,
         skip=skip,
         limit=limit,
-        status=status,
+        status=opportunity_status,
+        status_exclude=status_exclude,
         stage_id=stage_id,
         owner_id=actual_owner_id,
+        owner_id_exclude=owner_id_exclude,
         customer_id=customer_id,
         keyword=keyword,
+        customer_keyword=customer_keyword,
+        license_type=license_type,
+        license_type_exclude=license_type_exclude,
+        purchase_type=purchase_type,
+        purchase_type_exclude=purchase_type_exclude,
+        stage_name=stage_name,
+        expected_closing_date_start=expected_closing_date_start,
+        expected_closing_date_end=expected_closing_date_end,
         order_by=order_by,
         order_dir=order_dir
     )

@@ -223,12 +223,18 @@
               </div>
             </el-timeline-item>
           </el-timeline>
-          <!-- ✅ P0: Copywriting - Invitation to act（不是 mood） -->
-          <WolfEmpty
+          <Empty
             v-else
-            title="设置审批流程"
-            description="点击上方按钮添加审批节点"
-          />
+            class="min-h-[180px] border-0"
+          >
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Edit class="h-5 w-5" aria-hidden="true" />
+              </EmptyMedia>
+              <EmptyTitle>设置审批流程</EmptyTitle>
+              <EmptyDescription>点击上方按钮添加审批节点</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         </el-descriptions-item>
       </el-descriptions>
     </el-dialog>
@@ -246,8 +252,14 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError, showSuccess, getEmptyStateMessage } from '@/utils/errorMessages'
-import WolfEmpty from '@/components/WolfEmpty.vue'
 import { Plus, Search, ArrowLeft, MagicStick, Edit } from '@element-plus/icons-vue'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import ApprovalFlowAIDialog from '@/components/ApprovalFlowAIDialog.vue'
 import approvalFlowApi, { type ApprovalFlow, type ApprovalFlowDetail } from '@/api/approvalFlow'
 
@@ -372,8 +384,10 @@ const handleToggleStatus = (flow: ApprovalFlowDetail) => {
       type: 'warning'
     }
   ).then(async () => {
+    if (flow.id == null) return
+
     try {
-      await approvalFlowApi.updateApprovalFlow(flow.id!, { is_active: flow.is_active ? 0 : 1 })
+      await approvalFlowApi.updateApprovalFlow(flow.id, { is_active: flow.is_active ? 0 : 1 })
       // ✅ P0: Copywriting - 具体化的成功提示
       showSuccess(action, '审批流程')
       fetchApprovalFlows()

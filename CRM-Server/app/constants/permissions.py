@@ -226,8 +226,11 @@ ROLE_PERMISSIONS_MAPPING = {
         "contract:view:own", "contract:create", "contract:edit:own",
         "contract:delete:own",  # ← 补充删除权限
         "contract:submit",
-        "invoice:view:own", "invoice:create",
-        "payment:view:own", "payment:plan:view:all",
+        "invoice:view:own", "invoice:create", "invoice:edit:own", "invoice:delete:own",
+        "invoice:submit", "invoice:withdraw",
+        "invoice:title:create", "invoice:title:edit", "invoice:title:delete", "invoice:title:set_default",
+        "payment:view:own", "payment:register",
+        "payment:plan:view:all", "payment:plan:create", "payment:plan:edit", "payment:plan:delete",
         "statistics:view", "score:config:view", "report:view:own",
     ],
     "FINANCE": [

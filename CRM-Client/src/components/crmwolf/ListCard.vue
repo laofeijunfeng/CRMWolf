@@ -9,6 +9,11 @@
  * 无障碍：WCAG AA 级别（焦点、对比度、aria-label）
  */
 import { Card } from '@/components/ui/card'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 
 interface Props {
   /** 标题 */
@@ -79,7 +84,11 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
       <!-- Empty State -->
       <div v-else-if="items.length === 0" class="list-card-empty">
         <slot name="empty">
-          {{ emptyText }}
+          <Empty class="min-h-[160px] border-0 p-0">
+            <EmptyHeader>
+              <EmptyTitle class="text-sm font-medium">{{ emptyText }}</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         </slot>
       </div>
 
@@ -217,9 +226,6 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 // ==================== Empty State ====================
 .list-card-empty {
   padding: $wolf-space-2xl-v2;
-  text-align: center;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-body-v2;
 }
 
 // ==================== List Items ====================

@@ -148,6 +148,7 @@ def _make_contract(db, *, total_amount, license_type="SUBSCRIPTION",
         subscription_years=1,
         standard_unit_price=10000,
         status=status,
+        owner_id="u1",
         creator_id="u1",
     )
     db.add(contract)

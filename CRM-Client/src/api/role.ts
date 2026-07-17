@@ -59,7 +59,7 @@ export interface RolePermissionsUpdate {
 
 const roleApi = {
   getRoles: async (params?: RoleQueryParams): Promise<RoleResponse[]> => {
-    const response = await request.get<RoleResponse[]>('/v1/roles/', { params })
+    const response = await request.get<RoleResponse[]>('/v1/roles', { params })
     return response
   },
 
@@ -69,7 +69,7 @@ const roleApi = {
   },
 
   createRole: async (data: RoleCreate) => {
-    const response = await request.post<RoleResponse>('/v1/roles/', data)
+    const response = await request.post<RoleResponse>('/v1/roles', data)
     return response
   },
 

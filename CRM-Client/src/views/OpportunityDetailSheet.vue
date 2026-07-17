@@ -6,7 +6,6 @@
  * OpportunityDetailContent.vue 复用组件承载。
  */
 import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
 import {
   Sheet
 } from '@/components/ui/sheet'
@@ -18,6 +17,22 @@ interface CreateContractPayload {
   opportunityId: number
   customerId: number
   customerName: string
+  opportunityName: string
+  totalAmount: number
+  userCount: number
+  licenseType: string
+  subscriptionYears: number | null
+}
+
+interface ContractOpportunityContext {
+  id: number
+  opportunity_name: string
+  customer_id: number
+  customer_name?: string
+  total_amount: number
+  user_count: number
+  license_type: string
+  subscription_years: number | null
 }
 
 interface Props {
@@ -31,12 +46,11 @@ const emit = defineEmits<{
   'refresh': []
 }>()
 
-const router = useRouter()
-
 // Contract dialog state
 const showContractDialog = ref(false)
 const contractDialogCustomerId = ref<number | undefined>(undefined)
 const contractDialogCustomerName = ref<string | undefined>(undefined)
+const contractDialogOpportunity = ref<ContractOpportunityContext | null>(null)
 
 const visibleModel = computed({
   get: () => props.visible,
@@ -55,6 +69,16 @@ function handleCreateContract(payload: CreateContractPayload): void {
   // Open contract dialog with locked customer
   contractDialogCustomerId.value = payload.customerId
   contractDialogCustomerName.value = payload.customerName
+  contractDialogOpportunity.value = {
+    id: payload.opportunityId,
+    opportunity_name: payload.opportunityName,
+    customer_id: payload.customerId,
+    customer_name: payload.customerName,
+    total_amount: payload.totalAmount,
+    user_count: payload.userCount,
+    license_type: payload.licenseType,
+    subscription_years: payload.subscriptionYears
+  }
   showContractDialog.value = true
 }
 
@@ -84,6 +108,7 @@ function handleContractSuccess(): void {
     :customer-id="contractDialogCustomerId"
     :customer-name="contractDialogCustomerName"
     :customer-locked="true"
+    :fixed-opportunity="contractDialogOpportunity"
     @success="handleContractSuccess"
   />
 </template>

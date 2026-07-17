@@ -16,6 +16,22 @@ from app.schemas.opportunity import (
 )
 
 
+def _split_csv(value: Optional[str]) -> List[str]:
+    if value is None:
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _split_int_csv(value: Optional[str]) -> List[int]:
+    values = []
+    for item in _split_csv(value):
+        try:
+            values.append(int(item))
+        except ValueError:
+            continue
+    return values
+
+
 class OpportunityStageCRUD:
     def get_by_id(self, db: Session, stage_id: int) -> Optional[OpportunityStage]:
         return db.query(OpportunityStage).filter(OpportunityStage.id == stage_id).first()
@@ -146,26 +162,58 @@ class OpportunityCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[int] = None,
+        status: Optional[str] = None,
+        status_exclude: Optional[str] = None,
         stage_id: Optional[int] = None,
         owner_id: Optional[str] = None,
+        owner_id_exclude: Optional[str] = None,
         customer_id: Optional[int] = None,
         keyword: Optional[str] = None,
+        customer_keyword: Optional[str] = None,
+        license_type: Optional[str] = None,
+        license_type_exclude: Optional[str] = None,
+        purchase_type: Optional[str] = None,
+        purchase_type_exclude: Optional[str] = None,
+        stage_name: Optional[str] = None,
+        expected_closing_date_start: Optional[date] = None,
+        expected_closing_date_end: Optional[date] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None
     ) -> Tuple[List[Opportunity], int]:
         query = db.query(Opportunity).filter(Opportunity.team_id == team_id)
 
-        if status is not None:
-            query = query.filter(Opportunity.status == status)
+        status_values = _split_int_csv(status)
+        if status_values:
+            query = query.filter(Opportunity.status.in_(status_values))
+        status_exclude_values = _split_int_csv(status_exclude)
+        if status_exclude_values:
+            query = query.filter(Opportunity.status.notin_(status_exclude_values))
         if stage_id is not None:
             query = query.filter(Opportunity.procurement_stage_id == stage_id)
         if owner_id is not None:
-            query = query.filter(Opportunity.owner_id == owner_id)
+            query = query.filter(Opportunity.owner_id.in_(_split_csv(owner_id)))
+        if owner_id_exclude:
+            query = query.filter(Opportunity.owner_id.notin_(_split_csv(owner_id_exclude)))
         if customer_id is not None:
             query = query.filter(Opportunity.customer_id == customer_id)
         if keyword:
             query = query.filter(Opportunity.opportunity_name.like(f"%{keyword}%"))
+        if customer_keyword:
+            query = query.filter(Opportunity.customer.has(Customer.account_name.like(f"%{customer_keyword}%")))
+        if license_type:
+            query = query.filter(Opportunity.license_type.in_(_split_csv(license_type)))
+        if license_type_exclude:
+            query = query.filter(Opportunity.license_type.notin_(_split_csv(license_type_exclude)))
+        if purchase_type:
+            query = query.filter(Opportunity.purchase_type.in_(_split_csv(purchase_type)))
+        if purchase_type_exclude:
+            query = query.filter(Opportunity.purchase_type.notin_(_split_csv(purchase_type_exclude)))
+        if stage_name:
+            query = query.filter(Opportunity.current_stage_name.like(f"%{stage_name}%"))
+        if expected_closing_date_start:
+            query = query.filter(Opportunity.expected_closing_date >= expected_closing_date_start)
+        if expected_closing_date_end:
+            query = query.filter(Opportunity.expected_closing_date <= expected_closing_date_end)
 
         total = query.count()
 

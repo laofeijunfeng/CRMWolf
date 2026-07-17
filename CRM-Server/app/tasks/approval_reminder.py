@@ -218,6 +218,23 @@ class ApprovalReminderScheduler:
         users = role_crud.get_role_users(db, role.id, team_id)
         return users
 
+    def _get_submitter(self, db, submitter_id: str) -> Optional[User]:
+        """按当前系统用户ID查找提交人，兼容历史飞书 open_id 数据。"""
+        if not submitter_id:
+            return None
+
+        try:
+            user_id = int(submitter_id)
+        except (TypeError, ValueError):
+            user_id = None
+
+        if user_id is not None:
+            submitter = db.query(User).filter(User.id == user_id).first()
+            if submitter:
+                return submitter
+
+        return db.query(User).filter(User.feishu_open_id == submitter_id).first()
+
     def _has_sent_reminder(self, approval_key: str, threshold_hours: int) -> bool:
         """检查是否已发送过该级别的提醒
 
@@ -348,18 +365,7 @@ class ApprovalReminderScheduler:
 
         # 通知提交人
         try:
-            # 获取提交人信息
-            submitter = db.query(User).filter(
-                User.feishu_open_id == approval.submitter_id
-            ).first()
-
-            if not submitter:
-                # 如果通过 feishu_open_id 找不到，尝试通过 ID 查找
-                try:
-                    submitter_id = int(approval.submitter_id)
-                    submitter = db.query(User).filter(User.id == submitter_id).first()
-                except ValueError:
-                    pass
+            submitter = self._get_submitter(db, approval.submitter_id)
 
             if submitter:
                 submitter_open_id = getattr(submitter, 'feishu_open_id', None) or str(submitter.id)
@@ -441,16 +447,7 @@ class ApprovalReminderScheduler:
 
         # 通知提交人
         try:
-            submitter = db.query(User).filter(
-                User.feishu_open_id == approval.submitter_id
-            ).first()
-
-            if not submitter:
-                try:
-                    submitter_id = int(approval.submitter_id)
-                    submitter = db.query(User).filter(User.id == submitter_id).first()
-                except ValueError:
-                    pass
+            submitter = self._get_submitter(db, approval.submitter_id)
 
             if submitter:
                 submitter_open_id = getattr(submitter, 'feishu_open_id', None) or str(submitter.id)

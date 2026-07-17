@@ -131,7 +131,7 @@ describe('Payments approval integration', () => {
   })
 
   it.skip('calls submitApproval(PAYMENT, recordId) on click + success toast', async () => {
-    // TODO: Payments.vue 已重构为 PaymentSidebar + PaymentPlanView，
+    // TODO: Payments.vue 已重构，回款审批入口已迁移到当前回款页面和审批组件中，
     // submit-approval-btn 现在在 ApprovalProcessGeneric 组件中
     // 需要更新测试以适应新的组件结构
     const w = mountPayments()

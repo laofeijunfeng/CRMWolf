@@ -22,6 +22,8 @@ export interface Lead {
   created_time: string
   last_modified_time: string
   version: number
+  score?: number | null
+  score_updated_at?: string | null
 }
 
 export interface LeadDetail {
@@ -67,6 +69,7 @@ export interface LeadListParams {
   skip?: number
   limit?: number
   keyword?: string
+  filters?: string | null
   status?: number
   source?: string
   city?: string
@@ -124,6 +127,16 @@ export interface LeadMarkInvalidRequest {
   reason: string
 }
 
+export interface LeadOwnerFilterOption {
+  id: string
+  name: string
+  is_me: boolean
+}
+
+export interface LeadOwnerFilterOptionsResponse {
+  data: LeadOwnerFilterOption[]
+}
+
 export const leadApi = {
   createLead: (data: LeadCreate) => {
     return request.post<Lead>('/v1/leads/', data)
@@ -177,12 +190,16 @@ export const leadApi = {
     return request.post<Lead>(`/v1/leads/${id}/mark-invalid`, data)
   },
 
-  getPublicLeads: (params?: { skip?: number; limit?: number }) => {
+  getPublicLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters'>) => {
     return request.get<Lead[]>('/v1/leads/public/list', { params })
   },
 
-  getMyLeads: (params?: { skip?: number; limit?: number }) => {
+  getMyLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters'>) => {
     return request.get<Lead[]>('/v1/leads/my/list', { params })
+  },
+
+  getOwnerFilterOptions: (): Promise<LeadOwnerFilterOptionsResponse> => {
+    return request.get<LeadOwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'lead' } })
   },
 
   getFollowUpReminder: (days?: number) => {

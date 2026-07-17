@@ -4,7 +4,7 @@ from datetime import datetime
 
 
 class OwnerInfo(BaseModel):
-    id: str = Field(..., description="用户飞书Open ID")
+    id: str = Field(..., description="系统用户ID")
     name: str = Field(..., description="用户姓名")
     avatar_url: Optional[str] = Field(None, description="用户头像URL")
     
@@ -74,7 +74,7 @@ class CustomerFollowUpResponse(BaseModel):
     method: str = Field(..., description="跟进方式")
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
     next_action: Optional[str] = Field(None, description="下一步动作内容")
-    creator_id: str = Field(..., description="创建人飞书用户ID")
+    creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     creator_info: Optional[OwnerInfo] = Field(None, description="跟进人信息")
     customer_info: Optional[CustomerBasicInfo] = Field(None, description="客户基本信息")

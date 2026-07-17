@@ -128,7 +128,7 @@ class OpportunityCreate(OpportunityBase):
     customer_id: int = Field(..., description="关联客户ID（关联到 crm_customers 表）")
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID（关联到 crm_procurement_methods 表），如果不指定则使用客户的默认采购方式")
     stage_id: Optional[int] = Field(None, description="初始销售阶段ID（关联到 crm_procurement_stage_templates 表），如果不指定则使用采购方式的默认起始阶段")
-    owner_id: Optional[str] = Field(None, description="负责人（飞书用户ID），如果不指定则默认为创建人")
+    owner_id: Optional[str] = Field(None, description="负责人系统用户ID，如果不指定则默认为创建人")
 
 
 class OpportunityUpdate(BaseModel):
@@ -141,7 +141,7 @@ class OpportunityUpdate(BaseModel):
     decision_maker_count: Optional[int] = Field(None, ge=1, description="采购决策人数（影响销售策略）")
     expected_closing_date: Optional[date] = Field(None, description="预计成交日期")
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID（关联到 crm_procurement_methods 表）")
-    owner_id: Optional[str] = Field(None, description="负责人（飞书用户ID）")
+    owner_id: Optional[str] = Field(None, description="负责人系统用户ID")
     
     @model_validator(mode='after')
     def validate_license_fields(cls, values):
@@ -195,12 +195,12 @@ class OpportunityResponse(BaseModel):
     expected_closing_date: date = Field(..., description="预计成交日期")
     stage_id: Optional[int] = Field(None, description="当前销售阶段ID（已废弃，保留用于兼容）")
     win_probability: int = Field(..., description="当前阶段赢率（0-100，继承自销售阶段配置）")
-    owner_id: str = Field(..., description="负责人飞书用户ID")
+    owner_id: str = Field(..., description="负责人系统用户ID")
     status: int = Field(..., description="商机状态：0:跟进中, 1:已赢单, 2:已输单")
     loss_reason: Optional[str] = Field(None, description="输单原因（status=2时有值）")
     actual_amount: Optional[float] = Field(None, description="实际成交金额（status=1时有值）")
     actual_closing_date: Optional[date] = Field(None, description="实际成交日期（status=1时有值）")
-    creator_id: str = Field(..., description="创建人飞书用户ID")
+    creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
@@ -217,13 +217,13 @@ class CustomerInfo(BaseModel):
     address: Optional[str] = Field(None, description="公司地址")
     company_scale: Optional[str] = Field(None, description="公司规模")
     status: int = Field(..., description="客户状态")
-    owner_id: Optional[str] = Field(None, description="负责人飞书用户ID")
+    owner_id: Optional[str] = Field(None, description="负责人系统用户ID")
     
     model_config = ConfigDict(from_attributes=True)
 
 
 class OwnerInfo(BaseModel):
-    id: str = Field(..., description="用户飞书Open ID")
+    id: str = Field(..., description="系统用户ID")
     name: str = Field(..., description="用户姓名")
     avatar_url: Optional[str] = Field(None, description="用户头像URL")
     

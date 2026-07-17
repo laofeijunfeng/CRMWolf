@@ -10,7 +10,7 @@
  * 不直接调 API（COMPONENTS.md「组件禁直接调 API」），统一通过 useApprovalStore()
  * 的 actions：fetchDetail / submitEntity / approveEntity / cancelEntity。
  *
- * 五态覆盖（C-DSG-4）：Loading(Skeleton) / Empty(WolfEmpty 草稿态 CTA) /
+ * 五态覆盖（C-DSG-4）：Loading(Skeleton) / Empty(components/ui/empty 草稿态 CTA) /
  * Error(ErrorState 通用/forbidden) / Success(toast) / Conflict(409 重载保输入)。
  *
  * C-DSG-7 P0 已落：
@@ -42,8 +42,15 @@ import { FileAttachment } from '@/components/crmwolf'
 import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
 import ApprovalProcessStepper from './ApprovalProcessStepper.vue'
 import ErrorState from './ErrorState.vue'
-import WolfEmpty from './WolfEmpty.vue'
 import { Button } from '@/components/ui/button'
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import {
   Dialog,
   DialogContent,
@@ -437,12 +444,18 @@ onBeforeUnmount((): void => {
     </ErrorState>
 
     <!-- 草稿空态（detail===null 且 404）：提交 CTA -->
-    <WolfEmpty
+    <Empty
       v-else-if="detail === null && notFound"
-      title="尚未提交审批"
-      description="提交后审批人将收到待办通知"
+      class="min-h-[200px] border-0"
     >
-      <template v-if="isSubmitter" #action>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Loader2 class="h-5 w-5" aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle>尚未提交审批</EmptyTitle>
+        <EmptyDescription>提交后审批人将收到待办通知</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent v-if="isSubmitter">
         <Button
           v-permission="submitPermissionCode"
           data-testid="submit-approval-btn"
@@ -452,8 +465,8 @@ onBeforeUnmount((): void => {
           <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
           提交审批
         </Button>
-      </template>
-    </WolfEmpty>
+      </EmptyContent>
+    </Empty>
 
     <!-- 详情态：PENDING / APPROVED / REJECTED / CANCELLED -->
     <div v-else-if="detail" class="approval-process-generic__body">

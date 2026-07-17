@@ -55,7 +55,8 @@ class Contract(Base):
     payment_status = Column(String(20), nullable=False, default=PaymentStatus.UNPAID, comment="合同回款状态：UNPAID, PARTIAL, COMPLETED, OVERDUE")
 
     created_time = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
-    creator_id = Column(String(100), nullable=False, comment="创建人飞书用户ID")
+    owner_id = Column(String(100), nullable=False, comment="合同负责人系统用户ID")
+    creator_id = Column(String(100), nullable=False, comment="创建人系统用户ID")
     last_modified_time = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="最后修改时间")
     deleted_at = Column(DateTime, nullable=True, comment="删除时间（软删除标记）")
 
@@ -75,4 +76,5 @@ class Contract(Base):
         Index('idx_contract_signing_contact', 'signing_contact_id'),
         Index('idx_contract_payment_status', 'payment_status'),
         Index('idx_team_id', 'team_id'),
+        Index('idx_contract_owner_id', 'owner_id'),
     )

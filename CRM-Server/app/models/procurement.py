@@ -20,8 +20,8 @@ class ProcurementMethod(Base):
     is_active = Column(Integer, nullable=False, default=1, comment="是否启用: 1:启用, 0:停用")
     sort_order = Column(Integer, nullable=False, comment="排序号，用于前端展示排序")
 
-    created_by = Column(String(100), nullable=False, comment="创建人飞书用户ID")
-    updated_by = Column(String(100), nullable=True, comment="最后更新人飞书用户ID")
+    created_by = Column(String(100), nullable=False, comment="创建人系统用户ID")
+    updated_by = Column(String(100), nullable=True, comment="最后更新人系统用户ID")
     created_time = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
     updated_time = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="最后更新时间")
 
@@ -57,8 +57,8 @@ class ProcurementStageTemplate(Base):
     version = Column(Integer, nullable=False, default=1, comment="版本号，从1开始，每次修改递增")
     version_lock = Column(Integer, nullable=False, default=0, comment="乐观锁版本，每次更新递增")
 
-    created_by = Column(String(100), nullable=False, comment="创建人飞书用户ID")
-    updated_by = Column(String(100), nullable=True, comment="最后更新人飞书用户ID")
+    created_by = Column(String(100), nullable=False, comment="创建人系统用户ID")
+    updated_by = Column(String(100), nullable=True, comment="最后更新人系统用户ID")
     created_time = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
     updated_time = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="最后更新时间")
 
@@ -108,7 +108,7 @@ class StageTemplateChangeLog(Base):
     old_data = Column(Text, nullable=True, comment="变更前数据，旧值的JSON快照")
     new_data = Column(Text, nullable=True, comment="变更后数据，新值的JSON快照")
 
-    changed_by = Column(String(100), nullable=False, comment="变更人飞书用户ID")
+    changed_by = Column(String(100), nullable=False, comment="变更人系统用户ID")
     changed_at = Column(DateTime, default=func.now(), nullable=False, comment="变更时间")
     reason = Column(String(500), nullable=True, comment="变更原因")
 

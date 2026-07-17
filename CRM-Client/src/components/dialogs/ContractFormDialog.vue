@@ -38,9 +38,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { handleApiError } from '@/utils/errorHandler'
 import contractApi, { type ContractCreate, type ContractUpdate, type ContractResponse, type LicenseType } from '@/api/contract'
-import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
+import { opportunityApi } from '@/api/opportunity'
 import customerApi, { type ContactResponse, type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
 
 // Zod schema for form validation - use coerce for number fields
@@ -66,6 +71,7 @@ interface Props {
   customerId?: number | undefined
   customerName?: string | undefined
   customerLocked?: boolean
+  fixedOpportunity?: ContractOpportunityOption | null
   open: boolean
   contract?: ContractResponse | null
 }
@@ -79,6 +85,7 @@ const props = withDefaults(defineProps<Props>(), {
   customerId: undefined,
   customerName: undefined,
   customerLocked: false,
+  fixedOpportunity: null,
   open: false,
   contract: null
 })
@@ -101,17 +108,31 @@ const { handleSubmit, resetForm, setValues, setFieldValue, values } = useForm({
 const submitting = ref(false)
 const isDirty = ref(false)
 const showConfirmDialog = ref(false)
-const opportunities = ref<OpportunityListResponse[]>([])
+const opportunities = ref<ContractOpportunityOption[]>([])
 const contacts = ref<ContactResponse[]>([])
 const loadingOpportunities = ref(false)
 const loadingContacts = ref(false)
 const customers = ref<CustomerOption[]>([])
 const loadingCustomers = ref(false)
 const customerSearchKeyword = ref('')
+const contractNameManuallyEdited = ref(false)
+const isApplyingGeneratedName = ref(false)
+const lastGeneratedContractName = ref('')
 
 interface CustomerOption {
   id: number
   account_name: string
+}
+
+interface ContractOpportunityOption {
+  id: number
+  opportunity_name: string
+  customer_id: number
+  customer_name?: string
+  total_amount: number
+  user_count: number
+  license_type: string
+  subscription_years: number | null
 }
 
 type CustomerListResponse = CustomerResponse[] | { data?: { items?: CustomerResponse[] } }
@@ -140,6 +161,7 @@ const setLockedCustomerOption = (): void => {
 
 // Computed property for edit mode
 const isEdit = computed(() => !!props.contract)
+const hasFixedOpportunity = computed(() => props.fixedOpportunity !== null && props.fixedOpportunity !== undefined)
 
 // Computed property for dialog visibility
 const visible = computed({
@@ -153,12 +175,49 @@ const licenseTypeOptions = [
   { value: 'PERPETUAL', label: '买断制' }
 ]
 
+const selectedOpportunity = computed<ContractOpportunityOption | null>(() => {
+  if (props.fixedOpportunity !== null) return props.fixedOpportunity
+
+  const opportunityId = Number(values.opportunity_id)
+  if (!Number.isFinite(opportunityId) || opportunityId <= 0) return null
+
+  return opportunities.value.find((opportunity) => opportunity.id === opportunityId) ?? null
+})
+
+const selectedCustomerName = computed<string>(() => {
+  const customerId = Number(values.customer_id)
+  const selectedCustomer = customers.value.find((customer) => customer.id === customerId)
+  const opportunityCustomerName = selectedOpportunity.value?.customer_name?.trim()
+
+  if (selectedCustomer !== undefined) return selectedCustomer.account_name
+  if (opportunityCustomerName !== undefined && opportunityCustomerName !== '') return opportunityCustomerName
+  if (props.customerName !== undefined && props.customerName.trim() !== '') return props.customerName.trim()
+
+  return ''
+})
+
+const opportunitySelectDisabled = computed<boolean>(() => {
+  if (hasFixedOpportunity.value) return true
+  return Number(values.customer_id) <= 0
+})
+
+const opportunitySelectPlaceholder = computed<string>(() => {
+  if (Number(values.customer_id) <= 0) return '请先选择客户'
+  return loadingOpportunities.value ? '加载商机中...' : '请选择商机'
+})
+
 // Fetch available opportunities for this customer
 async function fetchOpportunities(customerId: number): Promise<void> {
   loadingOpportunities.value = true
   try {
     opportunities.value = await opportunityApi.getAvailableForContract(customerId)
+    if (props.fixedOpportunity !== null && !opportunities.value.some((item) => item.id === props.fixedOpportunity?.id)) {
+      opportunities.value = [props.fixedOpportunity, ...opportunities.value]
+    }
   } catch (error) {
+    if (props.fixedOpportunity !== null) {
+      opportunities.value = [props.fixedOpportunity]
+    }
     handleApiError(error, '获取商机列表')
   } finally {
     loadingOpportunities.value = false
@@ -207,6 +266,66 @@ watch(values, () => {
   isDirty.value = true
 }, { deep: true })
 
+watch(() => values.contract_name, (contractName) => {
+  if (isApplyingGeneratedName.value) return
+  contractNameManuallyEdited.value = contractName !== lastGeneratedContractName.value
+})
+
+function normalizeLicenseType(value: string): LicenseType {
+  return value === 'PERPETUAL' ? 'PERPETUAL' : 'SUBSCRIPTION'
+}
+
+function buildContractName(opportunity: ContractOpportunityOption): string {
+  const customerName = selectedCustomerName.value || '客户'
+  const userCount = Number(opportunity.user_count) || 1
+  const licenseType = normalizeLicenseType(opportunity.license_type)
+
+  if (licenseType === 'PERPETUAL') {
+    return `${customerName}-${userCount}人-买断`
+  }
+
+  const years = Number(opportunity.subscription_years ?? 1) || 1
+  return `${customerName}-${userCount}人-订阅${years}年`
+}
+
+function setGeneratedContractName(name: string): void {
+  isApplyingGeneratedName.value = true
+  lastGeneratedContractName.value = name
+  contractNameManuallyEdited.value = false
+  setFieldValue('contract_name', name)
+  setTimeout(() => {
+    isApplyingGeneratedName.value = false
+  }, 0)
+}
+
+function applyOpportunityDefaults(opportunity: ContractOpportunityOption, options: { forceName: boolean }): void {
+  const licenseType = normalizeLicenseType(opportunity.license_type)
+
+  setFieldValue('opportunity_id', opportunity.id)
+  setFieldValue('user_count', opportunity.user_count)
+  setFieldValue('total_amount', opportunity.total_amount)
+  setFieldValue('license_type', licenseType)
+  setFieldValue('subscription_years', licenseType === 'SUBSCRIPTION' ? opportunity.subscription_years ?? 1 : null)
+
+  const generatedName = buildContractName(opportunity)
+  if (options.forceName || !contractNameManuallyEdited.value || values.contract_name === lastGeneratedContractName.value) {
+    setGeneratedContractName(generatedName)
+  } else {
+    lastGeneratedContractName.value = generatedName
+  }
+}
+
+function handleOpportunityChange(value: unknown): void {
+  const opportunityId = Number(value)
+  if (!Number.isFinite(opportunityId) || opportunityId <= 0) return
+  setFieldValue('opportunity_id', opportunityId)
+
+  const opportunity = opportunities.value.find((item) => item.id === opportunityId)
+  if (opportunity !== undefined) {
+    applyOpportunityDefaults(opportunity, { forceName: true })
+  }
+}
+
 // Reset or populate form when dialog opens
 watch(() => props.open, async (newOpen) => {
   if (newOpen) {
@@ -248,12 +367,15 @@ watch(() => props.open, async (newOpen) => {
         values: {
           customer_id: initialCustomerId,
           contract_name: '',
+          opportunity_id: props.fixedOpportunity?.id,
           user_count: 1,
           total_amount: 0,
           license_type: 'SUBSCRIPTION',
           subscription_years: 1
         }
       })
+      contractNameManuallyEdited.value = false
+      lastGeneratedContractName.value = ''
 
       if (props.customerLocked && props.customerId !== undefined) {
         setLockedCustomerOption()
@@ -278,6 +400,10 @@ watch(() => props.open, async (newOpen) => {
           handleApiError(error, '获取客户详情')
         }
       }
+
+      if (props.fixedOpportunity !== null) {
+        applyOpportunityDefaults(props.fixedOpportunity, { forceName: true })
+      }
     }
 
     // Reset dirty state after form is populated/reset
@@ -290,10 +416,11 @@ watch(() => props.open, async (newOpen) => {
 // Watch customer_id changes to fetch opportunities and contacts
 watch(() => values.customer_id, async (newCustomerId) => {
   const customerId = Number(newCustomerId)
-  if (customerId > 0 && !props.customerLocked) {
+  if (customerId > 0 && !props.customerLocked && !hasFixedOpportunity.value) {
     // Clear previous selections
     setFieldValue('opportunity_id', undefined as unknown as number)
     setFieldValue('signing_contact_id', undefined as unknown as number)
+    opportunities.value = []
 
     // Fetch dependent data
     await fetchOpportunities(customerId)
@@ -405,15 +532,53 @@ function continueEditing(): void {
                 <div v-if="loadingCustomers" class="px-2 py-1.5 text-sm text-muted-foreground">
                   加载中...
                 </div>
-                <div v-else-if="customers.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
-                  暂无客户
-                </div>
+                <Empty v-else-if="customers.length === 0" class="min-h-0 border-0 px-2 py-2">
+                  <EmptyHeader>
+                    <EmptyTitle class="text-sm font-normal text-muted-foreground">暂无客户</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
                 <SelectItem
                   v-for="customer in customers"
                   :key="customer.id"
                   :value="customer.id.toString()"
                 >
                   {{ customer.account_name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
+        <!-- Opportunity (required, only in create mode) -->
+        <FormField v-if="!isEdit" v-slot="{ value }" name="opportunity_id">
+          <FormItem>
+            <FormLabel>关联商机 <span class="text-destructive">*</span></FormLabel>
+            <Select
+              :model-value="value !== undefined && value !== null ? String(value) : undefined"
+              :disabled="opportunitySelectDisabled"
+              @update:model-value="handleOpportunityChange"
+            >
+              <FormControl>
+                <SelectTrigger class="h-11 sm:h-8">
+                  <SelectValue :placeholder="opportunitySelectPlaceholder" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <div v-if="loadingOpportunities" class="px-2 py-1.5 text-sm text-muted-foreground">
+                  加载中...
+                </div>
+                <Empty v-else-if="opportunities.length === 0" class="min-h-0 border-0 px-2 py-2">
+                  <EmptyHeader>
+                    <EmptyTitle class="text-sm font-normal text-muted-foreground">暂无可关联商机</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
+                <SelectItem
+                  v-for="opportunity in opportunities"
+                  :key="opportunity.id"
+                  :value="opportunity.id.toString()"
+                >
+                  {{ opportunity.opportunity_name }}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -428,34 +593,10 @@ function continueEditing(): void {
             <FormControl>
               <Input
                 v-bind="componentField as any"
-                placeholder="请输入合同名称"
+                placeholder="选择商机后自动生成，可手动修改"
                 class="h-11 sm:h-8"
               />
             </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- Opportunity (required, only in create mode) -->
-        <FormField v-if="!isEdit" v-slot="{ componentField }" name="opportunity_id">
-          <FormItem>
-            <FormLabel>关联商机 <span class="text-destructive">*</span></FormLabel>
-            <Select v-bind="componentField as any">
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="请选择商机" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem
-                  v-for="opportunity in opportunities"
-                  :key="opportunity.id"
-                  :value="opportunity.id.toString()"
-                >
-                  {{ opportunity.opportunity_name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
             <FormMessage />
           </FormItem>
         </FormField>

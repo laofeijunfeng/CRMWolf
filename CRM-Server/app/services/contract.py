@@ -73,7 +73,13 @@ class ContractPricingService:
             return None
         
         if license_type == "SUBSCRIPTION" and subscription_years:
-            from dateutil.relativedelta import relativedelta
-            return effective_date + relativedelta(years=subscription_years)
+            try:
+                return effective_date.replace(year=effective_date.year + subscription_years)
+            except ValueError:
+                # Match dateutil.relativedelta behavior for leap day expiries.
+                return effective_date.replace(
+                    year=effective_date.year + subscription_years,
+                    day=28,
+                )
         
         return None

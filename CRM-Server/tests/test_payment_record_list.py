@@ -178,6 +178,7 @@ def seed_contract_plan(db_session):
         license_type="SUBSCRIPTION",
         standard_unit_price=10000,
         status=ContractStatus.SIGNED,
+        owner_id="1",
         creator_id="1",
     )
     db_session.add(contract)

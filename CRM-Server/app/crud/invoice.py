@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import Optional, List, Tuple
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from app.models.invoice import InvoiceTitle, InvoiceApplication, InvoiceApplicationStatus, InvoiceType
 from app.models.payment import PaymentPlan, PaymentRecord
@@ -12,6 +12,12 @@ from app.schemas.invoice import (
     InvoiceTitleCreate, InvoiceTitleUpdate,
     InvoiceApplicationCreate, InvoiceApplicationUpdate
 )
+
+
+def _split_csv(value: Optional[str]) -> List[str]:
+    if value is None:
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
 class InvoiceTitleCRUD:
@@ -147,9 +153,14 @@ class InvoiceApplicationCRUD:
         contract_id: Optional[int] = None,
         payment_plan_id: Optional[int] = None,
         status: Optional[str] = None,
+        status_exclude: Optional[str] = None,
+        invoice_type: Optional[str] = None,
+        invoice_type_exclude: Optional[str] = None,
         applicant_id: Optional[str] = None,
         current_user_id: Optional[str] = None,
-        keyword: Optional[str] = None
+        keyword: Optional[str] = None,
+        created_time_start: Optional[date] = None,
+        created_time_end: Optional[date] = None
     ) -> Tuple[List[InvoiceApplication], int]:
         query = db.query(InvoiceApplication).filter(InvoiceApplication.team_id == team_id)
         
@@ -163,13 +174,26 @@ class InvoiceApplicationCRUD:
             query = query.filter(InvoiceApplication.payment_plan_id == payment_plan_id)
         
         if status:
-            query = query.filter(InvoiceApplication.status == status)
+            query = query.filter(InvoiceApplication.status.in_(_split_csv(status)))
+        if status_exclude:
+            query = query.filter(InvoiceApplication.status.notin_(_split_csv(status_exclude)))
+
+        if invoice_type:
+            query = query.filter(InvoiceApplication.invoice_type.in_(_split_csv(invoice_type)))
+        if invoice_type_exclude:
+            query = query.filter(InvoiceApplication.invoice_type.notin_(_split_csv(invoice_type_exclude)))
         
         if applicant_id:
             query = query.filter(InvoiceApplication.applicant_id == applicant_id)
         
         if current_user_id:
             query = query.filter(InvoiceApplication.applicant_id == current_user_id)
+
+        if created_time_start:
+            query = query.filter(InvoiceApplication.created_time >= datetime.combine(created_time_start, time.min))
+
+        if created_time_end:
+            query = query.filter(InvoiceApplication.created_time <= datetime.combine(created_time_end, time.max))
 
         if keyword and keyword.strip():
             like_keyword = f"%{keyword.strip()}%"

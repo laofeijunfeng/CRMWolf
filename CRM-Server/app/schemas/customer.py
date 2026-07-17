@@ -182,7 +182,7 @@ class CustomerBase(BaseModel):
 
 
 class CustomerCreate(CustomerBase):
-    owner_id: Optional[str] = Field(None, description="负责人（飞书用户ID），不传则默认为创建人")
+    owner_id: Optional[str] = Field(None, description="负责人系统用户ID，不传则默认为创建人")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
 
 
@@ -235,13 +235,13 @@ class CustomerResponse(BaseModel):
     company_scale: Optional[str] = Field(None, description="公司规模")
     source: Optional[str] = Field(None, description="客户来源")
     status: int = Field(..., description="客户状态：0:跟进中, 1:已成交, 2:已输单, 3:已沉寂（公海）")
-    owner_id: Optional[str] = Field(None, description="负责人飞书用户ID（status=3时为空）")
+    owner_id: Optional[str] = Field(None, description="负责人系统用户ID（status=3时为空）")
     source_lead_id: Optional[int] = Field(None, description="来源线索ID（从线索转化而来时记录）")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
     loss_reason: Optional[str] = Field(None, description="输单原因（status=2时有值）")
     return_reason: Optional[str] = Field(None, description="退回公海原因（status=3时有值）")
     returned_time: Optional[datetime] = Field(None, description="退回公海时间（status=3时有值）")
-    creator_id: str = Field(..., description="创建人飞书用户ID")
+    creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
@@ -262,7 +262,7 @@ class CustomerResponse(BaseModel):
 
 
 class OwnerInfo(BaseModel):
-    id: str = Field(..., description="用户飞书Open ID")
+    id: str = Field(..., description="系统用户ID")
     name: str = Field(..., description="用户姓名")
     avatar_url: Optional[str] = Field(None, description="用户头像URL")
     
@@ -360,7 +360,7 @@ class CustomerReturnResponse(BaseModel):
 
 
 class CustomerClaimRequest(BaseModel):
-    owner_id: str = Field(..., min_length=1, description="新负责人飞书用户ID")
+    owner_id: str = Field(..., min_length=1, description="新负责人系统用户ID")
     
     @field_validator('owner_id')
     @classmethod
@@ -371,7 +371,7 @@ class CustomerClaimRequest(BaseModel):
 
 
 class CustomerAssignRequest(BaseModel):
-    owner_id: str = Field(..., min_length=1, description="被分配人（负责人）飞书用户ID")
+    owner_id: str = Field(..., min_length=1, description="被分配人（负责人）系统用户ID")
     remark: Optional[str] = Field(None, max_length=500, description="分配备注（说明分配原因等）")
     
     @field_validator('owner_id')
@@ -383,7 +383,7 @@ class CustomerAssignRequest(BaseModel):
 
 
 class OwnerOption(BaseModel):
-    id: str = Field(..., description="用户飞书Open ID")
+    id: str = Field(..., description="系统用户ID")
     name: str = Field(..., description="用户姓名")
     is_me: bool = Field(False, description="是否为当前用户")
 

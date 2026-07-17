@@ -51,9 +51,11 @@
             <div v-if="loading" class="nc-loading" data-testid="approval-bell-loading">
               加载中…
             </div>
-            <div v-else-if="items.length === 0" class="nc-empty" data-testid="approval-bell-empty">
-              暂无待我审批
-            </div>
+            <Empty v-else-if="items.length === 0" class="nc-empty min-h-0 border-0" data-testid="approval-bell-empty">
+              <EmptyHeader>
+                <EmptyTitle class="text-sm font-normal">暂无待我审批</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
             <template v-else>
               <el-dropdown-item
                 v-for="item in items"
@@ -91,6 +93,11 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { Bell } from '@element-plus/icons-vue'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { useApprovalStore } from '@/stores/approval'
 import type { ApprovalListItem, EntityType } from '@/schemas/approvalGeneric'
 import { logger } from '@/utils/logger'

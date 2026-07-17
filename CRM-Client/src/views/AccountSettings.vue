@@ -28,6 +28,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/crmwolf'
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { FormControl, FormDescription, FormField, FormItem, FormLabel } from '@/components/ui/form'
 import { authApi } from '@/api/auth'
 import { changePasswordSchema, type ChangePasswordFormValues } from '@/schemas/account-settings'
@@ -152,10 +158,12 @@ onMounted(() => {
       </AlertDescription>
     </Alert>
 
-    <Alert v-else-if="userInfo === null">
-      <AlertTitle>暂无账户信息</AlertTitle>
-      <AlertDescription>暂时无法显示账户资料，请稍后重试。</AlertDescription>
-    </Alert>
+    <Empty v-else-if="userInfo === null" class="min-h-[220px] border-0">
+      <EmptyHeader>
+        <EmptyTitle>暂无账户信息</EmptyTitle>
+        <EmptyDescription>暂时无法显示账户资料，请稍后重试。</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
 
     <div v-else class="account-settings__cards">
       <Card>

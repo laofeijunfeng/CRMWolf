@@ -128,6 +128,7 @@ def seed_contract_draft(db_session):
         subscription_years=1,
         standard_unit_price=10000,
         status=ContractStatus.DRAFT,
+        owner_id="u1",
         creator_id="u1",
     )
     db_session.add(contract)

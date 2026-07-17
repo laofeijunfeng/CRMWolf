@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import date
 import os
 
 from app.core.database import get_db
@@ -167,9 +168,14 @@ def list_invoice_applications(
     customer_id: Optional[int] = Query(None, description="客户ID"),
     contract_id: Optional[int] = Query(None, description="合同ID"),
     payment_plan_id: Optional[int] = Query(None, description="回款计划ID"),
-    application_status: Optional[str] = Query(None, alias="status", description="申请状态"),
+    application_status: Optional[str] = Query(None, alias="status", description="申请状态，多个值用逗号分隔"),
+    status_exclude: Optional[str] = Query(None, description="排除的申请状态，多个值用逗号分隔"),
+    invoice_type: Optional[str] = Query(None, description="发票类型，多个值用逗号分隔"),
+    invoice_type_exclude: Optional[str] = Query(None, description="排除的发票类型，多个值用逗号分隔"),
     applicant_id: Optional[str] = Query(None, description="申请人ID"),
     keyword: Optional[str] = Query(None, description="关键词，支持申请编号、客户、合同、抬头、税号、发票号码"),
+    created_time_start: Optional[date] = Query(None, description="创建时间起始"),
+    created_time_end: Optional[date] = Query(None, description="创建时间结束"),
     page: Optional[int] = Query(None, ge=1, description="页码（兼容前端 page/page_size）"),
     page_size: Optional[int] = Query(None, ge=1, le=100, description="每页记录数（兼容前端 page/page_size）"),
     me: bool = Query(False, description="是否只查询当前用户申请的数据"),
@@ -220,9 +226,14 @@ def list_invoice_applications(
         contract_id=contract_id,
         payment_plan_id=payment_plan_id,
         status=application_status,
+        status_exclude=status_exclude,
+        invoice_type=invoice_type,
+        invoice_type_exclude=invoice_type_exclude,
         applicant_id=applicant_id,
         current_user_id=current_user_id,
         keyword=keyword,
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
     )
 
     populated_applications = [_populate_application_info(db, app, team_id) for app in applications]

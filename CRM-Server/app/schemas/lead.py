@@ -5,7 +5,7 @@ from app.models.lead import LeadSource, LeadStatus, CompanyScale, FollowUpMethod
 
 
 class OwnerInfo(BaseModel):
-    id: str = Field(..., description="用户飞书Open ID")
+    id: str = Field(..., description="系统用户ID")
     name: str = Field(..., description="用户姓名")
     avatar_url: Optional[str] = Field(None, description="用户头像URL")
     
@@ -94,11 +94,11 @@ class LeadUpdate(BaseModel):
 
 class LeadResponse(LeadBase):
     id: int = Field(..., description="线索ID（主键）")
-    owner_id: Optional[str] = Field(None, description="负责人飞书用户ID")
+    owner_id: Optional[str] = Field(None, description="负责人系统用户ID")
     status: LeadStatus = Field(..., description="线索状态：NEW:新线索, CONTACTED:已联系, QUALIFIED:已确认, CONVERTED:已转化, INVALID:无效")
     invalid_reason: Optional[str] = Field(None, description="无效原因")
     pool_id: Optional[int] = Field(None, description="线索池ID（公海池）")
-    creator_id: str = Field(..., description="创建人飞书用户ID")
+    creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
@@ -146,7 +146,7 @@ class LeadFollowUpCreate(LeadFollowUpBase):
 class LeadFollowUpResponse(LeadFollowUpBase):
     id: int = Field(..., description="跟进记录ID")
     lead_id: int = Field(..., description="线索ID")
-    creator_id: str = Field(..., description="创建人飞书用户ID")
+    creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     creator_info: Optional[OwnerInfo] = Field(None, description="跟进人信息")
 
@@ -155,7 +155,7 @@ class LeadFollowUpResponse(LeadFollowUpBase):
 
 
 class LeadAssignRequest(BaseModel):
-    owner_id: str = Field(..., description="负责人ID（飞书用户ID）")
+    owner_id: str = Field(..., description="负责人系统用户ID")
 
 
 class LeadConvertRequest(BaseModel):

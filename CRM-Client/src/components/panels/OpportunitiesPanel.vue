@@ -8,6 +8,13 @@
  */
 import { Plus } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import {
+  Empty,
+  EmptyContent,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import StatusBadge from '@/components/StatusBadge.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { OpportunityListResponse, OpportunityStatus } from '@/api/opportunity'
@@ -66,8 +73,14 @@ const formatDate = (dateStr: string): string => {
       </template>
 
       <template #empty>
-        <div class="opportunities-empty">
-          <p class="opportunities-empty-text">暂无商机</p>
+        <Empty class="opportunities-empty">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Plus class="h-5 w-5" aria-hidden="true" />
+            </EmptyMedia>
+            <EmptyTitle class="text-sm font-medium">暂无商机</EmptyTitle>
+          </EmptyHeader>
+          <EmptyContent>
           <Button
             type="button"
             size="sm"
@@ -77,7 +90,8 @@ const formatDate = (dateStr: string): string => {
             <Plus class="w-4 h-4 mr-1" />
             新建商机
           </Button>
-        </div>
+          </EmptyContent>
+        </Empty>
       </template>
 
       <template #itemMain="{ item }">
@@ -110,15 +124,8 @@ const formatDate = (dateStr: string): string => {
 }
 
 .opportunities-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: $wolf-space-md-v2;
-}
-
-.opportunities-empty-text {
-  margin: 0;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-body-v2;
+  min-height: 160px;
+  border: 0;
+  padding: 0;
 }
 </style>

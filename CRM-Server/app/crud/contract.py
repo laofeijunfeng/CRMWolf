@@ -2,15 +2,24 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional, List, Tuple
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 import logging
 
 from app.models.contract import Contract, ContractStatus
+from app.models.customer import Customer
+from app.models.opportunity import Opportunity
 from app.schemas.contract import ContractCreate, ContractUpdate
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.contract import ContractPricingService
 
 logger = logging.getLogger(__name__)
+
+
+def _split_csv(value: Optional[str]) -> List[str]:
+    if value is None:
+        return []
+    raw_value = value.value if hasattr(value, "value") else value
+    return [item.strip() for item in str(raw_value).split(",") if item.strip()]
 
 
 class ApprovalService:
@@ -136,10 +145,21 @@ class ContractCRUD:
         limit: int = 100,
         customer_id: Optional[int] = None,
         status: Optional[str] = None,
+        status_exclude: Optional[str] = None,
         contract_number: Optional[str] = None,
         license_type: Optional[str] = None,
+        license_type_exclude: Optional[str] = None,
         keyword: Optional[str] = None,
+        customer_keyword: Optional[str] = None,
+        opportunity_keyword: Optional[str] = None,
         owner_id: Optional[str] = None,
+        owner_id_exclude: Optional[str] = None,
+        signing_date_start: Optional[date] = None,
+        signing_date_end: Optional[date] = None,
+        effective_date_start: Optional[date] = None,
+        effective_date_end: Optional[date] = None,
+        expiry_date_start: Optional[date] = None,
+        expiry_date_end: Optional[date] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None,
         include_deleted: bool = False
@@ -175,20 +195,44 @@ class ContractCRUD:
             query = query.filter(Contract.customer_id == customer_id)
 
         if status:
-            query = query.filter(Contract.status == status)
+            query = query.filter(Contract.status.in_(_split_csv(status)))
+        if status_exclude:
+            query = query.filter(Contract.status.notin_(_split_csv(status_exclude)))
 
         if contract_number:
             query = query.filter(Contract.contract_number.like(f"%{contract_number}%"))
 
         if license_type:
-            query = query.filter(Contract.license_type == license_type)
+            query = query.filter(Contract.license_type.in_(_split_csv(license_type)))
+        if license_type_exclude:
+            query = query.filter(Contract.license_type.notin_(_split_csv(license_type_exclude)))
 
         if keyword:
             query = query.filter(Contract.contract_name.like(f"%{keyword}%"))
 
+        if customer_keyword:
+            query = query.filter(Contract.customer.has(Customer.account_name.like(f"%{customer_keyword}%")))
+
+        if opportunity_keyword:
+            query = query.filter(Contract.opportunity.has(Opportunity.opportunity_name.like(f"%{opportunity_keyword}%")))
+
         if owner_id:
-            # Contract 使用 creator_id 作为负责人字段
-            query = query.filter(Contract.creator_id == owner_id)
+            query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
+        if owner_id_exclude:
+            query = query.filter(Contract.owner_id.notin_(_split_csv(owner_id_exclude)))
+
+        if signing_date_start:
+            query = query.filter(Contract.signing_date >= signing_date_start)
+        if signing_date_end:
+            query = query.filter(Contract.signing_date <= signing_date_end)
+        if effective_date_start:
+            query = query.filter(Contract.effective_date >= effective_date_start)
+        if effective_date_end:
+            query = query.filter(Contract.effective_date <= effective_date_end)
+        if expiry_date_start:
+            query = query.filter(Contract.expiry_date >= expiry_date_start)
+        if expiry_date_end:
+            query = query.filter(Contract.expiry_date <= expiry_date_end)
 
         total = query.count()
 
@@ -218,6 +262,7 @@ class ContractCRUD:
         from app.services.operation_log_service import operation_log_service
         
         contract_data = obj_in.model_dump()
+        explicit_owner_id = contract_data.pop('owner_id', None)
         
         contract_number = BusinessNumberGenerator.generate('CT', db)
         
@@ -234,11 +279,25 @@ class ContractCRUD:
             subscription_years=contract_data.get('subscription_years')
         )
         
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+
+        opportunity = db.query(Opportunity).filter(
+            Opportunity.id == contract_data['opportunity_id'],
+            Opportunity.team_id == team_id
+        ).first()
+        customer = db.query(Customer).filter(
+            Customer.id == contract_data['customer_id'],
+            Customer.team_id == team_id
+        ).first()
+        owner_id = explicit_owner_id or (opportunity.owner_id if opportunity else None) or (customer.owner_id if customer else None) or creator_id
+
         db_obj = Contract(
             contract_number=contract_number,
             standard_unit_price=standard_unit_price,
             expiry_date=expiry_date,
             status=ContractStatus.DRAFT,
+            owner_id=owner_id,
             creator_id=creator_id,
             team_id=team_id,
             **contract_data
@@ -289,10 +348,13 @@ class ContractCRUD:
         team_id: int
     ) -> Contract:
         from app.models.opportunity import Opportunity
+        from app.models.customer import Customer
 
         opportunity = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
         if not opportunity:
             raise ValueError("商机不存在")
+        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        owner_id = opportunity.owner_id or (customer.owner_id if customer else None) or creator_id
 
         contract_number = BusinessNumberGenerator.generate('CT', db)
 
@@ -317,6 +379,7 @@ class ContractCRUD:
             subscription_years=opportunity.subscription_years,
             standard_unit_price=standard_unit_price,
             status=ContractStatus.DRAFT,
+            owner_id=owner_id,
             creator_id=creator_id
         )
         

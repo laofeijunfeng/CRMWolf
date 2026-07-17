@@ -15,6 +15,7 @@ export interface ContractCreate {
   subscription_years?: number | null
   signing_date?: string | null
   effective_date?: string | null
+  owner_id?: string | null
 }
 
 export interface ContractUpdate {
@@ -46,12 +47,14 @@ export interface ContractListResponse {
   signing_date: string | null
   effective_date: string | null
   expiry_date: string | null
+  owner_id: string
   creator_id: string
   created_time: string
   last_modified_time: string
   customer_info?: CustomerBasicInfo
   opportunity_info?: OpportunityBasicInfo
   signing_contact_info?: ContactBasicInfo
+  owner_info?: CreatorBasicInfo
   creator_info?: CreatorBasicInfo
 }
 
@@ -59,6 +62,16 @@ export interface CreatorBasicInfo {
   id: string
   name: string
   avatar_url?: string
+}
+
+export interface OwnerFilterOption {
+  id: string
+  name: string
+  is_me: boolean
+}
+
+export interface OwnerFilterOptionsResponse {
+  data: OwnerFilterOption[]
 }
 
 export interface CustomerBasicInfo {
@@ -94,12 +107,14 @@ export interface ContractResponse {
   signing_date: string | null
   effective_date: string | null
   expiry_date: string | null
+  owner_id: string
   creator_id: string
   created_time: string
   last_modified_time: string
   customer_info?: CustomerBasicInfo
   opportunity_info?: OpportunityBasicInfo
   contact_info?: ContactBasicInfo
+  owner_info?: CreatorBasicInfo
   creator_info?: CreatorBasicInfo
   contacts?: {
     id: number
@@ -112,11 +127,22 @@ export interface ContractQueryParams {
   skip?: number
   limit?: number
   customer_id?: number | null
-  status?: ContractStatus | null
-  license_type?: LicenseType | null
+  status?: string | null
+  status_exclude?: string | null
+  license_type?: string | null
+  license_type_exclude?: string | null
   contract_number?: string | null
   keyword?: string | null
+  customer_keyword?: string | null
+  opportunity_keyword?: string | null
   owner_id?: string | null  // 新增：负责人ID筛选（用于「我的合同」）
+  owner_id_exclude?: string | null
+  signing_date_start?: string
+  signing_date_end?: string
+  effective_date_start?: string
+  effective_date_end?: string
+  expiry_date_start?: string
+  expiry_date_end?: string
   order_by?: string
   order_dir?: 'asc' | 'desc'
 }
@@ -168,6 +194,11 @@ const contractApi = {
 
   getCustomerContracts: async (customerId: number, params?: { skip?: number; limit?: number }): Promise<ContractListResponse[]> => {
     const response = await request.get<ContractListResponse[]>(`/v1/customers/${customerId}/contracts`, { params })
+    return response
+  },
+
+  getOwnerFilterOptions: async (): Promise<OwnerFilterOptionsResponse> => {
+    const response = await request.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'contract' } })
     return response
   }
 }

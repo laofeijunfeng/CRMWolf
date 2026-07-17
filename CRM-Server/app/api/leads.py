@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
+import json
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, check_lead_access, check_lead_owner, require_permission, get_current_user_team, check_lead_delete_permission
 from app.crud.lead import lead_crud, lead_follow_up_crud
@@ -16,6 +17,24 @@ from app.schemas.lead import (
 from app.models.lead import LeadStatus, LeadSource
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
+
+
+def parse_filter_conditions(filters: Optional[str]):
+    if not filters:
+        return None
+
+    try:
+        parsed_filters = json.loads(filters)
+        if isinstance(parsed_filters, dict):
+            parsed_filters = parsed_filters.get("filters", [])
+        if not isinstance(parsed_filters, list):
+            raise ValueError("filters must be a list")
+        return parsed_filters
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="筛选条件格式不正确"
+        )
 
 
 @router.post("/", response_model=LeadResponse, status_code=status.HTTP_201_CREATED, summary="创建线索", description="创建新的线索")
@@ -84,6 +103,7 @@ def get_leads(
     source: Optional[LeadSource] = Query(None, description="线索来源"),
     city: Optional[str] = Query(None, description="所在城市"),
     keyword: Optional[str] = Query(None, description="关键词搜索"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
     owner_id: Optional[str] = Query(None, description="按负责人ID筛选（可选，用于筛选我的线索）"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
@@ -117,10 +137,13 @@ def get_leads(
     if owner_id is None and not has_view_all:
         owner_id = str(current_user.id)
 
+    filter_conditions = parse_filter_conditions(filters)
+
     leads, total = lead_crud.get_multi(
         db, team_id=team_id, skip=skip, limit=limit,
         status=status, source=source, city=city,
         owner_id=owner_id, keyword=keyword,
+        filters=filter_conditions,
         order_by=order_by, order_dir=order_dir
     )
 
@@ -482,22 +505,37 @@ def mark_lead_invalid(
 def get_public_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    return lead_crud.get_public_leads(db, team_id, skip, limit)
+    return lead_crud.get_public_leads(
+        db,
+        team_id,
+        skip,
+        limit,
+        filters=parse_filter_conditions(filters)
+    )
 
 
 @router.get("/my/list", response_model=List[LeadResponse], summary="我的线索", description="获取当前用户负责的线索列表")
 def get_my_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
+    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    return lead_crud.get_leads_by_owner(db, team_id, str(current_user.id), skip, limit)
+    return lead_crud.get_leads_by_owner(
+        db,
+        team_id,
+        str(current_user.id),
+        skip,
+        limit,
+        filters=parse_filter_conditions(filters)
+    )
 
 
 @router.get("/follow-up/reminder", response_model=List[LeadResponse], summary="待跟进线索", description="获取需要跟进的线索列表")

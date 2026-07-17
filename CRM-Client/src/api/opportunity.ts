@@ -110,6 +110,16 @@ export interface OwnerInfo {
   avatar_url: string
 }
 
+export interface OwnerFilterOption {
+  id: string
+  name: string
+  is_me: boolean
+}
+
+export interface OwnerFilterOptionsResponse {
+  data: OwnerFilterOption[]
+}
+
 export interface SalesStageDetail {
   id: number
   stage_code: string
@@ -170,11 +180,21 @@ export interface OpportunityLossRequest {
 export interface OpportunityListParams {
   skip?: number
   limit?: number
-  status?: OpportunityStatus | null
+  status?: string | number | null
+  status_exclude?: string | number | null
   procurement_stage_id?: number | null
   owner_id?: string | null
+  owner_id_exclude?: string | null
   customer_id?: number | null
   keyword?: string | null
+  customer_keyword?: string | null
+  license_type?: string | null
+  license_type_exclude?: string | null
+  purchase_type?: string | null
+  purchase_type_exclude?: string | null
+  stage_name?: string | null
+  expected_closing_date_start?: string
+  expected_closing_date_end?: string
   order_by?: string
   order_dir?: 'asc' | 'desc'
 }
@@ -217,6 +237,24 @@ export interface OpportunityListResponse {
   decision_maker_count: number | null
   expected_closing_date: string
   stage_id: number | null
+  stage_name?: string
+  win_probability: number
+  owner_id: string
+  creator_id: string
+  current_stage_snapshot?: {
+    id: number
+    stage_name: string
+    win_probability: number
+    template_sort_order: number
+    template_code: string
+    entered_at: string
+    exited_at: string | null
+    procurement_method: {
+      id: number
+      code: string
+      name: string
+    }
+  } | null
   stage_info: {
     id: number
     stage_name: string
@@ -228,8 +266,9 @@ export interface OpportunityListResponse {
   last_modified_time: string
   customer_name?: string
   owner_info?: {
-    id: number
+    id: string
     name: string
+    avatar_url?: string | null
   }
 }
 
@@ -282,5 +321,9 @@ export const opportunityApi = {
     return request.get<OpportunityListResponse[]>(`/v1/opportunities/available-for-contract`, {
       params: { customer_id: customerId }
     })
+  },
+
+  getOwnerFilterOptions: (): Promise<OwnerFilterOptionsResponse> => {
+    return request.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'opportunity' } })
   }
 }

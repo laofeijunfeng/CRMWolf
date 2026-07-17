@@ -153,7 +153,14 @@
               </el-card>
             </el-timeline-item>
           </el-timeline>
-          <el-empty v-else description="配置阶段模板，定义采购流程" />
+          <Empty v-else class="min-h-[180px] border-0">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Plus class="h-5 w-5" aria-hidden="true" />
+              </EmptyMedia>
+              <EmptyTitle class="text-sm font-medium">配置阶段模板，定义采购流程</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         </div>
       </div>
     </el-dialog>
@@ -292,6 +299,12 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Plus, Search } from '@element-plus/icons-vue'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import procurementApi, {
   type ProcurementMethod,
   type ProcurementMethodCreate,
@@ -424,6 +437,7 @@ const fetchMethodStages = async (methodId: number) => {
 }
 
 const handleSearch = () => {
+  void fetchProcurementMethods()
 }
 
 const handleBack = () => {
@@ -567,7 +581,8 @@ const handleStageSubmit = async () => {
       })
       ElMessage.success('更新成功')
 
-      const index = currentMethodStages.value.findIndex(s => s.id === currentStage.value!.id)
+      const stageId = currentStage.value.id
+      const index = currentMethodStages.value.findIndex(s => s.id === stageId)
       if (index > -1) {
         Object.assign(currentMethodStages.value[index], stageFormData)
       }

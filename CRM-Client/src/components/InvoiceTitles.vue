@@ -61,7 +61,14 @@
       </el-table-column>
     </el-table>
 
-    <el-empty v-if="!loading && invoiceTitles.length === 0" description="暂无发票抬头" />
+    <Empty v-if="!loading && invoiceTitles.length === 0" class="min-h-[180px] border-0">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Plus class="h-5 w-5" aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle class="text-sm font-medium">暂无发票抬头</EmptyTitle>
+      </EmptyHeader>
+    </Empty>
 
     <el-dialog
       v-model="modalVisible"
@@ -114,7 +121,13 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import invoiceApi, { 
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
+import invoiceApi, {
   type InvoiceTitleResponse, 
   type InvoiceTitleCreate, 
   type TitleType 
@@ -243,7 +256,8 @@ const handleDelete = (record: InvoiceTitleResponse) => {
       console.error('删除失败', error)
       ElMessage.error('删除失败')
     }
-  }).catch(() => {
+  }).catch((error: unknown) => {
+    console.debug('取消删除发票抬头', error)
   })
 }
 

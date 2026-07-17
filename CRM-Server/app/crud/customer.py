@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import Optional, List, Tuple
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from app.models.customer import Customer, Contact
 from app.models.lead import Lead, LeadStatus
@@ -14,6 +14,22 @@ from app.schemas.customer import (
     ContactUpdate
 )
 from app.crud.operation_log import operation_log_crud
+
+
+def _split_csv(value: Optional[str]) -> List[str]:
+    if value is None:
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _split_int_csv(value: Optional[str]) -> List[int]:
+    values = []
+    for item in _split_csv(value):
+        try:
+            values.append(int(item))
+        except ValueError:
+            continue
+    return values
 
 
 class CustomerCRUD:
@@ -41,31 +57,61 @@ class CustomerCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[int] = None,
+        status: Optional[str] = None,
+        status_exclude: Optional[str] = None,
         industry: Optional[str] = None,
+        industry_exclude: Optional[str] = None,
         city: Optional[str] = None,
+        source: Optional[str] = None,
+        source_exclude: Optional[str] = None,
+        company_scale: Optional[str] = None,
+        company_scale_exclude: Optional[str] = None,
         owner_id: Optional[str] = None,
+        owner_id_exclude: Optional[str] = None,
         keyword: Optional[str] = None,
+        created_time_start: Optional[date] = None,
+        created_time_end: Optional[date] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None
     ) -> Tuple[List[Customer], int]:
         query = db.query(Customer).filter(Customer.team_id == team_id)
 
-        if status is not None:
-            query = query.filter(Customer.status == status)
+        status_values = _split_int_csv(status)
+        if status_values:
+            query = query.filter(Customer.status.in_(status_values))
+        status_exclude_values = _split_int_csv(status_exclude)
+        if status_exclude_values:
+            query = query.filter(Customer.status.notin_(status_exclude_values))
         if industry:
-            query = query.filter(Customer.industry == industry)
+            query = query.filter(Customer.industry.in_(_split_csv(industry)))
+        if industry_exclude:
+            query = query.filter(Customer.industry.notin_(_split_csv(industry_exclude)))
         if city:
             query = query.filter(Customer.city == city)
+        if source:
+            query = query.filter(Customer.source.in_(_split_csv(source)))
+        if source_exclude:
+            query = query.filter(Customer.source.notin_(_split_csv(source_exclude)))
+        if company_scale:
+            query = query.filter(Customer.company_scale.in_(_split_csv(company_scale)))
+        if company_scale_exclude:
+            query = query.filter(Customer.company_scale.notin_(_split_csv(company_scale_exclude)))
         if owner_id:
-            query = query.filter(Customer.owner_id == owner_id)
+            query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
+        if owner_id_exclude:
+            query = query.filter(Customer.owner_id.notin_(_split_csv(owner_id_exclude)))
         if keyword:
             query = query.filter(
                 or_(
                     Customer.account_name.like(f"%{keyword}%"),
-                    Customer.industry.like(f"%{keyword}%")
+                    Customer.industry.like(f"%{keyword}%"),
+                    Customer.city.like(f"%{keyword}%")
                 )
             )
+        if created_time_start:
+            query = query.filter(Customer.created_time >= datetime.combine(created_time_start, time.min))
+        if created_time_end:
+            query = query.filter(Customer.created_time <= datetime.combine(created_time_end, time.max))
 
         total = query.count()
 

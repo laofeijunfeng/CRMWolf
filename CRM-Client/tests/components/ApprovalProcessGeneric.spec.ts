@@ -146,14 +146,6 @@ vi.mock('@/components/ErrorState.vue', () => ({
   }),
 }))
 
-vi.mock('@/components/WolfEmpty.vue', () => ({
-  default: defineComponent({
-    name: 'WolfEmpty',
-    props: { title: String, description: String },
-    setup: (props, { slots }) => () => h('div', [props.title, props.description, slots.action?.()]),
-  }),
-}))
-
 vi.mock('@/api/fileUpload', () => ({ getInvoiceFileUrl: vi.fn(() => '/files/invoice') }))
 
 // ===== Mock 权限 / user store（v-permission 指令依赖 usePermissionStore，
@@ -247,7 +239,7 @@ describe('ApprovalProcessGeneric', () => {
     toast.error.mockReset()
   })
 
-  it('shows submit CTA empty state when no approval exists (404 → WolfEmpty)', async () => {
+  it('shows submit CTA empty state when no approval exists (404)', async () => {
     api.getApprovalDetail.mockRejectedValue(makeAxios404())
     const w = mountComp({
       entityType: 'INVOICE',

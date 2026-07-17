@@ -50,6 +50,11 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog, confirmDelete } from '@/utils/confirmDialog'
 import {
@@ -484,9 +489,11 @@ function handleRoleChange(roleId: number, checked: boolean): void {
                 >
                   {{ role.name }}
                 </Badge>
-                <span v-if="!row.roles || row.roles.length === 0" class="text-muted-foreground text-sm">
-                  暂无角色
-                </span>
+                <Empty v-if="!row.roles || row.roles.length === 0" class="min-h-0 border-0 p-0">
+                  <EmptyHeader>
+                    <EmptyTitle class="text-sm font-normal text-muted-foreground">暂无角色</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
               </div>
             </template>
 

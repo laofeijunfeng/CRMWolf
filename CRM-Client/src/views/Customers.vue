@@ -10,7 +10,7 @@
  * 改动清单：
  * - ✅ TopBar 集成（useHeaderStore）
  * - ✅ ContextTabs 组件（所有客户、我的客户、公海客户）
- * - ✅ FilterPanel 组件
+ * - ✅ ListFilterPopover 筛选
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
@@ -22,7 +22,8 @@ import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from '
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import AICustomerCreateDialog from '@/components/AICustomerCreateDialog.vue'
@@ -36,12 +37,15 @@ import customerApi, {
   type CustomerStatus,
   type CustomerReturnRequest,
   type ReturnReasonEnum,
-  type CustomerLoseRequest
+  type CustomerLoseRequest,
+  type OwnerFilterOption
 } from '@/api/customer'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { customerSourceOptions, companyScaleOptions } from '@/schemas/customer-form'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -59,6 +63,8 @@ interface CustomerTableRow extends CustomerResponse {
 // ==================== State ====================
 const loading = ref(false)
 const tableData = ref<CustomerTableRow[]>([])
+const ownerFilterOptions = ref<OwnerFilterOption[]>([])
+const industryFilterOptions = ref<{ value: string; label: string }[]>([])
 const selectedCustomer = ref<CustomerResponse | null>(null)
 const showAICustomerCreate = ref(false)
 const showCustomerForm = ref(false)
@@ -158,27 +164,61 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== FilterPanel 配置 ====================
-const filterFields = [
-  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索客户名称' },
+// ==================== 列表筛选配置 ====================
+const baseFilterFields: ListFilterField[] = [
+  { key: 'account_name', type: 'text', label: '客户名称' },
   {
     key: 'status',
-    type: 'select' as const,
+    type: 'enum',
     label: '状态',
-    placeholder: '全部状态',
     options: [
       { value: '0', label: '跟进中' },
       { value: '1', label: '已赢单' },
       { value: '2', label: '已输单' },
       { value: '3', label: '已失效' }
     ]
-  }
+  },
+  {
+    key: 'industry',
+    type: 'enum',
+    label: '行业',
+    options: []
+  },
+  {
+    key: 'source',
+    type: 'enum',
+    label: '来源',
+    options: [...customerSourceOptions]
+  },
+  { key: 'city', type: 'text', label: '城市' },
+  {
+    key: 'company_scale',
+    type: 'enum',
+    label: '规模',
+    options: [...companyScaleOptions]
+  },
+  { key: 'created_time', type: 'date', label: '创建时间' }
 ]
 
-const filterValues = reactive({
-  keyword: '',
-  status: ''
+const filterFields = computed<ListFilterField[]>(() => {
+  const fields: ListFilterField[] = baseFilterFields.map((field) => (
+    field.key === 'industry' ? { ...field, options: industryFilterOptions.value } : field
+  ))
+  if (ownerFilterOptions.value.length > 0) {
+    fields.push({
+      key: 'owner_id',
+      type: 'enum',
+      label: '负责人',
+      options: ownerFilterOptions.value.map((owner) => ({
+        value: owner.id,
+        label: owner.name
+      }))
+    })
+  }
+  return fields
 })
+
+const activeFilters = ref<ListFilterCondition[]>([])
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -260,11 +300,6 @@ const normalizeCustomerListResponse = (response: CustomerTableRow[] | CustomerLi
   return normalizeCustomerList(response)
 }
 
-interface FilterValues {
-  keyword?: string
-  status?: string
-}
-
 const getIndustryBadgeStatus = (row: CustomerResponse): string => {
   const industryName = row.industry_info?.name
   if (industryName === undefined || industryName === null || industryName.trim() === '') return '-'
@@ -304,14 +339,42 @@ const customerFormDialogProps = computed(() => {
 })
 
 // ==================== Methods ====================
+const fetchOwnerFilterOptions = async (): Promise<void> => {
+  try {
+    const response = await customerApi.getOwnerFilterOptions()
+    ownerFilterOptions.value = response.data
+  } catch (error) {
+    handleApiError(error, '获取负责人筛选项')
+  }
+}
+
+const fetchIndustryFilterOptions = async (): Promise<void> => {
+  try {
+    industryFilterOptions.value = await customerApi.getIndustryOptions()
+  } catch (error) {
+    handleApiError(error, '获取行业筛选项')
+  }
+}
+
 const fetchCustomerList = async (): Promise<void> => {
   loading.value = true
   try {
+    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
     const params: Record<string, unknown> = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      keyword: filterValues.keyword || null,
-      status: filterValues.status ? parseInt(filterValues.status, 10) : null
+      keyword: getFilterValue(activeFilters.value, 'account_name'),
+      status: getDelimitedFilterValues(activeFilters.value, 'status'),
+      status_exclude: getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains']),
+      industry: getDelimitedFilterValues(activeFilters.value, 'industry'),
+      industry_exclude: getDelimitedFilterValues(activeFilters.value, 'industry', ['neq', 'not_contains']),
+      source: getDelimitedFilterValues(activeFilters.value, 'source'),
+      source_exclude: getDelimitedFilterValues(activeFilters.value, 'source', ['neq', 'not_contains']),
+      city: getFilterValue(activeFilters.value, 'city', ['eq', 'contains']),
+      company_scale: getDelimitedFilterValues(activeFilters.value, 'company_scale'),
+      company_scale_exclude: getDelimitedFilterValues(activeFilters.value, 'company_scale', ['neq', 'not_contains']),
+      created_time_start: createdTimeBounds.start,
+      created_time_end: createdTimeBounds.end
     }
 
     if (activeTab.value === 'public') {
@@ -321,6 +384,9 @@ const fetchCustomerList = async (): Promise<void> => {
     } else {
       if (activeTab.value === 'my') {
         params['owner_id'] = 'me'
+      } else {
+        params['owner_id'] = getDelimitedFilterValues(activeFilters.value, 'owner_id')
+        params['owner_id_exclude'] = getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains'])
       }
 
       const response = await customerApi.getCustomers(params)
@@ -335,15 +401,14 @@ const fetchCustomerList = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: FilterValues): void => {
-  Object.assign(filterValues, values)
+const handleFilterApply = (filters: ListFilterCondition[]): void => {
+  activeFilters.value = filters
   pagination.current = 1
   fetchCustomerList()
 }
 
 const handleReset = (): void => {
-  filterValues.keyword = ''
-  filterValues.status = ''
+  activeFilters.value = []
   pagination.current = 1
   fetchCustomerList()
 }
@@ -523,6 +588,8 @@ const mapCustomerStatus = (status: number): 'following' | 'won' | 'lost' | 'expi
 
 // ==================== Lifecycle ====================
 onMounted(() => {
+  void fetchOwnerFilterOptions()
+  void fetchIndustryFilterOptions()
   fetchCustomerList()
 })
 
@@ -572,13 +639,6 @@ watchEffect(() => {
 
 <template>
   <div class="customers-page">
-    <!-- FilterPanel -->
-    <FilterPanel
-      :fields="filterFields"
-      @search="handleSearch"
-      @reset="handleReset"
-    />
-
     <!-- DataTable -->
     <DataTable
       :columns="columns"
@@ -587,9 +647,14 @@ watchEffect(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
+      height="calc(100vh - 136px)"
       empty-title="暂无客户"
+      v-model:filters="activeFilters"
+      :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      @filter-apply="handleFilterApply"
+      @filter-reset="handleReset"
     >
       <!-- 客户名称 -->
       <template #cell-account_name="{ row }">

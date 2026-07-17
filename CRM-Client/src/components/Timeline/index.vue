@@ -15,9 +15,14 @@
       <el-skeleton :rows="5" animated />
     </div>
 
-    <div v-else-if="logs.length === 0" class="timeline-empty">
-      <el-empty description="暂无操作记录" />
-    </div>
+    <Empty v-else-if="logs.length === 0" class="timeline-empty">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Document class="h-5 w-5" aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle class="text-sm font-medium">暂无操作记录</EmptyTitle>
+      </EmptyHeader>
+    </Empty>
 
     <div v-else class="timeline-wrapper" @scroll="handleScroll">
       <div class="timeline-list">
@@ -111,6 +116,7 @@
 
 <script setup lang="ts">
 import { markRaw } from 'vue'
+import type { Component } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import {
   Plus,
@@ -127,8 +133,18 @@ import { EVENT_TYPE_CONFIG } from './types'
 import type { EventType } from '@/api/operationLog'
 import TimelineFilter from './TimelineFilter.vue'
 import type { OperationLog } from '@/api/operationLog'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 
-const iconMap: Record<string, any> = {
+defineOptions({
+  name: 'OperationTimeline'
+})
+
+const iconMap: Record<string, Component> = {
   'icon-plus-circle': markRaw(Plus),
   'icon-sync': markRaw(Refresh),
   'icon-user-group': markRaw(User),
@@ -148,9 +164,8 @@ interface Props {
 }
 
 interface Emits {
-  (e: 'loadMore'): void
+  (e: 'loadMore' | 'reset'): void
   (e: 'filterChange', filters: { eventTypes: EventType[]; dateRange: string | null; customStartDate: string | null; customEndDate: string | null; keyword: string }): void
-  (e: 'reset'): void
 }
 
 const props = withDefaults(defineProps<Props>(), {

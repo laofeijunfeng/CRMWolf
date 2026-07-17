@@ -130,7 +130,7 @@ class LicenseApplicationCRUD:
         Args:
             db: 数据库会话
             team_id: 团队ID
-            applicant_id: 申请人飞书用户ID
+            applicant_id: 申请人系统用户ID
             obj_in: 创建请求数据
 
         Returns:
@@ -422,7 +422,7 @@ class LicenseApplicationCRUD:
             db: 数据库会话
             team_id: 团队ID
             application_id: 申请ID
-            submitter_id: 提交人飞书用户ID
+            submitter_id: 提交人系统用户ID
             submitter_name: 提交人姓名（可选）
 
         Returns:

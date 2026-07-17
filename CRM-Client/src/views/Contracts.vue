@@ -10,7 +10,7 @@
  * 改动清单：
  * - ✅ TopBar 集成（useHeaderStore）
  * - ✅ ContextTabs 组件（方案 A：显示常用状态）
- * - ✅ FilterPanel 组件（状态下拉筛选包含全部状态）
+ * - ✅ ListFilterPopover 筛选
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
@@ -19,12 +19,14 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import contractApi, {
   type ContractListResponse,
-  type ContractQueryParams
+  type ContractQueryParams,
+  type OwnerFilterOption
 } from '@/api/contract'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
@@ -32,6 +34,7 @@ import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 
@@ -45,6 +48,7 @@ const headerStore = useHeaderStore()
 // ==================== State ====================
 const loading = ref(false)
 const tableData = ref<ContractListResponse[]>([])
+const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const activeTab = ref('all')
 const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
@@ -66,14 +70,16 @@ const tabs = [
   { key: 'EFFECTIVE', label: '生效中' }
 ]
 
-// ==================== FilterPanel 配置（状态下拉筛选包含全部状态）====================
-const filterFields = [
-  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索合同名称' },
+// ==================== 列表筛选配置（状态下拉筛选包含全部状态）====================
+const baseFilterFields: ListFilterField[] = [
+  { key: 'contract_name', type: 'text', label: '合同名称' },
+  { key: 'contract_number', type: 'text', label: '合同编号' },
+  { key: 'customer_name', type: 'text', label: '关联客户' },
+  { key: 'opportunity_name', type: 'text', label: '关联商机' },
   {
     key: 'status',
-    type: 'select' as const,
+    type: 'enum',
     label: '状态',
-    placeholder: '全部状态',
     options: [
       { value: 'DRAFT', label: '草稿' },
       { value: 'PENDING_REVIEW', label: '审批中' },
@@ -82,13 +88,38 @@ const filterFields = [
       { value: 'EXPIRED', label: '已到期' },
       { value: 'TERMINATED', label: '已终止' }
     ]
-  }
+  },
+  {
+    key: 'license_type',
+    type: 'enum',
+    label: '授权模式',
+    options: [
+      { value: 'SUBSCRIPTION', label: '订阅' },
+      { value: 'PERPETUAL', label: '买断' }
+    ]
+  },
+  { key: 'signing_date', type: 'date', label: '签署日期' },
+  { key: 'effective_date', type: 'date', label: '生效日期' },
+  { key: 'expiry_date', type: 'date', label: '到期日期' }
 ]
 
-const filterValues = reactive({
-  keyword: '',
-  status: ''
+const filterFields = computed<ListFilterField[]>(() => {
+  const fields: ListFilterField[] = baseFilterFields.slice()
+  if (ownerFilterOptions.value.length > 0) {
+    fields.push({
+      key: 'owner_id',
+      type: 'enum',
+      label: '负责人',
+      options: ownerFilterOptions.value.map((owner) => ({
+        value: owner.id,
+        label: owner.name
+      }))
+    })
+  }
+  return fields
 })
+
+const activeFilters = ref<ListFilterCondition[]>([])
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -115,15 +146,14 @@ const canDeleteOwnContract = computed(() => permissionStore.hasPermission('contr
 const canEditRow = (row: ContractListResponse): boolean => {
   if (row['status'] !== 'DRAFT') return false
   if (canEditAllContract.value) return true
-  // Note: ContractListResponse may not have owner_id, check creator_id instead
-  if (canEditOwnContract.value && row.creator_id === String(userStore.userInfo?.id)) return true
+  if (canEditOwnContract.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false
 }
 
 const canDeleteRow = (row: ContractListResponse): boolean => {
   if (row['status'] !== 'DRAFT') return false
   if (canDeleteAllContract.value) return true
-  if (canDeleteOwnContract.value && row.creator_id === String(userStore.userInfo?.id)) return true
+  if (canDeleteOwnContract.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false
 }
 
@@ -132,6 +162,15 @@ const canSubmitApproval = (row: ContractListResponse): boolean => {
 }
 
 // ==================== Methods ====================
+const fetchOwnerFilterOptions = async (): Promise<void> => {
+  try {
+    const response = await contractApi.getOwnerFilterOptions()
+    ownerFilterOptions.value = response.data
+  } catch (error) {
+    handleApiError(error, '获取负责人筛选项')
+  }
+}
+
 const fetchContractList = async (): Promise<void> => {
   loading.value = true
   try {
@@ -139,16 +178,32 @@ const fetchContractList = async (): Promise<void> => {
     let statusFilter: string | null = null
     if (activeTab.value !== 'all') {
       statusFilter = activeTab.value
-    } else if (filterValues.status) {
-      statusFilter = filterValues.status
+    } else {
+      statusFilter = getDelimitedFilterValues(activeFilters.value, 'status')
     }
+    const signingDateBounds = getDateBounds(activeFilters.value, 'signing_date')
+    const effectiveDateBounds = getDateBounds(activeFilters.value, 'effective_date')
+    const expiryDateBounds = getDateBounds(activeFilters.value, 'expiry_date')
 
     const params: Record<string, unknown> = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      keyword: filterValues.keyword || null,
+      keyword: getFilterValue(activeFilters.value, 'contract_name'),
       status: statusFilter,
-      license_type: null
+      contract_number: getFilterValue(activeFilters.value, 'contract_number'),
+      customer_keyword: getFilterValue(activeFilters.value, 'customer_name'),
+      opportunity_keyword: getFilterValue(activeFilters.value, 'opportunity_name'),
+      status_exclude: getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains']),
+      license_type: getDelimitedFilterValues(activeFilters.value, 'license_type'),
+      license_type_exclude: getDelimitedFilterValues(activeFilters.value, 'license_type', ['neq', 'not_contains']),
+      owner_id: getDelimitedFilterValues(activeFilters.value, 'owner_id'),
+      owner_id_exclude: getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains']),
+      signing_date_start: signingDateBounds.start,
+      signing_date_end: signingDateBounds.end,
+      effective_date_start: effectiveDateBounds.start,
+      effective_date_end: effectiveDateBounds.end,
+      expiry_date_start: expiryDateBounds.start,
+      expiry_date_end: expiryDateBounds.end
     }
 
     const data = await contractApi.getContracts(params as ContractQueryParams) as unknown as ContractListResponse[]
@@ -161,10 +216,10 @@ const fetchContractList = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, unknown>): void => {
-  Object.assign(filterValues, values)
-  // 使用 FilterPanel 状态筛选时，清除 Tab 状态
-  if (values['status'] !== undefined && values['status'] !== null) {
+const handleFilterApply = (filters: ListFilterCondition[]): void => {
+  activeFilters.value = filters
+  // 使用筛选弹层状态条件时，清除 Tab 状态
+  if (filters.some((filter) => filter.field === 'status')) {
     activeTab.value = 'all'
   }
   pagination.current = 1
@@ -172,8 +227,7 @@ const handleSearch = (values: Record<string, unknown>): void => {
 }
 
 const handleReset = (): void => {
-  filterValues.keyword = ''
-  filterValues.status = ''
+  activeFilters.value = []
   activeTab.value = 'all'
   pagination.current = 1
   fetchContractList()
@@ -237,31 +291,22 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
 }
 
 // ==================== TableRowActions 配置 ====================
-interface RowAction {
-  label: string
-  handler: (record: ContractListResponse) => void
-  icon: typeof Edit
-  visible?: boolean
-  destructive?: boolean
-  separator?: boolean
-}
-
 interface RowActions {
-  primaryActions: RowAction[]
-  secondaryActions: RowAction[]
+  primaryActions: ActionConfig[]
+  secondaryActions: ActionConfig[]
 }
 
 const getRowActions = (row: ContractListResponse): RowActions => ({
   primaryActions: [
     {
       label: '编辑',
-      handler: handleEdit,
+      handler: () => handleEdit(row),
       icon: Edit,
       visible: canEditRow(row)
     },
     {
       label: '提交审批',
-      handler: handleSubmitApproval,
+      handler: () => handleSubmitApproval(row),
       icon: Send,
       visible: canSubmitApproval(row)
     }
@@ -269,7 +314,7 @@ const getRowActions = (row: ContractListResponse): RowActions => ({
   secondaryActions: [
     {
       label: '删除',
-      handler: handleDelete,
+      handler: () => handleDelete(row),
       icon: Trash2,
       destructive: true,
       separator: true,
@@ -301,6 +346,7 @@ const getLicenseTypeClass = (type: string): string => {
 
 // ==================== Lifecycle ====================
 onMounted(() => {
+  void fetchOwnerFilterOptions()
   fetchContractList()
 })
 
@@ -328,7 +374,7 @@ watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     activeTab.value = headerStore.activeTab
     // 切换 Tab 时清除状态筛选
-    filterValues.status = ''
+    activeFilters.value = activeFilters.value.filter((filter) => filter.field !== 'status')
     pagination.current = 1
     fetchContractList()
   }
@@ -340,13 +386,6 @@ watchEffect(() => {
 
 <template>
   <div class="contracts-page">
-    <!-- FilterPanel -->
-    <FilterPanel
-      :fields="filterFields"
-      @search="handleSearch"
-      @reset="handleReset"
-    />
-
     <!-- DataTable -->
     <DataTable
       :columns="columns"
@@ -355,9 +394,14 @@ watchEffect(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
+      height="calc(100vh - 136px)"
       empty-title="暂无合同"
+      v-model:filters="activeFilters"
+      :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      @filter-apply="handleFilterApply"
+      @filter-reset="handleReset"
     >
       <!-- 合同编号 -->
       <template #cell-contract_number="{ row }">

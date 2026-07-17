@@ -32,7 +32,7 @@ export interface PaginatedResponse<T> {
 // ===== 用户信息类型 =====
 // 与后端 OwnerInfo 保持一致
 export const UserInfoSchema = z.object({
-  id: z.string().min(1),        // 飞书 Open ID
+  id: z.string().min(1),        // 系统用户 ID
   name: z.string().min(1),
   avatar_url: z.string().url().nullable().or(z.literal(''))  // 允许 null、有效 URL 或空字符串
 })

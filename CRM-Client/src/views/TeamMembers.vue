@@ -51,7 +51,11 @@
                 <el-tag v-for="role in row.roles" :key="role.id" class="role-tag wolf-tag wolf-tag--info" size="small">
                   {{ role.name }}
                 </el-tag>
-                <span v-if="!row.roles || row.roles.length === 0" class="no-role">暂无角色</span>
+                <Empty v-if="!row.roles || row.roles.length === 0" class="no-role min-h-0 border-0 p-0">
+                  <EmptyHeader>
+                    <EmptyTitle class="text-sm font-normal">暂无角色</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
               </div>
             </template>
           </el-table-column>
@@ -207,6 +211,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Plus, Refresh, Search, Loading } from '@element-plus/icons-vue'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { teamApi, type TeamMemberResponse, type TeamResponse, type RoleSimpleResponse } from '@/api/team'
 import userApi, { type UserSearchResult } from '@/api/user'
 import roleApi, { type RoleResponse } from '@/api/role'
@@ -315,8 +324,10 @@ const handleSearchEmail = async () => {
 }
 
 const handleInviteUser = async (user: UserSearchResult) => {
+  if (!teamId.value) return
+
   try {
-    await teamApi.addMemberDirect(teamId.value!, user.id)
+    await teamApi.addMemberDirect(teamId.value, user.id)
     ElMessage.success(`${user.name} 已加入团队`)
     inviteDialogVisible.value = false
     fetchMembers()
@@ -327,27 +338,34 @@ const handleInviteUser = async (user: UserSearchResult) => {
 }
 
 const handleRemoveMember = (member: TeamMemberResponse) => {
+  if (!teamId.value) return
+
+  const currentTeamId = teamId.value
   ElMessageBox.confirm(
     `确定要移除成员"${member.name}"吗？`,
     '确认移除',
     { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
   ).then(async () => {
     try {
-      await teamApi.removeMember(teamId.value!, member.id.toString())
+      await teamApi.removeMember(currentTeamId, member.id.toString())
       ElMessage.success('成员已移除')
       fetchMembers()
     } catch (error: unknown) {
       console.error('移除失败', error)
       ElMessage.error(error.response?.data?.detail || '移除失败')
     }
-  }).catch(() => {})
+  }).catch((error: unknown) => {
+    console.debug('取消移除成员', error)
+  })
 }
 
 const handleRegenerateCode = async () => {
+  if (!teamId.value || !team.value) return
+
   codeLoading.value = true
   try {
-    const response = await teamApi.regenerateInviteCode(teamId.value!)
-    team.value = { ...team.value!, code: response.code }
+    const response = await teamApi.regenerateInviteCode(teamId.value)
+    team.value = { ...team.value, code: response.code }
     ElMessage.success('邀请码已重置')
   } catch (error: unknown) {
     console.error('重置失败', error)
@@ -442,12 +460,12 @@ const showResetPasswordDialog = (member: TeamMemberResponse) => {
 
 const handleResetPassword = async () => {
   const valid = await resetPasswordFormRef.value?.validate().catch(() => false)
-  if (!valid || !resetPasswordTargetUser.value) return
+  if (!valid || !resetPasswordTargetUser.value || !teamId.value) return
 
   resetPasswordLoading.value = true
   try {
     await teamApi.resetMemberPassword(
-      teamId.value!,
+      teamId.value,
       resetPasswordTargetUser.value.id,
       { new_password: resetPasswordForm.newPassword }
     )

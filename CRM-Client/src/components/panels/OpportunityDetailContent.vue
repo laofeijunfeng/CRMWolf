@@ -7,7 +7,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Pencil, Trophy, XCircle, ExternalLink, ArrowLeft } from 'lucide-vue-next'
+import { Pencil, Trophy, XCircle, ExternalLink, ArrowLeft, FileText } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
@@ -16,6 +16,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import OpportunityStageStepper from '@/components/OpportunityStageStepper.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
@@ -50,6 +58,11 @@ const emit = defineEmits<{
     opportunityId: number
     customerId: number
     customerName: string
+    opportunityName: string
+    totalAmount: number
+    userCount: number
+    licenseType: string
+    subscriptionYears: number | null
   }]
 }>()
 
@@ -161,7 +174,12 @@ function handleCreateContract(): void {
   emit('create-contract', {
     opportunityId: opportunity.value.id,
     customerId: opportunity.value.customer_id,
-    customerName: opportunity.value.customer_info?.account_name ?? opportunity.value.customer_name ?? ''
+    customerName: opportunity.value.customer_info?.account_name ?? opportunity.value.customer_name ?? '',
+    opportunityName: opportunity.value.opportunity_name,
+    totalAmount: opportunity.value.total_amount,
+    userCount: opportunity.value.user_count,
+    licenseType: opportunity.value.license_type,
+    subscriptionYears: opportunity.value.subscription_years
   })
 }
 
@@ -452,19 +470,20 @@ watch(() => props.opportunityId, () => {
                 加载中...
               </div>
 
-              <div v-else-if="!relatedContract" class="py-8 text-center">
-                <p class="text-wolf-text-tertiary-v2 text-sm mb-4">暂无关联合同</p>
-                <p v-if="opportunity.status === 1" class="text-wolf-text-tertiary-v2 text-xs mb-4">
-                  商机已赢单，请及时创建合同以锁定交易
-                </p>
-                <Button
-                  v-if="opportunity.status === 1"
-                  size="sm"
-                  @click="handleCreateContract"
-                >
-                  创建合同
-                </Button>
-              </div>
+              <Empty v-else-if="!relatedContract" class="min-h-[180px] border-0 py-6">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <FileText class="h-5 w-5" aria-hidden="true" />
+                  </EmptyMedia>
+                  <EmptyTitle class="text-sm font-medium">暂无关联合同</EmptyTitle>
+                  <EmptyDescription v-if="opportunity.status === 1">
+                    商机已赢单，请及时创建合同以锁定交易
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent v-if="opportunity.status === 1">
+                  <Button size="sm" @click="handleCreateContract">创建合同</Button>
+                </EmptyContent>
+              </Empty>
 
               <div v-else class="contract-content">
                 <div class="contract-header">

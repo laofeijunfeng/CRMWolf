@@ -52,8 +52,8 @@ class LicenseApplication(Base):
         default=ApprovalPhase.DRAFT,
         comment="审批流程状态：draft/pending_review/approved/rejected"
     )
-    applicant_id = Column(String(100), nullable=False, comment="申请人飞书用户ID")
-    approver_id = Column(String(100), nullable=True, comment="审批人飞书用户ID")
+    applicant_id = Column(String(100), nullable=False, comment="申请人系统用户ID")
+    approver_id = Column(String(100), nullable=True, comment="审批人系统用户ID")
     approved_time = Column(DateTime, nullable=True, comment="审批时间")
 
     # 审批关联字段（支持审批引擎）

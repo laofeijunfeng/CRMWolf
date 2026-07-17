@@ -165,8 +165,10 @@ export interface OverduePayment {
 }
 
 export interface PaymentPlanListParams {
-  status?: PaymentPlanStatus
+  status?: string
+  status_exclude?: string
   owner_id?: string
+  keyword?: string
   me?: boolean
   due_date_start?: string
   due_date_end?: string
@@ -196,6 +198,9 @@ export interface PaymentRecordListParams {
   payment_date_end?: string
   min_amount?: number
   creator_id?: string
+  keyword?: string
+  approval_status?: string
+  approval_status_exclude?: string
   me?: boolean
   page?: number
   page_size?: number

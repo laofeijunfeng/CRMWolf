@@ -151,7 +151,11 @@
               <span class="dropdown-label">{{ team.name }}</span>
               <Check v-if="team.id === teamStore.currentTeam?.id" class="dropdown-active-indicator" aria-hidden="true" />
             </DropdownMenuItem>
-            <span v-if="teamStore.teams.length === 0" class="no-teams">暂无团队</span>
+            <Empty v-if="teamStore.teams.length === 0" class="no-teams min-h-0 border-0">
+              <EmptyHeader>
+                <EmptyTitle class="text-sm font-normal">暂无团队</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
 
             <DropdownMenuSeparator />
             <div class="dropdown-header-label">个人设置</div>
@@ -285,6 +289,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/crmwolf'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { confirmLogout } from '@/utils/confirmDialog'
 import {
   Flag,

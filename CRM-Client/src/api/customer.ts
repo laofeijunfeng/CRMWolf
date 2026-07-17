@@ -287,11 +287,20 @@ export interface CustomerTrend {
 export interface CustomerQueryParams {
   skip?: number
   limit?: number
-  status?: CustomerStatus
+  status?: string
+  status_exclude?: string
   industry?: string
+  industry_exclude?: string
   city?: string
+  source?: string
+  source_exclude?: string
+  company_scale?: string
+  company_scale_exclude?: string
   owner_id?: string
+  owner_id_exclude?: string
   keyword?: string
+  created_time_start?: string
+  created_time_end?: string
   order_by?: string
   order_dir?: 'asc' | 'desc'
 }
@@ -320,9 +329,13 @@ export interface CustomerLoseRequest {
 }
 
 export interface OwnerFilterOption {
-  owner_id: string
-  owner_name: string
+  id: string
+  name: string
   is_me: boolean
+}
+
+export interface OwnerFilterOptionsResponse {
+  data: OwnerFilterOption[]
 }
 
 export interface PublicCustomerQueryParams {
@@ -437,8 +450,8 @@ const customerApi = {
   getPublicCustomers: (params?: PublicCustomerQueryParams): Promise<CustomerResponse[]> =>
     api.get<CustomerResponse[]>('/v1/customers/public/list', { params }),
 
-  getOwnerFilterOptions: (): Promise<OwnerFilterOption[]> =>
-    api.get<OwnerFilterOption[]>('/v1/filter-options/owners'),
+  getOwnerFilterOptions: (): Promise<OwnerFilterOptionsResponse> =>
+    api.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'customer' } }),
 
   getIndustryOptions: (): Promise<CustomerIndustryOption[]> =>
     api.get<CustomerIndustryOption[]>('/v1/customers/industries'),

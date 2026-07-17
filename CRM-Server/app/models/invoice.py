@@ -71,8 +71,8 @@ class InvoiceApplication(Base):
         default=ApprovalPhase.DRAFT,
         comment="审批流程状态：draft/pending_review/approved/rejected"
     )
-    applicant_id = Column(String(100), nullable=False, comment="申请人ID（飞书用户ID）")
-    reviewer_id = Column(String(100), comment="审批人ID（飞书用户ID）")
+    applicant_id = Column(String(100), nullable=False, comment="申请人系统用户ID")
+    reviewer_id = Column(String(100), comment="审批人系统用户ID")
     review_comment = Column(String(500), comment="审批意见")
     reviewed_time = Column(DateTime, comment="审批时间")
     

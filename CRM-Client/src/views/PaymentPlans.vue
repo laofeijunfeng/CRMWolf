@@ -2,11 +2,10 @@
 /**
  * PaymentPlans.vue - 回款计划页面
  *
- * 基于 PaymentPlanView.vue 重构：
+ * 当前 /payments/plans 路由页面：
  * - ✅ TopBar 集成（useHeaderStore）
  * - ✅ ContextTabs 组件（Segmented Control 模式）
- * - ✅ FilterPanel 组件（替代 SearchCard）
- * - ✅ DataTable 组件
+ * - ✅ DataTable 标准筛选与分页
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  *
@@ -20,7 +19,8 @@ import { useRoute } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import { DataTable, TableRowActions } from '@/components/crmwolf'
+import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
@@ -35,6 +35,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -54,6 +55,7 @@ const registerSubmitting = ref(false)
 const planFormDialogOpen = ref(false)
 const planFormMode = ref<'create' | 'edit'>('create')
 const editingPlan = ref<PaymentPlanWithDetails | null>(null)
+const activeFilters = ref<ListFilterCondition[]>([])
 
 const pagination = reactive({
   current: 1,
@@ -81,27 +83,22 @@ const activeTab = ref('pending')
 //   all: paymentPlansStore.total
 // }))
 
-// ==================== FilterPanel 配置 ====================
-const filterFields = [
-  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索合同名称、客户名称' },
+// ==================== DataTable 筛选配置 ====================
+const filterFields: ListFilterField[] = [
+  { key: 'keyword', type: 'text', label: '客户/合同/商机/阶段' },
   {
     key: 'status',
-    type: 'select' as const,
+    type: 'enum',
     label: '状态',
-    placeholder: '全部状态',
     options: [
       { value: 'PENDING', label: '待登记' },
       { value: 'PARTIAL', label: '部分回款' },
       { value: 'COMPLETED', label: '已完成' },
       { value: 'OVERDUE', label: '已逾期' }
     ]
-  }
+  },
+  { key: 'due_date', type: 'date', label: '计划日期' }
 ]
-
-const filterValues = reactive({
-  keyword: '',
-  status: ''
-})
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -150,23 +147,33 @@ const fetchPaymentPlans = async (): Promise<void> => {
       params.status = 'OVERDUE'
     } else if (activeTab.value === 'upcoming') {
       params.due_date_end = getUpcomingDate(7)
+    } else {
+      const status = getDelimitedFilterValues(activeFilters.value, 'status')
+      const statusExclude = getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains'])
+      if (status !== null) {
+        params.status = status
+      }
+      if (statusExclude !== null) {
+        params.status_exclude = statusExclude
+      }
+    }
+
+    const dueDateBounds = getDateBounds(activeFilters.value, 'due_date')
+    if (dueDateBounds.start !== undefined) {
+      params.due_date_start = dueDateBounds.start
+    }
+    if (dueDateBounds.end !== undefined) {
+      params.due_date_end = dueDateBounds.end
+    }
+
+    const keyword = getFilterValue(activeFilters.value, 'keyword')
+    if (keyword !== null && keyword.length > 0) {
+      params.keyword = keyword
     }
 
     const data = await paymentApi.listPaymentPlans(params)
 
-    // 关键词过滤
-    let filteredPlans = data.items
-    if (filterValues.keyword) {
-      const keyword = filterValues.keyword.toLowerCase()
-      filteredPlans = filteredPlans.filter((plan: PaymentPlanWithDetails) => {
-        return (
-          (plan.contract_name?.toLowerCase().includes(keyword) ?? false) ||
-          (plan.customer_name?.toLowerCase().includes(keyword) ?? false)
-        )
-      })
-    }
-
-    tableData.value = filteredPlans
+    tableData.value = data.items
     pagination.total = data.total
   } catch (error) {
     handleApiError(error, '获取回款计划列表')
@@ -175,15 +182,18 @@ const fetchPaymentPlans = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, unknown>): void => {
-  Object.assign(filterValues, values)
+const handleFilterApply = (filters: ListFilterCondition[]): void => {
+  activeFilters.value = filters
+  if (filters.some((filter) => filter.field === 'status')) {
+    activeTab.value = 'all'
+    headerStore.setActiveTab('all')
+  }
   pagination.current = 1
   fetchPaymentPlans()
 }
 
 const handleReset = (): void => {
-  filterValues.keyword = ''
-  filterValues.status = ''
+  activeFilters.value = []
   pagination.current = 1
   fetchPaymentPlans()
 }
@@ -211,7 +221,7 @@ const handleViewDetail = (row: PaymentPlanWithDetails): void => {
 }
 
 const openPlanDetailFromQuery = (value: unknown): void => {
-  const rawValue = Array.isArray(value) ? value[0] : value
+  const rawValue: unknown = Array.isArray(value) ? value[0] : value
   if (typeof rawValue !== 'string' || rawValue.trim() === '') return
 
   const planId = Number(rawValue)
@@ -348,24 +358,22 @@ watch(
 
 <template>
   <div class="payment-plans-page">
-    <!-- FilterPanel -->
-    <FilterPanel
-      :fields="filterFields"
-      @search="handleSearch"
-      @reset="handleReset"
-    />
-
     <!-- DataTable -->
     <DataTable
+      v-model:filters="activeFilters"
       :columns="columns"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
+      :filter-fields="filterFields"
+      height="calc(100vh - 136px)"
       empty-title="暂无回款计划"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      @filter-apply="handleFilterApply"
+      @filter-reset="handleReset"
     >
       <!-- 计划编号 -->
       <template #cell-plan_number="{ row }">

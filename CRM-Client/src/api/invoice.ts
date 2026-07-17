@@ -109,8 +109,13 @@ export interface InvoiceApplicationQueryParams {
   customer_id?: number
   contract_id?: number
   payment_plan_id?: number
-  status?: InvoiceApplicationStatus
+  status?: string
+  status_exclude?: string
+  invoice_type?: string
+  invoice_type_exclude?: string
   keyword?: string
+  created_time_start?: string
+  created_time_end?: string
   page?: number
   page_size?: number
 }

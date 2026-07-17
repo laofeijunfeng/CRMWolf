@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional
+from datetime import date
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, require_permission, get_current_user_team, check_customer_delete_permission
@@ -461,11 +462,20 @@ async def create_customer(
 def get_customers(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
-    status: CustomerStatusEnum = Query(None, description="客户状态"),
+    customer_status: Optional[str] = Query(None, alias="status", description="客户状态，多个值用逗号分隔"),
+    status_exclude: Optional[str] = Query(None, description="排除的客户状态，多个值用逗号分隔"),
     industry: str = Query(None, description="所属行业"),
+    industry_exclude: Optional[str] = Query(None, description="排除的所属行业，多个值用逗号分隔"),
     city: str = Query(None, description="所在城市"),
+    source: str = Query(None, description="客户来源"),
+    source_exclude: Optional[str] = Query(None, description="排除的客户来源，多个值用逗号分隔"),
+    company_scale: str = Query(None, description="公司规模"),
+    company_scale_exclude: Optional[str] = Query(None, description="排除的公司规模，多个值用逗号分隔"),
     owner_id: str = Query(None, description="负责人ID（支持 'me' 表示当前用户）"),
+    owner_id_exclude: Optional[str] = Query(None, description="排除的负责人ID，多个值用逗号分隔"),
     keyword: str = Query(None, description="关键词搜索"),
+    created_time_start: Optional[date] = Query(None, description="创建时间起始"),
+    created_time_end: Optional[date] = Query(None, description="创建时间结束"),
     order_by: str = Query(None, description="排序字段（created_time/account_name/city/status/industry）"),
     order_dir: str = Query(None, description="排序方向（asc/desc）"),
     team_id: int = Depends(get_current_user_team),
@@ -485,8 +495,10 @@ def get_customers(
     if owner_id in ["me", "my"]:
         actual_owner_id = str(current_user.id)
 
+    requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+
     # 权限验证：如果指定了其他人的 owner_id，必须有 view:all 权限
-    if actual_owner_id is not None and actual_owner_id != str(current_user.id):
+    if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids):
         if not has_view_all:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -502,11 +514,20 @@ def get_customers(
         team_id=team_id,
         skip=skip,
         limit=limit,
-        status=int(status) if status else None,
+        status=customer_status,
+        status_exclude=status_exclude,
         industry=industry,
+        industry_exclude=industry_exclude,
         city=city,
+        source=source,
+        source_exclude=source_exclude,
+        company_scale=company_scale,
+        company_scale_exclude=company_scale_exclude,
         owner_id=actual_owner_id,
+        owner_id_exclude=owner_id_exclude,
         keyword=keyword,
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
         order_by=order_by,
         order_dir=order_dir
     )
@@ -837,13 +858,6 @@ def create_contact(
             detail="客户不存在"
         )
 
-    existing_contact = contact_crud.get_by_mobile(db, contact.mobile, team_id)
-    if existing_contact:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该手机号已存在联系人"
-        )
-
     return contact_crud.create(db, contact, customer_id, team_id)
 
 
@@ -878,14 +892,6 @@ def update_contact(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="联系人不存在"
         )
-
-    if contact_update.mobile:
-        existing_contact = contact_crud.get_by_mobile(db, contact_update.mobile, team_id)
-        if existing_contact and existing_contact.id != contact_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="该手机号已存在联系人"
-            )
 
     return contact_crud.update(db, contact, contact_update)
 

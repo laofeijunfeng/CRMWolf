@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
-from typing import Optional, List, Tuple
-from datetime import datetime, timedelta
-from app.models.lead import Lead, LeadFollowUp, LeadStatus
+from typing import Any, Dict, Optional, List, Tuple
+from datetime import datetime, timedelta, time
+from enum import Enum
+from app.models.lead import Lead, LeadFollowUp, LeadStatus, LeadSource, CompanyScale
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadFollowUpCreate
 
 
@@ -31,6 +32,7 @@ class LeadCRUD:
         owner_id: Optional[str] = None,
         creator_id: Optional[str] = None,
         keyword: Optional[str] = None,
+        filters: Optional[List[Dict[str, Any]]] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None
     ) -> Tuple[List[Lead], int]:
@@ -57,6 +59,8 @@ class LeadCRUD:
                     Lead.contact_phone.like(f"%{keyword}%")
                 )
             )
+        if filters:
+            query = self._apply_filters(query, filters)
 
         total = query.count()
 
@@ -73,6 +77,126 @@ class LeadCRUD:
         leads = query.offset(skip).limit(limit).all()
 
         return leads, total
+
+    def _apply_filters(self, query, filters: List[Dict[str, Any]]):
+        field_map = {
+            "lead_name": (Lead.lead_name, "text"),
+            "contact_name": (Lead.contact_name, "text"),
+            "contact_phone": (Lead.contact_phone, "text"),
+            "city": (Lead.city, "text"),
+            "source": (Lead.source, "source"),
+            "company_scale": (Lead.company_scale, "company_scale"),
+            "status": (Lead.status, "status"),
+            "owner_id": (Lead.owner_id, "text"),
+            "created_time": (Lead.created_time, "date"),
+            "last_modified_time": (Lead.last_modified_time, "date"),
+            "score": (Lead.score, "number"),
+        }
+
+        for condition in filters:
+            field = condition.get("field")
+            op = condition.get("op")
+            value = condition.get("value")
+
+            if field not in field_map or not op:
+                continue
+
+            column, field_type = field_map[field]
+
+            if op == "is_empty":
+                if field_type in {"text", "source", "company_scale"}:
+                    query = query.filter(or_(column.is_(None), column == ""))
+                else:
+                    query = query.filter(column.is_(None))
+                continue
+
+            if op == "is_not_empty":
+                if field_type in {"text", "source", "company_scale"}:
+                    query = query.filter(and_(column.is_not(None), column != ""))
+                else:
+                    query = query.filter(column.is_not(None))
+                continue
+
+            parsed_value = self._parse_filter_value(field_type, value)
+            if parsed_value is None:
+                continue
+
+            if field_type == "date":
+                if op == "eq":
+                    start = datetime.combine(parsed_value.date(), time.min)
+                    end = datetime.combine(parsed_value.date(), time.max)
+                    query = query.filter(and_(column >= start, column <= end))
+                elif op == "before":
+                    query = query.filter(column < parsed_value)
+                elif op == "after":
+                    query = query.filter(column > parsed_value)
+                continue
+
+            if isinstance(parsed_value, list):
+                filter_values = [
+                    item.name if isinstance(item, Enum) else item
+                    for item in parsed_value
+                ]
+                if len(filter_values) == 0:
+                    continue
+
+                if op in {"eq", "contains"}:
+                    query = query.filter(column.in_(filter_values))
+                elif op in {"neq", "not_contains"}:
+                    query = query.filter(column.notin_(filter_values))
+                continue
+
+            filter_value = parsed_value.name if isinstance(parsed_value, Enum) else parsed_value
+
+            if op == "eq":
+                query = query.filter(column == filter_value)
+            elif op == "neq":
+                query = query.filter(column != filter_value)
+            elif op == "contains" and field_type == "text":
+                query = query.filter(column.like(f"%{parsed_value}%"))
+            elif op == "not_contains" and field_type == "text":
+                query = query.filter(column.notlike(f"%{parsed_value}%"))
+
+        return query
+
+    def _parse_filter_value(self, field_type: str, value: Any):
+        if value is None or value == "":
+            return None
+
+        if isinstance(value, list):
+            parsed_values = [
+                self._parse_filter_value(field_type, item)
+                for item in value
+            ]
+            return [item for item in parsed_values if item is not None]
+
+        try:
+            if field_type == "status":
+                return self._parse_enum_value(LeadStatus, value)
+            if field_type == "source":
+                return self._parse_enum_value(LeadSource, value)
+            if field_type == "company_scale":
+                return self._parse_enum_value(CompanyScale, value)
+            if field_type == "number":
+                return int(value)
+            if field_type == "date":
+                value_text = str(value)
+                if len(value_text) == 10:
+                    return datetime.fromisoformat(f"{value_text}T00:00:00")
+                return datetime.fromisoformat(value_text)
+        except (TypeError, ValueError):
+            return None
+
+        return str(value).strip()
+
+    def _parse_enum_value(self, enum_class, value: Any):
+        value_text = str(value).strip()
+
+        for member in enum_class:
+            if value == member.value or value_text == str(member.value) or value_text == member.name:
+                return member
+
+        return None
 
     def create(self, db: Session, obj_in: LeadCreate, creator_id: str, team_id: int) -> Lead:
         lead_data = obj_in.model_dump()
@@ -208,23 +332,44 @@ class LeadCRUD:
 
         return lead
 
-    def get_leads_by_owner(self, db: Session, team_id: int, owner_id: str, skip: int = 0, limit: int = 100) -> List[Lead]:
-        return db.query(Lead).filter(
+    def get_leads_by_owner(
+        self,
+        db: Session,
+        team_id: int,
+        owner_id: str,
+        skip: int = 0,
+        limit: int = 100,
+        filters: Optional[List[Dict[str, Any]]] = None
+    ) -> List[Lead]:
+        query = db.query(Lead).filter(
             and_(
                 Lead.team_id == team_id,
                 Lead.owner_id == owner_id,
                 Lead.status != LeadStatus.CONVERTED
             )
-        ).order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
+        )
+        if filters:
+            query = self._apply_filters(query, filters)
+        return query.order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
 
-    def get_public_leads(self, db: Session, team_id: int, skip: int = 0, limit: int = 100) -> List[Lead]:
-        return db.query(Lead).filter(
+    def get_public_leads(
+        self,
+        db: Session,
+        team_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        filters: Optional[List[Dict[str, Any]]] = None
+    ) -> List[Lead]:
+        query = db.query(Lead).filter(
             and_(
                 Lead.team_id == team_id,
                 Lead.owner_id.is_(None),
                 Lead.status != LeadStatus.CONVERTED
             )
-        ).order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
+        )
+        if filters:
+            query = self._apply_filters(query, filters)
+        return query.order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
 
     def get_leads_need_follow_up(self, db: Session, team_id: int, user_id: str, days: int = 7) -> List[Lead]:
         cutoff_date = datetime.now() - timedelta(days=days)

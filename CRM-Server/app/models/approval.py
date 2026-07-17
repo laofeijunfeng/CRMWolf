@@ -103,7 +103,7 @@ class Approval(Base):
     current_node_id = Column(BigInteger, ForeignKey('crm_approval_nodes.id', ondelete='SET NULL'), nullable=True, comment="当前审批节点ID")
     status = Column(String(20), nullable=False, default=ApprovalStatus.PENDING, comment="审批状态：PENDING, APPROVED, REJECTED, CANCELLED")
     
-    submitter_id = Column(String(100), nullable=False, comment="提交人飞书用户ID")
+    submitter_id = Column(String(100), nullable=False, comment="提交人系统用户ID")
     submitter_name = Column(String(100), nullable=True, comment="提交人姓名")
     
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
@@ -132,7 +132,7 @@ class ApprovalRecord(Base):
     approval_id = Column(BigInteger, ForeignKey('crm_contract_approvals.id', ondelete='CASCADE'), nullable=False, comment="审批实例ID")
     node_id = Column(BigInteger, ForeignKey('crm_approval_nodes.id', ondelete='SET NULL'), nullable=True, comment="审批节点ID")
 
-    approver_id = Column(String(100), nullable=False, comment="审批人飞书用户ID")
+    approver_id = Column(String(100), nullable=False, comment="审批人系统用户ID")
     approver_name = Column(String(100), nullable=True, comment="审批人姓名")
     action = Column(String(20), nullable=False, comment="操作：SUBMIT, APPROVE, REJECT, ROLLBACK")
     comment = Column(Text, nullable=True, comment="审批意见")

@@ -291,7 +291,7 @@ class ApprovalRecordResponse(BaseModel):
     approval_id: int = Field(..., description="审批实例ID，关联到审批实例表")
     node_id: Optional[int] = Field(None, description="节点ID，对应的审批节点")
     node_name: Optional[str] = Field(None, description="节点名称，如：部门经理审批")
-    approver_id: str = Field(..., description="审批人ID，飞书用户ID")
+    approver_id: str = Field(..., description="审批人系统用户ID")
     approver_name: Optional[str] = Field(None, description="审批人姓名")
     approver_status: Optional[str] = Field(
         None,

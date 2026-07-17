@@ -40,6 +40,12 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from '@/components/ui/tooltip'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import type { ApprovalRecord } from '@/schemas/approvalGeneric'
 
 // ==================== Types ====================
@@ -91,12 +97,17 @@ const formatDateTime = (iso: string): string => {
 <template>
   <div class="approval-stepper">
     <!-- 无记录时显示空状态 -->
-    <div
+    <Empty
       v-if="records.length === 0"
-      class="flex items-center justify-center py-8 text-muted-foreground text-sm"
+      class="min-h-[120px] border-0 py-6"
     >
-      暂无审批记录
-    </div>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Clock class="h-5 w-5" aria-hidden="true" />
+        </EmptyMedia>
+        <EmptyTitle class="text-sm font-medium">暂无审批记录</EmptyTitle>
+      </EmptyHeader>
+    </Empty>
 
     <!-- Stepper 流程 -->
     <Stepper

@@ -10,7 +10,7 @@
  * 改动清单：
  * - ✅ TopBar 集成（useHeaderStore）
  * - ✅ ContextTabs 组件（全部线索、我的线索、公海线索、待跟进）
- * - ✅ FilterPanel 组件
+ * - ✅ ListFilterPopover 筛选
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
@@ -21,7 +21,8 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import { DataTable, TableRowActions } from '@/components/crmwolf'
+import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -46,7 +47,7 @@ import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import LeadDetailSheet from './LeadDetailSheet.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { leadApi, type Lead, type LeadListParams } from '@/api/lead'
+import { leadApi, type Lead, type LeadListParams, type LeadOwnerFilterOption } from '@/api/lead'
 import userApi, { type UserResponse, UserStatus } from '@/api/user'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
@@ -64,6 +65,7 @@ const headerStore = useHeaderStore()
 const loading = ref(false)
 const tableData = ref<Lead[]>([])
 const userOptions = ref<UserResponse[]>([])
+const ownerFilterOptions = ref<LeadOwnerFilterOption[]>([])
 const showAILeadCreate = ref(false)
 
 // LeadDetailSheet 状态
@@ -102,25 +104,25 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== FilterPanel 配置 ====================
-const filterFields = [
-  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索线索名称' },
+// ==================== 列表筛选配置 ====================
+const baseFilterFields: ListFilterField[] = [
+  { key: 'lead_name', type: 'text', label: '线索名称' },
+  { key: 'contact_name', type: 'text', label: '联系人' },
+  { key: 'contact_phone', type: 'text', label: '联系电话' },
   {
     key: 'status',
-    type: 'select' as const,
+    type: 'enum',
     label: '状态',
-    placeholder: '全部状态',
     options: [
-      { value: '0', label: '新建' },
-      { value: '1', label: '跟进中' },
-      { value: '3', label: '无效' }
+      { value: 0, label: '新建' },
+      { value: 1, label: '跟进中' },
+      { value: 3, label: '无效' }
     ]
   },
   {
     key: 'source',
-    type: 'select' as const,
+    type: 'enum',
     label: '来源',
-    placeholder: '全部来源',
     options: [
       { value: '线上注册', label: '线上注册' },
       { value: '市场活动', label: '市场活动' },
@@ -131,15 +133,40 @@ const filterFields = [
       { value: '其他', label: '其他' }
     ]
   },
-  { key: 'city', type: 'text' as const, label: '城市', placeholder: '搜索城市' }
+  { key: 'city', type: 'text', label: '城市' },
+  {
+    key: 'company_scale',
+    type: 'enum',
+    label: '规模',
+    options: [
+      { value: '1-50人', label: '1-50人' },
+      { value: '51-200人', label: '51-200人' },
+      { value: '201-500人', label: '201-500人' },
+      { value: '501-1000人', label: '501-1000人' },
+      { value: '1000人以上', label: '1000人以上' }
+    ]
+  },
+  { key: 'created_time', type: 'date', label: '创建时间' },
+  { key: 'score', type: 'number', label: '热力值' }
 ]
 
-const filterValues = reactive({
-  keyword: '',
-  status: '',
-  source: '',
-  city: ''
+const filterFields = computed<ListFilterField[]>(() => {
+  const fields: ListFilterField[] = baseFilterFields.slice()
+  if (ownerFilterOptions.value.length > 0) {
+    fields.splice(fields.length - 2, 0, {
+      key: 'owner_id',
+      type: 'enum',
+      label: '负责人',
+      options: ownerFilterOptions.value.map((owner) => ({
+        value: owner.id,
+        label: owner.name
+      }))
+    })
+  }
+  return fields
 })
+
+const activeFilters = ref<ListFilterCondition[]>([])
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -184,7 +211,7 @@ const canDeleteRow = (row: Lead): boolean => {
 const canReturnRow = (row: Lead): boolean => {
   if (!canReturnLead.value) return false
   if (row.status !== 1) return false
-  if (!row.owner_id) return false
+  if (row.owner_id === null || row.owner_id === undefined || row.owner_id === '') return false
   if (canEditAllLead.value) return true
   if (canEditOwnLead.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false
@@ -205,10 +232,7 @@ const fetchLeadList = async (): Promise<void> => {
     const params: Record<string, unknown> = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      keyword: filterValues.keyword || null,
-      status: filterValues.status ? parseInt(filterValues.status, 10) : null,
-      source: filterValues.source || null,
-      city: filterValues.city || null
+      filters: activeFilters.value.length > 0 ? JSON.stringify(activeFilters.value) : null
     }
 
     if (activeTab.value === 'public') {
@@ -234,17 +258,14 @@ const fetchLeadList = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, unknown>): void => {
-  Object.assign(filterValues, values)
+const handleFilterApply = (filters: ListFilterCondition[]): void => {
+  activeFilters.value = filters
   pagination.current = 1
   fetchLeadList()
 }
 
 const handleReset = (): void => {
-  filterValues.keyword = ''
-  filterValues.status = ''
-  filterValues.source = ''
-  filterValues.city = ''
+  activeFilters.value = []
   pagination.current = 1
   fetchLeadList()
 }
@@ -294,7 +315,7 @@ const handleAssignModal = async (record: Lead): Promise<void> => {
 
 const handleAssignModalOk = async (): Promise<void> => {
   if (!selectedLead.value) return
-  if (!assignForm.owner_id) {
+  if (assignForm.owner_id === '') {
     toast.error('请选择负责人')
     return
   }
@@ -330,7 +351,7 @@ const handleMarkInvalid = (record: Lead): void => {
 
 const handleInvalidModalOk = async (): Promise<void> => {
   if (!selectedLeadForInvalid.value) return
-  if (!invalidForm.reason) {
+  if (invalidForm.reason.trim() === '') {
     toast.error('请输入无效原因')
     return
   }
@@ -368,7 +389,17 @@ const fetchUserOptions = async (): Promise<void> => {
     const response = await userApi.getUsers({ status: UserStatus.ACTIVE })
     userOptions.value = Array.isArray(response) ? response : []
   } catch (error) {
-    console.error('获取用户列表失败', error)
+    handleApiError(error, '获取用户列表')
+  }
+}
+
+const fetchOwnerFilterOptions = async (): Promise<void> => {
+  try {
+    const response = await leadApi.getOwnerFilterOptions()
+    ownerFilterOptions.value = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    handleApiError(error, '获取负责人筛选项')
+    ownerFilterOptions.value = []
   }
 }
 
@@ -377,7 +408,7 @@ const fetchUserOptions = async (): Promise<void> => {
 const asLead = (row: Record<string, unknown>): Lead => row as unknown as Lead
 
 const formatDateTime = (dateStr?: string): string => {
-  if (!dateStr) return '-'
+  if (dateStr === undefined || dateStr === '') return '-'
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN', {
     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -396,8 +427,8 @@ const mapLeadStatus = (status: number): 'new' | 'following' | 'converted' | 'inv
 }
 
 // 热力值图标 - 使用 Lucide SVG 图标，遵循设计规范（禁止 emoji）
-const getScoreIcon = (score: number | undefined): typeof Flame => {
-  if (score === undefined) return HelpCircle
+const getScoreIcon = (score: number | null | undefined): typeof Flame => {
+  if (score == null) return HelpCircle
   if (score >= 80) return Flame      // 高分/火爆
   if (score >= 60) return Zap        // 中高分/潜力
   if (score >= 40) return CircleCheck // 中分/稳定
@@ -409,8 +440,8 @@ const getScoreIcon = (score: number | undefined): typeof Flame => {
 // 中高分(≥60): 警告/潜力橙 → $wolf-warning-v2
 // 中分(≥40): 成功/稳定绿 → $wolf-success-v2
 // 低分(<40): 中性/冷淡灰 → $wolf-text-tertiary-v2
-const getScoreColorClass = (score: number | undefined): string => {
-  if (score === undefined) return 'score-unknown'
+const getScoreColorClass = (score: number | null | undefined): string => {
+  if (score == null) return 'score-unknown'
   if (score >= 80) return 'score-high'
   if (score >= 60) return 'score-medium-high'
   if (score >= 40) return 'score-medium'
@@ -419,6 +450,7 @@ const getScoreColorClass = (score: number | undefined): string => {
 
 // ==================== Lifecycle ====================
 onMounted(() => {
+  fetchOwnerFilterOptions()
   fetchLeadList()
 })
 
@@ -465,13 +497,6 @@ watchEffect(() => {
 
 <template>
   <div class="leads-page">
-    <!-- FilterPanel -->
-    <FilterPanel
-      :fields="filterFields"
-      @search="handleSearch"
-      @reset="handleReset"
-    />
-
     <!-- DataTable -->
     <DataTable
       :columns="columns"
@@ -480,9 +505,14 @@ watchEffect(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
+      height="calc(100vh - 136px)"
       empty-title="暂无线索"
+      v-model:filters="activeFilters"
+      :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      @filter-apply="handleFilterApply"
+      @filter-reset="handleReset"
     >
       <!-- 线索名称 -->
       <template #cell-lead_name="{ row }">

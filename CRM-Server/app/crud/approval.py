@@ -606,7 +606,7 @@ class ApprovalCRUD:
             business_id: 业务单据ID
             team_id: 团队ID
             flow: 匹配到的审批流程
-            submitter_id: 提交人飞书用户ID
+            submitter_id: 提交人系统用户ID
             submitter_name: 提交人姓名
 
         Returns:
@@ -642,7 +642,7 @@ class ApprovalCRUD:
             business_id: 业务单据ID
             team_id: 团队ID
             flow: 匹配到的审批流程
-            submitter_id: 提交人飞书用户ID
+            submitter_id: 提交人系统用户ID
             submitter_name: 提交人姓名
 
         Returns:
@@ -673,7 +673,7 @@ class ApprovalCRUD:
             business_id: 业务单据ID
             team_id: 团队ID
             flow: 匹配到的审批流程
-            submitter_id: 提交人飞书用户ID
+            submitter_id: 提交人系统用户ID
             submitter_name: 提交人姓名
             auto_commit: 是否自动 commit（False 时不 commit，由调用方统一 commit）
 

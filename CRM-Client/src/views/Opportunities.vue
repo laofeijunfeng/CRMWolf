@@ -10,7 +10,7 @@
  * 组件替换：
  * - ✅ TopBar 集成（useHeaderStore）
  * - ✅ ContextTabs 组件（Segmented Control 模式）
- * - ✅ FilterPanel 组件
+ * - ✅ ListFilterPopover 筛选
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
@@ -20,18 +20,18 @@ import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { opportunityApi, type Opportunity, type OpportunityListParams } from '@/api/opportunity'
-import customerApi from '@/api/customer'
-import type { CustomerListResponse } from '@/schemas/customer'
+import { opportunityApi, type Opportunity, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption } from '@/api/opportunity'
 import procurementApi from '@/api/procurement'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
@@ -47,8 +47,8 @@ const headerStore = useHeaderStore()
 
 // ==================== State ====================
 const loading = ref(false)
-const tableData = ref<Opportunity[]>([])
-const customers = ref<CustomerListResponse[]>([])
+const tableData = ref<OpportunityListResponse[]>([])
+const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 
 // 抽屉状态
 const sheetVisible = ref(false)
@@ -85,26 +85,60 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== FilterPanel 配置 ====================
-const filterFields = [
-  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索商机名称' },
+// ==================== 列表筛选配置 ====================
+const baseFilterFields: ListFilterField[] = [
+  { key: 'opportunity_name', type: 'text', label: '商机名称' },
+  { key: 'customer_name', type: 'text', label: '客户名称' },
   {
     key: 'status',
-    type: 'select' as const,
+    type: 'enum',
     label: '状态',
-    placeholder: '全部状态',
     options: [
       { value: '0', label: '跟进中' },
       { value: '1', label: '已赢单' },
       { value: '2', label: '已输单' }
     ]
-  }
+  },
+  {
+    key: 'license_type',
+    type: 'enum',
+    label: '授权模式',
+    options: [
+      { value: 'SUBSCRIPTION', label: '订阅' },
+      { value: 'PERPETUAL', label: '买断' }
+    ]
+  },
+  {
+    key: 'purchase_type',
+    type: 'enum',
+    label: '采购类型',
+    options: [
+      { value: 'NEW', label: '新购' },
+      { value: 'RENEWAL', label: '续购' },
+      { value: 'EXPANSION', label: '增购' }
+    ]
+  },
+  { key: 'expected_closing_date', type: 'date', label: '预计成交日期' },
+  { key: 'stage_name', type: 'text', label: '销售阶段' }
 ]
 
-const filterValues = reactive({
-  keyword: '',
-  status: ''
+const filterFields = computed<ListFilterField[]>(() => {
+  const fields: ListFilterField[] = baseFilterFields.slice()
+  if (ownerFilterOptions.value.length > 0) {
+    fields.push({
+      key: 'owner_id',
+      type: 'enum',
+      label: '负责人',
+      options: ownerFilterOptions.value.map((owner) => ({
+        value: owner.id,
+        label: owner.name
+      }))
+    })
+  }
+  return fields
 })
+
+const activeFilters = ref<ListFilterCondition[]>([])
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -140,34 +174,36 @@ const canDeleteOwnOpportunity = computed(() =>
 )
 
 // 行级权限检查函数
-const canEditRow = (row: Opportunity): boolean => {
+const canEditRow = (row: OpportunityListResponse): boolean => {
   if (canEditAllOpportunity.value) return true
   if (canEditOwnOpportunity.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false
 }
 
-const canDeleteRow = (row: Opportunity): boolean => {
+const canDeleteRow = (row: OpportunityListResponse): boolean => {
   if (canDeleteAllOpportunity.value) return true
   if (canDeleteOwnOpportunity.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false
 }
 
 // ==================== Methods ====================
-const fetchCustomers = async (): Promise<void> => {
+const fetchOwnerFilterOptions = async (): Promise<void> => {
   try {
-    const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
-    customers.value = response ?? []
+    const response = await opportunityApi.getOwnerFilterOptions()
+    ownerFilterOptions.value = response.data
   } catch (error) {
-    handleApiError(error, '获取客户列表')
+    handleApiError(error, '获取负责人筛选项')
   }
 }
 
 const fetchOpportunities = async (): Promise<void> => {
   loading.value = true
   try {
-    // 从 filterValues 提取筛选值
-    const keyword = filterValues.keyword || null
-    let status: number | null = filterValues.status ? parseInt(filterValues.status, 10) : null
+    const keyword = getFilterValue(activeFilters.value, 'opportunity_name')
+    let status: string | number | null = getDelimitedFilterValues(activeFilters.value, 'status')
+    const expectedClosingDateBounds = getDateBounds(activeFilters.value, 'expected_closing_date')
+    const licenseType = getDelimitedFilterValues(activeFilters.value, 'license_type')
+    const purchaseType = getDelimitedFilterValues(activeFilters.value, 'purchase_type')
 
     // 快捷筛选标签覆盖
     if (activeTab.value === 'active') {
@@ -182,7 +218,26 @@ const fetchOpportunities = async (): Promise<void> => {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
       keyword,
-      status
+      status,
+      status_exclude: getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains']),
+      customer_keyword: getFilterValue(activeFilters.value, 'customer_name'),
+      stage_name: getFilterValue(activeFilters.value, 'stage_name'),
+      owner_id: getDelimitedFilterValues(activeFilters.value, 'owner_id'),
+      owner_id_exclude: getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains'])
+    }
+    if (licenseType !== null) {
+      params.license_type = licenseType
+    }
+    if (purchaseType !== null) {
+      params.purchase_type = purchaseType
+    }
+    params.license_type_exclude = getDelimitedFilterValues(activeFilters.value, 'license_type', ['neq', 'not_contains'])
+    params.purchase_type_exclude = getDelimitedFilterValues(activeFilters.value, 'purchase_type', ['neq', 'not_contains'])
+    if (expectedClosingDateBounds.start !== undefined) {
+      params.expected_closing_date_start = expectedClosingDateBounds.start
+    }
+    if (expectedClosingDateBounds.end !== undefined) {
+      params.expected_closing_date_end = expectedClosingDateBounds.end
     }
 
     const response = await opportunityApi.getOpportunities(params)
@@ -195,15 +250,14 @@ const fetchOpportunities = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, string>): void => {
-  Object.assign(filterValues, values)
+const handleFilterApply = (filters: ListFilterCondition[]): void => {
+  activeFilters.value = filters
   pagination.current = 1
   fetchOpportunities()
 }
 
 const handleReset = (): void => {
-  filterValues.keyword = ''
-  filterValues.status = ''
+  activeFilters.value = []
   pagination.current = 1
   fetchOpportunities()
 }
@@ -248,12 +302,16 @@ const handleEditSuccess = (): void => {
 }
 
 // 打开编辑商机弹窗
-const openEditDialog = (row: Opportunity): void => {
-  editingOpportunity.value = row
-  editDialogOpen.value = true
+const openEditDialog = async (row: OpportunityListResponse): Promise<void> => {
+  try {
+    editingOpportunity.value = await opportunityApi.getOpportunity(row.id)
+    editDialogOpen.value = true
+  } catch (error) {
+    handleApiError(error, '获取商机详情')
+  }
 }
 
-const handleDelete = async (record: Opportunity): Promise<void> => {
+const handleDelete = async (record: OpportunityListResponse): Promise<void> => {
   const confirmed = await confirmDelete(`商机 "${record.opportunity_name}"`)
   if (!confirmed) return
 
@@ -266,7 +324,7 @@ const handleDelete = async (record: Opportunity): Promise<void> => {
   }
 }
 
-const handleAdvanceStage = async (record: Opportunity): Promise<void> => {
+const handleAdvanceStage = async (record: OpportunityListResponse): Promise<void> => {
   try {
     // 1. 获取可推进阶段
     const stages = await procurementApi.getOpportunityProcurementStages(record.id)
@@ -333,12 +391,12 @@ const handleAdvanceStage = async (record: Opportunity): Promise<void> => {
   }
 }
 
-const handleMarkAsWon = (record: Opportunity): void => {
+const handleMarkAsWon = (record: OpportunityListResponse): void => {
   selectedOpportunityIdForWin.value = record.id
   winDialogOpen.value = true
 }
 
-const handleMarkAsLost = (record: Opportunity): void => {
+const handleMarkAsLost = (record: OpportunityListResponse): void => {
   selectedOpportunityIdForLose.value = record.id
   loseDialogOpen.value = true
 }
@@ -354,7 +412,7 @@ const handleLoseSuccess = (): void => {
 }
 
 // ==================== TableRowActions 配置 ====================
-const getPrimaryActions = (row: Opportunity): ActionConfig[] => [
+const getPrimaryActions = (row: OpportunityListResponse): ActionConfig[] => [
   {
     label: '编辑',
     icon: Pencil,
@@ -369,7 +427,7 @@ const getPrimaryActions = (row: Opportunity): ActionConfig[] => [
   }
 ]
 
-const getSecondaryActions = (row: Opportunity): ActionConfig[] => [
+const getSecondaryActions = (row: OpportunityListResponse): ActionConfig[] => [
   {
     label: '赢单',
     icon: Trophy,
@@ -422,7 +480,7 @@ const getStageClass = (winProbability: number | undefined): string => {
 onMounted(async () => {
   await Promise.all([
     fetchOpportunities(),
-    fetchCustomers()
+    fetchOwnerFilterOptions()
   ])
 })
 
@@ -460,13 +518,6 @@ watchEffect(() => {
 
 <template>
   <div class="opportunities-page">
-    <!-- FilterPanel -->
-    <FilterPanel
-      :fields="filterFields"
-      @search="handleSearch"
-      @reset="handleReset"
-    />
-
     <!-- DataTable -->
     <DataTable
       :columns="columns"
@@ -475,9 +526,14 @@ watchEffect(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
+      height="calc(100vh - 136px)"
       empty-title="暂无商机"
+      v-model:filters="activeFilters"
+      :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      @filter-apply="handleFilterApply"
+      @filter-reset="handleReset"
     >
       <!-- 商机名称 -->
       <template #cell-opportunity_name="{ row }">

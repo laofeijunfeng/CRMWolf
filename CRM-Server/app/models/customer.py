@@ -73,7 +73,7 @@ class Customer(Base):
     source = Column(String(50), nullable=True, comment="客户来源")
 
     status = Column(Integer, nullable=False, default=0, comment="客户状态：0:跟进中, 1:已赢单, 2:已输单, 3:已失效")
-    owner_id = Column(String(100), nullable=True, comment="负责人（飞书用户ID）")
+    owner_id = Column(String(100), nullable=True, comment="负责人系统用户ID")
     source_lead_id = Column(BigInteger, nullable=True, comment="来源线索ID")
     default_procurement_method_id = Column(BigInteger, nullable=True, comment="默认采购方式ID")
     loss_reason = Column(String(500), nullable=True, comment="输单原因")

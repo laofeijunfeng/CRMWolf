@@ -18,14 +18,17 @@ export { default as TopBarTabs } from './TopBarTabs.vue'
 export { default as DataTable } from './DataTable.vue'
 export { default as FilterPanel } from './FilterPanel.vue'
 export { default as FileAttachment } from './FileAttachment.vue'
+export { default as ListFilterPopover } from './ListFilterPopover.vue'
+export { default as MultiSelect } from './MultiSelect.vue'
+export { default as TableToolbarButton } from './TableToolbarButton.vue'
 export { default as TableRowActions } from './TableRowActions.vue'
 export { default as StatusBadge } from '../StatusBadge.vue'
 
 // Export types
 export type { ActionConfig } from './TableRowActions.vue'
+export type { ListFilterCondition, ListFilterField } from './listFilterTypes'
 
 // Feedback components (§8 MEDIUM Priority)
-export { default as EmptyState } from './EmptyState.vue'
 export { default as LoadingSkeleton } from './LoadingSkeleton.vue'
 export { default as SearchCard } from './SearchCard.vue'
 export { default as ConfirmDialog } from './ConfirmDialog.vue'

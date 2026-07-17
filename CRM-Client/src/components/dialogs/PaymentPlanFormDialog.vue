@@ -27,7 +27,6 @@ import paymentApi, {
   type PaymentPlanUpdate,
 } from '@/api/payment'
 import { handleApiError } from '@/utils/errorHandler'
-import { formatCurrency } from '@/utils/format'
 
 interface Props {
   open: boolean
@@ -122,7 +121,9 @@ function resetForm(): void {
     ? String(props.fixedContract.id)
     : plan?.contract_id !== undefined ? String(plan.contract_id) : ''
   form.stageName = plan?.stage_name ?? ''
-  form.plannedAmount = plan?.planned_amount !== undefined ? String(plan.planned_amount) : ''
+  form.plannedAmount = plan?.planned_amount !== undefined
+    ? String(plan.planned_amount)
+    : getSelectedContractAmount()
   form.dueDate = plan?.due_date ?? ''
   form.notes = plan?.notes ?? ''
   clearErrors()
@@ -255,8 +256,18 @@ function handleCancel(): void {
 }
 
 function contractOptionLabel(contract: PaymentPlanContractOption): string {
-  const amount = formatCurrency(Number(contract.total_amount))
-  return `${contract.contract_name} · ${contract.customer_name ?? '未关联客户'} · ${amount}`
+  return contract.contract_name
+}
+
+function getSelectedContractAmount(): string {
+  if (!isCreateMode.value) return ''
+
+  if (props.fixedContract !== null) {
+    return String(props.fixedContract.total_amount)
+  }
+
+  const selectedContract = contracts.value.find((contract) => String(contract.id) === form.contractId)
+  return selectedContract !== undefined ? String(selectedContract.total_amount) : ''
 }
 
 watch(
@@ -270,6 +281,14 @@ watch(
     }
   },
   { immediate: true }
+)
+
+watch(
+  () => form.contractId,
+  () => {
+    if (!visible.value || !isCreateMode.value || hasFixedContract.value) return
+    form.plannedAmount = getSelectedContractAmount()
+  }
 )
 </script>
 

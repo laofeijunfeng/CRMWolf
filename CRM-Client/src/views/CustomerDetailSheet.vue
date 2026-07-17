@@ -27,6 +27,14 @@ import {
   AccordionTrigger,
   AccordionContent
 } from '@/components/ui/accordion'
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 
 // Panels
 import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
@@ -482,7 +490,7 @@ const handleContractReject = (): void => {
 }
 
 // Payment plan detail sheet nested event handlers (Task 6 fix)
-const handlePaymentPlanViewContract = (contractId: number): void => {
+const handlePaymentPlanDetailViewContract = (contractId: number): void => {
   // Close the plan sheet and open contract sheet
   planSheetVisible.value = false
   selectedPlanId.value = null
@@ -490,7 +498,7 @@ const handlePaymentPlanViewContract = (contractId: number): void => {
   handleViewContract(contractId)
 }
 
-const handlePaymentPlanViewCustomer = (customerId: number): void => {
+const handlePaymentPlanDetailViewCustomer = (customerId: number): void => {
   // If same customer, close nested sheets and return focus to current customer
   if (customerId === props.customerId) {
     planSheetVisible.value = false
@@ -503,7 +511,7 @@ const handlePaymentPlanViewCustomer = (customerId: number): void => {
   router.push({ path: '/customers', query: { customerId: String(customerId) } })
 }
 
-const handlePaymentPlanViewApproval = (record: PaymentRecordInfo): void => {
+const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void => {
   // Reuse handleRecordClick to open PaymentRecordDetailSheet
   handleRecordClick(record)
 }
@@ -670,8 +678,15 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                   </div>
 
                   <!-- 待生成状态 -->
-                  <div v-else-if="customer?.profile_status === 'PENDING' || !customer?.profile_status" class="flex flex-col items-center gap-3 py-4">
-                    <span class="text-sm text-wolf-text-tertiary-v2">暂无客户档案</span>
+                  <Empty v-else-if="customer?.profile_status === 'PENDING' || !customer?.profile_status" class="min-h-[160px] border-0 py-4">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        <RefreshCw class="h-5 w-5" aria-hidden="true" />
+                      </EmptyMedia>
+                      <EmptyTitle class="text-sm font-medium">暂无客户档案</EmptyTitle>
+                      <EmptyDescription>生成后可查看客户画像与分析摘要</EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
                     <Button
                       variant="outline"
                       size="sm"
@@ -681,7 +696,8 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                       <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
                       生成档案
                     </Button>
-                  </div>
+                    </EmptyContent>
+                  </Empty>
 
                   <!-- 失败状态 -->
                   <div v-else-if="customer?.profile_status === 'FAILED'" class="flex flex-col gap-3 py-4">
@@ -923,9 +939,9 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     @update:visible="planSheetVisible = $event"
     @refresh="handlePlanSheetRefresh"
     @record-click="handleRecordClick"
-    @view-contract="handlePaymentPlanViewContract"
-    @view-customer="handlePaymentPlanViewCustomer"
-    @view-approval="handlePaymentPlanViewApproval"
+    @view-contract="handlePaymentPlanDetailViewContract"
+    @view-customer="handlePaymentPlanDetailViewCustomer"
+    @view-approval="handlePaymentPlanDetailViewApproval"
   />
 
   <!-- Payment Record Detail Sheet (Task 6) -->

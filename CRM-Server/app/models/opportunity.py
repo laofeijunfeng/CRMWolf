@@ -76,7 +76,7 @@ class Opportunity(Base):
     expected_closing_date = Column(Date, nullable=False, comment="预计成交日期")
     procurement_stage_id = Column(BigInteger, nullable=True, comment="采购阶段ID（已废弃，保留用于兼容）")
     win_probability = Column(Integer, nullable=False, default=0, comment="当前阶段赢率（0-100）")
-    owner_id = Column(String(100), nullable=False, comment="负责人（飞书用户ID）")
+    owner_id = Column(String(100), nullable=False, comment="负责人系统用户ID")
     status = Column(Integer, nullable=False, default=0, comment="商机状态：0:跟进中, 1:已赢单, 2:已输单")
     loss_reason = Column(String(500), nullable=True, comment="输单原因")
     actual_amount = Column(Numeric(12, 2), nullable=True, comment="实际成交金额")

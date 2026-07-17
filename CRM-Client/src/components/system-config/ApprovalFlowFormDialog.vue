@@ -22,6 +22,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
 import approvalFlowApi, {
   type ApprovalFlow,
   type ApprovalFlowDetail,
@@ -487,9 +493,14 @@ watch(
 
             <p v-if="errors.nodes" class="field-error">{{ errors.nodes }}</p>
 
-            <div v-if="form.nodes.length === 0" class="empty-nodes">
-              暂无审批节点
-            </div>
+            <Empty v-if="form.nodes.length === 0" class="empty-nodes">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Plus class="h-5 w-5" aria-hidden="true" />
+                </EmptyMedia>
+                <EmptyTitle class="text-sm font-medium">暂无审批节点</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
 
             <div v-else class="nodes-list">
               <div

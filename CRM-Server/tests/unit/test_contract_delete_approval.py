@@ -53,6 +53,7 @@ def db_session():
         Column('total_paid_amount', Numeric(12, 2), nullable=False, default=0),
         Column('payment_status', String(20), nullable=False, default='UNPAID'),
         Column('created_time', DateTime, nullable=False),
+        Column('owner_id', String(100), nullable=False),
         Column('creator_id', String(100), nullable=False),
         Column('last_modified_time', DateTime, nullable=False),
         Column('deleted_at', DateTime, nullable=True),
@@ -148,6 +149,7 @@ def sample_contract(db_session):
         subscription_years=1,
         standard_unit_price=10000,
         status=ContractStatus.PENDING_REVIEW,
+        owner_id="user_001",
         creator_id="user_001"
     )
     db_session.add(contract)

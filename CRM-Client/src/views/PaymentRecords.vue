@@ -2,11 +2,10 @@
 /**
  * PaymentRecords.vue - 回款管理页面
  *
- * 基于 PaymentRecordView.vue 重构：
+ * 当前 /payments/records 路由页面：
  * - ✅ TopBar 集成（useHeaderStore）
  * - ✅ ContextTabs 组件（Segmented Control 模式）
- * - ✅ FilterPanel 组件（替代 SearchCard）
- * - ✅ DataTable 组件
+ * - ✅ DataTable 标准筛选与分页
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  *
@@ -20,7 +19,8 @@ import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
-import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
+import { DataTable, TableRowActions } from '@/components/crmwolf'
+import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
@@ -34,6 +34,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -49,6 +50,7 @@ const selectedRecord = ref<PaymentRecordWithDetails | null>(null)
 const detailSheetVisible = ref(false)
 const editDialogOpen = ref(false)
 const editSubmitting = ref(false)
+const activeFilters = ref<ListFilterCondition[]>([])
 
 const pagination = reactive({
   current: 1,
@@ -67,14 +69,22 @@ const tabs = [
 
 const activeTab = ref('all')
 
-// ==================== FilterPanel 配置 ====================
-const filterFields = [
-  { key: 'keyword', type: 'text' as const, label: '搜索', placeholder: '搜索合同名称、客户名称' }
+// ==================== DataTable 筛选配置 ====================
+const filterFields: ListFilterField[] = [
+  { key: 'keyword', type: 'text', label: '客户/合同/阶段' },
+  {
+    key: 'approval_status',
+    type: 'enum',
+    label: '审批状态',
+    options: [
+      { value: 'pending_submit', label: '待提交' },
+      { value: 'pending_approval', label: '审批中' },
+      { value: 'approved', label: '已确认' },
+      { value: 'rejected', label: '已驳回' }
+    ]
+  },
+  { key: 'payment_date', type: 'date', label: '回款日期' }
 ]
-
-const filterValues = reactive({
-  keyword: ''
-})
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -101,45 +111,38 @@ const fetchPaymentRecords = async (): Promise<void> => {
       page_size: pagination.pageSize
     }
 
+    const paymentDateBounds = getDateBounds(activeFilters.value, 'payment_date')
+    if (paymentDateBounds.start !== undefined) {
+      params.payment_date_start = paymentDateBounds.start
+    }
+    if (paymentDateBounds.end !== undefined) {
+      params.payment_date_end = paymentDateBounds.end
+    }
+
+    if (activeTab.value === 'pending_submit' || activeTab.value === 'pending_approval' || activeTab.value === 'rejected') {
+      params.approval_status = activeTab.value
+    } else if (activeTab.value === 'confirmed') {
+      params.approval_status = 'approved'
+    } else {
+      const approvalStatus = getDelimitedFilterValues(activeFilters.value, 'approval_status')
+      const approvalStatusExclude = getDelimitedFilterValues(activeFilters.value, 'approval_status', ['neq', 'not_contains'])
+      if (approvalStatus !== null) {
+        params.approval_status = approvalStatus
+      }
+      if (approvalStatusExclude !== null) {
+        params.approval_status_exclude = approvalStatusExclude
+      }
+    }
+
+    const keyword = getFilterValue(activeFilters.value, 'keyword')
+    if (keyword !== null && keyword.length > 0) {
+      params.keyword = keyword
+    }
+
     const data = await paymentApi.listPaymentRecords(params)
 
-    // 客户端过滤
-    let filteredRecords = data.items
-
-    // 根据 activeTab 筛选
-    if (activeTab.value !== 'all') {
-      filteredRecords = filteredRecords.filter((record: PaymentRecordWithDetails) => {
-        const approvalStatus = record.approval?.status
-        const confirmationStatus = record.confirmation_status
-
-        switch (activeTab.value) {
-          case 'pending_submit':
-            return confirmationStatus === 'PENDING' && record.approval_id == null
-          case 'pending_approval':
-            return approvalStatus === 'PENDING'
-          case 'confirmed':
-            return confirmationStatus === 'CONFIRMED'
-          case 'rejected':
-            return approvalStatus === 'REJECTED'
-          default:
-            return true
-        }
-      })
-    }
-
-    // 关键词过滤
-    if (filterValues.keyword) {
-      const keyword = filterValues.keyword.toLowerCase()
-      filteredRecords = filteredRecords.filter((record: PaymentRecordWithDetails) => {
-        return (
-          (record.contract_name?.toLowerCase().includes(keyword) ?? false) ||
-          (record.customer_name?.toLowerCase().includes(keyword) ?? false)
-        )
-      })
-    }
-
-    tableData.value = filteredRecords
-    pagination.total = filteredRecords.length
+    tableData.value = data.items
+    pagination.total = data.total
   } catch (error) {
     handleApiError(error, '获取回款管理列表')
   } finally {
@@ -147,14 +150,18 @@ const fetchPaymentRecords = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, unknown>): void => {
-  Object.assign(filterValues, values)
+const handleFilterApply = (filters: ListFilterCondition[]): void => {
+  activeFilters.value = filters
+  if (filters.some((filter) => filter.field === 'approval_status')) {
+    activeTab.value = 'all'
+    headerStore.setActiveTab('all')
+  }
   pagination.current = 1
   fetchPaymentRecords()
 }
 
 const handleReset = (): void => {
-  filterValues.keyword = ''
+  activeFilters.value = []
   pagination.current = 1
   fetchPaymentRecords()
 }
@@ -289,24 +296,22 @@ watchEffect(() => {
 
 <template>
   <div class="payment-records-page">
-    <!-- FilterPanel -->
-    <FilterPanel
-      :fields="filterFields"
-      @search="handleSearch"
-      @reset="handleReset"
-    />
-
     <!-- DataTable -->
     <DataTable
+      v-model:filters="activeFilters"
       :columns="columns"
       :data="tableData"
       :loading="loading"
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
+      :filter-fields="filterFields"
+      height="calc(100vh - 136px)"
       empty-title="暂无回款记录"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      @filter-apply="handleFilterApply"
+      @filter-reset="handleReset"
     >
       <!-- 记录编号 -->
       <template #cell-record_number="{ row }">

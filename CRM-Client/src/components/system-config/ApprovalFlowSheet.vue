@@ -37,6 +37,12 @@ import {
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle
+} from '@/components/ui/empty'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -541,9 +547,14 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
               </div>
             </div>
           </div>
-          <div v-else class="text-sm text-muted-foreground text-center py-8">
-            暂无审批节点
-          </div>
+          <Empty v-else class="min-h-[160px] border-0 py-6">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Plus class="h-5 w-5" aria-hidden="true" />
+              </EmptyMedia>
+              <EmptyTitle class="text-sm font-medium">暂无审批节点</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         </div>
       </div>
     </DialogContent>

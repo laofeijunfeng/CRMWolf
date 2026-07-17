@@ -553,6 +553,7 @@ def test_entity_summary_contract_join(
         license_type="SUBSCRIPTION",
         standard_unit_price=Decimal("8888"),
         status=ContractStatus.PENDING_REVIEW,
+        owner_id="1",
         creator_id="1",
     )
     db_session.add(c)

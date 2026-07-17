@@ -83,7 +83,7 @@ class ContactBasicInfo(BaseModel):
 
 
 class CreatorBasicInfo(BaseModel):
-    id: str = Field(..., description="创建人飞书用户ID")
+    id: str = Field(..., description="创建人系统用户ID")
     name: str = Field(..., description="创建人姓名")
     email: Optional[str] = Field(None, description="创建人邮箱")
     mobile: Optional[str] = Field(None, description="创建人手机号")
@@ -91,6 +91,11 @@ class CreatorBasicInfo(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class OwnerBasicInfo(CreatorBasicInfo):
+    id: str = Field(..., description="负责人系统用户ID")
+    name: str = Field(..., description="负责人姓名")
 
 
 class ContractBase(BaseModel):
@@ -122,7 +127,7 @@ class ContractBase(BaseModel):
 
 
 class ContractCreate(ContractBase):
-    pass
+    owner_id: Optional[str] = Field(None, description="合同负责人系统用户ID，不传则继承商机/客户负责人")
 
 
 class ContractUpdate(BaseModel):
@@ -151,7 +156,8 @@ class ContractResponse(BaseModel):
     signing_date: Optional[date] = Field(None, description="签署日期")
     effective_date: Optional[date] = Field(None, description="生效日期")
     expiry_date: Optional[date] = Field(None, description="到期日期")
-    creator_id: str = Field(..., description="创建人飞书用户ID")
+    owner_id: str = Field(..., description="负责人系统用户ID")
+    creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     
@@ -162,6 +168,7 @@ class ContractResponse(BaseModel):
 class ContractListResponse(ContractResponse):
     customer_info: Optional[CustomerBasicInfo] = Field(None, description="客户基本信息")
     opportunity_info: Optional[OpportunityBasicInfo] = Field(None, description="商机基本信息")
+    owner_info: Optional[OwnerBasicInfo] = Field(None, description="负责人信息")
     creator_info: Optional[CreatorBasicInfo] = Field(None, description="创建人信息")
     status_info: Optional[dict] = Field(None, description="合同状态信息")
 
@@ -170,6 +177,7 @@ class ContractDetailResponse(ContractResponse):
     customer_info: Optional[CustomerBasicInfo] = Field(None, description="客户基本信息")
     opportunity_info: Optional[OpportunityBasicInfo] = Field(None, description="商机基本信息")
     contact_info: Optional[ContactBasicInfo] = Field(None, description="签约人信息")
+    owner_info: Optional[OwnerBasicInfo] = Field(None, description="负责人信息")
     creator_info: Optional[CreatorBasicInfo] = Field(None, description="创建人信息")
 
 

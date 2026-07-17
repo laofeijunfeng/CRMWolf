@@ -37,6 +37,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 import { DatePicker } from '@/components/ui/date-picker'
 import { handleApiError } from '@/utils/errorHandler'
 import { opportunityApi, type Opportunity, type OpportunityCreate, type OpportunityUpdate, LicenseType, PurchaseType } from '@/api/opportunity'
@@ -421,9 +426,11 @@ function continueEditing(): void {
                 <div v-if="loadingCustomers" class="px-2 py-1.5 text-sm text-muted-foreground">
                   加载中...
                 </div>
-                <div v-else-if="customers.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">
-                  暂无客户
-                </div>
+                <Empty v-else-if="customers.length === 0" class="min-h-0 border-0 px-2 py-2">
+                  <EmptyHeader>
+                    <EmptyTitle class="text-sm font-normal text-muted-foreground">暂无客户</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
                 <SelectItem
                   v-for="customer in customers"
                   :key="customer.id"

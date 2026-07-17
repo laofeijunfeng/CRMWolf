@@ -17,8 +17,14 @@ import {
   PaginationPrevious,
   PaginationNext
 } from '@/components/ui/pagination'
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle
+} from '@/components/ui/empty'
 import LoadingSkeleton from './LoadingSkeleton.vue'
-import EmptyState from './EmptyState.vue'
+import ListFilterPopover from './ListFilterPopover.vue'
+import type { ListFilterCondition, ListFilterField } from './listFilterTypes'
 import { buildPaginationEntries, type PaginationEntry } from './paginationWindow'
 
 // ==================== Props ====================
@@ -62,6 +68,10 @@ interface Props {
   fixedRightCount?: number
   /** 行是否可作为整体交互目标 */
   rowInteractive?: boolean
+  /** 标准列表筛选字段 */
+  filterFields?: ListFilterField[]
+  /** 当前筛选条件 */
+  filters?: ListFilterCondition[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -73,6 +83,8 @@ const props = withDefaults(defineProps<Props>(), {
   fixedLeftCount: 1,
   fixedRightCount: 1,
   rowInteractive: false,
+  filterFields: () => [],
+  filters: () => [],
 })
 
 // ==================== Emits ====================
@@ -80,6 +92,9 @@ const emit = defineEmits<{
   'update:page': [value: number]
   'update:pageSize': [value: number]
   'row-click': [row: T]
+  'update:filters': [value: ListFilterCondition[]]
+  'filter-apply': [value: ListFilterCondition[]]
+  'filter-reset': []
 }>()
 
 // ==================== Computed ====================
@@ -87,6 +102,9 @@ const totalPages = computed<number>(() => Math.ceil(props.total / props.pageSize
 const paginationEntries = computed<PaginationEntry[]>(() =>
   buildPaginationEntries(props.page, totalPages.value)
 )
+const normalizedFilterFields = computed<ListFilterField[]>(() => props.filterFields ?? [])
+const normalizedFilters = computed<ListFilterCondition[]>(() => props.filters ?? [])
+const hasTableTools = computed(() => normalizedFilterFields.value.length > 0)
 
 /**
  * 计算固定列配置
@@ -118,12 +136,13 @@ const processedColumns = computed(() => {
  * - 固定左侧列累加前面的固定列宽度
  * - 固定右侧列累加后面的固定列宽度
  */
-const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | 'right' }): string | undefined => {
+const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | 'right' | undefined }): string | undefined => {
   if (col.fixed === 'left') {
     // 累加前面所有左侧固定列的宽度
     let offset = 0
     for (let i = 0; i < col.index; i++) {
       const prevCol = processedColumns.value[i]
+      if (!prevCol) continue
       if (prevCol.fixed === 'left') {
         // 解析宽度（如 "150px" → 150）
         const widthValue = parseInt(prevCol.width?.replace('px', '') ?? '120', 10)
@@ -138,6 +157,7 @@ const getFixedOffset = (col: { index: number; width?: string; fixed?: 'left' | '
     let offset = 0
     for (let i = processedColumns.value.length - 1; i > col.index; i--) {
       const nextCol = processedColumns.value[i]
+      if (!nextCol) continue
       if (nextCol.fixed === 'right') {
         const widthValue = parseInt(nextCol.width?.replace('px', '') ?? '120', 10)
         offset += widthValue
@@ -185,6 +205,24 @@ function handleRowKeydown(event: KeyboardEvent, row: T): void {
   }
 }
 
+function handleFilterUpdate(filters: ListFilterCondition[]): void {
+  emit('update:filters', filters)
+}
+
+function handleFilterApply(filters: ListFilterCondition[]): void {
+  emit('filter-apply', filters)
+}
+
+function handleFilterReset(): void {
+  emit('filter-reset')
+}
+
+function getRowKey(row: T, index: number): string | number {
+  const key = props.rowKey as string
+  const value: unknown = row[key]
+  return typeof value === 'string' || typeof value === 'number' ? value : index
+}
+
 function getAlignClass(align?: string): string {
   switch (align) {
     case 'center':
@@ -219,14 +257,20 @@ watch(() => props.data, () => {
       show-avatar
     />
 
-    <!-- 空状态 -->
-    <EmptyState
-      v-else-if="!loading && data.length === 0"
-      :title="emptyTitle ?? '暂无数据'"
-    />
-
     <!-- 表格卡片 -->
     <div v-else class="data-table-card" :style="{ height }">
+      <div v-if="hasTableTools || $slots['tableTools']" class="data-table-tools">
+        <ListFilterPopover
+          v-if="normalizedFilterFields.length > 0"
+          :model-value="normalizedFilters"
+          :fields="normalizedFilterFields"
+          @update:model-value="handleFilterUpdate"
+          @apply="handleFilterApply"
+          @reset="handleFilterReset"
+        />
+        <slot name="tableTools" />
+      </div>
+
       <!-- 表格内容区（可滚动） -->
       <div
         class="data-table-content"
@@ -261,7 +305,7 @@ watch(() => props.data, () => {
           <tbody class="data-table-body">
             <tr
               v-for="(row, index) in data"
-              :key="row[rowKey] || index"
+              :key="getRowKey(row, index)"
               class="data-table-row"
               :class="{ 'is-interactive': rowInteractive }"
               :role="rowInteractive ? 'button' : undefined"
@@ -290,6 +334,15 @@ watch(() => props.data, () => {
                 <slot :name="`cell-${col.key}`" :row="row" :value="row[col.key]">
                   {{ row[col.key] ?? '-' }}
                 </slot>
+              </td>
+            </tr>
+            <tr v-if="data.length === 0" class="data-table-empty-row">
+              <td :colspan="processedColumns.length" class="data-table-empty-cell">
+                <Empty class="border-0">
+                  <EmptyHeader>
+                    <EmptyTitle>{{ emptyTitle ?? '暂无数据' }}</EmptyTitle>
+                  </EmptyHeader>
+                </Empty>
               </td>
             </tr>
           </tbody>
@@ -409,6 +462,17 @@ watch(() => props.data, () => {
   }
 }
 
+.data-table-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #E4ECFC;
+  background: $wolf-bg-card-v2;
+  flex-shrink: 0;
+}
+
 // 表格行
 .data-table-row {
   height: 44px;  // 行高（list-page.md 3.2）
@@ -466,6 +530,19 @@ watch(() => props.data, () => {
   &.fixed-right.has-shadow {
     box-shadow: -2px 0 4px rgba(0, 0, 0, 0.08);
   }
+}
+
+.data-table-empty-row {
+  height: 180px;
+
+  &:hover {
+    background: transparent;
+  }
+}
+
+.data-table-empty-cell {
+  padding: $wolf-space-xl-v2;
+  text-align: center;
 }
 
 // ==================== 分页区 ====================

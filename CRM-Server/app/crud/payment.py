@@ -14,6 +14,12 @@ from app.schemas.payment import (
 from app.services.business_number_generator import BusinessNumberGenerator
 
 
+def _split_csv(value: Optional[str]) -> List[str]:
+    if value is None:
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
 class PaymentPlanCRUD:
     def get_by_id(self, db: Session, plan_id: int, team_id: Optional[int] = None) -> Optional[PaymentPlan]:
         query = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id)
@@ -50,7 +56,9 @@ class PaymentPlanCRUD:
         skip: int = 0,
         limit: int = 100,
         status: Optional[str] = None,
+        status_exclude: Optional[str] = None,
         owner_id: Optional[str] = None,
+        keyword: Optional[str] = None,
         due_date_start: Optional[date] = None,
         due_date_end: Optional[date] = None,
         current_user_id: Optional[str] = None
@@ -63,7 +71,9 @@ class PaymentPlanCRUD:
         plans_query = plans_query.filter(PaymentPlan.team_id == team_id)
         
         if status:
-            plans_query = plans_query.filter(PaymentPlan.status == status)
+            plans_query = plans_query.filter(PaymentPlan.status.in_(_split_csv(status)))
+        if status_exclude:
+            plans_query = plans_query.filter(PaymentPlan.status.notin_(_split_csv(status_exclude)))
         
         if due_date_start:
             plans_query = plans_query.filter(PaymentPlan.due_date >= due_date_start)
@@ -72,10 +82,23 @@ class PaymentPlanCRUD:
             plans_query = plans_query.filter(PaymentPlan.due_date <= due_date_end)
         
         if owner_id:
-            plans_query = plans_query.filter(Contract.creator_id == owner_id)
+            plans_query = plans_query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
         
         if current_user_id:
-            plans_query = plans_query.filter(Contract.creator_id == current_user_id)
+            plans_query = plans_query.filter(Contract.owner_id == current_user_id)
+
+        if keyword and keyword.strip():
+            like_keyword = f"%{keyword.strip()}%"
+            plans_query = plans_query.outerjoin(Customer, Contract.customer_id == Customer.id).outerjoin(
+                Opportunity, Contract.opportunity_id == Opportunity.id
+            ).filter(
+                or_(
+                    PaymentPlan.stage_name.ilike(like_keyword),
+                    Contract.contract_name.ilike(like_keyword),
+                    Customer.account_name.ilike(like_keyword),
+                    Opportunity.opportunity_name.ilike(like_keyword),
+                )
+            )
         
         total = plans_query.count()
         
@@ -313,8 +336,10 @@ class PaymentRecordCRUD:
         payment_date_end: Optional[date] = None,
         min_amount: Optional[float] = None,
         creator_id: Optional[str] = None,
+        keyword: Optional[str] = None,
         current_user_id: Optional[str] = None,
-        approval_status: Optional[str] = None
+        approval_status: Optional[str] = None,
+        approval_status_exclude: Optional[str] = None
     ) -> Tuple[List[PaymentRecord], int]:
         from app.models.contract import Contract
         from app.models.customer import Customer
@@ -342,33 +367,35 @@ class PaymentRecordCRUD:
         )
         records_query = records_query.filter(PaymentRecord.team_id == team_id)
 
-        # Task 1.4: approval_status filtering
-        if approval_status == 'pending_submit':
-            # 待提交审批：无approval_id，confirmation_status='PENDING'
-            records_query = records_query.filter(
-                PaymentRecord.approval_id.is_(None),
-                PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING
-            )
-        elif approval_status == 'pending_approval':
-            # 审批中：有approval_id，approval.status='PENDING'
-            records_query = records_query.join(
-                Approval, PaymentRecord.approval_id == Approval.id
-            ).filter(
-                PaymentRecord.approval_id.isnot(None),
-                Approval.status == ApprovalStatus.PENDING
-            )
-        elif approval_status == 'approved':
-            # 已通过：confirmation_status='CONFIRMED'
-            records_query = records_query.filter(
-                PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED
-            )
-        elif approval_status == 'rejected':
-            # 已驳回：approval.status='REJECTED'
-            records_query = records_query.join(
-                Approval, PaymentRecord.approval_id == Approval.id
-            ).filter(
-                Approval.status == ApprovalStatus.REJECTED
-            )
+        approval_status_values = _split_csv(approval_status)
+        approval_status_exclude_values = _split_csv(approval_status_exclude)
+        if approval_status_values or approval_status_exclude_values:
+            records_query = records_query.outerjoin(Approval, PaymentRecord.approval_id == Approval.id)
+
+            def approval_status_predicate(status_value: str):
+                if status_value == 'pending_submit':
+                    return and_(
+                        PaymentRecord.approval_id.is_(None),
+                        PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING
+                    )
+                if status_value == 'pending_approval':
+                    return and_(
+                        PaymentRecord.approval_id.isnot(None),
+                        Approval.status == ApprovalStatus.PENDING
+                    )
+                if status_value == 'approved':
+                    return PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED
+                if status_value == 'rejected':
+                    return Approval.status == ApprovalStatus.REJECTED
+                return None
+
+            include_predicates = [predicate for predicate in (approval_status_predicate(value) for value in approval_status_values) if predicate is not None]
+            exclude_predicates = [predicate for predicate in (approval_status_predicate(value) for value in approval_status_exclude_values) if predicate is not None]
+
+            if include_predicates:
+                records_query = records_query.filter(or_(*include_predicates))
+            if exclude_predicates:
+                records_query = records_query.filter(~or_(*exclude_predicates))
         
         if contract_id:
             records_query = records_query.filter(PaymentPlan.contract_id == contract_id)
@@ -390,6 +417,16 @@ class PaymentRecordCRUD:
         
         if current_user_id:
             records_query = records_query.filter(Contract.creator_id == current_user_id)
+
+        if keyword and keyword.strip():
+            like_keyword = f"%{keyword.strip()}%"
+            records_query = records_query.filter(
+                or_(
+                    PaymentPlan.stage_name.ilike(like_keyword),
+                    Contract.contract_name.ilike(like_keyword),
+                    Customer.account_name.ilike(like_keyword),
+                )
+            )
         
         total = records_query.count()
         records = records_query.order_by(PaymentRecord.payment_date.desc()).offset(skip).limit(limit).all()
