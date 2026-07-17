@@ -162,6 +162,11 @@ ALL_PERMISSIONS = [
     {"name": "删除回款记录", "code": "payment:record:delete", "resource": "payment_record", "action": "delete"},
     {"name": "确认回款入账", "code": "payment:confirm", "resource": "payment", "action": "confirm"},
 
+    # License - 补充审批权限集
+    {"name": "审批License申请", "code": "license:approve", "resource": "license", "action": "approve"},
+    {"name": "审批自己的License申请", "code": "license:approve:own", "resource": "license", "action": "approve", "scope": "own"},
+    {"name": "审批所有License申请", "code": "license:approve:all", "resource": "license", "action": "approve", "scope": "all"},
+
     # 财务权限
     {"name": "查看财务审计日志", "code": "finance:audit:view", "resource": "finance", "action": "audit", "scope": "view"},
     {"name": "查看应收账款", "code": "finance:receivables:view", "resource": "finance", "action": "receivables", "scope": "view"},
