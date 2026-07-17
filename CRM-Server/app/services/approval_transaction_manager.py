@@ -114,7 +114,7 @@ class ApprovalTransactionManager:
             db.refresh(approval)
 
             # 8. 异步发送通知（失败不阻断）
-            self._send_notification_async(approval, entity, team_id)
+            self._send_notification_async(db, approval, entity, team_id)
 
             logger.info(
                 f"create_with_approval 成功（business_type={business_type}, "
@@ -222,7 +222,7 @@ class ApprovalTransactionManager:
             db.refresh(approval)
 
             # 9. 异步发送通知
-            self._send_notification_async(approval, entity, team_id)
+            self._send_notification_async(db, approval, entity, team_id)
 
             logger.info(
                 f"submit_for_approval 成功（business_type={business_type}, "
@@ -236,7 +236,7 @@ class ApprovalTransactionManager:
             db.rollback()
             return (None, f"系统异常：{str(e)}")
 
-    def _send_notification_async(self, approval: Approval, entity: Any, team_id: int) -> None:
+    def _send_notification_async(self, db: Session, approval: Approval, entity: Any, team_id: int) -> None:
         """
         异步发送审批通知（失败不阻断业务流程）
 
@@ -246,6 +246,7 @@ class ApprovalTransactionManager:
         3. 提供手动补发入口（ApprovalService.resend_notification）
 
         Args:
+            db: 数据库会话
             approval: 审批实例
             entity: 业务单据实例
             team_id: 团队ID
@@ -254,48 +255,53 @@ class ApprovalTransactionManager:
 
         try:
             from app.services.notification import notification_service_factory
-            from app.crud.user import user_crud
+            from app.crud.role import role_crud
 
             # 获取审批人信息
             adapter = get_adapter(approval.business_type)
             entity_name = adapter.get_name(entity)
 
-            # 获取当前审批节点的审批人
+            # 获取当前审批节点角色下的审批人
             current_node = approval.current_node
-            if not current_node or not current_node.approver_ids:
+            if not current_node or not current_node.approve_role:
                 logger.warning(
-                    f"审批节点无审批人（approval_id={approval.id}），跳过通知"
+                    f"审批节点未配置审批角色（approval_id={approval.id}），跳过通知"
                 )
                 return
 
-            # 获取第一个审批人信息
-            approver_id = current_node.approver_ids[0]
-            approver = user_crud.get_by_id(None, int(approver_id))  # type: ignore
-            if not approver:
+            role = role_crud.get_by_code(db, current_node.approve_role)
+            if not role:
                 logger.warning(
-                    f"审批人不存在（approver_id={approver_id}），跳过通知"
+                    f"审批角色不存在（approval_id={approval.id}, role={current_node.approve_role}），跳过通知"
                 )
                 return
 
-            # 创建通知服务实例并发送通知
-            notification_service = notification_service_factory(None, team_id)  # type: ignore
-
-            # 使用 asyncio.run 调用异步通知方法
-            asyncio.run(
-                notification_service.notify_approval_pending(
-                    entity_type=approval.business_type,
-                    entity_name=entity_name,
-                    flow_name=approval.flow.name if approval.flow else "",
-                    node_name=current_node.name if current_node else "",
-                    approver_open_id=approver.open_id or "",
-                    approver_name=approver.name or "",
-                    business_id=approval.business_id,
+            approvers = role_crud.get_role_users(db, role.id, team_id)
+            if not approvers:
+                logger.warning(
+                    f"审批角色无成员（approval_id={approval.id}, role={current_node.approve_role}），跳过通知"
                 )
-            )
+                return
+
+            notification_service = notification_service_factory(db, team_id)
+
+            for approver in approvers:
+                # 使用 asyncio.run 调用异步通知方法
+                asyncio.run(
+                    notification_service.notify_approval_pending(
+                        entity_type=approval.business_type,
+                        entity_name=entity_name,
+                        flow_name=approval.flow.flow_name if approval.flow else "",
+                        node_name=current_node.node_name,
+                        approver_open_id=approver.feishu_open_id or "",
+                        approver_name=approver.name or "",
+                        business_id=approval.business_id,
+                    )
+                )
 
             logger.info(
                 f"审批通知发送成功（approval_id={approval.id}, "
-                f"business_type={approval.business_type})"
+                f"business_type={approval.business_type}, approver_count={len(approvers)})"
             )
 
         except Exception as e:
@@ -332,7 +338,7 @@ class ApprovalTransactionManager:
             if entity is None:
                 return (False, "业务单据不存在")
 
-            self._send_notification_async(approval, entity, team_id)
+            self._send_notification_async(db, approval, entity, team_id)
             return (True, None)
 
         except Exception as e:

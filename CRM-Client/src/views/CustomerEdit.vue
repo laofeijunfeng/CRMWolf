@@ -233,7 +233,7 @@ onMounted(async () => {
             <!-- Source -->
             <FormField v-slot="{ componentField }" name="source">
               <FormItem>
-                <FormLabel>客户来源</FormLabel>
+                <FormLabel>客户来源 <span class="text-destructive">*</span></FormLabel>
                 <Select v-bind="componentField as any">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
@@ -257,7 +257,7 @@ onMounted(async () => {
             <!-- Company Scale -->
             <FormField v-slot="{ componentField }" name="company_scale">
               <FormItem>
-                <FormLabel>公司规模</FormLabel>
+                <FormLabel>公司规模 <span class="text-destructive">*</span></FormLabel>
                 <Select v-bind="componentField as any">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
@@ -283,11 +283,11 @@ onMounted(async () => {
             <!-- Default Procurement Method -->
             <FormField v-slot="{ componentField }" name="default_procurement_method_id">
               <FormItem>
-                <FormLabel>默认采购方式</FormLabel>
+                <FormLabel>采购方式 <span class="text-destructive">*</span></FormLabel>
                 <Select v-bind="componentField as any">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue placeholder="请选择默认采购方式" />
+                      <SelectValue placeholder="请选择采购方式" />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>

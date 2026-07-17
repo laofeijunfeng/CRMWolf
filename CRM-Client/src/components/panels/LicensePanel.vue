@@ -23,11 +23,16 @@ interface Props {
 defineProps<Props>()
 
 const emit = defineEmits<{
+  'add-deployment': []
   'apply': []
   'view': [applicationId: number]
 }>()
 
 // ==================== Methods ====================
+const handleAddDeployment = (): void => {
+  emit('add-deployment')
+}
+
 const handleApply = (): void => {
   emit('apply')
 }
@@ -85,6 +90,13 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       empty-text="暂无部署信息"
       class="mb-4"
     >
+      <template #headerActions>
+        <Button size="sm" variant="outline" @click="handleAddDeployment">
+          <Plus class="w-4 h-4 mr-1" />
+          新增部署
+        </Button>
+      </template>
+
       <template #itemMain="{ item }">
         <div class="flex items-center gap-2 mb-1">
           <span class="font-medium text-wolf-text-primary-v2">{{ item.deployment_name }}</span>

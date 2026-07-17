@@ -44,6 +44,8 @@ import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vu
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
+import DeploymentInfoFormDialog from '@/components/dialogs/DeploymentInfoFormDialog.vue'
+import LicenseApplicationFormDialog from '@/components/dialogs/LicenseApplicationFormDialog.vue'
 
 // Detail Sheets (Task 6)
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
@@ -91,6 +93,8 @@ const opportunityDialogOpen = ref(false)
 const contractDialogOpen = ref(false)
 const invoiceTitleDialogOpen = ref(false)
 const invoiceApplicationDialogOpen = ref(false)
+const deploymentDialogOpen = ref(false)
+const licenseApplicationDialogOpen = ref(false)
 
 // ==================== Edit States ====================
 const editingContact = ref<ContactResponse | null>(null)
@@ -405,9 +409,26 @@ const handleRecordPayment = (): void => {
 }
 
 // License handlers
+const handleCreateDeployment = (): void => {
+  deploymentDialogOpen.value = true
+}
+
+const handleDeploymentSuccess = (): void => {
+  deploymentDialogOpen.value = false
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
 const handleApplyLicense = (): void => {
-  // TODO: 打开许可证申请对话框
-  toast.info('许可证申请功能开发中')
+  licenseApplicationDialogOpen.value = true
+}
+
+const handleLicenseApplicationSuccess = (): void => {
+  licenseApplicationDialogOpen.value = false
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
 }
 
 // Contract detail sheet handlers (Task 6)
@@ -510,6 +531,8 @@ watch(() => props.visible, (visible): void => {
     planSheetVisible.value = false
     selectedRecord.value = null
     recordSheetVisible.value = false
+    deploymentDialogOpen.value = false
+    licenseApplicationDialogOpen.value = false
   }
 }, { immediate: true })
 
@@ -782,6 +805,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               :customer-id="customerId ?? 0"
               :license-applications="licenseApplications"
               :deployments="deployments"
+              @add-deployment="handleCreateDeployment"
               @apply="handleApplyLicense"
             />
           </div>
@@ -862,6 +886,24 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     :fixed-invoice-title="applyingInvoiceTitle"
     @update:open="handleInvoiceApplicationDialogClose"
     @success="handleInvoiceApplicationSuccess"
+  />
+
+  <DeploymentInfoFormDialog
+    v-if="customerId !== null"
+    :customer-id="customerId"
+    :open="deploymentDialogOpen"
+    @update:open="deploymentDialogOpen = $event"
+    @success="handleDeploymentSuccess"
+  />
+
+  <LicenseApplicationFormDialog
+    v-if="customerId !== null"
+    :customer-id="customerId"
+    :open="licenseApplicationDialogOpen"
+    :deployments="deployments"
+    :contracts="contracts"
+    @update:open="licenseApplicationDialogOpen = $event"
+    @success="handleLicenseApplicationSuccess"
   />
 
   <!-- Contract Detail Sheet (Task 6) -->
