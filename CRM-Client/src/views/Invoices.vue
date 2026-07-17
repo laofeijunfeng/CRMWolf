@@ -33,6 +33,7 @@ import invoiceApi, {
 } from '@/api/invoice'
 import customerApi from '@/api/customer'
 import type { CustomerResponse } from '@/api/customer'
+import { normalizePaginatedResponse } from '@/types/pagination'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
@@ -132,7 +133,7 @@ const canMarkInvoiced = computed(() => permissionStore.hasPermission('invoice:ma
 const fetchCustomers = async (): Promise<void> => {
   try {
     const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
-    customerOptions.value = response ?? []
+    customerOptions.value = normalizePaginatedResponse(response).items
   } catch (error) {
     handleApiError(error, '获取客户列表')
   }

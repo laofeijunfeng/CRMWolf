@@ -27,6 +27,7 @@ import paymentApi, {
   type PaymentPlanUpdate,
 } from '@/api/payment'
 import { handleApiError } from '@/utils/errorHandler'
+import { normalizePaginatedResponse } from '@/types/pagination'
 
 interface Props {
   open: boolean
@@ -213,11 +214,12 @@ async function fetchContracts(): Promise<void> {
 
   contractsLoading.value = true
   try {
-    contracts.value = await contractApi.getContracts({
+    const response = await contractApi.getContracts({
       limit: 100,
       order_by: 'created_time',
       order_dir: 'desc',
     })
+    contracts.value = normalizePaginatedResponse(response).items
   } catch (error: unknown) {
     handleApiError(error, '获取合同列表')
   } finally {

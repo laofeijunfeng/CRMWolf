@@ -32,6 +32,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { normalizePaginatedResponse } from '@/types/pagination'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
@@ -241,8 +242,9 @@ const fetchOpportunities = async (): Promise<void> => {
     }
 
     const response = await opportunityApi.getOpportunities(params)
-    tableData.value = Array.isArray(response) ? response : []
-    pagination.total = Array.isArray(response) ? response.length : 0
+    const normalized = normalizePaginatedResponse(response)
+    tableData.value = normalized.items
+    pagination.total = normalized.total
   } catch (error) {
     handleApiError(error, '获取商机列表')
   } finally {

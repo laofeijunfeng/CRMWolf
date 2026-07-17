@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import type { PaginatedResponse } from '@/types/pagination'
 
 export type LicenseType = 'SUBSCRIPTION' | 'PERPETUAL'
 
@@ -158,8 +159,8 @@ const contractApi = {
     return response
   },
 
-  getContracts: async (params?: ContractQueryParams): Promise<ContractListResponse[]> => {
-    const response = await request.get<ContractListResponse[]>('/v1/contracts/', { params })
+  getContracts: async (params?: ContractQueryParams): Promise<ContractListResponse[] | PaginatedResponse<ContractListResponse>> => {
+    const response = await request.get<ContractListResponse[] | PaginatedResponse<ContractListResponse>>('/v1/contracts/', { params })
     return response
   },
 

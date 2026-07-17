@@ -136,13 +136,14 @@ interface ContractOpportunityOption {
   subscription_years: number | null
 }
 
-type CustomerListResponse = CustomerResponse[] | { data?: { items?: CustomerResponse[] } }
+type CustomerListResponse = CustomerResponse[] | { data?: { items?: CustomerResponse[] }; items?: CustomerResponse[] }
 
 const normalizeCustomerList = (response: CustomerListResponse): CustomerOption[] => {
   if (Array.isArray(response)) {
     return response.map(c => ({ id: c.id, account_name: c.account_name }))
   }
-  return response.data?.items?.map(c => ({ id: c.id, account_name: c.account_name })) ?? []
+  const items = response.items ?? response.data?.items ?? []
+  return items.map(c => ({ id: c.id, account_name: c.account_name }))
 }
 
 const getLockedCustomerOption = (): CustomerOption | null => {

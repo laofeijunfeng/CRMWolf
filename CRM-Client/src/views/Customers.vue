@@ -56,9 +56,7 @@ const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
 
-interface CustomerTableRow extends CustomerResponse {
-  score?: number | null
-}
+type CustomerTableRow = CustomerResponse
 
 // ==================== State ====================
 const loading = ref(false)
@@ -381,8 +379,9 @@ const fetchCustomerList = async (): Promise<void> => {
 
     if (activeTab.value === 'public') {
       const response = await customerApi.getPublicCustomers(params)
-      tableData.value = Array.isArray(response) ? response : []
-      pagination.total = Array.isArray(response) ? response.length : 0
+      const normalized = normalizeCustomerListResponse(response)
+      tableData.value = normalized.items
+      pagination.total = normalized.total
     } else {
       if (activeTab.value === 'my') {
         params['owner_id'] = 'me'

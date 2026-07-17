@@ -31,6 +31,7 @@ import paymentApi, { type PaymentPlanResponse } from '@/api/payment'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency } from '@/utils/format'
+import { normalizePaginatedResponse } from '@/types/pagination'
 
 interface FixedCustomer {
   id: number
@@ -221,7 +222,8 @@ async function fetchCustomers(): Promise<void> {
 
   loadingCustomers.value = true
   try {
-    customers.value = await customerApi.getCustomers({ skip: 0, limit: 100 })
+    const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
+    customers.value = normalizePaginatedResponse(response).items
   } catch (error: unknown) {
     handleApiError(error, '获取客户列表')
   } finally {

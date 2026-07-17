@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from app.models.user import User, UserStatus
 from app.schemas.user import UserCreate, UserUpdate
 from app.core.security import get_password_hash
@@ -27,7 +27,7 @@ class UserCRUD:
         limit: int = 100,
         status: Optional[UserStatus] = None,
         region: Optional[str] = None
-    ) -> List[User]:
+    ) -> Tuple[List[User], int]:
         query = db.query(User)
 
         if status:
@@ -35,7 +35,9 @@ class UserCRUD:
         if region:
             query = query.filter(User.region == region)
 
-        return query.offset(skip).limit(limit).all()
+        total = query.count()
+        users = query.offset(skip).limit(limit).all()
+        return users, total
 
     def count(self, db: Session) -> int:
         """获取用户总数"""

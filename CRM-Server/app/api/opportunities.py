@@ -26,6 +26,7 @@ from app.schemas.opportunity import (
     OpportunityMoveToStage,
     OpportunityProcurementStageInfo
 )
+from app.schemas.common import PaginatedResponse
 from app.services.feishu import feishu_service
 
 
@@ -51,7 +52,7 @@ def create_opportunity(
     return opportunity_crud.create(db, opportunity, str(current_user.id), team_id)
 
 
-@router.get("/", response_model=List[OpportunityListResponse], summary="查询商机列表", description="支持分页、按状态/阶段/负责人等多条件筛选和动态排序，返回客户名称、采购阶段、负责人信息")
+@router.get("/", response_model=PaginatedResponse[OpportunityListResponse], summary="查询商机列表", description="支持分页、按状态/阶段/负责人等多条件筛选和动态排序，返回客户名称、采购阶段、负责人信息")
 def get_opportunities(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
@@ -101,7 +102,7 @@ def get_opportunities(
     if actual_owner_id is None and not has_view_all:
         actual_owner_id = str(current_user.id)
 
-    opportunities, _ = opportunity_crud.get_multi(
+    opportunities, total = opportunity_crud.get_multi(
         db=db,
         team_id=team_id,
         skip=skip,
@@ -190,7 +191,15 @@ def get_opportunities(
         
         result.append(OpportunityListResponse(**opp_dict))
     
-    return result
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[OpportunityListResponse](
+        items=result,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
+    )
 
 
 @router.get("/available-for-contract", response_model=List[OpportunityListResponse], summary="获取可创建合同的商机列表", description="""

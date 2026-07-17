@@ -172,6 +172,7 @@ import userApi, { type UserResponse, type UserCreate, type UserUpdate, UserStatu
 import roleApi, { type RoleResponse } from '@/api/role'
 import { usePermissionStore } from '@/stores/permissions'
 import { useTeamStore } from '@/stores/team'
+import { normalizePaginatedResponse } from '@/types/pagination'
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
@@ -244,15 +245,16 @@ const fetchUsers = async () => {
     }
 
     if (searchForm.status) {
-      params.status = searchForm.status
+      params['status'] = searchForm.status
     }
     if (searchForm.region) {
-      params.region = searchForm.region
+      params['region'] = searchForm.region
     }
 
-    const data = await userApi.getUsers(params)
-    tableData.value = data
-    pagination.total = data.length
+    const response = await userApi.getUsers(params)
+    const normalized = normalizePaginatedResponse(response)
+    tableData.value = normalized.items
+    pagination.total = normalized.total
   } catch (error: unknown) {
     console.error('获取用户列表失败', error)
     ElMessage.error('获取用户列表失败')
@@ -359,9 +361,7 @@ const handleDelete = (record: UserResponse) => {
       console.error('删除失败', error)
       ElMessage.error(error.response?.data?.detail || error.message || '删除失败')
     }
-  }).catch(() => {
-    
-  })
+  }).catch(() => undefined)
 }
 
 const fetchAllRoles = async () => {

@@ -149,7 +149,7 @@ interface CustomerOption {
   account_name: string
 }
 
-type CustomerListResponse = CustomerResponse[] | { data?: { items?: CustomerResponse[] } }
+type CustomerListResponse = CustomerResponse[] | { data?: { items?: CustomerResponse[] }; items?: CustomerResponse[] }
 
 const toCustomerOption = (customer: CustomerOption): CustomerOption => ({
   id: customer.id,
@@ -160,7 +160,8 @@ const normalizeCustomerList = (response: CustomerListResponse): CustomerOption[]
   if (Array.isArray(response)) {
     return response.map(toCustomerOption)
   }
-  return response.data?.items?.map(toCustomerOption) ?? []
+  const items = response.items ?? response.data?.items ?? []
+  return items.map(toCustomerOption)
 }
 
 const isLicenseType = (value: string | null | undefined): value is LicenseType => (

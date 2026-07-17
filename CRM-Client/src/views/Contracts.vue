@@ -33,6 +33,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { normalizePaginatedResponse } from '@/types/pagination'
 import { formatCurrency } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
@@ -206,9 +207,10 @@ const fetchContractList = async (): Promise<void> => {
       expiry_date_end: expiryDateBounds.end
     }
 
-    const data = await contractApi.getContracts(params as ContractQueryParams) as unknown as ContractListResponse[]
-    tableData.value = data
-    pagination.total = data.length
+    const response = await contractApi.getContracts(params as ContractQueryParams)
+    const normalized = normalizePaginatedResponse(response)
+    tableData.value = normalized.items
+    pagination.total = normalized.total
   } catch (error) {
     handleApiError(error, '获取合同列表')
   } finally {

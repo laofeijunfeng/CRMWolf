@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import { z } from 'zod'
+import type { PaginatedResponse } from '@/types/pagination'
 import {
   ConvertResponseSchema,
   CustomerResponseSchema,
@@ -427,8 +428,8 @@ const customerApi = {
   createCustomer: (data: CustomerCreate): Promise<CustomerResponse> =>
     api.post('/v1/customers/', data, undefined, CustomerResponseSchema),
 
-  getCustomers: (params?: CustomerQueryParams): Promise<CustomerResponse[]> =>
-    api.get<CustomerResponse[]>('/v1/customers/', { params }),
+  getCustomers: (params?: CustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
+    api.get<CustomerResponse[] | PaginatedResponse<CustomerResponse>>('/v1/customers/', { params }),
 
   getCustomerDetail: (customerId: number): Promise<CustomerDetailResponse> =>
     api.get('/v1/customers/' + customerId, undefined, CustomerDetailResponseSchema),
@@ -451,8 +452,8 @@ const customerApi = {
   claimCustomer: (customerId: number, data: CustomerClaimRequest): Promise<CustomerResponse> =>
     api.post('/v1/customers/' + customerId + '/claim', data, undefined, CustomerResponseSchema),
 
-  getPublicCustomers: (params?: PublicCustomerQueryParams): Promise<CustomerResponse[]> =>
-    api.get<CustomerResponse[]>('/v1/customers/public/list', { params }),
+  getPublicCustomers: (params?: PublicCustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
+    api.get<CustomerResponse[] | PaginatedResponse<CustomerResponse>>('/v1/customers/public/list', { params }),
 
   getOwnerFilterOptions: (): Promise<OwnerFilterOptionsResponse> =>
     api.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'customer' } }),

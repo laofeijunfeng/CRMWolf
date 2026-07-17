@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import type { PaginatedResponse } from '@/types/pagination'
 
 export enum OpportunityStatus {
   FOLLOW_UP = 0,
@@ -274,7 +275,7 @@ export interface OpportunityListResponse {
 
 export const opportunityApi = {
   getOpportunities: (params?: OpportunityListParams) => {
-    return request.get<OpportunityListResponse[]>(`/v1/opportunities/`, { params })
+    return request.get<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>>(`/v1/opportunities/`, { params })
   },
 
   getOpportunity: (opportunityId: number) => {

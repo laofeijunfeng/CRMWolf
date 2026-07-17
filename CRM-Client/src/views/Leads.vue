@@ -53,6 +53,7 @@ import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { normalizePaginatedResponse } from '@/types/pagination'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -237,19 +238,22 @@ const fetchLeadList = async (): Promise<void> => {
 
     if (activeTab.value === 'public') {
       const response = await leadApi.getPublicLeads(params)
-      tableData.value = Array.isArray(response) ? response.filter((item: Lead) => item.status !== 2) : []
-      pagination.total = tableData.value.length
+      const normalized = normalizePaginatedResponse(response)
+      tableData.value = normalized.items.filter((item: Lead) => item.status !== 2)
+      pagination.total = normalized.total
     } else if (activeTab.value === 'my') {
       const response = await leadApi.getMyLeads(params)
-      tableData.value = Array.isArray(response) ? response.filter((item: Lead) => item.status !== 2) : []
-      pagination.total = tableData.value.length
+      const normalized = normalizePaginatedResponse(response)
+      tableData.value = normalized.items.filter((item: Lead) => item.status !== 2)
+      pagination.total = normalized.total
     } else {
       if (activeTab.value === 'following') {
         params['status'] = 1
       }
       const response = await leadApi.getLeadList(params as LeadListParams)
-      tableData.value = Array.isArray(response) ? response.filter((item: Lead) => item.status !== 2) : []
-      pagination.total = tableData.value.length
+      const normalized = normalizePaginatedResponse(response)
+      tableData.value = normalized.items.filter((item: Lead) => item.status !== 2)
+      pagination.total = normalized.total
     }
   } catch (error) {
     handleApiError(error, '获取线索列表')
@@ -387,7 +391,7 @@ const handleDelete = async (record: Lead): Promise<void> => {
 const fetchUserOptions = async (): Promise<void> => {
   try {
     const response = await userApi.getUsers({ status: UserStatus.ACTIVE })
-    userOptions.value = Array.isArray(response) ? response : []
+    userOptions.value = normalizePaginatedResponse(response).items
   } catch (error) {
     handleApiError(error, '获取用户列表')
   }

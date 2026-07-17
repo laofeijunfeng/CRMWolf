@@ -22,6 +22,7 @@ from app.schemas.customer import (
     CustomerIndustryOption, CustomerLoseRequest
 )
 from app.schemas.contract import ContractListResponse
+from app.schemas.common import PaginatedResponse
 from app.schemas.payment import PaymentPlanResponse
 from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
 
@@ -458,7 +459,7 @@ async def create_customer(
     return new_customer
 
 
-@router.get("/", response_model=List[CustomerListResponse], summary="查询客户列表", description="支持分页、按客户名称/行业/城市/状态/负责人等多条件筛选，支持动态排序，返回负责人和创建人信息")
+@router.get("/", response_model=PaginatedResponse[CustomerListResponse], summary="查询客户列表", description="支持分页、按客户名称/行业/城市/状态/负责人等多条件筛选，支持动态排序，返回负责人和创建人信息")
 def get_customers(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
@@ -509,7 +510,7 @@ def get_customers(
     if actual_owner_id is None and not has_view_all:
         actual_owner_id = str(current_user.id)
 
-    customers, _ = customer_crud.get_multi(
+    customers, total = customer_crud.get_multi(
         db=db,
         team_id=team_id,
         skip=skip,
@@ -630,7 +631,15 @@ def get_customers(
         }
         result.append(CustomerListResponse(**customer_dict))
     
-    return result
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[CustomerListResponse](
+        items=result,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
+    )
 
 
 @router.get("/{customer_id}", response_model=CustomerDetailResponse, summary="获取客户详情", description="返回客户信息及其所有联系人列表")
@@ -1020,7 +1029,7 @@ async def return_customer_to_pool(
     )
 
 
-@router.get("/public/list", response_model=List[CustomerResponse], summary="查询公海客户", description="获取公海池中的客户列表，支持动态排序")
+@router.get("/public/list", response_model=PaginatedResponse[CustomerResponse], summary="查询公海客户", description="获取公海池中的客户列表，支持动态排序")
 def get_public_customers(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -1038,7 +1047,15 @@ def get_public_customers(
         status=status, city=city, keyword=keyword,
         order_by=order_by, order_dir=order_dir
     )
-    return customers
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[CustomerResponse](
+        items=customers,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
+    )
 
 
 @router.post("/{customer_id}/claim", response_model=CustomerResponse, summary="领取客户", description="从公海池中领取客户")

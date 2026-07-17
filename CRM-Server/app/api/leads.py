@@ -14,6 +14,7 @@ from app.schemas.lead import (
     LeadBatchImportRequest, LeadBatchImportResponse,
     LeadTrendResponse, LeadConversionResponse, LeadMarkInvalidRequest
 )
+from app.schemas.common import PaginatedResponse
 from app.models.lead import LeadStatus, LeadSource
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
@@ -95,7 +96,7 @@ def batch_import_leads(
     )
 
 
-@router.get("/", response_model=List[LeadListResponse], summary="查询线索列表", description="查询线索列表，支持多条件筛选和动态排序，返回负责人信息")
+@router.get("/", response_model=PaginatedResponse[LeadListResponse], summary="查询线索列表", description="查询线索列表，支持多条件筛选和动态排序，返回负责人信息")
 def get_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -185,7 +186,15 @@ def get_leads(
 
         result.append(LeadListResponse(**lead_dict))
 
-    return result
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[LeadListResponse](
+        items=result,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
+    )
 
 
 @router.get("/statistics", summary="线索统计", description="获取线索统计数据")
@@ -501,7 +510,7 @@ def mark_lead_invalid(
     return lead_crud.mark_invalid(db, lead_id, request_data.reason, str(current_user.id), current_user.name, team_id)
 
 
-@router.get("/public/list", response_model=List[LeadResponse], summary="公海线索", description="获取公海中的线索列表（团队公海池）")
+@router.get("/public/list", response_model=PaginatedResponse[LeadResponse], summary="公海线索", description="获取公海中的线索列表（团队公海池）")
 def get_public_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -510,16 +519,25 @@ def get_public_leads(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    return lead_crud.get_public_leads(
+    leads, total = lead_crud.get_public_leads(
         db,
         team_id,
         skip,
         limit,
         filters=parse_filter_conditions(filters)
     )
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[LeadResponse](
+        items=leads,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
+    )
 
 
-@router.get("/my/list", response_model=List[LeadResponse], summary="我的线索", description="获取当前用户负责的线索列表")
+@router.get("/my/list", response_model=PaginatedResponse[LeadResponse], summary="我的线索", description="获取当前用户负责的线索列表")
 def get_my_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -528,13 +546,22 @@ def get_my_leads(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    return lead_crud.get_leads_by_owner(
+    leads, total = lead_crud.get_leads_by_owner(
         db,
         team_id,
         str(current_user.id),
         skip,
         limit,
         filters=parse_filter_conditions(filters)
+    )
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[LeadResponse](
+        items=leads,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
     )
 
 

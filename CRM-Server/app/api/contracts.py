@@ -17,6 +17,7 @@ from app.schemas.contract import (
     ContractResponse, ContractListResponse, ContractDetailResponse,
     ContractStatusEnum, LicenseTypeEnum, MessageResponse
 )
+from app.schemas.common import PaginatedResponse
 from app.services.notification import notification_service_factory
 from app.models.approval import BusinessType
 
@@ -263,7 +264,7 @@ async def create_contract_from_opportunity(
         )
 
 
-@router.get("/", response_model=List[ContractListResponse], summary="查询合同列表", description="""
+@router.get("/", response_model=PaginatedResponse[ContractListResponse], summary="查询合同列表", description="""
 查询合同列表，支持多条件筛选和分页。
 
 **功能说明：**
@@ -391,7 +392,15 @@ def get_contracts(
         
         result.append(ContractListResponse(**contract_dict))
     
-    return result
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[ContractListResponse](
+        items=result,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
+    )
 
 
 @router.get("/opportunity/{opportunity_id}", response_model=ContractListResponse, summary="根据商机获取合同", description="""

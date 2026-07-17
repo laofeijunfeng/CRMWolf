@@ -5,12 +5,13 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_current_user_team
 from app.crud.user import user_crud
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserWithRolesResponse
+from app.schemas.common import PaginatedResponse
 from app.models.user import UserStatus
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
 
 
-@router.get("/", response_model=List[UserWithRolesResponse], summary="获取用户列表", description="获取系统中的用户列表，支持按状态和地区筛选，包含用户角色信息")
+@router.get("/", response_model=PaginatedResponse[UserWithRolesResponse], summary="获取用户列表", description="获取系统中的用户列表，支持按状态和地区筛选，包含用户角色信息")
 def get_users(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -22,7 +23,7 @@ def get_users(
 ):
     from sqlalchemy import text
 
-    users = user_crud.get_multi(db, skip=skip, limit=limit, status=status, region=region)
+    users, total = user_crud.get_multi(db, skip=skip, limit=limit, status=status, region=region)
 
     result = []
     for user in users:
@@ -50,7 +51,15 @@ def get_users(
         }
         result.append(UserWithRolesResponse(**user_dict))
 
-    return result
+    page = skip // limit + 1
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return PaginatedResponse[UserWithRolesResponse](
+        items=result,
+        total=total,
+        page=page,
+        page_size=limit,
+        total_pages=total_pages
+    )
 
 
 @router.get("/search", response_model=List[UserResponse], summary="搜索用户", description="按邮箱模糊搜索用户，可排除已在指定团队的用户")

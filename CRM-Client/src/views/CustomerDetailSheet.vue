@@ -74,6 +74,7 @@ import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import { getCustomerScore, type ScoreResponse } from '@/api/score'
+import { normalizePaginatedResponse } from '@/types/pagination'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -234,7 +235,7 @@ const loadAllData = async (customerId: number): Promise<void> => {
     customer.value = customerDetail
     score.value = scoreData
     followUps.value = followUpsData
-    opportunities.value = opportunitiesData
+    opportunities.value = normalizePaginatedResponse(opportunitiesData).items
     contracts.value = contractsData
     invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
     licenseApplications.value = licenseApplicationsData

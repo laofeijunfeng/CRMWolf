@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import type { PaginatedResponse } from '@/types/pagination'
 
 export interface OwnerInfo {
   id: string
@@ -147,7 +148,7 @@ export const leadApi = {
   },
 
   getLeadList: (params: LeadListParams) => {
-    return request.get<Lead[]>('/v1/leads/', { params })
+    return request.get<Lead[] | PaginatedResponse<Lead>>('/v1/leads/', { params })
   },
 
   getLeadDetail: (id: number) => {
@@ -191,11 +192,11 @@ export const leadApi = {
   },
 
   getPublicLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters'>) => {
-    return request.get<Lead[]>('/v1/leads/public/list', { params })
+    return request.get<Lead[] | PaginatedResponse<Lead>>('/v1/leads/public/list', { params })
   },
 
   getMyLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters'>) => {
-    return request.get<Lead[]>('/v1/leads/my/list', { params })
+    return request.get<Lead[] | PaginatedResponse<Lead>>('/v1/leads/my/list', { params })
   },
 
   getOwnerFilterOptions: (): Promise<LeadOwnerFilterOptionsResponse> => {

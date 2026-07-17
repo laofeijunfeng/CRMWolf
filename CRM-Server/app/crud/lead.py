@@ -340,7 +340,7 @@ class LeadCRUD:
         skip: int = 0,
         limit: int = 100,
         filters: Optional[List[Dict[str, Any]]] = None
-    ) -> List[Lead]:
+    ) -> Tuple[List[Lead], int]:
         query = db.query(Lead).filter(
             and_(
                 Lead.team_id == team_id,
@@ -350,7 +350,9 @@ class LeadCRUD:
         )
         if filters:
             query = self._apply_filters(query, filters)
-        return query.order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
+        total = query.count()
+        leads = query.order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
+        return leads, total
 
     def get_public_leads(
         self,
@@ -359,7 +361,7 @@ class LeadCRUD:
         skip: int = 0,
         limit: int = 100,
         filters: Optional[List[Dict[str, Any]]] = None
-    ) -> List[Lead]:
+    ) -> Tuple[List[Lead], int]:
         query = db.query(Lead).filter(
             and_(
                 Lead.team_id == team_id,
@@ -369,7 +371,9 @@ class LeadCRUD:
         )
         if filters:
             query = self._apply_filters(query, filters)
-        return query.order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
+        total = query.count()
+        leads = query.order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
+        return leads, total
 
     def get_leads_need_follow_up(self, db: Session, team_id: int, user_id: str, days: int = 7) -> List[Lead]:
         cutoff_date = datetime.now() - timedelta(days=days)

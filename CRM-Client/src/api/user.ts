@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import type { PaginatedResponse } from '@/types/pagination'
 
 export enum UserStatus {
   ACTIVE = 'active',
@@ -61,7 +62,7 @@ export interface UserSearchResult {
 
 const userApi = {
   getUsers: async (params?: UserQueryParams) => {
-    const response = await request.get<UserResponse[]>('/v1/users/', { params })
+    const response = await request.get<UserResponse[] | PaginatedResponse<UserResponse>>('/v1/users/', { params })
     return response
   },
 
@@ -88,7 +89,7 @@ const userApi = {
   searchUsers: async (email: string, excludeTeamId?: number) => {
     const params: Record<string, unknown> = { email, limit: 10 }
     if (excludeTeamId) {
-      params.exclude_team_id = excludeTeamId
+      params['exclude_team_id'] = excludeTeamId
     }
     const response = await request.get<UserSearchResult[]>('/v1/users/search', { params })
     return response
