@@ -90,6 +90,7 @@ const filterFields: ListFilterField[] = [
 const columns = [
   { key: 'record_number', title: '记录编号', width: '150px' },
   { key: 'customer_name', title: '客户名称' },
+  { key: 'actual_payer_name', title: '实际付款方' },
   { key: 'contract_name', title: '合同名称' },
   { key: 'actual_amount', title: '回款金额', align: 'right' as const },
   { key: 'payment_date', title: '回款日期' },
@@ -328,6 +329,10 @@ watchEffect(() => {
       <!-- 客户名称 -->
       <template #cell-customer_name="{ row }">
         <span class="customer-name-link">{{ row.customer_name || '-' }}</span>
+      </template>
+
+      <template #cell-actual_payer_name="{ row }">
+        <span>{{ row.actual_payer_name || '-' }}</span>
       </template>
 
       <!-- 回款金额 -->

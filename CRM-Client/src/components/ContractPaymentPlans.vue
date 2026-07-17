@@ -122,6 +122,9 @@ const registerDefaultAmount = computed<number | null>(() => {
   if (plan === null) return null
   return plan.remaining_amount ?? plan.planned_amount
 })
+const registerDefaultPayerName = computed<string>(() => {
+  return currentPlan.value?.customer_name?.trim() ?? props.contractInfo?.customer_info?.account_name?.trim() ?? ''
+})
 
 function mapStatus(status: PaymentPlanStatus): 'pending' | 'overdue' | 'partial' | 'completed' {
   const statusMap: Record<PaymentPlanStatus, 'pending' | 'overdue' | 'partial' | 'completed'> = {
@@ -483,6 +486,7 @@ watch(
     <PaymentRecordDialog
       :open="recordDialogOpen"
       :default-amount="registerDefaultAmount"
+      :default-payer-name="registerDefaultPayerName"
       :submitting="submittingRecord"
       @update:open="recordDialogOpen = $event"
       @submit="handleCreateRecord"

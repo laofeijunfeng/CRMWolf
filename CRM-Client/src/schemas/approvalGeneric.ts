@@ -133,6 +133,7 @@ export const ApprovalListItemSchema = z.object({
   application_number: z.string().min(1),
   entity_name: z.string().nullable(),
   entity_amount: z.number().nullable(),
+  actual_payer_name: z.string().nullable().optional(),
   customer_info: ApprovalCustomerInfoSchema.nullable().optional(),
   submitter_id: z.string().min(1),
   submitter_name: z.string().nullable(),  // 允许 null（发票/回款申请人无姓名字段）

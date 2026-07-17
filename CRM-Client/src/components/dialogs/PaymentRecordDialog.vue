@@ -17,6 +17,7 @@ import { DatePicker } from '@/components/ui/date-picker'
 interface Props {
   open: boolean
   defaultAmount?: number | null
+  defaultPayerName?: string | null
   submitting?: boolean
 }
 
@@ -27,6 +28,7 @@ interface Emits {
 
 interface PaymentRecordForm {
   actualAmount: string
+  actualPayerName: string
   paymentDate: string
   proofAttachment: string
   notes: string
@@ -34,12 +36,14 @@ interface PaymentRecordForm {
 
 interface PaymentRecordErrors {
   actualAmount: string
+  actualPayerName: string
   paymentDate: string
   notes: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   defaultAmount: null,
+  defaultPayerName: null,
   submitting: false,
 })
 
@@ -47,6 +51,7 @@ const emit = defineEmits<Emits>()
 
 const form = reactive<PaymentRecordForm>({
   actualAmount: '',
+  actualPayerName: '',
   paymentDate: '',
   proofAttachment: '',
   notes: '',
@@ -54,6 +59,7 @@ const form = reactive<PaymentRecordForm>({
 
 const errors = reactive<PaymentRecordErrors>({
   actualAmount: '',
+  actualPayerName: '',
   paymentDate: '',
   notes: '',
 })
@@ -65,6 +71,7 @@ const visible = computed({
 
 const isSubmitting = computed((): boolean => props.submitting === true)
 const hasAmountError = computed((): boolean => errors.actualAmount.length > 0)
+const hasActualPayerNameError = computed((): boolean => errors.actualPayerName.length > 0)
 const hasPaymentDateError = computed((): boolean => errors.paymentDate.length > 0)
 const hasNotesError = computed((): boolean => errors.notes.length > 0)
 
@@ -96,12 +103,14 @@ function formatDefaultAmount(defaultAmount: number | null): string {
 
 function clearErrors(): void {
   errors.actualAmount = ''
+  errors.actualPayerName = ''
   errors.paymentDate = ''
   errors.notes = ''
 }
 
 function resetForm(): void {
   form.actualAmount = formatDefaultAmount(props.defaultAmount)
+  form.actualPayerName = props.defaultPayerName?.trim() ?? ''
   form.paymentDate = getLocalDateString()
   form.proofAttachment = ''
   form.notes = ''
@@ -126,6 +135,13 @@ function validateForm(): boolean {
     errors.actualAmount = '请输入大于 0 的回款金额'
   }
 
+  const normalizedPayerName = form.actualPayerName.trim()
+  if (normalizedPayerName.length === 0) {
+    errors.actualPayerName = '请输入实际付款方'
+  } else if (normalizedPayerName.length > 200) {
+    errors.actualPayerName = '实际付款方不能超过 200 字'
+  }
+
   const normalizedDate = form.paymentDate.trim()
   if (normalizedDate.length === 0 || !isValidLocalDate(normalizedDate)) {
     errors.paymentDate = '请选择回款日期'
@@ -135,7 +151,7 @@ function validateForm(): boolean {
     errors.notes = '备注不能超过 200 字'
   }
 
-  return !hasAmountError.value && !hasPaymentDateError.value && !hasNotesError.value
+  return !hasAmountError.value && !hasActualPayerNameError.value && !hasPaymentDateError.value && !hasNotesError.value
 }
 
 function handleSubmit(): void {
@@ -145,6 +161,7 @@ function handleSubmit(): void {
 
   const payload: PaymentRecordCreate = {
     actual_amount: Number(form.actualAmount.trim()),
+    actual_payer_name: form.actualPayerName.trim(),
     payment_date: form.paymentDate.trim(),
   }
 
@@ -168,7 +185,7 @@ function closeDialog(): void {
 }
 
 watch(
-  () => [props.open, props.defaultAmount] as const,
+  () => [props.open, props.defaultAmount, props.defaultPayerName] as const,
   ([isOpen]) => {
     if (isOpen) {
       resetForm()
@@ -220,6 +237,36 @@ watch(
             role="alert"
           >
             {{ errors.actualAmount }}
+          </p>
+        </div>
+
+        <div class="payment-record-dialog__field">
+          <label class="payment-record-dialog__label" for="payment-record-payer-name">
+            实际付款方
+            <span class="payment-record-dialog__required" aria-hidden="true">*</span>
+          </label>
+          <Input
+            id="payment-record-payer-name"
+            v-model="form.actualPayerName"
+            name="actual_payer_name"
+            type="text"
+            maxlength="200"
+            placeholder="请输入实际付款方"
+            class="payment-record-dialog__control h-11 min-h-11"
+            :disabled="isSubmitting"
+            :aria-invalid="hasActualPayerNameError"
+            aria-describedby="payment-record-payer-name-help payment-record-payer-name-error"
+          />
+          <p id="payment-record-payer-name-help" class="payment-record-dialog__help">
+            默认使用客户名称，可按实际付款公司抬头修改。
+          </p>
+          <p
+            v-if="hasActualPayerNameError"
+            id="payment-record-payer-name-error"
+            class="payment-record-dialog__error"
+            role="alert"
+          >
+            {{ errors.actualPayerName }}
           </p>
         </div>
 

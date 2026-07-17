@@ -122,6 +122,7 @@ const registerDefaultAmount = computed<number | null>(() => {
   if (plan === null) return null
   return plan.remaining_amount ?? plan.planned_amount ?? null
 })
+const registerDefaultPayerName = computed<string>(() => selectedConfirmPlan.value?.customer_name?.trim() ?? '')
 
 // ==================== Methods ====================
 const getUpcomingDate = (days: number): string => {
@@ -452,6 +453,7 @@ watch(
     <PaymentRecordDialog
       :open="registerDialogOpen"
       :default-amount="registerDefaultAmount"
+      :default-payer-name="registerDefaultPayerName"
       :submitting="registerSubmitting"
       @update:open="handleRegisterDialogOpenChange"
       @submit="handleRegisterSubmit"

@@ -1058,6 +1058,7 @@ class ApprovalCRUD:
                 "application_number": summary["application_number"] if summary else f"{ap.business_type}-{ap.business_id}",
                 "entity_name": summary["entity_name"] if summary else None,
                 "entity_amount": summary["entity_amount"] if summary else None,
+                "actual_payer_name": summary.get("actual_payer_name") if summary else None,
                 "customer_info": summary["customer_info"] if summary else None,
                 "submitter_id": ap.submitter_id,
                 "submitter_name": ap.submitter_name,
@@ -1186,6 +1187,7 @@ class ApprovalCRUD:
                     "application_number": pr.record_number or f"PAY-{pr.id}",
                     "entity_name": contract.contract_name if contract else None,
                     "entity_amount": float(pr.actual_amount) if pr.actual_amount is not None else None,
+                    "actual_payer_name": pr.actual_payer_name,
                     "customer_info": customers_by_id.get(contract.customer_id) if contract else None,
                 }
 

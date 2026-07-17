@@ -453,12 +453,16 @@ class PaymentRecordCRUD:
 
         # 生成记录编号
         record_number = BusinessNumberGenerator.generate('PAY', db)
+        record_data = obj_in.model_dump()
+        if not record_data.get("actual_payer_name"):
+            customer = customer_crud.get_by_id(db, plan.contract.customer_id) if plan.contract else None
+            record_data["actual_payer_name"] = customer.account_name if customer else None
 
         db_record = PaymentRecord(
             payment_plan_id=plan_id,
             team_id=team_id,
             record_number=record_number,
-            **obj_in.model_dump(),
+            **record_data,
             creator_id=creator_id,
             creator_name=creator_name
         )

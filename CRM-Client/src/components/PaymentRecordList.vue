@@ -154,6 +154,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
         </div>
         <div class="record-meta-grid" aria-label="回款记录属性">
           <span>回款日期：{{ formatDate(item.payment_date) }}</span>
+          <span>实际付款方：{{ item.actual_payer_name || '-' }}</span>
           <span>登记人：{{ formatCreator(item) }}</span>
           <span>{{ formatInvoiceCount(item) }}</span>
         </div>

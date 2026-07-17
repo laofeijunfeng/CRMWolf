@@ -69,6 +69,7 @@ class PaymentPlanUpdate(BaseModel):
 class PaymentRecordInfo(BaseModel):
     id: int
     actual_amount: float
+    actual_payer_name: Optional[str] = Field(None, description="实际付款方名称")
     payment_date: date
     proof_attachment: Optional[str]
     creator_name: Optional[str]
@@ -128,6 +129,7 @@ class PaymentPlanBatchCreate(BaseModel):
 
 class PaymentRecordBase(BaseModel):
     actual_amount: float = Field(..., gt=0, description="实际回款金额")
+    actual_payer_name: Optional[str] = Field(None, max_length=200, description="实际付款方名称")
     payment_date: date = Field(..., description="实际回款日期")
     proof_attachment: Optional[str] = Field(None, max_length=500, description="回款凭证附件URL")
     notes: Optional[str] = Field(None, description="备注")
@@ -139,6 +141,7 @@ class PaymentRecordCreate(PaymentRecordBase):
 
 class PaymentRecordUpdate(BaseModel):
     actual_amount: Optional[float] = Field(None, gt=0, description="实际回款金额")
+    actual_payer_name: Optional[str] = Field(None, max_length=200, description="实际付款方名称")
     payment_date: Optional[date] = Field(None, description="实际回款日期")
     proof_attachment: Optional[str] = Field(None, max_length=500, description="回款凭证附件URL")
     notes: Optional[str] = Field(None, description="备注")

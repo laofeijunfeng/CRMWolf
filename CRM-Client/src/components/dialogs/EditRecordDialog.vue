@@ -28,6 +28,7 @@ interface Emits {
 
 interface EditRecordForm {
   actualAmount: string
+  actualPayerName: string
   paymentDate: string
   proofAttachment: string
   notes: string
@@ -35,6 +36,7 @@ interface EditRecordForm {
 
 interface EditRecordErrors {
   actualAmount: string
+  actualPayerName: string
   paymentDate: string
   notes: string
 }
@@ -47,6 +49,7 @@ const emit = defineEmits<Emits>()
 
 const form = reactive<EditRecordForm>({
   actualAmount: '',
+  actualPayerName: '',
   paymentDate: '',
   proofAttachment: '',
   notes: '',
@@ -54,6 +57,7 @@ const form = reactive<EditRecordForm>({
 
 const errors = reactive<EditRecordErrors>({
   actualAmount: '',
+  actualPayerName: '',
   paymentDate: '',
   notes: '',
 })
@@ -65,11 +69,13 @@ const visible = computed({
 
 const isSubmitting = computed((): boolean => props.submitting === true)
 const hasAmountError = computed((): boolean => errors.actualAmount.length > 0)
+const hasActualPayerNameError = computed((): boolean => errors.actualPayerName.length > 0)
 const hasPaymentDateError = computed((): boolean => errors.paymentDate.length > 0)
 const hasNotesError = computed((): boolean => errors.notes.length > 0)
 
 function clearErrors(): void {
   errors.actualAmount = ''
+  errors.actualPayerName = ''
   errors.paymentDate = ''
   errors.notes = ''
 }
@@ -81,6 +87,7 @@ function normalizeDateString(value: string): string {
 
 function resetForm(): void {
   form.actualAmount = ''
+  form.actualPayerName = ''
   form.paymentDate = ''
   form.proofAttachment = ''
   form.notes = ''
@@ -89,6 +96,7 @@ function resetForm(): void {
 
 function populateForm(record: EditablePaymentRecord): void {
   form.actualAmount = Number.isFinite(record.actual_amount) ? String(record.actual_amount) : ''
+  form.actualPayerName = record.actual_payer_name ?? ''
   form.paymentDate = normalizeDateString(record.payment_date)
   form.proofAttachment = record.proof_attachment ?? ''
   form.notes = record.notes ?? ''
@@ -108,6 +116,13 @@ function validateForm(): boolean {
     errors.actualAmount = '请输入大于 0 的回款金额'
   }
 
+  const normalizedPayerName = form.actualPayerName.trim()
+  if (normalizedPayerName.length === 0) {
+    errors.actualPayerName = '请输入实际付款方'
+  } else if (normalizedPayerName.length > 200) {
+    errors.actualPayerName = '实际付款方不能超过 200 字'
+  }
+
   const normalizedDate = form.paymentDate.trim()
   if (normalizedDate.length === 0 || !isValidLocalDate(normalizedDate)) {
     errors.paymentDate = '请选择回款日期'
@@ -117,7 +132,7 @@ function validateForm(): boolean {
     errors.notes = '备注不能超过 200 字'
   }
 
-  return !hasAmountError.value && !hasPaymentDateError.value && !hasNotesError.value
+  return !hasAmountError.value && !hasActualPayerNameError.value && !hasPaymentDateError.value && !hasNotesError.value
 }
 
 function handleSubmit(): void {
@@ -127,6 +142,7 @@ function handleSubmit(): void {
 
   const payload: PaymentRecordUpdate = {
     actual_amount: Number(form.actualAmount.trim()),
+    actual_payer_name: form.actualPayerName.trim(),
     payment_date: form.paymentDate.trim(),
     proof_attachment: form.proofAttachment.trim(),
     notes: form.notes.trim(),
@@ -195,6 +211,36 @@ watch(
             role="alert"
           >
             {{ errors.actualAmount }}
+          </p>
+        </div>
+
+        <div class="edit-record-dialog__field">
+          <label class="edit-record-dialog__label" for="edit-record-payer-name">
+            实际付款方
+            <span class="edit-record-dialog__required" aria-hidden="true">*</span>
+          </label>
+          <Input
+            id="edit-record-payer-name"
+            v-model="form.actualPayerName"
+            name="actual_payer_name"
+            type="text"
+            maxlength="200"
+            placeholder="请输入实际付款方"
+            class="edit-record-dialog__control h-11 min-h-11"
+            :disabled="isSubmitting || record === null"
+            :aria-invalid="hasActualPayerNameError"
+            aria-describedby="edit-record-payer-name-help edit-record-payer-name-error"
+          />
+          <p id="edit-record-payer-name-help" class="edit-record-dialog__help">
+            可按实际付款公司抬头修改。
+          </p>
+          <p
+            v-if="hasActualPayerNameError"
+            id="edit-record-payer-name-error"
+            class="edit-record-dialog__error"
+            role="alert"
+          >
+            {{ errors.actualPayerName }}
           </p>
         </div>
 

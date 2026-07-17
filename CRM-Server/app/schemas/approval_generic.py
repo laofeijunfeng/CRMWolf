@@ -63,6 +63,7 @@ class ApprovalListItemResponse(BaseModel):
     application_number: str = Field(..., description="单号（合同 contract_number / 发票 application_number / 回款合成 PAY-{id}）")
     entity_name: Optional[str] = Field(None, description="客户/实体摘要（合同 contract_name / 发票 invoice_title_text；回款暂为 None）")
     entity_amount: Optional[float] = Field(None, description="单据金额（合同 total_amount / 发票 invoice_amount / 回款 actual_amount）")
+    actual_payer_name: Optional[str] = Field(None, description="实际付款方名称，仅回款审批返回")
     customer_info: Optional[ApprovalCustomerInfoResponse] = Field(None, description="关联客户/公司基础信息")
     submitter_id: str = Field(..., description="提交人系统用户ID")
     submitter_name: Optional[str] = Field(None, description="提交人姓名")

@@ -106,6 +106,7 @@ class PaymentRecord(Base):
 
     payment_plan_id = Column(BigInteger, ForeignKey('crm_contract_payment_plans.id', ondelete='CASCADE'), nullable=False, comment="关联的回款计划ID")
     actual_amount = Column(Numeric(12, 2), nullable=False, comment="实际回款金额")
+    actual_payer_name = Column(String(200), comment="实际付款方名称")
     payment_date = Column(Date, nullable=False, comment="实际回款日期")
     proof_attachment = Column(String(500), comment="回款凭证附件URL")
     notes = Column(Text, comment="备注")

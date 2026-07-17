@@ -95,6 +95,7 @@ const registerDefaultAmount = computed<number | null>(() => {
   if (paymentPlan.value === null) return null
   return paymentPlan.value.remaining_amount ?? paymentPlan.value.planned_amount ?? 0
 })
+const registerDefaultPayerName = computed<string>(() => paymentPlan.value?.customer_name?.trim() ?? '')
 
 const latestRecord = computed<PaymentRecordInfo | null>(() => {
   const records = paymentPlan.value?.payment_records ?? []
@@ -663,6 +664,7 @@ watch(
   <PaymentRecordDialog
     :open="registerDialogOpen"
     :default-amount="registerDefaultAmount"
+    :default-payer-name="registerDefaultPayerName"
     :submitting="registerSubmitting"
     @update:open="registerDialogOpen = $event"
     @submit="handleRegisterSubmit"

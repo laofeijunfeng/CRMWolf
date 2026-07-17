@@ -339,6 +339,10 @@
                         {{ formatCurrency(selectedApproval.entity_amount) }}
                       </div>
                     </div>
+                    <div v-if="selectedApproval.business_type === 'PAYMENT'" class="attribute-item">
+                      <div class="attribute-label">实际付款方</div>
+                      <div class="attribute-value">{{ selectedApproval.actual_payer_name || '-' }}</div>
+                    </div>
                     <div class="attribute-item">
                       <div class="attribute-label">提交人</div>
                       <div class="attribute-value">{{ selectedApproval.submitter_name }}</div>

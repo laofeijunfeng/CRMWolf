@@ -546,6 +546,7 @@ def get_payment_plan_detail(
             {
                 "id": r.id,
                 "actual_amount": float(r.actual_amount),
+                "actual_payer_name": r.actual_payer_name,
                 "payment_date": r.payment_date.isoformat(),
                 "proof_attachment": r.proof_attachment,
                 "creator_name": r.creator_name,
@@ -920,6 +921,7 @@ def list_payment_records(
                 "payment_plan_id": record.payment_plan_id,
                 "record_number": record.record_number,
                 "actual_amount": float(record.actual_amount),
+                "actual_payer_name": record.actual_payer_name,
                 "payment_date": record.payment_date.isoformat(),
                 "proof_attachment": record.proof_attachment,
                 "notes": record.notes,

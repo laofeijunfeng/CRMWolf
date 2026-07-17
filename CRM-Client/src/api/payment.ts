@@ -49,6 +49,7 @@ export interface ApprovalInfo {
 export interface PaymentRecordInfo {
   id: number
   actual_amount: number
+  actual_payer_name?: string | null
   payment_date: string
   proof_attachment?: string
   creator_name?: string
@@ -108,6 +109,7 @@ export interface ContractPaymentSummary {
 
 export interface PaymentRecordCreate {
   actual_amount: number
+  actual_payer_name?: string
   payment_date: string
   proof_attachment?: string
   notes?: string
@@ -115,6 +117,7 @@ export interface PaymentRecordCreate {
 
 export interface PaymentRecordUpdate {
   actual_amount?: number
+  actual_payer_name?: string
   payment_date?: string
   proof_attachment?: string
   notes?: string
@@ -125,6 +128,7 @@ export interface PaymentRecordResponse {
   payment_plan_id: number  // 修复：与后端 schema 字段名一致
   record_number?: string  // 回款记录编号（可选，兼容旧数据）
   actual_amount: number
+  actual_payer_name?: string | null
   payment_date: string
   proof_attachment?: string
   notes?: string

@@ -400,6 +400,13 @@ watch(
                   <div class="attribute-item">
                     <span class="attribute-label">
                       <User aria-hidden="true" class="attribute-icon" />
+                      实际付款方
+                    </span>
+                    <span class="attribute-value">{{ formatText(props.record?.actual_payer_name) }}</span>
+                  </div>
+                  <div class="attribute-item">
+                    <span class="attribute-label">
+                      <User aria-hidden="true" class="attribute-icon" />
                       登记人
                     </span>
                     <span class="attribute-value">{{ formatCreator(props.record) }}</span>
