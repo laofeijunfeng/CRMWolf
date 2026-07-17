@@ -116,13 +116,13 @@ async function fetchProcurementMethodOptions(): Promise<void> {
   }
 }
 
-function normalizeCompanyScale(value: string | null): CustomerForm['company_scale'] {
+function normalizeCompanyScale(value: string | null): CustomerForm['company_scale'] | undefined {
   return companyScaleOptions.some(option => option.value === value)
     ? value as CustomerForm['company_scale']
     : undefined
 }
 
-function normalizeCustomerSource(value: string | null): CustomerForm['source'] {
+function normalizeCustomerSource(value: string | null): CustomerForm['source'] | undefined {
   return customerSourceOptions.some(option => option.value === value)
     ? value as CustomerForm['source']
     : undefined
@@ -265,7 +265,7 @@ function continueEditing(): void {
                 <FormLabel>客户名称 <span class="text-destructive">*</span></FormLabel>
                 <FormControl>
                   <Input
-                    v-bind="componentField"
+                    v-bind="componentField as any"
                     autocomplete="organization"
                     class="h-11 sm:h-8"
                     placeholder="请输入客户名称"
@@ -281,7 +281,7 @@ function continueEditing(): void {
                 <FormLabel>所在城市 <span class="text-destructive">*</span></FormLabel>
                 <FormControl>
                   <Input
-                    v-bind="componentField"
+                    v-bind="componentField as any"
                     autocomplete="address-level2"
                     class="h-11 sm:h-8"
                     placeholder="请输入城市"
@@ -294,8 +294,8 @@ function continueEditing(): void {
             <!-- Customer Source -->
             <FormField v-slot="{ componentField }" name="source">
               <FormItem>
-                <FormLabel>客户来源</FormLabel>
-                <Select v-bind="componentField">
+                <FormLabel>客户来源 <span class="text-destructive">*</span></FormLabel>
+                <Select v-bind="componentField as any">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
                       <SelectValue placeholder="请选择来源" />
@@ -318,8 +318,8 @@ function continueEditing(): void {
             <!-- Company Scale -->
             <FormField v-slot="{ componentField }" name="company_scale">
               <FormItem>
-                <FormLabel>公司规模</FormLabel>
-                <Select v-bind="componentField">
+                <FormLabel>公司规模 <span class="text-destructive">*</span></FormLabel>
+                <Select v-bind="componentField as any">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
                       <SelectValue placeholder="请选择规模" />
@@ -342,8 +342,8 @@ function continueEditing(): void {
             <!-- Default Procurement Method -->
             <FormField v-slot="{ componentField }" name="default_procurement_method_id">
               <FormItem>
-                <FormLabel>采购方式</FormLabel>
-                <Select v-bind="componentField" :disabled="procurementMethodsLoading">
+                <FormLabel>采购方式 <span class="text-destructive">*</span></FormLabel>
+                <Select v-bind="componentField as any" :disabled="procurementMethodsLoading">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
                       <SelectValue :placeholder="procurementMethodsLoading ? '采购方式加载中' : '请选择采购方式'" />
@@ -370,7 +370,7 @@ function continueEditing(): void {
               <FormLabel>详细地址</FormLabel>
               <FormControl>
                 <Input
-                  v-bind="componentField"
+                  v-bind="componentField as any"
                   autocomplete="street-address"
                   class="h-11 sm:h-8"
                   placeholder="请输入详细地址"
@@ -391,7 +391,7 @@ function continueEditing(): void {
               <FormLabel>公司背景</FormLabel>
               <FormControl>
                 <Textarea
-                  v-bind="componentField"
+                  v-bind="componentField as any"
                   :rows="3"
                   placeholder="请输入公司背景信息"
                 />
@@ -406,7 +406,7 @@ function continueEditing(): void {
               <FormLabel>公司网站</FormLabel>
               <FormControl>
                 <Input
-                  v-bind="componentField"
+                  v-bind="componentField as any"
                   type="url"
                   autocomplete="url"
                   class="h-11 sm:h-8"
@@ -423,7 +423,7 @@ function continueEditing(): void {
               <FormLabel>主营业务</FormLabel>
               <FormControl>
                 <Textarea
-                  v-bind="componentField"
+                  v-bind="componentField as any"
                   :rows="3"
                   placeholder="请输入主营业务信息"
                 />
@@ -438,7 +438,7 @@ function continueEditing(): void {
               <FormLabel>项目背景</FormLabel>
               <FormControl>
                 <Textarea
-                  v-bind="componentField"
+                  v-bind="componentField as any"
                   :rows="3"
                   placeholder="请输入项目背景信息"
                 />
