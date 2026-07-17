@@ -19,15 +19,6 @@ export interface LicenseApplicationUpdate {
   remark?: string | null  // 补充需求：备注字段
 }
 
-export interface LicenseApplicationApprove {
-  license_code: string
-}
-
-export interface LicenseApplicationApproveFull {
-  license_info: string
-  comment?: string | null
-}
-
 export interface LicenseApplicationResponse {
   id: number
   team_id: number
@@ -89,26 +80,11 @@ const licenseApplicationApi = {
   },
 
   deleteApplication: (applicationId: number) => {
-    return request.delete<void>(`/v1/license-applications/${applicationId}`)
+    return request.delete(`/v1/license-applications/${applicationId}`)
   },
 
   submitApplication: (applicationId: number) => {
     return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/submit`)
-  },
-
-  approveApplication: (applicationId: number, data: LicenseApplicationApprove) => {
-    return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/approve`, data)
-  },
-
-  // 补充需求：完整审批版本（解析 License 信息）
-  approveApplicationFull: (applicationId: number, data: LicenseApplicationApproveFull) => {
-    return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/approve-full`, data)
-  },
-
-  rejectApplication: (applicationId: number, reason: string) => {
-    return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/reject`, null, {
-      params: { reason }
-    })
   },
 
   // 导出 Word 文档
@@ -116,6 +92,21 @@ const licenseApplicationApi = {
     return request.get(`/v1/license-applications/${applicationId}/export`, {
       responseType: 'blob'
     })
+  },
+
+  /**
+   * 发放 License（审批通过后调用）
+   * @param applicationId License 申请 ID
+   * @param data 发放数据（license_info 必填）
+   */
+  issueLicense: (applicationId: number, data: {
+    license_info: string
+    comment?: string
+  }): Promise<LicenseApplicationResponse> => {
+    return request.post<LicenseApplicationResponse>(
+      `/v1/license-applications/${applicationId}/issue`,
+      data
+    )
   }
 }
 

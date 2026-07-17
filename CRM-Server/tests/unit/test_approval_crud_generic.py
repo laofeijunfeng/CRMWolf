@@ -4,7 +4,7 @@
 - get_by_entity：单据无审批时返回 None
 - create_approval_generic：写 business_type/business_id 列、INVOICE 不写 contract_id
 - 旧 create_approval(db, contract, ...) legacy wrapper：CONTRACT 分支 contract_id=business_id 兼容
-- match_flow_generic 决策1：CONTRACT 未匹配报错；PAYMENT/INVOICE 未匹配 (None, None) 直通
+- match_flow_generic：四类业务未匹配审批流程时都返回配置错误
 - match_flow 旧 wrapper 委托 generic CONTRACT 分支（E1 合同回归契约）
 - approve/cancel 经适配器回写状态 + E4 None 守卫（单据已删仅终结审批）
 """
@@ -165,6 +165,34 @@ def test_get_by_entity_returns_none_when_absent(db_session):
     assert a is None
 
 
+def test_get_by_entity_returns_latest_approval_by_id_after_resubmit(
+    db_session, seed_contract_draft, seed_flow_with_one_node
+):
+    """撤回后重新提交时，即使 created_time 同秒，也必须取新审批实例。"""
+    flow, _ = seed_flow_with_one_node
+
+    first = approval_crud.create_approval(
+        db_session, seed_contract_draft, flow, "u1", "eddie"
+    )
+    approval_crud.cancel(db_session, first, "u1")
+
+    second = approval_crud.create_approval(
+        db_session, seed_contract_draft, flow, "u1", "eddie"
+    )
+
+    same_time = datetime(2026, 7, 16, 16, 17, 44)
+    first.created_time = same_time
+    second.created_time = same_time
+    db_session.commit()
+
+    latest = approval_crud.get_by_entity(
+        db_session, BusinessType.CONTRACT, seed_contract_draft.id, team_id=1
+    )
+
+    assert latest.id == second.id
+    assert latest.status == ApprovalStatus.PENDING
+
+
 def test_create_approval_generic_writes_business_columns(
     db_session, seed_invoice_flow_with_one_node, seed_invoice_draft
 ):
@@ -202,12 +230,12 @@ def test_contract_create_legacy_still_works(
 # ---------- 决策1：match_flow_generic 未匹配分支 ----------------------------
 
 def test_match_flow_generic_contract_unmatched_returns_error(db_session):
-    """CONTRACT 未匹配沿用原报错语义（E1 逐字一致）。"""
+    """CONTRACT 未匹配审批流程时返回配置错误。"""
     flow, err = approval_flow_crud.match_flow_generic(
         db_session, BusinessType.CONTRACT, team_id=1, amount=999999999, license_type="SUBSCRIPTION"
     )
     assert flow is None
-    assert err == "未找到匹配的审批流程，请联系管理员配置"
+    assert err == "未找到匹配的合同审批流程，请联系管理员创建或完善审批流程"
 
 
 def test_match_flow_generic_contract_empty_amount_returns_specific_error(db_session):
@@ -219,22 +247,31 @@ def test_match_flow_generic_contract_empty_amount_returns_specific_error(db_sess
     assert err == "合同金额为空，无法匹配审批流程，请补充金额或让管理员创建默认流程"
 
 
-def test_match_flow_generic_payment_unmatched_returns_none_none(db_session):
-    """PAYMENT 未配置流=免审批直通（决策1）。"""
+def test_match_flow_generic_payment_unmatched_returns_error(db_session):
+    """PAYMENT 未匹配审批流程时返回配置错误。"""
     flow, err = approval_flow_crud.match_flow_generic(
         db_session, BusinessType.PAYMENT, team_id=1, amount=5000, license_type=None
     )
     assert flow is None
-    assert err is None
+    assert err == "未找到匹配的回款审批流程，请联系管理员创建或完善审批流程"
 
 
-def test_match_flow_generic_invoice_unmatched_returns_none_none(db_session):
-    """INVOICE 未配置流=免审批直通（决策1）。"""
+def test_match_flow_generic_invoice_unmatched_returns_error(db_session):
+    """INVOICE 未匹配审批流程时返回配置错误。"""
     flow, err = approval_flow_crud.match_flow_generic(
         db_session, BusinessType.INVOICE, team_id=1, amount=5000, license_type=None
     )
     assert flow is None
-    assert err is None
+    assert err == "未找到匹配的发票审批流程，请联系管理员创建或完善审批流程"
+
+
+def test_match_flow_generic_license_unmatched_returns_error(db_session):
+    """LICENSE 未匹配审批流程时返回配置错误。"""
+    flow, err = approval_flow_crud.match_flow_generic(
+        db_session, BusinessType.LICENSE, team_id=1, amount=None, license_type=None
+    )
+    assert flow is None
+    assert err == "未找到匹配的License审批流程，请联系管理员创建或完善审批流程"
 
 
 # ---------- E1 合同回归契约：match_flow 旧 wrapper 委托 generic CONTRACT ----

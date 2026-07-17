@@ -222,11 +222,11 @@ watch(() => props.open, (open) => {
 
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <SheetHeader>
-      <SheetTitle class="text-base font-semibold text-wolf-text-primary">AI 配置</SheetTitle>
-      <SheetDescription class="text-sm text-wolf-text-secondary">配置大模型服务接口</SheetDescription>
-    </SheetHeader>
     <DetailSheetContent>
+      <SheetHeader class="system-config-sheet-header">
+        <SheetTitle class="text-base font-semibold text-wolf-text-primary">AI 配置</SheetTitle>
+        <SheetDescription class="text-sm text-wolf-text-secondary">配置大模型服务接口</SheetDescription>
+      </SheetHeader>
       <ScrollArea class="h-full">
         <div class="p-4 space-y-4">
           <!-- 配置卡片 -->
@@ -437,4 +437,11 @@ watch(() => props.open, (open) => {
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+
+.system-config-sheet-header {
+  padding: $wolf-space-xl-v2;
+  padding-bottom: $wolf-space-lg-v2;
+  border-bottom: 1px solid $wolf-border-default-v2;
+  background: $wolf-bg-card-v2;
+}
 </style>

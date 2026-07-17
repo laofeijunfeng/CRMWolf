@@ -250,17 +250,47 @@ class ApprovalTransactionManager:
             entity: 业务单据实例
             team_id: 团队ID
         """
-        try:
-            # 使用后台任务发送通知（目前为同步实现，后续可改为异步）
-            from app.services.notification_service import notification_service
+        import asyncio
 
+        try:
+            from app.services.notification import notification_service_factory
+            from app.crud.user import user_crud
+
+            # 获取审批人信息
             adapter = get_adapter(approval.business_type)
             entity_name = adapter.get_name(entity)
 
-            notification_service.send_approval_notification(
-                approval=approval,
-                entity_name=entity_name,
-                team_id=team_id
+            # 获取当前审批节点的审批人
+            current_node = approval.current_node
+            if not current_node or not current_node.approver_ids:
+                logger.warning(
+                    f"审批节点无审批人（approval_id={approval.id}），跳过通知"
+                )
+                return
+
+            # 获取第一个审批人信息
+            approver_id = current_node.approver_ids[0]
+            approver = user_crud.get_by_id(None, int(approver_id))  # type: ignore
+            if not approver:
+                logger.warning(
+                    f"审批人不存在（approver_id={approver_id}），跳过通知"
+                )
+                return
+
+            # 创建通知服务实例并发送通知
+            notification_service = notification_service_factory(None, team_id)  # type: ignore
+
+            # 使用 asyncio.run 调用异步通知方法
+            asyncio.run(
+                notification_service.notify_approval_pending(
+                    entity_type=approval.business_type,
+                    entity_name=entity_name,
+                    flow_name=approval.flow.name if approval.flow else "",
+                    node_name=current_node.name if current_node else "",
+                    approver_open_id=approver.open_id or "",
+                    approver_name=approver.name or "",
+                    business_id=approval.business_id,
+                )
             )
 
             logger.info(

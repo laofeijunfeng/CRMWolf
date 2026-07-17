@@ -40,6 +40,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
+import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import {
   customerFormSchema,
   customerCreateSchema,
@@ -86,6 +87,8 @@ const { handleSubmit, resetForm, setValues, values } = useForm<CustomerForm | Cu
 // State
 const submitting = ref(false)
 const loading = ref(false)
+const procurementMethodsLoading = ref(false)
+const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
 const isDirty = ref(false)
 const showConfirmDialog = ref(false)
 
@@ -100,8 +103,37 @@ watch(values, () => {
   isDirty.value = true
 }, { deep: true })
 
+async function fetchProcurementMethodOptions(): Promise<void> {
+  if (procurementMethodOptions.value.length > 0 || procurementMethodsLoading.value) return
+
+  procurementMethodsLoading.value = true
+  try {
+    procurementMethodOptions.value = await procurementApi.getProcurementMethodOptions()
+  } catch (error) {
+    handleApiError(error, '获取采购方式')
+  } finally {
+    procurementMethodsLoading.value = false
+  }
+}
+
+function normalizeCompanyScale(value: string | null): CustomerForm['company_scale'] | undefined {
+  return companyScaleOptions.some(option => option.value === value)
+    ? value as CustomerForm['company_scale']
+    : undefined
+}
+
+function normalizeCustomerSource(value: string | null): CustomerForm['source'] | undefined {
+  return customerSourceOptions.some(option => option.value === value)
+    ? value as CustomerForm['source']
+    : undefined
+}
+
 // Load customer detail in edit mode
 watch([(): boolean => props.open, (): number | undefined => props.customerId], async ([open, customerId]): Promise<void> => {
+  if (open) {
+    void fetchProcurementMethodOptions()
+  }
+
   if (open && props.mode === 'edit' && customerId !== undefined && customerId !== null) {
     loading.value = true
     try {
@@ -110,8 +142,8 @@ watch([(): boolean => props.open, (): number | undefined => props.customerId], a
         account_name: customer.account_name,
         city: customer.city,
         address: customer.address ?? '',
-        company_scale: customer.company_scale ?? undefined,
-        source: customer.source ?? undefined,
+        company_scale: normalizeCompanyScale(customer.company_scale),
+        source: normalizeCustomerSource(customer.source),
         default_procurement_method_id: customer.default_procurement_method_id ?? undefined,
         // Profile fields (only in edit mode)
         company_background: customer.company_background ?? '',
@@ -262,7 +294,7 @@ function continueEditing(): void {
             <!-- Customer Source -->
             <FormField v-slot="{ componentField }" name="source">
               <FormItem>
-                <FormLabel>客户来源</FormLabel>
+                <FormLabel>客户来源 <span class="text-destructive">*</span></FormLabel>
                 <Select v-bind="componentField as any">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
@@ -286,7 +318,7 @@ function continueEditing(): void {
             <!-- Company Scale -->
             <FormField v-slot="{ componentField }" name="company_scale">
               <FormItem>
-                <FormLabel>公司规模</FormLabel>
+                <FormLabel>公司规模 <span class="text-destructive">*</span></FormLabel>
                 <Select v-bind="componentField as any">
                   <FormControl>
                     <SelectTrigger class="h-11 sm:h-8">
@@ -307,18 +339,26 @@ function continueEditing(): void {
               </FormItem>
             </FormField>
 
-            <!-- Default Procurement Method ID -->
+            <!-- Default Procurement Method -->
             <FormField v-slot="{ componentField }" name="default_procurement_method_id">
               <FormItem>
-                <FormLabel>默认采购方式ID</FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    type="number"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入采购方式ID（可选）"
-                  />
-                </FormControl>
+                <FormLabel>采购方式 <span class="text-destructive">*</span></FormLabel>
+                <Select v-bind="componentField as any" :disabled="procurementMethodsLoading">
+                  <FormControl>
+                    <SelectTrigger class="h-11 sm:h-8">
+                      <SelectValue :placeholder="procurementMethodsLoading ? '采购方式加载中' : '请选择采购方式'" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="option in procurementMethodOptions"
+                      :key="option.id"
+                      :value="option.id"
+                    >
+                      {{ option.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
                 <FormMessage />
               </FormItem>
             </FormField>

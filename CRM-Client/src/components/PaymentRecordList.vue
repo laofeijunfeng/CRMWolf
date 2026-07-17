@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Eye, FilePenLine, ReceiptText } from 'lucide-vue-next'
+import { Eye, FilePenLine, ReceiptText, Trash2 } from 'lucide-vue-next'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,16 +22,19 @@ import { formatCurrency, formatLocalDate } from '@/utils/format'
 interface Props {
   records: PaymentRecordInfo[]
   canRegister?: boolean
+  canDelete?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
-  canRegister: true
+  canRegister: true,
+  canDelete: false
 })
 
 const emit = defineEmits<{
   register: []
   'record-click': [record: PaymentRecordInfo]
   'edit-record': [record: PaymentRecordInfo]
+  'delete-record': [record: PaymentRecordInfo]
   'view-approval': [record: PaymentRecordInfo]
 }>()
 
@@ -77,6 +80,10 @@ const handleRecordClick = (record: PaymentRecordInfo): void => {
 
 const handleEditRecord = (record: PaymentRecordInfo): void => {
   emit('edit-record', record)
+}
+
+const handleDeleteRecord = (record: PaymentRecordInfo): void => {
+  emit('delete-record', record)
 }
 
 const handleViewApproval = (record: PaymentRecordInfo): void => {
@@ -163,6 +170,16 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
         @click.stop="handleEditRecord(item)"
       >
         <FilePenLine aria-hidden="true" />
+      </Button>
+      <Button
+        v-if="canDelete"
+        variant="ghost"
+        size="icon"
+        type="button"
+        :aria-label="`删除 ${formatDate(item.payment_date)} 回款记录`"
+        @click.stop="handleDeleteRecord(item)"
+      >
+        <Trash2 class="record-delete-icon" aria-hidden="true" />
       </Button>
       <Button
         v-if="hasApprovalSeam(item)"
@@ -271,6 +288,10 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
   font-size: $wolf-font-size-auxiliary-v2;
   line-height: $wolf-line-height-body-v2;
   word-break: break-word;
+}
+
+.record-delete-icon {
+  color: $wolf-danger-text-v2;
 }
 
 @media (prefers-reduced-motion: reduce) {

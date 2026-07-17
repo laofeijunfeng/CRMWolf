@@ -229,7 +229,7 @@ class OpportunityCRUD:
             'purchase_type': obj_in.purchase_type.value,
             'decision_maker_count': obj_in.decision_maker_count,
             'expected_closing_date': obj_in.expected_closing_date,
-            'owner_id': obj_in.owner_id,
+            'owner_id': obj_in.owner_id if obj_in.owner_id else creator_id,  # 创建人自动成为负责人
             'creator_id': creator_id,
             'team_id': team_id,
             'status': 0,

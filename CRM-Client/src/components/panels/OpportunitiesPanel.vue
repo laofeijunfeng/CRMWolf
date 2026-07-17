@@ -6,8 +6,7 @@
  * 技术栈：shadcn-vue + variables-v2.scss
  * 无障碍：所有图标按钮均有 aria-label
  */
-import { nextTick, ref, watch } from 'vue'
-import { Plus, ExternalLink } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import StatusBadge from '@/components/StatusBadge.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
@@ -16,33 +15,16 @@ import type { OpportunityListResponse, OpportunityStatus } from '@/api/opportuni
 interface Props {
   customerId: number
   opportunities: OpportunityListResponse[]
-  highlightedOpportunityId?: number | null
-  restoreFocusOpportunityId?: number | null
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  highlightedOpportunityId: null,
-  restoreFocusOpportunityId: null
-})
+const props = defineProps<Props>()
 
 const emit = defineEmits<{
   'add': []
-  'view-opportunity': [opportunityId: number]
-  'open-full-page': [opportunityId: number]
 }>()
-
-const panelRootRef = ref<HTMLElement | null>(null)
 
 const handleAdd = (): void => {
   emit('add')
-}
-
-const handleView = (opportunity: OpportunityListResponse): void => {
-  emit('view-opportunity', opportunity.id)
-}
-
-const handleOpenFullPage = (opportunityId: number): void => {
-  emit('open-full-page', opportunityId)
 }
 
 const mapStatus = (status: OpportunityStatus): string => {
@@ -67,30 +49,14 @@ const formatDate = (dateStr: string): string => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN')
 }
-
-const restoreRowFocus = async (): Promise<void> => {
-  if (props.restoreFocusOpportunityId === null) return
-  await nextTick()
-  const row = panelRootRef.value?.querySelector<HTMLElement>(
-    `[data-list-card-row-id="${props.restoreFocusOpportunityId}"]`
-  )
-  row?.focus()
-}
-
-watch(() => props.restoreFocusOpportunityId, () => {
-  restoreRowFocus()
-}, { immediate: true })
 </script>
 
 <template>
-  <div ref="panelRootRef" class="opportunities-panel">
+  <div class="opportunities-panel">
     <ListCard
       title="商机"
       :items="opportunities"
       empty-text="暂无商机"
-      :highlighted-item-id="highlightedOpportunityId"
-      row-interactive
-      @row-click="handleView"
     >
       <template #headerActions>
         <Button size="sm" @click="handleAdd">
@@ -131,17 +97,6 @@ watch(() => props.restoreFocusOpportunityId, () => {
           {{ item.stage_info?.stage_name ?? '-' }}
           · 预计成交: {{ formatDate(item.expected_closing_date) }}
         </div>
-      </template>
-
-      <template #itemActions="{ item }">
-        <Button
-          variant="ghost"
-          size="sm"
-          :aria-label="`打开商机 ${item.opportunity_name} 完整详情`"
-          @click.stop="handleOpenFullPage(item.id)"
-        >
-          <ExternalLink class="w-4 h-4" />
-        </Button>
       </template>
     </ListCard>
   </div>

@@ -18,7 +18,7 @@ export interface ApprovalFlow {
   min_amount?: number | null
   max_amount?: number | null
   license_type?: string | null
-  business_type: 'CONTRACT' | 'PAYMENT' | 'INVOICE' // 业务类型：合同/回款/发票
+  business_type: 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' // 业务类型：合同/回款/发票/许可证
   is_active?: number
   created_time?: string
   last_modified_time?: string

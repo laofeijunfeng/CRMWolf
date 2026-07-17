@@ -201,7 +201,7 @@ class PaymentPlanCRUD:
         db.commit()
         return True
     
-    def update_status(self, db: Session, plan: PaymentPlan) -> PaymentPlan:
+    def update_status(self, db: Session, plan: PaymentPlan, commit: bool = True) -> PaymentPlan:
         from app.models.payment import PaymentRecord
         
         # 从数据库重新查询回款记录，确保获取最新数据
@@ -221,8 +221,9 @@ class PaymentPlanCRUD:
         else:
             plan.status = PaymentPlanStatus.PENDING
         
-        db.commit()
-        db.refresh(plan)
+        if commit:
+            db.commit()
+            db.refresh(plan)
         return plan
     
     def get_upcoming_payments(self, db: Session, team_id: int, days: int = 7) -> List[PaymentPlan]:
@@ -428,10 +429,12 @@ class PaymentRecordCRUD:
         db.flush()
         
         from app.crud.payment import payment_plan_crud
-        payment_plan_crud.update_status(db, plan)
-        self._update_contract_payment_status(db, plan.contract_id)
-        
-        db.commit()
+        payment_plan_crud.update_status(db, plan, commit=False)
+        self._update_contract_payment_status(db, plan.contract_id, commit=False)
+
+        # 审批创建成功时统一提交回款记录、计划/合同状态和审批实例；
+        # 审批创建失败时由 API 层 rollback，避免留下无审批的半成功回款记录。
+        self._auto_submit_approval(db, db_record, creator_id, creator_name)
         db.refresh(db_record)
 
         # 填充关联对象，避免 DetachedInstanceError
@@ -468,9 +471,6 @@ class PaymentRecordCRUD:
                     "customerName": customer.account_name if customer else None
                 }
             )
-
-        # 自动提交审批
-        self._auto_submit_approval(db, db_record, creator_id, creator_name)
 
         return db_record
     
@@ -566,7 +566,7 @@ class PaymentRecordCRUD:
         db.refresh(record)
         return record
     
-    def _update_contract_payment_status(self, db: Session, contract_id: int):
+    def _update_contract_payment_status(self, db: Session, contract_id: int, commit: bool = True):
         from app.models.contract import Contract
         from app.models.payment import PaymentPlanStatus
         
@@ -597,7 +597,8 @@ class PaymentRecordCRUD:
             else:
                 contract.payment_status = PaymentStatus.UNPAID
         
-        db.commit()
+        if commit:
+            db.commit()
 
     def _auto_submit_approval(self, db: Session, record: PaymentRecord, creator_id: str, creator_name: str):
         """
@@ -624,7 +625,7 @@ class PaymentRecordCRUD:
             license_type=None
         )
 
-        # 强制匹配审批流：未匹配则报错（去掉无审批流逻辑）
+        # 未匹配审批流时统一报错
         if flow is None:
             raise ValueError(error_msg or "未找到匹配的回款审批流程，请联系管理员配置完整的审批流程覆盖范围")
 

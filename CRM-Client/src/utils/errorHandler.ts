@@ -56,17 +56,52 @@ function analyzeError(error: unknown): ApiErrorInfo {
 
   const errorMsg = error.message.toLowerCase()
 
-  // 检查是否为 Axios 错误
+  // 检查是否为 ZodError（数据验证错误）
+  // 使用多种方式检测：name 属性、errors 属性、原型链
+  const isZodError =
+    error.name === 'ZodError' ||
+    'errors' in error ||
+    (error.constructor?.name === 'ZodError') ||
+    errorMsg.includes('zoderror') ||
+    errorMsg.includes('validation')
+
+  if (isZodError) {
+    // 打印详细的 Zod 错误信息以便调试
+    console.error('ZodError 详情:', error)
+    return {
+      type: ApiErrorType.UNKNOWN,
+      title: '数据格式错误',
+      description: '服务器返回的数据格式异常，请联系技术支持',
+    }
+  }
+
+  // 检查是否为 Axios 错误（需要有 response 或 config 属性）
+  const isAxiosError = 'response' in error || 'config' in error
+  if (!isAxiosError) {
+    return {
+      ...defaultError,
+      description: errorMsg || defaultError.description,
+    }
+  }
+
   const axiosError = error as AxiosError<AxiosResponseData>
   const status = axiosError.response?.status
 
-  // 网络错误
+  // 网络错误（无响应）
+  if (!axiosError.response) {
+    return {
+      type: ApiErrorType.NETWORK,
+      title: '网络连接失败',
+      description: '网络不稳定或服务器无响应，请检查网络后重试',
+    }
+  }
+
+  // 网络错误（错误消息包含关键词）
   if (
     errorMsg.includes('network') ||
     errorMsg.includes('fetch') ||
     errorMsg.includes('timeout') ||
-    errorMsg.includes('err_network') ||
-    !axiosError.response
+    errorMsg.includes('err_network')
   ) {
     return {
       type: ApiErrorType.NETWORK,

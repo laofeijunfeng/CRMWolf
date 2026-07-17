@@ -398,11 +398,11 @@ function handleRoleChange(roleId: number, checked: boolean): void {
 
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <SheetHeader>
-      <SheetTitle class="text-base font-semibold text-wolf-text-primary">团队成员</SheetTitle>
-      <SheetDescription class="text-sm text-wolf-text-secondary">管理团队成员与角色分配</SheetDescription>
-    </SheetHeader>
     <DetailSheetContent>
+      <SheetHeader class="system-config-sheet-header">
+        <SheetTitle class="text-base font-semibold text-wolf-text-primary">团队成员</SheetTitle>
+        <SheetDescription class="text-sm text-wolf-text-secondary">管理团队成员与角色分配</SheetDescription>
+      </SheetHeader>
       <ScrollArea class="h-full">
         <!-- 团队信息 -->
         <div class="p-4 border-b">
@@ -703,4 +703,11 @@ function handleRoleChange(roleId: number, checked: boolean): void {
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+
+.system-config-sheet-header {
+  padding: $wolf-space-xl-v2;
+  padding-bottom: $wolf-space-lg-v2;
+  border-bottom: 1px solid $wolf-border-default-v2;
+  background: $wolf-bg-card-v2;
+}
 </style>

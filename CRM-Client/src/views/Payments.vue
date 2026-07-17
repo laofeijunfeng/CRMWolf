@@ -218,7 +218,7 @@ watchEffect(() => {
       type: 'primary',
       handler: (): void => {
         if (permissionStore.hasPermission('payment:create')) {
-          router.push('/payments/create')
+          router.push('/payments/plans')
         } else {
           toast.warning('您没有创建回款计划的权限')
         }

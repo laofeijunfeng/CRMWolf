@@ -14,9 +14,7 @@ from app.crud.crud_license_application import (
     update_license_application,
     delete_license_application,
     submit_license_application,
-    approve_license_application,
-    approve_license_application_full,
-    reject_license_application
+    issue_license_application_full,
 )
 from app.schemas.license_application import (
     LicenseApplicationCreate,
@@ -161,7 +159,7 @@ def submit_application(
         )
 
 
-@router.post("/{application_id}/approve", response_model=LicenseApplicationResponse, summary="审批通过License申请")
+@router.post("/{application_id}/approve", response_model=LicenseApplicationResponse, summary="[已废弃] 审批通过License申请", deprecated=True)
 def approve_application(
     application_id: int,
     approve_data: LicenseApplicationApprove,
@@ -169,22 +167,13 @@ def approve_application(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """审批通过 License 申请（待审批 → 已发放）"""
-    existing = get_license_application(db, team_id, application_id)
-    if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="License申请不存在"
-        )
-    if existing.status != LicenseApplicationStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="仅待审批状态的申请可以审批"
-        )
-    return approve_license_application(db, team_id, application_id, approve_data, current_user.id)
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="该接口已废弃。请使用 /v1/approvals/LICENSE/{application_id}/approve 进行审批。",
+    )
 
 
-@router.post("/{application_id}/approve-full", response_model=LicenseApplicationResponse, summary="审批通过License申请（完整版本）")
+@router.post("/{application_id}/approve-full", response_model=LicenseApplicationResponse, summary="[已废弃] 审批通过License申请（完整版本）", deprecated=True)
 def approve_application_full(
     application_id: int,
     approve_data: LicenseApplicationApproveFull,
@@ -192,30 +181,13 @@ def approve_application_full(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """
-    审批通过 License 申请（完整版本）
-
-    接收完整的 License 信息文本，解析并填充：
-    - enterprise_id: 企业编号
-    - supported_modules: 支持模块
-    - server_license_code: 服务端 License
-    - client_license_code: 客户端 License
-    """
-    existing = get_license_application(db, team_id, application_id)
-    if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="License申请不存在"
-        )
-    if existing.status != LicenseApplicationStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="仅待审批状态的申请可以审批"
-        )
-    return approve_license_application_full(db, team_id, application_id, approve_data, current_user.id)
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="该接口已废弃。请先使用通用审批接口完成审批，再调用 /v1/license-applications/{application_id}/issue 发放License。",
+    )
 
 
-@router.post("/{application_id}/reject", response_model=LicenseApplicationResponse, summary="审批拒绝License申请")
+@router.post("/{application_id}/reject", response_model=LicenseApplicationResponse, summary="[已废弃] 审批拒绝License申请", deprecated=True)
 def reject_application(
     application_id: int,
     reason: str = Query(..., description="拒绝原因"),
@@ -223,19 +195,45 @@ def reject_application(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """审批拒绝 License 申请（待审批 → 已驳回）"""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="该接口已废弃。请使用 /v1/approvals/LICENSE/{application_id}/approve 提交 REJECT 动作。",
+    )
+
+
+@router.post("/{application_id}/issue", response_model=LicenseApplicationResponse, summary="发放License申请")
+def issue_application(
+    application_id: int,
+    issue_data: LicenseApplicationApproveFull,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """发放已通过审批的 License 申请。"""
     existing = get_license_application(db, team_id, application_id)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="License申请不存在"
         )
-    if existing.status != LicenseApplicationStatus.PENDING:
+    if existing.status != LicenseApplicationStatus.APPROVED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="仅待审批状态的申请可以拒绝"
+            detail=f"License申请状态为 {existing.status}，不可发放"
         )
-    return reject_license_application(db, team_id, application_id, reason)
+    try:
+        issued = issue_license_application_full(db, team_id, application_id, issue_data, str(current_user.id))
+        if not issued:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="License申请不存在"
+            )
+        return issued
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 
 @router.get("/{application_id}/export", summary="导出License文档")

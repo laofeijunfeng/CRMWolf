@@ -1,4 +1,4 @@
-"""审批引擎业务单据适配器：把审批 CRUD 与具体单据（合同/回款/发票）的状态机解耦。
+"""审批引擎业务单据适配器：把审批 CRUD 与具体单据（合同/回款/发票/License）的状态机解耦。
 
 每个 business_type 注册一个 ApprovalEntityAdapter，负责：
 - 取实体、取提交人、取匹配审批流的维度
@@ -61,10 +61,8 @@ class ContractAdapter:
 
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
-        # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = REJECTED）
-        # 此处不切换原有 status（保持 PENDING_REVIEW）
-        # 注：原有设计 entity.status = ContractStatus.DRAFT 是错误的
-        pass
+        # 审批结果由 approval.status / approval_phase 保留；业务状态回到草稿，允许修改后重新提交。
+        entity.status = ContractStatus.DRAFT
 
     def on_cancelled(self, db, entity):
         if entity is None: return  # E4 守卫
@@ -142,29 +140,6 @@ class InvoiceApplicationAdapter:
         entity.status = InvoiceApplicationStatus.APPROVED
         entity.reviewed_time = func.now()
 
-    def on_approved_with_file(
-        self,
-        db,
-        entity,
-        file_path: str,
-        invoice_number: Optional[str] = None,
-    ):
-        """审批通过 + 上传发票文件——状态直接变为 ISSUED
-
-        Args:
-            db: 数据库会话
-            entity: InvoiceApplication 实例
-            file_path: 发票文件相对路径
-            invoice_number: 发票号码（可选，财务可从文件中查看）
-        """
-        if entity is None: return  # E4 守卫
-
-        entity.status = InvoiceApplicationStatus.ISSUED
-        entity.invoice_file_path = file_path
-        entity.invoice_number = invoice_number  # 可选字段
-        entity.issued_time = func.now()
-        entity.reviewed_time = func.now()
-
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
         entity.status = InvoiceApplicationStatus.REJECTED
@@ -182,10 +157,10 @@ class LicenseApplicationAdapter:
     """License 申请审批适配器
 
     状态流转：
-    - on_submit: DRAFT → PENDING（提交审批）
-    - on_approved: PENDING → ISSUED（审批通过，由审批人在 approve_full API 中设置）
-    - on_rejected: PENDING → REJECTED（审批拒绝）
-    - on_cancelled: PENDING → DRAFT（撤回审批）
+    - on_submit: DRAFT → PENDING_REVIEW（提交审批）
+    - on_approved: PENDING_REVIEW → APPROVED（审批通过）
+    - on_rejected: PENDING_REVIEW → REJECTED（审批拒绝）
+    - on_cancelled: PENDING_REVIEW → DRAFT（撤回审批）
     """
     business_type = BusinessType.LICENSE
 
@@ -223,13 +198,11 @@ class LicenseApplicationAdapter:
     def on_approved(self, db: Session, entity: LicenseApplication) -> None:
         """审批通过时的状态切换
 
-        注意：License 申请的审批通过需要审批人填写 License 信息，
-        在 approve_full API 中手动设置状态为 ISSUED。
-        此处预留回调逻辑（如需要可扩展）。
+        审批只负责批准申请。License 信息填写和发放是审批通过后的后置业务动作，
+        由 License issue 接口在确认 Approval.status=APPROVED 后执行。
         """
         if entity is None: return  # E4 守卫
-        # 审批通过后，状态由审批人在 approve_full API 中设置为 ISSUED
-        # 此处不修改状态，避免与 approve_full 冲突
+        entity.status = LicenseApplicationStatus.APPROVED
 
     def on_rejected(self, db: Session, entity: LicenseApplication) -> None:
         """审批拒绝时的状态切换"""

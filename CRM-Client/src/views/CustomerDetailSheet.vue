@@ -8,7 +8,7 @@
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
 import { ref, watch } from 'vue'
-import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
+import { useRouter } from 'vue-router'
 import {
   Sheet,
   SheetHeader,
@@ -32,7 +32,6 @@ import {
 import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
 import ContactsPanel from '@/components/panels/ContactsPanel.vue'
 import OpportunitiesPanel from '@/components/panels/OpportunitiesPanel.vue'
-import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
 import ContractsPanel from '@/components/panels/ContractsPanel.vue'
 import PaymentsPanel from '@/components/panels/PaymentsPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
@@ -44,6 +43,12 @@ import ContactFormDialog from '@/components/dialogs/ContactFormDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
+import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
+
+// Detail Sheets (Task 6)
+import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
+import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
+import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 
 import { Plus, Pencil, RefreshCw, Loader2 } from 'lucide-vue-next'
 import ScoreIndicator from '@/components/ScoreIndicator.vue'
@@ -53,6 +58,8 @@ import customerApi, { type CustomerDetailResponse, type ContactResponse } from '
 import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
+import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite } from '@/api/payment'
+import paymentApi from '@/api/payment'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
@@ -70,7 +77,6 @@ defineEmits<{
   'refresh': []
 }>()
 
-const route = useRoute()
 const router = useRouter()
 
 // ==================== State ====================
@@ -78,25 +84,27 @@ const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
 const activePanel = ref('followup')  // Sidebar 导航切换
 const regeneratingProfile = ref(false)  // 档案重新生成状态
 
-type DrilldownView =
-  | { type: 'none' }
-  | { type: 'opportunity'; id: number }
-
-const drilldownView = ref<DrilldownView>({ type: 'none' })
-const lastViewedOpportunityId = ref<number | null>(null)
-const restoreFocusOpportunityId = ref<number | null>(null)
-
 // ==================== Dialog States ====================
 const followUpDialogOpen = ref(false)
 const contactDialogOpen = ref(false)
 const opportunityDialogOpen = ref(false)
 const contractDialogOpen = ref(false)
 const invoiceTitleDialogOpen = ref(false)
+const invoiceApplicationDialogOpen = ref(false)
 
 // ==================== Edit States ====================
 const editingContact = ref<ContactResponse | null>(null)
 const editingContract = ref<ContractResponse | null>(null)
 const editingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
+const applyingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
+
+// ==================== Detail Sheet States (Task 6) ====================
+const selectedContractId = ref<number | null>(null)
+const contractSheetVisible = ref(false)
+const selectedPlanId = ref<number | null>(null)
+const planSheetVisible = ref(false)
+const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string; approval: ApprovalInfo | ApprovalInfoLite | null } | null>(null)
+const recordSheetVisible = ref(false)
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
@@ -104,6 +112,7 @@ const score = ref<ScoreResponse | null>(null)
 const followUps = ref<CustomerFollowUpResponse[]>([])
 const opportunities = ref<OpportunityListResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
+const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
 const licenseApplications = ref<LicenseApplicationResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
@@ -125,106 +134,6 @@ const navTabs: NavTabItem[] = [
   { key: 'license-management', label: 'License' }
 ]
 
-const defaultPanel = 'followup'
-
-const isNavTabKey = (value: string | null): boolean => {
-  if (value === null) return false
-  return navTabs.some(tab => tab.key === value)
-}
-
-const getSingleQueryValue = (query: LocationQuery, key: string): string | null => {
-  const value = query[key]
-  if (typeof value === 'string' && value.trim() !== '') return value
-  if (Array.isArray(value)) {
-    return value.find((item): item is string => typeof item === 'string' && item.trim() !== '') ?? null
-  }
-  return null
-}
-
-const parsePositiveIntegerQueryValue = (value: string | null): number | null => {
-  if (value === null) return null
-  const parsed = Number(value)
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
-}
-
-const copyRouteQuery = (query: LocationQuery): LocationQueryRaw => {
-  const nextQuery: LocationQueryRaw = {}
-  Object.entries(query).forEach(([key, value]) => {
-    if (typeof value === 'string') {
-      nextQuery[key] = value
-    } else if (Array.isArray(value)) {
-      const values = value.filter((item): item is string => typeof item === 'string')
-      if (values.length > 0) {
-        nextQuery[key] = values
-      }
-    } else if (value === null) {
-      nextQuery[key] = value
-    }
-  })
-  return nextQuery
-}
-
-const routeOpportunityId = (): number | null => parsePositiveIntegerQueryValue(getSingleQueryValue(route.query, 'opportunityId'))
-
-const routePanel = (): string => {
-  if (routeOpportunityId() !== null) return 'opportunities'
-  const tab = getSingleQueryValue(route.query, 'tab')
-  if (isNavTabKey(tab) && tab !== null) return tab
-  return defaultPanel
-}
-
-const buildCustomerDetailQueryLocation = (panel: string, opportunityId: number | null = null): { path: string; query: LocationQueryRaw } => {
-  const query = copyRouteQuery(route.query)
-  if (props.customerId !== null) {
-    query['customerId'] = String(props.customerId)
-  }
-
-  if (panel === defaultPanel) {
-    delete query['tab']
-  } else {
-    query['tab'] = panel
-  }
-
-  if (opportunityId === null) {
-    delete query['opportunityId']
-  } else {
-    query['opportunityId'] = String(opportunityId)
-  }
-
-  return { path: route.path, query }
-}
-
-const pushCustomerDetailQuery = (panel: string, opportunityId: number | null = null): void => {
-  router.push(buildCustomerDetailQueryLocation(panel, opportunityId))
-}
-
-const replaceCustomerDetailQuery = (panel: string, opportunityId: number | null = null): void => {
-  router.replace(buildCustomerDetailQueryLocation(panel, opportunityId))
-}
-
-const applyRouteNavigationState = (): void => {
-  if (!props.visible) return
-
-  const panel = routePanel()
-  activePanel.value = panel
-
-  if (panel !== 'opportunities') {
-    drilldownView.value = { type: 'none' }
-    restoreFocusOpportunityId.value = null
-    return
-  }
-
-  const opportunityId = routeOpportunityId()
-  if (opportunityId === null) {
-    drilldownView.value = { type: 'none' }
-    return
-  }
-
-  lastViewedOpportunityId.value = opportunityId
-  restoreFocusOpportunityId.value = null
-  drilldownView.value = { type: 'opportunity', id: opportunityId }
-}
-
 // ==================== Methods ====================
 const handleCreateOpportunity = (): void => {
   // 打开新建商机弹窗
@@ -239,12 +148,9 @@ const handleEdit = (): void => {
   // TODO: 跳转编辑页面
 }
 
-// 占位方法：Sidebar 面板切换（Task 4 实现）
+// 占位方法：Sidebar 面板切换
 const setActivePanel = (panel: string): void => {
   activePanel.value = panel
-  drilldownView.value = { type: 'none' }
-  restoreFocusOpportunityId.value = null
-  pushCustomerDetailQuery(panel)
 }
 
 // ==================== Helper Functions ====================
@@ -262,6 +168,7 @@ const loadAllData = async (customerId: number): Promise<void> => {
   const loadRequestId = latestLoadRequestId + 1
   latestLoadRequestId = loadRequestId
   loading.value = true
+
   try {
     const [
       customerDetail,
@@ -283,7 +190,9 @@ const loadAllData = async (customerId: number): Promise<void> => {
       deploymentApi.list(customerId).catch(() => [])
     ])
 
-    if (loadRequestId !== latestLoadRequestId) return
+    if (loadRequestId !== latestLoadRequestId) {
+      return
+    }
 
     customer.value = customerDetail
     score.value = scoreData
@@ -293,8 +202,24 @@ const loadAllData = async (customerId: number): Promise<void> => {
     invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
     licenseApplications.value = licenseApplicationsData
     deployments.value = deploymentsData
+
+    if (contractsData.length > 0) {
+      const paymentPlanPromises = contractsData.map((contract) =>
+        paymentApi.getPaymentPlans(contract.id).catch(() => [])
+      )
+      const paymentPlanResults = await Promise.all(paymentPlanPromises)
+      if (loadRequestId !== latestLoadRequestId) {
+        return
+      }
+      paymentPlans.value = paymentPlanResults.flat()
+    } else {
+      paymentPlans.value = []
+    }
+
   } catch (error) {
-    if (loadRequestId !== latestLoadRequestId) return
+    if (loadRequestId !== latestLoadRequestId) {
+      return
+    }
     handleApiError(error, '加载客户详情')
   } finally {
     if (loadRequestId === latestLoadRequestId) {
@@ -392,46 +317,6 @@ const handleOpportunitySuccess = (): void => {
   }
 }
 
-const handleViewOpportunity = (opportunityId: number): void => {
-  activePanel.value = 'opportunities'
-  lastViewedOpportunityId.value = opportunityId
-  restoreFocusOpportunityId.value = null
-  drilldownView.value = { type: 'opportunity', id: opportunityId }
-  pushCustomerDetailQuery('opportunities', opportunityId)
-}
-
-const backToOpportunityList = (): void => {
-  activePanel.value = 'opportunities'
-  restoreFocusOpportunityId.value = lastViewedOpportunityId.value
-  drilldownView.value = { type: 'none' }
-  replaceCustomerDetailQuery('opportunities')
-}
-
-const openOpportunityFullPage = (opportunityId: number): void => {
-  router.push(`/opportunities/${opportunityId}`)
-}
-
-const refreshAfterOpportunityChange = (): void => {
-  if (props.customerId !== null) {
-    loadAllData(props.customerId)
-  }
-}
-
-const handleEditOpportunity = (opportunityId: number): void => {
-  router.push(`/opportunities/${opportunityId}/edit`)
-}
-
-const handleCreateContractFromOpportunity = (opportunityId: number): void => {
-  router.push({
-    path: '/contracts/create',
-    query: { opportunityId: String(opportunityId) }
-  })
-}
-
-const handleViewContract = (contractId: number): void => {
-  router.push(`/contracts/${contractId}`)
-}
-
 // Contract handlers
 const handleContractDialogClose = (open: boolean): void => {
   contractDialogOpen.value = open
@@ -493,6 +378,26 @@ const handleSetDefaultInvoiceTitle = async (titleId: number): Promise<void> => {
   }
 }
 
+const handleApplyInvoice = (invoiceTitle: InvoiceTitleResponse): void => {
+  applyingInvoiceTitle.value = invoiceTitle
+  invoiceApplicationDialogOpen.value = true
+}
+
+const handleInvoiceApplicationDialogClose = (open: boolean): void => {
+  invoiceApplicationDialogOpen.value = open
+  if (!open) {
+    applyingInvoiceTitle.value = null
+  }
+}
+
+const handleInvoiceApplicationSuccess = (): void => {
+  invoiceApplicationDialogOpen.value = false
+  applyingInvoiceTitle.value = null
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
 // Payment handlers
 const handleRecordPayment = (): void => {
   // TODO: 打开回款记录对话框
@@ -505,36 +410,112 @@ const handleApplyLicense = (): void => {
   toast.info('许可证申请功能开发中')
 }
 
+// Contract detail sheet handlers (Task 6)
+const handleViewContract = (contractId: number): void => {
+  selectedContractId.value = contractId
+  contractSheetVisible.value = true
+}
+
+const handleContractSheetRefresh = (): void => {
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+// Payment plan detail sheet handlers (Task 6)
+const handleViewPaymentPlan = (planId: number): void => {
+  selectedPlanId.value = planId
+  planSheetVisible.value = true
+}
+
+const handlePlanSheetRefresh = (): void => {
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+// Payment record detail sheet handler (Task 6)
+const handleRecordClick = (record: PaymentRecordInfo): void => {
+  const plan = paymentPlans.value.find((p) =>
+    p.payment_records?.some((r) => r.id === record.id)
+  )
+  // Get approval from record or from plan's latest approval if this is the latest record
+  const approval = record.approval ?? (plan?.latest_record_id === record.id ? plan.latest_approval : null) ?? null
+  selectedRecord.value = {
+    record,
+    stageName: plan?.stage_name ?? '',
+    approval
+  }
+  recordSheetVisible.value = true
+}
+
+// Contract detail sheet approval handlers (Task 6 fix)
+const handleContractApprove = (): void => {
+  // ContractDetailSheet handles the action internally, just refresh parent data
+  handleContractSheetRefresh()
+}
+
+const handleContractReject = (): void => {
+  // ContractDetailSheet handles the action internally, just refresh parent data
+  handleContractSheetRefresh()
+}
+
+// Payment plan detail sheet nested event handlers (Task 6 fix)
+const handlePaymentPlanViewContract = (contractId: number): void => {
+  // Close the plan sheet and open contract sheet
+  planSheetVisible.value = false
+  selectedPlanId.value = null
+  // Open contract sheet
+  handleViewContract(contractId)
+}
+
+const handlePaymentPlanViewCustomer = (customerId: number): void => {
+  // If same customer, close nested sheets and return focus to current customer
+  if (customerId === props.customerId) {
+    planSheetVisible.value = false
+    selectedPlanId.value = null
+    recordSheetVisible.value = false
+    selectedRecord.value = null
+    return
+  }
+  // Navigate to different customer using router
+  router.push({ path: '/customers', query: { customerId: String(customerId) } })
+}
+
+const handlePaymentPlanViewApproval = (record: PaymentRecordInfo): void => {
+  // Reuse handleRecordClick to open PaymentRecordDetailSheet
+  handleRecordClick(record)
+}
+
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
     loadAllData(props.customerId)
-    applyRouteNavigationState()
   } else if (!visible) {
     // 清理状态
-    activePanel.value = defaultPanel
-    drilldownView.value = { type: 'none' }
-    lastViewedOpportunityId.value = null
-    restoreFocusOpportunityId.value = null
+    activePanel.value = 'followup'
     customer.value = null
     score.value = null
     followUps.value = []
     opportunities.value = []
     contracts.value = []
+    paymentPlans.value = []
     invoiceTitles.value = []
     licenseApplications.value = []
     deployments.value = []
+    // Clear nested sheet states
+    selectedContractId.value = null
+    contractSheetVisible.value = false
+    selectedPlanId.value = null
+    planSheetVisible.value = false
+    selectedRecord.value = null
+    recordSheetVisible.value = false
   }
 }, { immediate: true })
 
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
   loadAllData(customerId)
-  applyRouteNavigationState()
-})
-
-watch(() => route.query, (): void => {
-  applyRouteNavigationState()
 })
 </script>
 
@@ -762,49 +743,27 @@ watch(() => route.query, (): void => {
               @set-primary="handleSetPrimaryContact"
             />
 
-            <Transition name="drilldown-fade" mode="out-in">
-              <OpportunitiesPanel
-                v-if="activePanel === 'opportunities' && drilldownView.type === 'none'"
-                key="opportunities-list"
-                :customer-id="customerId ?? 0"
-                :opportunities="opportunities"
-                :highlighted-opportunity-id="lastViewedOpportunityId"
-                :restore-focus-opportunity-id="restoreFocusOpportunityId"
-                @add="opportunityDialogOpen = true"
-                @view-opportunity="handleViewOpportunity"
-                @open-full-page="openOpportunityFullPage"
-              />
-
-              <OpportunityDetailContent
-                v-else-if="activePanel === 'opportunities' && drilldownView.type === 'opportunity'"
-                key="opportunity-detail"
-                :opportunity-id="drilldownView.id"
-                embedded
-                :customer-context="{
-                  customerId: customerId ?? 0,
-                  customerName: customer?.account_name
-                }"
-                @back="backToOpportunityList"
-                @refresh="refreshAfterOpportunityChange"
-                @open-full-page="openOpportunityFullPage"
-                @edit="handleEditOpportunity"
-                @view-contract="handleViewContract"
-                @create-contract="handleCreateContractFromOpportunity"
-              />
-            </Transition>
+            <OpportunitiesPanel
+              v-if="activePanel === 'opportunities'"
+              :customer-id="customerId ?? 0"
+              :opportunities="opportunities"
+              @add="opportunityDialogOpen = true"
+            />
 
             <ContractsPanel
               v-if="activePanel === 'contracts'"
               :customer-id="customerId ?? 0"
               :contracts="contracts"
               @add="contractDialogOpen = true"
+              @view="handleViewContract"
             />
 
             <PaymentsPanel
               v-if="activePanel === 'payments'"
               :customer-id="customerId ?? 0"
-              :payments="[]"
+              :payments="paymentPlans"
               @record="handleRecordPayment"
+              @view="handleViewPaymentPlan"
             />
 
             <InvoicesPanel
@@ -815,6 +774,7 @@ watch(() => route.query, (): void => {
               @edit="handleEditInvoiceTitle"
               @delete="handleDeleteInvoiceTitle"
               @set-default="handleSetDefaultInvoiceTitle"
+              @apply="handleApplyInvoice"
             />
 
             <LicensePanel
@@ -877,6 +837,8 @@ watch(() => route.query, (): void => {
   <ContractFormDialog
     v-if="customerId !== null"
     :customer-id="customerId"
+    :customer-name="customer?.account_name"
+    :customer-locked="true"
     :open="contractDialogOpen"
     :contract="editingContract"
     @update:open="handleContractDialogClose"
@@ -890,6 +852,48 @@ watch(() => route.query, (): void => {
     :invoice-title="editingInvoiceTitle"
     @update:open="handleInvoiceTitleDialogClose"
     @success="handleInvoiceTitleSuccess"
+  />
+
+  <InvoiceApplicationFormDialog
+    v-if="customerId !== null && customer !== null"
+    mode="create"
+    :open="invoiceApplicationDialogOpen"
+    :fixed-customer="{ id: customer.id, account_name: customer.account_name }"
+    :fixed-invoice-title="applyingInvoiceTitle"
+    @update:open="handleInvoiceApplicationDialogClose"
+    @success="handleInvoiceApplicationSuccess"
+  />
+
+  <!-- Contract Detail Sheet (Task 6) -->
+  <ContractDetailSheet
+    :contract-id="selectedContractId"
+    :visible="contractSheetVisible"
+    @update:visible="contractSheetVisible = $event"
+    @refresh="handleContractSheetRefresh"
+    @approve="handleContractApprove"
+    @reject="handleContractReject"
+  />
+
+  <!-- Payment Plan Detail Sheet (Task 6) -->
+  <PaymentPlanDetailSheet
+    :plan-id="selectedPlanId"
+    :visible="planSheetVisible"
+    @update:visible="planSheetVisible = $event"
+    @refresh="handlePlanSheetRefresh"
+    @record-click="handleRecordClick"
+    @view-contract="handlePaymentPlanViewContract"
+    @view-customer="handlePaymentPlanViewCustomer"
+    @view-approval="handlePaymentPlanViewApproval"
+  />
+
+  <!-- Payment Record Detail Sheet (Task 6) -->
+  <PaymentRecordDetailSheet
+    :record-id="selectedRecord?.record.id ?? null"
+    :visible="recordSheetVisible"
+    :record="selectedRecord?.record ?? null"
+    :stage-name="selectedRecord?.stageName ?? ''"
+    :approval="selectedRecord?.approval ?? null"
+    @update:visible="recordSheetVisible = $event"
   />
 </template>
 
@@ -982,34 +986,5 @@ watch(() => route.query, (): void => {
   border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-lg-v2;
   background: $wolf-bg-card-v2;
-}
-
-.drilldown-fade-enter-active,
-.drilldown-fade-leave-active {
-  transition:
-    opacity $wolf-motion-state-duration-v2 ease,
-    transform $wolf-motion-state-duration-v2 ease;
-}
-
-.drilldown-fade-enter-from {
-  opacity: 0;
-  transform: translateX($wolf-space-md-v2);
-}
-
-.drilldown-fade-leave-to {
-  opacity: 0;
-  transform: translateX(-$wolf-space-md-v2);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .drilldown-fade-enter-active,
-  .drilldown-fade-leave-active {
-    transition-duration: $wolf-reduced-motion-duration-v2;
-  }
-
-  .drilldown-fade-enter-from,
-  .drilldown-fade-leave-to {
-    transform: none;
-  }
 }
 </style>

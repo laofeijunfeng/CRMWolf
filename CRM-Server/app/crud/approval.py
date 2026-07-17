@@ -207,22 +207,19 @@ class ApprovalFlowCRUD:
         license_type: Optional[str],
     ) -> Tuple[Optional[ApprovalFlow], Optional[str]]:
         """
-        通用审批流程匹配（A5：支持 CONTRACT/PAYMENT/INVOICE）
+        通用审批流程匹配（支持 CONTRACT/PAYMENT/INVOICE/LICENSE）
 
         E1 合同回归契约（P0）：business_type='CONTRACT' 的匹配结果必须与改造前
         match_flow(contract) 逐字一致——仅多 `ApprovalFlow.business_type == 'CONTRACT'`
         一个过滤条件。team_id 隔离、金额范围比较、license_type 匹配、
         calculate_flow_precision_score 评分、(-score, created_time) 排序逻辑全部沿用原代码。
 
-        决策1 语义（未匹配分支）：
-        - CONTRACT：沿用合同"未匹配=报错阻断"语义——金额为空时返回
-          "合同金额为空，无法匹配审批流程，请补充金额或让管理员创建默认流程"，
-          正常未匹配返回 "未找到匹配的审批流程，请联系管理员配置"（调用方报 400）。
-        - PAYMENT/INVOICE：未匹配返回 (None, None)（非报错，调用方判定 None=免审批直通）。
+        未匹配分支统一为配置错误：所有业务类型都必须配置审批流程。
+        调用方收到 (None, error) 后应提示管理员创建或完善审批流程。
 
         Args:
             db: 数据库会话
-            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE）
             team_id: 团队ID（可选，用于团队隔离）
             amount: 单据金额（合同 total_amount / 回款 actual_amount / 发票 invoice_amount）
             license_type: 授权类型（仅合同有值，回款/发票传 None）
@@ -245,15 +242,19 @@ class ApprovalFlowCRUD:
         # 查询所有启用的流程
         flows = query.all()
 
-        # 未匹配时按 business_type 分支决定"报错"还是"直通"
+        # 未匹配时统一报错。合同金额为空保留更具体的历史提示。
         def _no_match() -> Tuple[Optional[ApprovalFlow], Optional[str]]:
             if business_type == BusinessType.CONTRACT:
-                # 沿用合同原 match_flow 的两条错误信息（E1 逐字一致）
                 if is_amount_empty:
                     return None, "合同金额为空，无法匹配审批流程，请补充金额或让管理员创建默认流程"
-                return None, "未找到匹配的审批流程，请联系管理员配置"
-            # PAYMENT/INVOICE：未配置流=免审批直通（决策1）
-            return None, None
+            display_names = {
+                BusinessType.CONTRACT: "合同",
+                BusinessType.PAYMENT: "回款",
+                BusinessType.INVOICE: "发票",
+                BusinessType.LICENSE: "License",
+            }
+            display_name = display_names.get(business_type, "业务单据")
+            return None, f"未找到匹配的{display_name}审批流程，请联系管理员创建或完善审批流程"
 
         # 金额为空时，优先匹配无金额限制的流程
         if is_amount_empty:
@@ -464,7 +465,7 @@ class ApprovalCRUD:
 
         Args:
             db: 数据库会话
-            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE）
             business_id: 业务单据ID
             team_id: 团队ID（可选，团队隔离）
 
@@ -477,7 +478,7 @@ class ApprovalCRUD:
         )
         if team_id is not None:
             query = query.filter(Approval.team_id == team_id)
-        return query.order_by(Approval.created_time.desc()).first()
+        return query.order_by(Approval.id.desc()).first()
 
     def get_by_contract_id(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> Optional[Approval]:
         """
@@ -592,7 +593,7 @@ class ApprovalCRUD:
         submitter_name: str,
     ) -> Approval:
         """
-        通用审批实例创建（A5：支持 CONTRACT/PAYMENT/INVOICE）
+        通用审批实例创建（支持 CONTRACT/PAYMENT/INVOICE/LICENSE）
 
         - 通过适配器 get_entity 取业务单据；不存在则 raise ValueError（防幻觉单据ID）
         - 写 Approval.business_type/business_id；CONTRACT 额外写 contract_id=business_id 兼容旧字段
@@ -687,20 +688,8 @@ class ApprovalCRUD:
         if entity is None:
             raise ValueError("业务单据不存在")
 
-        # 获取 contract_id：CONTRACT 类型直接用 business_id，INVOICE/PAYMENT/LICENSE 从实体获取
-        contract_id = None
-        if business_type == BusinessType.CONTRACT:
-            contract_id = business_id
-        elif business_type == BusinessType.INVOICE:
-            contract_id = entity.contract_id
-        elif business_type == BusinessType.PAYMENT:
-            # PAYMENT 关联 payment_plan -> contract
-            from app.models.payment import PaymentPlan
-            payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == entity.payment_plan_id).first()
-            contract_id = payment_plan.contract_id if payment_plan else None
-        elif business_type == BusinessType.LICENSE:
-            # LICENSE 直接从实体获取 contract_id（正式版 License 必须关联合同）
-            contract_id = entity.contract_id
+        # contract_id 是旧合同审批兼容字段；非合同审批统一依赖 business_type/business_id 定位。
+        contract_id = business_id if business_type == BusinessType.CONTRACT else None
 
         # 补充 submitter_name（INVOICE/PAYMENT 可能无姓名字段）
         if submitter_name is None and submitter_id:
@@ -859,13 +848,13 @@ class ApprovalCRUD:
         limit: int = 100
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        查询超时的审批实例列表（泛化覆盖 CONTRACT/PAYMENT/INVOICE 三类）。
+        查询超时的审批实例列表（泛化覆盖 CONTRACT/PAYMENT/INVOICE/LICENSE）。
 
         I-1 修复：原实现 `JOIN Contract ON Approval.contract_id == Contract.id`
-        为 INNER JOIN，PAYMENT/INVOICE 审批 contract_id=NULL 被排除，导致回款/
-        发票超时审批在 /overdue 不可见。现去掉 Contract JOIN，按 Approval 基本
+        为 INNER JOIN，非合同审批 contract_id 可能为 NULL，导致超时审批在
+        /overdue 不可见。现去掉 Contract JOIN，按 Approval 基本
         信息（business_type/business_id）返回；contract_id 仍透传（CONTRACT 类
-        非空、PAYMENT/INVOICE 为 None），实体名由调用方按需经适配器 get_entity
+        非空、非合同为 None），实体名由调用方按需经适配器 get_entity
         取（前端铃铛已走 list_approvals 不消费 /overdue，本端点仅作管理端应急，
         泛化后覆盖三类即可）。保留 team_id 过滤与 overdue_hours 计算。
 
@@ -884,7 +873,7 @@ class ApprovalCRUD:
         # 计算超时阈值时间点
         threshold_time = datetime.now() - timedelta(hours=min_hours)
 
-        # 查询超时的审批实例（不再 INNER JOIN Contract——PAYMENT/INVOICE
+        # 查询超时的审批实例（不再 INNER JOIN Contract——非合同审批
         # contract_id=NULL，INNER JOIN 会把它们排除在外）
         query = db.query(
             Approval.id.label('approval_id'),
@@ -965,7 +954,7 @@ class ApprovalCRUD:
     #   processed: EXISTS(records WHERE approver_id=user_id AND action!=SUBMIT) AND team_id
     #   submitted: submitter_id=user_id AND team_id
     # E9 N+1 规避：审批行先取主体，再按 business_type 分组批量预取
-    #   Contract/PaymentRecord/InvoiceApplication 三表，内存 join 出
+    #   Contract/PaymentRecord/InvoiceApplication/LicenseApplication 四表，内存 join 出
     #   application_number / entity_name / entity_amount 三摘要字段。
     # overdue_hours：Python 计算（now - created_time）/3600，DB 无关，与
     #   get_overdue_approvals 同套路；非 PENDING 行也回传（前端按需展示）。
@@ -991,7 +980,7 @@ class ApprovalCRUD:
             user_id: 当前用户ID（int，用于 submitted/processed 过滤）
             user_roles: 当前用户在 team_id 下的角色 code 列表（用于 pending 过滤）
             tab: pending / processed / submitted
-            business_type: 可选业务类型过滤（CONTRACT / PAYMENT / INVOICE）
+            business_type: 可选业务类型过滤（CONTRACT / PAYMENT / INVOICE / LICENSE）
             page: 页码（1-based）
             page_size: 每页条数
 
@@ -1069,6 +1058,7 @@ class ApprovalCRUD:
                 "application_number": summary["application_number"] if summary else f"{ap.business_type}-{ap.business_id}",
                 "entity_name": summary["entity_name"] if summary else None,
                 "entity_amount": summary["entity_amount"] if summary else None,
+                "customer_info": summary["customer_info"] if summary else None,
                 "submitter_id": ap.submitter_id,
                 "submitter_name": ap.submitter_name,
                 "status": ap.status,
@@ -1092,61 +1082,126 @@ class ApprovalCRUD:
 
         - CONTRACT: contract_number / contract_name / total_amount
         - INVOICE: application_number / invoice_title_text / invoice_amount
-        - PAYMENT: 合成 PAY-{id} / None / actual_amount（无单号字段，entity_name 暂空）
+        - PAYMENT: record_number 或 PAY-{id} / 合同名 / actual_amount
+        - LICENSE: application_number / license_type / None
+        - customer_info: 四类业务统一返回关联客户/公司基础信息
 
         Returns:
-            Dict[(business_type, business_id), {application_number, entity_name, entity_amount}]
+            Dict[(business_type, business_id), {application_number, entity_name, entity_amount, customer_info}]
         """
         from app.models.contract import Contract
+        from app.models.customer import Customer
         from app.models.invoice import InvoiceApplication
+        from app.models.license_application import LicenseApplication
         from app.models.payment import PaymentRecord, PaymentPlan
 
-        ids_by_type: Dict[str, List[int]] = {"CONTRACT": [], "INVOICE": [], "PAYMENT": []}
+        ids_by_type: Dict[str, List[int]] = {
+            BusinessType.CONTRACT: [],
+            BusinessType.INVOICE: [],
+            BusinessType.PAYMENT: [],
+            BusinessType.LICENSE: [],
+        }
         for ap in approvals:
             if ap.business_id and ap.business_type in ids_by_type:
                 ids_by_type[ap.business_type].append(ap.business_id)
 
         summaries: Dict[Tuple[str, int], Dict[str, Any]] = {}
 
+        def serialize_customer(customer: Optional[Customer]) -> Optional[Dict[str, Any]]:
+            if not customer:
+                return None
+            return {
+                "id": customer.id,
+                "account_name": customer.account_name,
+                "industry": customer.industry,
+                "city": customer.city,
+                "company_scale": customer.company_scale,
+                "source": customer.source,
+                "status": customer.status,
+                "owner_id": customer.owner_id,
+            }
+
+        def fetch_customers(customer_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+            unique_ids = list({cid for cid in customer_ids if cid})
+            if not unique_ids:
+                return {}
+            customers = db.query(Customer).filter(
+                Customer.id.in_(unique_ids),
+                Customer.team_id == team_id,
+            ).all()
+            return {c.id: serialize_customer(c) for c in customers}
+
         # CONTRACT
         if ids_by_type["CONTRACT"]:
-            for c in db.query(Contract).filter(
+            contracts = db.query(Contract).filter(
                 Contract.id.in_(ids_by_type["CONTRACT"]), Contract.team_id == team_id
-            ).all():
+            ).all()
+            customers_by_id = fetch_customers([c.customer_id for c in contracts])
+            for c in contracts:
                 summaries[(BusinessType.CONTRACT, c.id)] = {
                     "application_number": c.contract_number or f"CONTRACT-{c.id}",
                     "entity_name": c.contract_name,
                     "entity_amount": float(c.total_amount) if c.total_amount is not None else None,
+                    "customer_info": customers_by_id.get(c.customer_id),
                 }
 
         # INVOICE
         if ids_by_type["INVOICE"]:
-            for inv in db.query(InvoiceApplication).filter(
+            invoices = db.query(InvoiceApplication).filter(
                 InvoiceApplication.id.in_(ids_by_type["INVOICE"]),
                 InvoiceApplication.team_id == team_id,
-            ).all():
+            ).all()
+            customers_by_id = fetch_customers([inv.customer_id for inv in invoices])
+            for inv in invoices:
                 summaries[(BusinessType.INVOICE, inv.id)] = {
                     "application_number": inv.application_number or f"INVOICE-{inv.id}",
                     "entity_name": inv.invoice_title_text,
                     "entity_amount": float(inv.invoice_amount) if inv.invoice_amount is not None else None,
+                    "customer_info": customers_by_id.get(inv.customer_id),
                 }
 
-        # PAYMENT（通过 payment_plan_id 关联获取合同名称）
+        # PAYMENT（通过 payment_plan_id 批量关联获取合同名称和客户信息）
         if ids_by_type["PAYMENT"]:
-            for pr in db.query(PaymentRecord).filter(
+            records = db.query(PaymentRecord).filter(
                 PaymentRecord.id.in_(ids_by_type["PAYMENT"]),
                 PaymentRecord.team_id == team_id,
-            ).all():
-                # 关联 PaymentPlan -> Contract 获取合同名称
-                plan = db.query(PaymentPlan).filter(PaymentPlan.id == pr.payment_plan_id).first()
-                contract_name = None
-                if plan:
-                    contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
-                    contract_name = contract.contract_name if contract else None
+            ).all()
+            plan_ids = [pr.payment_plan_id for pr in records if pr.payment_plan_id]
+            plans = db.query(PaymentPlan).filter(
+                PaymentPlan.id.in_(list(set(plan_ids))),
+                PaymentPlan.team_id == team_id,
+            ).all() if plan_ids else []
+            plans_by_id = {p.id: p for p in plans}
+            contract_ids = [p.contract_id for p in plans if p.contract_id]
+            contracts = db.query(Contract).filter(
+                Contract.id.in_(list(set(contract_ids))),
+                Contract.team_id == team_id,
+            ).all() if contract_ids else []
+            contracts_by_id = {c.id: c for c in contracts}
+            customers_by_id = fetch_customers([c.customer_id for c in contracts])
+            for pr in records:
+                plan = plans_by_id.get(pr.payment_plan_id)
+                contract = contracts_by_id.get(plan.contract_id) if plan else None
                 summaries[(BusinessType.PAYMENT, pr.id)] = {
                     "application_number": pr.record_number or f"PAY-{pr.id}",
-                    "entity_name": contract_name,
+                    "entity_name": contract.contract_name if contract else None,
                     "entity_amount": float(pr.actual_amount) if pr.actual_amount is not None else None,
+                    "customer_info": customers_by_id.get(contract.customer_id) if contract else None,
+                }
+
+        # LICENSE
+        if ids_by_type["LICENSE"]:
+            licenses = db.query(LicenseApplication).filter(
+                LicenseApplication.id.in_(ids_by_type["LICENSE"]),
+                LicenseApplication.team_id == team_id,
+            ).all()
+            customers_by_id = fetch_customers([lic.customer_id for lic in licenses])
+            for lic in licenses:
+                summaries[(BusinessType.LICENSE, lic.id)] = {
+                    "application_number": lic.application_number or f"LICENSE-{lic.id}",
+                    "entity_name": lic.license_type,
+                    "entity_amount": None,
+                    "customer_info": customers_by_id.get(lic.customer_id),
                 }
 
         return summaries

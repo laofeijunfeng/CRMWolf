@@ -2,17 +2,23 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional
+import logging
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, check_contract_edit_permission, check_contract_delete_permission
-from app.crud.contract import contract_crud
+from app.crud.contract import contract_crud, ApprovalService
 from app.crud.customer import customer_crud, contact_crud
 from app.crud.opportunity import opportunity_crud
+from app.crud.user import user_crud
 from app.schemas.contract import (
-    ContractCreate, ContractUpdate, ContractStatusUpdate,
+    ContractCreate, ContractUpdate,
     ContractResponse, ContractListResponse, ContractDetailResponse,
     ContractStatusEnum, LicenseTypeEnum, MessageResponse
 )
+from app.services.notification import notification_service_factory
+from app.models.approval import BusinessType
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/v1/contracts", tags=["合同管理"])
@@ -31,7 +37,7 @@ router = APIRouter(prefix="/v1/contracts", tags=["合同管理"])
 - 销售人员为客户创建合同
 - 商务谈判达成后建立合同记录
 """)
-def create_contract(
+async def create_contract(
     contract: ContractCreate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -77,6 +83,30 @@ def create_contract(
             creator_id=str(current_user.id),
             team_id=team_id
         )
+
+        # 提交审批并发送通知
+        approval = ApprovalService.submit_for_approval(db, db_contract.id)
+        if approval and approval.current_node and approval.current_node.approver_ids:
+            try:
+                approver_id = approval.current_node.approver_ids[0]
+                approver = user_crud.get_by_id(db, int(approver_id))
+
+                if approver:
+                    notification_service = notification_service_factory(db, team_id)
+                    await notification_service.notify_approval_pending(
+                        entity_type=BusinessType.CONTRACT.value,
+                        entity_name=db_contract.contract_name,
+                        flow_name=approval.flow.name if approval.flow else "",
+                        node_name=approval.current_node.name if approval.current_node else "",
+                        approver_open_id=approver.open_id or "",
+                        approver_name=approver.name or "",
+                        business_id=db_contract.id,
+                    )
+                    logger.info(f"合同审批通知发送成功（contract_id={db_contract.id}）")
+            except Exception as notify_error:
+                # 通知失败不阻断业务流程
+                logger.error(f"合同审批通知发送失败（contract_id={db_contract.id}）: {notify_error}", exc_info=True)
+
         return db_contract
     except ValueError as e:
         raise HTTPException(
@@ -98,7 +128,7 @@ def create_contract(
 - 商机赢单后直接生成合同
 - 减少手动创建合同的工作量
 """)
-def create_contract_from_opportunity(
+async def create_contract_from_opportunity(
     opportunity_id: int,
     contract_name: str = Query(..., description="合同名称，如：XX公司软件采购合同"),
     signing_contact_id: int = Query(..., description="签约联系人ID，必须是该商机的客户下的联系人"),
@@ -144,6 +174,30 @@ def create_contract_from_opportunity(
             creator_id=str(current_user.id),
             team_id=team_id
         )
+
+        # 提交审批并发送通知
+        approval = ApprovalService.submit_for_approval(db, db_contract.id)
+        if approval and approval.current_node and approval.current_node.approver_ids:
+            try:
+                approver_id = approval.current_node.approver_ids[0]
+                approver = user_crud.get_by_id(db, int(approver_id))
+
+                if approver:
+                    notification_service = notification_service_factory(db, team_id)
+                    await notification_service.notify_approval_pending(
+                        entity_type=BusinessType.CONTRACT.value,
+                        entity_name=db_contract.contract_name,
+                        flow_name=approval.flow.name if approval.flow else "",
+                        node_name=approval.current_node.name if approval.current_node else "",
+                        approver_open_id=approver.open_id or "",
+                        approver_name=approver.name or "",
+                        business_id=db_contract.id,
+                    )
+                    logger.info(f"合同审批通知发送成功（contract_id={db_contract.id}）")
+            except Exception as notify_error:
+                # 通知失败不阻断业务流程
+                logger.error(f"合同审批通知发送失败（contract_id={db_contract.id}）: {notify_error}", exc_info=True)
+
         return db_contract
     except ValueError as e:
         raise HTTPException(
@@ -621,42 +675,6 @@ def update_contract(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-
-
-@router.patch("/{contract_id}/status", response_model=ContractResponse, summary="更新合同状态", description="""
-更新合同状态，推进合同生命周期流程。
-
-**功能说明：**
-- 更新合同的当前状态
-- 实现合同生命周期管理（草稿→待审核→已签署→已生效→已过期/已终止）
-- 状态流转需符合业务规则
-
-**业务场景：**
-- 提交合同审批（DRAFT → PENDING_REVIEW）
-- 标记合同已签署（PENDING_REVIEW → SIGNED）
-- 激活合同使其生效（SIGNED → EFFECTIVE）
-- 处理到期或终止合同
-""")
-def update_contract_status(
-    contract_id: int,
-    status_update: ContractStatusUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    contract = contract_crud.get_by_id(db, contract_id, team_id)
-    if not contract:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="合同不存在"
-        )
-    
-    updated_contract = contract_crud.update_status(
-        db=db,
-        db_obj=contract,
-        obj_in=status_update
-    )
-    return updated_contract
 
 
 @router.delete("/{contract_id}", response_model=MessageResponse, summary="删除合同", description="""

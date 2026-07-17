@@ -7,6 +7,27 @@
 import { z } from 'zod'
 import { UserInfoSchema, CustomerStatusSchema, PaginatedResponseSchema } from './common'
 
+// ===== 行业信息 Schema =====
+export const CustomerIndustryInfoSchema = z.object({
+  code: z.string(),
+  name: z.string(),
+  primary_code: z.string().nullable().optional(),
+  primary_name: z.string().nullable().optional(),
+  secondary_name: z.string().nullable().optional()
+})
+
+export type CustomerIndustryInfo = z.infer<typeof CustomerIndustryInfoSchema>
+
+// ===== 采购方式信息 Schema =====
+export const ProcurementMethodInfoSchema = z.object({
+  id: z.number().int(),
+  code: z.string(),
+  name: z.string(),
+  is_active: z.number()
+})
+
+export type ProcurementMethodInfo = z.infer<typeof ProcurementMethodInfoSchema>
+
 // ===== 客户基础类型 =====
 export const CustomerResponseSchema = z.object({
   id: z.number().int().positive(),
@@ -21,10 +42,10 @@ export const CustomerResponseSchema = z.object({
   source_lead_id: z.number().int().nullable(),
   default_procurement_method_id: z.number().int().nullable(),
   return_reason: z.string().nullable(),
-  returned_time: z.string().datetime().nullable(),
+  returned_time: z.string().nullable(), // 放宽日期格式验证
   creator_id: z.string(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: z.string(), // 放宽日期格式验证
+  last_modified_time: z.string(), // 放宽日期格式验证
   version: z.number().int().nonnegative()
 })
 
@@ -33,8 +54,10 @@ export type CustomerResponse = z.infer<typeof CustomerResponseSchema>
 // ===== 客户列表响应 =====
 export const CustomerListResponseSchema = PaginatedResponseSchema(
   CustomerResponseSchema.extend({
+    industry_info: CustomerIndustryInfoSchema.nullable().optional(),
     owner_info: UserInfoSchema.nullable(),
-    creator_info: UserInfoSchema.nullable()
+    creator_info: UserInfoSchema.nullable(),
+    default_procurement_method_info: ProcurementMethodInfoSchema.nullable().optional()
   })
 )
 
@@ -54,19 +77,44 @@ export const CustomerDefaultOpportunitySchema = z.object({
 export type CustomerDefaultOpportunity = z.infer<typeof CustomerDefaultOpportunitySchema>
 
 // ===== 客户详情响应 =====
+// 完整映射后端 CustomerDetailResponse (CRM-Server/app/schemas/customer.py:279-316)
 export const CustomerDetailResponseSchema = CustomerResponseSchema.extend({
+  // 关联信息
+  industry_info: CustomerIndustryInfoSchema.nullable().optional(),
   owner_info: UserInfoSchema.nullable(),
   creator_info: UserInfoSchema.nullable(),
+  default_procurement_method_info: ProcurementMethodInfoSchema.nullable().optional(),
+  default_opportunity: CustomerDefaultOpportunitySchema.nullable().optional(),
+  // 联系人列表（完整字段）
   contacts: z.array(z.object({
     id: z.number().int(),
     customer_id: z.number().int(),
     name: z.string(),
+    gender: z.number().int().nullable().optional(),
     position: z.string().nullable(),
+    is_decision_maker: z.boolean().optional(),
     mobile: z.string(),
     email: z.string().nullable(),
-    is_primary: z.boolean()
+    wechat_id: z.string().nullable().optional(),
+    remark: z.string().nullable().optional(),
+    reports_to: z.number().int().nullable().optional(),
+    is_primary: z.boolean(),
+    created_time: z.string()
   })),
-  default_opportunity: CustomerDefaultOpportunitySchema.nullable().optional()
+  // 档案字段
+  company_background: z.string().nullable(),
+  company_website: z.string().nullable(),
+  main_business: z.string().nullable(),
+  similar_customers: z.string().nullable(),
+  project_background: z.string().nullable(),
+  profile_status: z.string().nullable(),
+  profile_generated_time: z.string().nullable(),
+  profile_error_message: z.string().nullable(),
+  // 热力值字段
+  score: z.number().int().nullable().optional(),
+  score_updated_at: z.string().nullable().optional(),
+  // 输单原因
+  loss_reason: z.string().nullable()
 })
 
 export type CustomerDetailResponse = z.infer<typeof CustomerDetailResponseSchema>
@@ -103,7 +151,7 @@ export type ConvertResponse = z.infer<typeof ConvertResponseSchema>
 export const CustomerReturnResponseSchema = z.object({
   customer_id: z.number().int().positive(),
   previous_owner: z.string(),
-  returned_time: z.string().datetime(),
+  returned_time: z.string(),
   return_reason: z.string(),
   message: z.string()
 })
@@ -124,7 +172,7 @@ export const ContactResponseSchema = z.object({
   remark: z.string().nullable(),
   reports_to: z.number().int().nullable(),
   is_primary: z.boolean(),
-  created_time: z.string().datetime()
+  created_time: z.string()
 })
 
 export type ContactResponse = z.infer<typeof ContactResponseSchema>
@@ -194,8 +242,8 @@ export const ContractListResponseSchema = z.object({
   signing_date: z.string().nullable(),
   effective_date: z.string().nullable(),
   expiry_date: z.string().nullable(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: z.string(),
+  last_modified_time: z.string(),
   customer_name: z.string().optional(),
   opportunity_name: z.string().optional(),
   owner_info: z.object({
@@ -216,8 +264,8 @@ export const PaymentPlanResponseSchema = z.object({
   notes: z.string().nullable(),
   contract_id: z.number().int().positive(),
   status: z.string(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: z.string(),
+  last_modified_time: z.string(),
   paid_amount: z.number().nonnegative().nullable(),
   remaining_amount: z.number().nonnegative().nullable(),
   contract_name: z.string().optional(),
@@ -243,8 +291,8 @@ export const InvoiceApplicationResponseSchema = z.object({
   approval_status: z.string(),
   rejection_reason: z.string().nullable(),
   applicant_id: z.string(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: z.string(),
+  last_modified_time: z.string(),
   contract_name: z.string().optional(),
   contract_number: z.string().optional(),
   stage_name: z.string().optional(),

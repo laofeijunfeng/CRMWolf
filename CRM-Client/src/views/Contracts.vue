@@ -15,11 +15,10 @@
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  */
-import { ref, reactive, computed, onMounted, onUnmounted, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Eye, Edit, Send, Trash2 } from 'lucide-vue-next'
+import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
 import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -27,16 +26,18 @@ import contractApi, {
   type ContractListResponse,
   type ContractQueryParams
 } from '@/api/contract'
+import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
+import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
+import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
 
-const router = useRouter()
 const permissionStore = usePermissionStore()
 const userStore = useUserStore()
 const headerStore = useHeaderStore()
@@ -45,6 +46,10 @@ const headerStore = useHeaderStore()
 const loading = ref(false)
 const tableData = ref<ContractListResponse[]>([])
 const activeTab = ref('all')
+const showCreateDialog = ref(false)
+const showEditDialog = ref(false)
+const editingContract = ref<ContractListResponse | null>(null)
+const viewingContractId = ref<number | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -156,10 +161,10 @@ const fetchContractList = async (): Promise<void> => {
   }
 }
 
-const handleSearch = (values: Record<string, any>): void => {
+const handleSearch = (values: Record<string, unknown>): void => {
   Object.assign(filterValues, values)
   // 使用 FilterPanel 状态筛选时，清除 Tab 状态
-  if (values['status']) {
+  if (values['status'] !== undefined && values['status'] !== null) {
     activeTab.value = 'all'
   }
   pagination.current = 1
@@ -186,15 +191,26 @@ const handlePageSizeChange = (pageSize: number): void => {
 }
 
 const handleCreate = (): void => {
-  router.push('/contracts/create')
+  showCreateDialog.value = true
+}
+
+const handleCreateSuccess = (): void => {
+  fetchContractList()
 }
 
 const handleViewDetail = (record: ContractListResponse): void => {
-  router.push(`/contracts/${record.id}`)
+  viewingContractId.value = record.id
 }
 
 const handleEdit = (record: ContractListResponse): void => {
-  router.push(`/contracts/edit/${record.id}`)
+  editingContract.value = record
+  showEditDialog.value = true
+}
+
+const handleEditSuccess = (): void => {
+  showEditDialog.value = false
+  editingContract.value = null
+  fetchContractList()
 }
 
 const handleDelete = async (record: ContractListResponse): Promise<void> => {
@@ -212,7 +228,7 @@ const handleDelete = async (record: ContractListResponse): Promise<void> => {
 
 const handleSubmitApproval = async (record: ContractListResponse): Promise<void> => {
   try {
-    await contractApi.updateContractStatus(record.id, { status: 'PENDING_REVIEW' })
+    await approvalGenericApi.submitApproval('CONTRACT', record.id)
     toast.success('合同已提交审批')
     fetchContractList()
   } catch (error) {
@@ -221,27 +237,36 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
 }
 
 // ==================== TableRowActions 配置 ====================
-const getRowActions = (row: ContractListResponse) => ({
+interface RowAction {
+  label: string
+  handler: (record: ContractListResponse) => void
+  icon: typeof Edit
+  visible?: boolean
+  destructive?: boolean
+  separator?: boolean
+}
+
+interface RowActions {
+  primaryActions: RowAction[]
+  secondaryActions: RowAction[]
+}
+
+const getRowActions = (row: ContractListResponse): RowActions => ({
   primaryActions: [
-    {
-      label: '查看',
-      handler: handleViewDetail,
-      icon: Eye
-    },
     {
       label: '编辑',
       handler: handleEdit,
       icon: Edit,
       visible: canEditRow(row)
-    }
-  ],
-  secondaryActions: [
+    },
     {
       label: '提交审批',
       handler: handleSubmitApproval,
       icon: Send,
       visible: canSubmitApproval(row)
-    },
+    }
+  ],
+  secondaryActions: [
     {
       label: '删除',
       handler: handleDelete,
@@ -336,7 +361,9 @@ watchEffect(() => {
     >
       <!-- 合同编号 -->
       <template #cell-contract_number="{ row }">
-        {{ row.contract_number || '-' }}
+        <span class="link-text" @click.stop="handleViewDetail(row)">
+          {{ row.contract_number || '-' }}
+        </span>
       </template>
 
       <!-- 合同名称 -->
@@ -388,6 +415,26 @@ watchEffect(() => {
         <TableRowActions :row="row" v-bind="getRowActions(row)" />
       </template>
     </DataTable>
+
+    <!-- Contract Create Dialog -->
+    <ContractFormDialog
+      v-model:open="showCreateDialog"
+      @success="handleCreateSuccess"
+    />
+
+    <!-- Contract Edit Dialog -->
+    <ContractFormDialog
+      v-model:open="showEditDialog"
+      :contract="editingContract"
+      @success="handleEditSuccess"
+    />
+
+    <!-- Contract Detail Sheet -->
+    <ContractDetailSheet
+      :contract-id="viewingContractId"
+      :visible="viewingContractId !== null"
+      @update:visible="(v: boolean) => { if (!v) viewingContractId = null }"
+    />
   </div>
 </template>
 

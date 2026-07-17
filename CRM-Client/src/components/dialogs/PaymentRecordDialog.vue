@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { DatePicker } from '@/components/ui/date-picker'
 
 interface Props {
   open: boolean
@@ -72,6 +73,18 @@ function getLocalDateString(date: Date = new Date()): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+function parseLocalDateString(value: string): Date | null {
+  if (!isValidLocalDate(value)) return null
+
+  const [year, month, day] = value.split('-').map(Number)
+  if (year === undefined || month === undefined || day === undefined) return null
+  return new Date(year, month - 1, day)
+}
+
+function handlePaymentDateChange(date: Date | null): void {
+  form.paymentDate = date !== null ? getLocalDateString(date) : ''
 }
 
 function formatDefaultAmount(defaultAmount: number | null): string {
@@ -215,15 +228,12 @@ watch(
             回款日期
             <span class="payment-record-dialog__required" aria-hidden="true">*</span>
           </label>
-          <Input
-            id="payment-record-date"
-            v-model="form.paymentDate"
-            name="payment_date"
-            type="date"
-            class="payment-record-dialog__control h-11 min-h-11"
+          <DatePicker
+            :model-value="parseLocalDateString(form.paymentDate)"
+            placeholder="请选择回款日期"
+            class="payment-record-dialog__control"
             :disabled="isSubmitting"
-            :aria-invalid="hasPaymentDateError"
-            aria-describedby="payment-record-date-help payment-record-date-error"
+            @update:model-value="handlePaymentDateChange"
           />
           <p id="payment-record-date-help" class="payment-record-dialog__help">
             使用本地日期，格式为 YYYY-MM-DD。

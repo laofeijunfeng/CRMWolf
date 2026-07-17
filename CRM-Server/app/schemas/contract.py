@@ -135,21 +135,6 @@ class ContractUpdate(BaseModel):
     effective_date: Optional[date] = Field(None, description="生效日期")
 
 
-class ContractStatusUpdate(BaseModel):
-    """合同状态更新请求模型
-    
-    用于更新合同状态，推进合同生命周期：
-    
-    - status: 目标状态
-      - PENDING_REVIEW: 从草稿提交审批
-      - SIGNED: 审核通过标记已签署
-      - EFFECTIVE: 签署完成激活生效
-      - EXPIRED: 合同到期
-      - TERMINATED: 合同提前终止
-    """
-    status: ContractStatusEnum = Field(..., description="目标合同状态，参考 ContractStatusEnum 枚举值")
-
-
 class ContractResponse(BaseModel):
     id: int = Field(..., description="合同ID")
     contract_number: str = Field(..., description="合同编号")

@@ -42,7 +42,6 @@ export type UpdatedTimesMap = Record<string, string>
 /**
  * 提交审批（通用）
  * @returns GenericApprovalSubmitResponse：{ approval_id, status }
- *   PAYMENT/INVOICE 未匹配流程时后端直通返回 approval_id=0, status=APPROVED
  */
 function submitApproval(
   entityType: EntityType,

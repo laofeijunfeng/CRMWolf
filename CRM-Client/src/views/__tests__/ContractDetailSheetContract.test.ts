@@ -10,9 +10,9 @@ describe('ContractDetailSheet Task 2 contract', () => {
   it('integrates payment plans and the contract edit dialog using shadcn sheet boundaries', () => {
     const source = readSource('src/views/ContractDetailSheet.vue')
 
-    expect(source).toContain("@/components/PaymentPlans.vue")
+    expect(source).toContain("@/components/ContractPaymentPlans.vue")
     expect(source).toContain("@/components/dialogs/ContractFormDialog.vue")
-    expect(source).toContain('<PaymentPlans')
+    expect(source).toContain('<ContractPaymentPlans')
     expect(source).toContain('<ContractFormDialog')
 
     const sheetEnd = source.indexOf('</Sheet>')
@@ -21,18 +21,20 @@ describe('ContractDetailSheet Task 2 contract', () => {
     expect(editDialog).toBeGreaterThan(sheetEnd)
   })
 
-  it('provides draft submit, draft edit, pending-review withdraw, and close footer actions', () => {
+  it('uses the generic approval process component and keeps edit/close footer actions', () => {
     const source = readSource('src/views/ContractDetailSheet.vue')
 
-    expect(source).toContain('submitContractApproval')
-    expect(source).toContain('cancelContractApproval')
-    expect(source).toContain('canSubmitApproval')
-    expect(source).toContain('canWithdrawApproval')
+    expect(source).toContain("@/components/ApprovalProcessGeneric.vue")
+    expect(source).toContain('<ApprovalProcessGeneric')
+    expect(source).toContain(':entity-type="contractEntityType"')
+    expect(source).toContain('@submitted="handleApprovalActionDone"')
+    expect(source).toContain('@withdrawn="handleApprovalActionDone"')
     expect(source).toContain('canEditContract')
-    expect(source).toContain('提交审批')
-    expect(source).toContain('撤回审批')
     expect(source).toContain('编辑合同')
     expect(source).toContain('关闭')
+    expect(source).not.toContain(`Approval${'ProgressCompact'}`)
+    expect(source).not.toContain('submitContractApproval')
+    expect(source).not.toContain('cancelContractApproval')
   })
 
   it('gates draft edit by all permission or own permission plus creator match', () => {

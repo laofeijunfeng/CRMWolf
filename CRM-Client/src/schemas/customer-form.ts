@@ -44,15 +44,24 @@ export const customerFormSchema = z.object({
   company_scale: z.enum([
     '1-50人', '51-200人', '201-500人',
     '501-1000人', '1000人以上'
-  ]).optional().nullable(),
+  ], {
+    required_error: '请选择公司规模',
+    invalid_type_error: '请选择公司规模'
+  }),
 
   source: z.enum([
     '线上注册', '市场活动', '客户推荐',
     '电话营销', '网站咨询', '展会',
     '其他', '线索转化'
-  ]).optional().nullable(),
+  ], {
+    required_error: '请选择客户来源',
+    invalid_type_error: '请选择客户来源'
+  }),
 
-  default_procurement_method_id: z.number().int().positive().optional().nullable(),
+  default_procurement_method_id: z.number({
+    required_error: '请选择采购方式',
+    invalid_type_error: '请选择采购方式'
+  }).int().positive('请选择采购方式'),
 
   // Profile fields (only for edit mode)
   company_background: z.string()

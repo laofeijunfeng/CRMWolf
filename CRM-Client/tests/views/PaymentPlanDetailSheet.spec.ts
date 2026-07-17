@@ -140,6 +140,25 @@ vi.mock('@/components/StatusBadge.vue', () => ({
   }),
 }))
 
+vi.mock('@/components/ApprovalProcessStepper.vue', () => ({
+  default: defineComponent({
+    name: 'ApprovalProcessStepper',
+    props: {
+      records: { type: Array as PropType<Array<{ action: string | null; node_name: string | null; comment: string | null }>>, required: true },
+      isPending: Boolean,
+    },
+    setup: (props) => () => h('div', {
+      'data-testid': 'approval-process-stepper',
+      'data-record-count': String(props.records.length),
+      'data-is-pending': String(props.isPending),
+    }, props.records.map((record) => h('span', [
+      record.action,
+      record.node_name,
+      record.comment,
+    ].filter(Boolean).join(':')))),
+  }),
+}))
+
 interface MockRecord {
   id: number
 }
@@ -553,11 +572,14 @@ describe('PaymentPlanDetailSheet', () => {
     expect(wrapper.text()).toContain('审批被驳回')
     expect(wrapper.text()).toContain('金额凭证不一致')
     expect(wrapper.text()).toContain('财务复核')
+    expect(wrapper.get('[data-testid="approval-process-stepper"]').attributes('data-record-count')).toBe('2')
   })
 
   it('keeps the sheet source on V2 primitives without Element Plus imports', () => {
     const source = sourceText()
 
+    expect(source).toContain("import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'")
+    expect(source).toContain('<ApprovalProcessStepper')
     expect(source).toContain('variables-v2.scss')
     expect(source).not.toMatch(/<el-/)
     expect(source).not.toContain('element-plus')

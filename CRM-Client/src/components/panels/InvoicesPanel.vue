@@ -6,7 +6,7 @@
  * 技术栈：shadcn-vue + variables-v2.scss
  * 无障碍：所有图标按钮均有 aria-label
  */
-import { Plus, Pencil, Trash2, Star, Building2, User } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Star, Building2, User, ReceiptText } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ListCard from '@/components/crmwolf/ListCard.vue'
@@ -25,6 +25,7 @@ const emit = defineEmits<{
   'edit': [invoiceTitle: InvoiceTitleResponse]
   'delete': [titleId: number]
   'set-default': [titleId: number]
+  'apply': [invoiceTitle: InvoiceTitleResponse]
 }>()
 
 // ==================== Methods ====================
@@ -42,6 +43,10 @@ const handleDelete = (titleId: number): void => {
 
 const handleSetDefault = (titleId: number): void => {
   emit('set-default', titleId)
+}
+
+const handleApply = (invoiceTitle: InvoiceTitleResponse): void => {
+  emit('apply', invoiceTitle)
 }
 
 // Get title type label and icon
@@ -118,6 +123,15 @@ const maskTaxId = (taxId: string): string => {
     </template>
 
     <template #itemActions="{ item }">
+      <Button
+        variant="ghost"
+        size="sm"
+        :aria-label="`使用 ${item.title} 申请发票`"
+        @click.stop="handleApply(item)"
+      >
+        <ReceiptText class="w-4 h-4" />
+        申请发票
+      </Button>
       <Button
         v-if="!item.is_default"
         variant="ghost"

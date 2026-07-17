@@ -50,22 +50,34 @@ interface Props {
   isPending?: boolean
 }
 
+interface ActionConfig {
+  icon: Component
+  label: string
+  actionClass: string
+}
+
 withDefaults(defineProps<Props>(), {
   isPending: false
 })
 
 // ==================== Constants ====================
-const ACTION_CONFIG: Record<string, { icon: Component; label: string; colorClass: string }> = {
-  SUBMIT: { icon: Send, label: '提交', colorClass: 'text-blue-500' },
-  APPROVE: { icon: CheckCircle2, label: '同意', colorClass: 'text-green-500' },
-  REJECT: { icon: XCircle, label: '驳回', colorClass: 'text-red-500' },
-  ROLLBACK: { icon: RotateCcw, label: '撤回', colorClass: 'text-orange-500' },
-  CANCEL: { icon: RotateCcw, label: '撤回', colorClass: 'text-orange-500' }
+const FALLBACK_ACTION_CONFIG: ActionConfig = {
+  icon: RotateCcw,
+  label: '撤回',
+  actionClass: 'approval-stepper__action--rollback'
+}
+
+const ACTION_CONFIG: Record<string, ActionConfig> = {
+  SUBMIT: { icon: Send, label: '提交', actionClass: 'approval-stepper__action--submit' },
+  APPROVE: { icon: CheckCircle2, label: '同意', actionClass: 'approval-stepper__action--approve' },
+  REJECT: { icon: XCircle, label: '驳回', actionClass: 'approval-stepper__action--reject' },
+  ROLLBACK: FALLBACK_ACTION_CONFIG,
+  CANCEL: FALLBACK_ACTION_CONFIG
 }
 
 // ==================== Methods ====================
-const getActionConfig = (action: string | null | undefined): { icon: Component; label: string; colorClass: string } => {
-  return ACTION_CONFIG[action ?? 'ROLLBACK'] ?? ACTION_CONFIG['ROLLBACK']
+const getActionConfig = (action: string | null | undefined): ActionConfig => {
+  return ACTION_CONFIG[action ?? 'ROLLBACK'] ?? FALLBACK_ACTION_CONFIG
 }
 
 const formatDateTime = (iso: string): string => {
@@ -107,10 +119,8 @@ const formatDateTime = (iso: string): string => {
               <TooltipTrigger as-child>
                 <StepperIndicator
                   :class="[
-                    'w-10 h-10 rounded-full flex items-center justify-center',
-                    'data-[state=completed]:bg-green-100 data-[state=completed]:text-green-600',
-                    'data-[state=active]:bg-blue-100 data-[state=active]:text-blue-600',
-                    'data-[state=inactive]:bg-gray-100 data-[state=inactive]:text-gray-400'
+                    'approval-stepper__indicator',
+                    getActionConfig(record.action).actionClass
                   ]"
                 >
                   <component
@@ -130,8 +140,8 @@ const formatDateTime = (iso: string): string => {
             <!-- StepperTitle：显示操作名称 -->
             <StepperTitle
               :class="[
-                'text-xs font-medium text-center',
-                getActionConfig(record.action).colorClass
+                'approval-stepper__title',
+                getActionConfig(record.action).actionClass
               ]"
             >
               {{ getActionConfig(record.action).label }}
@@ -148,7 +158,7 @@ const formatDateTime = (iso: string): string => {
             <!-- 驳回理由（仅驳回时显示） -->
             <p
               v-if="record.action === 'REJECT' && record.comment"
-              class="text-xs text-red-500 max-w-[120px] truncate"
+              class="approval-stepper__reject-comment max-w-[120px] truncate"
               :title="record.comment"
             >
               {{ record.comment }}
@@ -174,6 +184,60 @@ const formatDateTime = (iso: string): string => {
   padding: $wolf-space-md-v2;
   background: $wolf-bg-card-v2;
   border-radius: $wolf-radius-v2;
+}
+
+.approval-stepper__indicator {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: $wolf-radius-full-v2;
+  background: $wolf-bg-muted-v2;
+  color: $wolf-text-tertiary-v2;
+}
+
+.approval-stepper__title {
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  text-align: center;
+}
+
+.approval-stepper__action--submit {
+  color: $wolf-primary-v2;
+
+  &.approval-stepper__indicator {
+    background: $wolf-primary-light-v2;
+  }
+}
+
+.approval-stepper__action--approve {
+  color: $wolf-success-text-v2;
+
+  &.approval-stepper__indicator {
+    background: $wolf-success-bg-v2;
+  }
+}
+
+.approval-stepper__action--reject {
+  color: $wolf-danger-text-v2;
+
+  &.approval-stepper__indicator {
+    background: $wolf-danger-bg-v2;
+  }
+}
+
+.approval-stepper__action--rollback {
+  color: $wolf-warning-text-v2;
+
+  &.approval-stepper__indicator {
+    background: $wolf-warning-bg-v2;
+  }
+}
+
+.approval-stepper__reject-comment {
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-danger-text-v2;
 }
 
 // Reduced Motion 支持

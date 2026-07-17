@@ -19,13 +19,16 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Eye, Pencil, Trash2 } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
 import { FilterPanel, DataTable, TableRowActions } from '@/components/crmwolf'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
+import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
+import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import paymentApi, {
   type PaymentRecordWithDetails,
-  type PaymentRecordListParams
+  type PaymentRecordListParams,
+  type PaymentRecordUpdate
 } from '@/api/payment'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
@@ -42,6 +45,10 @@ const headerStore = useHeaderStore()
 // ==================== State ====================
 const loading = ref(false)
 const tableData = ref<PaymentRecordWithDetails[]>([])
+const selectedRecord = ref<PaymentRecordWithDetails | null>(null)
+const detailSheetVisible = ref(false)
+const editDialogOpen = ref(false)
+const editSubmitting = ref(false)
 
 const pagination = reactive({
   current: 1,
@@ -71,7 +78,7 @@ const filterValues = reactive({
 
 // ==================== DataTable 配置 ====================
 const columns = [
-  { key: 'record_number', title: '记录编号', width: '120px' },
+  { key: 'record_number', title: '记录编号', width: '150px' },
   { key: 'customer_name', title: '客户名称' },
   { key: 'contract_name', title: '合同名称' },
   { key: 'actual_amount', title: '回款金额', align: 'right' as const },
@@ -170,11 +177,46 @@ const handleCreateRecord = (): void => {
 }
 
 const handleViewDetail = (record: PaymentRecordWithDetails): void => {
-  router.push(`/payments/records/${record.id}`)
+  selectedRecord.value = record
+  detailSheetVisible.value = true
 }
 
 const handleEdit = (record: PaymentRecordWithDetails): void => {
-  router.push(`/payments/records/${record.id}/edit`)
+  selectedRecord.value = record
+  editDialogOpen.value = true
+}
+
+const handleEditAction = (row: Record<string, unknown>): void => {
+  handleEdit(row as unknown as PaymentRecordWithDetails)
+}
+
+const handleEditDialogOpenChange = (open: boolean): void => {
+  editDialogOpen.value = open
+  if (!open && !detailSheetVisible.value) {
+    selectedRecord.value = null
+  }
+}
+
+const handleDetailSheetVisibleChange = (visible: boolean): void => {
+  detailSheetVisible.value = visible
+  if (!visible && !editDialogOpen.value) {
+    selectedRecord.value = null
+  }
+}
+
+const handleEditSubmit = async (recordId: number, data: PaymentRecordUpdate): Promise<void> => {
+  editSubmitting.value = true
+  try {
+    await paymentApi.updatePaymentRecord(recordId, data)
+    toast.success('回款记录更新成功')
+    editDialogOpen.value = false
+    selectedRecord.value = null
+    fetchPaymentRecords()
+  } catch (error) {
+    handleApiError(error, '更新回款记录')
+  } finally {
+    editSubmitting.value = false
+  }
 }
 
 const handleDelete = async (record: PaymentRecordWithDetails): Promise<void> => {
@@ -192,6 +234,10 @@ const handleDelete = async (record: PaymentRecordWithDetails): Promise<void> => 
   } catch (error) {
     handleApiError(error, '删除回款记录')
   }
+}
+
+const handleDeleteAction = (row: Record<string, unknown>): void => {
+  void handleDelete(row as unknown as PaymentRecordWithDetails)
 }
 
 // ==================== 格式化函数 ====================
@@ -264,7 +310,14 @@ watchEffect(() => {
     >
       <!-- 记录编号 -->
       <template #cell-record_number="{ row }">
-        <span class="record-number-cell">{{ row.record_number || '-' }}</span>
+        <button
+          type="button"
+          class="record-number-cell record-number-link"
+          :aria-label="`查看回款记录 ${row.record_number || row.id}`"
+          @click.stop="handleViewDetail(row as PaymentRecordWithDetails)"
+        >
+          {{ row.record_number || '-' }}
+        </button>
       </template>
 
       <!-- 客户名称 -->
@@ -279,7 +332,7 @@ watchEffect(() => {
 
       <!-- 状态 -->
       <template #cell-confirmation_status="{ row }">
-        <StatusBadge :status="mapPaymentRecordStatus(row.confirmation_status)" type="paymentRecord" />
+        <StatusBadge :status="mapPaymentRecordStatus(row.confirmation_status ?? 'PENDING')" type="paymentRecord" />
       </template>
 
       <!-- 操作 -->
@@ -288,14 +341,8 @@ watchEffect(() => {
           :row="row"
           :primary-actions="[
             {
-              label: '查看',
-              handler: handleViewDetail,
-              visible: true,
-              icon: Eye
-            },
-            {
               label: '编辑',
-              handler: handleEdit,
+              handler: handleEditAction,
               visible: canEditRecord,
               icon: Pencil
             }
@@ -303,7 +350,7 @@ watchEffect(() => {
           :secondary-actions="[
             {
               label: '删除',
-              handler: handleDelete,
+              handler: handleDeleteAction,
               visible: canDeleteRecord,
               icon: Trash2,
               destructive: true
@@ -312,6 +359,23 @@ watchEffect(() => {
         />
       </template>
     </DataTable>
+
+    <PaymentRecordDetailSheet
+      :record-id="selectedRecord?.id ?? null"
+      :visible="detailSheetVisible"
+      :record="selectedRecord"
+      :stage-name="selectedRecord?.stage_name ?? ''"
+      :approval="selectedRecord?.approval ?? null"
+      @update:visible="handleDetailSheetVisibleChange"
+    />
+
+    <EditRecordDialog
+      :open="editDialogOpen"
+      :record="selectedRecord"
+      :submitting="editSubmitting"
+      @update:open="handleEditDialogOpenChange"
+      @submit="handleEditSubmit"
+    />
   </div>
 </template>
 
@@ -349,5 +413,28 @@ watchEffect(() => {
 .record-number-cell {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
+}
+
+.record-number-link {
+  min-height: $wolf-touch-target-min-v2;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: $wolf-text-link-v2;
+  cursor: pointer;
+  font-weight: $wolf-font-weight-medium-v2;
+  text-align: left;
+
+  &:hover {
+    color: $wolf-text-link-hover-v2;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+    border-radius: $wolf-radius-sm-v2;
+  }
 }
 </style>

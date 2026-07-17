@@ -2,11 +2,11 @@
   ApprovalCenter — 审批中心
 
   基于 V2 设计规范重构：
-  - ContextTabs（待我审批/我已处理/我提交的，权限驱动）+ Badge 显示待办数
+  - TopBar 集成 ContextTabs（待我审批/我已处理/我提交的，权限驱动）+ Badge 显示待办数
   - FilterPanel（单据类型筛选）
   - DataTable（桌面端表格）+ 键盘快捷键（J/K 上下行、Enter 开 Sheet、Esc 关 Sheet）
   - 移动端卡片列表 + 快速审批按钮（Touch Target ≥44pt）
-  - Sheet（详情抽屉）内嵌 Card + Label + ApprovalProcessGeneric
+  - DetailSheetContent（统一详情抽屉样式）
   - V2 Design Tokens 统一样式
 
   核心功能：
@@ -21,7 +21,7 @@
   性能优化：列表只调 1 次 listApprovals；详情走单点 getApprovalDetail。
 -->
 <template>
-  <div class="approval-center" v-loading="loading">
+  <div class="approval-center" v-loading="listLoading">
     <!-- 标题 + 全局 ErrorState（403 forbidden / 加载失败） -->
     <ErrorState
       v-if="loadError === 'forbidden'"
@@ -43,21 +43,12 @@
     </ErrorState>
 
     <template v-else>
-      <!-- ContextTabs（高度 48px） -->
-      <ContextTabs
-        v-model:activeTab="activeTab"
-        :tabs="tabs"
-        @change="handleTabChange"
-        class="mb-6"
-      />
-
       <!-- FilterPanel -->
       <FilterPanel
         :fields="filterFields"
         v-model:values="filterValues"
         @search="handleFilterChange"
         @reset="resetFilter"
-        class="mb-6"
       />
 
       <!-- DataTable（桌面端） -->
@@ -68,8 +59,8 @@
         :total="total"
         :page="page"
         :page-size="pageSize"
-        :loading="loading"
-        height="calc(100vh - 320px)"
+        :loading="listLoading"
+        height="calc(100vh - 248px)"
         empty-title="暂无待审批事项"
         row-interactive
         @update:page="page = $event; fetchList()"
@@ -298,87 +289,137 @@
 
     <!-- 详情 Sheet -->
     <Sheet v-model:open="sheetVisible" @closed="onSheetClosed">
-      <SheetContent
-        :side="'right'"
-        :class="isMobile ? 'w-full' : 'w-[480px]'"
-        class="flex flex-col"
-      >
-        <!-- SheetHeader -->
-        <SheetHeader>
-          <SheetTitle>审批详情</SheetTitle>
-          <SheetDescription>
-            审批单号：{{ selectedApproval?.application_number }}
+      <DetailSheetContent>
+        <!-- Header -->
+        <SheetHeader class="p-6 pb-4 border-b border-wolf-border-default-v2">
+          <SheetTitle class="text-lg font-semibold">审批详情</SheetTitle>
+          <SheetDescription class="font-mono text-sm mt-1">
+            {{ selectedApproval?.application_number || '-' }}
           </SheetDescription>
         </SheetHeader>
 
-        <!-- SheetContent（ScrollArea） -->
-        <ScrollArea class="flex-1 -mx-6 px-6">
-          <!-- 加载状态 -->
-          <div v-if="loading" class="space-y-4">
-            <Skeleton class="h-32 w-full" />
-            <Skeleton class="h-48 w-full" />
+        <!-- Content -->
+        <ScrollArea class="flex-1">
+          <div class="p-6 space-y-6 min-h-[400px]">
+            <!-- 基本信息卡（来自列表行数据，无需额外请求） -->
+            <Card v-if="selectedApproval" class="info-card">
+              <CardContent class="p-0">
+                <div class="p-4 border-b border-wolf-border-light-v2">
+                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">基本信息</h3>
+                </div>
+                <div class="p-4">
+                  <div class="attributes-grid">
+                    <div class="attribute-item">
+                      <div class="attribute-label">单号</div>
+                      <div
+                        class="attribute-value font-mono text-wolf-primary-v2 cursor-pointer hover:underline"
+                        @click="copyNumber(selectedApproval.application_number)"
+                      >
+                        {{ selectedApproval.application_number }}
+                      </div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">单据类型</div>
+                      <div class="attribute-value">{{ businessTypeLabel(selectedApproval.business_type) }}</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">客户/实体</div>
+                      <div class="attribute-value">{{ selectedApproval.entity_name || '-' }}</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">金额</div>
+                      <div class="attribute-value font-mono font-semibold text-wolf-warning-text-v2">
+                        {{ formatCurrency(selectedApproval.entity_amount) }}
+                      </div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">提交人</div>
+                      <div class="attribute-value">{{ selectedApproval.submitter_name }}</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">提交时间</div>
+                      <div class="attribute-value font-mono text-sm">{{ formatDateRelative(selectedApproval.created_time) }}</div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card v-if="selectedApproval?.customer_info" class="info-card">
+              <CardContent class="p-0">
+                <div class="p-4 border-b border-wolf-border-light-v2">
+                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">公司信息</h3>
+                </div>
+                <div class="p-4">
+                  <div class="attributes-grid">
+                    <div class="attribute-item">
+                      <div class="attribute-label">客户名称</div>
+                      <div class="attribute-value">{{ selectedApproval.customer_info.account_name }}</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">所在城市</div>
+                      <div class="attribute-value">{{ selectedApproval.customer_info.city || '-' }}</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">所属行业</div>
+                      <div class="attribute-value">{{ selectedApproval.customer_info.industry || '-' }}</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">公司规模</div>
+                      <div class="attribute-value">{{ selectedApproval.customer_info.company_scale || '-' }}</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">客户来源</div>
+                      <div class="attribute-value">{{ selectedApproval.customer_info.source || '-' }}</div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">客户状态</div>
+                      <div class="attribute-value">{{ customerStatusLabel(selectedApproval.customer_info.status) }}</div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <!-- 审批流程组件（内部处理加载/错误/空态） -->
+            <ApprovalProcessGeneric
+              v-if="selectedApproval"
+              :entity-type="selectedApproval.business_type"
+              :entity-id="selectedApproval.business_id"
+              :can-approve="activeTab === 'pending'"
+              :is-submitter="activeTab === 'submitted'"
+              :show-invoice-upload-action="false"
+              @approved="onApprovalActionDone"
+              @rejected="onApprovalActionDone"
+              @withdrawn="onApprovalActionDone"
+              @submitted="onApprovalActionDone"
+              @resubmit="onResubmit"
+            />
           </div>
-
-          <!-- 基本信息 Card -->
-          <Card v-else-if="selectedApproval" class="mb-4">
-            <CardHeader>
-              <h3 class="text-base font-semibold">基本信息</h3>
-            </CardHeader>
-            <CardContent>
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <Label class="text-muted-foreground">单号</Label>
-                  <p
-                    class="font-mono text-primary cursor-pointer hover:underline mt-1"
-                    @click="copyNumber(selectedApproval.application_number)"
-                  >
-                    {{ selectedApproval.application_number }}
-                  </p>
-                </div>
-                <div>
-                  <Label class="text-muted-foreground">单据类型</Label>
-                  <p class="mt-1">{{ businessTypeLabel(selectedApproval.business_type) }}</p>
-                </div>
-                <div>
-                  <Label class="text-muted-foreground">客户/实体</Label>
-                  <p class="mt-1">{{ selectedApproval.entity_name || '-' }}</p>
-                </div>
-                <div>
-                  <Label class="text-muted-foreground">金额</Label>
-                  <p class="font-mono font-semibold text-warning mt-1">
-                    {{ formatCurrency(selectedApproval.entity_amount) }}
-                  </p>
-                </div>
-                <div>
-                  <Label class="text-muted-foreground">提交人</Label>
-                  <p class="mt-1">{{ selectedApproval.submitter_name }}</p>
-                </div>
-                <div>
-                  <Label class="text-muted-foreground">提交时间</Label>
-                  <p class="font-mono text-sm mt-1">
-                    {{ formatDateRelative(selectedApproval.created_time) }}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <!-- 审批流程 Card -->
-          <ApprovalProcessGeneric
-            v-if="selectedApproval"
-            :entity-type="selectedApproval.business_type"
-            :entity-id="selectedApproval.business_id"
-            :can-approve="activeTab === 'pending'"
-            :is-submitter="activeTab === 'submitted'"
-            @approved="onApprovalActionDone"
-            @rejected="onApprovalActionDone"
-            @withdrawn="onApprovalActionDone"
-            @submitted="onApprovalActionDone"
-            @resubmit="onResubmit"
-          />
         </ScrollArea>
-      </SheetContent>
+
+        <!-- Footer -->
+        <SheetFooter
+          v-if="showInvoiceUploadFooter"
+          class="p-4 border-t border-wolf-border-default-v2 flex flex-row justify-end gap-2"
+        >
+          <Button
+            data-testid="mark-issued-btn"
+            aria-label="上传发票文件，审批已通过"
+            @click="markIssuedDialogVisible = true"
+          >
+            上传发票文件
+          </Button>
+        </SheetFooter>
+      </DetailSheetContent>
     </Sheet>
+
+    <InvoiceMarkIssuedDialog
+      v-if="selectedApproval?.business_type === 'INVOICE'"
+      v-model:open="markIssuedDialogVisible"
+      :application-id="selectedApproval.business_id"
+      @issued="handleInvoiceFileUploaded"
+    />
 
     <!-- 移动端快速驳回弹窗 -->
     <Dialog v-model:open="quickRejectVisible">
@@ -418,23 +459,29 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- 合同编辑弹窗 -->
+    <ContractFormDialog
+      v-model:open="contractEditVisible"
+      :contract="editingContract"
+      @success="handleContractEditSuccess"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch, reactive } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, ref, watch, watchEffect, reactive } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Clock, Copy } from 'lucide-vue-next'
-import { ContextTabs, FilterPanel, DataTable, Badge, Separator } from '@/components/crmwolf'
+import { FilterPanel, DataTable, Badge, Separator } from '@/components/crmwolf'
 import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from '@/components/ui/pagination'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
-import { Label } from '@/components/ui/label'
+import { Sheet, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet'
+import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -443,11 +490,17 @@ import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import WolfEmpty from '@/components/WolfEmpty.vue'
+import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
+import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import { useApprovalStore } from '@/stores/approval'
+import { usePermissionStore } from '@/stores/permissions'
+import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency, formatDateRelative } from '@/utils/format'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
+import contractApi from '@/api/contract'
 import type { EntityType, ApprovalListItem } from '@/schemas/approvalGeneric'
+import type { ContractResponse } from '@/api/contract'
 
 type Tab = 'pending' | 'processed' | 'submitted'
 type LoadError = null | 'error' | 'forbidden'
@@ -455,7 +508,9 @@ type LoadError = null | 'error' | 'forbidden'
 // ==================== Stores ====================
 usePageTitle()
 const store = useApprovalStore()
-const { loading, pendingCount } = storeToRefs(store)
+const permissionStore = usePermissionStore()
+const headerStore = useHeaderStore()
+const { pendingCount, currentApprovalDetail } = storeToRefs(store)
 const router = useRouter()
 
 // ==================== State ====================
@@ -470,12 +525,21 @@ const total = ref<number>(0)
 const rows = ref<ApprovalListItem[]>([])
 const loadError = ref<LoadError>(null)
 
+// 列表加载状态（独立于 Sheet 详情加载）
+const listLoading = ref<boolean>(false)
+
 const sheetVisible = ref<boolean>(false)
 const selectedApproval = ref<ApprovalListItem | null>(null)
+const markIssuedDialogVisible = ref<boolean>(false)
 const triggerRowIndex = ref<number>(-1)
 const focusedRowEl = ref<HTMLElement | null>(null)
 
 const resubmitPendingId = ref<number | null>(null)
+
+// 合同编辑弹窗状态
+const contractEditVisible = ref<boolean>(false)
+const editingContract = ref<ContractResponse | null>(null)
+const contractLoading = ref<boolean>(false)
 
 // 移动端检测（响应式）
 const isMobile = ref<boolean>(false)
@@ -489,13 +553,29 @@ const quickRejectReason = ref<string>('')
 const quickRejectRow = ref<ApprovalListItem | null>(null)
 
 // ==================== 计算属性 ====================
+const showInvoiceUploadFooter = computed<boolean>(() =>
+  selectedApproval.value?.business_type === 'INVOICE' &&
+  currentApprovalDetail.value?.business_type === 'INVOICE' &&
+  currentApprovalDetail.value.status === 'APPROVED' &&
+  (currentApprovalDetail.value.invoice_file_path == null || currentApprovalDetail.value.invoice_file_path.length === 0) &&
+  permissionStore.hasPermission('invoice:mark_issued')
+)
 
 // ==================== ContextTabs 配置 ====================
-const tabs = computed(() => [
-  { key: 'pending', label: '待我审批', badge: pendingCount.value > 0 ? pendingCount.value : undefined },
-  { key: 'processed', label: '我已处理' },
-  { key: 'submitted', label: '我提交的' }
-])
+const tabs = computed(() => {
+  const pendingTab: { key: string; label: string; badge?: number } = {
+    key: 'pending',
+    label: '待我审批'
+  }
+  if (pendingCount.value > 0) {
+    pendingTab.badge = pendingCount.value
+  }
+  return [
+    pendingTab,
+    { key: 'processed', label: '我已处理' },
+    { key: 'submitted', label: '我提交的' }
+  ]
+})
 
 // ==================== FilterPanel 配置 ====================
 const filterFields = [
@@ -576,6 +656,23 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', checkMobile)
 })
+onUnmounted(() => {
+  headerStore.clear()
+})
+
+// TopBar 配置（Tabs）
+watchEffect(() => {
+  headerStore.setTabs(tabs.value, activeTab.value)
+})
+
+// 监听 headerStore.activeTab 变化
+watchEffect(() => {
+  if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
+    activeTab.value = headerStore.activeTab as Tab
+    page.value = 1
+    fetchList()
+  }
+})
 
 // ===== 方法 =====
 const isAxiosStatus = (err: unknown, code: number): boolean => {
@@ -593,8 +690,19 @@ const businessTypeLabel = (t: EntityType): string => {
   return map[t] ?? t
 }
 
+const customerStatusLabel = (status?: number | null): string => {
+  const map: Record<number, string> = {
+    0: '跟进中',
+    1: '已成交',
+    2: '已流失',
+    3: '非激活'
+  }
+  return status == null ? '-' : (map[status] ?? String(status))
+}
+
 const fetchList = async (): Promise<void> => {
   loadError.value = null
+  listLoading.value = true
   try {
     const query = {
       tab: activeTab.value,
@@ -613,6 +721,8 @@ const fetchList = async (): Promise<void> => {
     } else {
       loadError.value = 'error'
     }
+  } finally {
+    listLoading.value = false
   }
 }
 
@@ -649,11 +759,6 @@ const getPageItems = (): number[] => {
 }
 
 const reload = (): void => {
-  fetchList()
-}
-
-const handleTabChange = (): void => {
-  page.value = 1
   fetchList()
 }
 
@@ -705,6 +810,7 @@ const onSheetClosed = (): void => {
     target.focus()
   }
   selectedApproval.value = null
+  markIssuedDialogVisible.value = false
   triggerRowIndex.value = -1
 }
 
@@ -714,16 +820,37 @@ const onApprovalActionDone = (): void => {
   fetchList()
 }
 
+const handleInvoiceFileUploaded = (): void => {
+  markIssuedDialogVisible.value = false
+  sheetVisible.value = false
+  fetchList()
+}
+
 // 条4：REJECTED 行修改并重新提交（先 update 回 DRAFT 再 submitApproval）
 // 注：update 回 DRAFT 由各实体编辑页负责；审批中心 entry 仅 router.push 跳
 // 对应编辑页（PAYMENT 无独立编辑页，跳列表页 + info 提示），避免审批中心耦合
 // 各实体的 update API（COMPONENTS.md「视图不直接发业务 update」亦不在此处内嵌
 // 多条合同/回款/发票的 update 调用，保持中心单一职责）。
-// 修复（Important #1）：原 window.location.assign(`#...`) 在 createWebHistory 模式
-// 下不切 SPA 路由（仅改 hash 不导航）；改用 router.push 走真实 SPA 路由跳转。
+// 修复：合同编辑使用弹窗而非路由跳转
 const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
   resubmitPendingId.value = row.id
   try {
+    // 合同类型：直接打开编辑弹窗
+    if (row.business_type === 'CONTRACT') {
+      contractLoading.value = true
+      try {
+        const contract = await contractApi.getContract(row.business_id)
+        editingContract.value = contract
+        contractEditVisible.value = true
+      } catch {
+        toast.error('获取合同信息失败')
+      } finally {
+        contractLoading.value = false
+      }
+      return
+    }
+
+    // 其他实体类型：路由跳转
     const confirmed = await createConfirmDialog({
       title: '修改并重新提交',
       message: `将跳转到 ${businessTypeLabel(row.business_type)} 编辑页修改后重新提交审批。是否继续？`,
@@ -732,22 +859,26 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
       variant: 'default'
     })
     if (!confirmed) return
-    // 跳转到对应实体编辑页（route 由路由层声明，审批中心不内嵌 update 逻辑）
-    const route: Record<EntityType, string> = {
-      INVOICE: `/invoices/edit/${row.business_id}`,
-      CONTRACT: `/contracts/edit/${row.business_id}`,
+    // 跳转到对应实体编辑页
+    const route: Record<Exclude<EntityType, 'CONTRACT'>, string> = {
+      INVOICE: `/invoices/${row.business_id}`,
       // 回款无独立编辑页（/payments 为列表页）：跳列表页 + info 提示，
       // 保证不白屏/不断旅程；用户在列表内修改后重新提交审批。
       PAYMENT: `/payments`,
       // License 申请在客户详情页的 License 管理 Tab 编辑
-      LICENSE: `/customers/${row.customer_id}?tab=license-management`
+      LICENSE: row.customer_info?.id !== undefined
+        ? `/customers/${row.customer_info.id}?tab=license-management`
+        : '/customers'
     }
-    const target = route[row.business_type]
+    const target = route[row.business_type as Exclude<EntityType, 'CONTRACT'>]
     await router.push(target)
     // PAYMENT 目标是列表页，无法直接进入驳回回款的编辑入口——补 info 引导，
     // 旅程不断（比原 window.location.assign hash bug 强）。
     if (row.business_type === 'PAYMENT') {
       toast.info('请修改回款记录后重新提交审批')
+    }
+    if (row.business_type === 'INVOICE') {
+      toast.info('请在发票详情页编辑后重新提交审批')
     }
     if (row.business_type === 'LICENSE') {
       toast.info('请修改 License 申请后重新提交审批')
@@ -757,6 +888,14 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
   } finally {
     resubmitPendingId.value = null
   }
+}
+
+// 合同编辑成功回调
+const handleContractEditSuccess = (): void => {
+  contractEditVisible.value = false
+  editingContract.value = null
+  toast.success('合同已修改，请重新提交审批')
+  fetchList()
 }
 
 // 移动端快速审批：同意（单条，无抽屉）
@@ -890,7 +1029,11 @@ watch(rows, async () => {
 .approval-center {
   padding: $wolf-page-padding-v2;
   background: $wolf-bg-page-v2;
-  min-height: calc(100vh - 56px);
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-section-gap-v2;
+  min-height: 0;
+  flex: 1;
 }
 
 // 超时徽章（DataTable 内使用 Badge 组件）
@@ -930,5 +1073,48 @@ watch(rows, async () => {
     border-color: $wolf-warning-v2;
     border-width: 1px;
   }
+}
+
+// ===== Sheet 内部样式（参考 LeadDetailSheet） =====
+
+// 信息卡片
+.info-card {
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-lg-v2;
+  border: 1px solid $wolf-border-light-v2;
+}
+
+// 属性网格
+.attributes-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+
+  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.attribute-item {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+}
+
+.attribute-label {
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-tertiary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.attribute-value {
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  word-break: break-all;
 }
 </style>
