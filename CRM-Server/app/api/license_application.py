@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.deps import get_current_active_user, get_current_user_team, require_permission
 from app.crud.crud_license_application import (
     create_license_application,
     get_license_application,
@@ -206,7 +206,7 @@ def issue_application(
     application_id: int,
     issue_data: LicenseApplicationApproveFull,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    current_user = Depends(require_permission("license:issue")),
     db: Session = Depends(get_db)
 ):
     """发放已通过审批的 License 申请。"""

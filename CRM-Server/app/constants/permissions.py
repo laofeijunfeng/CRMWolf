@@ -166,6 +166,7 @@ ALL_PERMISSIONS = [
     {"name": "审批License申请", "code": "license:approve", "resource": "license", "action": "approve"},
     {"name": "审批自己的License申请", "code": "license:approve:own", "resource": "license", "action": "approve", "scope": "own"},
     {"name": "审批所有License申请", "code": "license:approve:all", "resource": "license", "action": "approve", "scope": "all"},
+    {"name": "发放License", "code": "license:issue", "resource": "license", "action": "issue"},
 
     # 财务权限
     {"name": "查看财务审计日志", "code": "finance:audit:view", "resource": "finance", "action": "audit", "scope": "view"},
@@ -243,6 +244,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "payment:submit", "payment:approve",  # ← 补充回款提交/审批
         "payment:plan:view:all", "payment:plan:create", "payment:plan:edit", "payment:plan:delete",
         "contract:view:all", "contract:view:own",
+        "license:issue",
         "finance:audit:view", "finance:receivables:view", "finance:reports:view",  # ← 补充财务报表权限
         "statistics:view", "report:view:own",
     ],

@@ -59,7 +59,11 @@ const ALL_APPROVAL_PERMISSIONS = [
   'invoice:approve:all',
   'payment:approve',
   'payment:approve:own',
-  'payment:approve:all'
+  'payment:approve:all',
+  'license:approve',
+  'license:approve:own',
+  'license:approve:all',
+  'license:issue'
 ]
 
 const router = useRouter()
