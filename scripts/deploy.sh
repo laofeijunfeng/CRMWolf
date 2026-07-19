@@ -118,7 +118,7 @@ sleep 10
 
 # 5. 执行数据库迁移（如有）
 echo "[迁移] 执行数据库迁移..."
-docker exec crm-backend alembic upgrade head
+docker exec crm-backend python -m alembic upgrade head
 
 # 6. 健康检查
 echo "[检查] 执行健康检查..."
