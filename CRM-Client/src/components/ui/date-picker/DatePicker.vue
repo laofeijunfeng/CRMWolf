@@ -51,19 +51,27 @@ function toDateValue(date: Date): DateValue {
   })
 }
 
+type DateLike = Pick<DateValue, 'year' | 'month' | 'day'>
+
+function isSameDateValue(left?: DateLike, right?: DateLike): boolean {
+  return left?.year === right?.year
+    && left?.month === right?.month
+    && left?.day === right?.day
+}
+
 // 监听外部 modelValue 变化，同步到内部
 watch(
   () => props.modelValue,
   (newVal) => {
     if (newVal) {
       const nextValue = toDateValue(newVal)
+      if (isSameDateValue(dateValue.value, nextValue)) {
+        return
+      }
       dateValue.value = nextValue
       calendarPlaceholder.value = nextValue
     } else {
       dateValue.value = undefined
-      if (!open.value) {
-        calendarPlaceholder.value = today(getLocalTimeZone())
-      }
     }
   },
   { immediate: true }
@@ -75,10 +83,20 @@ const formattedDate = computed(() => {
   return dateValue.value.toDate(getLocalTimeZone()).toLocaleDateString('zh-CN')
 })
 
+function handleCalendarInteractOutside(event: Event): void {
+  const originalEvent = (event as CustomEvent<{ originalEvent?: Event }>).detail?.originalEvent
+  const target = (originalEvent?.target ?? event.target) as HTMLElement | null
+
+  if (target?.closest('[data-date-picker-select-content]')) {
+    event.preventDefault()
+  }
+}
+
 // 处理日期选择
 const handleSelect = (value: DateValue | undefined): void => {
   dateValue.value = value
   if (value) {
+    calendarPlaceholder.value = value
     const date = value.toDate(getLocalTimeZone())
     emit('update:modelValue', date)
     open.value = false // 选择后关闭
@@ -107,7 +125,11 @@ const handleSelect = (value: DateValue | undefined): void => {
         </span>
       </Button>
     </PopoverTrigger>
-    <PopoverContent class="w-auto p-0" align="start">
+    <PopoverContent
+      class="w-auto p-0"
+      align="start"
+      @interact-outside="handleCalendarInteractOutside"
+    >
       <Calendar
         :model-value="dateValue as any"
         :placeholder="calendarPlaceholder as any"

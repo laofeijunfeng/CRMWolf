@@ -53,35 +53,30 @@ const emit = defineEmits<{
   'update:placeholder': [value: DateValue | undefined]
 }>()
 
-const fallbackPlaceholder = ref<DateValue | undefined>(
+const displayPlaceholder = ref<DateValue>(
   props.modelValue ?? props.placeholder ?? props.defaultValue ?? today(getLocalTimeZone())
 )
 
-function isSameDateValue(left?: DateValue, right?: DateValue): boolean {
+type DateLike = Pick<DateValue, 'year' | 'month' | 'day'>
+
+function isSameDateValue(left?: DateLike, right?: DateLike): boolean {
   return left?.year === right?.year
     && left?.month === right?.month
     && left?.day === right?.day
 }
 
 function setCalendarPlaceholder(value: DateValue): void {
-  fallbackPlaceholder.value = value
+  displayPlaceholder.value = value
   if (!isSameDateValue(props.placeholder, value)) {
     emit('update:placeholder', value)
   }
 }
 
-const calendarPlaceholder = computed({
-  get: () => props.placeholder ?? fallbackPlaceholder.value ?? today(getLocalTimeZone()),
-  set: (value: DateValue) => {
-    setCalendarPlaceholder(value)
-  }
-})
-
 watch(
   () => props.placeholder,
   (value) => {
-    if (value) {
-      fallbackPlaceholder.value = value
+    if (value && !isSameDateValue(displayPlaceholder.value, value)) {
+      displayPlaceholder.value = value
     }
   },
   { immediate: true }
@@ -90,8 +85,8 @@ watch(
 watch(
   () => props.modelValue,
   (value) => {
-    if (value && !props.placeholder) {
-      fallbackPlaceholder.value = value
+    if (value && !props.placeholder && !isSameDateValue(displayPlaceholder.value, value)) {
+      displayPlaceholder.value = value
     }
   },
   { immediate: true }
@@ -104,16 +99,16 @@ const years = computed(() => {
 })
 
 const selectedMonth = computed({
-  get: () => String(calendarPlaceholder.value?.month ?? 1),
+  get: () => String(displayPlaceholder.value.month),
   set: (value: string) => {
-    calendarPlaceholder.value = calendarPlaceholder.value.set({ month: Number(value) })
+    setCalendarPlaceholder(displayPlaceholder.value.set({ month: Number(value) }))
   }
 })
 
 const selectedYear = computed({
-  get: () => String(calendarPlaceholder.value?.year ?? new Date().getFullYear()),
+  get: () => String(displayPlaceholder.value.year),
   set: (value: string) => {
-    calendarPlaceholder.value = calendarPlaceholder.value.set({ year: Number(value) })
+    setCalendarPlaceholder(displayPlaceholder.value.set({ year: Number(value) }))
   }
 })
 
@@ -123,7 +118,7 @@ function handlePlaceholderChange(value: DateValue): void {
 
 const calendarRootProps = computed(() => {
   const rootProps: Record<string, unknown> = {
-    placeholder: calendarPlaceholder.value,
+    placeholder: displayPlaceholder.value,
     disabled: props.disabled,
     locale: props.locale,
     initialFocus: props.initialFocus,
@@ -162,7 +157,7 @@ const calendarRootProps = computed(() => {
           <SelectTrigger class="h-8 w-[92px] border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent class="max-h-72">
+          <SelectContent class="max-h-72" data-date-picker-select-content>
             <SelectItem
               v-for="year in years"
               :key="year"
@@ -177,7 +172,7 @@ const calendarRootProps = computed(() => {
           <SelectTrigger class="h-8 w-[76px] border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent data-date-picker-select-content>
             <SelectItem
               v-for="month in 12"
               :key="month"
