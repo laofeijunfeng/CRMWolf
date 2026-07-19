@@ -1,6 +1,6 @@
 import request from '@/utils/request'
 
-export type LicenseApplicationStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'ISSUED'
+export type LicenseApplicationStatus = 'DRAFT' | 'PENDING' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'ISSUED'
 export type LicenseType = 'TRIAL' | 'OFFICIAL'
 
 export interface LicenseApplicationCreate {
@@ -88,7 +88,7 @@ const licenseApplicationApi = {
   },
 
   // 导出 Word 文档
-  exportDocument: (applicationId: number) => {
+  exportDocument: (applicationId: number): Promise<Blob> => {
     return request.get(`/v1/license-applications/${applicationId}/export`, {
       responseType: 'blob'
     })

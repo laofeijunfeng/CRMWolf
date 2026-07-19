@@ -4,6 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime
+from urllib.parse import quote
+import os
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
@@ -28,6 +31,24 @@ from app.services.license_export_service import export_license_document
 
 
 router = APIRouter(prefix="/v1/license-applications", tags=["License申请管理"])
+
+
+def _content_disposition(filename: str) -> str:
+    safe_filename = os.path.basename(filename).replace("\r", "").replace("\n", "")
+    fallback_name = safe_filename.encode("ascii", "ignore").decode("ascii") or "license_file.docx"
+    quoted_name = quote(safe_filename, safe="")
+    return f"attachment; filename=\"{fallback_name}\"; filename*=UTF-8''{quoted_name}"
+
+
+def _sanitize_filename_part(value: str) -> str:
+    return value.translate(str.maketrans('', '', '\\/:*?"<>|\r\n')).strip()
+
+
+def _export_filename(application) -> str:
+    customer_name = application.customer.account_name if application.customer else "客户"
+    safe_customer_name = _sanitize_filename_part(customer_name) or "客户"
+    current_date = datetime.now().strftime("%Y%m%d")
+    return f"私有化部署License-{safe_customer_name}_{current_date}.docx"
 
 
 @router.post("/", response_model=LicenseApplicationResponse, status_code=status.HTTP_201_CREATED, summary="创建License申请")
@@ -265,6 +286,8 @@ def export_application(
     file_path = export_license_document(existing)
     return FileResponse(
         file_path,
-        filename=f"License_{existing.application_number}.docx",
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": _content_disposition(_export_filename(existing))
+        }
     )

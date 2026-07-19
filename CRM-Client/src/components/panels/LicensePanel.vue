@@ -6,27 +6,32 @@
  * 技术栈：shadcn-vue + variables-v2.scss
  * 无障碍：所有图标按钮均有 aria-label
  */
-import { Plus, Server, FileText, ExternalLink, Calendar, Hash } from 'lucide-vue-next'
+import { ref } from 'vue'
+import { Plus, Server, FileText, Download, Calendar, Hash, Loader2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ListCard from '@/components/crmwolf/ListCard.vue'
-import type { LicenseApplicationResponse, LicenseApplicationStatus, LicenseType } from '@/api/licenseApplication'
+import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseApplicationStatus, type LicenseType } from '@/api/licenseApplication'
 import type { DeploymentInfoResponse } from '@/api/deployment'
+import { toast } from 'vue-sonner'
+import { handleApiError } from '@/utils/errorHandler'
 
 // ==================== Props & Emits ====================
 interface Props {
   customerId: number
+  customerName?: string | null
   licenseApplications: LicenseApplicationResponse[]
   deployments: DeploymentInfoResponse[]
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
 
 const emit = defineEmits<{
   'add-deployment': []
   'apply': []
-  'view': [applicationId: number]
 }>()
+
+const downloadingApplicationId = ref<number | null>(null)
 
 // ==================== Methods ====================
 const handleAddDeployment = (): void => {
@@ -37,8 +42,46 @@ const handleApply = (): void => {
   emit('apply')
 }
 
-const handleView = (applicationId: number): void => {
-  emit('view', applicationId)
+const formatCompactDate = (date: Date): string => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}${month}${day}`
+}
+
+const sanitizeFileNamePart = (value: string): string => {
+  return value.replace(/[\\/:*?"<>|]/g, '').trim()
+}
+
+const getDownloadFileName = (item: LicenseApplicationResponse): string => {
+  const customerName = sanitizeFileNamePart(props.customerName ?? item.customer_name ?? '客户')
+  return `私有化部署License-${customerName}_${formatCompactDate(new Date())}.docx`
+}
+
+const handleDownload = async (item: LicenseApplicationResponse): Promise<void> => {
+  if (item.status !== 'ISSUED' || downloadingApplicationId.value !== null) {
+    return
+  }
+
+  downloadingApplicationId.value = item.id
+  try {
+    const response = await licenseApplicationApi.exportDocument(item.id)
+    const blob = response instanceof Blob ? response : new Blob([response])
+    const url = window.URL.createObjectURL(blob)
+    const link = window.document.createElement('a')
+
+    link.href = url
+    link.download = getDownloadFileName(item)
+    window.document.body.appendChild(link)
+    link.click()
+    window.document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    toast.success('License 文件已开始下载')
+  } catch (error) {
+    handleApiError(error, '下载 License 文件')
+  } finally {
+    downloadingApplicationId.value = null
+  }
 }
 
 // Format date
@@ -52,9 +95,10 @@ const formatDate = (dateStr: string): string => {
 
 // Get status label and color
 const getStatusInfo = (status: LicenseApplicationStatus): { label: string; color: string } => {
-  const statusMap: Record<LicenseApplicationStatus, { label: string; color: string }> = {
+  const statusMap: Record<string, { label: string; color: string }> = {
     DRAFT: { label: '草稿', color: 'bg-slate-100 text-slate-700' },
     PENDING: { label: '待审批', color: 'bg-amber-100 text-amber-700' },
+    PENDING_REVIEW: { label: '待审批', color: 'bg-amber-100 text-amber-700' },
     APPROVED: { label: '已批准', color: 'bg-emerald-100 text-emerald-700' },
     REJECTED: { label: '已拒绝', color: 'bg-red-100 text-red-700' },
     ISSUED: { label: '已签发', color: 'bg-blue-100 text-blue-700' }
@@ -170,12 +214,16 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
 
       <template #itemActions="{ item }">
         <Button
+          v-if="item.status === 'ISSUED'"
           variant="ghost"
-          size="sm"
-          :aria-label="`查看申请 ${item.application_number} 详情`"
-          @click.stop="handleView(item.id)"
+          size="icon"
+          :aria-label="`下载申请 ${item.application_number} License 文件`"
+          :title="`下载 License 文件`"
+          :disabled="downloadingApplicationId !== null"
+          @click.stop="handleDownload(item)"
         >
-          <ExternalLink class="w-4 h-4" />
+          <Loader2 v-if="downloadingApplicationId === item.id" class="w-4 h-4 animate-spin" />
+          <Download v-else class="w-4 h-4" />
         </Button>
       </template>
     </ListCard>

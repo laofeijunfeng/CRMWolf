@@ -860,6 +860,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
             <LicensePanel
               v-if="activePanel === 'license-management'"
               :customer-id="customerId ?? 0"
+              :customer-name="customer?.account_name"
               :license-applications="licenseApplications"
               :deployments="deployments"
               @add-deployment="handleCreateDeployment"

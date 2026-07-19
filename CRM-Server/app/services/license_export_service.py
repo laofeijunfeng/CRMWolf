@@ -20,7 +20,7 @@ def export_license_document(application: LicenseApplication) -> str:
     Returns:
         str: 导出文件的临时路径
 
-    文件名格式：私有化{试用/正式}License-{客户名称}_{当前日期}.docx
+    文件名格式：私有化部署License-{客户名称}_{当前日期}.docx
     """
     doc = Document()
 
@@ -68,9 +68,10 @@ def export_license_document(application: LicenseApplication) -> str:
     else:
         doc.add_paragraph("未填写")
 
-    # 文件名：私有化{试用/正式}License-{客户名称}_{当前日期}.docx
+    # 文件名：私有化部署License-{客户名称}_{当前日期}.docx
     current_date = datetime.now().strftime('%Y%m%d')
-    file_name = f"私有化{license_type_text}License-{application.customer.account_name}_{current_date}.docx"
+    safe_customer_name = application.customer.account_name.translate(str.maketrans('', '', '\\/:*?"<>|\r\n'))
+    file_name = f"私有化部署License-{safe_customer_name}_{current_date}.docx"
     file_path = tempfile.mktemp(suffix='.docx', prefix=file_name)
     doc.save(file_path)
 
