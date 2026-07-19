@@ -24,6 +24,7 @@ import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil } from 'lucide-vue-next'
 import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import AICustomerCreateDialog from '@/components/AICustomerCreateDialog.vue'
@@ -46,6 +47,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { customerSourceOptions, companyScaleOptions } from '@/schemas/customer-form'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { getPrimarySort } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -217,6 +219,30 @@ const filterFields = computed<ListFilterField[]>(() => {
 })
 
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
+
+const sortFields = computed<ListSortField[]>(() => [
+  { key: 'account_name', type: 'text', label: '客户名称' },
+  {
+    key: 'industry',
+    type: 'enum',
+    label: '行业',
+    options: industryFilterOptions.value
+  },
+  { key: 'city', type: 'text', label: '城市' },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: '0', label: '跟进中' },
+      { value: '1', label: '已赢单' },
+      { value: '2', label: '已输单' },
+      { value: '3', label: '已失效' }
+    ]
+  },
+  { key: 'created_time', type: 'date', label: '创建时间' }
+])
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -374,7 +400,8 @@ const fetchCustomerList = async (): Promise<void> => {
       company_scale: getDelimitedFilterValues(activeFilters.value, 'company_scale'),
       company_scale_exclude: getDelimitedFilterValues(activeFilters.value, 'company_scale', ['neq', 'not_contains']),
       created_time_start: createdTimeBounds.start,
-      created_time_end: createdTimeBounds.end
+      created_time_end: createdTimeBounds.end,
+      ...getPrimarySort(activeSorts.value)
     }
 
     if (activeTab.value === 'public') {
@@ -410,6 +437,18 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
 
 const handleReset = (): void => {
   activeFilters.value = []
+  pagination.current = 1
+  fetchCustomerList()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  pagination.current = 1
+  fetchCustomerList()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   pagination.current = 1
   fetchCustomerList()
 }
@@ -665,6 +704,7 @@ watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     activeTab.value = headerStore.activeTab
     pagination.current = 1
+    activeSorts.value = []
     fetchCustomerList()
   }
 })
@@ -690,11 +730,15 @@ watchEffect(() => {
       mobile-status-key="status"
       :mobile-meta-keys="['industry', 'source', 'owner']"
       v-model:filters="activeFilters"
+      v-model:sorts="activeSorts"
       :filter-fields="filterFields"
+      :sort-fields="sortFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

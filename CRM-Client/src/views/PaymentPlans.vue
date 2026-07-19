@@ -21,6 +21,7 @@ import { toast } from 'vue-sonner'
 import { Plus, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
@@ -36,6 +37,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { serializeListSorts } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -56,6 +58,7 @@ const planFormDialogOpen = ref(false)
 const planFormMode = ref<'create' | 'edit'>('create')
 const editingPlan = ref<PaymentPlanWithDetails | null>(null)
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
 
 const pagination = reactive({
   current: 1,
@@ -98,6 +101,26 @@ const filterFields: ListFilterField[] = [
     ]
   },
   { key: 'due_date', type: 'date', label: '计划日期' }
+]
+
+const sortFields: ListSortField[] = [
+  { key: 'plan_number', type: 'text', label: '计划编号' },
+  { key: 'stage_name', type: 'text', label: '阶段名称' },
+  { key: 'customer_name', type: 'text', label: '客户名称' },
+  { key: 'contract_name', type: 'text', label: '合同名称' },
+  { key: 'planned_amount', type: 'number', label: '计划金额' },
+  { key: 'due_date', type: 'date', label: '计划日期' },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 'PENDING', label: '待登记' },
+      { value: 'PARTIAL', label: '部分回款' },
+      { value: 'COMPLETED', label: '已完成' },
+      { value: 'OVERDUE', label: '已逾期' }
+    ]
+  }
 ]
 
 // ==================== DataTable 配置 ====================
@@ -172,6 +195,11 @@ const fetchPaymentPlans = async (): Promise<void> => {
       params.keyword = keyword
     }
 
+    const sort = serializeListSorts(activeSorts.value)
+    if (sort !== null) {
+      params.sort = sort
+    }
+
     const data = await paymentApi.listPaymentPlans(params)
 
     tableData.value = data.items
@@ -195,6 +223,18 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
 
 const handleReset = (): void => {
   activeFilters.value = []
+  pagination.current = 1
+  fetchPaymentPlans()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  pagination.current = 1
+  fetchPaymentPlans()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   pagination.current = 1
   fetchPaymentPlans()
 }
@@ -369,6 +409,8 @@ watch(
       :page-size="pagination.pageSize"
       :total="pagination.total"
       :filter-fields="filterFields"
+      :sort-fields="sortFields"
+      :sorts="activeSorts"
       height="calc(100vh - 136px)"
       empty-title="暂无回款计划"
       row-interactive
@@ -380,6 +422,9 @@ watch(
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @update:sorts="activeSorts = $event"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

@@ -160,7 +160,9 @@ class InvoiceApplicationCRUD:
         current_user_id: Optional[str] = None,
         keyword: Optional[str] = None,
         created_time_start: Optional[date] = None,
-        created_time_end: Optional[date] = None
+        created_time_end: Optional[date] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None
     ) -> Tuple[List[InvoiceApplication], int]:
         query = db.query(InvoiceApplication).filter(InvoiceApplication.team_id == team_id)
         
@@ -214,7 +216,25 @@ class InvoiceApplicationCRUD:
             )
         
         total = query.count()
-        applications = query.order_by(InvoiceApplication.created_time.desc()).offset(skip).limit(limit).all()
+
+        allowed_sort_fields = {
+            "application_number": InvoiceApplication.application_number,
+            "invoice_type": InvoiceApplication.invoice_type,
+            "invoice_amount": InvoiceApplication.invoice_amount,
+            "invoice_title_text": InvoiceApplication.invoice_title_text,
+            "status": InvoiceApplication.status,
+            "created_time": InvoiceApplication.created_time,
+            "issued_time": InvoiceApplication.issued_time,
+        }
+        order_column = allowed_sort_fields.get(order_by or "")
+        if order_column is not None and order_dir and order_dir.lower() == "asc":
+            query = query.order_by(order_column.asc())
+        elif order_column is not None:
+            query = query.order_by(order_column.desc())
+        else:
+            query = query.order_by(InvoiceApplication.created_time.desc())
+
+        applications = query.offset(skip).limit(limit).all()
         
         return applications, total
     

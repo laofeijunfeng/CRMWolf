@@ -21,6 +21,7 @@ import { toast } from 'vue-sonner'
 import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
@@ -35,6 +36,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { serializeListSorts } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -51,6 +53,7 @@ const detailSheetVisible = ref(false)
 const editDialogOpen = ref(false)
 const editSubmitting = ref(false)
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
 
 const pagination = reactive({
   current: 1,
@@ -86,6 +89,26 @@ const filterFields: ListFilterField[] = [
   { key: 'payment_date', type: 'date', label: '回款日期' }
 ]
 
+const sortFields: ListSortField[] = [
+  { key: 'record_number', type: 'text', label: '记录编号' },
+  { key: 'customer_name', type: 'text', label: '客户名称' },
+  { key: 'actual_payer_name', type: 'text', label: '实际付款方' },
+  { key: 'contract_name', type: 'text', label: '合同名称' },
+  { key: 'actual_amount', type: 'number', label: '回款金额' },
+  { key: 'payment_date', type: 'date', label: '回款日期' },
+  {
+    key: 'confirmation_status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 'PENDING', label: '待确认' },
+      { value: 'CONFIRMED', label: '已确认' },
+      { value: 'DISPUTED', label: '有争议' }
+    ]
+  },
+  { key: 'created_time', type: 'date', label: '创建时间' }
+]
+
 // ==================== DataTable 配置 ====================
 const columns = [
   { key: 'record_number', title: '记录编号', width: '150px' },
@@ -110,6 +133,10 @@ const fetchPaymentRecords = async (): Promise<void> => {
     const params: PaymentRecordListParams = {
       page: pagination.current,
       page_size: pagination.pageSize
+    }
+    const sort = serializeListSorts(activeSorts.value)
+    if (sort !== null) {
+      params.sort = sort
     }
 
     const paymentDateBounds = getDateBounds(activeFilters.value, 'payment_date')
@@ -163,6 +190,18 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
 
 const handleReset = (): void => {
   activeFilters.value = []
+  pagination.current = 1
+  fetchPaymentRecords()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  pagination.current = 1
+  fetchPaymentRecords()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   pagination.current = 1
   fetchPaymentRecords()
 }
@@ -253,7 +292,7 @@ const mapPaymentRecordStatus = (status: string): 'pending' | 'confirmed' | 'reje
   const map: Record<string, 'pending' | 'confirmed' | 'rejected'> = {
     'PENDING': 'pending',
     'CONFIRMED': 'confirmed',
-    'REJECTED': 'rejected'
+    'DISPUTED': 'rejected'
   }
   return map[status] || 'pending'
 }
@@ -287,6 +326,7 @@ watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     activeTab.value = headerStore.activeTab
     pagination.current = 1
+    activeSorts.value = []
     fetchPaymentRecords()
   }
 })
@@ -300,6 +340,7 @@ watchEffect(() => {
     <!-- DataTable -->
     <DataTable
       v-model:filters="activeFilters"
+      v-model:sorts="activeSorts"
       :columns="columns"
       :data="tableData"
       :loading="loading"
@@ -307,6 +348,7 @@ watchEffect(() => {
       :page-size="pagination.pageSize"
       :total="pagination.total"
       :filter-fields="filterFields"
+      :sort-fields="sortFields"
       height="calc(100vh - 136px)"
       empty-title="暂无回款记录"
       row-interactive
@@ -318,6 +360,8 @@ watchEffect(() => {
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

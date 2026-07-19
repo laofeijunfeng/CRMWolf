@@ -24,7 +24,9 @@ import {
 } from '@/components/ui/empty'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import ListFilterPopover from './ListFilterPopover.vue'
+import ListSortPopover from './ListSortPopover.vue'
 import type { ListFilterCondition, ListFilterField } from './listFilterTypes'
+import type { ListSortCondition, ListSortField, ListSortFieldType, ListSortOption } from './listSortTypes'
 import { buildPaginationEntries, type PaginationEntry } from './paginationWindow'
 
 // ==================== Props ====================
@@ -39,6 +41,14 @@ interface Column {
   align?: 'left' | 'center' | 'right'
   /** 固定列位置（left/right） */
   fixed?: 'left' | 'right'
+  /** 是否可排序 */
+  sortable?: boolean
+  /** 排序字段，默认使用 key */
+  sortKey?: string
+  /** 排序字段类型 */
+  sortType?: ListSortFieldType
+  /** 枚举排序选项顺序 */
+  sortOptions?: ListSortOption[]
 }
 
 interface Props {
@@ -72,6 +82,10 @@ interface Props {
   filterFields?: ListFilterField[]
   /** 当前筛选条件 */
   filters?: ListFilterCondition[]
+  /** 标准列表排序字段 */
+  sortFields?: ListSortField[]
+  /** 当前排序条件 */
+  sorts?: ListSortCondition[]
   /** 窄视口展示模式 */
   mobileMode?: 'card' | 'table'
   /** 移动端兜底卡片标题字段 */
@@ -95,10 +109,12 @@ const props = withDefaults(defineProps<Props>(), {
   rowInteractive: false,
   filterFields: () => [],
   filters: () => [],
+  sortFields: () => [],
+  sorts: () => [],
   mobileMode: 'card',
-  mobileTitleKey: undefined,
-  mobileSubtitleKey: undefined,
-  mobileStatusKey: undefined,
+  mobileTitleKey: '',
+  mobileSubtitleKey: '',
+  mobileStatusKey: '',
   mobileMetaKeys: () => [],
 })
 
@@ -110,6 +126,9 @@ const emit = defineEmits<{
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
   'filter-reset': []
+  'update:sorts': [value: ListSortCondition[]]
+  'sort-apply': [value: ListSortCondition[]]
+  'sort-reset': []
 }>()
 
 // ==================== Computed ====================
@@ -119,7 +138,29 @@ const paginationEntries = computed<PaginationEntry[]>(() =>
 )
 const normalizedFilterFields = computed<ListFilterField[]>(() => props.filterFields ?? [])
 const normalizedFilters = computed<ListFilterCondition[]>(() => props.filters ?? [])
-const hasTableTools = computed(() => normalizedFilterFields.value.length > 0)
+const normalizedSortFields = computed<ListSortField[]>(() => {
+  if (props.sortFields.length > 0) {
+    return props.sortFields
+  }
+
+  return props.columns
+    .filter((col) => col.sortable === true && col.sortType !== undefined && col.key !== 'actions')
+    .map((col) => {
+      const field: ListSortField = {
+        key: col.sortKey ?? col.key,
+        label: col.title,
+        type: col.sortType as ListSortFieldType
+      }
+      if (col.sortOptions !== undefined) {
+        field.options = col.sortOptions
+      }
+      return field
+    })
+})
+const normalizedSorts = computed<ListSortCondition[]>(() => props.sorts ?? [])
+const hasTableTools = computed(() =>
+  normalizedFilterFields.value.length > 0 || normalizedSortFields.value.length > 0
+)
 
 /**
  * 计算固定列配置
@@ -270,6 +311,18 @@ function handleFilterReset(): void {
   emit('filter-reset')
 }
 
+function handleSortUpdate(sorts: ListSortCondition[]): void {
+  emit('update:sorts', sorts)
+}
+
+function handleSortApply(sorts: ListSortCondition[]): void {
+  emit('sort-apply', sorts)
+}
+
+function handleSortReset(): void {
+  emit('sort-reset')
+}
+
 function getRowKey(row: T, index: number): string | number {
   const key = props.rowKey as string
   const value: unknown = row[key]
@@ -288,7 +341,7 @@ function getAlignClass(align?: string): string {
 }
 
 function getFallbackValue(row: T, key?: string): unknown {
-  if (!key) return '-'
+  if (key === undefined || key === '') return '-'
   return row[key] ?? '-'
 }
 
@@ -330,6 +383,14 @@ watch(() => props.data, () => {
           @update:model-value="handleFilterUpdate"
           @apply="handleFilterApply"
           @reset="handleFilterReset"
+        />
+        <ListSortPopover
+          v-if="normalizedSortFields.length > 0"
+          :model-value="normalizedSorts"
+          :fields="normalizedSortFields"
+          @update:model-value="handleSortUpdate"
+          @apply="handleSortApply"
+          @reset="handleSortReset"
         />
         <slot name="tableTools" />
       </div>

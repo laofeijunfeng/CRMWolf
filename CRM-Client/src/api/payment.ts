@@ -176,6 +176,9 @@ export interface PaymentPlanListParams {
   me?: boolean
   due_date_start?: string
   due_date_end?: string
+  sort?: string
+  order_by?: string
+  order_dir?: 'asc' | 'desc'
   page?: number
   page_size?: number
 }
@@ -206,6 +209,9 @@ export interface PaymentRecordListParams {
   approval_status?: string
   approval_status_exclude?: string
   me?: boolean
+  sort?: string
+  order_by?: string
+  order_dir?: 'asc' | 'desc'
   page?: number
   page_size?: number
 }

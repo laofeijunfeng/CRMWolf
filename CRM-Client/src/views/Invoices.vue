@@ -21,6 +21,7 @@ import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2, Send, RotateCcw, Stamp, Download } from 'lucide-vue-next'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -41,6 +42,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { getPrimarySort } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -110,6 +112,37 @@ const filterFields: ListFilterField[] = [
 ]
 
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
+
+const sortFields: ListSortField[] = [
+  { key: 'application_number', type: 'text', label: '申请单号' },
+  {
+    key: 'invoice_type',
+    type: 'enum',
+    label: '发票类型',
+    options: [
+      { value: 'VAT_SPECIAL', label: '增值税专用发票' },
+      { value: 'VAT_NORMAL', label: '增值税普通发票' }
+    ]
+  },
+  { key: 'invoice_amount', type: 'number', label: '开票金额' },
+  { key: 'invoice_title_text', type: 'text', label: '开票抬头' },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 'DRAFT', label: '草稿' },
+      { value: 'PENDING_REVIEW', label: '待审批' },
+      { value: 'APPROVED', label: '已批准' },
+      { value: 'REJECTED', label: '已驳回' },
+      { value: 'ISSUED', label: '已开票' },
+      { value: 'CANCELLED', label: '已取消' }
+    ]
+  },
+  { key: 'created_time', type: 'date', label: '创建时间' },
+  { key: 'issued_time', type: 'date', label: '开票时间' }
+]
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -144,7 +177,8 @@ const fetchInvoiceApplications = async (): Promise<void> => {
   try {
     const params: InvoiceApplicationQueryParams = {
       page: pagination.current,
-      page_size: pagination.pageSize
+      page_size: pagination.pageSize,
+      ...getPrimarySort(activeSorts.value)
     }
 
     // Tab 状态筛选
@@ -207,6 +241,18 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
 
 const handleReset = (): void => {
   activeFilters.value = []
+  pagination.current = 1
+  fetchInvoiceApplications()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  pagination.current = 1
+  fetchInvoiceApplications()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   pagination.current = 1
   fetchInvoiceApplications()
 }
@@ -447,6 +493,7 @@ watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     activeTab.value = headerStore.activeTab
     pagination.current = 1
+    activeSorts.value = []
     fetchInvoiceApplications()
   }
 })
@@ -473,11 +520,15 @@ watchEffect(() => {
       mobile-status-key="status"
       :mobile-meta-keys="['contract_name', 'applicant_name', 'created_time']"
       v-model:filters="activeFilters"
+      v-model:sorts="activeSorts"
       :filter-fields="filterFields"
+      :sort-fields="sortFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

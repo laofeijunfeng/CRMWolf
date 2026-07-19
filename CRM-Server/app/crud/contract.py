@@ -236,7 +236,7 @@ class ContractCRUD:
 
         total = query.count()
 
-        allowed_sort_fields = ['created_time', 'contract_name', 'total_amount', 'status', 'effective_date', 'expiry_date']
+        allowed_sort_fields = ['created_time', 'contract_name', 'total_amount', 'license_type', 'status', 'signing_date', 'effective_date', 'expiry_date']
         if order_by and order_dir and order_by in allowed_sort_fields:
             order_column = getattr(Contract, order_by)
             if order_dir.lower() == 'desc':

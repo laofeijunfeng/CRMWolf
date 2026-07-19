@@ -116,6 +116,8 @@ export interface InvoiceApplicationQueryParams {
   keyword?: string
   created_time_start?: string
   created_time_end?: string
+  order_by?: string
+  order_dir?: 'asc' | 'desc'
   page?: number
   page_size?: number
 }

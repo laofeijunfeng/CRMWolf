@@ -176,6 +176,8 @@ def list_invoice_applications(
     keyword: Optional[str] = Query(None, description="关键词，支持申请编号、客户、合同、抬头、税号、发票号码"),
     created_time_start: Optional[date] = Query(None, description="创建时间起始"),
     created_time_end: Optional[date] = Query(None, description="创建时间结束"),
+    order_by: Optional[str] = Query(None, description="排序字段"),
+    order_dir: Optional[str] = Query(None, description="排序方向 asc/desc"),
     page: Optional[int] = Query(None, ge=1, description="页码（兼容前端 page/page_size）"),
     page_size: Optional[int] = Query(None, ge=1, le=100, description="每页记录数（兼容前端 page/page_size）"),
     me: bool = Query(False, description="是否只查询当前用户申请的数据"),
@@ -234,6 +236,8 @@ def list_invoice_applications(
         keyword=keyword,
         created_time_start=created_time_start,
         created_time_end=created_time_end,
+        order_by=order_by,
+        order_dir=order_dir,
     )
 
     populated_applications = [_populate_application_info(db, app, team_id) for app in applications]

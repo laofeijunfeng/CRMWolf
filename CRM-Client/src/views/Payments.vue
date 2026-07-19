@@ -14,12 +14,16 @@ import { Plus, ExternalLink, CircleCheck } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { DataTable, FilterPanel, TableRowActions, StatusBadge } from '@/components/crmwolf'
 import type { ActionConfig } from '@/components/crmwolf/TableRowActions.vue'
+import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { handleApiError } from '@/utils/errorHandler'
+import { serializeListSorts } from '@/utils/listSorts'
 import paymentApi, {
+  type PaymentPlanListParams,
+  type PaymentRecordListParams,
   type PaymentPlanResponse,
   type PaymentPlanStatus,
   type PaymentRecordResponse
@@ -38,6 +42,7 @@ const loading = ref(false)
 type PaymentTableRow = PaymentPlanResponse | PaymentRecordResponse
 
 const tableData = ref<PaymentTableRow[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
 const pagination = reactive({
   current: 1,
   pageSize: 20,
@@ -76,6 +81,43 @@ const filterValues = reactive({
   status: ''
 })
 
+const planSortFields: ListSortField[] = [
+  { key: 'contract_name', type: 'text', label: '关联合同' },
+  { key: 'customer_name', type: 'text', label: '客户名称' },
+  { key: 'stage_name', type: 'text', label: '回款阶段' },
+  { key: 'planned_amount', type: 'number', label: '计划金额' },
+  { key: 'due_date', type: 'date', label: '计划日期' },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 'PENDING', label: '待回款' },
+      { value: 'PARTIAL', label: '部分回款' },
+      { value: 'COMPLETED', label: '已完成' },
+      { value: 'OVERDUE', label: '已逾期' }
+    ]
+  }
+]
+
+const recordSortFields: ListSortField[] = [
+  { key: 'contract_name', type: 'text', label: '关联合同' },
+  { key: 'customer_name', type: 'text', label: '客户名称' },
+  { key: 'actual_amount', type: 'number', label: '回款金额' },
+  { key: 'payment_date', type: 'date', label: '回款日期' },
+  {
+    key: 'confirmation_status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 'PENDING', label: '待确认' },
+      { value: 'CONFIRMED', label: '已确认' },
+      { value: 'DISPUTED', label: '有争议' }
+    ]
+  },
+  { key: 'created_time', type: 'date', label: '创建时间' }
+]
+
 // DataTable 配置
 const columns = computed(() => activeTab.value === 'plans'
   ? [
@@ -99,6 +141,8 @@ const columns = computed(() => activeTab.value === 'plans'
     ]
 )
 
+const sortFields = computed<ListSortField[]>(() => activeTab.value === 'plans' ? planSortFields : recordSortFields)
+
 // Methods
 const getSelectedPlanStatus = (): PaymentPlanStatus | undefined => {
   const status = filterValues.status
@@ -121,18 +165,34 @@ const fetchData = async (): Promise<void> => {
   loading.value = true
   try {
     if (activeTab.value === 'plans') {
-      const response = await paymentApi.listPaymentPlans({
+      const params: PaymentPlanListParams = {
         page: pagination.current,
-        page_size: pagination.pageSize,
-        status: getSelectedPlanStatus()
-      })
+        page_size: pagination.pageSize
+      }
+      const status = getSelectedPlanStatus()
+      if (status !== undefined) {
+        params.status = status
+      }
+
+      const sort = serializeListSorts(activeSorts.value)
+      if (sort !== null) {
+        params.sort = sort
+      }
+
+      const response = await paymentApi.listPaymentPlans(params)
       tableData.value = filterByKeyword(response.items)
       pagination.total = response.total
     } else {
-      const response = await paymentApi.listPaymentRecords({
+      const params: PaymentRecordListParams = {
         page: pagination.current,
         page_size: pagination.pageSize
-      })
+      }
+      const sort = serializeListSorts(activeSorts.value)
+      if (sort !== null) {
+        params.sort = sort
+      }
+
+      const response = await paymentApi.listPaymentRecords(params)
       tableData.value = filterByKeyword(response.items)
       pagination.total = response.total
     }
@@ -152,6 +212,18 @@ const handleSearch = (values: Record<string, string | number>): void => {
 const handleReset = (): void => {
   filterValues.keyword = ''
   filterValues.status = ''
+  pagination.current = 1
+  fetchData()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  pagination.current = 1
+  fetchData()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   pagination.current = 1
   fetchData()
 }
@@ -232,6 +304,7 @@ watchEffect(() => {
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     activeTab.value = headerStore.activeTab
+    activeSorts.value = []
     pagination.current = 1
     fetchData()
   }
@@ -261,9 +334,14 @@ onUnmounted(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
+      :sort-fields="sortFields"
+      :sorts="activeSorts"
       empty-title="暂无回款数据"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
+      @update:sorts="activeSorts = $event"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
     >
       <!-- 合同名称（可点击） -->
       <template #cell-contract_name="{ row }">

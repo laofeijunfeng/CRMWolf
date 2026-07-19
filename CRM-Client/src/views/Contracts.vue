@@ -21,6 +21,7 @@ import { toast } from 'vue-sonner'
 import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
 import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import contractApi, {
@@ -36,6 +37,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { formatCurrency } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { getPrimarySort } from '@/utils/listSorts'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 
@@ -121,6 +123,38 @@ const filterFields = computed<ListFilterField[]>(() => {
 })
 
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
+
+const sortFields: ListSortField[] = [
+  { key: 'contract_name', type: 'text', label: '合同名称' },
+  { key: 'total_amount', type: 'number', label: '总金额' },
+  {
+    key: 'license_type',
+    type: 'enum',
+    label: '授权模式',
+    options: [
+      { value: 'SUBSCRIPTION', label: '订阅' },
+      { value: 'PERPETUAL', label: '买断' }
+    ]
+  },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 'DRAFT', label: '草稿' },
+      { value: 'PENDING_REVIEW', label: '审批中' },
+      { value: 'SIGNED', label: '已签署' },
+      { value: 'EFFECTIVE', label: '生效中' },
+      { value: 'EXPIRED', label: '已到期' },
+      { value: 'TERMINATED', label: '已终止' }
+    ]
+  },
+  { key: 'signing_date', type: 'date', label: '签署日期' },
+  { key: 'effective_date', type: 'date', label: '生效日期' },
+  { key: 'expiry_date', type: 'date', label: '到期日期' },
+  { key: 'created_time', type: 'date', label: '创建时间' }
+]
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -204,7 +238,8 @@ const fetchContractList = async (): Promise<void> => {
       effective_date_start: effectiveDateBounds.start,
       effective_date_end: effectiveDateBounds.end,
       expiry_date_start: expiryDateBounds.start,
-      expiry_date_end: expiryDateBounds.end
+      expiry_date_end: expiryDateBounds.end,
+      ...getPrimarySort(activeSorts.value)
     }
 
     const response = await contractApi.getContracts(params as ContractQueryParams)
@@ -231,6 +266,18 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
 const handleReset = (): void => {
   activeFilters.value = []
   activeTab.value = 'all'
+  pagination.current = 1
+  fetchContractList()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  pagination.current = 1
+  fetchContractList()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   pagination.current = 1
   fetchContractList()
 }
@@ -377,6 +424,7 @@ watchEffect(() => {
     activeTab.value = headerStore.activeTab
     // 切换 Tab 时清除状态筛选
     activeFilters.value = activeFilters.value.filter((filter) => filter.field !== 'status')
+    activeSorts.value = []
     pagination.current = 1
     fetchContractList()
   }
@@ -405,10 +453,15 @@ watchEffect(() => {
       :mobile-meta-keys="['contract_number', 'creator', 'signing_date']"
       v-model:filters="activeFilters"
       :filter-fields="filterFields"
+      :sort-fields="sortFields"
+      :sorts="activeSorts"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @update:sorts="activeSorts = $event"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

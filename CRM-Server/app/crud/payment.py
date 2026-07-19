@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func, text
+from sqlalchemy import and_, or_, func, text, case
 from sqlalchemy.orm import joinedload
 from typing import Optional, List, Tuple
 from datetime import date, datetime, timedelta
@@ -18,6 +18,23 @@ def _split_csv(value: Optional[str]) -> List[str]:
     if value is None:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _parse_sort(value: Optional[str], order_by: Optional[str] = None, order_dir: Optional[str] = None) -> List[Tuple[str, str]]:
+    sort_specs: List[Tuple[str, str]] = []
+
+    if value:
+        for item in str(value).split(","):
+            raw_field, _, raw_direction = item.partition(":")
+            field = raw_field.strip()
+            direction = raw_direction.strip().lower()
+            if field and direction in ("asc", "desc"):
+                sort_specs.append((field, direction))
+
+    if not sort_specs and order_by and order_dir and order_dir.lower() in ("asc", "desc"):
+        sort_specs.append((order_by.strip(), order_dir.lower()))
+
+    return sort_specs
 
 
 class PaymentPlanCRUD:
@@ -61,6 +78,9 @@ class PaymentPlanCRUD:
         keyword: Optional[str] = None,
         due_date_start: Optional[date] = None,
         due_date_end: Optional[date] = None,
+        sort: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None,
         current_user_id: Optional[str] = None
     ) -> Tuple[List[PaymentPlan], int]:
         from app.models.contract import Contract
@@ -68,6 +88,9 @@ class PaymentPlanCRUD:
         from app.models.opportunity import Opportunity
 
         plans_query = db.query(PaymentPlan).join(Contract, PaymentPlan.contract_id == Contract.id)
+        plans_query = plans_query.outerjoin(Customer, Contract.customer_id == Customer.id).outerjoin(
+            Opportunity, Contract.opportunity_id == Opportunity.id
+        )
         plans_query = plans_query.filter(PaymentPlan.team_id == team_id)
         
         if status:
@@ -89,9 +112,7 @@ class PaymentPlanCRUD:
 
         if keyword and keyword.strip():
             like_keyword = f"%{keyword.strip()}%"
-            plans_query = plans_query.outerjoin(Customer, Contract.customer_id == Customer.id).outerjoin(
-                Opportunity, Contract.opportunity_id == Opportunity.id
-            ).filter(
+            plans_query = plans_query.filter(
                 or_(
                     PaymentPlan.stage_name.ilike(like_keyword),
                     Contract.contract_name.ilike(like_keyword),
@@ -101,8 +122,39 @@ class PaymentPlanCRUD:
             )
         
         total = plans_query.count()
-        
-        plans = plans_query.order_by(PaymentPlan.due_date.asc()).offset(skip).limit(limit).all()
+
+        status_order = case(
+            (PaymentPlan.status == PaymentPlanStatus.PENDING, 0),
+            (PaymentPlan.status == PaymentPlanStatus.PARTIAL, 1),
+            (PaymentPlan.status == PaymentPlanStatus.COMPLETED, 2),
+            (PaymentPlan.status == PaymentPlanStatus.OVERDUE, 3),
+            else_=99
+        )
+        allowed_sort_fields = {
+            "plan_number": PaymentPlan.plan_number,
+            "stage_name": PaymentPlan.stage_name,
+            "customer_name": Customer.account_name,
+            "contract_name": Contract.contract_name,
+            "planned_amount": PaymentPlan.planned_amount,
+            "due_date": PaymentPlan.due_date,
+            "status": status_order,
+            "created_time": PaymentPlan.created_time,
+        }
+        order_clauses = []
+        used_sort_fields = set()
+        for field, direction in _parse_sort(sort, order_by, order_dir):
+            if field in used_sort_fields or field not in allowed_sort_fields:
+                continue
+            column = allowed_sort_fields[field]
+            order_clauses.append(column.desc() if direction == "desc" else column.asc())
+            used_sort_fields.add(field)
+
+        if order_clauses:
+            plans_query = plans_query.order_by(*order_clauses, PaymentPlan.id.desc())
+        else:
+            plans_query = plans_query.order_by(PaymentPlan.due_date.asc(), PaymentPlan.id.desc())
+
+        plans = plans_query.offset(skip).limit(limit).all()
         
         for plan in plans:
             contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
@@ -339,7 +391,10 @@ class PaymentRecordCRUD:
         keyword: Optional[str] = None,
         current_user_id: Optional[str] = None,
         approval_status: Optional[str] = None,
-        approval_status_exclude: Optional[str] = None
+        approval_status_exclude: Optional[str] = None,
+        sort: Optional[str] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None
     ) -> Tuple[List[PaymentRecord], int]:
         from app.models.contract import Contract
         from app.models.customer import Customer
@@ -429,7 +484,39 @@ class PaymentRecordCRUD:
             )
         
         total = records_query.count()
-        records = records_query.order_by(PaymentRecord.payment_date.desc()).offset(skip).limit(limit).all()
+
+        confirmation_status_order = case(
+            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING, 0),
+            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED, 1),
+            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.DISPUTED, 2),
+            else_=99
+        )
+        allowed_sort_fields = {
+            "record_number": PaymentRecord.record_number,
+            "contract_name": Contract.contract_name,
+            "customer_name": Customer.account_name,
+            "actual_payer_name": PaymentRecord.actual_payer_name,
+            "stage_name": PaymentPlan.stage_name,
+            "actual_amount": PaymentRecord.actual_amount,
+            "payment_date": PaymentRecord.payment_date,
+            "confirmation_status": confirmation_status_order,
+            "created_time": PaymentRecord.created_time,
+        }
+        order_clauses = []
+        used_sort_fields = set()
+        for field, direction in _parse_sort(sort, order_by, order_dir):
+            if field in used_sort_fields or field not in allowed_sort_fields:
+                continue
+            column = allowed_sort_fields[field]
+            order_clauses.append(column.desc() if direction == "desc" else column.asc())
+            used_sort_fields.add(field)
+
+        if order_clauses:
+            records_query = records_query.order_by(*order_clauses, PaymentRecord.id.desc())
+        else:
+            records_query = records_query.order_by(PaymentRecord.payment_date.desc(), PaymentRecord.id.desc())
+
+        records = records_query.offset(skip).limit(limit).all()
 
         # Records now have eager-loaded: payment_plan, contract, customer, approval
         # No need for manual filling

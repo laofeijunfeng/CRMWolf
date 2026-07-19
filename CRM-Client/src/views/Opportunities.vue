@@ -22,6 +22,7 @@ import { toast } from 'vue-sonner'
 import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
 import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { opportunityApi, type Opportunity, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption } from '@/api/opportunity'
@@ -32,6 +33,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatCurrency } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { getPrimarySort } from '@/utils/listSorts'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
@@ -141,6 +143,24 @@ const filterFields = computed<ListFilterField[]>(() => {
 })
 
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
+
+const sortFields: ListSortField[] = [
+  { key: 'opportunity_name', type: 'text', label: '商机名称' },
+  { key: 'total_amount', type: 'number', label: '预计金额' },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: '0', label: '跟进中' },
+      { value: '1', label: '已赢单' },
+      { value: '2', label: '已输单' }
+    ]
+  },
+  { key: 'expected_closing_date', type: 'date', label: '预计成交日期' },
+  { key: 'created_time', type: 'date', label: '创建时间' }
+]
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -229,7 +249,8 @@ const fetchOpportunities = async (): Promise<void> => {
       customer_keyword: getFilterValue(activeFilters.value, 'customer_name'),
       stage_name: getFilterValue(activeFilters.value, 'stage_name'),
       owner_id: getDelimitedFilterValues(activeFilters.value, 'owner_id'),
-      owner_id_exclude: getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains'])
+      owner_id_exclude: getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains']),
+      ...getPrimarySort(activeSorts.value)
     }
     if (licenseType !== null) {
       params.license_type = licenseType
@@ -265,6 +286,18 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
 
 const handleReset = (): void => {
   activeFilters.value = []
+  pagination.current = 1
+  fetchOpportunities()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  pagination.current = 1
+  fetchOpportunities()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   pagination.current = 1
   fetchOpportunities()
 }
@@ -555,6 +588,7 @@ watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     activeTab.value = headerStore.activeTab
     pagination.current = 1
+    activeSorts.value = []
     fetchOpportunities()
   }
 })
@@ -581,11 +615,15 @@ watchEffect(() => {
       mobile-status-key="status"
       :mobile-meta-keys="['stage', 'win_probability', 'owner']"
       v-model:filters="activeFilters"
+      v-model:sorts="activeSorts"
       :filter-fields="filterFields"
+      :sort-fields="sortFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

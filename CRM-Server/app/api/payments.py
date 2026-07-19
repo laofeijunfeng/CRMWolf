@@ -142,6 +142,9 @@ def list_payment_plans(
     me: bool = Query(False, description="是否只查询当前用户的计划"),
     due_date_start: Optional[date] = Query(None, description="计划回款日期起始（YYYY-MM-DD）"),
     due_date_end: Optional[date] = Query(None, description="计划回款日期结束（YYYY-MM-DD）"),
+    sort: Optional[str] = Query(None, description="多字段排序，格式：field:asc,field2:desc"),
+    order_by: Optional[str] = Query(None, description="兼容旧版单字段排序"),
+    order_dir: Optional[str] = Query(None, description="兼容旧版排序方向（asc/desc）"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     team_id: int = Depends(get_current_user_team),
@@ -191,6 +194,9 @@ def list_payment_plans(
             keyword=keyword,
             due_date_start=due_date_start,
             due_date_end=due_date_end,
+            sort=sort,
+            order_by=order_by,
+            order_dir=order_dir,
             current_user_id=current_user_id
         )
 
@@ -831,6 +837,9 @@ def list_payment_records(
     me: bool = Query(False, description="是否只查询当前用户登记的记录"),
     approval_status: Optional[str] = Query(None, description="审批状态筛选: pending_submit(待提交), pending_approval(审批中), approved(已通过), rejected(已驳回)，多个值用逗号分隔"),
     approval_status_exclude: Optional[str] = Query(None, description="排除的审批状态，多个值用逗号分隔"),
+    sort: Optional[str] = Query(None, description="多字段排序，格式：field:asc,field2:desc"),
+    order_by: Optional[str] = Query(None, description="兼容旧版单字段排序"),
+    order_dir: Optional[str] = Query(None, description="兼容旧版排序方向（asc/desc）"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
     team_id: int = Depends(get_current_user_team),
@@ -883,7 +892,10 @@ def list_payment_records(
             keyword=keyword,
             current_user_id=current_user_id,
             approval_status=approval_status,
-            approval_status_exclude=approval_status_exclude
+            approval_status_exclude=approval_status_exclude,
+            sort=sort,
+            order_by=order_by,
+            order_dir=order_dir
         )
 
         # Task 1.4: Calculate pending_approval_me_count

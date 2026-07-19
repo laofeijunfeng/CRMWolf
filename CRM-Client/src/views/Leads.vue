@@ -23,6 +23,7 @@ import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -54,6 +55,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { normalizePaginatedResponse } from '@/types/pagination'
+import { getPrimarySort } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -168,6 +170,25 @@ const filterFields = computed<ListFilterField[]>(() => {
 })
 
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
+
+const sortFields: ListSortField[] = [
+  { key: 'lead_name', type: 'text', label: '线索名称' },
+  { key: 'city', type: 'text', label: '城市' },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 0, label: '新建' },
+      { value: 1, label: '跟进中' },
+      { value: 3, label: '无效' }
+    ]
+  },
+  { key: 'score', type: 'number', label: '热力值' },
+  { key: 'created_time', type: 'date', label: '创建时间' },
+  { key: 'last_modified_time', type: 'date', label: '最后更新' }
+]
 
 // ==================== DataTable 配置 ====================
 const columns = [
@@ -233,7 +254,8 @@ const fetchLeadList = async (): Promise<void> => {
     const params: Record<string, unknown> = {
       skip: (pagination.current - 1) * pagination.pageSize,
       limit: pagination.pageSize,
-      filters: activeFilters.value.length > 0 ? JSON.stringify(activeFilters.value) : null
+      filters: activeFilters.value.length > 0 ? JSON.stringify(activeFilters.value) : null,
+      ...getPrimarySort(activeSorts.value)
     }
 
     if (activeTab.value === 'public') {
@@ -270,6 +292,18 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
 
 const handleReset = (): void => {
   activeFilters.value = []
+  pagination.current = 1
+  fetchLeadList()
+}
+
+const handleSortApply = (sorts: ListSortCondition[]): void => {
+  activeSorts.value = sorts
+  pagination.current = 1
+  fetchLeadList()
+}
+
+const handleSortReset = (): void => {
+  activeSorts.value = []
   pagination.current = 1
   fetchLeadList()
 }
@@ -490,6 +524,7 @@ watchEffect(() => {
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     activeTab.value = headerStore.activeTab
+    activeSorts.value = []
     pagination.current = 1
     fetchLeadList()
   }
@@ -518,10 +553,15 @@ watchEffect(() => {
       :mobile-meta-keys="['contact_phone', 'source', 'owner']"
       v-model:filters="activeFilters"
       :filter-fields="filterFields"
+      :sort-fields="sortFields"
+      :sorts="activeSorts"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @update:sorts="activeSorts = $event"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

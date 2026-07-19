@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Filter, Plus, Trash2, X } from 'lucide-vue-next'
+import { Filter, Plus, Trash2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DatePicker } from '@/components/ui/date-picker'
 import MultiSelect from './MultiSelect.vue'
 import TableToolbarButton from './TableToolbarButton.vue'
+import TableToolbarBuilderPanel from './TableToolbarBuilderPanel.vue'
 import {
   Popover,
   PopoverContent,
@@ -225,21 +226,7 @@ watch(
     </PopoverTrigger>
 
     <PopoverContent align="start" class="list-filter-popover">
-      <div class="filter-builder">
-        <div class="filter-builder-header">
-          <span class="filter-builder-title">筛选条件</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            class="icon-button"
-            aria-label="清空筛选"
-            @click="resetFilters"
-          >
-            <X class="w-4 h-4" aria-hidden="true" />
-          </Button>
-        </div>
-
+      <TableToolbarBuilderPanel title="筛选条件" reset-label="清空筛选" @reset="resetFilters">
         <div class="filter-condition-list">
           <div
             v-for="condition in localConditions"
@@ -325,7 +312,7 @@ watch(
           </div>
         </div>
 
-        <div class="filter-builder-footer">
+        <template #footer>
           <Button
             type="button"
             variant="ghost"
@@ -353,8 +340,8 @@ watch(
               应用
             </Button>
           </div>
-        </div>
-      </div>
+        </template>
+      </TableToolbarBuilderPanel>
     </PopoverContent>
   </Popover>
 </template>
@@ -365,31 +352,6 @@ watch(
 :global(.list-filter-popover) {
   width: min(680px, calc(100vw - 24px));
   padding: 0;
-}
-
-.filter-builder {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-}
-
-.filter-builder-header,
-.filter-builder-footer,
-.filter-actions {
-  display: flex;
-  align-items: center;
-}
-
-.filter-builder-header,
-.filter-builder-footer {
-  justify-content: space-between;
-}
-
-.filter-builder-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: $wolf-text-primary-v2;
 }
 
 .filter-condition-list {
@@ -413,6 +375,11 @@ watch(
 
 .filter-empty-placeholder {
   height: 32px;
+}
+
+.filter-actions {
+  display: flex;
+  align-items: center;
 }
 
 .icon-button {

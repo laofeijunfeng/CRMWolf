@@ -64,7 +64,7 @@ class LeadCRUD:
 
         total = query.count()
 
-        allowed_sort_fields = ['created_time', 'lead_name', 'city', 'status', 'last_modified_time']
+        allowed_sort_fields = ['created_time', 'lead_name', 'city', 'status', 'score', 'last_modified_time']
         if order_by and order_dir and order_by in allowed_sort_fields:
             order_column = getattr(Lead, order_by)
             if order_dir.lower() == 'desc':
