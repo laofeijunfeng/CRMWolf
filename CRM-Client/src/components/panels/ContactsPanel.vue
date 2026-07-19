@@ -57,20 +57,23 @@ const handleSetPrimary = (contactId: number): void => {
     </template>
 
     <template #itemMain="{ item }">
-      <div class="flex items-center gap-2">
-        <span class="font-medium text-wolf-text-primary-v2">{{ item.name }}</span>
-        <Badge v-if="item.is_primary" variant="secondary" class="text-xs px-2 py-0.5">
-          <Star class="w-3 h-3 mr-1" />
-          主要联系人
-        </Badge>
-        <Badge v-if="item.is_decision_maker" variant="secondary" class="text-xs px-2 py-0.5">
-          决策者
-        </Badge>
-      </div>
-      <div class="text-sm text-wolf-text-tertiary-v2 mt-1">
-        {{ item.position || '-' }} · {{ item.mobile }}
-        <span v-if="item.email">· {{ item.email }}</span>
-      </div>
+      <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.name }}</span>
+    </template>
+
+    <template #itemMeta="{ item }">
+      <span>{{ item.position || '-' }}</span>
+      <span> · {{ item.mobile || '-' }}</span>
+      <span v-if="item.email"> · {{ item.email }}</span>
+    </template>
+
+    <template #itemBadges="{ item }">
+      <Badge v-if="item.is_primary" variant="secondary" class="text-xs px-2 py-0.5">
+        <Star class="w-3 h-3 mr-1" />
+        主要联系人
+      </Badge>
+      <Badge v-if="item.is_decision_maker" variant="secondary" class="text-xs px-2 py-0.5">
+        决策者
+      </Badge>
     </template>
 
     <template #itemActions="{ item }">

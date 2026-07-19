@@ -27,7 +27,7 @@ import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { ListCard } from '@/components/crmwolf'
+import { AmountText, ListCard } from '@/components/crmwolf'
 import {
   Dialog,
   DialogContent,
@@ -223,11 +223,6 @@ watch(() => props.open, (open) => {
 })
 
 // ==================== Helper Functions ====================
-function formatAmount(amount: number | null | undefined): string {
-  if (amount === null || amount === undefined) return '0'
-  return amount.toLocaleString()
-}
-
 function formatDate(dateStr: string | undefined): string {
   if (dateStr === undefined || dateStr === '') return '-'
   const date = new Date(dateStr)
@@ -325,7 +320,9 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
               <div class="mt-1 text-xs text-muted-foreground">
                 {{ item.flow_code }} ·
                 <span v-if="item.min_amount || item.max_amount">
-                  ¥{{ formatAmount(item.min_amount) }} - ¥{{ formatAmount(item.max_amount) }}
+                  <AmountText :value="item.min_amount ?? 0" size="sm" tone="warning" />
+                  <span> - </span>
+                  <AmountText :value="item.max_amount ?? 0" size="sm" tone="warning" />
                 </span>
                 <span v-else>不限金额</span>
                 · {{ formatDate(item.created_time) }}
@@ -396,7 +393,9 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
             <div class="text-sm text-muted-foreground">金额范围</div>
             <div class="font-medium">
               <span v-if="currentFlow.min_amount || currentFlow.max_amount">
-                ¥{{ formatAmount(currentFlow.min_amount) }} - ¥{{ formatAmount(currentFlow.max_amount) }}
+                <AmountText :value="currentFlow.min_amount ?? 0" tone="warning" />
+                <span> - </span>
+                <AmountText :value="currentFlow.max_amount ?? 0" tone="warning" />
               </span>
               <span v-else class="text-muted-foreground">不限</span>
             </div>

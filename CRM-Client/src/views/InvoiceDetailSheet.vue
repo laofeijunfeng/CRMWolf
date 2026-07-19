@@ -56,7 +56,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
-import { FileAttachment } from '@/components/crmwolf'
+import { AmountText, FileAttachment } from '@/components/crmwolf'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import StatusBadge, { type InvoiceStatus as InvoiceBadgeStatus } from '@/components/StatusBadge.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
@@ -74,7 +74,6 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { confirmDelete } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
-import { formatCurrency } from '@/utils/format'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { logger } from '@/utils/logger'
 
@@ -441,7 +440,7 @@ onBeforeUnmount((): void => {
 
           <div v-if="invoiceInfo" class="amount-summary" aria-label="开票金额">
             <span>开票金额</span>
-            <strong>{{ formatCurrency(invoiceInfo.invoice_amount) }}</strong>
+            <AmountText :value="invoiceInfo.invoice_amount" size="lg" tone="warning" />
           </div>
         </div>
       </SheetHeader>

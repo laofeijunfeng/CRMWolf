@@ -20,7 +20,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
-import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
@@ -31,7 +31,6 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { formatCurrency } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
 import { normalizePaginatedResponse } from '@/types/pagination'
@@ -636,9 +635,7 @@ watchEffect(() => {
         <div class="opportunity-mobile-card-customer">
           {{ row.customer_name || '-' }}
         </div>
-        <div class="opportunity-mobile-card-amount">
-          {{ formatCurrency(row.total_amount) }}
-        </div>
+        <AmountText class="opportunity-mobile-card-amount" :value="row.total_amount" size="lg" tone="primary" />
         <div class="opportunity-mobile-card-badges">
           <StatusBadge
             v-if="row.license_type"
@@ -687,7 +684,7 @@ watchEffect(() => {
 
       <!-- 预计金额 -->
       <template #cell-total_amount="{ row }">
-        <span class="amount-cell">{{ formatCurrency(row.total_amount) }}</span>
+        <AmountText :value="row.total_amount" tone="primary" />
       </template>
 
       <!-- 用户数 -->
@@ -830,12 +827,6 @@ watchEffect(() => {
   }
 }
 
-// 金额单元格
-.amount-cell {
-  font-family: $wolf-font-mono-v2;
-  font-variant-numeric: tabular-nums;
-}
-
 .opportunity-mobile-card-header {
   display: flex;
   align-items: flex-start;
@@ -861,11 +852,6 @@ watchEffect(() => {
 
 .opportunity-mobile-card-amount {
   margin-top: $wolf-space-sm-v2;
-  font-family: $wolf-font-mono-v2;
-  font-size: 18px;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-warning-text-v2;
-  font-variant-numeric: tabular-nums;
 }
 
 .opportunity-mobile-card-badges {

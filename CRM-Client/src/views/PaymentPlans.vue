@@ -19,7 +19,7 @@ import { useRoute } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
-import { DataTable, TableRowActions } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
@@ -35,7 +35,7 @@ import paymentApi, {
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { formatCurrency, formatLocalDate } from '@/utils/format'
+import { formatLocalDate } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { serializeListSorts } from '@/utils/listSorts'
 
@@ -440,9 +440,7 @@ watch(
         <div class="payment-plan-mobile-card-customer">
           {{ row.customer_name || '-' }}
         </div>
-        <div class="payment-plan-mobile-card-amount">
-          {{ formatCurrency(row.planned_amount) }}
-        </div>
+        <AmountText class="payment-plan-mobile-card-amount" :value="row.planned_amount" size="lg" tone="warning" />
         <div class="payment-plan-mobile-card-meta">
           <span>{{ row.stage_name || '-' }}</span>
           <span>计划：{{ row.due_date || '-' }}</span>
@@ -499,7 +497,7 @@ watch(
 
       <!-- 计划金额 -->
       <template #cell-plan_amount="{ row }">
-        <span class="amount-cell">{{ formatCurrency(row.planned_amount) }}</span>
+        <AmountText :value="row.planned_amount" tone="warning" />
       </template>
 
       <!-- 状态 -->
@@ -595,12 +593,6 @@ watch(
   }
 }
 
-// 金额单元格
-.amount-cell {
-  font-family: $wolf-font-mono-v2;
-  font-variant-numeric: tabular-nums;
-}
-
 // 编号单元格
 .number-cell {
   font-family: $wolf-font-mono-v2;
@@ -664,11 +656,6 @@ watch(
 
 .payment-plan-mobile-card-amount {
   margin-top: $wolf-space-sm-v2;
-  font-family: $wolf-font-mono-v2;
-  font-size: 18px;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-warning-text-v2;
-  font-variant-numeric: tabular-nums;
 }
 
 .payment-plan-mobile-card-meta {

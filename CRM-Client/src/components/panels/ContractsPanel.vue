@@ -11,6 +11,7 @@
 import { Plus, ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import StatusBadge from '@/components/StatusBadge.vue'
+import AmountText from '@/components/crmwolf/AmountText.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { ContractListResponse, ContractStatus } from '@/api/contract'
 
@@ -46,15 +47,6 @@ const mapStatus = (status: ContractStatus): string => {
   return statusMap[status]
 }
 
-const formatCurrency = (amount: string | number): string => {
-  const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    minimumFractionDigits: 0
-  }).format(numAmount)
-}
-
 const formatDate = (dateStr: string | null): string => {
   if (dateStr === null || dateStr === '') {
     return '-'
@@ -78,20 +70,24 @@ const formatDate = (dateStr: string | null): string => {
     </template>
 
     <template #itemMain="{ item }">
-      <div class="flex items-center gap-2">
-        <span class="font-medium text-wolf-text-primary-v2">
-          {{ item.contract_name }}
-        </span>
-        <StatusBadge
-          :status="mapStatus(item.status)"
-          type="contract"
-          size="small"
-        />
-      </div>
-      <div class="text-sm text-wolf-text-tertiary-v2 mt-1">
-        {{ item.contract_number }} · {{ formatCurrency(item.total_amount) }}
-        · 签署日期: {{ formatDate(item.signing_date) }}
-      </div>
+      <span class="font-medium text-wolf-text-primary-v2 truncate">
+        {{ item.contract_name }}
+      </span>
+    </template>
+
+    <template #itemMeta="{ item }">
+      <span>{{ item.contract_number }}</span>
+      <span> · </span>
+      <AmountText :value="item.total_amount" size="sm" />
+      <span> · 签署日期: {{ formatDate(item.signing_date) }}</span>
+    </template>
+
+    <template #itemBadges="{ item }">
+      <StatusBadge
+        :status="mapStatus(item.status)"
+        type="contract"
+        size="small"
+      />
     </template>
 
     <template #itemActions="{ item }">

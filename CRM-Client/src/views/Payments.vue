@@ -12,7 +12,7 @@ import { ref, reactive, computed, watchEffect, onMounted, onUnmounted } from 'vu
 import { useRouter, useRoute } from 'vue-router'
 import { Plus, ExternalLink, CircleCheck } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { DataTable, FilterPanel, TableRowActions, StatusBadge } from '@/components/crmwolf'
+import { AmountText, DataTable, FilterPanel, TableRowActions, StatusBadge } from '@/components/crmwolf'
 import type { ActionConfig } from '@/components/crmwolf/TableRowActions.vue'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
@@ -243,11 +243,6 @@ const viewContract = (row: Record<string, unknown>): void => {
   if (typeof row['contract_id'] === 'number') router.push(`/contracts/${row['contract_id']}`)
 }
 
-const formatCurrency = (amount: number | string): string => {
-  const num = typeof amount === 'string' ? parseFloat(amount) : amount
-  return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
 const mapPaymentStatus = (status: string): string => {
   const map: Record<string, string> = {
     'PENDING': 'pending',
@@ -358,15 +353,15 @@ onUnmounted(() => {
 
       <!-- 金额格式化 -->
       <template #cell-planned_amount="{ row }">
-        <span class="amount-cell font-mono">{{ formatCurrency(row.planned_amount) }}</span>
+        <AmountText :value="row.planned_amount" tone="warning" />
       </template>
 
       <template #cell-paid_amount="{ row }">
-        <span class="amount-cell font-mono">{{ formatCurrency(row.paid_amount || 0) }}</span>
+        <AmountText :value="row.paid_amount || 0" />
       </template>
 
       <template #cell-amount="{ row }">
-        <span class="amount-cell font-mono">{{ formatCurrency(row.amount) }}</span>
+        <AmountText :value="row.amount" />
       </template>
 
       <!-- 状态 -->

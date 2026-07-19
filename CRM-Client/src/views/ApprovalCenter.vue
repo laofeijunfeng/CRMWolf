@@ -94,9 +94,7 @@
 
         <!-- 金额列：mono font + 强调 -->
         <template #cell-entity_amount="{ row }">
-          <span class="font-mono font-semibold text-warning">
-            {{ formatCurrency(row.entity_amount) }}
-          </span>
+          <AmountText :value="row.entity_amount" tone="warning" />
         </template>
 
         <!-- 时间列：relative time -->
@@ -178,9 +176,7 @@
               <span class="text-base font-medium max-w-[60%] truncate">
                 {{ row.entity_name || '-' }}
               </span>
-              <span class="font-mono font-semibold text-lg text-warning">
-                {{ formatCurrency(row.entity_amount) }}
-              </span>
+              <AmountText :value="row.entity_amount" size="lg" tone="warning" />
             </div>
 
             <!-- 卡片次要信息：提交人 + 时间 -->
@@ -335,8 +331,8 @@
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">金额</div>
-                      <div class="attribute-value font-mono font-semibold text-wolf-warning-text-v2">
-                        {{ formatCurrency(selectedApproval.entity_amount) }}
+                      <div class="attribute-value">
+                        <AmountText :value="selectedApproval.entity_amount" tone="warning" />
                       </div>
                     </div>
                     <div v-if="selectedApproval.business_type === 'PAYMENT'" class="attribute-item">
@@ -486,7 +482,7 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Clock, Copy } from 'lucide-vue-next'
-import { FilterPanel, DataTable, Badge, Separator } from '@/components/crmwolf'
+import { AmountText, FilterPanel, DataTable, Badge, Separator } from '@/components/crmwolf'
 import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from '@/components/ui/pagination'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet'
@@ -513,7 +509,7 @@ import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { formatCurrency, formatDateRelative } from '@/utils/format'
+import { formatDateRelative } from '@/utils/format'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
 import contractApi from '@/api/contract'
 import type { EntityType, ApprovalListItem } from '@/schemas/approvalGeneric'

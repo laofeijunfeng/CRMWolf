@@ -19,7 +19,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2, Send, RotateCcw, Stamp, Download } from 'lucide-vue-next'
-import { DataTable, TableRowActions } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,6 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { formatCurrency } from '@/utils/format'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
@@ -544,9 +543,7 @@ watchEffect(() => {
         <div class="invoice-mobile-card-contract">
           {{ row.contract_name || '-' }}
         </div>
-        <div class="invoice-mobile-card-amount">
-          {{ formatCurrency(row.invoice_amount) }}
-        </div>
+        <AmountText class="invoice-mobile-card-amount" :value="row.invoice_amount" size="lg" tone="warning" />
         <div class="invoice-mobile-card-meta">
           <span :class="['status-badge', getInvoiceTypeClass(row.invoice_type)]">
             {{ getInvoiceTypeText(row.invoice_type) }}
@@ -638,7 +635,7 @@ watchEffect(() => {
 
       <!-- 开票金额 -->
       <template #cell-invoice_amount="{ row }">
-        <span class="amount-cell">{{ formatCurrency(row.invoice_amount) }}</span>
+        <AmountText :value="row.invoice_amount" tone="warning" />
       </template>
 
       <!-- 开票抬头 -->
@@ -790,12 +787,6 @@ watchEffect(() => {
   gap: $wolf-space-sm-v2;
 }
 
-// 金额单元格
-.amount-cell {
-  font-family: $wolf-font-mono-v2;
-  font-variant-numeric: tabular-nums;
-}
-
 .invoice-mobile-card-header {
   display: flex;
   align-items: flex-start;
@@ -829,11 +820,6 @@ watchEffect(() => {
 
 .invoice-mobile-card-amount {
   margin-top: $wolf-space-sm-v2;
-  font-family: $wolf-font-mono-v2;
-  font-size: 18px;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-warning-text-v2;
-  font-variant-numeric: tabular-nums;
 }
 
 .invoice-mobile-card-meta {

@@ -142,26 +142,25 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       </template>
 
       <template #itemMain="{ item }">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="font-medium text-wolf-text-primary-v2">{{ item.deployment_name }}</span>
-          <Badge
-            v-if="item.is_default"
-            variant="secondary"
-            class="text-xs"
-          >
-            默认
-          </Badge>
-        </div>
-        <div class="text-sm text-wolf-text-tertiary-v2 space-y-1">
-          <div class="flex items-center gap-2">
-            <Server class="w-3 h-3" />
-            <span>{{ item.server_address }}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-wolf-text-tertiary-v2 w-20">授权人数:</span>
-            <span>{{ item.authorized_users }} 人</span>
-          </div>
-        </div>
+        <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.deployment_name }}</span>
+      </template>
+
+      <template #itemMeta="{ item }">
+        <span class="inline-flex items-center gap-1">
+          <Server class="w-3 h-3" />
+          {{ item.server_address || '-' }}
+        </span>
+        <span> · 授权人数: {{ item.authorized_users }} 人</span>
+      </template>
+
+      <template #itemBadges="{ item }">
+        <Badge
+          v-if="item.is_default"
+          variant="secondary"
+          class="text-xs"
+        >
+          默认
+        </Badge>
       </template>
     </ListCard>
 
@@ -179,37 +178,37 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       </template>
 
       <template #itemMain="{ item }">
-        <div class="flex items-center gap-2 mb-1">
-          <Hash class="w-3 h-3 text-wolf-text-tertiary-v2" />
-          <span class="text-sm text-wolf-text-tertiary-v2">{{ item.application_number }}</span>
-          <Badge :class="getLicenseTypeInfo(item.license_type).color" class="text-xs">
-            {{ getLicenseTypeInfo(item.license_type).label }}
-          </Badge>
-          <Badge :class="getStatusInfo(item.status).color" class="text-xs">
-            {{ getStatusInfo(item.status).label }}
-          </Badge>
+        <div class="flex items-center gap-2 min-w-0">
+          <Hash class="w-3 h-3 shrink-0 text-wolf-text-tertiary-v2" />
+          <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.application_number }}</span>
         </div>
+      </template>
 
-        <!-- Application Details -->
-        <div class="text-sm text-wolf-text-secondary-v2 space-y-1">
-          <div class="flex items-center gap-2">
-            <Server class="w-3 h-3" />
-            <span>部署: {{ getDeploymentName(item.deployment_info_id, deployments) }}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <Calendar class="w-3 h-3" />
-            <span>到期日期: {{ formatDate(item.expiry_date) }}</span>
-          </div>
-          <div v-if="item.contract_name" class="flex items-center gap-2">
-            <FileText class="w-3 h-3" />
-            <span>合同: {{ item.contract_name }}</span>
-          </div>
-        </div>
+      <template #itemMeta="{ item }">
+        <span class="inline-flex items-center gap-1">
+          <Server class="w-3 h-3" />
+          部署: {{ getDeploymentName(item.deployment_info_id, deployments) }}
+        </span>
+        <span> · </span>
+        <span class="inline-flex items-center gap-1">
+          <Calendar class="w-3 h-3" />
+          到期: {{ formatDate(item.expiry_date) }}
+        </span>
+        <span v-if="item.contract_name"> · </span>
+        <span v-if="item.contract_name" class="inline-flex items-center gap-1">
+          <FileText class="w-3 h-3" />
+          合同: {{ item.contract_name }}
+        </span>
+        <span v-if="item.remark"> · 备注: {{ item.remark }}</span>
+      </template>
 
-        <!-- Remark -->
-        <div v-if="item.remark" class="text-xs text-wolf-text-tertiary-v2 mt-2 p-2 bg-wolf-bg-secondary-v2 rounded">
-          {{ item.remark }}
-        </div>
+      <template #itemBadges="{ item }">
+        <Badge :class="getLicenseTypeInfo(item.license_type).color" class="text-xs">
+          {{ getLicenseTypeInfo(item.license_type).label }}
+        </Badge>
+        <Badge :class="getStatusInfo(item.status).color" class="text-xs">
+          {{ getStatusInfo(item.status).label }}
+        </Badge>
       </template>
 
       <template #itemActions="{ item }">

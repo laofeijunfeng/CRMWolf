@@ -53,6 +53,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'
+import { AmountText } from '@/components/crmwolf'
 import type {
   ApprovalInfo,
   ApprovalInfoLite,
@@ -61,7 +62,7 @@ import type {
   PaymentRecordInfo
 } from '@/api/payment'
 import type { ApprovalRecord } from '@/schemas/approvalGeneric'
-import { formatCurrency, formatLocalDate } from '@/utils/format'
+import { formatLocalDate } from '@/utils/format'
 
 /**
  * Local type extending PaymentRecordInfo for detail sheet display.
@@ -340,7 +341,7 @@ watch(
           <div v-if="hasRecord" class="amount-summary" aria-label="回款金额">
             <div class="amount-summary-item">
               <span class="amount-summary-label">回款金额</span>
-              <strong>{{ formatCurrency(props.record?.actual_amount ?? 0) }}</strong>
+              <AmountText :value="props.record?.actual_amount ?? 0" size="lg" />
             </div>
           </div>
         </div>

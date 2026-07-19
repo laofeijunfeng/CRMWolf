@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import ListCard from '@/components/crmwolf/ListCard.vue'
+import AmountText from '@/components/crmwolf/AmountText.vue'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentNextStepDialog from '@/components/PaymentNextStepDialog.vue'
@@ -393,9 +394,9 @@ watch(
           </div>
 
           <div class="plan-amount">
-            <span class="amount-value">{{ formatCurrency(item.planned_amount) }}</span>
+            <AmountText :value="item.planned_amount" tone="warning" />
             <span v-if="item.status !== 'PENDING'" class="amount-subtitle">
-              已回款：{{ formatCurrency(item.paid_amount ?? 0) }}
+              已回款：<AmountText :value="item.paid_amount ?? 0" size="sm" />
             </span>
           </div>
         </div>
@@ -640,15 +641,10 @@ watch(
   }
 }
 
-.amount-value {
-  color: $wolf-text-primary-v2;
-  font-family: $wolf-font-mono-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  font-variant-numeric: tabular-nums;
-}
-
 .amount-subtitle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: $wolf-space-xs-v2;
   color: $wolf-text-secondary-v2;
   font-size: $wolf-font-size-caption-v2;
 }

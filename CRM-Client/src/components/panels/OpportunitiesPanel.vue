@@ -16,6 +16,7 @@ import {
   EmptyTitle
 } from '@/components/ui/empty'
 import StatusBadge from '@/components/StatusBadge.vue'
+import AmountText from '@/components/crmwolf/AmountText.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { OpportunityListResponse, OpportunityStatus } from '@/api/opportunity'
 
@@ -24,7 +25,7 @@ interface Props {
   opportunities: OpportunityListResponse[]
 }
 
-const props = defineProps<Props>()
+defineProps<Props>()
 
 const emit = defineEmits<{
   'add': []
@@ -41,14 +42,6 @@ const mapStatus = (status: OpportunityStatus): string => {
     2: 'lost'
   }
   return statusMap[status]
-}
-
-const formatCurrency = (amount: number): string => {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    minimumFractionDigits: 0
-  }).format(amount)
 }
 
 const formatDate = (dateStr: string): string => {
@@ -95,22 +88,24 @@ const formatDate = (dateStr: string): string => {
       </template>
 
       <template #itemMain="{ item }">
-        <div class="flex items-center gap-2">
-          <span class="font-medium text-wolf-text-primary-v2">
-            {{ item.opportunity_name }}
-          </span>
-          <StatusBadge
-            v-if="item.status !== null && item.status !== undefined"
-            :status="mapStatus(item.status)"
-            type="opportunity"
-            size="small"
-          />
-        </div>
-        <div class="text-sm text-wolf-text-tertiary-v2 mt-1">
-          {{ formatCurrency(item.total_amount) }} ·
-          {{ item.stage_info?.stage_name ?? '-' }}
-          · 预计成交: {{ formatDate(item.expected_closing_date) }}
-        </div>
+        <span class="font-medium text-wolf-text-primary-v2 truncate">
+          {{ item.opportunity_name }}
+        </span>
+      </template>
+
+      <template #itemMeta="{ item }">
+        <AmountText :value="item.total_amount" size="sm" tone="primary" />
+        <span> · {{ item.stage_info?.stage_name ?? '-' }}</span>
+        <span> · 预计成交: {{ formatDate(item.expected_closing_date) }}</span>
+      </template>
+
+      <template #itemBadges="{ item }">
+        <StatusBadge
+          v-if="item.status !== null && item.status !== undefined"
+          :status="mapStatus(item.status)"
+          type="opportunity"
+          size="small"
+        />
       </template>
     </ListCard>
   </div>

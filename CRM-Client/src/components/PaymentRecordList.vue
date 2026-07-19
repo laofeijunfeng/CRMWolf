@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Eye, FilePenLine, ReceiptText, Trash2 } from 'lucide-vue-next'
+import AmountText from '@/components/crmwolf/AmountText.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,7 +18,7 @@ import {
   EmptyTitle
 } from '@/components/ui/empty'
 import type { PaymentConfirmationStatus, PaymentRecordInfo } from '@/api/payment'
-import { formatCurrency, formatLocalDate } from '@/utils/format'
+import { formatLocalDate } from '@/utils/format'
 
 interface Props {
   records: PaymentRecordInfo[]
@@ -143,7 +144,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
     <template #itemMain="{ item }">
       <div class="record-main">
         <div class="record-title-line">
-          <span class="record-amount">{{ formatCurrency(item.actual_amount) }}</span>
+          <AmountText class="record-amount" :value="item.actual_amount" size="lg" />
           <Badge
             :class="['record-status-badge', getStatusClass(item.confirmation_status)]"
             role="status"
@@ -239,14 +240,6 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
   align-items: center;
   gap: $wolf-space-sm-v2;
   flex-wrap: wrap;
-}
-
-.record-amount {
-  font-family: $wolf-font-mono-v2;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  font-variant-numeric: tabular-nums;
 }
 
 .record-status-badge {

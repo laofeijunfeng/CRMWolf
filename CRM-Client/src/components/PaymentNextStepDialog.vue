@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { DocumentChecked, Clock, View, ArrowRight } from '@element-plus/icons-vue'
+import AmountText from '@/components/crmwolf/AmountText.vue'
 import { useApprovalStore } from '@/stores/approval'
 import type { PaymentRecordResponse } from '@/api/payment'
 
@@ -23,10 +24,6 @@ const approvalStore = useApprovalStore()
 const submitting = ref(false)
 
 // Task 7.5: Format helpers
-const formatAmount = (amount: number): string => {
-  return amount?.toLocaleString() ?? '0'
-}
-
 const formatDate = (date: string): string => {
   return date ?? ''
 }
@@ -88,9 +85,7 @@ const handleViewDetail = (): void => {
       <div class="amount-hero">
         <div class="amount-label">回款金额</div>
         <!-- Task 7.1: Mono font for amount -->
-        <div class="amount-value mono-number">
-          ¥{{ formatAmount(record?.actual_amount ?? 0) }}
-        </div>
+        <AmountText class="amount-value" :value="record?.actual_amount ?? 0" size="xl" />
         <div class="amount-date">
           回款日期：{{ formatDate(record?.payment_date ?? '') }}
         </div>
@@ -166,12 +161,7 @@ const handleViewDetail = (): void => {
 }
 
 .amount-value {
-  font-size: 32px;
-  font-weight: $wolf-font-weight-semibold;
-  color: $wolf-text-primary;
   margin-bottom: $wolf-space-xs;
-  font-family: $wolf-font-mono;
-  font-variant-numeric: tabular-nums lining-nums;
 }
 
 .amount-date {

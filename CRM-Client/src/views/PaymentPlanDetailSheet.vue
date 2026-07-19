@@ -56,7 +56,8 @@ import paymentApi, {
 import type { ApprovalRecord } from '@/schemas/approvalGeneric'
 import { useApprovalStore } from '@/stores/approval'
 import { handleApiError } from '@/utils/errorHandler'
-import { formatCurrency, formatLocalDate } from '@/utils/format'
+import { formatLocalDate } from '@/utils/format'
+import { AmountText } from '@/components/crmwolf'
 
 interface Props {
   planId: number | null
@@ -433,15 +434,15 @@ watch(
           <div v-if="paymentPlan" class="amount-summary" aria-label="回款金额概览">
             <div class="amount-summary-item">
               <span class="amount-summary-label">计划</span>
-              <strong>{{ formatCurrency(paymentPlan.planned_amount) }}</strong>
+              <AmountText :value="paymentPlan.planned_amount" size="lg" tone="warning" />
             </div>
             <div class="amount-summary-item paid">
               <span class="amount-summary-label">已回款</span>
-              <strong>{{ formatCurrency(paymentPlan.paid_amount ?? 0) }}</strong>
+              <AmountText :value="paymentPlan.paid_amount ?? 0" size="lg" />
             </div>
             <div class="amount-summary-item remaining">
               <span class="amount-summary-label">待回款</span>
-              <strong>{{ formatCurrency(paymentPlan.remaining_amount ?? 0) }}</strong>
+              <AmountText :value="paymentPlan.remaining_amount ?? 0" size="lg" tone="primary" />
             </div>
           </div>
         </div>
@@ -521,11 +522,15 @@ watch(
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">待回款金额</span>
-                    <span class="attribute-value mono-value amount-remaining">{{ formatCurrency(paymentPlan.remaining_amount ?? 0) }}</span>
+                    <span class="attribute-value">
+                      <AmountText :value="paymentPlan.remaining_amount ?? 0" tone="primary" />
+                    </span>
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">已开票金额</span>
-                    <span class="attribute-value mono-value">{{ formatCurrency(paymentPlan.invoiced_amount ?? 0) }}</span>
+                    <span class="attribute-value">
+                      <AmountText :value="paymentPlan.invoiced_amount ?? 0" tone="warning" />
+                    </span>
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">发票数量</span>
@@ -893,10 +898,6 @@ $payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 .mono-value {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
-}
-
-.amount-remaining {
-  color: $wolf-warning-text-v2;
 }
 
 .approval-heading {

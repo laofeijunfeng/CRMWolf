@@ -12,6 +12,7 @@ import { Plus, ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import StatusBadge from '@/components/StatusBadge.vue'
+import AmountText from '@/components/crmwolf/AmountText.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { PaymentPlanResponse, PaymentPlanStatus } from '@/api/payment'
 
@@ -33,14 +34,6 @@ const handleRecord = (plan: PaymentPlanResponse): void => {
 
 const handleView = (planId: number): void => {
   emit('view', planId)
-}
-
-const formatCurrency = (amount: number): string => {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    minimumFractionDigits: 0
-  }).format(amount)
 }
 
 const formatDate = (dateStr: string): string => {
@@ -74,41 +67,37 @@ const calculateProgress = (plan: PaymentPlanResponse): number => {
     empty-text="暂无回款计划"
   >
     <template #itemMain="{ item }">
-      <div class="flex items-center justify-between mb-2">
-        <div>
-          <div class="flex items-center gap-2">
-            <span class="font-medium text-wolf-text-primary-v2">
-              {{ item.stage_name }}
-            </span>
-            <StatusBadge
-              :status="mapStatus(item.status)"
-              type="paymentPlan"
-              size="small"
-            />
-          </div>
-          <div class="text-sm text-wolf-text-tertiary-v2 mt-1">
-            {{ item.contract_name ?? '未关联合同' }} ·
-            到期: {{ formatDate(item.due_date) }}
-          </div>
-        </div>
-        <div class="text-right">
-          <div class="font-medium text-wolf-text-primary-v2">
-            {{ formatCurrency(item.planned_amount) }}
-          </div>
-          <div v-if="item.status !== 'PENDING'" class="text-xs text-wolf-text-tertiary-v2 mt-1">
-            已回款: {{ formatCurrency(item.paid_amount ?? 0) }}
-          </div>
-        </div>
-      </div>
+      <div class="payment-plan-main">
+        <span class="font-medium text-wolf-text-primary-v2 truncate">
+          {{ item.stage_name }}
+        </span>
 
-      <!-- Progress bar for partial/completed -->
-      <div v-if="item.status !== 'PENDING'" class="mt-2">
         <Progress
+          v-if="item.status !== 'PENDING'"
           :model-value="calculateProgress(item)"
-          class="h-1.5"
+          class="payment-plan-progress"
           :aria-label="`${item.stage_name} 回款进度 ${calculateProgress(item)}%`"
         />
       </div>
+    </template>
+
+    <template #itemMeta="{ item }">
+      <span>{{ item.contract_name ?? '未关联合同' }}</span>
+      <span> · 到期: {{ formatDate(item.due_date) }}</span>
+      <span> · 计划: </span>
+      <AmountText :value="item.planned_amount" size="sm" tone="warning" />
+      <template v-if="item.status !== 'PENDING'">
+        <span> · 已回款: </span>
+        <AmountText :value="item.paid_amount ?? 0" size="sm" />
+      </template>
+    </template>
+
+    <template #itemBadges="{ item }">
+      <StatusBadge
+        :status="mapStatus(item.status)"
+        type="paymentPlan"
+        size="small"
+      />
     </template>
 
     <template #itemActions="{ item }">
@@ -136,4 +125,16 @@ const calculateProgress = (plan: PaymentPlanResponse): number => {
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+
+.payment-plan-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+}
+
+.payment-plan-progress {
+  width: min(160px, 100%);
+  height: 6px;
+}
 </style>

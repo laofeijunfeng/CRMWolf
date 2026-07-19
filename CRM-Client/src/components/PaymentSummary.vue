@@ -3,17 +3,17 @@
     <div class="summary-grid">
       <div class="summary-item">
         <div class="summary-label">合同总额</div>
-        <div class="summary-value amount">¥{{ formatAmount(summary?.total_amount || 0) }}</div>
+        <AmountText class="summary-amount-value" :value="summary?.total_amount || 0" size="lg" tone="warning" />
       </div>
       
       <div class="summary-item">
         <div class="summary-label">已回款金额</div>
-        <div class="summary-value paid">¥{{ formatAmount(summary?.total_paid_amount || 0) }}</div>
+        <AmountText class="summary-amount-value" :value="summary?.total_paid_amount || 0" size="lg" />
       </div>
       
       <div class="summary-item">
         <div class="summary-label">待回款金额</div>
-        <div class="summary-value remaining">¥{{ formatAmount(summary?.remaining_amount || 0) }}</div>
+        <AmountText class="summary-amount-value" :value="summary?.remaining_amount || 0" size="lg" tone="primary" />
       </div>
       
       <div class="summary-item">
@@ -59,6 +59,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { WarningFilled } from '@element-plus/icons-vue'
+import AmountText from '@/components/crmwolf/AmountText.vue'
 import paymentApi, { type ContractPaymentSummary } from '@/api/payment'
 
 interface Props {
@@ -70,12 +71,14 @@ const props = defineProps<Props>()
 const loading = ref(false)
 const summary = ref<ContractPaymentSummary | null>(null)
 
-const paymentProgress = computed(() => {
+type StatusTagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
+const paymentProgress = computed((): number => {
   if (!summary.value || summary.value.total_amount === 0) return 0
   return Math.round((summary.value.total_paid_amount / summary.value.total_amount) * 100)
 })
 
-const statusText = computed(() => {
+const statusText = computed((): string => {
   if (!summary.value) return '-'
   const statusMap: Record<string, string> = {
     'UNPAID': '未回款',
@@ -83,21 +86,21 @@ const statusText = computed(() => {
     'COMPLETED': '已回完',
     'OVERDUE': '有逾期'
   }
-  return statusMap[summary.value.payment_status] || '-'
+  return statusMap[summary.value.payment_status] ?? '-'
 })
 
-const statusType = computed(() => {
+const statusType = computed((): StatusTagType => {
   if (!summary.value) return 'info'
-  const typeMap: Record<string, any> = {
+  const typeMap: Record<string, StatusTagType> = {
     'UNPAID': 'info',
     'PARTIAL': 'primary',
     'COMPLETED': 'success',
     'OVERDUE': 'danger'
   }
-  return typeMap[summary.value.payment_status] || 'info'
+  return typeMap[summary.value.payment_status] ?? 'info'
 })
 
-const progressColor = computed(() => {
+const progressColor = computed((): string => {
   const progress = paymentProgress.value
   if (progress === 100) return '#67c23a'
   if (progress >= 50) return '#409eff'
@@ -105,26 +108,18 @@ const progressColor = computed(() => {
   return '#f56c6c'
 })
 
-const fetchSummary = async () => {
+const fetchSummary = async (): Promise<void> => {
   loading.value = true
   try {
-    const response = await paymentApi.getPaymentSummary(props.contractId)
-    summary.value = response.data || response
-  } catch (error) {
-    console.error('获取回款汇总失败', error)
+    summary.value = await paymentApi.getPaymentSummary(props.contractId)
+  } catch {
+    summary.value = null
   } finally {
     loading.value = false
   }
 }
 
-const formatAmount = (amount: number) => {
-  return amount.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  })
-}
-
-const refresh = () => {
+const refresh = (): void => {
   fetchSummary()
 }
 
@@ -176,18 +171,6 @@ onMounted(() => {
   font-size: 18px;
   font-weight: 600;
   color: var(--el-text-color-primary);
-}
-
-.summary-value.amount {
-  color: var(--el-text-color-primary);
-}
-
-.summary-value.paid {
-  color: var(--el-color-success);
-}
-
-.summary-value.remaining {
-  color: var(--el-color-warning);
 }
 
 .summary-value.progress {

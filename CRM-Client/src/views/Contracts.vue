@@ -19,7 +19,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
-import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
@@ -35,7 +35,6 @@ import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { normalizePaginatedResponse } from '@/types/pagination'
-import { formatCurrency } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
@@ -477,9 +476,7 @@ watchEffect(() => {
         <div class="contract-mobile-card-customer">
           {{ row.customer_info?.account_name || '-' }}
         </div>
-        <div class="contract-mobile-card-amount">
-          {{ formatCurrency(row.total_amount) }}
-        </div>
+        <AmountText class="contract-mobile-card-amount" :value="row.total_amount" size="lg" />
         <div class="contract-mobile-card-meta">
           <span>{{ getLicenseTypeText(row.license_type) }}</span>
           <span>创建人：{{ row.creator_info?.name || '-' }}</span>
@@ -517,7 +514,7 @@ watchEffect(() => {
 
       <!-- 总金额 -->
       <template #cell-total_amount="{ row }">
-        <span class="amount-cell">{{ formatCurrency(row.total_amount) }}</span>
+        <AmountText :value="row.total_amount" />
       </template>
 
       <!-- 授权模式 -->
@@ -600,12 +597,6 @@ watchEffect(() => {
   }
 }
 
-// 金额单元格
-.amount-cell {
-  font-family: $wolf-font-mono-v2;
-  font-variant-numeric: tabular-nums;
-}
-
 .contract-mobile-card-header {
   display: flex;
   align-items: flex-start;
@@ -638,11 +629,6 @@ watchEffect(() => {
 
 .contract-mobile-card-amount {
   margin-top: $wolf-space-sm-v2;
-  font-family: $wolf-font-mono-v2;
-  font-size: 18px;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-warning-text-v2;
-  font-variant-numeric: tabular-nums;
 }
 
 .contract-mobile-card-meta {

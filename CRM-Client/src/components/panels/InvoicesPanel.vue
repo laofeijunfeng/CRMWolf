@@ -81,45 +81,32 @@ const maskTaxId = (taxId: string): string => {
     </template>
 
     <template #itemMain="{ item }">
-      <!-- Title header with type and default badge -->
-      <div class="flex items-center gap-2 mb-2">
+      <div class="flex items-center gap-2 min-w-0">
         <component
           :is="item.title_type === 'COMPANY' ? Building2 : User"
-          class="w-4 h-4 text-wolf-text-secondary-v2"
+          class="w-4 h-4 shrink-0 text-wolf-text-secondary-v2"
         />
-        <span class="font-medium text-wolf-text-primary-v2">{{ item.title }}</span>
-        <Badge :class="getTitleTypeInfo(item.title_type).color" class="text-xs">
-          {{ getTitleTypeInfo(item.title_type).label }}
-        </Badge>
-        <Badge v-if="item.is_default" variant="secondary" class="text-xs">
-          <Star class="w-3 h-3 mr-1" />
-          默认
-        </Badge>
+        <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.title }}</span>
       </div>
+    </template>
 
-      <!-- Details -->
-      <div class="text-sm text-wolf-text-secondary-v2 space-y-1">
-        <div class="flex items-center gap-2">
-          <span class="text-wolf-text-tertiary-v2 w-16">税号:</span>
-          <span class="font-mono">{{ maskTaxId(item.taxpayer_id) }}</span>
-        </div>
-        <div v-if="item.bank_name" class="flex items-center gap-2">
-          <span class="text-wolf-text-tertiary-v2 w-16">银行:</span>
-          <span>{{ item.bank_name }}</span>
-        </div>
-        <div v-if="item.bank_account" class="flex items-center gap-2">
-          <span class="text-wolf-text-tertiary-v2 w-16">账号:</span>
-          <span class="font-mono">{{ item.bank_account }}</span>
-        </div>
-        <div v-if="item.address" class="flex items-center gap-2">
-          <span class="text-wolf-text-tertiary-v2 w-16">地址:</span>
-          <span>{{ item.address }}</span>
-        </div>
-        <div v-if="item.phone" class="flex items-center gap-2">
-          <span class="text-wolf-text-tertiary-v2 w-16">电话:</span>
-          <span>{{ item.phone }}</span>
-        </div>
-      </div>
+    <template #itemMeta="{ item }">
+      <span>税号: </span>
+      <span class="font-mono">{{ maskTaxId(item.taxpayer_id) }}</span>
+      <span v-if="item.bank_name"> · {{ item.bank_name }}</span>
+      <span v-if="item.bank_account"> · {{ item.bank_account }}</span>
+      <span v-if="item.phone"> · {{ item.phone }}</span>
+      <span v-if="item.address"> · {{ item.address }}</span>
+    </template>
+
+    <template #itemBadges="{ item }">
+      <Badge :class="getTitleTypeInfo(item.title_type).color" class="text-xs">
+        {{ getTitleTypeInfo(item.title_type).label }}
+      </Badge>
+      <Badge v-if="item.is_default" variant="secondary" class="text-xs">
+        <Star class="w-3 h-3 mr-1" />
+        默认
+      </Badge>
     </template>
 
     <template #itemActions="{ item }">

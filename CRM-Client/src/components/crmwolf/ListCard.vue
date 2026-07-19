@@ -235,9 +235,10 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 }
 
 .list-card-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
-  justify-content: space-between;
+  gap: $wolf-space-md-v2;
   min-height: $wolf-touch-target-min-v2; // 44px - touch target compliance
   padding: $wolf-space-md-v2 $wolf-space-lg-v2;
   border-bottom: 1px solid $wolf-border-light-v2;
@@ -274,29 +275,31 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 }
 
 .list-card-item-main {
-  flex: 1;
   min-width: 0;
 }
 
 .list-card-item-meta {
+  min-width: 0;
   font-size: $wolf-font-size-caption-v2;
   color: $wolf-text-tertiary-v2;
-  margin-top: $wolf-space-xs-v2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .list-card-item-badges {
   display: flex;
   align-items: center;
   gap: $wolf-space-xs-v2; // Must be >=8px - defined in variables-v2
-  margin-left: $wolf-space-sm-v2;
+  min-width: 0;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .list-card-item-actions {
   display: flex;
   align-items: center;
   gap: $wolf-space-xs-v2; // Must be >=8px - touch spacing compliance
-  margin-left: $wolf-space-md-v2;
   flex-shrink: 0;
 
   // Ensure all buttons meet touch target size
@@ -312,6 +315,15 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   .list-card-item {
     padding-left: $wolf-space-md-v2;
     padding-right: $wolf-space-md-v2;
+  }
+
+  .list-card-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .list-card-item-meta,
+  .list-card-item-badges {
+    grid-column: 1 / -1;
   }
 
   // Stack actions vertically on small screens if > 2 buttons

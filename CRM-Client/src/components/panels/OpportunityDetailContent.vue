@@ -10,7 +10,8 @@ import { RouterLink } from 'vue-router'
 import { Pencil, Trophy, XCircle, ExternalLink, ArrowLeft, FileText } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
-import { formatCurrency, formatLocalDate } from '@/utils/format'
+import { formatLocalDate } from '@/utils/format'
+import { AmountText } from '@/components/crmwolf'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -376,9 +377,7 @@ watch(() => props.opportunityId, () => {
         </div>
         <div v-if="opportunity" class="text-right">
           <div class="text-xs text-wolf-text-tertiary-v2">预计金额</div>
-          <div class="text-xl font-semibold text-wolf-text-primary-v2">
-            {{ formatCurrency(opportunity.total_amount) }}
-          </div>
+          <AmountText :value="opportunity.total_amount" size="lg" tone="primary" />
         </div>
       </div>
     </div>
@@ -454,7 +453,9 @@ watch(() => props.opportunityId, () => {
 
                   <div class="attribute-item">
                     <div class="attribute-label">标准单价</div>
-                    <span class="attribute-value">{{ formatCurrency(opportunity.unit_price) }}</span>
+                    <span class="attribute-value">
+                      <AmountText :value="opportunity.unit_price" tone="primary" />
+                    </span>
                   </div>
 
                   <div class="attribute-item">
@@ -588,7 +589,9 @@ watch(() => props.opportunityId, () => {
                   </div>
                   <div class="attribute-item">
                     <div class="attribute-label">合同金额</div>
-                    <span class="attribute-value">{{ formatCurrency(relatedContract.total_amount) }}</span>
+                    <span class="attribute-value">
+                      <AmountText :value="relatedContract.total_amount" />
+                    </span>
                   </div>
                   <div v-if="relatedContract.license_type === 'SUBSCRIPTION'" class="attribute-item">
                     <div class="attribute-label">订阅年限</div>

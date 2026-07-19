@@ -19,7 +19,7 @@ import { useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
-import { DataTable, TableRowActions } from '@/components/crmwolf'
+import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { confirmDelete } from '@/utils/confirmDialog'
@@ -34,7 +34,6 @@ import paymentApi, {
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { formatCurrency } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { serializeListSorts } from '@/utils/listSorts'
 
@@ -377,9 +376,7 @@ watchEffect(() => {
         <div class="payment-record-mobile-card-contract">
           {{ row.contract_name || '-' }}
         </div>
-        <div class="payment-record-mobile-card-amount">
-          {{ formatCurrency(row.actual_amount) }}
-        </div>
+        <AmountText class="payment-record-mobile-card-amount" :value="row.actual_amount" size="lg" />
         <div class="payment-record-mobile-card-meta">
           <span>付款方：{{ row.actual_payer_name || '-' }}</span>
           <span>回款：{{ row.payment_date || '-' }}</span>
@@ -433,7 +430,7 @@ watchEffect(() => {
 
       <!-- 回款金额 -->
       <template #cell-actual_amount="{ row }">
-        <span class="amount-cell">{{ formatCurrency(row.actual_amount) }}</span>
+        <AmountText :value="row.actual_amount" />
       </template>
 
       <!-- 状态 -->
@@ -515,12 +512,6 @@ watchEffect(() => {
   }
 }
 
-// 金额单元格
-.amount-cell {
-  font-family: $wolf-font-mono-v2;
-  font-variant-numeric: tabular-nums;
-}
-
 // 记录编号单元格
 .record-number-cell {
   font-family: $wolf-font-mono-v2;
@@ -584,11 +575,6 @@ watchEffect(() => {
 
 .payment-record-mobile-card-amount {
   margin-top: $wolf-space-sm-v2;
-  font-family: $wolf-font-mono-v2;
-  font-size: 18px;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-warning-text-v2;
-  font-variant-numeric: tabular-nums;
 }
 
 .payment-record-mobile-card-meta {

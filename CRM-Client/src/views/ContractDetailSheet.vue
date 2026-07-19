@@ -34,13 +34,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ContractPaymentPlans from '@/components/ContractPaymentPlans.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
-import { FileAttachment } from '@/components/crmwolf'
+import { AmountText, FileAttachment } from '@/components/crmwolf'
 import contractApi, { type ContractResponse, type ContractStatus, type LicenseType } from '@/api/contract'
 import { createContractFileObjectUrl, downloadContractFile as downloadContractFileApi } from '@/api/fileUpload'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { handleApiError } from '@/utils/errorHandler'
-import { formatCurrency } from '@/utils/format'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 // ==================== Props & Emits ====================
@@ -159,11 +158,14 @@ const contractFiles = computed<FileAttachmentItem[]>(() => {
   if (contract === null || !hasContractFile.value) return []
 
   const filePath = contract.contract_file_path ?? ''
-  const fileName = contract.contract_file_name?.trim() || getContractFileName(filePath)
+  const trimmedFileName = contract.contract_file_name?.trim()
+  const fileName = trimmedFileName != null && trimmedFileName.length > 0
+    ? trimmedFileName
+    : getContractFileName(filePath)
   const file: FileAttachmentItem = {
     id: contract.id,
     name: fileName,
-    extension: getFileExtension(fileName || filePath),
+    extension: getFileExtension(fileName.length > 0 ? fileName : filePath),
     status: contractFilePreviewLoading.value ? 'processing' : 'done'
   }
 
@@ -453,9 +455,7 @@ onBeforeUnmount((): void => {
 
           <div v-if="contractInfo" class="amount-summary">
             <div class="amount-label">合同总金额</div>
-            <div class="amount-value">
-              {{ formatCurrency(contractInfo.total_amount) }}
-            </div>
+            <AmountText :value="contractInfo.total_amount" size="lg" />
           </div>
         </div>
       </SheetHeader>
@@ -716,13 +716,6 @@ onBeforeUnmount((): void => {
   font-size: $wolf-font-size-caption-v2;
   color: $wolf-text-tertiary-v2;
   margin-bottom: $wolf-space-xs-v2;
-}
-
-.amount-value {
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  line-height: $wolf-line-height-title-v2;
 }
 
 .sheet-body {
