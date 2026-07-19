@@ -37,7 +37,8 @@ class ApprovalTransactionManager:
         match_flow_kwargs: dict,
         submitter_id: str,
         submitter_name: str,
-        team_id: int
+        team_id: int,
+        rollback_on_no_flow: bool = False
     ) -> Tuple[Any, Optional[Approval], Optional[str]]:
         """
         创建业务单据 + 自动提交审批（Contract/Payment 场景）
@@ -64,7 +65,7 @@ class ApprovalTransactionManager:
 
             # 2. 匹配审批流程（捕获查询异常）
             try:
-                # A5 修复：使用 match_flow_generic（支持 CONTRACT/PAYMENT/INVOICE/LICENSE）
+                # A5 修复：使用 match_flow_generic（支持 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
                 # match_flow(contract) 是 CONTRACT 专用 wrapper，不支持 business_type 参数
                 flow, err_msg = approval_flow_crud.match_flow_generic(
                     db,
@@ -80,6 +81,10 @@ class ApprovalTransactionManager:
 
             # 3. 审批流程未匹配 → commit 单据，返回提示
             if flow is None:
+                if rollback_on_no_flow:
+                    db.rollback()
+                    logger.info(f"审批流程未匹配，已回滚业务单据创建（business_type={business_type}）")
+                    return (None, None, err_msg or "请先配置审批流程")
                 entity.approval_phase = ApprovalPhase.DRAFT
                 db.commit()
                 logger.info(f"审批流程未匹配（business_type={business_type}, entity_id={entity.id}）")
@@ -181,7 +186,7 @@ class ApprovalTransactionManager:
             # 4. 匹配审批流程
             match_kwargs = adapter.match_kwargs(entity)
             try:
-                # A5 修复：使用 match_flow_generic（支持 CONTRACT/PAYMENT/INVOICE/LICENSE）
+                # A5 修复：使用 match_flow_generic（支持 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
                 # match_flow(contract) 是 CONTRACT 专用 wrapper，不支持 business_type 参数
                 flow, err_msg = approval_flow_crud.match_flow_generic(
                     db,

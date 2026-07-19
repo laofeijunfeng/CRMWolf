@@ -49,7 +49,7 @@ import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 
 /**
- * 所有审批权限（合同/发票/回款）
+ * 所有审批权限（合同/发票/回款/License/商机）
  */
 const ALL_APPROVAL_PERMISSIONS = [
   'contract:approve:own',
@@ -63,7 +63,10 @@ const ALL_APPROVAL_PERMISSIONS = [
   'license:approve',
   'license:approve:own',
   'license:approve:all',
-  'license:issue'
+  'license:issue',
+  'opportunity:approve',
+  'opportunity:approve:own',
+  'opportunity:approve:all'
 ]
 
 const router = useRouter()

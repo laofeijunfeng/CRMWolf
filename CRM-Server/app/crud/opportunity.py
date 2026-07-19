@@ -232,13 +232,17 @@ class OpportunityCRUD:
         return opportunities, total
 
     def create(self, db: Session, obj_in: OpportunityCreate, creator_id: str, team_id: int) -> Opportunity:
+        db_obj = self.create_without_commit(db, obj_in, creator_id, team_id)
+        db.commit()
+        db.refresh(db_obj)
+        self.log_created(db, db_obj, creator_id, team_id)
+        return db_obj
+
+    def create_without_commit(self, db: Session, obj_in: OpportunityCreate, creator_id: str, team_id: int) -> Opportunity:
         from app.crud.opportunity import opportunity_stage_crud
-        from app.crud.user import user_crud
         from app.crud.procurement import procurement_stage_template_crud
         from app.services.pricing import pricing_service
-        from app.services.operation_log_service import operation_log_service
         from app.models.procurement import OpportunityStageSnapshot
-        from decimal import Decimal
         from datetime import datetime
         
         # 1. 确定采购方式
@@ -319,10 +323,12 @@ class OpportunityCRUD:
         db_obj.current_win_probability = snapshot.win_probability
         db_obj.current_stage_entered_at = snapshot.entered_at
         
-        db.commit()
-        db.refresh(db_obj)
-        
-        # 8. 记录操作日志
+        return db_obj
+
+    def log_created(self, db: Session, db_obj: Opportunity, creator_id: str, team_id: int) -> None:
+        from app.crud.user import user_crud
+        from app.services.operation_log_service import operation_log_service
+
         operator = user_crud.get_by_id(db, int(creator_id))
         operator_name = operator.name if operator else None
 
@@ -339,14 +345,12 @@ class OpportunityCRUD:
             content={
                 "opportunityName": db_obj.opportunity_name,
                 "expectedAmount": float(db_obj.total_amount),
-                "procurementMethodId": procurement_method_id,
-                "currentStage": stage.stage_name,
+                "procurementMethodId": db_obj.procurement_method_id,
+                "currentStage": db_obj.current_stage_name,
                 "customerId": db_obj.customer_id
             },
             team_id=team_id
         )
-        
-        return db_obj
 
     def update(self, db: Session, db_obj: Opportunity, obj_in: OpportunityUpdate) -> Opportunity:
         from app.services.pricing import pricing_service
@@ -816,6 +820,7 @@ class OpportunityCRUD:
 
         业务规则：
         - 只返回"已赢单"（status=1）的商机
+        - 只返回审批已通过（approval_phase=approved）的商机
         - 排除已经创建合同的商机
         - 不需要分页，返回所有符合条件的商机
 
@@ -827,7 +832,8 @@ class OpportunityCRUD:
 
         query = db.query(Opportunity).filter(
             Opportunity.customer_id == customer_id,
-            Opportunity.status == 1  # 已赢单
+            Opportunity.status == 1,  # 已赢单
+            Opportunity.approval_phase == "approved",
         )
 
         if team_id is not None:

@@ -3,7 +3,7 @@
  * ApprovalFlowSheet.vue - 审批流程管理 Sheet
  *
  * 功能：
- * - 展示审批流程列表（DataTable）
+ * - 展示审批流程列表（ListCard）
  * - 搜索流程
  * - 查看流程详情（Dialog）
  * - 启用/禁用流程
@@ -27,7 +27,7 @@ import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { DataTable } from '@/components/crmwolf'
+import { ListCard } from '@/components/crmwolf'
 import {
   Dialog,
   DialogContent,
@@ -56,6 +56,7 @@ import approvalFlowApi, {
   type ApprovalNode
 } from '@/api/approvalFlow'
 import ApprovalFlowFormDialog from './ApprovalFlowFormDialog.vue'
+import ApprovalFlowAIDialog from '@/components/ApprovalFlowAIDialog.vue'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -80,6 +81,8 @@ const pagination = ref({
   total: 0
 })
 
+type ApprovalFlowListItem = ApprovalFlowDetail & { id: number }
+
 // 详情 Dialog
 const detailDialogOpen = ref(false)
 const currentFlow = ref<ApprovalFlowDetail | null>(null)
@@ -88,75 +91,13 @@ const currentFlow = ref<ApprovalFlowDetail | null>(null)
 const formDialogOpen = ref(false)
 const formDialogMode = ref<'create' | 'edit'>('create')
 const editingFlowId = ref<number | null>(null)
-
-// ==================== Types ====================
-interface Column {
-  key: string
-  title: string
-  width?: string
-  align?: 'left' | 'center' | 'right'
-  fixed?: 'left' | 'right'
-}
-
-// ==================== Table Columns ====================
-const columns: Column[] = [
-  {
-    key: 'flow_name',
-    title: '流程名称',
-    width: '150px',
-    fixed: 'left'
-  },
-  {
-    key: 'flow_code',
-    title: '流程编码',
-    width: '120px'
-  },
-  {
-    key: 'amount_range',
-    title: '金额范围',
-    width: '150px'
-  },
-  {
-    key: 'license_type',
-    title: '授权类型',
-    width: '100px'
-  },
-  {
-    key: 'business_type',
-    title: '单据类型',
-    width: '100px'
-  },
-  {
-    key: 'nodes_count',
-    title: '节点数',
-    width: '80px',
-    align: 'center'
-  },
-  {
-    key: 'is_active',
-    title: '状态',
-    width: '80px',
-    align: 'center'
-  },
-  {
-    key: 'created_time',
-    title: '创建时间',
-    width: '160px'
-  },
-  {
-    key: 'actions',
-    title: '操作',
-    width: '200px',
-    fixed: 'right',
-    align: 'center'
-  }
-]
+const aiDialogOpen = ref(false)
 
 // ==================== Computed ====================
 const filteredFlows = computed(() => {
-  let filtered = approvalFlows.value
+  let filtered = approvalFlows.value.filter((flow): flow is ApprovalFlowListItem => typeof flow.id === 'number')
 
-  if (searchText.value) {
+  if (searchText.value !== '') {
     const search = searchText.value.toLowerCase()
     filtered = filtered.filter(flow =>
       flow.flow_name.toLowerCase().includes(search) ||
@@ -166,27 +107,30 @@ const filteredFlows = computed(() => {
 
   if (filterStatus.value !== '') {
     filtered = filtered.filter(flow =>
-      filterStatus.value === 'true' ? flow.is_active : !flow.is_active
+      filterStatus.value === 'true' ? flow.is_active === 1 : flow.is_active !== 1
     )
   }
 
-  if (filterLicenseType.value) {
+  if (filterLicenseType.value !== '') {
     filtered = filtered.filter(flow => flow.license_type === filterLicenseType.value)
   }
 
-  if (filterBusinessType.value) {
+  if (filterBusinessType.value !== '') {
     filtered = filtered.filter(flow => flow.business_type === filterBusinessType.value)
   }
 
   return filtered
 })
 
+const listTitle = computed(() => `审批流程列表（${filteredFlows.value.length}）`)
+
 // ==================== Business Type Labels ====================
 const businessTypeLabels: Record<string, string> = {
   CONTRACT: '合同',
   PAYMENT: '回款登记',
   INVOICE: '发票申请',
-  LICENSE: 'License申请'
+  LICENSE: 'License申请',
+  OPPORTUNITY: '商机'
 }
 
 const licenseTypeLabels: Record<string, string> = {
@@ -214,7 +158,7 @@ const fetchApprovalFlows = async (): Promise<void> => {
 
 // ==================== Actions ====================
 const handleView = async (record: ApprovalFlowDetail): Promise<void> => {
-  if (!record.id) return
+  if (typeof record.id !== 'number') return
   try {
     const data = await approvalFlowApi.getApprovalFlowDetail(record.id)
     currentFlow.value = data
@@ -225,15 +169,16 @@ const handleView = async (record: ApprovalFlowDetail): Promise<void> => {
 }
 
 const handleEdit = (record: ApprovalFlowDetail): void => {
-  if (!record.id) return
+  if (typeof record.id !== 'number') return
   formDialogMode.value = 'edit'
   editingFlowId.value = record.id
   formDialogOpen.value = true
 }
 
 const handleToggleStatus = async (record: ApprovalFlowDetail): Promise<void> => {
-  if (!record.id) return
-  const action = record.is_active ? '禁用' : '启用'
+  if (typeof record.id !== 'number') return
+  const isActive = record.is_active === 1
+  const action = isActive ? '禁用' : '启用'
   const confirmed = await confirmDialog(
     `确定要${action}流程"${record.flow_name}"吗？`,
     `确认${action}`
@@ -243,7 +188,7 @@ const handleToggleStatus = async (record: ApprovalFlowDetail): Promise<void> => 
 
   try {
     await approvalFlowApi.updateApprovalFlow(record.id, {
-      is_active: record.is_active ? 0 : 1
+      is_active: isActive ? 0 : 1
     })
     toast.success(`流程已${action}`)
     fetchApprovalFlows()
@@ -259,11 +204,14 @@ const handleManualCreate = (): void => {
 }
 
 const handleAICreate = (): void => {
-  // TODO: Open AI creation dialog
-  toast.info('AI 创建流程功能开发中')
+  aiDialogOpen.value = true
 }
 
 const handleFormSuccess = (): void => {
+  fetchApprovalFlows()
+}
+
+const handleAICreated = (): void => {
   fetchApprovalFlows()
 }
 
@@ -281,7 +229,7 @@ function formatAmount(amount: number | null | undefined): string {
 }
 
 function formatDate(dateStr: string | undefined): string {
-  if (!dateStr) return '-'
+  if (dateStr === undefined || dateStr === '') return '-'
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN', {
     year: 'numeric',
@@ -357,104 +305,67 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
                 <SelectItem value="CONTRACT">合同</SelectItem>
                 <SelectItem value="PAYMENT">回款登记</SelectItem>
                 <SelectItem value="INVOICE">发票申请</SelectItem>
+                <SelectItem value="LICENSE">License申请</SelectItem>
+                <SelectItem value="OPPORTUNITY">商机</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </div>
 
-        <!-- 表格区域 -->
+        <!-- 列表区域 -->
         <div class="p-4">
-          <DataTable
-            :columns="columns"
-            :data="filteredFlows"
+          <ListCard
+            :title="listTitle"
+            :items="filteredFlows"
             :loading="loading"
-            :total="pagination.total"
-            :page="pagination.page"
-            :page-size="pagination.pageSize"
-            height="calc(100vh - 400px)"
-            empty-title="暂无审批流程"
+            empty-text="暂无审批流程"
           >
-            <!-- 流程名称列 -->
-            <template #cell-flow_name="{ row }">
-              <span class="text-primary font-medium cursor-pointer hover:underline">
-                {{ row.flow_name }}
-              </span>
-            </template>
-
-            <!-- 金额范围列 -->
-            <template #cell-amount_range="{ row }">
-              <span v-if="row.min_amount || row.max_amount">
-                ¥{{ formatAmount(row.min_amount) }} - ¥{{ formatAmount(row.max_amount) }}
-              </span>
-              <span v-else class="text-muted-foreground">不限</span>
-            </template>
-
-            <!-- 授权类型列 -->
-            <template #cell-license_type="{ row }">
-              <Badge v-if="row.license_type" variant="outline">
-                {{ licenseTypeLabels[row.license_type] || row.license_type }}
-              </Badge>
-              <span v-else class="text-muted-foreground">不限</span>
-            </template>
-
-            <!-- 单据类型列 -->
-            <template #cell-business_type="{ row }">
-              <Badge variant="secondary">
-                {{ businessTypeLabels[row.business_type] || row.business_type }}
-              </Badge>
-            </template>
-
-            <!-- 节点数列 -->
-            <template #cell-nodes_count="{ row }">
-              <Badge variant="outline">{{ row.nodes?.length || 0 }}</Badge>
-            </template>
-
-            <!-- 状态列 -->
-            <template #cell-is_active="{ row }">
-              <Badge :variant="row.is_active ? 'default' : 'secondary'">
-                {{ row.is_active ? '启用' : '禁用' }}
-              </Badge>
-            </template>
-
-            <!-- 创建时间列 -->
-            <template #cell-created_time="{ row }">
-              {{ formatDate(row.created_time) }}
-            </template>
-
-            <!-- 操作列 -->
-            <template #cell-actions="{ row }">
-              <div class="flex items-center justify-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 px-2"
-                  @click="handleView(row)"
-                >
-                  <Eye class="w-3.5 h-3.5 mr-1" />
-                  查看
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 px-2"
-                  @click="handleEdit(row)"
-                >
-                  <Pencil class="w-3.5 h-3.5 mr-1" />
-                  编辑
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 px-2"
-                  :class="row.is_active ? 'text-orange-500' : 'text-green-500'"
-                  @click="handleToggleStatus(row)"
-                >
-                  <Power class="w-3.5 h-3.5 mr-1" />
-                  {{ row.is_active ? '禁用' : '启用' }}
-                </Button>
+            <template #itemMain="{ item }">
+              <div class="font-medium text-wolf-text-primary">{{ item.flow_name }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">
+                {{ item.flow_code }} ·
+                <span v-if="item.min_amount || item.max_amount">
+                  ¥{{ formatAmount(item.min_amount) }} - ¥{{ formatAmount(item.max_amount) }}
+                </span>
+                <span v-else>不限金额</span>
+                · {{ formatDate(item.created_time) }}
+              </div>
+              <div v-if="item.description" class="mt-1 text-sm text-muted-foreground">
+                {{ item.description }}
               </div>
             </template>
-          </DataTable>
+
+            <template #itemBadges="{ item }">
+              <Badge variant="secondary">
+                {{ businessTypeLabels[item.business_type] || item.business_type }}
+              </Badge>
+              <Badge v-if="item.license_type" variant="outline">
+                {{ licenseTypeLabels[item.license_type] || item.license_type }}
+              </Badge>
+              <Badge variant="outline">节点 {{ item.nodes?.length || 0 }}</Badge>
+              <Badge :variant="item.is_active ? 'default' : 'secondary'">
+                {{ item.is_active ? '启用' : '禁用' }}
+              </Badge>
+            </template>
+
+            <template #itemActions="{ item }">
+              <Button variant="ghost" size="icon" title="查看" @click="handleView(item)">
+                <Eye class="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" title="编辑" @click="handleEdit(item)">
+                <Pencil class="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                :title="item.is_active ? '禁用' : '启用'"
+                :class="item.is_active ? 'text-orange-500' : 'text-green-600'"
+                @click="handleToggleStatus(item)"
+              >
+                <Power class="h-4 w-4" />
+              </Button>
+            </template>
+          </ListCard>
         </div>
       </ScrollArea>
     </DetailSheetContent>
@@ -565,6 +476,11 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
     :mode="formDialogMode"
     :flow-id="editingFlowId"
     @success="handleFormSuccess"
+  />
+
+  <ApprovalFlowAIDialog
+    v-model="aiDialogOpen"
+    @created="handleAICreated"
   />
 </template>
 

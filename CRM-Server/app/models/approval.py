@@ -38,7 +38,7 @@ class ApprovalFlow(Base):
     license_type = Column(String(20), nullable=True, comment="授权类型（条件）")
 
     # A5：流程适用单据类型，对齐 A3 迁移 012（crm_approval_flows.business_type）
-    business_type = Column(String(20), nullable=False, default=BusinessType.CONTRACT, comment="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE")
+    business_type = Column(String(20), nullable=False, default=BusinessType.CONTRACT, comment="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY")
 
     is_active = Column(Integer, nullable=False, default=1, comment="是否启用：0:否, 1:是")
 
@@ -96,7 +96,7 @@ class Approval(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='SET NULL'), nullable=True, comment="关联合同ID（合同删除后置空，审批记录保留）")
-    business_type = Column(String(20), nullable=False, default=BusinessType.CONTRACT, comment="业务单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE")
+    business_type = Column(String(20), nullable=False, default=BusinessType.CONTRACT, comment="业务单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY")
     business_id = Column(BigInteger, nullable=True, index=True, comment="业务单据ID（与 business_type 联合定位单据）")
     flow_id = Column(BigInteger, ForeignKey('crm_approval_flows.id', ondelete='SET NULL'), nullable=True, comment="审批流程模板ID")
     

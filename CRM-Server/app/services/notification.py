@@ -23,6 +23,7 @@ _ENTITY_TYPE_LABEL = {
     BusinessType.PAYMENT: "回款登记",
     BusinessType.INVOICE: "发票申请",
     BusinessType.LICENSE: "License申请",
+    BusinessType.OPPORTUNITY: "商机",
 }
 
 
@@ -107,7 +108,7 @@ class NotificationService:
         仍可工作（内部回退映射，并触发 DeprecationWarning）。
 
         Args:
-            entity_type: 业务单据类型（CONTRACT / PAYMENT / INVOICE / LICENSE），缺省 CONTRACT
+            entity_type: 业务单据类型（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY），缺省 CONTRACT
             entity_name: 业务单据展示名（如 "合同A" / "回款登记#9"）
             flow_name: 审批流程名称
             node_name: 当前审批节点名称

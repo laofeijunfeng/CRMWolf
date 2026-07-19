@@ -1,4 +1,4 @@
-<script setup lang="ts" generic="T extends { id: number }">
+<script setup lang="ts" generic="T extends { id: string | number }">
 /**
  * ListCard - 统一列表卡片组件
  *
@@ -27,7 +27,7 @@ interface Props {
   /** 行是否可点击 */
   rowInteractive?: boolean
   /** 需要高亮并可被外层恢复焦点的行 ID */
-  highlightedItemId?: number | null | undefined
+  highlightedItemId?: string | number | null | undefined
 }
 
 const props = withDefaults(defineProps<Props>(), {

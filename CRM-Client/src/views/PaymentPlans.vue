@@ -371,11 +371,70 @@ watch(
       :filter-fields="filterFields"
       height="calc(100vh - 136px)"
       empty-title="暂无回款计划"
+      row-interactive
+      mobile-title-key="plan_number"
+      mobile-subtitle-key="contract_name"
+      mobile-status-key="status"
+      :mobile-meta-keys="['stage_name', 'customer_name', 'due_date']"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @row-click="handleViewDetail"
     >
+      <template #mobile-card="{ row }">
+        <div class="payment-plan-mobile-card-header">
+          <div class="payment-plan-mobile-card-number">
+            {{ row.plan_number || `#${row.id}` }}
+          </div>
+          <StatusBadge :status="mapPaymentPlanStatus(row.status)" type="paymentPlan" />
+        </div>
+        <div class="payment-plan-mobile-card-title">
+          {{ row.contract_name || '-' }}
+        </div>
+        <div class="payment-plan-mobile-card-customer">
+          {{ row.customer_name || '-' }}
+        </div>
+        <div class="payment-plan-mobile-card-amount">
+          {{ formatCurrency(row.planned_amount) }}
+        </div>
+        <div class="payment-plan-mobile-card-meta">
+          <span>{{ row.stage_name || '-' }}</span>
+          <span>计划：{{ row.due_date || '-' }}</span>
+        </div>
+      </template>
+
+      <template #mobile-actions="{ row }">
+        <TableRowActions
+          :row="row"
+          :primary-actions="[
+            {
+              label: '确认回款',
+              handler: (r) => handleConfirmPayment(r as unknown as PaymentPlanWithDetails),
+              visible: canConfirmPayment && row.status !== 'COMPLETED',
+              icon: CheckCircle
+            }
+          ]"
+          :secondary-actions="[
+            {
+              label: '编辑',
+              handler: (r) => handleEdit(r as unknown as PaymentPlanWithDetails),
+              visible: canEditPlan,
+              icon: Pencil
+            },
+            {
+              label: '删除',
+              handler: (r) => handleDelete(r as unknown as PaymentPlanWithDetails),
+              visible: canDeletePlan,
+              icon: Trash2,
+              destructive: true,
+              separator: true
+            }
+          ]"
+          size="lg"
+        />
+      </template>
+
       <!-- 计划编号 -->
       <template #cell-plan_number="{ row }">
         <button
@@ -474,6 +533,12 @@ watch(
   flex: 1;
 }
 
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .payment-plans-page {
+    padding: $wolf-page-padding-mobile-v2;
+  }
+}
+
 // 客户名称链接
 .customer-name-link {
   color: $wolf-text-link-v2;
@@ -518,5 +583,55 @@ watch(
     outline-offset: $wolf-focus-ring-offset-v2;
     border-radius: $wolf-radius-sm-v2;
   }
+}
+
+.payment-plan-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.payment-plan-mobile-card-number {
+  min-width: 0;
+  font-family: $wolf-font-mono-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-link-v2;
+  overflow-wrap: anywhere;
+}
+
+.payment-plan-mobile-card-title {
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.payment-plan-mobile-card-customer {
+  margin-top: $wolf-space-xs-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  overflow-wrap: anywhere;
+}
+
+.payment-plan-mobile-card-amount {
+  margin-top: $wolf-space-sm-v2;
+  font-family: $wolf-font-mono-v2;
+  font-size: 18px;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-warning-text-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+.payment-plan-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
 }
 </style>

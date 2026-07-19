@@ -50,17 +50,36 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:modelValue': [value: DateValue | undefined]
+  'update:placeholder': [value: DateValue | undefined]
 }>()
 
-const calendarPlaceholder = ref<DateValue | undefined>(
+const fallbackPlaceholder = ref<DateValue | undefined>(
   props.modelValue ?? props.placeholder ?? props.defaultValue ?? today(getLocalTimeZone())
 )
+
+function isSameDateValue(left?: DateValue, right?: DateValue): boolean {
+  return left?.year === right?.year
+    && left?.month === right?.month
+    && left?.day === right?.day
+}
+
+function setCalendarPlaceholder(value: DateValue): void {
+  fallbackPlaceholder.value = value
+  if (!isSameDateValue(props.placeholder, value)) {
+    emit('update:placeholder', value)
+  }
+}
+
+const calendarPlaceholder = computed<DateValue>({
+  get: () => props.placeholder ?? fallbackPlaceholder.value ?? today(getLocalTimeZone()),
+  set: setCalendarPlaceholder
+})
 
 watch(
   () => props.placeholder,
   (value) => {
-    if (value && !calendarPlaceholder.value) {
-      calendarPlaceholder.value = value
+    if (value) {
+      fallbackPlaceholder.value = value
     }
   },
   { immediate: true }
@@ -69,8 +88,8 @@ watch(
 watch(
   () => props.modelValue,
   (value) => {
-    if (value) {
-      calendarPlaceholder.value = value
+    if (value && !props.placeholder) {
+      fallbackPlaceholder.value = value
     }
   },
   { immediate: true }
@@ -85,7 +104,6 @@ const years = computed(() => {
 const selectedMonth = computed({
   get: () => String(calendarPlaceholder.value?.month ?? 1),
   set: (value: string) => {
-    if (!calendarPlaceholder.value) return
     calendarPlaceholder.value = calendarPlaceholder.value.set({ month: Number(value) })
   }
 })
@@ -93,10 +111,13 @@ const selectedMonth = computed({
 const selectedYear = computed({
   get: () => String(calendarPlaceholder.value?.year ?? new Date().getFullYear()),
   set: (value: string) => {
-    if (!calendarPlaceholder.value) return
     calendarPlaceholder.value = calendarPlaceholder.value.set({ year: Number(value) })
   }
 })
+
+function handlePlaceholderChange(value: DateValue): void {
+  setCalendarPlaceholder(value)
+}
 </script>
 
 <template>
@@ -111,7 +132,7 @@ const selectedYear = computed({
     :class="cn('p-3', props.class)"
     class="rounded-md border bg-white"
     @update:model-value="emit('update:modelValue', $event)"
-    @update:placeholder="calendarPlaceholder = $event"
+    @update:placeholder="handlePlaceholderChange"
   >
     <CalendarHeader class="flex items-center justify-between gap-2 pt-1">
       <CalendarPrev

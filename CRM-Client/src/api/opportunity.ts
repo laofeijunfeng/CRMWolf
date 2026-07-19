@@ -93,6 +93,7 @@ export interface Opportunity {
   creator_id: string
   creator_info?: OwnerInfo
   status: OpportunityStatus
+  approval_phase: 'draft' | 'pending_review' | 'approved' | 'rejected'
   actual_amount?: number
   actual_closing_date?: string
   loss_reason?: string
@@ -263,6 +264,7 @@ export interface OpportunityListResponse {
     is_default: number
   } | null
   status: number
+  approval_phase: 'draft' | 'pending_review' | 'approved' | 'rejected'
   created_time: string
   last_modified_time: string
   customer_name?: string

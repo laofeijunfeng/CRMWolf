@@ -2,6 +2,7 @@ from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, func
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
 from app.core.database import Base
+from app.constants.approval_phase import ApprovalPhase
 
 
 class PurchaseType(PyEnum):
@@ -78,6 +79,7 @@ class Opportunity(Base):
     win_probability = Column(Integer, nullable=False, default=0, comment="当前阶段赢率（0-100）")
     owner_id = Column(String(100), nullable=False, comment="负责人系统用户ID")
     status = Column(Integer, nullable=False, default=0, comment="商机状态：0:跟进中, 1:已赢单, 2:已输单")
+    approval_phase = Column(String(20), nullable=False, default=ApprovalPhase.DRAFT, comment="审批流程状态：draft/pending_review/approved/rejected")
     loss_reason = Column(String(500), nullable=True, comment="输单原因")
     actual_amount = Column(Numeric(12, 2), nullable=True, comment="实际成交金额")
     actual_closing_date = Column(Date, nullable=True, comment="实际成交日期")

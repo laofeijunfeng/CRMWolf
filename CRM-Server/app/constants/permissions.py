@@ -132,6 +132,9 @@ ALL_PERMISSIONS = [
 
     # 商机 - 补充 delete:all
     {"name": "删除所有商机", "code": "opportunity:delete:all", "resource": "opportunity", "action": "delete", "scope": "all"},
+    {"name": "审批商机", "code": "opportunity:approve", "resource": "opportunity", "action": "approve"},
+    {"name": "审批自己的商机", "code": "opportunity:approve:own", "resource": "opportunity", "action": "approve", "scope": "own"},
+    {"name": "审批所有商机", "code": "opportunity:approve:all", "resource": "opportunity", "action": "approve", "scope": "all"},
 
     # 合同 - 补充 delete:all 和审批权限
     {"name": "删除所有合同", "code": "contract:delete:all", "resource": "contract", "action": "delete", "scope": "all"},
@@ -194,6 +197,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "opportunity:view:all", "opportunity:view:own", "opportunity:create",
         "opportunity:edit:own", "opportunity:edit:all", "opportunity:delete:own", "opportunity:delete:all",
         "opportunity:stage", "opportunity:win", "opportunity:lose", "opportunity:assign",
+        "opportunity:approve:own",
         "opportunity:analytics:view", "opportunity:stage:manage",
         "opportunity:stage:create", "opportunity:stage:edit", "opportunity:stage:delete",
         "lead:view:all", "lead:view:own", "lead:create",

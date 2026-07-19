@@ -28,9 +28,11 @@ import OpportunityStageStepper from '@/components/OpportunityStageStepper.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
 import OpportunityLoseDialog from '@/components/dialogs/OpportunityLoseDialog.vue'
+import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import { usePermissionStore } from '@/stores/permissions'
+import { useUserStore } from '@/stores/user'
 
 interface CustomerContext {
   customerId: number
@@ -67,6 +69,7 @@ const emit = defineEmits<{
 }>()
 
 const permissionStore = usePermissionStore()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const loadError = ref(false)
@@ -82,10 +85,18 @@ const loseDialogOpen = ref(false)
 const editDialogOpen = ref(false)
 
 const canEdit = computed(() =>
-  permissionStore.hasAnyPermission(['opportunity:update', 'opportunity:edit_own', 'opportunity:edit_all'])
+  permissionStore.hasAnyPermission(['opportunity:edit:own', 'opportunity:edit:all'])
 )
+const canWin = computed(() => permissionStore.hasPermission('opportunity:win'))
+const canLose = computed(() => permissionStore.hasPermission('opportunity:lose'))
 
 const isActive = computed(() => opportunity.value?.status === 0)
+const approvalPhase = computed(() => opportunity.value?.approval_phase)
+const isApprovalPending = computed(() => approvalPhase.value === 'pending_review')
+const isApprovalApproved = computed(() => approvalPhase.value === 'approved')
+const isApprovalSubmitter = computed(() =>
+  opportunity.value?.creator_id === String(userStore.userInfo?.id)
+)
 
 function firstNonEmpty(...values: (string | null | undefined)[]): string {
   const value = values.find(item => item !== undefined && item !== null && item.trim() !== '')
@@ -145,6 +156,10 @@ async function fetchRelatedContract(opportunityId: number): Promise<void> {
 // 编辑功能
 function handleEdit(): void {
   if (!opportunity.value) return
+  if (isApprovalPending.value) {
+    toast.warning('商机审批中，暂不能编辑')
+    return
+  }
   editDialogOpen.value = true
 }
 
@@ -171,6 +186,10 @@ function handleLoseSuccess(): void {
 
 function handleCreateContract(): void {
   if (!opportunity.value) return
+  if (!isApprovalApproved.value) {
+    toast.warning('商机审批通过后才能创建合同')
+    return
+  }
   emit('create-contract', {
     opportunityId: opportunity.value.id,
     customerId: opportunity.value.customer_id,
@@ -237,6 +256,26 @@ function getStatusClass(status: number | undefined): string {
     2: 'status-danger'
   }
   return map[status] ?? ''
+}
+
+function getApprovalPhaseText(phase: string | undefined): string {
+  const map: Record<string, string> = {
+    draft: '待提交',
+    pending_review: '审批中',
+    approved: '审批通过',
+    rejected: '审批拒绝'
+  }
+  return phase === undefined ? '-' : (map[phase] ?? phase)
+}
+
+function getApprovalPhaseClass(phase: string | undefined): string {
+  const map: Record<string, string> = {
+    draft: 'status-default',
+    pending_review: 'status-warning',
+    approved: 'status-success',
+    rejected: 'status-danger'
+  }
+  return phase === undefined ? '' : (map[phase] ?? '')
 }
 
 function getPurchaseTypeText(type: string | undefined): string {
@@ -324,6 +363,9 @@ watch(() => props.opportunityId, () => {
             <Badge v-if="opportunity" :class="['status-badge', getStatusClass(opportunity.status)]">
               {{ getStatusText(opportunity.status) }}
             </Badge>
+            <Badge v-if="opportunity" :class="['status-badge', getApprovalPhaseClass(opportunity.approval_phase)]">
+              {{ getApprovalPhaseText(opportunity.approval_phase) }}
+            </Badge>
             <Badge v-if="opportunity" :class="['status-badge', getPurchaseTypeClass(opportunity.purchase_type)]">
               {{ getPurchaseTypeText(opportunity.purchase_type) }}
             </Badge>
@@ -387,6 +429,15 @@ watch(() => props.opportunityId, () => {
                       {{ opportunity.customer_info?.account_name || '-' }}
                     </RouterLink>
                     <span v-else class="attribute-value">{{ displayCustomerName }}</span>
+                  </div>
+
+                  <div class="attribute-item">
+                    <div class="attribute-label">审批状态</div>
+                    <span class="attribute-value">
+                      <Badge :class="['status-badge', getApprovalPhaseClass(opportunity.approval_phase)]">
+                        {{ getApprovalPhaseText(opportunity.approval_phase) }}
+                      </Badge>
+                    </span>
                   </div>
 
                   <div class="attribute-item">
@@ -459,7 +510,28 @@ watch(() => props.opportunityId, () => {
             </CardContent>
           </Card>
 
-          <OpportunityStageStepper :opportunity-id="opportunity.id" />
+          <OpportunityStageStepper
+            v-if="isApprovalApproved"
+            :opportunity-id="opportunity.id"
+          />
+
+          <Card class="approval-card">
+            <CardHeader class="p-4 border-b border-wolf-border-light-v2">
+              <h3 class="text-sm font-semibold text-wolf-text-primary-v2">审批流程</h3>
+            </CardHeader>
+            <CardContent class="p-4">
+              <ApprovalProcessGeneric
+                entity-type="OPPORTUNITY"
+                :entity-id="opportunity.id"
+                :is-submitter="isApprovalSubmitter"
+                @submitted="fetchOpportunityDetail"
+                @approved="fetchOpportunityDetail"
+                @rejected="fetchOpportunityDetail"
+                @withdrawn="fetchOpportunityDetail"
+                @resubmit="handleEdit"
+              />
+            </CardContent>
+          </Card>
 
           <Card class="contract-card">
             <CardHeader class="p-4 border-b border-wolf-border-light-v2">
@@ -480,7 +552,7 @@ watch(() => props.opportunityId, () => {
                     商机已赢单，请及时创建合同以锁定交易
                   </EmptyDescription>
                 </EmptyHeader>
-                <EmptyContent v-if="opportunity.status === 1">
+                <EmptyContent v-if="opportunity.status === 1 && isApprovalApproved">
                   <Button size="sm" @click="handleCreateContract">创建合同</Button>
                 </EmptyContent>
               </Empty>
@@ -548,7 +620,7 @@ watch(() => props.opportunityId, () => {
         打开完整商机详情
       </Button>
       <Button
-        v-if="isActive && canEdit"
+        v-if="isActive && canWin && isApprovalApproved"
         variant="default"
         class="bg-wolf-success-v2 hover:bg-wolf-success-v2/90"
         @click="winDialogOpen = true"
@@ -557,7 +629,7 @@ watch(() => props.opportunityId, () => {
         赢单
       </Button>
       <Button
-        v-if="isActive && canEdit"
+        v-if="isActive && canLose && isApprovalApproved"
         variant="outline"
         class="text-wolf-danger-v2 border-wolf-danger-v2 hover:bg-wolf-danger-bg-v2"
         @click="loseDialogOpen = true"
@@ -566,7 +638,7 @@ watch(() => props.opportunityId, () => {
         输单
       </Button>
       <Button
-        v-if="canEdit"
+        v-if="canEdit && !isApprovalPending"
         variant="outline"
         @click="handleEdit"
       >

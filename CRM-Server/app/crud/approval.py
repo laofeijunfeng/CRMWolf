@@ -207,7 +207,7 @@ class ApprovalFlowCRUD:
         license_type: Optional[str],
     ) -> Tuple[Optional[ApprovalFlow], Optional[str]]:
         """
-        通用审批流程匹配（支持 CONTRACT/PAYMENT/INVOICE/LICENSE）
+        通用审批流程匹配（支持 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
 
         E1 合同回归契约（P0）：business_type='CONTRACT' 的匹配结果必须与改造前
         match_flow(contract) 逐字一致——仅多 `ApprovalFlow.business_type == 'CONTRACT'`
@@ -219,7 +219,7 @@ class ApprovalFlowCRUD:
 
         Args:
             db: 数据库会话
-            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE）
+            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
             team_id: 团队ID（可选，用于团队隔离）
             amount: 单据金额（合同 total_amount / 回款 actual_amount / 发票 invoice_amount）
             license_type: 授权类型（仅合同有值，回款/发票传 None）
@@ -252,6 +252,7 @@ class ApprovalFlowCRUD:
                 BusinessType.PAYMENT: "回款",
                 BusinessType.INVOICE: "发票",
                 BusinessType.LICENSE: "License",
+                BusinessType.OPPORTUNITY: "商机",
             }
             display_name = display_names.get(business_type, "业务单据")
             return None, f"未找到匹配的{display_name}审批流程，请联系管理员创建或完善审批流程"
@@ -465,7 +466,7 @@ class ApprovalCRUD:
 
         Args:
             db: 数据库会话
-            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE）
+            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
             business_id: 业务单据ID
             team_id: 团队ID（可选，团队隔离）
 
@@ -593,7 +594,7 @@ class ApprovalCRUD:
         submitter_name: str,
     ) -> Approval:
         """
-        通用审批实例创建（支持 CONTRACT/PAYMENT/INVOICE/LICENSE）
+        通用审批实例创建（支持 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
 
         - 通过适配器 get_entity 取业务单据；不存在则 raise ValueError（防幻觉单据ID）
         - 写 Approval.business_type/business_id；CONTRACT 额外写 contract_id=business_id 兼容旧字段
@@ -848,7 +849,7 @@ class ApprovalCRUD:
         limit: int = 100
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        查询超时的审批实例列表（泛化覆盖 CONTRACT/PAYMENT/INVOICE/LICENSE）。
+        查询超时的审批实例列表（泛化覆盖 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）。
 
         I-1 修复：原实现 `JOIN Contract ON Approval.contract_id == Contract.id`
         为 INNER JOIN，非合同审批 contract_id 可能为 NULL，导致超时审批在
@@ -980,7 +981,7 @@ class ApprovalCRUD:
             user_id: 当前用户ID（int，用于 submitted/processed 过滤）
             user_roles: 当前用户在 team_id 下的角色 code 列表（用于 pending 过滤）
             tab: pending / processed / submitted
-            business_type: 可选业务类型过滤（CONTRACT / PAYMENT / INVOICE / LICENSE）
+            business_type: 可选业务类型过滤（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY）
             page: 页码（1-based）
             page_size: 每页条数
 
@@ -1086,6 +1087,7 @@ class ApprovalCRUD:
         - INVOICE: application_number / invoice_title_text / invoice_amount
         - PAYMENT: record_number 或 PAY-{id} / 合同名 / actual_amount
         - LICENSE: application_number / license_type / None
+        - OPPORTUNITY: OPP-{id} / opportunity_name / total_amount
         - customer_info: 四类业务统一返回关联客户/公司基础信息
 
         Returns:
@@ -1095,6 +1097,7 @@ class ApprovalCRUD:
         from app.models.customer import Customer
         from app.models.invoice import InvoiceApplication
         from app.models.license_application import LicenseApplication
+        from app.models.opportunity import Opportunity
         from app.models.payment import PaymentRecord, PaymentPlan
 
         ids_by_type: Dict[str, List[int]] = {
@@ -1102,6 +1105,7 @@ class ApprovalCRUD:
             BusinessType.INVOICE: [],
             BusinessType.PAYMENT: [],
             BusinessType.LICENSE: [],
+            BusinessType.OPPORTUNITY: [],
         }
         for ap in approvals:
             if ap.business_id and ap.business_type in ids_by_type:
@@ -1145,6 +1149,10 @@ class ApprovalCRUD:
                     "entity_name": c.contract_name,
                     "entity_amount": float(c.total_amount) if c.total_amount is not None else None,
                     "customer_info": customers_by_id.get(c.customer_id),
+                    "contract_file_path": c.contract_file_path,
+                    "contract_file_name": c.contract_file_name,
+                    "contract_file_size": c.contract_file_size,
+                    "contract_file_mime_type": c.contract_file_mime_type,
                 }
 
         # INVOICE
@@ -1206,6 +1214,21 @@ class ApprovalCRUD:
                     "entity_amount": None,
                     "license_status": lic.status,
                     "customer_info": customers_by_id.get(lic.customer_id),
+                }
+
+        # OPPORTUNITY
+        if ids_by_type["OPPORTUNITY"]:
+            opportunities = db.query(Opportunity).filter(
+                Opportunity.id.in_(ids_by_type["OPPORTUNITY"]),
+                Opportunity.team_id == team_id,
+            ).all()
+            customers_by_id = fetch_customers([opp.customer_id for opp in opportunities])
+            for opp in opportunities:
+                summaries[(BusinessType.OPPORTUNITY, opp.id)] = {
+                    "application_number": f"OPP-{opp.id}",
+                    "entity_name": opp.opportunity_name,
+                    "entity_amount": float(opp.total_amount) if opp.total_amount is not None else None,
+                    "customer_info": customers_by_id.get(opp.customer_id),
                 }
 
         return summaries

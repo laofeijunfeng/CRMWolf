@@ -13,13 +13,18 @@ class FileStorageError(Exception):
 
 
 # 允许的文件扩展名（发票常见格式）
-ALLOWED_EXTENSIONS = {
+INVOICE_ALLOWED_EXTENSIONS = {
     ".pdf",   # PDF 发票
     ".jpg",   # 图片发票
     ".jpeg",
     ".png",
     ".ofd",   # 电子发票格式
 }
+CONTRACT_ALLOWED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+}
+ALLOWED_EXTENSIONS = INVOICE_ALLOWED_EXTENSIONS
 
 # 最大文件大小（10MB）
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -35,7 +40,7 @@ class FileStorageService:
         """
         self.base_dir = base_dir or get_settings().UPLOAD_DIR
 
-    def _validate_filename(self, filename: str) -> str:
+    def _validate_filename(self, filename: str, allowed_extensions: Optional[set[str]] = None) -> str:
         """校验文件名安全性
 
         1. 禁止路径穿越（../）
@@ -48,25 +53,26 @@ class FileStorageService:
 
         # 检查扩展名
         ext = os.path.splitext(filename)[1].lower()
-        if ext not in ALLOWED_EXTENSIONS:
+        extensions = allowed_extensions or ALLOWED_EXTENSIONS
+        if ext not in extensions:
             raise FileStorageError(
-                f"不允许的文件类型：{ext}。允许类型：{', '.join(ALLOWED_EXTENSIONS)}"
+                f"不允许的文件类型：{ext}。允许类型：{', '.join(sorted(extensions))}"
             )
 
         return filename
 
-    def _generate_safe_filename(self, original_filename: str, invoice_id: int) -> str:
+    def _generate_safe_filename(self, original_filename: str, entity_id: int) -> str:
         """生成安全的存储文件名
 
         格式：{invoice_id}_{timestamp}_{hash}.{ext}
         """
         ext = os.path.splitext(original_filename)[1].lower()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # 用 invoice_id + timestamp 作为 hash 输入，避免文件名冲突
-        hash_input = f"{invoice_id}_{timestamp}_{original_filename}"
+        # 用实体 ID + timestamp 作为 hash 输入，避免文件名冲突
+        hash_input = f"{entity_id}_{timestamp}_{original_filename}"
         hash_suffix = hashlib.md5(hash_input.encode()).hexdigest()[:8]
 
-        return f"{invoice_id}_{timestamp}_{hash_suffix}{ext}"
+        return f"{entity_id}_{timestamp}_{hash_suffix}{ext}"
 
     def save_invoice_file(
         self,
@@ -96,7 +102,7 @@ class FileStorageService:
             )
 
         # 校验文件名
-        safe_filename = self._validate_filename(filename)
+        safe_filename = self._validate_filename(filename, INVOICE_ALLOWED_EXTENSIONS)
         storage_filename = self._generate_safe_filename(safe_filename, invoice_id)
 
         # 构建目录路径：{base_dir}/invoices/{team_id}/{invoice_id}/
@@ -116,6 +122,33 @@ class FileStorageService:
         # 返回相对路径
         relative_path = os.path.join("invoices", str(team_id), str(invoice_id), storage_filename)
         return relative_path
+
+    def save_contract_file(
+        self,
+        team_id: int,
+        contract_id: int,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        """保存合同附件，仅允许 PDF 和 DOCX。"""
+        if len(content) > MAX_FILE_SIZE:
+            raise FileStorageError(
+                f"文件过大：{len(content)} 字节，最大允许 {MAX_FILE_SIZE} 字节"
+            )
+
+        safe_filename = self._validate_filename(filename, CONTRACT_ALLOWED_EXTENSIONS)
+        storage_filename = self._generate_safe_filename(safe_filename, contract_id)
+        dir_path = os.path.join(self.base_dir, "contracts", str(team_id), str(contract_id))
+
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+            full_path = os.path.join(dir_path, storage_filename)
+            with open(full_path, "wb") as f:
+                f.write(content)
+        except OSError as e:
+            raise FileStorageError(f"文件保存失败：{e}") from e
+
+        return os.path.join("contracts", str(team_id), str(contract_id), storage_filename)
 
     def get_full_path(self, relative_path: str) -> str:
         """获取文件完整路径

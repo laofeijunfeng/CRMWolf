@@ -3,7 +3,7 @@
  * ProcurementSheet.vue - 采购配置管理 Sheet
  *
  * 功能：
- * - 展示采购方式列表（DataTable）
+ * - 展示采购方式列表（ListCard）
  * - 搜索采购方式
  * - 新建/编辑采购方式（Dialog）
  * - 删除采购方式
@@ -15,7 +15,6 @@
  * - z-index: Sheet z-[200], Dialog z-[1000]
  */
 import { ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
@@ -31,7 +30,7 @@ import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { DataTable } from '@/components/crmwolf'
+import { ListCard } from '@/components/crmwolf'
 import {
   Dialog,
   DialogContent,
@@ -73,13 +72,12 @@ type Emits = (e: 'update:open', value: boolean) => void
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
-const router = useRouter()
 
 // ==================== State ====================
 const loading = ref(false)
 const procurementMethods = ref<ProcurementMethod[]>([])
 const searchText = ref('')
-const filterStatus = ref<string | undefined>(undefined)
+const filterStatus = ref('all')
 const pagination = ref({
   page: 1,
   pageSize: 20,
@@ -123,58 +121,6 @@ const { handleSubmit, resetForm } = useForm({
   }
 })
 
-// ==================== Types ====================
-interface Column {
-  key: string
-  title: string
-  width?: string
-  align?: 'left' | 'center' | 'right'
-  fixed?: 'left' | 'right'
-}
-
-// ==================== Table Columns ====================
-const columns: Column[] = [
-  {
-    key: 'code',
-    title: '编码',
-    width: '150px',
-    fixed: 'left'
-  },
-  {
-    key: 'name',
-    title: '名称',
-    width: '150px'
-  },
-  {
-    key: 'sort_order',
-    title: '排序',
-    width: '80px',
-    align: 'center'
-  },
-  {
-    key: 'is_active',
-    title: '状态',
-    width: '80px',
-    align: 'center'
-  },
-  {
-    key: 'description',
-    title: '描述'
-  },
-  {
-    key: 'created_time',
-    title: '创建时间',
-    width: '160px'
-  },
-  {
-    key: 'actions',
-    title: '操作',
-    width: '160px',
-    fixed: 'right',
-    align: 'center'
-  }
-]
-
 // ==================== Computed ====================
 const filteredMethods = computed(() => {
   let filtered = procurementMethods.value
@@ -187,7 +133,7 @@ const filteredMethods = computed(() => {
     )
   }
 
-  if (filterStatus.value !== undefined) {
+  if (filterStatus.value !== 'all') {
     filtered = filtered.filter(method =>
       filterStatus.value === 'true' ? method.is_active : !method.is_active
     )
@@ -195,6 +141,8 @@ const filteredMethods = computed(() => {
 
   return filtered.sort((a, b) => a.sort_order - b.sort_order)
 })
+
+const listTitle = computed(() => `采购方式列表（${filteredMethods.value.length}）`)
 
 // ==================== API Methods ====================
 const fetchProcurementMethods = async (): Promise<void> => {
@@ -226,7 +174,17 @@ const showCreateDialog = (): void => {
 }
 
 const handleEdit = (record: ProcurementMethod): void => {
-  router.push(`/procurement-methods/${record.id}/edit`)
+  isEditMode.value = true
+  selectedMethod.value = record
+  resetForm({
+    values: {
+      code: record.code,
+      name: record.name,
+      sort_order: record.sort_order,
+      description: record.description ?? ''
+    }
+  })
+  dialogOpen.value = true
 }
 
 const onSubmit = handleSubmit(async (formValues) => {
@@ -235,18 +193,18 @@ const onSubmit = handleSubmit(async (formValues) => {
     if (isEditMode.value && selectedMethod.value) {
       const updateData: ProcurementMethodUpdate = {
         name: formValues.name,
-        sort_order: formValues.sort_order,
-        description: formValues.description ?? undefined
+        sort_order: formValues.sort_order
       }
+      if (formValues.description) updateData.description = formValues.description
       await procurementApi.updateProcurementMethod(selectedMethod.value.id, updateData)
       toast.success('采购方式更新成功')
     } else {
       const createData: ProcurementMethodCreate = {
         code: formValues.code,
         name: formValues.name,
-        sort_order: formValues.sort_order,
-        description: formValues.description ?? undefined
+        sort_order: formValues.sort_order
       }
+      if (formValues.description) createData.description = formValues.description
       await procurementApi.createProcurementMethod(createData)
       toast.success('采购方式创建成功')
     }
@@ -335,6 +293,7 @@ function formatDate(dateStr: string): string {
                 <SelectValue placeholder="筛选状态" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="all">全部</SelectItem>
                 <SelectItem value="true">启用</SelectItem>
                 <SelectItem value="false">停用</SelectItem>
               </SelectContent>
@@ -342,66 +301,45 @@ function formatDate(dateStr: string): string {
           </div>
         </div>
 
-        <!-- 表格区域 -->
+        <!-- 列表区域 -->
         <div class="p-4">
-          <DataTable
-            :columns="columns"
-            :data="filteredMethods"
+          <ListCard
+            :title="listTitle"
+            :items="filteredMethods"
             :loading="loading"
-            :total="pagination.total"
-            :page="pagination.page"
-            :page-size="pagination.pageSize"
-            height="calc(100vh - 350px)"
-            empty-title="暂无采购方式"
+            empty-text="暂无采购方式"
           >
-            <!-- 编码列 -->
-            <template #cell-code="{ row }">
-              <span class="text-primary font-medium cursor-pointer hover:underline">
-                {{ row.code }}
-              </span>
+            <template #itemMain="{ item }">
+              <div class="font-medium text-wolf-text-primary">{{ item.name }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">
+                {{ item.code }} · 排序 {{ item.sort_order }} · {{ formatDate(item.created_time) }}
+              </div>
+              <div v-if="item.description" class="mt-1 text-sm text-muted-foreground">
+                {{ item.description }}
+              </div>
             </template>
 
-            <!-- 状态列 -->
-            <template #cell-is_active="{ row }">
-              <Badge :variant="row.is_active ? 'default' : 'secondary'">
-                {{ row.is_active ? '启用' : '停用' }}
+            <template #itemBadges="{ item }">
+              <Badge :variant="item.is_active ? 'default' : 'secondary'">
+                {{ item.is_active ? '启用' : '停用' }}
               </Badge>
             </template>
 
-            <!-- 描述列 -->
-            <template #cell-description="{ row }">
-              <span class="text-muted-foreground">{{ row.description || '-' }}</span>
+            <template #itemActions="{ item }">
+              <Button variant="ghost" size="icon" title="编辑" @click="handleEdit(item)">
+                <Pencil class="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="删除"
+                class="text-destructive hover:text-destructive"
+                @click="handleDelete(item)"
+              >
+                <Trash2 class="h-4 w-4" />
+              </Button>
             </template>
-
-            <!-- 创建时间列 -->
-            <template #cell-created_time="{ row }">
-              {{ formatDate(row.created_time) }}
-            </template>
-
-            <!-- 操作列 -->
-            <template #cell-actions="{ row }">
-              <div class="flex items-center justify-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 px-2"
-                  @click="handleEdit(row)"
-                >
-                  <Pencil class="w-3.5 h-3.5 mr-1" />
-                  编辑
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 px-2 text-destructive hover:text-destructive"
-                  @click="handleDelete(row)"
-                >
-                  <Trash2 class="w-3.5 h-3.5 mr-1" />
-                  删除
-                </Button>
-              </div>
-            </template>
-          </DataTable>
+          </ListCard>
         </div>
       </ScrollArea>
     </DetailSheetContent>

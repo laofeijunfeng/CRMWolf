@@ -94,12 +94,6 @@ const routes: RouteRecordRaw[] = [
         redirect: '/opportunities'
       },
       {
-        path: 'users',
-        name: 'Users',
-        component: () => import('@/views/Users.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
         path: 'roles',
         name: 'Roles',
         redirect: '/system-config'
@@ -107,8 +101,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'approval-flows',
         name: 'ApprovalFlows',
-        component: () => import('@/views/ApprovalFlows.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'approval-flows/create',
@@ -153,26 +146,22 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'procurement-methods',
         name: 'ProcurementMethods',
-        component: () => import('@/views/ProcurementMethods.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'procurement-methods/create',
         name: 'ProcurementMethodCreate',
-        component: () => import('@/views/ProcurementMethodForm.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'procurement-methods/:id/edit',
         name: 'ProcurementMethodEdit',
-        component: () => import('@/views/ProcurementMethodForm.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'procurement-methods/:methodId/stages',
         name: 'ProcurementStageTemplates',
-        component: () => import('@/views/ProcurementStageTemplates.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       {
         path: 'settings',
@@ -207,8 +196,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'team-members',
         name: 'TeamMembers',
-        component: () => import('@/views/TeamMembers.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/system-config'
       },
       // 审批中心（Phase C / Task C3）：取代自写按钮的
       // FinanceInvoiceApprovals / FinancePaymentConfirmations，INVOICE 与 PAYMENT

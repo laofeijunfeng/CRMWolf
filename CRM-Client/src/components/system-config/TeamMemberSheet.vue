@@ -3,7 +3,7 @@
  * TeamMemberSheet.vue - 团队成员管理 Sheet
  *
  * 功能：
- * - 展示团队成员列表（DataTable）
+ * - 展示团队成员列表（ListCard）
  * - 邀请成员（Dialog）
  * - 分配角色（Dialog）
  * - 重置成员密码（Dialog）
@@ -20,7 +20,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
-import { Search, Plus, RefreshCw, UserPlus, Key, Shield, Trash2, Loader2 } from 'lucide-vue-next'
+import { Search, RefreshCw, UserPlus, Key, Shield, Trash2, Loader2 } from 'lucide-vue-next'
 import {
   Sheet,
   SheetHeader,
@@ -31,7 +31,7 @@ import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { DataTable } from '@/components/crmwolf'
+import { ListCard } from '@/components/crmwolf'
 import {
   Dialog,
   DialogContent,
@@ -50,18 +50,12 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import {
-  Empty,
-  EmptyHeader,
-  EmptyTitle
-} from '@/components/ui/empty'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog, confirmDelete } from '@/utils/confirmDialog'
 import {
   teamApi,
   type TeamMemberResponse,
-  type TeamResponse,
-  type RoleSimpleResponse
+  type TeamResponse
 } from '@/api/team'
 import userApi, { type UserSearchResult } from '@/api/user'
 import roleApi, { type RoleResponse } from '@/api/role'
@@ -132,15 +126,6 @@ const { handleSubmit: handleResetPasswordSubmit, resetForm: resetPasswordResetFo
   }
 })
 
-// ==================== Types ====================
-interface Column {
-  key: string
-  title: string
-  width?: string
-  align?: 'left' | 'center' | 'right'
-  fixed?: 'left' | 'right'
-}
-
 // ==================== Computed ====================
 const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
 const teamId = computed(() => teamStore.currentTeam?.id)
@@ -159,43 +144,7 @@ const filteredMembers = computed(() => {
   )
 })
 
-// ==================== Table Columns ====================
-const columns: Column[] = [
-  {
-    key: 'name',
-    title: '姓名',
-    width: '150px',
-    fixed: 'left'
-  },
-  {
-    key: 'email',
-    title: '邮箱',
-    width: '200px'
-  },
-  {
-    key: 'current_team',
-    title: '当前团队',
-    width: '100px',
-    align: 'center'
-  },
-  {
-    key: 'joined_at',
-    title: '加入时间',
-    width: '160px'
-  },
-  {
-    key: 'roles',
-    title: '角色',
-    width: '200px'
-  },
-  {
-    key: 'actions',
-    title: '操作',
-    width: '220px',
-    fixed: 'right',
-    align: 'center'
-  }
-]
+const listTitle = computed(() => `成员列表（${filteredMembers.value.length}）`)
 
 // ==================== API Methods ====================
 const fetchTeamInfo = async (): Promise<void> => {
@@ -441,98 +390,76 @@ function handleRoleChange(roleId: number, checked: boolean): void {
           </div>
         </div>
 
-        <!-- 表格区域 -->
+        <!-- 列表区域 -->
         <div class="p-4">
-          <DataTable
-            :columns="columns"
-            :data="filteredMembers"
+          <ListCard
+            :title="listTitle"
+            :items="filteredMembers"
             :loading="loading"
-            :total="pagination.total"
-            :page="pagination.page"
-            :page-size="pagination.pageSize"
-            height="calc(100vh - 400px)"
-            empty-title="暂无团队成员"
+            empty-text="暂无团队成员"
           >
-            <!-- 姓名列 -->
-            <template #cell-name="{ row }">
-              <div class="flex items-center gap-2">
-                <div v-if="row.avatar_url" class="w-8 h-8 rounded-full overflow-hidden">
-                  <img :src="row.avatar_url" alt="头像" class="w-full h-full object-cover" />
+            <template #itemMain="{ item }">
+              <div class="flex items-center gap-3">
+                <div v-if="item.avatar_url" class="h-9 w-9 overflow-hidden rounded-full">
+                  <img :src="item.avatar_url" alt="头像" class="h-full w-full object-cover" />
                 </div>
-                <div v-else class="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-sm font-semibold">
-                  {{ row.name?.charAt(0) || 'U' }}
+                <div v-else class="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+                  {{ item.name?.charAt(0) || 'U' }}
                 </div>
-                <span class="font-medium">{{ row.name }}</span>
+                <div class="min-w-0">
+                  <div class="font-medium text-wolf-text-primary">{{ item.name }}</div>
+                  <div class="mt-1 text-xs text-muted-foreground">
+                    {{ item.email }} · {{ formatDate(item.joined_at) }}
+                  </div>
+                </div>
               </div>
             </template>
 
-            <!-- 当前团队列 -->
-            <template #cell-current_team="{ row }">
-              <Badge :variant="row.current_team ? 'default' : 'secondary'">
-                {{ row.current_team ? '是' : '否' }}
+            <template #itemBadges="{ item }">
+              <Badge :variant="item.current_team ? 'default' : 'secondary'">
+                {{ item.current_team ? '当前团队' : '其他团队' }}
               </Badge>
+              <Badge
+                v-for="role in item.roles"
+                :key="role.id"
+                variant="outline"
+              >
+                {{ role.name }}
+              </Badge>
+              <Badge v-if="!item.roles || item.roles.length === 0" variant="secondary">暂无角色</Badge>
             </template>
 
-            <!-- 加入时间列 -->
-            <template #cell-joined_at="{ row }">
-              {{ formatDate(row.joined_at) }}
+            <template #itemActions="{ item }">
+              <Button
+                v-if="item.id !== currentUserId && isTeamAdmin"
+                variant="ghost"
+                size="icon"
+                title="重置密码"
+                @click="showResetPasswordDialog(item)"
+              >
+                <Key class="h-4 w-4" />
+              </Button>
+              <Button
+                v-if="item.id !== currentUserId && isTeamAdmin"
+                variant="ghost"
+                size="icon"
+                title="分配角色"
+                @click="handleAssignRoles(item)"
+              >
+                <Shield class="h-4 w-4" />
+              </Button>
+              <Button
+                v-if="item.id !== currentUserId && isTeamAdmin"
+                variant="ghost"
+                size="icon"
+                title="移除"
+                class="text-destructive hover:text-destructive"
+                @click="handleRemoveMember(item)"
+              >
+                <Trash2 class="h-4 w-4" />
+              </Button>
             </template>
-
-            <!-- 角色列 -->
-            <template #cell-roles="{ row }">
-              <div class="flex items-center gap-1 flex-wrap">
-                <Badge
-                  v-for="role in row.roles"
-                  :key="role.id"
-                  variant="outline"
-                  class="text-xs"
-                >
-                  {{ role.name }}
-                </Badge>
-                <Empty v-if="!row.roles || row.roles.length === 0" class="min-h-0 border-0 p-0">
-                  <EmptyHeader>
-                    <EmptyTitle class="text-sm font-normal text-muted-foreground">暂无角色</EmptyTitle>
-                  </EmptyHeader>
-                </Empty>
-              </div>
-            </template>
-
-            <!-- 操作列 -->
-            <template #cell-actions="{ row }">
-              <div class="flex items-center justify-center gap-1">
-                <Button
-                  v-if="row.id !== currentUserId && isTeamAdmin"
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 px-2"
-                  @click="showResetPasswordDialog(row)"
-                >
-                  <Key class="w-3.5 h-3.5 mr-1" />
-                  重置密码
-                </Button>
-                <Button
-                  v-if="row.id !== currentUserId && isTeamAdmin"
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 px-2"
-                  @click="handleAssignRoles(row)"
-                >
-                  <Shield class="w-3.5 h-3.5 mr-1" />
-                  分配角色
-                </Button>
-                <Button
-                  v-if="row.id !== currentUserId && isTeamAdmin"
-                  variant="ghost"
-                  size="sm"
-                  class="h-8 px-2 text-destructive hover:text-destructive"
-                  @click="handleRemoveMember(row)"
-                >
-                  <Trash2 class="w-3.5 h-3.5 mr-1" />
-                  移除
-                </Button>
-              </div>
-            </template>
-          </DataTable>
+          </ListCard>
         </div>
       </ScrollArea>
     </DetailSheetContent>

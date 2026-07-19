@@ -28,6 +28,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
+    "docx-preview": "^0.3.7",
     "element-plus": "^2.13.2",
     "embla-carousel-vue": "^8.6.0",
     "lucide-vue-next": "^1.0.0",

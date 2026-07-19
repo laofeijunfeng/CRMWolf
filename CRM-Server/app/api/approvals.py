@@ -66,7 +66,7 @@ def log_approval_operation(
         notification_status: 通知发送状态（success/failed/skipped）
         reason: 拒绝/撤回原因
         level: 日志级别（默认 INFO）
-        business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE）
+        business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
         business_id: 业务单据ID（A6 通用端点）
     """
     message = f"[Approval] {operation}"
@@ -1045,6 +1045,7 @@ _SELF_APPROVE_DENY_MSG = {
     BusinessType.PAYMENT: "您没有权限审批自己创建的回款",
     BusinessType.INVOICE: "您没有权限审批自己创建的发票",
     BusinessType.LICENSE: "您没有权限审批自己创建的License申请",
+    BusinessType.OPPORTUNITY: "您没有权限审批自己创建的商机",
 }
 
 
@@ -1099,7 +1100,7 @@ def _check_approve_permissions(
 
     - 角色校验：current_node.approve_role 不在 current_user 角色集 → 403
     - 自审追加：current_user 是单据提交人时需 `<resource>:approve:own` 权限 → 403
-      （CONTRACT/PAYMENT/INVOICE/LICENSE 均校验，泛化自原 CONTRACT-only 逻辑，M-3）
+      （CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY 均校验，泛化自原 CONTRACT-only 逻辑，M-3）
 
     旧合同端点传 entity_type=BusinessType.CONTRACT / entity_id=contract_id；
     新通用端点传路由参数 entity_type / entity_id。
@@ -1113,7 +1114,7 @@ def _check_approve_permissions(
             detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}",
         )
 
-    # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE/LICENSE 通用）
+    # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY 通用）
     if entity_type is not None and entity_id is not None:
         _check_self_approval_permission(
             db, current_user, team_id, entity_type, entity_id
@@ -1166,7 +1167,7 @@ def _check_next_node_has_approvers(
 
 
 # ============================================================================
-# 通用审批 API 端点（CONTRACT / PAYMENT / INVOICE / LICENSE 统一入口）
+# 通用审批 API 端点（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY 统一入口）
 # ============================================================================
 # 设计要点：
 # - 新端点 prefix 沿用既有 router 的 `/v1/approvals`
@@ -1265,6 +1266,10 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
         "flow_is_active": flow_is_active,
         "flow_disabled_warning": flow_disabled_warning,
         "customer_info": summary.get("customer_info") if summary else None,
+        "contract_file_path": summary.get("contract_file_path") if summary else None,
+        "contract_file_name": summary.get("contract_file_name") if summary else None,
+        "contract_file_size": summary.get("contract_file_size") if summary else None,
+        "contract_file_mime_type": summary.get("contract_file_mime_type") if summary else None,
         "license_status": summary.get("license_status") if summary else None,
         "records": record_list,
     }
@@ -1275,7 +1280,7 @@ def _validate_entity_type(entity_type: str) -> None:
     if not is_valid_business_type(entity_type):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效的业务单据类型: {entity_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE",
+            detail=f"无效的业务单据类型: {entity_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
         )
 
 
@@ -1284,7 +1289,7 @@ def _validate_entity_type(entity_type: str) -> None:
     response_model=GenericApprovalSubmitResponse,
     summary="提交审批（通用）",
     description="""
-将草稿状态的业务单据（合同/回款/发票/License）提交到审批流程，统一入口。
+将草稿状态的业务单据（合同/回款/发票/License/商机）提交到审批流程，统一入口。
 
 **功能说明：**
 - 按 entity_type 走对应适配器取实体；不存在 → 404
@@ -1293,7 +1298,7 @@ def _validate_entity_type(entity_type: str) -> None:
 - 通知由 Task A8 泛化，本端点暂不发送
 
 **路径参数：**
-- entity_type: CONTRACT / PAYMENT / INVOICE / LICENSE
+- entity_type: CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY
 - entity_id: 业务单据 ID
 """,
 )
@@ -1672,7 +1677,7 @@ def detail_generic_approval(
 
 **查询参数：**
 - tab: pending / processed / submitted
-- business_type: 可选 CONTRACT / PAYMENT / INVOICE / LICENSE 维度过滤
+- business_type: 可选 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY 维度过滤
 - page / page_size: 分页
 
 **返回字段：**
@@ -1684,7 +1689,7 @@ def detail_generic_approval(
 )
 def list_approvals(
     tab: str = Query("pending", description="过滤维度：pending/processed/submitted"),
-    business_type: Optional[str] = Query(None, description="业务类型过滤 CONTRACT/PAYMENT/INVOICE/LICENSE"),
+    business_type: Optional[str] = Query(None, description="业务类型过滤 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY"),
     page: int = Query(1, ge=1, description="页码，1-based"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     team_id: int = Depends(get_current_user_team),
@@ -1700,7 +1705,7 @@ def list_approvals(
     if business_type is not None and not is_valid_business_type(business_type):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效的业务单据类型: {business_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE",
+            detail=f"无效的业务单据类型: {business_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
         )
 
     # 当前用户在该 team 下的角色 code 集合（pending tab 过滤用）

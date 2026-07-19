@@ -19,6 +19,11 @@ export interface ContractCreate {
   owner_id?: string | null
 }
 
+export interface ContractCreateWithFile {
+  data: ContractCreate
+  file: File
+}
+
 export interface ContractUpdate {
   contract_name?: string | null
   signing_contact_id?: number | null
@@ -57,6 +62,10 @@ export interface ContractListResponse {
   signing_contact_info?: ContactBasicInfo
   owner_info?: CreatorBasicInfo
   creator_info?: CreatorBasicInfo
+  contract_file_path?: string | null
+  contract_file_name?: string | null
+  contract_file_size?: number | null
+  contract_file_mime_type?: string | null
 }
 
 export interface CreatorBasicInfo {
@@ -117,6 +126,10 @@ export interface ContractResponse {
   contact_info?: ContactBasicInfo
   owner_info?: CreatorBasicInfo
   creator_info?: CreatorBasicInfo
+  contract_file_path?: string | null
+  contract_file_name?: string | null
+  contract_file_size?: number | null
+  contract_file_mime_type?: string | null
   contacts?: {
     id: number
     name: string
@@ -151,11 +164,16 @@ export interface ContractQueryParams {
 export interface ContractFromOpportunityParams {
   contract_name: string
   signing_contact_id: number
+  file: File
 }
 
 const contractApi = {
-  createContract: async (data: ContractCreate): Promise<ContractResponse> => {
-    const response = await request.post<ContractResponse>('/v1/contracts/', data)
+  createContract: async (payload: ContractCreateWithFile): Promise<ContractResponse> => {
+    const formData = new FormData()
+    formData.append('contract_payload', JSON.stringify(payload.data))
+    formData.append('file', payload.file)
+
+    const response = await request.post<ContractResponse>('/v1/contracts/', formData)
     return response
   },
 
@@ -180,9 +198,12 @@ const contractApi = {
   },
 
   createContractFromOpportunity: async (opportunityId: number, params: ContractFromOpportunityParams): Promise<ContractResponse> => {
-    const response = await request.post<ContractResponse>(`/v1/contracts/from-opportunity/${opportunityId}`, null, {
-      params
-    })
+    const formData = new FormData()
+    formData.append('contract_name', params.contract_name)
+    formData.append('signing_contact_id', String(params.signing_contact_id))
+    formData.append('file', params.file)
+
+    const response = await request.post<ContractResponse>(`/v1/contracts/from-opportunity/${opportunityId}`, formData)
     return response
   },
 

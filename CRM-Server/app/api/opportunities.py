@@ -28,9 +28,28 @@ from app.schemas.opportunity import (
 )
 from app.schemas.common import PaginatedResponse
 from app.services.feishu import feishu_service
+from app.constants.approval_phase import ApprovalPhase
+from app.constants.business_types import BusinessType
+from app.services.approval_transaction_manager import approval_transaction_manager
 
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机管理"])
+
+
+def _ensure_opportunity_not_pending(opportunity) -> None:
+    if getattr(opportunity, "approval_phase", None) == ApprovalPhase.PENDING_REVIEW:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="商机审批中，暂不能进行该操作"
+        )
+
+
+def _ensure_opportunity_approved(opportunity) -> None:
+    if getattr(opportunity, "approval_phase", None) != ApprovalPhase.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="商机审批通过后才能进行该操作"
+        )
 
 
 
@@ -49,7 +68,39 @@ def create_opportunity(
             detail="客户不存在"
         )
 
-    return opportunity_crud.create(db, opportunity, str(current_user.id), team_id)
+    from app.crud.user import user_crud
+
+    submitter_id = str(current_user.id)
+    submitter = user_crud.get_by_id(db, int(current_user.id))
+    submitter_name = submitter.name if submitter else None
+
+    entity, approval, error_msg = approval_transaction_manager.create_with_approval(
+        db=db,
+        business_type=BusinessType.OPPORTUNITY,
+        entity_create_func=lambda: opportunity_crud.create_without_commit(
+            db,
+            opportunity,
+            submitter_id,
+            team_id
+        ),
+        match_flow_kwargs={
+            "amount": opportunity.total_amount,
+            "license_type": opportunity.license_type.value,
+        },
+        submitter_id=submitter_id,
+        submitter_name=submitter_name,
+        team_id=team_id,
+        rollback_on_no_flow=True
+    )
+
+    if entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_msg or "商机创建失败"
+        )
+
+    opportunity_crud.log_created(db, entity, submitter_id, team_id)
+    return entity
 
 
 @router.get("/", response_model=PaginatedResponse[OpportunityListResponse], summary="查询商机列表", description="支持分页、按状态/阶段/负责人等多条件筛选和动态排序，返回客户名称、采购阶段、负责人信息")
@@ -173,6 +224,7 @@ def get_opportunities(
             "win_probability": opp.win_probability,
             "owner_id": opp.owner_id,
             "status": opp.status,
+            "approval_phase": opp.approval_phase,
             "loss_reason": opp.loss_reason,
             "actual_amount": float(opp.actual_amount) if opp.actual_amount else None,
             "actual_closing_date": opp.actual_closing_date,
@@ -295,6 +347,7 @@ def get_available_opportunities_for_contract(
             "win_probability": opp.win_probability,
             "owner_id": opp.owner_id,
             "status": opp.status,
+            "approval_phase": opp.approval_phase,
             "loss_reason": opp.loss_reason,
             "actual_amount": float(opp.actual_amount) if opp.actual_amount else None,
             "actual_closing_date": opp.actual_closing_date,
@@ -402,6 +455,7 @@ def get_opportunity(
         "win_probability": opportunity.win_probability,
         "owner_id": opportunity.owner_id,
         "status": opportunity.status,
+        "approval_phase": opportunity.approval_phase,
         "loss_reason": opportunity.loss_reason,
         "actual_amount": float(opportunity.actual_amount) if opportunity.actual_amount else None,
         "actual_closing_date": opportunity.actual_closing_date,
@@ -494,6 +548,7 @@ def update_opportunity(
     db_opportunity = Depends(check_opportunity_edit_permission),
     db: Session = Depends(get_db)
 ):
+    _ensure_opportunity_not_pending(db_opportunity)
     return opportunity_crud.update(db, db_opportunity, opportunity)
 
 
@@ -508,6 +563,8 @@ async def move_opportunity_stage(
     from sqlalchemy import text
     from app.schemas.opportunity import CurrentStageSnapshotInfo
     from datetime import datetime
+
+    _ensure_opportunity_approved(db_opportunity)
 
     updated_opportunity = opportunity_crud.move_to_stage(
         db=db,
@@ -575,6 +632,7 @@ async def move_opportunity_stage(
         "win_probability": updated_opportunity.win_probability,
         "owner_id": updated_opportunity.owner_id,
         "status": updated_opportunity.status,
+        "approval_phase": updated_opportunity.approval_phase,
         "loss_reason": updated_opportunity.loss_reason,
         "actual_amount": float(updated_opportunity.actual_amount) if updated_opportunity.actual_amount else None,
         "actual_closing_date": updated_opportunity.actual_closing_date,
@@ -609,6 +667,7 @@ async def mark_opportunity_as_won(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="商机不存在"
         )
+    _ensure_opportunity_approved(db_opportunity)
 
     updated_opportunity = opportunity_crud.mark_as_won(db, db_opportunity, win_data, str(current_user.id))
 
@@ -638,6 +697,7 @@ async def mark_opportunity_as_lost(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="商机不存在"
         )
+    _ensure_opportunity_approved(db_opportunity)
 
     updated_opportunity = opportunity_crud.mark_as_lost(db, db_opportunity, lose_data, str(current_user.id))
 

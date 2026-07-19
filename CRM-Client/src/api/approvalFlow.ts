@@ -18,7 +18,7 @@ export interface ApprovalFlow {
   min_amount?: number | null
   max_amount?: number | null
   license_type?: string | null
-  business_type: 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' // 业务类型：合同/回款/发票/许可证
+  business_type: 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' | 'OPPORTUNITY' // 业务类型：合同/回款/发票/许可证/商机
   is_active?: number
   created_time?: string
   last_modified_time?: string
@@ -30,24 +30,29 @@ export interface ApprovalFlowDetail extends ApprovalFlow {
 }
 
 const approvalFlowApi = {
-  getApprovalFlows: (params?: { skip?: number; limit?: number; is_active?: boolean | null }) => {
-    return request.get('/v1/approvals/flows', { params })
+  getApprovalFlows: (params?: { skip?: number; limit?: number; is_active?: boolean | null }): Promise<ApprovalFlowDetail[]> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    return request.get<ApprovalFlowDetail[]>('/v1/approvals/flows', { params })
   },
 
-  getApprovalFlowDetail: (flowId: number) => {
-    return request.get(`/v1/approvals/flows/${flowId}`)
+  getApprovalFlowDetail: (flowId: number): Promise<ApprovalFlowDetail> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    return request.get<ApprovalFlowDetail>(`/v1/approvals/flows/${flowId}`)
   },
 
-  createApprovalFlow: (data: ApprovalFlow) => {
-    return request.post('/v1/approvals/flows', data)
+  createApprovalFlow: (data: ApprovalFlow): Promise<ApprovalFlowDetail> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    return request.post<ApprovalFlowDetail>('/v1/approvals/flows', data)
   },
 
-  updateApprovalFlow: (flowId: number, data: Partial<ApprovalFlow>) => {
-    return request.put(`/v1/approvals/flows/${flowId}`, data)
+  updateApprovalFlow: (flowId: number, data: Partial<ApprovalFlow>): Promise<ApprovalFlowDetail> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    return request.put<ApprovalFlowDetail>(`/v1/approvals/flows/${flowId}`, data)
   },
 
-  deleteApprovalFlow: (flowId: number) => {
-    return request.delete(`/v1/approvals/flows/${flowId}`)
+  deleteApprovalFlow: (flowId: number): Promise<{ success: boolean }> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    return request.delete<{ success: boolean }>(`/v1/approvals/flows/${flowId}`)
   }
 }
 

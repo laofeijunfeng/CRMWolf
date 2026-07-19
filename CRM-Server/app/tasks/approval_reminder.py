@@ -279,7 +279,7 @@ class ApprovalReminderScheduler:
         Args:
             db: 数据库会话
             approval: 审批实例
-            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
             entity_name: 业务单据展示名
             business_id: 业务单据ID
             node: 当前审批节点
@@ -329,7 +329,7 @@ class ApprovalReminderScheduler:
         Args:
             db: 数据库会话
             approval: 审批实例
-            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
             entity_name: 业务单据展示名
             business_id: 业务单据ID
             node: 当前审批节点
@@ -411,7 +411,7 @@ class ApprovalReminderScheduler:
         Args:
             db: 数据库会话
             approval: 审批实例
-            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE）
+            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
             entity_name: 业务单据展示名
             business_id: 业务单据ID
             node: 当前审批节点

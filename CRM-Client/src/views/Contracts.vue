@@ -398,13 +398,46 @@ watchEffect(() => {
       :total="pagination.total"
       height="calc(100vh - 136px)"
       empty-title="暂无合同"
+      row-interactive
+      mobile-title-key="contract_name"
+      mobile-subtitle-key="customer"
+      mobile-status-key="status"
+      :mobile-meta-keys="['contract_number', 'creator', 'signing_date']"
       v-model:filters="activeFilters"
       :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @row-click="handleViewDetail"
     >
+      <template #mobile-card="{ row }">
+        <div class="contract-mobile-card-header">
+          <div class="contract-mobile-card-title">
+            {{ row.contract_name }}
+          </div>
+          <StatusBadge :status="mapContractStatus(row.status)" type="contract" />
+        </div>
+        <div class="contract-mobile-card-number">
+          {{ row.contract_number || '-' }}
+        </div>
+        <div class="contract-mobile-card-customer">
+          {{ row.customer_info?.account_name || '-' }}
+        </div>
+        <div class="contract-mobile-card-amount">
+          {{ formatCurrency(row.total_amount) }}
+        </div>
+        <div class="contract-mobile-card-meta">
+          <span>{{ getLicenseTypeText(row.license_type) }}</span>
+          <span>创建人：{{ row.creator_info?.name || '-' }}</span>
+          <span>签署：{{ row.signing_date || '-' }}</span>
+        </div>
+      </template>
+
+      <template #mobile-actions="{ row }">
+        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
+      </template>
+
       <!-- 合同编号 -->
       <template #cell-contract_number="{ row }">
         <span class="link-text" @click.stop="handleViewDetail(row)">
@@ -497,6 +530,12 @@ watchEffect(() => {
   flex: 1;
 }
 
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .contracts-page {
+    padding: $wolf-page-padding-mobile-v2;
+  }
+}
+
 // 链接样式
 .link-text {
   color: $wolf-text-link-v2;
@@ -512,5 +551,53 @@ watchEffect(() => {
 .amount-cell {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
+}
+
+.contract-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.contract-mobile-card-title {
+  min-width: 0;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.contract-mobile-card-number {
+  margin-top: $wolf-space-xs-v2;
+  font-family: $wolf-font-mono-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-link-v2;
+}
+
+.contract-mobile-card-customer {
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  overflow-wrap: anywhere;
+}
+
+.contract-mobile-card-amount {
+  margin-top: $wolf-space-sm-v2;
+  font-family: $wolf-font-mono-v2;
+  font-size: 18px;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-warning-text-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+.contract-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
 }
 </style>

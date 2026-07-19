@@ -72,6 +72,16 @@ interface Props {
   filterFields?: ListFilterField[]
   /** 当前筛选条件 */
   filters?: ListFilterCondition[]
+  /** 窄视口展示模式 */
+  mobileMode?: 'card' | 'table'
+  /** 移动端兜底卡片标题字段 */
+  mobileTitleKey?: string
+  /** 移动端兜底卡片副标题字段 */
+  mobileSubtitleKey?: string
+  /** 移动端兜底卡片状态字段 */
+  mobileStatusKey?: string
+  /** 移动端兜底卡片元信息字段 */
+  mobileMetaKeys?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -85,6 +95,11 @@ const props = withDefaults(defineProps<Props>(), {
   rowInteractive: false,
   filterFields: () => [],
   filters: () => [],
+  mobileMode: 'card',
+  mobileTitleKey: undefined,
+  mobileSubtitleKey: undefined,
+  mobileStatusKey: undefined,
+  mobileMetaKeys: () => [],
 })
 
 // ==================== Emits ====================
@@ -129,6 +144,28 @@ const processedColumns = computed(() => {
   })
 
   return cols
+})
+
+const dataColumns = computed(() => processedColumns.value.filter((col) => col.key !== 'actions'))
+const fallbackTitleColumn = computed(() =>
+  dataColumns.value.find((col) => col.key === props.mobileTitleKey) ?? dataColumns.value[0]
+)
+const fallbackSubtitleColumn = computed(() =>
+  dataColumns.value.find((col) => col.key === props.mobileSubtitleKey) ?? dataColumns.value[1]
+)
+const fallbackStatusColumn = computed(() =>
+  dataColumns.value.find((col) => col.key === props.mobileStatusKey)
+)
+const fallbackMetaColumns = computed(() => {
+  const explicit = props.mobileMetaKeys
+    .map((key) => dataColumns.value.find((col) => col.key === key))
+    .filter((col): col is NonNullable<typeof col> => Boolean(col))
+  if (explicit.length > 0) return explicit
+  return dataColumns.value.filter((col) =>
+    col.key !== fallbackTitleColumn.value?.key &&
+    col.key !== fallbackSubtitleColumn.value?.key &&
+    col.key !== fallbackStatusColumn.value?.key
+  ).slice(0, 3)
 })
 
 /**
@@ -195,6 +232,17 @@ function handleRowClick(row: T): void {
   emit('row-click', row)
 }
 
+function isNestedInteractiveElement(target: EventTarget | null, currentTarget: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement) || !(currentTarget instanceof HTMLElement)) return false
+  if (target === currentTarget) return false
+  return target.closest('button, a, input, select, textarea, [role="button"], [role="link"]') !== null
+}
+
+function handleCardClick(event: MouseEvent, row: T): void {
+  if (isNestedInteractiveElement(event.target, event.currentTarget)) return
+  handleRowClick(row)
+}
+
 function handleRowKeydown(event: KeyboardEvent, row: T): void {
   if (!props.rowInteractive) return
   if (event.key === 'Enter') {
@@ -203,6 +251,11 @@ function handleRowKeydown(event: KeyboardEvent, row: T): void {
     event.preventDefault()
     emit('row-click', row)
   }
+}
+
+function handleCardKeydown(event: KeyboardEvent, row: T): void {
+  if (isNestedInteractiveElement(event.target, event.currentTarget)) return
+  handleRowKeydown(event, row)
 }
 
 function handleFilterUpdate(filters: ListFilterCondition[]): void {
@@ -234,6 +287,11 @@ function getAlignClass(align?: string): string {
   }
 }
 
+function getFallbackValue(row: T, key?: string): unknown {
+  if (!key) return '-'
+  return row[key] ?? '-'
+}
+
 // 监听滚动位置
 function handleScroll(event: Event): void {
   const target = event.target as HTMLElement
@@ -258,7 +316,12 @@ watch(() => props.data, () => {
     />
 
     <!-- 表格卡片 -->
-    <div v-else class="data-table-card" :style="{ height }">
+    <div
+      v-else
+      class="data-table-card"
+      :class="{ 'has-mobile-cards': mobileMode === 'card' }"
+      :style="{ height }"
+    >
       <div v-if="hasTableTools || $slots['tableTools']" class="data-table-tools">
         <ListFilterPopover
           v-if="normalizedFilterFields.length > 0"
@@ -274,8 +337,56 @@ watch(() => props.data, () => {
       <!-- 表格内容区（可滚动） -->
       <div
         class="data-table-content"
+        :class="{ 'has-mobile-cards': mobileMode === 'card' }"
         @scroll="handleScroll"
       >
+        <div v-if="mobileMode === 'card'" class="data-table-mobile-list">
+          <div
+            v-for="(row, index) in data"
+            :key="getRowKey(row, index)"
+            class="data-table-mobile-card"
+            :class="{ 'is-interactive': rowInteractive }"
+            :role="rowInteractive ? 'button' : undefined"
+            :tabindex="rowInteractive ? 0 : undefined"
+            @click="handleCardClick($event, row)"
+            @keydown="handleCardKeydown($event, row)"
+          >
+            <slot name="mobile-card" :row="row" :index="index">
+              <div class="data-table-mobile-card-header">
+                <div class="data-table-mobile-card-title">
+                  {{ getFallbackValue(row, fallbackTitleColumn?.key) }}
+                </div>
+                <div v-if="fallbackStatusColumn" class="data-table-mobile-card-status">
+                  {{ getFallbackValue(row, fallbackStatusColumn.key) }}
+                </div>
+              </div>
+              <div v-if="fallbackSubtitleColumn" class="data-table-mobile-card-subtitle">
+                {{ getFallbackValue(row, fallbackSubtitleColumn.key) }}
+              </div>
+              <div v-if="fallbackMetaColumns.length > 0" class="data-table-mobile-card-meta">
+                <span
+                  v-for="col in fallbackMetaColumns"
+                  :key="col.key"
+                  class="data-table-mobile-card-meta-item"
+                >
+                  {{ col.title }}：{{ getFallbackValue(row, col.key) }}
+                </span>
+              </div>
+            </slot>
+            <div v-if="$slots['mobile-actions']" class="data-table-mobile-card-actions">
+              <slot name="mobile-actions" :row="row" :index="index" />
+            </div>
+          </div>
+
+          <div v-if="data.length === 0" class="data-table-mobile-empty">
+            <Empty class="border-0">
+              <EmptyHeader>
+                <EmptyTitle>{{ emptyTitle ?? '暂无数据' }}</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
+          </div>
+        </div>
+
         <table class="data-table">
           <thead class="data-table-header">
             <tr>
@@ -425,6 +536,86 @@ watch(() => props.data, () => {
   border-spacing: 0;
   table-layout: fixed;
   min-width: max-content;  // 确保表格不被压缩
+}
+
+.data-table-mobile-list {
+  display: none;
+}
+
+.data-table-mobile-card {
+  background: $wolf-bg-card-v2;
+  border: 1px solid $wolf-border-light-v2;
+  border-radius: $wolf-radius-lg-v2;
+  padding: $wolf-space-md-v2;
+  transition: background 150ms ease, border-color 150ms ease;
+
+  &.is-interactive {
+    cursor: pointer;
+  }
+
+  &.is-interactive:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+  }
+}
+
+.data-table-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.data-table-mobile-card-title {
+  min-width: 0;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  overflow-wrap: anywhere;
+}
+
+.data-table-mobile-card-status {
+  flex-shrink: 0;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-secondary-v2;
+}
+
+.data-table-mobile-card-subtitle {
+  margin-top: $wolf-space-xs-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  overflow-wrap: anywhere;
+}
+
+.data-table-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
+}
+
+.data-table-mobile-card-meta-item {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.data-table-mobile-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-sm-v2;
+  margin-top: $wolf-space-md-v2;
+  padding-top: $wolf-space-md-v2;
+  border-top: 1px solid $wolf-border-light-v2;
+}
+
+.data-table-mobile-empty {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 // 表头（sticky 固定）
@@ -624,6 +815,51 @@ watch(() => props.data, () => {
   // 行高：Touch Target 合规（44px）
   .data-table-row {
     min-height: $wolf-touch-target-min-v2;  // 44px
+  }
+}
+
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .data-table-content.has-mobile-cards {
+    overflow-x: hidden;
+    padding: 0;
+    background: $wolf-bg-page-v2;
+  }
+
+  .data-table-content.has-mobile-cards .data-table {
+    display: none;
+  }
+
+  .data-table-content.has-mobile-cards .data-table-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: $wolf-section-gap-mobile-v2;
+  }
+
+  .data-table-card.has-mobile-cards {
+    height: auto !important;
+    min-height: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+  }
+
+  .data-table-tools {
+    min-height: $wolf-touch-target-min-v2;
+    padding: $wolf-space-sm-v2 0;
+  }
+
+  .data-table-footer {
+    padding: $wolf-space-md-v2 0 calc($wolf-space-md-v2 + $wolf-safe-area-bottom-v2);
+    justify-content: center;
+  }
+
+  .data-table-footer .total-text {
+    width: 100%;
+    text-align: center;
+  }
+
+  .data-table-footer .page-size-select {
+    display: none;
   }
 }
 

@@ -8,6 +8,9 @@ import request from '@/utils/request'
 const getInvoiceFilePath = (invoiceId: number): string =>
   `/v1/invoice-applications/${invoiceId}/file`
 
+const getContractFilePath = (contractId: number): string =>
+  `/v1/contracts/${contractId}/file`
+
 export const createInvoiceFileObjectUrl = async (invoiceId: number): Promise<string> => {
   const response = await request.get<Blob>(getInvoiceFilePath(invoiceId), {
     responseType: 'blob'
@@ -26,6 +29,30 @@ export const downloadInvoiceFile = async (invoiceId: number, fileName?: string):
 
   link.href = url
   link.download = fileName?.trim() || `invoice-${invoiceId}`
+  window.document.body.appendChild(link)
+  link.click()
+  window.document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+export const createContractFileObjectUrl = async (contractId: number): Promise<string> => {
+  const response = await request.get<Blob>(getContractFilePath(contractId), {
+    responseType: 'blob'
+  })
+  const blob = response instanceof Blob ? response : new Blob([response])
+  return window.URL.createObjectURL(blob)
+}
+
+export const downloadContractFile = async (contractId: number, fileName?: string): Promise<void> => {
+  const response = await request.get<Blob>(getContractFilePath(contractId), {
+    responseType: 'blob'
+  })
+  const blob = response instanceof Blob ? response : new Blob([response])
+  const url = window.URL.createObjectURL(blob)
+  const link = window.document.createElement('a')
+
+  link.href = url
+  link.download = fileName?.trim() || `contract-${contractId}`
   window.document.body.appendChild(link)
   link.click()
   window.document.body.removeChild(link)

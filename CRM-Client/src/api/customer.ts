@@ -179,6 +179,8 @@ export interface CustomerResponse {
   version: number
   license_expiry_date: string | null
   license_type: string | null
+  score?: number | null
+  score_updated_at?: string | null
   owner_info?: UserBasicInfo
   creator_info?: UserBasicInfo
 }

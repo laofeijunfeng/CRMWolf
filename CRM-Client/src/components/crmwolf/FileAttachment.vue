@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import {
   AlertCircle,
   CheckCircle2,
@@ -38,6 +38,7 @@ const props = withDefaults(defineProps<{
   emptyText?: string
   accept?: string
   multiple?: boolean
+  required?: boolean
   maxSizeMb?: number
   disabled?: boolean
   compact?: boolean
@@ -52,6 +53,7 @@ const props = withDefaults(defineProps<{
   emptyText: '暂无附件',
   accept: '.pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.ofd',
   multiple: false,
+  required: false,
   maxSizeMb: 20,
   disabled: false,
   compact: false,
@@ -72,6 +74,9 @@ const emit = defineEmits<{
 const inputRef = ref<HTMLInputElement | null>(null)
 const selectedPreview = ref<FileAttachmentItem | null>(null)
 const previewOpen = ref(false)
+const docxPreviewRef = ref<HTMLElement | null>(null)
+const docxPreviewLoading = ref(false)
+const docxPreviewError = ref('')
 
 const canUpload = computed(() => props.mode === 'upload' || props.mode === 'manage')
 const canRemove = computed(() => props.mode === 'manage' && props.allowRemove)
@@ -132,12 +137,18 @@ const matchesAccept = (file: File): boolean => {
   })
 }
 
-const handlePreview = (file: FileAttachmentItem): void => {
+const handlePreview = async (file: FileAttachmentItem): Promise<void> => {
   emit('preview', file)
   if (!props.previewInDialog || !isPreviewable(file) || !file.url) return
 
   selectedPreview.value = file
   previewOpen.value = true
+  docxPreviewError.value = ''
+
+  if (isDocx(file)) {
+    await nextTick()
+    await renderDocxPreview(file)
+  }
 }
 
 const handleDownload = (file: FileAttachmentItem): void => {
@@ -200,7 +211,7 @@ const getStatusText = (file: FileAttachmentItem): string => {
 
 const isPreviewable = (file: FileAttachmentItem): boolean => {
   const ext = getExtension(file)
-  return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)
+  return ['pdf', 'docx', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)
 }
 
 const isImage = (file: FileAttachmentItem): boolean => {
@@ -209,13 +220,42 @@ const isImage = (file: FileAttachmentItem): boolean => {
 }
 
 const isPdf = (file: FileAttachmentItem): boolean => getExtension(file) === 'pdf'
+
+const isDocx = (file: FileAttachmentItem): boolean => getExtension(file) === 'docx'
+
+const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
+  if (!file.url || docxPreviewRef.value === null) return
+
+  docxPreviewLoading.value = true
+  docxPreviewError.value = ''
+  docxPreviewRef.value.innerHTML = ''
+
+  try {
+    const [{ renderAsync }, response] = await Promise.all([
+      import('docx-preview'),
+      fetch(file.url)
+    ])
+    if (!response.ok) throw new Error('DOCX fetch failed')
+
+    const blob = await response.blob()
+    if (docxPreviewRef.value === null) return
+    await renderAsync(blob, docxPreviewRef.value)
+  } catch {
+    docxPreviewError.value = 'DOCX 预览加载失败，请下载后查看'
+  } finally {
+    docxPreviewLoading.value = false
+  }
+}
 </script>
 
 <template>
   <section :class="['file-attachment', { 'file-attachment--compact': compact }]">
     <div class="file-attachment__header">
       <div class="file-attachment__heading">
-        <h3 class="file-attachment__title">{{ title }}</h3>
+        <h3 class="file-attachment__title">
+          {{ title }}
+          <span v-if="required" class="file-attachment__required">*</span>
+        </h3>
         <p v-if="description" class="file-attachment__description">{{ description }}</p>
       </div>
 
@@ -342,6 +382,18 @@ const isPdf = (file: FileAttachmentItem): boolean => getExtension(file) === 'pdf
             :title="selectedPreview.name"
             class="file-preview-dialog__frame"
           />
+          <div
+            v-else-if="isDocx(selectedPreview)"
+            class="file-preview-dialog__docx-shell"
+          >
+            <div v-if="docxPreviewLoading" class="file-preview-dialog__loading">
+              DOCX 预览加载中...
+            </div>
+            <div v-if="docxPreviewError" class="file-preview-dialog__error">
+              {{ docxPreviewError }}
+            </div>
+            <div ref="docxPreviewRef" class="file-preview-dialog__docx" />
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -375,6 +427,10 @@ const isPdf = (file: FileAttachmentItem): boolean => getExtension(file) === 'pdf
   font-size: $wolf-font-size-body-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   line-height: $wolf-line-height-title-v2;
+}
+
+.file-attachment__required {
+  color: $wolf-danger-v2;
 }
 
 .file-attachment__description {
@@ -616,6 +672,30 @@ const isPdf = (file: FileAttachmentItem): boolean => getExtension(file) === 'pdf
   min-height: 70vh;
   border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-sm-v2;
+}
+
+.file-preview-dialog__docx-shell {
+  min-height: 70vh;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-sm-v2;
+  background: $wolf-bg-muted-v2;
+}
+
+.file-preview-dialog__docx {
+  padding: $wolf-space-md-v2;
+}
+
+.file-preview-dialog__loading,
+.file-preview-dialog__error {
+  padding: $wolf-space-md-v2;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-body-v2;
+}
+
+.file-preview-dialog__error {
+  color: $wolf-danger-text-v2;
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2 - 1) {

@@ -2,7 +2,7 @@
  * ApprovalProcessGeneric — 通用审批操作组件（Phase C，C-DSG-5 / C-DSG-7）
  *
  * 嵌入业务详情页的审批区。Props：
- *   entityType : 'CONTRACT' | 'PAYMENT' | 'INVOICE'
+ *   entityType : 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' | 'OPPORTUNITY'
  *   entityId   : number
  *   canApprove : 是否对当前节点具备审批权（控制同意/驳回按钮显隐）
  *   isSubmitter: 是否为提交人（控制撤回 + 草稿态"提交审批"CTA 显隐）
@@ -74,7 +74,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
 import {
+  createContractFileObjectUrl,
   createInvoiceFileObjectUrl,
+  downloadContractFile as downloadContractFileApi,
   downloadInvoiceFile as downloadInvoiceFileApi,
 } from '@/api/fileUpload'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
@@ -83,7 +85,8 @@ const SUBMIT_PERMISSION: Record<EntityType, string> = {
   CONTRACT: 'contract:submit',
   PAYMENT: 'payment:submit',
   INVOICE: 'invoice:submit',
-  LICENSE: 'license:submit'
+  LICENSE: 'license:submit',
+  OPPORTUNITY: 'opportunity:create'
 }
 
 const props = defineProps({
@@ -132,6 +135,9 @@ const conflictNotice = ref<string>('')
 const invoiceFilePreviewUrl = ref<string>('')
 const invoiceFilePreviewLoading = ref<boolean>(false)
 const invoiceFilePreviewRequestId = ref<number>(0)
+const contractFilePreviewUrl = ref<string>('')
+const contractFilePreviewLoading = ref<boolean>(false)
+const contractFilePreviewRequestId = ref<number>(0)
 
 // 开票对话框
 const markIssuedDialogVisible = ref<boolean>(false)
@@ -181,6 +187,37 @@ const invoiceFiles = computed<FileAttachmentItem[]>(() => {
   return [file]
 })
 
+const hasContractFile = computed<boolean>(() =>
+  props.entityType === 'CONTRACT' &&
+  detail.value?.contract_file_path != null &&
+  detail.value.contract_file_path.length > 0
+)
+
+const contractFiles = computed<FileAttachmentItem[]>(() => {
+  if (!hasContractFile.value || detail.value == null) return []
+
+  const filePath = detail.value.contract_file_path ?? ''
+  const fileName = detail.value.contract_file_name?.trim() || getContractFileName(filePath)
+  const file: FileAttachmentItem = {
+    id: props.entityId,
+    name: fileName,
+    extension: getFileExtension(fileName || filePath),
+    status: contractFilePreviewLoading.value ? 'processing' : 'done'
+  }
+
+  if (detail.value.contract_file_size != null) {
+    file.size = detail.value.contract_file_size
+  }
+  if (detail.value.contract_file_mime_type != null) {
+    file.mimeType = detail.value.contract_file_mime_type
+  }
+  if (contractFilePreviewUrl.value.length > 0) {
+    file.url = contractFilePreviewUrl.value
+  }
+
+  return [file]
+})
+
 // 发票开票按钮显示条件
 const showMarkIssued = computed<boolean>(() =>
   props.entityType === 'INVOICE' &&
@@ -209,6 +246,12 @@ const revokeInvoiceFilePreviewUrl = (): void => {
   invoiceFilePreviewUrl.value = ''
 }
 
+const revokeContractFilePreviewUrl = (): void => {
+  if (contractFilePreviewUrl.value.length === 0) return
+  window.URL.revokeObjectURL(contractFilePreviewUrl.value)
+  contractFilePreviewUrl.value = ''
+}
+
 const loadInvoiceFilePreviewUrl = async (): Promise<void> => {
   const requestId = invoiceFilePreviewRequestId.value + 1
   invoiceFilePreviewRequestId.value = requestId
@@ -232,6 +275,33 @@ const loadInvoiceFilePreviewUrl = async (): Promise<void> => {
   } finally {
     if (requestId === invoiceFilePreviewRequestId.value) {
       invoiceFilePreviewLoading.value = false
+    }
+  }
+}
+
+const loadContractFilePreviewUrl = async (): Promise<void> => {
+  const requestId = contractFilePreviewRequestId.value + 1
+  contractFilePreviewRequestId.value = requestId
+  revokeContractFilePreviewUrl()
+
+  if (!hasContractFile.value || props.entityType !== 'CONTRACT') {
+    contractFilePreviewLoading.value = false
+    return
+  }
+
+  contractFilePreviewLoading.value = true
+  try {
+    const objectUrl = await createContractFileObjectUrl(props.entityId)
+    if (requestId === contractFilePreviewRequestId.value && hasContractFile.value) {
+      contractFilePreviewUrl.value = objectUrl
+    } else {
+      window.URL.revokeObjectURL(objectUrl)
+    }
+  } catch {
+    toast.error('合同附件预览加载失败')
+  } finally {
+    if (requestId === contractFilePreviewRequestId.value) {
+      contractFilePreviewLoading.value = false
     }
   }
 }
@@ -369,6 +439,15 @@ const downloadInvoiceFile = async (): Promise<void> => {
   }
 }
 
+const downloadContractFile = async (): Promise<void> => {
+  if (detail.value == null || props.entityType !== 'CONTRACT') return
+  try {
+    await downloadContractFileApi(props.entityId, detail.value.contract_file_name ?? undefined)
+  } catch {
+    toast.error('合同附件下载失败')
+  }
+}
+
 const getFileExtension = (filePath: string): string => {
   return filePath.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
 }
@@ -376,6 +455,11 @@ const getFileExtension = (filePath: string): string => {
 const getInvoiceFileName = (): string => {
   const extension = getFileExtension(detail.value?.invoice_file_path ?? '')
   return extension ? `发票文件.${extension}` : '发票文件'
+}
+
+const getContractFileName = (filePath: string): string => {
+  const extension = getFileExtension(filePath)
+  return extension ? `合同附件.${extension}` : '合同附件'
 }
 
 // 打开对话框方法
@@ -417,9 +501,19 @@ watch(
   { immediate: true }
 )
 
+watch(
+  [hasContractFile, (): number => props.entityId],
+  (): void => {
+    void loadContractFilePreviewUrl()
+  },
+  { immediate: true }
+)
+
 onBeforeUnmount((): void => {
   invoiceFilePreviewRequestId.value += 1
+  contractFilePreviewRequestId.value += 1
   revokeInvoiceFilePreviewUrl()
+  revokeContractFilePreviewUrl()
 })
 </script>
 
@@ -497,6 +591,16 @@ onBeforeUnmount((): void => {
           :files="invoiceFiles"
           empty-text="暂无发票文件"
           @download="() => downloadInvoiceFile()"
+        />
+      </div>
+
+      <div v-if="hasContractFile" class="approval-process-generic__file-section">
+        <FileAttachment
+          title="合同邮件附件"
+          mode="readonly"
+          :files="contractFiles"
+          empty-text="暂无合同附件"
+          @download="() => downloadContractFile()"
         />
       </div>
 

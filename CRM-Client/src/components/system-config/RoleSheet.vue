@@ -3,7 +3,7 @@
  * RoleSheet.vue - 角色管理 Sheet
  *
  * 功能：
- * - 展示角色列表（DataTable）
+ * - 展示角色列表（ListCard）
  * - 搜索角色
  * - 新建/编辑角色（Dialog）
  * - 配置权限（Dialog）
@@ -30,7 +30,7 @@ import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { DataTable } from '@/components/crmwolf'
+import { ListCard } from '@/components/crmwolf'
 import {
   Dialog,
   DialogContent,
@@ -118,15 +118,6 @@ const { handleSubmit, resetForm } = useForm({
   }
 })
 
-// ==================== Types ====================
-interface Column {
-  key: string
-  title: string
-  width?: string
-  align?: 'left' | 'center' | 'right'
-  fixed?: 'left' | 'right'
-}
-
 // ==================== Resource Name Mapping ====================
 const resourceNames: Record<string, string> = {
   lead: '线索',
@@ -145,37 +136,6 @@ function getResourceName(resource: string): string {
   return resourceNames[resource] ?? resource
 }
 
-// ==================== Table Columns ====================
-const columns: Column[] = [
-  {
-    key: 'code',
-    title: '角色代码',
-    width: '150px',
-    fixed: 'left'
-  },
-  {
-    key: 'name',
-    title: '角色名称',
-    width: '150px'
-  },
-  {
-    key: 'description',
-    title: '描述'
-  },
-  {
-    key: 'created_at',
-    title: '创建时间',
-    width: '160px'
-  },
-  {
-    key: 'actions',
-    title: '操作',
-    width: '220px',
-    fixed: 'right',
-    align: 'center'
-  }
-]
-
 // ==================== Computed ====================
 const filteredRoles = computed(() => {
   if (!searchText.value) return roles.value
@@ -185,6 +145,8 @@ const filteredRoles = computed(() => {
     role.name.toLowerCase().includes(search)
   )
 })
+
+const listTitle = computed(() => `角色列表（${filteredRoles.value.length}）`)
 
 // 权限分组（按资源分组）
 const permissionGroups = computed(() => {
@@ -412,38 +374,35 @@ function formatDate(dateStr: string): string {
           </Button>
         </div>
 
-        <!-- 表格区域 -->
+        <!-- 列表区域 -->
         <div class="p-4">
-          <DataTable
-            :columns="columns"
-            :data="filteredRoles"
+          <ListCard
+            :title="listTitle"
+            :items="filteredRoles"
             :loading="loading"
-            :total="pagination.total"
-            :page="pagination.page"
-            :page-size="pagination.pageSize"
-            height="calc(100vh - 350px)"
-            empty-title="暂无角色数据"
+            empty-text="暂无角色数据"
           >
-            <!-- 角色代码列 -->
-            <template #cell-code="{ row }">
-              <span class="text-primary font-medium cursor-pointer hover:underline">
-                {{ row.code }}
-              </span>
+            <template #itemMain="{ item }">
+              <div class="font-medium text-wolf-text-primary">{{ item.name }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">
+                {{ item.code }} · {{ formatDate(item.created_at) }}
+              </div>
+              <div v-if="item.description" class="mt-1 text-sm text-muted-foreground">
+                {{ item.description }}
+              </div>
             </template>
 
-            <!-- 创建时间列 -->
-            <template #cell-created_at="{ row }">
-              {{ formatDate(row.created_at) }}
+            <template #itemBadges="{ item }">
+              <Badge variant="outline">{{ item.code }}</Badge>
             </template>
 
-            <!-- 操作列 -->
-            <template #cell-actions="{ row }">
-              <div class="flex items-center justify-center gap-1">
+            <template #itemActions="{ item }">
+              <div class="flex items-center gap-1">
                 <Button
                   variant="ghost"
                   size="sm"
                   class="h-8 px-2"
-                  @click="handleEdit(row)"
+                  @click="handleEdit(item)"
                 >
                   <Pencil class="w-3.5 h-3.5 mr-1" />
                   编辑
@@ -452,7 +411,7 @@ function formatDate(dateStr: string): string {
                   variant="ghost"
                   size="sm"
                   class="h-8 px-2"
-                  @click="handleConfigPermissions(row)"
+                  @click="handleConfigPermissions(item)"
                 >
                   <Settings class="w-3.5 h-3.5 mr-1" />
                   权限
@@ -461,14 +420,14 @@ function formatDate(dateStr: string): string {
                   variant="ghost"
                   size="sm"
                   class="h-8 px-2 text-destructive hover:text-destructive"
-                  @click="handleDelete(row)"
+                  @click="handleDelete(item)"
                 >
                   <Trash2 class="w-3.5 h-3.5 mr-1" />
                   删除
                 </Button>
               </div>
             </template>
-          </DataTable>
+          </ListCard>
         </div>
       </ScrollArea>
     </DetailSheetContent>

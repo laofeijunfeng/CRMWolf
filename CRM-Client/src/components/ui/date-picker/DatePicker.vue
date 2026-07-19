@@ -37,24 +37,33 @@ const emit = defineEmits<{
 // Popover 状态
 const open = ref(false)
 
-// 默认 placeholder（今天）
-const defaultPlaceholder = today(getLocalTimeZone())
-
 // 内部日期值（DateValue 类型）
 const dateValue = ref<DateValue | undefined>(undefined)
+
+// 日历当前浏览年月。需要由 DatePicker 持有，避免 Calendar/Popover 重建后回到今天。
+const calendarPlaceholder = ref<DateValue | undefined>(today(getLocalTimeZone()))
+
+function toDateValue(date: Date): DateValue {
+  return today(getLocalTimeZone()).set({
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate()
+  })
+}
 
 // 监听外部 modelValue 变化，同步到内部
 watch(
   () => props.modelValue,
   (newVal) => {
     if (newVal) {
-      dateValue.value = today(getLocalTimeZone()).set({
-        year: newVal.getFullYear(),
-        month: newVal.getMonth() + 1,
-        day: newVal.getDate()
-      })
+      const nextValue = toDateValue(newVal)
+      dateValue.value = nextValue
+      calendarPlaceholder.value = nextValue
     } else {
       dateValue.value = undefined
+      if (!open.value) {
+        calendarPlaceholder.value = today(getLocalTimeZone())
+      }
     }
   },
   { immediate: true }
@@ -67,7 +76,7 @@ const formattedDate = computed(() => {
 })
 
 // 处理日期选择
-const handleSelect = (value: DateValue | undefined) => {
+const handleSelect = (value: DateValue | undefined): void => {
   dateValue.value = value
   if (value) {
     const date = value.toDate(getLocalTimeZone())
@@ -101,7 +110,7 @@ const handleSelect = (value: DateValue | undefined) => {
     <PopoverContent class="w-auto p-0" align="start">
       <Calendar
         v-model="dateValue"
-        :placeholder="defaultPlaceholder"
+        v-model:placeholder="calendarPlaceholder"
         locale="zh-CN"
         initial-focus
         @update:model-value="handleSelect"

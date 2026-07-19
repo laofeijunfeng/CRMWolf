@@ -685,13 +685,116 @@ watchEffect(() => {
       :total="pagination.total"
       height="calc(100vh - 136px)"
       empty-title="暂无客户"
+      row-interactive
+      mobile-title-key="account_name"
+      mobile-status-key="status"
+      :mobile-meta-keys="['industry', 'source', 'owner']"
       v-model:filters="activeFilters"
       :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @row-click="handleViewDetail"
     >
+      <template #mobile-card="{ row }">
+        <div class="customer-mobile-card-header">
+          <div class="customer-mobile-card-title">
+            {{ row.account_name }}
+          </div>
+          <StatusBadge :status="mapCustomerStatus(row.status)" type="customer" />
+        </div>
+        <div class="customer-mobile-card-badges">
+          <StatusBadge
+            v-if="row.industry_info?.name"
+            :status="getIndustryBadgeStatus(row)"
+            type="industry"
+          />
+          <StatusBadge
+            v-if="row.source"
+            :status="row.source"
+            type="source"
+          />
+          <span class="license-badge" :class="getLicenseStatusClass(row)">
+            {{ getLicenseStatusLabel(row) }}
+          </span>
+        </div>
+        <div class="customer-mobile-card-score">
+          <ScoreIndicator :score="row.score ?? null" mode="badge" />
+        </div>
+        <div class="customer-mobile-card-meta">
+          <span>{{ row.city || '-' }}</span>
+          <span>{{ row.company_scale || '-' }}</span>
+          <span>负责人：{{ row.owner_info?.name || '-' }}</span>
+        </div>
+      </template>
+
+      <template #mobile-actions="{ row }">
+        <Button
+          v-if="activeTab === 'public' && canAccessPublic"
+          variant="ghost"
+          size="lg"
+          @click.stop="handleClaim(row)"
+        >
+          领取
+        </Button>
+        <TableRowActions
+          v-else
+          :row="row"
+          :primary-actions="[
+            {
+              label: '新建商机',
+              handler: asCustomerActionHandler(handleCreateOpportunity),
+              visible: canCreateOpportunity,
+              icon: Sparkles as Component
+            },
+            {
+              label: '编辑',
+              handler: asCustomerActionHandler(handleEdit),
+              visible: canEditRow(row),
+              icon: Pencil as Component
+            }
+          ]"
+          :secondary-actions="[
+            {
+              label: '退回公海',
+              handler: asCustomerActionHandler(handleReturn),
+              visible: canReturnRow(row),
+              icon: ArrowRightLeft as Component
+            },
+            {
+              label: '赢单',
+              handler: asCustomerActionHandler(handleWin),
+              visible: canEditRow(row),
+              icon: TrendingUp as Component
+            },
+            {
+              label: '输单',
+              handler: asCustomerActionHandler(handleLose),
+              visible: canEditRow(row),
+              icon: TrendingDown as Component,
+              destructive: true,
+              separator: true
+            },
+            {
+              label: '失效',
+              handler: asCustomerActionHandler(handleInvalid),
+              visible: canEditRow(row),
+              icon: XCircle as Component,
+              destructive: true
+            },
+            {
+              label: '删除',
+              handler: asCustomerActionHandler(handleDelete),
+              visible: canDeleteRow(row),
+              icon: Trash2 as Component,
+              destructive: true
+            }
+          ]"
+          size="lg"
+        />
+      </template>
+
       <!-- 客户名称 -->
       <template #cell-account_name="{ row }">
         <span class="link-text" @click.stop="handleViewDetail(row)">
@@ -944,6 +1047,12 @@ watchEffect(() => {
   flex: 1;
 }
 
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .customers-page {
+    padding: $wolf-page-padding-mobile-v2;
+  }
+}
+
 // 链接样式
 .link-text {
   color: $wolf-text-link-v2;
@@ -992,6 +1101,42 @@ watchEffect(() => {
   color: $wolf-text-tertiary-v2;
   background: $wolf-bg-muted-v2;
   border-color: $wolf-border-light-v2;
+}
+
+.customer-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.customer-mobile-card-title {
+  min-width: 0;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.customer-mobile-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2;
+  margin-top: $wolf-space-sm-v2;
+}
+
+.customer-mobile-card-score {
+  margin-top: $wolf-space-sm-v2;
+}
+
+.customer-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
 // 简易弹窗样式（临时使用，后续替换为 shadcn-vue Dialog）

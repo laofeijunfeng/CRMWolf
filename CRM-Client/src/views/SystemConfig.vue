@@ -42,7 +42,6 @@ const NotificationSheet = defineAsyncComponent(() =>
 const TeamMemberSheet = defineAsyncComponent(() =>
   import('@/components/system-config/TeamMemberSheet.vue')
 )
-
 const permissionStore = usePermissionStore()
 
 // Sheet 状态
@@ -185,6 +184,7 @@ fetchUserRoles()
           <p class="text-sm text-wolf-text-secondary">管理团队成员与角色分配</p>
         </CardContent>
       </Card>
+
     </div>
 
     <!-- Sheet 组件 -->

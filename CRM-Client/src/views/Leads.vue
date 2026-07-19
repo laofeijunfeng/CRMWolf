@@ -511,13 +511,108 @@ watchEffect(() => {
       :total="pagination.total"
       height="calc(100vh - 136px)"
       empty-title="暂无线索"
+      row-interactive
+      mobile-title-key="lead_name"
+      mobile-subtitle-key="contact_name"
+      mobile-status-key="status"
+      :mobile-meta-keys="['contact_phone', 'source', 'owner']"
       v-model:filters="activeFilters"
       :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @row-click="handleViewDetail"
     >
+      <template #mobile-card="{ row }">
+        <div class="lead-mobile-card-header">
+          <div class="lead-mobile-card-title">
+            {{ row.lead_name }}
+          </div>
+          <StatusBadge :status="mapLeadStatus(row.status)" type="lead" />
+        </div>
+        <div class="lead-mobile-card-contact">
+          <span>{{ row.contact_name || '-' }}</span>
+          <span>{{ row.contact_phone || '-' }}</span>
+        </div>
+        <div class="lead-mobile-card-score">
+          <span :class="['score-icon', getScoreColorClass(row.score)]">
+            <component :is="getScoreIcon(row.score)" class="w-4 h-4" />
+          </span>
+          <span class="score-number">{{ row.score ?? '--' }}</span>
+        </div>
+        <div class="lead-mobile-card-meta">
+          <span>{{ row.source || '-' }}</span>
+          <span>{{ row.city || '-' }}</span>
+          <span>负责人：{{ row.owner_info?.name || '未分配' }}</span>
+        </div>
+      </template>
+
+      <template #mobile-actions="{ row }">
+        <Button
+          v-if="activeTab === 'public' && canAccessPublic"
+          variant="ghost"
+          size="lg"
+          @click.stop="handleClaim(row)"
+        >
+          领取
+        </Button>
+        <TableRowActions
+          v-else
+          :row="row"
+          :primary-actions="[
+            {
+              label: '编辑',
+              handler: (r) => handleEdit(asLead(r)),
+              visible: canEditRow(row),
+              icon: Pencil
+            },
+            {
+              label: '转化为客户',
+              handler: (r) => handleConvert(asLead(r)),
+              visible: canConvertRow(row),
+              icon: CircleCheck
+            }
+          ]"
+          :secondary-actions="[
+            {
+              label: '领取',
+              handler: (r) => handleClaim(asLead(r)),
+              visible: canClaimLead && row.status === 0 && !row.owner_id,
+              icon: UserPlus
+            },
+            {
+              label: '分配',
+              handler: (r) => handleAssignModal(asLead(r)),
+              visible: canAssignLead,
+              icon: UserPlus
+            },
+            {
+              label: '退回公海',
+              handler: (r) => handleReturn(asLead(r)),
+              visible: canReturnRow(row),
+              icon: ArrowRightLeft
+            },
+            {
+              label: '标记无效',
+              handler: (r) => handleMarkInvalid(asLead(r)),
+              visible: canEditRow(row) && row.status !== 2,
+              icon: XCircle,
+              destructive: true,
+              separator: true
+            },
+            {
+              label: '删除',
+              handler: (r) => handleDelete(asLead(r)),
+              visible: canDeleteRow(row),
+              icon: Trash2,
+              destructive: true
+            }
+          ]"
+          size="lg"
+        />
+      </template>
+
       <!-- 线索名称 -->
       <template #cell-lead_name="{ row }">
         <span class="link-text" @click.stop="handleViewDetail(row)">
@@ -761,6 +856,12 @@ watchEffect(() => {
   flex: 1;
 }
 
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .leads-page {
+    padding: $wolf-page-padding-mobile-v2;
+  }
+}
+
 // 链接样式
 .link-text {
   color: $wolf-text-link-v2;
@@ -802,5 +903,46 @@ watchEffect(() => {
 .score-number {
   font-weight: $wolf-font-weight-medium-v2;
   font-size: $wolf-font-size-auxiliary-v2;
+}
+
+.lead-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.lead-mobile-card-title {
+  min-width: 0;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.lead-mobile-card-contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+}
+
+.lead-mobile-card-score {
+  display: inline-flex;
+  align-items: center;
+  gap: $wolf-space-xs-v2;
+  margin-top: $wolf-space-sm-v2;
+}
+
+.lead-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
 }
 </style>

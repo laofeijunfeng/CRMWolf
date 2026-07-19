@@ -60,10 +60,18 @@ const schema = toTypedSchema(
     total_amount: z.coerce.number().min(0, '金额不能为负数'),
     user_count: z.coerce.number().int('用户数必须为整数').min(1, '用户数至少为1'),
     license_type: z.nativeEnum(LicenseType, { errorMap: () => ({ message: '请选择授权类型' }) }),
-    subscription_years: z.coerce.number().int('订阅年限必须为整数').min(1, '订阅年限至少为1年'),
+    subscription_years: z.coerce.number().int('订阅年限必须为整数').min(1, '订阅年限至少为1年').optional().nullable(),
     purchase_type: z.nativeEnum(PurchaseType, { errorMap: () => ({ message: '请选择采购类型' }) }),
     expected_closing_date: z.string().min(1, '请选择预计成交日期'),
     procurement_method_id: z.coerce.number().optional().nullable()
+  }).superRefine((values, ctx) => {
+    if (values.license_type === LicenseType.SUBSCRIPTION && values.subscription_years == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['subscription_years'],
+        message: '订阅制下订阅年限必须大于0'
+      })
+    }
   })
 )
 

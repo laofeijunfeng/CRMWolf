@@ -15,8 +15,8 @@
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
  */
-import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, ArrowRight, Trophy, XCircle, Trash2 } from 'lucide-vue-next'
@@ -42,6 +42,7 @@ import OpportunityLoseDialog from '@/components/dialogs/OpportunityLoseDialog.vu
 usePageTitle()
 
 const router = useRouter()
+const route = useRoute()
 const permissionStore = usePermissionStore()
 const userStore = useUserStore()
 const headerStore = useHeaderStore()
@@ -154,6 +155,7 @@ const columns = [
   { key: 'win_probability', title: '赢率', align: 'right' as const, width: '80px' },
   { key: 'owner', title: '负责人', width: '100px' },
   { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
+  { key: 'approval_phase', title: '审批', align: 'center' as const, width: '110px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
 ]
 
@@ -186,6 +188,9 @@ const canDeleteRow = (row: OpportunityListResponse): boolean => {
   if (canDeleteOwnOpportunity.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false
 }
+
+const isApprovalApproved = (row: OpportunityListResponse): boolean => row.approval_phase === 'approved'
+const isApprovalPending = (row: OpportunityListResponse): boolean => row.approval_phase === 'pending_review'
 
 // ==================== Methods ====================
 const fetchOwnerFilterOptions = async (): Promise<void> => {
@@ -285,6 +290,17 @@ const openOpportunitySheet = (id: number): void => {
   sheetVisible.value = true
 }
 
+const handleViewDetail = (row: OpportunityListResponse): void => {
+  openOpportunitySheet(row.id)
+}
+
+const openOpportunityFromRoute = (): void => {
+  const opportunityId = Number(route.query['opportunityId'])
+  if (Number.isFinite(opportunityId) && opportunityId > 0) {
+    openOpportunitySheet(opportunityId)
+  }
+}
+
 // 抽屉刷新后刷新列表
 const handleSheetRefresh = (): void => {
   fetchOpportunities()
@@ -293,6 +309,7 @@ const handleSheetRefresh = (): void => {
 // 新建商机成功回调
 const handleOpportunitySuccess = (): void => {
   opportunityDialogOpen.value = false
+  toast.success('商机已创建并提交审批')
   fetchOpportunities()
 }
 
@@ -419,13 +436,13 @@ const getPrimaryActions = (row: OpportunityListResponse): ActionConfig[] => [
     label: '编辑',
     icon: Pencil,
     handler: () => openEditDialog(row),
-    visible: canEditRow(row)
+    visible: canEditRow(row) && !isApprovalPending(row)
   },
   {
     label: '推进阶段',
     icon: ArrowRight,
     handler: () => handleAdvanceStage(row),
-    visible: row.status === 0 // 仅"跟进中"状态可推进
+    visible: row.status === 0 && isApprovalApproved(row) // 仅审批通过的"跟进中"商机可推进
   }
 ]
 
@@ -434,13 +451,13 @@ const getSecondaryActions = (row: OpportunityListResponse): ActionConfig[] => [
     label: '赢单',
     icon: Trophy,
     handler: () => handleMarkAsWon(row),
-    visible: row.status === 0 // 仅"跟进中"状态可赢单
+    visible: row.status === 0 && isApprovalApproved(row) // 仅审批通过的"跟进中"商机可赢单
   },
   {
     label: '输单',
     icon: XCircle,
     handler: () => handleMarkAsLost(row),
-    visible: row.status === 0 // 仅"跟进中"状态可输单
+    visible: row.status === 0 && isApprovalApproved(row) // 仅审批通过的"跟进中"商机可输单
   },
   {
     label: '删除',
@@ -478,13 +495,41 @@ const getStageClass = (winProbability: number | undefined): string => {
   return 'status-info'
 }
 
+const getApprovalPhaseText = (phase: string | undefined): string => {
+  const map: Record<string, string> = {
+    draft: '待提交',
+    pending_review: '审批中',
+    approved: '已通过',
+    rejected: '已拒绝'
+  }
+  return phase === undefined ? '-' : (map[phase] ?? phase)
+}
+
+const getApprovalPhaseClass = (phase: string | undefined): string => {
+  const map: Record<string, string> = {
+    draft: 'status-default',
+    pending_review: 'status-warning',
+    approved: 'status-success',
+    rejected: 'status-danger'
+  }
+  return phase === undefined ? 'status-default' : (map[phase] ?? 'status-default')
+}
+
 // ==================== Lifecycle ====================
 onMounted(async () => {
   await Promise.all([
     fetchOpportunities(),
     fetchOwnerFilterOptions()
   ])
+  openOpportunityFromRoute()
 })
+
+watch(
+  () => route.query['opportunityId'],
+  () => {
+    openOpportunityFromRoute()
+  }
+)
 
 // TopBar 配置（Tabs + Actions）
 watchEffect(() => {
@@ -530,13 +575,64 @@ watchEffect(() => {
       :total="pagination.total"
       height="calc(100vh - 136px)"
       empty-title="暂无商机"
+      row-interactive
+      mobile-title-key="opportunity_name"
+      mobile-subtitle-key="customer_name"
+      mobile-status-key="status"
+      :mobile-meta-keys="['stage', 'win_probability', 'owner']"
       v-model:filters="activeFilters"
       :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @row-click="handleViewDetail"
     >
+      <template #mobile-card="{ row }">
+        <div class="opportunity-mobile-card-header">
+          <div class="opportunity-mobile-card-title">
+            {{ row.opportunity_name }}
+          </div>
+          <StatusBadge :status="mapOpportunityStatus(row.status)" type="opportunity" />
+        </div>
+        <div class="opportunity-mobile-card-customer">
+          {{ row.customer_name || '-' }}
+        </div>
+        <div class="opportunity-mobile-card-amount">
+          {{ formatCurrency(row.total_amount) }}
+        </div>
+        <div class="opportunity-mobile-card-badges">
+          <StatusBadge
+            v-if="row.license_type"
+            :status="row.license_type"
+            type="authorizationMode"
+          />
+          <StatusBadge
+            v-if="row.purchase_type"
+            :status="row.purchase_type"
+            type="procurementType"
+          />
+          <span :class="['status-badge', getApprovalPhaseClass(row.approval_phase)]">
+            {{ getApprovalPhaseText(row.approval_phase) }}
+          </span>
+        </div>
+        <div class="opportunity-mobile-card-meta">
+          <span>{{ row.current_stage_snapshot?.stage_name || row.stage_name || '-' }}</span>
+          <span>赢率：{{ row.win_probability !== undefined ? row.win_probability + '%' : '-' }}</span>
+          <span>预计：{{ formatDate(row.expected_closing_date) }}</span>
+          <span>负责人：{{ row.owner_info?.name || '-' }}</span>
+        </div>
+      </template>
+
+      <template #mobile-actions="{ row }">
+        <TableRowActions
+          :row="row"
+          :primary-actions="getPrimaryActions(row)"
+          :secondary-actions="getSecondaryActions(row)"
+          size="lg"
+        />
+      </template>
+
       <!-- 商机名称 -->
       <template #cell-opportunity_name="{ row }">
         <span class="link-text" @click.stop="openOpportunitySheet(row.id)">
@@ -608,6 +704,13 @@ watchEffect(() => {
         <StatusBadge :status="mapOpportunityStatus(row.status)" type="opportunity" />
       </template>
 
+      <!-- 审批 -->
+      <template #cell-approval_phase="{ row }">
+        <span :class="['status-badge', getApprovalPhaseClass(row.approval_phase)]">
+          {{ getApprovalPhaseText(row.approval_phase) }}
+        </span>
+      </template>
+
       <!-- 操作 -->
       <template #cell-actions="{ row }">
         <TableRowActions
@@ -672,6 +775,12 @@ watchEffect(() => {
   flex: 1;
 }
 
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .opportunities-page {
+    padding: $wolf-page-padding-mobile-v2;
+  }
+}
+
 // 链接样式
 .link-text {
   color: $wolf-text-link-v2;
@@ -687,5 +796,53 @@ watchEffect(() => {
 .amount-cell {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
+}
+
+.opportunity-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.opportunity-mobile-card-title {
+  min-width: 0;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.opportunity-mobile-card-customer {
+  margin-top: $wolf-space-xs-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  overflow-wrap: anywhere;
+}
+
+.opportunity-mobile-card-amount {
+  margin-top: $wolf-space-sm-v2;
+  font-family: $wolf-font-mono-v2;
+  font-size: 18px;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-warning-text-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+.opportunity-mobile-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2;
+  margin-top: $wolf-space-sm-v2;
+}
+
+.opportunity-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
 }
 </style>

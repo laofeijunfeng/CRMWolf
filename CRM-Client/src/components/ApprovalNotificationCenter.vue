@@ -21,13 +21,13 @@
     成功后重置回 pollIntervalMs(60s)
   - onUnmounted 清理 timer + 移除监听（避免泄漏）
 
-  可见性门控：v-any-permission="['invoice:approve','payment:approve']"——
+  可见性门控：v-any-permission 审批权限集合——
   无任一审批权限时不渲染铃铛。
 -->
 <template>
   <div class="approval-notification-center">
     <div
-      v-any-permission="['invoice:approve', 'payment:approve']"
+      v-any-permission="['invoice:approve', 'invoice:approve:own', 'invoice:approve:all', 'payment:approve', 'payment:approve:own', 'payment:approve:all', 'contract:approve:own', 'contract:approve:all', 'license:approve', 'license:approve:own', 'license:approve:all', 'opportunity:approve', 'opportunity:approve:own', 'opportunity:approve:all']"
       data-testid="approval-bell"
     >
       <el-dropdown
@@ -139,7 +139,9 @@ const businessTypeLabel = (t: EntityType): string => {
   const map: Record<EntityType, string> = {
     PAYMENT: '回款',
     INVOICE: '发票',
-    CONTRACT: '合同'
+    CONTRACT: '合同',
+    LICENSE: 'License',
+    OPPORTUNITY: '商机'
   }
   return map[t] ?? t
 }

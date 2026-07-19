@@ -167,7 +167,7 @@ class ApprovalFlowCreate(BaseModel):
     )
     business_type: str = Field(
         ...,
-        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE"
+        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY"
     )
     nodes: List[ApprovalNodeCreate] = Field(
         ...,
@@ -219,7 +219,7 @@ class ApprovalFlowUpdate(BaseModel):
     )
     business_type: Optional[str] = Field(
         None,
-        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE"
+        description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY"
     )
     nodes: Optional[List[ApprovalNodeUpdate]] = Field(
         None,
@@ -369,7 +369,7 @@ class ApprovalListResponse(BaseModel):
 class OverdueApprovalResponse(BaseModel):
     """超时审批响应模型"""
     approval_id: int = Field(..., description="审批实例ID")
-    business_type: str = Field(..., description="业务单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE")
+    business_type: str = Field(..., description="业务单据类型：CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY")
     business_id: Optional[int] = Field(None, description="业务单据ID（与 business_type 联合定位单据）")
     contract_id: Optional[int] = Field(None, description="关联合同ID（仅 CONTRACT 类非空，PAYMENT/INVOICE 为 None）")
     contract_name: Optional[str] = Field(None, description="合同名称（仅 CONTRACT 类由调用方按需填充）")

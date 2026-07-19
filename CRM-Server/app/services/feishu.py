@@ -15,6 +15,7 @@ _ENTITY_TYPE_LABEL = {
     BusinessType.PAYMENT: "回款登记",
     BusinessType.INVOICE: "发票申请",
     BusinessType.LICENSE: "License申请",
+    BusinessType.OPPORTUNITY: "商机",
 }
 
 _APPROVAL_TYPE_HEADER_TEMPLATE = {
@@ -22,6 +23,7 @@ _APPROVAL_TYPE_HEADER_TEMPLATE = {
     BusinessType.PAYMENT: "green",
     BusinessType.INVOICE: "orange",
     BusinessType.LICENSE: "purple",
+    BusinessType.OPPORTUNITY: "blue",
 }
 
 _REMINDER_HEADER_TEMPLATE = {
@@ -173,7 +175,7 @@ class FeishuService:
         """发送飞书消息卡片（支持按钮链接）
 
         Args:
-            user_id: 用户 open_id
+            user_id: 飞书 Open ID（参数名沿用历史兼容）
             title: 卡片标题
             content: 卡片内容（lark_md 格式）
             button_url: 可选按钮跳转链接
@@ -708,6 +710,7 @@ class FeishuService:
             BusinessType.PAYMENT: "payments",
             BusinessType.INVOICE: "invoices",
             BusinessType.LICENSE: "license-applications",
+            BusinessType.OPPORTUNITY: "opportunities",
         }
         segment = path_map.get(entity_type, "contracts")
         return f"{frontend_url}/{segment}/{business_id}"
@@ -716,7 +719,7 @@ class FeishuService:
         """构造审批中心跳转链接。
 
         Args:
-            business_type: 可选业务类型筛选（CONTRACT/PAYMENT/INVOICE/LICENSE）
+            business_type: 可选业务类型筛选（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
 
         Returns:
             审批中心链接，如 {FRONTEND_URL}/approvals?status=PENDING&business_type=PAYMENT
@@ -959,7 +962,7 @@ class FeishuService:
         泛化签名（A8）：entity_type / entity_name 替代 contract_name（旧别名仍兼容）。
 
         Args:
-            user_id: 审批人 open_id
+            user_id: 审批人飞书 Open ID（参数名沿用历史兼容）
             entity_type: 业务单据类型，缺省 CONTRACT
             entity_name: 业务单据展示名
             waiting_hours: 已等待小时数
@@ -1109,7 +1112,7 @@ class FeishuService:
         泛化签名（A8）：entity_type / entity_name 替代 contract_name（旧别名仍兼容）。
 
         Args:
-            user_id: 提交人/管理员 open_id
+            user_id: 提交人/管理员飞书 Open ID（参数名沿用历史兼容）
             entity_type: 业务单据类型，缺省 CONTRACT
             entity_name: 业务单据展示名
             node_name: 当前审批节点名称

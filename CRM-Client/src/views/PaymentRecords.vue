@@ -309,11 +309,63 @@ watchEffect(() => {
       :filter-fields="filterFields"
       height="calc(100vh - 136px)"
       empty-title="暂无回款记录"
+      row-interactive
+      mobile-title-key="record_number"
+      mobile-subtitle-key="customer_name"
+      mobile-status-key="confirmation_status"
+      :mobile-meta-keys="['contract_name', 'actual_payer_name', 'payment_date']"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @row-click="handleViewDetail"
     >
+      <template #mobile-card="{ row }">
+        <div class="payment-record-mobile-card-header">
+          <div class="payment-record-mobile-card-number">
+            {{ row.record_number || `#${row.id}` }}
+          </div>
+          <StatusBadge :status="mapPaymentRecordStatus(row.confirmation_status ?? 'PENDING')" type="paymentRecord" />
+        </div>
+        <div class="payment-record-mobile-card-customer">
+          {{ row.customer_name || '-' }}
+        </div>
+        <div class="payment-record-mobile-card-contract">
+          {{ row.contract_name || '-' }}
+        </div>
+        <div class="payment-record-mobile-card-amount">
+          {{ formatCurrency(row.actual_amount) }}
+        </div>
+        <div class="payment-record-mobile-card-meta">
+          <span>付款方：{{ row.actual_payer_name || '-' }}</span>
+          <span>回款：{{ row.payment_date || '-' }}</span>
+        </div>
+      </template>
+
+      <template #mobile-actions="{ row }">
+        <TableRowActions
+          :row="row"
+          :primary-actions="[
+            {
+              label: '编辑',
+              handler: handleEditAction,
+              visible: canEditRecord,
+              icon: Pencil
+            }
+          ]"
+          :secondary-actions="[
+            {
+              label: '删除',
+              handler: handleDeleteAction,
+              visible: canDeleteRecord,
+              icon: Trash2,
+              destructive: true
+            }
+          ]"
+          size="lg"
+        />
+      </template>
+
       <!-- 记录编号 -->
       <template #cell-record_number="{ row }">
         <button
@@ -402,6 +454,12 @@ watchEffect(() => {
   flex: 1;
 }
 
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .payment-records-page {
+    padding: $wolf-page-padding-mobile-v2;
+  }
+}
+
 // 客户名称链接
 .customer-name-link {
   color: $wolf-text-link-v2;
@@ -446,5 +504,55 @@ watchEffect(() => {
     outline-offset: $wolf-focus-ring-offset-v2;
     border-radius: $wolf-radius-sm-v2;
   }
+}
+
+.payment-record-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.payment-record-mobile-card-number {
+  min-width: 0;
+  font-family: $wolf-font-mono-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-link-v2;
+  overflow-wrap: anywhere;
+}
+
+.payment-record-mobile-card-customer {
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.payment-record-mobile-card-contract {
+  margin-top: $wolf-space-xs-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  overflow-wrap: anywhere;
+}
+
+.payment-record-mobile-card-amount {
+  margin-top: $wolf-space-sm-v2;
+  font-family: $wolf-font-mono-v2;
+  font-size: 18px;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-warning-text-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+.payment-record-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
 }
 </style>

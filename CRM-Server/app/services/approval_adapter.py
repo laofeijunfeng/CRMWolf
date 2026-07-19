@@ -19,6 +19,7 @@ from app.models.contract import Contract, ContractStatus
 from app.models.payment import PaymentRecord, PaymentConfirmationStatus
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
+from app.models.opportunity import Opportunity
 
 
 class ApprovalEntityAdapter(Protocol):
@@ -221,11 +222,53 @@ class LicenseApplicationAdapter:
         return f"License申请#{entity.application_number}"
 
 
+class OpportunityAdapter:
+    """商机审批适配器
+
+    商机的 status 表示跟进中/赢单/输单，审批状态由 approval_phase 独立承载。
+    因此审批提交、通过、驳回、撤回均不改写业务 status。
+    """
+    business_type = BusinessType.OPPORTUNITY
+
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> Optional[Opportunity]:
+        from app.crud.opportunity import opportunity_crud
+        return opportunity_crud.get_by_id(db, business_id, team_id)
+
+    def get_submitter(self, entity: Opportunity) -> tuple[str, str | None]:
+        if entity is None:
+            return "", None
+        return entity.creator_id or "", None
+
+    def match_kwargs(self, entity: Opportunity) -> dict:
+        return {
+            "amount": float(entity.total_amount) if entity.total_amount else 0,
+            "license_type": getattr(entity, "license_type", None),
+        }
+
+    def on_submit(self, db: Session, entity: Opportunity) -> None:
+        if entity is None: return  # E4 守卫
+
+    def on_approved(self, db: Session, entity: Opportunity) -> None:
+        if entity is None: return  # E4 守卫
+
+    def on_rejected(self, db: Session, entity: Opportunity) -> None:
+        if entity is None: return  # E4 守卫
+
+    def on_cancelled(self, db: Session, entity: Opportunity) -> None:
+        if entity is None: return  # E4 守卫
+
+    def get_name(self, entity: Opportunity) -> str:
+        if entity is None:
+            return "商机"
+        return getattr(entity, "opportunity_name", None) or f"商机#{entity.id}"
+
+
 _REGISTRY: dict[str, ApprovalEntityAdapter] = {
     BusinessType.CONTRACT: ContractAdapter(),
     BusinessType.PAYMENT: PaymentRecordAdapter(),
     BusinessType.INVOICE: InvoiceApplicationAdapter(),
     BusinessType.LICENSE: LicenseApplicationAdapter(),
+    BusinessType.OPPORTUNITY: OpportunityAdapter(),
 }
 
 

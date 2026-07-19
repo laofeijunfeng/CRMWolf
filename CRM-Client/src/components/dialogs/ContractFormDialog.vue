@@ -43,11 +43,13 @@ import {
   EmptyHeader,
   EmptyTitle
 } from '@/components/ui/empty'
+import { FileAttachment } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import contractApi, { type ContractCreate, type ContractUpdate, type ContractResponse, type LicenseType } from '@/api/contract'
 import { opportunityApi } from '@/api/opportunity'
 import customerApi, { type ContactResponse, type CustomerResponse, type CustomerDetailResponse } from '@/api/customer'
 import { formatLocalDate } from '@/utils/format'
+import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 // Zod schema for form validation - use coerce for number fields
 const schema = toTypedSchema(
@@ -119,6 +121,7 @@ const customerSearchKeyword = ref('')
 const contractNameManuallyEdited = ref(false)
 const isApplyingGeneratedName = ref(false)
 const lastGeneratedContractName = ref('')
+const selectedContractFile = ref<File | null>(null)
 
 interface CustomerOption {
   id: number
@@ -164,6 +167,19 @@ const setLockedCustomerOption = (): void => {
 // Computed property for edit mode
 const isEdit = computed(() => !!props.contract)
 const hasFixedOpportunity = computed(() => props.fixedOpportunity !== null && props.fixedOpportunity !== undefined)
+const canSubmit = computed(() => !submitting.value && (isEdit.value || selectedContractFile.value !== null))
+const selectedContractFileItems = computed<FileAttachmentItem[]>(() => {
+  if (selectedContractFile.value === null) return []
+  const fileName = selectedContractFile.value.name
+  return [{
+    id: fileName,
+    name: fileName,
+    size: selectedContractFile.value.size,
+    mimeType: selectedContractFile.value.type,
+    extension: getFileExtension(fileName),
+    status: 'idle'
+  }]
+})
 
 // Computed property for dialog visibility
 const visible = computed({
@@ -277,6 +293,34 @@ function normalizeLicenseType(value: string): LicenseType {
   return value === 'PERPETUAL' ? 'PERPETUAL' : 'SUBSCRIPTION'
 }
 
+function getFileExtension(fileName: string): string {
+  return fileName.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
+}
+
+function isAllowedContractFile(file: File): boolean {
+  return ['pdf', 'docx'].includes(getFileExtension(file.name))
+}
+
+function handleContractFileUpload(files: File[]): void {
+  const file = files[0]
+  if (file === undefined) return
+  if (!isAllowedContractFile(file)) {
+    toast.error('仅支持上传 PDF 或 DOCX 文件，旧版 DOC 请转存后上传')
+    return
+  }
+  selectedContractFile.value = file
+  isDirty.value = true
+}
+
+function handleContractFileRemove(): void {
+  selectedContractFile.value = null
+  isDirty.value = true
+}
+
+function handleContractFileError(message: string): void {
+  toast.error(message)
+}
+
 function buildContractName(opportunity: ContractOpportunityOption): string {
   const customerName = selectedCustomerName.value || '客户'
   const userCount = Number(opportunity.user_count) || 1
@@ -334,6 +378,7 @@ watch(() => props.open, async (newOpen) => {
     customerSearchKeyword.value = ''
 
     if (props.contract) {
+      selectedContractFile.value = null
       // Edit mode: populate form with contract data
       setValues({
         customer_id: props.contract.customer_id.toString(),
@@ -365,19 +410,22 @@ watch(() => props.open, async (newOpen) => {
       // Create mode: reset form
       const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
 
+      const initialValues = {
+        customer_id: initialCustomerId,
+        contract_name: '',
+        user_count: 1,
+        total_amount: 0,
+        license_type: 'SUBSCRIPTION' as const,
+        subscription_years: 1
+      }
       resetForm({
-        values: {
-          customer_id: initialCustomerId,
-          contract_name: '',
-          opportunity_id: props.fixedOpportunity?.id,
-          user_count: 1,
-          total_amount: 0,
-          license_type: 'SUBSCRIPTION',
-          subscription_years: 1
-        }
+        values: props.fixedOpportunity === null
+          ? initialValues
+          : { ...initialValues, opportunity_id: props.fixedOpportunity.id }
       })
       contractNameManuallyEdited.value = false
       lastGeneratedContractName.value = ''
+      selectedContractFile.value = null
 
       if (props.customerLocked && props.customerId !== undefined) {
         setLockedCustomerOption()
@@ -449,6 +497,11 @@ const onSubmit = handleSubmit(async (formValues) => {
       await contractApi.updateContract(props.contract.id, data)
       toast.success('合同更新成功')
     } else {
+      if (selectedContractFile.value === null) {
+        toast.warning('请上传合同邮件附件')
+        return
+      }
+
       // Create mode
       const data: ContractCreate = {
         contract_name: formValues['contract_name'],
@@ -462,7 +515,10 @@ const onSubmit = handleSubmit(async (formValues) => {
         signing_date: formValues['signing_date'] ?? null,
         effective_date: formValues['effective_date'] ?? null
       }
-      await contractApi.createContract(data)
+      await contractApi.createContract({
+        data,
+        file: selectedContractFile.value
+      })
       toast.success('合同创建成功')
     }
 
@@ -557,7 +613,7 @@ function continueEditing(): void {
           <FormItem>
             <FormLabel>关联商机 <span class="text-destructive">*</span></FormLabel>
             <Select
-              :model-value="value !== undefined && value !== null ? String(value) : undefined"
+              :model-value="value !== undefined && value !== null ? String(value) : null"
               :disabled="opportunitySelectDisabled"
               @update:model-value="handleOpportunityChange"
             >
@@ -602,6 +658,22 @@ function continueEditing(): void {
             <FormMessage />
           </FormItem>
         </FormField>
+
+        <FileAttachment
+          v-if="!isEdit"
+          title="合同邮件附件"
+          description="仅支持 PDF 或 DOCX，旧版 DOC 请转存后上传"
+          mode="manage"
+          accept=".pdf,.docx"
+          required
+          :files="selectedContractFileItems"
+          :multiple="false"
+          :allow-preview="false"
+          empty-text="请上传合同邮件附件"
+          @upload="handleContractFileUpload"
+          @remove="handleContractFileRemove"
+          @error="handleContractFileError"
+        />
 
         <!-- Signing Contact (required) -->
         <FormField v-slot="{ componentField }" name="signing_contact_id">
@@ -739,7 +811,7 @@ function continueEditing(): void {
           <Button variant="outline" type="button" @click="handleCancel">
             取消
           </Button>
-          <Button type="submit" :loading="submitting">
+          <Button type="submit" :loading="submitting" :disabled="!canSubmit">
             {{ submitting ? '提交中...' : '确定' }}
           </Button>
         </DialogFooter>

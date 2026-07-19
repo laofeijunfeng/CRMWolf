@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional
 from datetime import date
+from urllib.parse import quote
 import logging
+import os
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, check_contract_edit_permission, check_contract_delete_permission
+from app.core.deps import get_current_active_user, get_current_user_team, check_contract_edit_permission, check_contract_delete_permission, check_contract_view_permission
 from app.crud.contract import contract_crud, ApprovalService
 from app.crud.customer import customer_crud, contact_crud
 from app.crud.opportunity import opportunity_crud
@@ -19,6 +21,7 @@ from app.schemas.contract import (
 )
 from app.schemas.common import PaginatedResponse
 from app.services.notification import notification_service_factory
+from app.services.file_storage import file_storage_service, FileStorageError
 from app.models.approval import BusinessType
 
 logger = logging.getLogger(__name__)
@@ -81,7 +84,37 @@ def _contract_response_base(contract) -> dict:
         "creator_id": contract.creator_id,
         "created_time": contract.created_time,
         "last_modified_time": contract.last_modified_time,
+        "contract_file_path": contract.contract_file_path,
+        "contract_file_name": contract.contract_file_name,
+        "contract_file_size": contract.contract_file_size,
+        "contract_file_mime_type": contract.contract_file_mime_type,
     }
+
+
+def _parse_contract_payload(contract_payload: str) -> ContractCreate:
+    try:
+        return ContractCreate.model_validate_json(contract_payload)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"合同参数格式错误：{e}",
+        )
+
+
+def _contract_file_content_type(file_path: str) -> str:
+    ext = os.path.splitext(file_path)[1].lower()
+    content_type_map = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    return content_type_map.get(ext, "application/octet-stream")
+
+
+def _content_disposition(filename: str) -> str:
+    safe_filename = os.path.basename(filename).replace("\r", "").replace("\n", "")
+    fallback_name = safe_filename.encode("ascii", "ignore").decode("ascii") or "contract_file"
+    quoted_name = quote(safe_filename, safe="")
+    return f"attachment; filename=\"{fallback_name}\"; filename*=UTF-8''{quoted_name}"
 
 
 @router.post("/", response_model=ContractResponse, status_code=status.HTTP_201_CREATED, summary="创建合同", description="""
@@ -98,11 +131,20 @@ def _contract_response_base(contract) -> dict:
 - 商务谈判达成后建立合同记录
 """)
 async def create_contract(
-    contract: ContractCreate,
+    contract_payload: str = Form(..., description="合同 JSON 数据"),
+    file: UploadFile = File(..., description="合同邮件附件（PDF/DOCX，必传）"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    contract = _parse_contract_payload(contract_payload)
+    file_content = await file.read()
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请上传合同邮件附件"
+        )
+
     customer = customer_crud.get_by_id(db, contract.customer_id, team_id)
     if not customer:
         raise HTTPException(
@@ -144,6 +186,28 @@ async def create_contract(
             team_id=team_id
         )
 
+        try:
+            contract_file_path = file_storage_service.save_contract_file(
+                team_id=team_id,
+                contract_id=db_contract.id,
+                filename=file.filename,
+                content=file_content,
+            )
+        except FileStorageError as file_error:
+            db.delete(db_contract)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(file_error)
+            )
+
+        db_contract.contract_file_path = contract_file_path
+        db_contract.contract_file_name = file.filename
+        db_contract.contract_file_size = len(file_content)
+        db_contract.contract_file_mime_type = file.content_type
+        db.commit()
+        db.refresh(db_contract)
+
         # 提交审批并发送通知
         approval = ApprovalService.submit_for_approval(db, db_contract.id)
         if approval and approval.current_node:
@@ -174,6 +238,48 @@ async def create_contract(
         )
 
 
+@router.get(
+    "/{contract_id}/file",
+    summary="下载合同附件",
+    description="下载或预览合同邮件附件。仅支持 PDF / DOCX。",
+)
+async def download_contract_file(
+    contract_id: int,
+    contract = Depends(check_contract_view_permission),
+):
+    if not contract.contract_file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该合同未上传附件",
+        )
+
+    try:
+        full_path = file_storage_service.get_full_path(contract.contract_file_path)
+    except FileStorageError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="文件路径非法",
+        )
+
+    if not os.path.exists(full_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文件不存在",
+        )
+
+    with open(full_path, "rb") as f:
+        content = f.read()
+
+    filename = contract.contract_file_name or f"contract_{contract_id}{os.path.splitext(contract.contract_file_path)[1].lower()}"
+    return Response(
+        content=content,
+        media_type=contract.contract_file_mime_type or _contract_file_content_type(contract.contract_file_path),
+        headers={
+            "Content-Disposition": _content_disposition(filename)
+        },
+    )
+
+
 @router.post("/from-opportunity/{opportunity_id}", response_model=ContractResponse, status_code=status.HTTP_201_CREATED, summary="根据商机创建合同", description="""
 从赢单商机快速创建合同，简化销售流程。
 
@@ -189,8 +295,9 @@ async def create_contract(
 """)
 async def create_contract_from_opportunity(
     opportunity_id: int,
-    contract_name: str = Query(..., description="合同名称，如：XX公司软件采购合同"),
-    signing_contact_id: int = Query(..., description="签约联系人ID，必须是该商机的客户下的联系人"),
+    contract_name: str = Form(..., description="合同名称，如：XX公司软件采购合同"),
+    signing_contact_id: int = Form(..., description="签约联系人ID，必须是该商机的客户下的联系人"),
+    file: UploadFile = File(..., description="合同邮件附件（PDF/DOCX，必传）"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -208,6 +315,13 @@ async def create_contract_from_opportunity(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="只能从赢单商机创建合同"
+        )
+
+    file_content = await file.read()
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请上传合同邮件附件"
         )
 
     contact = contact_crud.get_by_id(db, signing_contact_id, team_id)
@@ -233,6 +347,28 @@ async def create_contract_from_opportunity(
             creator_id=str(current_user.id),
             team_id=team_id
         )
+
+        try:
+            contract_file_path = file_storage_service.save_contract_file(
+                team_id=team_id,
+                contract_id=db_contract.id,
+                filename=file.filename,
+                content=file_content,
+            )
+        except FileStorageError as file_error:
+            db.delete(db_contract)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(file_error)
+            )
+
+        db_contract.contract_file_path = contract_file_path
+        db_contract.contract_file_name = file.filename
+        db_contract.contract_file_size = len(file_content)
+        db_contract.contract_file_mime_type = file.content_type
+        db.commit()
+        db.refresh(db_contract)
 
         # 提交审批并发送通知
         approval = ApprovalService.submit_for_approval(db, db_contract.id)

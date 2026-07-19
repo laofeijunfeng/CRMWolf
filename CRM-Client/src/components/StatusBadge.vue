@@ -30,7 +30,7 @@ export type SourceType = '线上注册' | '市场活动' | '客户推荐' | '电
 export type AuthorizationModeType = 'SUBSCRIPTION' | 'PERPETUAL'
 export type ProcurementTypeType = 'NEW' | 'RENEWAL' | 'EXPANSION'
 export type IndustryType = 'IT/互联网' | '金融' | '教育' | '医疗' | '制造' | '零售' | '房地产' | '其他'
-export type CompanyScaleType = '1-10人' | '11-50人' | '51-200人' | '201-500人' | '501-1000人' | '1000人以上'
+export type CompanyScaleType = '1-50人' | '51-200人' | '201-500人' | '501-1000人' | '1000人以上'
 
 type StatusType = 'lead' | 'customer' | 'opportunity' | 'contract' | 'invoice' | 'paymentPlan' | 'paymentRecord' | 'generic' | 'source' | 'authorizationMode' | 'procurementType' | 'industry' | 'companyScale'
 type StatusColor = 'neutral' | 'warning' | 'success' | 'danger'
@@ -129,8 +129,7 @@ const STATUS_CONFIG = {
     '__default__': { label: '__LABEL__', color: 'neutral' }
   } as Record<string, StatusConfigItem>,
   companyScale: {
-    '1-10人': { label: '1-10人', color: 'neutral' },
-    '11-50人': { label: '11-50人', color: 'neutral' },
+    '1-50人': { label: '1-50人', color: 'neutral' },
     '51-200人': { label: '51-200人', color: 'warning' },
     '201-500人': { label: '201-500人', color: 'warning' },
     '501-1000人': { label: '501-1000人', color: 'success' },

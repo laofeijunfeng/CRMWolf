@@ -605,7 +605,8 @@ const filterFields = [
       { value: 'PAYMENT', label: '回款' },
       { value: 'INVOICE', label: '发票' },
       { value: 'CONTRACT', label: '合同' },
-      { value: 'LICENSE', label: 'License' }
+      { value: 'LICENSE', label: 'License' },
+      { value: 'OPPORTUNITY', label: '商机' }
     ]
   }
 ]
@@ -702,7 +703,8 @@ const businessTypeLabel = (t: EntityType): string => {
     PAYMENT: '回款',
     INVOICE: '发票',
     CONTRACT: '合同',
-    LICENSE: 'License'
+    LICENSE: 'License',
+    OPPORTUNITY: '商机'
   }
   return map[t] ?? t
 }
@@ -885,7 +887,8 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
       // License 申请在客户详情页的 License 管理 Tab 编辑
       LICENSE: row.customer_info?.id !== undefined
         ? `/customers/${row.customer_info.id}?tab=license-management`
-        : '/customers'
+        : '/customers',
+      OPPORTUNITY: `/opportunities?opportunityId=${row.business_id}`
     }
     const target = route[row.business_type as Exclude<EntityType, 'CONTRACT'>]
     await router.push(target)
@@ -899,6 +902,9 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     }
     if (row.business_type === 'LICENSE') {
       toast.info('请修改 License 申请后重新提交审批')
+    }
+    if (row.business_type === 'OPPORTUNITY') {
+      toast.info('请在商机详情中处理审批')
     }
   } catch {
     // router.push 失败

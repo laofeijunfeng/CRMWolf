@@ -57,6 +57,7 @@ docs-site/
 # ===== 上传文件 =====
 CRM-Server/uploads/**.tar
 CRM-Server/uploads/invoices/
+CRM-Server/uploads/contracts/
 # Ignore all uploaded files except .gitkeep
 uploads/*
 !uploads/.gitkeep

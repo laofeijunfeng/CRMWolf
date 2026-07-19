@@ -53,6 +53,10 @@ class Contract(Base):
 
     total_paid_amount = Column(Numeric(12, 2), nullable=False, default=0, comment="累计已回款金额")
     payment_status = Column(String(20), nullable=False, default=PaymentStatus.UNPAID, comment="合同回款状态：UNPAID, PARTIAL, COMPLETED, OVERDUE")
+    contract_file_path = Column(String(500), nullable=True, comment="合同附件路径（相对路径）")
+    contract_file_name = Column(String(255), nullable=True, comment="合同附件原始文件名")
+    contract_file_size = Column(BigInteger, nullable=True, comment="合同附件大小（字节）")
+    contract_file_mime_type = Column(String(100), nullable=True, comment="合同附件 MIME 类型")
 
     created_time = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
     owner_id = Column(String(100), nullable=False, comment="合同负责人系统用户ID")

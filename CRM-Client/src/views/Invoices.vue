@@ -467,13 +467,98 @@ watchEffect(() => {
       :total="pagination.total"
       height="calc(100vh - 136px)"
       empty-title="暂无发票申请"
+      row-interactive
+      mobile-title-key="application_number"
+      mobile-subtitle-key="customer_name"
+      mobile-status-key="status"
+      :mobile-meta-keys="['contract_name', 'applicant_name', 'created_time']"
       v-model:filters="activeFilters"
       :filter-fields="filterFields"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @row-click="handleViewDetail"
     >
+      <template #mobile-card="{ row }">
+        <div class="invoice-mobile-card-header">
+          <div class="invoice-mobile-card-number">
+            {{ row.application_number }}
+          </div>
+          <StatusBadge :status="mapInvoiceStatus(row.status)" type="invoice" />
+        </div>
+        <div class="invoice-mobile-card-customer">
+          {{ row.customer_name || '-' }}
+        </div>
+        <div class="invoice-mobile-card-contract">
+          {{ row.contract_name || '-' }}
+        </div>
+        <div class="invoice-mobile-card-amount">
+          {{ formatCurrency(row.invoice_amount) }}
+        </div>
+        <div class="invoice-mobile-card-meta">
+          <span :class="['status-badge', getInvoiceTypeClass(row.invoice_type)]">
+            {{ getInvoiceTypeText(row.invoice_type) }}
+          </span>
+          <span>申请人：{{ row.applicant_name || '-' }}</span>
+          <span>{{ formatDateTime(row.created_time) }}</span>
+        </div>
+      </template>
+
+      <template #mobile-actions="{ row }">
+        <TableRowActions
+          :row="row"
+          :primary-actions="[
+            {
+              label: '查看',
+              handler: viewInvoiceRow,
+              icon: Eye
+            },
+            {
+              label: '编辑',
+              handler: editInvoiceRow,
+              visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
+              icon: Pencil
+            },
+            {
+              label: '下载',
+              handler: downloadInvoiceRow,
+              visible: row.status === 'ISSUED' && Boolean(row.invoice_file_path),
+              icon: Download
+            }
+          ]"
+          :secondary-actions="[
+            {
+              label: '提交',
+              handler: submitInvoiceRow,
+              visible: row.status === 'DRAFT' && canCreateInvoice,
+              icon: Send
+            },
+            {
+              label: '撤回',
+              handler: withdrawInvoiceRow,
+              visible: row.status === 'PENDING_REVIEW',
+              icon: RotateCcw
+            },
+            {
+              label: '开票',
+              handler: markIssuedInvoiceRow,
+              visible: row.status === 'APPROVED' && canMarkInvoiced,
+              icon: Stamp
+            },
+            {
+              label: '删除',
+              handler: deleteInvoiceRow,
+              visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
+              icon: Trash2,
+              destructive: true,
+              separator: true
+            }
+          ]"
+          size="lg"
+        />
+      </template>
+
       <!-- 申请单号 -->
       <template #cell-application_number="{ row }">
         <div class="application-number-cell">
@@ -630,6 +715,12 @@ watchEffect(() => {
   flex: 1;
 }
 
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .invoices-page {
+    padding: $wolf-page-padding-mobile-v2;
+  }
+}
+
 // 链接样式
 .link-text {
   color: $wolf-text-link-v2;
@@ -652,6 +743,55 @@ watchEffect(() => {
 .amount-cell {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
+}
+
+.invoice-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.invoice-mobile-card-number {
+  min-width: 0;
+  font-family: $wolf-font-mono-v2;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-link-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.invoice-mobile-card-customer {
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-primary-v2;
+  overflow-wrap: anywhere;
+}
+
+.invoice-mobile-card-contract {
+  margin-top: $wolf-space-xs-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-secondary-v2;
+  overflow-wrap: anywhere;
+}
+
+.invoice-mobile-card-amount {
+  margin-top: $wolf-space-sm-v2;
+  font-family: $wolf-font-mono-v2;
+  font-size: 18px;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-warning-text-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
 // 简易弹窗样式（临时使用，后续替换为 shadcn-vue Dialog）

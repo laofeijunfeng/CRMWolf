@@ -197,6 +197,7 @@ class OpportunityResponse(BaseModel):
     win_probability: int = Field(..., description="当前阶段赢率（0-100，继承自销售阶段配置）")
     owner_id: str = Field(..., description="负责人系统用户ID")
     status: int = Field(..., description="商机状态：0:跟进中, 1:已赢单, 2:已输单")
+    approval_phase: str = Field(..., description="审批流程状态：draft/pending_review/approved/rejected")
     loss_reason: Optional[str] = Field(None, description="输单原因（status=2时有值）")
     actual_amount: Optional[float] = Field(None, description="实际成交金额（status=1时有值）")
     actual_closing_date: Optional[date] = Field(None, description="实际成交日期（status=1时有值）")

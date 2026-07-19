@@ -160,6 +160,10 @@ class ContractResponse(BaseModel):
     creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
+    contract_file_path: Optional[str] = Field(None, description="合同附件路径（相对路径）")
+    contract_file_name: Optional[str] = Field(None, description="合同附件原始文件名")
+    contract_file_size: Optional[int] = Field(None, description="合同附件大小（字节）")
+    contract_file_mime_type: Optional[str] = Field(None, description="合同附件 MIME 类型")
     
     class Config:
         from_attributes = True
