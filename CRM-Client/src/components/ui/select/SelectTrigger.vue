@@ -15,15 +15,16 @@ const forwardedProps = useForwardProps(delegatedProps)
 
 <template>
   <SelectTrigger
-    v-bind="forwardedProps"
+    v-bind="forwardedProps as any"
     :class="cn(
-      'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background data-[placeholder]:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:truncate text-start',
+      'flex h-input-desktop w-full items-center justify-between gap-wolf-sm rounded-wolf border border-wolf-border-default bg-wolf-bg-card px-wolf-md text-start text-wolf-body font-wolf text-wolf-text-primary ring-offset-wolf transition-colors duration-wolf data-[placeholder]:text-wolf-text-placeholder hover:border-wolf-border-hover focus:outline-none focus:ring-2 focus:ring-wolf-primary focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-wolf-bg-muted disabled:text-wolf-text-tertiary disabled:opacity-60 aria-[invalid=true]:border-wolf-danger aria-[invalid=true]:ring-wolf-danger [&>span]:truncate',
+      'max-[767px]:h-input-mobile max-[767px]:px-wolf-xl',
       props.class,
     )"
   >
     <slot />
     <SelectIcon as-child>
-      <ChevronDown class="w-4 h-4 opacity-50 shrink-0" />
+      <ChevronDown class="h-wolf-icon-xs w-wolf-icon-xs shrink-0 text-wolf-text-tertiary" />
     </SelectIcon>
   </SelectTrigger>
 </template>

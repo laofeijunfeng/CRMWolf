@@ -29,15 +29,15 @@ import {
 import { cn } from '@/lib/utils'
 
 interface Props {
-  modelValue?: DateValue
-  placeholder?: DateValue
-  defaultValue?: DateValue
-  disabled?: boolean
-  class?: string
-  locale?: string
-  initialFocus?: boolean
-  minYear?: number
-  maxYear?: number
+  modelValue?: DateValue | undefined
+  placeholder?: DateValue | undefined
+  defaultValue?: DateValue | undefined
+  disabled?: boolean | undefined
+  class?: string | undefined
+  locale?: string | undefined
+  initialFocus?: boolean | undefined
+  minYear?: number | undefined
+  maxYear?: number | undefined
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -70,9 +70,11 @@ function setCalendarPlaceholder(value: DateValue): void {
   }
 }
 
-const calendarPlaceholder = computed<DateValue>({
+const calendarPlaceholder = computed({
   get: () => props.placeholder ?? fallbackPlaceholder.value ?? today(getLocalTimeZone()),
-  set: setCalendarPlaceholder
+  set: (value: DateValue) => {
+    setCalendarPlaceholder(value)
+  }
 })
 
 watch(
@@ -118,21 +120,35 @@ const selectedYear = computed({
 function handlePlaceholderChange(value: DateValue): void {
   setCalendarPlaceholder(value)
 }
+
+const calendarRootProps = computed(() => {
+  const rootProps: Record<string, unknown> = {
+    placeholder: calendarPlaceholder.value,
+    disabled: props.disabled,
+    locale: props.locale,
+    initialFocus: props.initialFocus,
+  }
+
+  if (props.modelValue !== undefined) {
+    rootProps['modelValue'] = props.modelValue
+  }
+
+  if (props.defaultValue !== undefined) {
+    rootProps['defaultValue'] = props.defaultValue
+  }
+
+  return rootProps
+})
 </script>
 
 <template>
   <CalendarRoot
     v-slot="{ weekDays, grid }"
-    :model-value="props.modelValue"
-    :default-value="props.defaultValue"
-    :placeholder="calendarPlaceholder"
-    :disabled="props.disabled"
-    :locale="props.locale"
-    :initial-focus="props.initialFocus"
+    v-bind="calendarRootProps as any"
     :class="cn('p-3', props.class)"
     class="rounded-md border bg-white"
-    @update:model-value="emit('update:modelValue', $event)"
-    @update:placeholder="handlePlaceholderChange"
+    @update:model-value="emit('update:modelValue', $event as DateValue | undefined)"
+    @update:placeholder="handlePlaceholderChange($event as DateValue)"
   >
     <CalendarHeader class="flex items-center justify-between gap-2 pt-1">
       <CalendarPrev

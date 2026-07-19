@@ -4,13 +4,15 @@ import { toValue } from "vue"
 import { useFormField } from "./useFormField"
 
 const { name, formMessageId } = useFormField()
+
+const fieldName = String(toValue(name))
 </script>
 
 <template>
   <ErrorMessage
     :id="formMessageId"
     as="p"
-    :name="toValue(name)"
-    class="text-sm font-medium text-destructive"
+    :name="fieldName"
+    class="text-wolf-caption font-wolf font-wolf-medium text-wolf-danger"
   />
 </template>

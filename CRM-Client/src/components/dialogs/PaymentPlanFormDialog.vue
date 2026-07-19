@@ -309,7 +309,7 @@ watch(
           </label>
           <Input
             id="payment-plan-fixed-contract"
-            class="payment-plan-form-dialog__control h-11 min-h-11"
+            class="payment-plan-form-dialog__control"
             :model-value="fixedContractLabel"
             disabled
           />
@@ -323,7 +323,7 @@ watch(
           <Select v-model="form.contractId" :disabled="contractsLoading || submitting">
             <SelectTrigger
               id="payment-plan-contract"
-              class="payment-plan-form-dialog__control h-11 min-h-11"
+              class="payment-plan-form-dialog__control"
               :aria-invalid="errors.contractId !== ''"
               aria-describedby="payment-plan-contract-error"
             >
@@ -358,7 +358,7 @@ watch(
             <Input
               id="payment-plan-stage"
               v-model="form.stageName"
-              class="payment-plan-form-dialog__control h-11 min-h-11"
+              class="payment-plan-form-dialog__control"
               placeholder="如：首付款、尾款"
               :disabled="submitting"
               :aria-invalid="errors.stageName !== ''"
@@ -386,7 +386,7 @@ watch(
               inputmode="decimal"
               min="0"
               step="0.01"
-              class="payment-plan-form-dialog__control h-11 min-h-11"
+              class="payment-plan-form-dialog__control"
               placeholder="请输入计划金额"
               :disabled="submitting"
               :aria-invalid="errors.plannedAmount !== ''"

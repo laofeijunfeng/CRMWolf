@@ -27,64 +27,52 @@
     <!-- Follow-up List -->
     <div v-else class="follow-up-list">
       <div
-        v-for="(followUp, index) in followUps"
+        v-for="followUp in followUps"
         :key="followUp.id"
         class="follow-up-item"
-        :class="{ 'is-last': index === followUps.length - 1 }"
       >
-        <!-- Left vertical line -->
-        <div class="follow-up-item-tail" />
-        <!-- Left dot -->
-        <div class="follow-up-item-dot">
-          <MessageSquare class="dot-icon" />
+        <div class="follow-up-method" :title="followUp.method" aria-hidden="true">
+          <component :is="getMethodIcon(followUp.method)" class="method-icon" />
         </div>
 
-        <!-- Content card -->
-        <div class="follow-up-item-content">
-          <div class="follow-up-card">
-            <!-- Time and delete button -->
-            <div class="follow-up-header">
-              <span class="follow-up-time">{{ formatTime(followUp.created_time) }}</span>
-              <Button
-                v-if="canDelete(followUp)"
-                variant="ghost"
-                size="icon-sm"
-                class="delete-btn"
-                @click.stop="handleDelete(followUp)"
-              >
-                <Trash2 class="delete-icon" />
-              </Button>
-            </div>
+        <div class="follow-up-body">
+          <div class="follow-up-content-row">
+            <p class="follow-up-content" :title="followUp.content">
+              {{ followUp.content }}
+            </p>
+            <Button
+              v-if="canDelete(followUp)"
+              variant="ghost"
+              size="icon-sm"
+              class="delete-btn"
+              :aria-label="`删除 ${formatTime(followUp.created_time)} 的跟进记录`"
+              title="删除"
+              @click.stop="handleDelete(followUp)"
+            >
+              <Trash2 class="delete-icon" />
+            </Button>
+          </div>
 
-            <!-- Follow-up details -->
-            <div class="follow-up-details">
-              <div class="follow-up-tags">
-                <span class="meta-tag type-tag">跟进记录</span>
-                <span class="meta-tag operator-tag">
-                  <User class="tag-icon" />
-                  <span>{{ followUp.creator_info?.name || '系统' }}</span>
-                </span>
-                <span class="meta-tag method-tag">
-                  <Phone class="tag-icon" />
-                  <span>{{ followUp.method }}</span>
-                </span>
-              </div>
-
-              <div class="follow-up-main">
-                <span class="content-value">{{ followUp.content }}</span>
-              </div>
-
-              <div v-if="followUp.next_follow_time || followUp.next_action" class="follow-up-plan">
-                <div v-if="followUp.next_follow_time" class="plan-item">
-                  <span class="plan-label">下次跟进</span>
-                  <span class="plan-value">{{ formatDate(followUp.next_follow_time) }}</span>
-                </div>
-                <div v-if="followUp.next_action" class="plan-item plan-action">
-                  <span class="plan-label">下一步动作</span>
-                  <span class="plan-value">{{ followUp.next_action }}</span>
-                </div>
-              </div>
-            </div>
+          <div class="follow-up-meta" :title="getMetaTitle(followUp)">
+            <span class="meta-item">
+              <User class="meta-icon" />
+              {{ getCreatorName(followUp) }}
+            </span>
+            <span class="meta-separator">·</span>
+            <span>{{ followUp.method }}</span>
+            <span class="meta-separator">·</span>
+            <span>{{ formatTime(followUp.created_time) }}</span>
+            <template v-if="hasText(followUp.next_follow_time)">
+              <span class="meta-separator">·</span>
+              <span class="meta-item">
+                <CalendarClock class="meta-icon" />
+                {{ formatShortDate(followUp.next_follow_time) }}
+              </span>
+            </template>
+            <template v-if="hasText(followUp.next_action)">
+              <span class="meta-separator">·</span>
+              <span class="meta-next-action">{{ followUp.next_action }}</span>
+            </template>
           </div>
         </div>
       </div>
@@ -93,7 +81,8 @@
 </template>
 
 <script setup lang="ts">
-import { MessageSquare, User, Phone, Trash2 } from 'lucide-vue-next'
+import type { Component } from 'vue'
+import { CalendarClock, Mail, MessageCircle, MessageSquare, Phone, Trash2, User, Users } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import {
@@ -145,6 +134,28 @@ const handleDelete = async (followUp: FollowUp): Promise<void> => {
   }
 }
 
+const getMethodIcon = (method: string): Component => {
+  const methodMap: Record<string, Component> = {
+    电话: Phone,
+    微信: MessageCircle,
+    邮件: Mail,
+    拜访: Users,
+    面谈: Users,
+    会议: Users
+  }
+
+  return methodMap[method] ?? MessageSquare
+}
+
+const hasText = (value: string | null | undefined): value is string => {
+  return value !== undefined && value !== null && value.trim() !== ''
+}
+
+const getCreatorName = (followUp: FollowUp): string => {
+  const name = followUp.creator_info?.name
+  return hasText(name) ? name : '系统'
+}
+
 const formatTime = (dateStr: string): string => {
   const date = new Date(dateStr)
   const now = new Date()
@@ -162,10 +173,27 @@ const formatTime = (dateStr: string): string => {
   }
 }
 
-const formatDate = (dateStr: string): string => {
-  if (!dateStr) return '-'
+const formatShortDate = (dateStr: string): string => {
+  if (!hasText(dateStr)) return '-'
   const date = new Date(dateStr)
-  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+}
+
+const getMetaTitle = (followUp: FollowUp): string => {
+  const meta = [
+    `跟进人：${getCreatorName(followUp)}`,
+    `方式：${followUp.method}`,
+    `时间：${formatTime(followUp.created_time)}`
+  ]
+
+  if (hasText(followUp.next_follow_time)) {
+    meta.push(`下次跟进：${formatShortDate(followUp.next_follow_time)}`)
+  }
+  if (hasText(followUp.next_action)) {
+    meta.push(`下一步：${followUp.next_action}`)
+  }
+
+  return meta.join('，')
 }
 </script>
 
@@ -217,174 +245,107 @@ const formatDate = (dateStr: string): string => {
 }
 
 .follow-up-list {
-  position: relative;
-  padding-left: $wolf-space-lg-v2;
+  display: flex;
+  flex-direction: column;
 }
 
 .follow-up-item {
-  position: relative;
-  padding-bottom: $wolf-space-xl-v2;
-  padding-left: $wolf-space-xl-v2;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: $wolf-space-sm-v2;
+  min-height: $wolf-touch-target-min-v2;
+  padding: $wolf-space-sm-v2 $wolf-space-lg-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
+  transition: background 150ms ease;
+
+  &:hover {
+    background: $wolf-bg-hover-v2;
+  }
+
+  &:last-child {
+    border-bottom: none;
+  }
 }
 
-/* Left vertical line */
-.follow-up-item-tail {
-  position: absolute;
-  left: 0;
-  top: 12px;
-  height: calc(100% - 12px);
-  width: 2px;
-  background: $wolf-border-default-v2;
-}
-
-.follow-up-item.is-last .follow-up-item-tail {
-  display: none;
-}
-
-/* Left dot */
-.follow-up-item-dot {
-  position: absolute;
-  left: -6px;
-  top: 0;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: $wolf-bg-card-v2;
-  border: 2px solid $wolf-primary-v2;
+.follow-up-method {
+  width: 28px;
+  height: 28px;
+  margin-top: 1px;
+  border-radius: $wolf-radius-sm-v2;
+  background: $wolf-bg-muted-v2;
+  color: $wolf-text-secondary-v2;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
 }
 
-.dot-icon {
-  width: 10px;
-  height: 10px;
-  color: $wolf-primary-v2;
+.method-icon {
+  width: 15px;
+  height: 15px;
 }
 
-/* Content card */
-.follow-up-item-content {
-  background: $wolf-bg-muted-v2;
-  border-radius: $wolf-radius-v2;
-  padding: $wolf-space-md-v2;
-  transition: $wolf-transition-v2;
-}
-
-.follow-up-item-content:hover {
-  background: $wolf-bg-hover-v2;
-}
-
-.follow-up-card {
+.follow-up-body {
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: $wolf-space-xs-v2;
+}
+
+.follow-up-content-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: $wolf-space-sm-v2;
+  min-width: 0;
 }
 
-.follow-up-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.follow-up-time {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-}
-
-.follow-up-details {
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-md-v2;
-}
-
-.follow-up-tags {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm-v2;
-  flex-wrap: wrap;
-}
-
-.follow-up-main {
-  flex: 1;
-}
-
-.content-value {
+.follow-up-content {
+  margin: 0;
   color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-body-v2;
   line-height: $wolf-line-height-body-v2;
   font-weight: $wolf-font-weight-medium-v2;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
-.meta-tag {
-  display: inline-flex;
+.follow-up-meta {
+  display: flex;
   align-items: center;
   gap: $wolf-space-xs-v2;
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-sm-v2;
-  font-size: $wolf-font-size-caption-v2;
-}
-
-.type-tag {
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-}
-
-.operator-tag {
-  background: $wolf-bg-elevated-v2;
-  color: $wolf-text-secondary-v2;
-  border: 1px solid $wolf-border-default-v2;
-}
-
-.operator-tag .tag-icon {
+  min-width: 0;
   color: $wolf-text-tertiary-v2;
-}
-
-.method-tag {
-  background: $wolf-bg-elevated-v2;
-  color: $wolf-text-secondary-v2;
-  border: 1px solid $wolf-border-default-v2;
-}
-
-.method-tag .tag-icon {
-  color: $wolf-primary-v2;
-}
-
-.follow-up-plan {
-  margin-top: $wolf-space-sm-v2;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  background: $wolf-bg-hover-v2;
-  border-radius: $wolf-radius-sm-v2;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.plan-item {
-  display: flex;
-  align-items: flex-start;
-  gap: $wolf-space-sm-v2;
   font-size: $wolf-font-size-caption-v2;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.plan-label {
-  color: $wolf-text-tertiary-v2;
-  min-width: 70px;
+.meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
 }
 
-.plan-value {
-  color: $wolf-text-secondary-v2;
-  flex: 1;
-}
-
-.plan-action .plan-value {
-  color: $wolf-text-primary-v2;
-}
-
-.tag-icon {
+.meta-icon {
   width: 12px;
   height: 12px;
+  flex-shrink: 0;
+}
+
+.meta-separator {
+  color: $wolf-disabled-text-v2;
+}
+
+.meta-next-action {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .delete-btn {
@@ -394,6 +355,7 @@ const formatDate = (dateStr: string): string => {
   min-width: 24px !important;
   opacity: 0;
   transition: opacity 0.2s;
+  margin-top: -4px;
 }
 
 .delete-btn:hover {
@@ -406,7 +368,21 @@ const formatDate = (dateStr: string): string => {
   color: $wolf-danger-v2;
 }
 
-.follow-up-card:hover .delete-btn {
+.follow-up-item:hover .delete-btn,
+.delete-btn:focus-visible {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .delete-btn {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .follow-up-item,
+  .delete-btn {
+    transition-duration: $wolf-reduced-motion-duration-v2;
+  }
 }
 </style>

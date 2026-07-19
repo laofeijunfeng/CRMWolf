@@ -55,6 +55,10 @@ function handleTabChange(key: string): void {
   emit('update:activeTab', key)
   emit('change', key)
 }
+
+function hasBadge(badge: number | string | undefined): boolean {
+  return badge !== undefined && badge !== '' && badge !== 0
+}
 </script>
 
 <template>
@@ -71,10 +75,10 @@ function handleTabChange(key: string): void {
         :disabled="tab.disabled ?? false"
         class="tabs-trigger-underline"
       >
-        <span class="inline-flex items-center gap-2">
+        <span class="tab-trigger-content">
           {{ tab.label }}
           <Badge
-            v-if="tab.badge"
+            v-if="hasBadge(tab.badge)"
             variant="destructive"
             class="ml-1 tab-badge"
           >
@@ -94,6 +98,7 @@ function handleTabChange(key: string): void {
   height: 40px;  // 适配 TopBar 56px
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 // ==================== TabsList 容器样式（Underline 模式 - 扁平）====================
@@ -107,6 +112,7 @@ function handleTabChange(key: string): void {
   display: flex;
   align-items: center;
   gap: $wolf-space-xs-v2;  // 4px（紧凑）
+  min-width: 0;
 
   // 移除圆角容器
   border-radius: 0;
@@ -118,7 +124,16 @@ function handleTabChange(key: string): void {
   @media (max-width: $wolf-breakpoint-md-v2 - 1) {
     height: 44px;  // Touch Target minimum
     gap: $wolf-space-sm-v2;  // 8px（移动端稍大）
+    min-width: max-content;
   }
+}
+
+.tab-trigger-content {
+  display: inline-flex;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 // ==================== TabsTrigger Item 样式（Underline 模式）====================
@@ -190,8 +205,9 @@ function handleTabChange(key: string): void {
 
   // ========== 移动端 Touch Target 合规（UI/UX Pro Max §2）==========
   @media (max-width: $wolf-breakpoint-md-v2 - 1) {
-    height: 36px;  // 视觉高度（移动端）
-    min-height: 36px;
+    height: 44px;
+    min-height: 44px;
+    flex-shrink: 0;
 
     // 字号增大（避免 iOS auto-zoom）
     font-size: $wolf-font-size-body-mobile-v2;  // 16px

@@ -18,7 +18,7 @@
 import { ref, reactive, watch, computed } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil, TrendingUp, Clock, CheckCircle, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
+import { Plus, Pencil, TrendingUp, CheckCircle, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import {
@@ -108,19 +108,20 @@ const handleEditSuccess = (): void => {
 const scoreDetailsDialogOpen = ref(false)
 
 // ==================== Methods ====================
-const fetchLeadDetail = async () => {
-  if (!props.leadId) return
+const fetchLeadDetail = async (): Promise<void> => {
+  const leadId = props.leadId
+  if (leadId == null) return
 
   loading.value = true
   try {
-    const res = await leadApi.getLeadDetail(props.leadId)
+    const res = await leadApi.getLeadDetail(leadId)
     leadData.value = res
-    followUps.value = res.follow_ups?.reverse() || []
+    followUps.value = [...(res.follow_ups ?? [])].reverse()
 
     // 获取热力值明细（使用 score 参数或默认值）
     try {
-      const scoreRes = await getLeadScore(props.leadId)
-      scoreDetails.value = scoreRes.details || []
+      const scoreRes = await getLeadScore(leadId)
+      scoreDetails.value = scoreRes.details ?? []
     } catch {
       scoreDetails.value = []
     }
@@ -132,7 +133,7 @@ const fetchLeadDetail = async () => {
 }
 
 // ==================== 操作方法 ====================
-const handleConvert = () => {
+const handleConvert = (): void => {
   if (!leadData.value) return
   showConvertDialog.value = true
 }
@@ -145,7 +146,7 @@ const handleConvertSuccess = (): void => {
 }
 
 // ==================== 添加跟进 ====================
-const showFollowUpDialog = () => {
+const showFollowUpDialog = (): void => {
   // 设置默认下次跟进时间（3天后）
   const threeDaysLater = new Date()
   threeDaysLater.setDate(threeDaysLater.getDate() + 3)
@@ -159,8 +160,10 @@ const showFollowUpDialog = () => {
   followUpDialogOpen.value = true
 }
 
-const handleFollowUpSubmit = async () => {
-  if (!props.leadId || !followUpForm.content.trim()) {
+const handleFollowUpSubmit = async (): Promise<void> => {
+  const leadId = props.leadId
+  const content = followUpForm.content.trim()
+  if (leadId == null || content.length === 0) {
     toast.error('请输入跟进内容')
     return
   }
@@ -168,12 +171,12 @@ const handleFollowUpSubmit = async () => {
   followUpSubmitting.value = true
   try {
     const data: LeadFollowUpCreate = {
-      content: followUpForm.content,
+      content,
       method: followUpForm.method,
-      next_follow_time: followUpForm.next_follow_time || null,
-      next_action: followUpForm.next_action || null
+      next_follow_time: followUpForm.next_follow_time.length > 0 ? followUpForm.next_follow_time : null,
+      next_action: followUpForm.next_action.length > 0 ? followUpForm.next_action : null
     }
-    await leadApi.addFollowUp(props.leadId, data)
+    await leadApi.addFollowUp(leadId, data)
     toast.success('跟进记录添加成功')
     followUpDialogOpen.value = false
     await fetchLeadDetail()
@@ -185,11 +188,12 @@ const handleFollowUpSubmit = async () => {
 }
 
 // ==================== 删除跟进 ====================
-const handleFollowUpDelete = async (followUp: { id: number }) => {
-  if (!props.leadId) return
+const handleFollowUpDelete = async (followUp: { id: number }): Promise<void> => {
+  const leadId = props.leadId
+  if (leadId == null) return
 
   try {
-    await leadApi.deleteFollowUp(props.leadId, followUp.id)
+    await leadApi.deleteFollowUp(leadId, followUp.id)
     toast.success('跟进记录删除成功')
     await fetchLeadDetail()
   } catch (error) {
@@ -197,17 +201,20 @@ const handleFollowUpDelete = async (followUp: { id: number }) => {
   }
 }
 
-const closeSheet = () => {
+const closeSheet = (): void => {
   emit('update:visible', false)
 }
 
 // ==================== 辅助属性 ====================
 // score 属性（LeadDetail 类型已包含 score 字段）
-const leadScore = computed(() => leadData.value?.score ?? null)
+const leadScore = computed<number | undefined>(() => {
+  const score = (leadData.value as (LeadDetail & { score?: number | null }) | null)?.score
+  return typeof score === 'number' ? score : undefined
+})
 
 // ==================== 格式化函数 ====================
 const formatDate = (dateStr: string | undefined): string => {
-  if (!dateStr) return '-'
+  if (dateStr == null || dateStr.length === 0) return '-'
   const date = new Date(dateStr)
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -227,7 +234,7 @@ const formatDateForInput = (date: Date): string => {
 const getStatusText = (status: number | undefined): string => {
   if (status === undefined) return '-'
   const map: Record<number, string> = { 0: '新建', 1: '跟进中', 2: '已转化', 3: '无效' }
-  return map[status] || '未知'
+  return map[status] ?? '未知'
 }
 
 const getStatusClass = (status: number | undefined): string => {
@@ -238,7 +245,7 @@ const getStatusClass = (status: number | undefined): string => {
     2: 'status-success',
     3: 'status-danger'
   }
-  return map[status] || 'status-default'
+  return map[status] ?? 'status-default'
 }
 
 // 热力值颜色 - 使用 V2 设计令牌语义
@@ -260,8 +267,8 @@ const getScoreIconComponent = (score: number | undefined | null): typeof Flame =
 }
 
 // ==================== Watch ====================
-watch(() => props.visible, (visible) => {
-  if (visible && props.leadId) {
+watch(() => props.visible, (visible): void => {
+  if (visible && props.leadId != null) {
     fetchLeadDetail()
   }
 })
@@ -375,7 +382,7 @@ watch(() => props.visible, (visible) => {
                     </div>
                     <div :class="['progress-wrapper', getScoreColorClass(leadScore)]">
                       <Progress
-                        :model-value="leadScore || 0"
+                        :model-value="leadScore ?? 0"
                         class="h-2"
                       />
                     </div>
@@ -420,15 +427,6 @@ watch(() => props.visible, (visible) => {
                   :current-user-id="String(userStore.userInfo?.id)"
                   @delete="handleFollowUpDelete"
                 />
-                <Empty v-if="followUps.length === 0" class="py-8">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <Clock class="w-10 h-10" />
-                    </EmptyMedia>
-                  </EmptyHeader>
-                  <EmptyTitle>暂无跟进记录</EmptyTitle>
-                  <EmptyDescription>点击上方按钮添加跟进记录</EmptyDescription>
-                </Empty>
               </CardContent>
             </Card>
           </template>

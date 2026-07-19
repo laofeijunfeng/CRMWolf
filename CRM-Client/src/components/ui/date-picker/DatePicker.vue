@@ -95,9 +95,9 @@ const handleSelect = (value: DateValue | undefined): void => {
         variant="outline"
         :disabled="disabled"
         :class="cn(
-          'w-full justify-start text-left font-normal',
+          'h-input-desktop w-full justify-start rounded-wolf border-wolf-border-default bg-wolf-bg-card px-wolf-md text-left text-wolf-body font-wolf font-wolf-normal text-wolf-text-primary ring-offset-wolf transition-colors duration-wolf hover:border-wolf-border-hover hover:bg-wolf-bg-card focus-visible:ring-wolf-primary disabled:cursor-not-allowed disabled:bg-wolf-bg-muted disabled:text-wolf-text-tertiary disabled:opacity-60',
+          'max-[767px]:h-input-mobile max-[767px]:px-wolf-xl',
           !dateValue && 'text-wolf-text-placeholder',
-          'h-11 mobile:h-10',
           props.class
         )"
       >
@@ -109,11 +109,12 @@ const handleSelect = (value: DateValue | undefined): void => {
     </PopoverTrigger>
     <PopoverContent class="w-auto p-0" align="start">
       <Calendar
-        v-model="dateValue"
-        v-model:placeholder="calendarPlaceholder"
+        :model-value="dateValue as any"
+        :placeholder="calendarPlaceholder as any"
         locale="zh-CN"
         initial-focus
         @update:model-value="handleSelect"
+        @update:placeholder="calendarPlaceholder = $event as DateValue | undefined"
       />
     </PopoverContent>
   </Popover>

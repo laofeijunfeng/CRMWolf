@@ -1,4 +1,4 @@
-import type { ComputedRef } from "vue"
+import type { ComputedRef, MaybeRef, Ref } from "vue"
 import { FieldContextKey } from "vee-validate"
 import { computed, inject } from "vue"
 import { FORM_ITEM_INJECTION_KEY } from "./injectionKeys"
@@ -7,12 +7,12 @@ interface FieldState {
   valid: ComputedRef<boolean | undefined>
   isDirty: ComputedRef<boolean | undefined>
   isTouched: ComputedRef<boolean | undefined>
-  error: string | undefined
+  error: Ref<string | undefined>
 }
 
 interface UseFormFieldReturn extends FieldState {
   id: string | undefined
-  name: string | number | symbol
+  name: MaybeRef<string | number | symbol>
   formItemId: string
   formDescriptionId: string
   formMessageId: string

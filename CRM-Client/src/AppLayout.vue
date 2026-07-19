@@ -175,79 +175,139 @@
     <!-- Main Content -->
     <main class="main-content">
       <!-- TopBar（三段式布局） -->
-      <header class="top-bar">
-        <!-- 左侧：返回按钮 + TopBarTabs 或自定义按钮 -->
-        <div class="header-left">
-          <!-- TopBarTabs（优先显示，当页面注册了 tabs 时） -->
+      <header class="top-bar" :class="{ 'has-tabs': headerHasTabs }">
+        <div class="top-bar-main">
+          <!-- 左侧：返回按钮 + TopBarTabs 或自定义按钮 -->
+          <div class="header-left">
+            <!-- TopBarTabs（优先显示，当页面注册了 tabs 时） -->
+            <TopBarTabs
+              v-if="headerHasTabs"
+              class="top-bar-tabs-desktop"
+              :tabs="headerTabs!"
+              :active-tab="headerActiveTab"
+              @change="handleTabChange"
+            />
+            <!-- 自定义左侧按钮（当没有 tabs 时） -->
+            <template v-else>
+              <slot name="header-left">
+                <Button
+                  v-if="headerStore.leftAction"
+                  variant="ghost"
+                  size="icon"
+                  class="header-left-btn"
+                  :class="{ active: headerStore.leftAction.active }"
+                  :aria-label="headerStore.leftAction.ariaLabel || '操作'"
+                  @click="headerStore.leftAction.handler"
+                >
+                  <component :is="headerStore.leftAction.icon" class="w-5 h-5" aria-hidden="true" />
+                </Button>
+                <!-- 默认返回按钮 -->
+                <Button
+                  v-else-if="headerStore.showBack"
+                  variant="ghost"
+                  size="icon"
+                  class="header-back-btn"
+                  :aria-label="headerStore.backRoute ? '返回上一页' : '返回'"
+                  @click="handleHeaderBack"
+                >
+                  <component :is="ArrowLeft" class="w-5 h-5" aria-hidden="true" />
+                </Button>
+              </slot>
+            </template>
+          </div>
+
+          <!-- 中间：页面标题 -->
+          <div class="header-center">
+            <Transition name="title-fade" mode="out-in">
+              <h1
+                class="wolf-page-title"
+                :key="pageTitle"
+                :class="{ 'title-empty': !pageTitle }"
+              >
+                {{ pageTitle || 'CRMWolf' }}
+              </h1>
+            </Transition>
+          </div>
+
+          <!-- 右侧：页面操作 + 审批中心（固定最右） -->
+          <div class="header-right">
+            <!-- 桌面端完整页面操作区（从 headerStore 渲染） -->
+            <div v-if="visibleHeaderActions.length > 0" class="header-actions-desktop">
+              <Button
+                v-for="action in visibleHeaderActions"
+                :key="action.id"
+                :variant="mapActionTypeToVariant(action.type)"
+                :disabled="isActionDisabled(action)"
+                :aria-label="getActionLabel(action)"
+                @click="action.handler"
+              >
+                <component v-if="action.icon" :is="action.icon" class="w-4 h-4 mr-2" aria-hidden="true" />
+                {{ action.label }}
+              </Button>
+            </div>
+
+            <!-- 移动端保留最高优先级操作，其余进入更多菜单 -->
+            <div v-if="visibleHeaderActions.length > 0" class="header-actions-mobile">
+              <Button
+                v-if="mobilePrimaryHeaderAction !== null"
+                :variant="mapActionTypeToVariant(mobilePrimaryHeaderAction.type)"
+                :disabled="isActionDisabled(mobilePrimaryHeaderAction)"
+                class="header-mobile-primary"
+                :class="{ 'header-mobile-primary--icon-only': hasActionIcon(mobilePrimaryHeaderAction) }"
+                :aria-label="getActionLabel(mobilePrimaryHeaderAction)"
+                @click="mobilePrimaryHeaderAction.handler"
+              >
+                <component
+                  v-if="mobilePrimaryHeaderAction.icon"
+                  :is="mobilePrimaryHeaderAction.icon"
+                  class="header-mobile-primary-icon"
+                  aria-hidden="true"
+                />
+                <span class="header-mobile-primary-label">{{ mobilePrimaryHeaderAction.label }}</span>
+              </Button>
+
+              <DropdownMenu v-if="mobileOverflowHeaderActions.length > 0">
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="header-more-btn"
+                    aria-label="更多操作"
+                  >
+                    <MoreHorizontal class="w-5 h-5" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" side="bottom" :side-offset="8" class="header-more-menu">
+                  <DropdownMenuItem
+                    v-for="action in mobileOverflowHeaderActions"
+                    :key="action.id"
+                    :disabled="isActionDisabled(action)"
+                    class="header-more-item"
+                    :class="{ 'header-more-item--danger': action.type === 'danger' }"
+                    :aria-label="getActionLabel(action)"
+                    @select="action.handler"
+                  >
+                    <component v-if="action.icon" :is="action.icon" class="header-more-icon" aria-hidden="true" />
+                    <span>{{ action.label }}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            <!-- 分隔线（当有页面操作时） -->
+            <div v-if="visibleHeaderActions.length > 0" class="header-divider"></div>
+
+            <!-- 审批中心（固定在最右，永不移动） -->
+            <ApprovalIcon class="header-approval" />
+          </div>
+        </div>
+
+        <div v-if="headerHasTabs" class="top-bar-tabs-mobile-row">
           <TopBarTabs
-            v-if="headerHasTabs"
             :tabs="headerTabs!"
             :active-tab="headerActiveTab"
             @change="handleTabChange"
           />
-          <!-- 自定义左侧按钮（当没有 tabs 时） -->
-          <template v-else>
-            <slot name="header-left">
-              <Button
-                v-if="headerStore.leftAction"
-                variant="ghost"
-                size="icon"
-                class="header-left-btn"
-                :class="{ active: headerStore.leftAction.active }"
-                :aria-label="headerStore.leftAction.ariaLabel || '操作'"
-                @click="headerStore.leftAction.handler"
-              >
-                <component :is="headerStore.leftAction.icon" class="w-5 h-5" aria-hidden="true" />
-              </Button>
-              <!-- 默认返回按钮 -->
-              <Button
-                v-else-if="headerStore.showBack"
-                variant="ghost"
-                size="icon"
-                class="header-back-btn"
-                :aria-label="headerStore.backRoute ? '返回上一页' : '返回'"
-                @click="handleHeaderBack"
-              >
-                <component :is="ArrowLeft" class="w-5 h-5" aria-hidden="true" />
-              </Button>
-            </slot>
-          </template>
-        </div>
-
-        <!-- 中间：页面标题（当没有 tabs 时显示） -->
-        <div class="header-center">
-          <Transition v-if="!headerHasTabs" name="title-fade" mode="out-in">
-            <h1
-              class="wolf-page-title"
-              :key="pageTitle"
-              :class="{ 'title-empty': !pageTitle }"
-            >
-              {{ pageTitle || 'CRMWolf' }}
-            </h1>
-          </Transition>
-        </div>
-
-        <!-- 右侧：页面操作 + 审批中心（固定最右） -->
-        <div class="header-right">
-          <!-- 页面操作区（从 headerStore 渲染） -->
-          <template v-for="action in headerStore.actions" :key="action.id">
-            <Button
-              v-if="action.visible !== false"
-              :variant="mapActionTypeToVariant(action.type)"
-              :disabled="action.disabled ?? false"
-              :aria-label="action.label"
-              @click="action.handler"
-            >
-              <component v-if="action.icon" :is="action.icon" class="w-4 h-4 mr-2" aria-hidden="true" />
-              {{ action.label }}
-            </Button>
-          </template>
-
-          <!-- 分隔线（当有页面操作时） -->
-          <div v-if="headerStore.hasActions" class="header-divider"></div>
-
-          <!-- 审批中心（固定在最右，永不移动） -->
-          <ApprovalIcon class="header-approval" />
         </div>
       </header>
 
@@ -277,6 +337,7 @@ import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
 import { usePageTitleStore } from '@/stores/pageTitle'
 import { useHeaderStore } from '@/stores/header'
+import type { HeaderAction } from '@/stores/header'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -308,6 +369,7 @@ import {
   ChevronDown,
   Check,
   ArrowLeft,
+  MoreHorizontal,
 } from 'lucide-vue-next'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import BottomNav from '@/components/crmwolf/BottomNav.vue'
@@ -326,6 +388,15 @@ const { title: pageTitle } = storeToRefs(pageTitleStore)
 const headerTabs = computed(() => headerStore.tabs)
 const headerActiveTab = computed(() => headerStore.activeTab)
 const headerHasTabs = computed(() => headerStore.hasTabs)
+const visibleHeaderActions = computed<HeaderAction[]>(() => headerStore.actions.filter(action => action.visible !== false))
+const mobilePrimaryHeaderAction = computed<HeaderAction | null>(() => {
+  return visibleHeaderActions.value.find(action => action.type === 'primary') ?? visibleHeaderActions.value[0] ?? null
+})
+const mobileOverflowHeaderActions = computed<HeaderAction[]>(() => {
+  const primaryAction = mobilePrimaryHeaderAction.value
+  if (primaryAction === null) return visibleHeaderActions.value
+  return visibleHeaderActions.value.filter(action => action.id !== primaryAction.id)
+})
 
 // UserInfoDropdown state
 const showUserDropdown = ref(false)
@@ -377,6 +448,12 @@ const mapActionTypeToVariant = (type?: 'primary' | 'success' | 'danger' | 'defau
       return 'outline'
   }
 }
+
+const isActionDisabled = (action: HeaderAction): boolean => action.disabled === true
+
+const getActionLabel = (action: HeaderAction): string => action.ariaLabel ?? action.label
+
+const hasActionIcon = (action: HeaderAction): boolean => action.icon !== undefined
 
 const handleSwitchTeam = async (teamId: number): Promise<void> => {
   if (teamId === teamStore.currentTeam?.id) {
@@ -842,9 +919,8 @@ $z-index-bottom-nav: 100;
 // MASTER.md 6.2: 高度 56px + 三段式
 .top-bar {
   display: flex;
+  flex-direction: column;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: space-between;  // 三段式布局
   height: $wolf-topbar-height-v2;  // 56px
   padding: 0 $wolf-space-xl-v2;  // 0 24px（与页面内容对齐）
   border-bottom: 1px solid $wolf-border-default-v2;  // #E4ECFC
@@ -854,8 +930,35 @@ $z-index-bottom-nav: 100;
   z-index: $z-index-topbar;  // 90
 
   @media (max-width: $wolf-breakpoint-sm-v2 - 1) {  // <768px
-    height: $wolf-topbar-height-mobile-v2;  // 56px（移动端）
+    height: $wolf-topbar-height-mobile-v2;
+    padding: 0 $wolf-page-padding-mobile-v2;
+
+    @supports (padding-top: env(safe-area-inset-top)) {
+      height: calc($wolf-topbar-height-mobile-v2 + $wolf-safe-area-top-v2);
+      padding-top: $wolf-safe-area-top-v2;
+    }
+
+    &.has-tabs {
+      height: calc($wolf-topbar-height-mobile-v2 + 44px);
+
+      @supports (padding-top: env(safe-area-inset-top)) {
+        height: calc($wolf-topbar-height-mobile-v2 + 44px + $wolf-safe-area-top-v2);
+      }
+    }
   }
+}
+
+.top-bar-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;  // 三段式布局
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.top-bar-tabs-mobile-row {
+  display: none;
 }
 
 // Header Left（返回按钮或 TopBarTabs）
@@ -882,12 +985,20 @@ $z-index-bottom-nav: 100;
   overflow: hidden;
 }
 
+.top-bar.has-tabs .header-center {
+  display: none;
+}
+
 .wolf-page-title {
   font-size: $wolf-font-size-title-v2;  // 16px → 20px（MASTER.md 6.2）
   font-weight: $wolf-font-weight-semibold-v2;  // 600
   letter-spacing: -0.02em;
   color: $wolf-text-primary-v2;  // #0F172A
   margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: opacity $wolf-transition-v2;
 
   &.title-empty {
@@ -903,9 +1014,22 @@ $z-index-bottom-nav: 100;
   min-width: 44px;
 }
 
+.header-actions-desktop {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+}
+
+.header-actions-mobile {
+  display: none;
+  align-items: center;
+  gap: $wolf-space-xs-v2;
+}
+
 // Header Buttons
 .header-back-btn,
-.header-left-btn {
+.header-left-btn,
+.header-more-btn {
   width: 44px;  // Touch target
   height: 44px;
   display: flex;
@@ -916,6 +1040,43 @@ $z-index-bottom-nav: 100;
     outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
     outline-offset: $wolf-focus-ring-offset-v2;
   }
+}
+
+.header-mobile-primary {
+  min-width: 44px;
+  max-width: 128px;
+  height: 40px;
+}
+
+.header-mobile-primary-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.header-mobile-primary-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-more-menu {
+  min-width: 160px;
+}
+
+.header-more-item {
+  min-height: 44px;
+  gap: $wolf-space-sm-v2;
+}
+
+.header-more-item--danger {
+  color: $wolf-danger-v2;
+}
+
+.header-more-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .header-divider {
@@ -956,6 +1117,93 @@ $z-index-bottom-nav: 100;
       padding-bottom: calc($wolf-bottom-nav-height-v2 + $wolf-safe-area-bottom-v2);
     }
   }
+
+  .top-bar-main {
+    height: $wolf-topbar-height-mobile-v2;
+    flex-shrink: 0;
+  }
+
+  .header-left {
+    flex: 0 0 44px;
+    min-width: 44px;
+    gap: 0;
+  }
+
+  .top-bar-tabs-desktop {
+    display: none;
+  }
+
+  .top-bar.has-tabs .header-center {
+    display: flex;
+  }
+
+  .header-center {
+    min-width: 0;
+    padding: 0 $wolf-space-sm-v2;
+  }
+
+  .wolf-page-title {
+    font-size: $wolf-font-size-title-mobile-v2;
+    line-height: $wolf-line-height-title-v2;
+    letter-spacing: 0;
+  }
+
+  .header-right {
+    flex-shrink: 0;
+    gap: $wolf-space-xs-v2;
+  }
+
+  .header-actions-desktop {
+    display: none;
+  }
+
+  .header-actions-mobile {
+    display: flex;
+  }
+
+  .header-mobile-primary {
+    padding: 0 $wolf-space-sm-v2;
+  }
+
+  .header-mobile-primary--icon-only {
+    width: 40px;
+    padding: 0;
+  }
+
+  .header-mobile-primary--icon-only .header-mobile-primary-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .header-divider {
+    display: none;
+  }
+
+  .top-bar-tabs-mobile-row {
+    display: flex;
+    width: 100%;
+    height: 44px;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+
+    .top-bar-tabs {
+      min-width: max-content;
+    }
+  }
 }
 
 // ==================== Reduced Motion ====================
@@ -965,7 +1213,9 @@ $z-index-bottom-nav: 100;
   .nav-item::before,
   .user-dropdown,
   .dropdown-item,
-  .user-chevron {
+  .user-chevron,
+  .top-bar,
+  .header-mobile-primary {
     transition-duration: $wolf-reduced-motion-duration-v2;  // 0.01ms
   }
 
