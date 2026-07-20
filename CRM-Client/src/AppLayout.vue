@@ -191,7 +191,7 @@
       <header class="top-bar" :class="{ 'has-tabs': headerHasTabs }">
         <div class="top-bar-main">
           <!-- 左侧：返回按钮 + TopBarTabs 或自定义按钮 -->
-          <div class="header-left">
+          <div v-if="hasHeaderLeftContent" class="header-left">
             <!-- TopBarTabs（优先显示，当页面注册了 tabs 时） -->
             <TopBarTabs
               v-if="headerHasTabs"
@@ -342,7 +342,7 @@
  * - UI/UX Pro Max §1 Accessibility (aria-labels, keyboard-nav)
  * - §1.5 shadcn-vue 优先原则（Button 替换 el-button）
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useSlots } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/stores/user'
@@ -392,6 +392,7 @@ import { logger } from '@/utils/logger'
 
 const router = useRouter()
 const route = useRoute()
+const slots = useSlots()
 const userStore = useUserStore()
 const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
@@ -402,6 +403,12 @@ const { title: pageTitle } = storeToRefs(pageTitleStore)
 const headerTabs = computed(() => headerStore.tabs)
 const headerActiveTab = computed(() => headerStore.activeTab)
 const headerHasTabs = computed(() => headerStore.hasTabs)
+const hasHeaderLeftContent = computed(() => (
+  headerHasTabs.value ||
+  Boolean(slots['header-left']) ||
+  Boolean(headerStore.leftAction) ||
+  headerStore.showBack
+))
 const visibleHeaderActions = computed<HeaderAction[]>(() => headerStore.actions.filter(action => action.visible !== false))
 const canViewSalesDashboard = computed(() => permissionStore.hasAnyPermission([
   'sales_dashboard:view:own',
@@ -968,9 +975,10 @@ $z-index-bottom-nav: 100;
 }
 
 .top-bar-main {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  column-gap: $wolf-space-md-v2;
   align-items: center;
-  justify-content: space-between;  // 三段式布局
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -982,10 +990,11 @@ $z-index-bottom-nav: 100;
 
 // Header Left（返回按钮或 TopBarTabs）
 .header-left {
+  grid-column: 1;
+  justify-self: start;
   display: flex;
   align-items: center;
-  flex: 1;  // 允许扩展以容纳 tabs
-  min-width: 44px;  // Touch target minimum
+  min-width: 0;
   min-height: 44px;
   gap: $wolf-space-sm-v2;
 
@@ -997,10 +1006,11 @@ $z-index-bottom-nav: 100;
 
 // Header Center（仅显示页面标题）
 .header-center {
-  flex: 1;
+  grid-column: 2;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -1027,6 +1037,8 @@ $z-index-bottom-nav: 100;
 
 // Header Right
 .header-right {
+  grid-column: 3;
+  justify-self: end;
   display: flex;
   align-items: center;
   gap: $wolf-space-sm-v2;  // 8px
@@ -1138,6 +1150,8 @@ $z-index-bottom-nav: 100;
   }
 
   .top-bar-main {
+    grid-template-columns: 44px minmax(0, 1fr) minmax(44px, auto);
+    column-gap: 0;
     height: $wolf-topbar-height-mobile-v2;
     flex-shrink: 0;
   }
