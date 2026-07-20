@@ -257,6 +257,17 @@ export interface OpportunityListResponse {
       name: string
     }
   } | null
+  stage: {
+    id: number
+    stage_code: string
+    stage_name: string
+    win_probability: number
+    sort_order: number
+    description: string | null
+    is_active: number
+    created_time: string
+    last_modified_time: string
+  } | null
   stage_info: {
     id: number
     stage_name: string

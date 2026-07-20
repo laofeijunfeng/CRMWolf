@@ -211,6 +211,14 @@ const canDeleteRow = (row: OpportunityListResponse): boolean => {
 const isApprovalApproved = (row: OpportunityListResponse): boolean => row.approval_phase === 'approved'
 const isApprovalPending = (row: OpportunityListResponse): boolean => row.approval_phase === 'pending_review'
 
+const getOpportunityStageName = (row: OpportunityListResponse): string => {
+  return row.current_stage_snapshot?.stage_name
+    ?? row.stage?.stage_name
+    ?? row.stage_info?.stage_name
+    ?? row.stage_name
+    ?? '-'
+}
+
 // ==================== Methods ====================
 const fetchOwnerFilterOptions = async (): Promise<void> => {
   try {
@@ -652,7 +660,7 @@ watchEffect(() => {
           </span>
         </div>
         <div class="opportunity-mobile-card-meta">
-          <span>{{ row.current_stage_snapshot?.stage_name || row.stage_name || '-' }}</span>
+          <span>{{ getOpportunityStageName(row) }}</span>
           <span>赢率：{{ row.win_probability !== undefined ? row.win_probability + '%' : '-' }}</span>
           <span>预计：{{ formatDate(row.expected_closing_date) }}</span>
           <span>负责人：{{ row.owner_info?.name || '-' }}</span>
@@ -720,7 +728,7 @@ watchEffect(() => {
       <!-- 销售阶段 -->
       <template #cell-stage="{ row }">
         <span :class="['status-badge', getStageClass(row.win_probability)]">
-          {{ row.current_stage_snapshot?.stage_name || row.stage_name || '-' }}
+          {{ getOpportunityStageName(row) }}
         </span>
       </template>
 
