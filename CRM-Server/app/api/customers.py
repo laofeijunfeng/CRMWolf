@@ -87,6 +87,7 @@ async def convert_from_lead(
 ):
     from app.services.feishu import feishu_service
     from app.services.customer_profile_service import customer_profile_service
+    from app.services.customer_brief_service import customer_brief_service
 
     try:
         customer, contact = customer_crud.convert_from_lead(
@@ -110,6 +111,7 @@ async def convert_from_lead(
             source_lead_id=data.lead_id,
             team_id=team_id
         )
+        await customer_brief_service.trigger_generation(customer_id=customer.id, team_id=team_id)
 
         await feishu_service.notify_account_created(
             customer.owner_id,
@@ -435,6 +437,7 @@ async def create_customer(
     db: Session = Depends(get_db)
 ):
     from app.services.customer_profile_service import customer_profile_service
+    from app.services.customer_brief_service import customer_brief_service
 
     existing_customer = customer_crud.get_by_name(db, customer.account_name, team_id)
     if existing_customer:
@@ -461,6 +464,7 @@ async def create_customer(
         source_lead_id=None,
         team_id=team_id
     )
+    await customer_brief_service.trigger_generation(customer_id=new_customer.id, team_id=team_id)
 
     return new_customer
 
@@ -1105,3 +1109,19 @@ async def regenerate_profile(
     )
 
     return MessageResponse(message="档案正在重新生成")
+
+
+@router.post("/{customer_id}/regenerate-brief", response_model=MessageResponse, summary="重新生成客户概况", description="AI重新生成销售侧客户概况")
+async def regenerate_customer_brief(
+    customer_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    from app.services.customer_brief_service import customer_brief_service
+
+    _get_viewable_customer(db, customer_id, team_id, current_user)
+    customer_crud.update_customer_brief_status(db, customer_id, "PENDING")
+    await customer_brief_service.trigger_generation(customer_id=customer_id, team_id=team_id)
+
+    return MessageResponse(message="客户概况正在生成")

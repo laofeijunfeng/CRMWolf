@@ -1,6 +1,7 @@
 import request from '@/utils/request'
 import { z } from 'zod'
 import type { PaginatedResponse } from '@/types/pagination'
+import { logger } from '@/utils/logger'
 import {
   ConvertResponseSchema,
   CustomerResponseSchema,
@@ -25,7 +26,7 @@ const api = {
           try {
             return schema.parse(data) as T
           } catch (error) {
-            console.error('Zod 验证失败:', url, error)
+            logger.error('[CustomerAPI]', 'Zod 验证失败', { url, error })
             throw error
           }
         })
@@ -39,7 +40,7 @@ const api = {
           try {
             return schema.parse(d) as T
           } catch (error) {
-            console.error('Zod 验证失败:', url, error)
+            logger.error('[CustomerAPI]', 'Zod 验证失败', { url, error })
             throw error
           }
         })
@@ -53,7 +54,7 @@ const api = {
           try {
             return schema.parse(d) as T
           } catch (error) {
-            console.error('Zod 验证失败:', url, error)
+            logger.error('[CustomerAPI]', 'Zod 验证失败', { url, error })
             throw error
           }
         })
@@ -67,7 +68,7 @@ const api = {
           try {
             return schema.parse(d) as T
           } catch (error) {
-            console.error('Zod 验证失败:', url, error)
+            logger.error('[CustomerAPI]', 'Zod 验证失败', { url, error })
             throw error
           }
         })
@@ -80,7 +81,7 @@ const api = {
           try {
             return schema.parse(d) as T
           } catch (error) {
-            console.error('Zod 验证失败:', url, error)
+            logger.error('[CustomerAPI]', 'Zod 验证失败', { url, error })
             throw error
           }
         })
@@ -244,6 +245,13 @@ export interface CustomerDetailResponse {
   profile_status: string | null  // PENDING | GENERATING | COMPLETED | FAILED
   profile_generated_time: string | null
   profile_error_message: string | null
+  // 客户概况字段
+  customer_brief_json?: string | null
+  customer_brief_markdown?: string | null
+  customer_brief_citations?: string | null
+  customer_brief_status?: string | null
+  customer_brief_generated_time?: string | null
+  customer_brief_error_message?: string | null
 }
 
 export interface ContactCreate {
@@ -450,6 +458,9 @@ const customerApi = {
 
   getCustomerDetail: (customerId: number): Promise<CustomerDetailResponse> =>
     api.get('/v1/customers/' + customerId, undefined, CustomerDetailResponseSchema),
+
+  regenerateCustomerBrief: (customerId: number): Promise<{ message: string }> =>
+    api.post('/v1/customers/' + customerId + '/regenerate-brief'),
 
   updateCustomer: (customerId: number, data: CustomerUpdate): Promise<CustomerResponse> =>
     api.put('/v1/customers/' + customerId, data, undefined, CustomerResponseSchema),

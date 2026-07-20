@@ -244,6 +244,51 @@ class CustomerCRUD:
         db.refresh(customer)
         return customer
 
+    def update_customer_brief_status(
+        self,
+        db: Session,
+        customer_id: int,
+        status: str,
+        error_message: Optional[str] = None
+    ) -> Customer:
+        """更新客户概况生成状态"""
+        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        if not customer:
+            raise ValueError("客户不存在")
+
+        customer.customer_brief_status = status
+        if status != "FAILED":
+            customer.customer_brief_error_message = None
+        if status == "FAILED" and error_message:
+            customer.customer_brief_error_message = error_message
+        if status == "COMPLETED":
+            customer.customer_brief_generated_time = datetime.now()
+
+        customer.version += 1
+        db.commit()
+        db.refresh(customer)
+        return customer
+
+    def update_customer_brief(
+        self,
+        db: Session,
+        customer_id: int,
+        brief_data: dict
+    ) -> Customer:
+        """更新客户概况内容"""
+        customer = db.query(Customer).filter(Customer.id == customer_id).first()
+        if not customer:
+            raise ValueError("客户不存在")
+
+        for field, value in brief_data.items():
+            if hasattr(customer, field):
+                setattr(customer, field, value)
+
+        customer.version += 1
+        db.commit()
+        db.refresh(customer)
+        return customer
+
     def delete(self, db: Session, db_obj: Customer, operator_id: Optional[str] = None, team_id: Optional[int] = None) -> Customer:
         """删除客户，如果客户来源于线索，则恢复线索状态为 FOLLOWING
 

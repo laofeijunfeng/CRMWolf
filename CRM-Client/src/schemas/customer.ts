@@ -112,6 +112,12 @@ export const CustomerDetailResponseSchema = CustomerResponseSchema.extend({
   profile_status: z.string().nullable(),
   profile_generated_time: z.string().nullable(),
   profile_error_message: z.string().nullable(),
+  customer_brief_json: z.string().nullable().optional(),
+  customer_brief_markdown: z.string().nullable().optional(),
+  customer_brief_citations: z.string().nullable().optional(),
+  customer_brief_status: z.string().nullable().optional(),
+  customer_brief_generated_time: z.string().nullable().optional(),
+  customer_brief_error_message: z.string().nullable().optional(),
   // 热力值字段
   score: z.number().int().nullable().optional(),
   score_updated_at: z.string().nullable().optional(),

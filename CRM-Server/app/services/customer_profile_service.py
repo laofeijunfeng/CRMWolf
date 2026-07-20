@@ -52,12 +52,19 @@ class CustomerProfileService:
             customer_crud.update_profile_status(db, customer_id, "GENERATING")
             logger.info(f"状态已更新为 GENERATING: customer_id={customer_id}")
 
+            effective_team_id = team_id
+            if effective_team_id is None:
+                customer = db.query(Customer).filter(Customer.id == customer_id).first()
+                if not customer:
+                    raise ValueError("客户不存在")
+                effective_team_id = customer.team_id
+
             # 2. 获取 AI 配置
-            config = ai_config_crud.get_config(db, team_id or 1)
+            config = ai_config_crud.get_config(db, effective_team_id)
             if not config:
                 raise ValueError("AI 配置未设置")
 
-            api_key = ai_config_crud.get_decrypted_api_key(db, team_id or 1)
+            api_key = ai_config_crud.get_decrypted_api_key(db, effective_team_id)
             if not api_key:
                 raise ValueError("无法获取 API Key")
 
@@ -104,7 +111,7 @@ class CustomerProfileService:
 
             # 9. 获取同行业客户候选列表（限制在当前团队）
             similar_customer_candidates = industry_crud.get_customers_by_industry(
-                db, industry_code, customer_id, team_id, limit=50
+                db, industry_code, customer_id, effective_team_id, limit=50
             )
             logger.info(f"同行业客户候选数量: {len(similar_customer_candidates) if similar_customer_candidates else 0}")
 
@@ -152,6 +159,12 @@ class CustomerProfileService:
                 }
             )
             logger.info(f"客户档案更新完成: customer_id={customer_id}, status=COMPLETED")
+
+            try:
+                from app.services.customer_brief_service import customer_brief_service
+                await customer_brief_service.trigger_generation(customer_id=customer_id, team_id=effective_team_id)
+            except Exception as brief_error:
+                logger.warning("客户档案完成后触发客户概况生成失败: %s", brief_error)
 
             return {
                 "success": True,

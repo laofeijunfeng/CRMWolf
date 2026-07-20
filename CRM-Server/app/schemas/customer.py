@@ -312,6 +312,13 @@ class CustomerDetailResponse(BaseModel):
     profile_status: Optional[str] = None
     profile_generated_time: Optional[datetime] = None
     profile_error_message: Optional[str] = None
+    # 客户概况字段
+    customer_brief_json: Optional[str] = None
+    customer_brief_markdown: Optional[str] = None
+    customer_brief_citations: Optional[str] = None
+    customer_brief_status: Optional[str] = None
+    customer_brief_generated_time: Optional[datetime] = None
+    customer_brief_error_message: Optional[str] = None
     # 热力值字段
     score: Optional[int] = Field(None, description="热力值分数（0-100）")
     score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")

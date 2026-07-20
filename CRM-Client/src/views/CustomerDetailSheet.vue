@@ -7,7 +7,7 @@
  *
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Sheet,
@@ -60,7 +60,7 @@ import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 
-import { Plus, Pencil, RefreshCw, Loader2 } from 'lucide-vue-next'
+import { Plus, Pencil, RefreshCw, Loader2, Sparkles } from 'lucide-vue-next'
 import ScoreIndicator from '@/components/ScoreIndicator.vue'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
@@ -92,8 +92,9 @@ const router = useRouter()
 
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
-const activePanel = ref('followup')  // Sidebar 导航切换
+const activePanel = ref('customer-brief')  // Sidebar 导航切换
 const regeneratingProfile = ref(false)  // 档案重新生成状态
+const regeneratingBrief = ref(false)
 
 // ==================== Dialog States ====================
 const followUpDialogOpen = ref(false)
@@ -131,6 +132,149 @@ const licenseApplications = ref<LicenseApplicationResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
 let latestLoadRequestId = 0
 
+interface CustomerBriefCitation {
+  source_type?: string
+  source_id?: string
+  title?: string
+  excerpt?: string
+}
+
+type CustomerBriefCitationMap = Record<string, CustomerBriefCitation>
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const getCitationSourceLabel = (sourceType: string | undefined): string => {
+  const labels: Record<string, string> = {
+    customer: '客户',
+    customer_profile: '客户档案',
+    contact: '联系人',
+    opportunity: '商机',
+    contract: '合同',
+    payment_plan: '回款计划',
+    payment_record: '回款记录',
+    follow_up: '跟进记录'
+  }
+  return sourceType !== undefined && sourceType !== '' ? labels[sourceType] ?? sourceType : '来源'
+}
+
+const buildCitationTooltip = (citation: CustomerBriefCitation): string => {
+  const trimmedTitle = citation.title?.trim()
+  const title = trimmedTitle !== undefined && trimmedTitle !== ''
+    ? trimmedTitle
+    : getCitationSourceLabel(citation.source_type)
+  const excerpt = citation.excerpt?.trim()
+  if (excerpt === undefined || excerpt === '') return title
+  return `${title}\n${excerpt}`
+}
+
+const renderInlineMarkdown = (value: string, citationMap: CustomerBriefCitationMap): string => {
+  const escaped = escapeHtml(value)
+  return escaped
+    .replace(/\[(\d+)\]/g, (match, citationKey: string) => {
+      const citation = citationMap[citationKey]
+      if (citation === undefined) return match
+
+      const tooltip = escapeHtml(buildCitationTooltip(citation))
+      const sourceLabel = escapeHtml(getCitationSourceLabel(citation.source_type))
+      return [
+        '<span',
+        ' class="customer-brief-citation"',
+        ' tabindex="0"',
+        ` aria-label="引用 ${citationKey}，${sourceLabel}"`,
+        ` data-citation-tooltip="${tooltip}"`,
+        '>',
+        `[${citationKey}]`,
+        '</span>'
+      ].join('')
+    })
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+}
+
+const renderSimpleMarkdown = (value: string, citationMap: CustomerBriefCitationMap): string => {
+  const lines = value.split('\n')
+  const html: string[] = []
+  let listType: 'ul' | 'ol' | null = null
+
+  const closeList = (): void => {
+    if (listType !== null) {
+      html.push(`</${listType}>`)
+      listType = null
+    }
+  }
+
+  for (const line of lines) {
+    const text = line.trim()
+    if (text === '') {
+      closeList()
+      continue
+    }
+
+    if (text.startsWith('## ')) {
+      closeList()
+      html.push(`<h2>${renderInlineMarkdown(text.slice(3), citationMap)}</h2>`)
+      continue
+    }
+
+    if (text.startsWith('### ')) {
+      closeList()
+      html.push(`<h3>${renderInlineMarkdown(text.slice(4), citationMap)}</h3>`)
+      continue
+    }
+
+    if (/^- /.test(text)) {
+      if (listType !== 'ul') {
+        closeList()
+        html.push('<ul>')
+        listType = 'ul'
+      }
+      html.push(`<li>${renderInlineMarkdown(text.slice(2), citationMap)}</li>`)
+      continue
+    }
+
+    const orderedMatch = text.match(/^\d+\.\s+(.+)$/)
+    if (orderedMatch !== null) {
+      if (listType !== 'ol') {
+        closeList()
+        html.push('<ol>')
+        listType = 'ol'
+      }
+      html.push(`<li>${renderInlineMarkdown(orderedMatch[1] ?? '', citationMap)}</li>`)
+      continue
+    }
+
+    closeList()
+    html.push(`<p>${renderInlineMarkdown(text, citationMap)}</p>`)
+  }
+
+  closeList()
+  return html.join('')
+}
+
+const customerBriefCitationMap = computed<CustomerBriefCitationMap>(() => {
+  const rawCitations = customer.value?.customer_brief_citations
+  if (rawCitations === undefined || rawCitations === null || rawCitations.trim() === '') return {}
+
+  try {
+    const parsed = JSON.parse(rawCitations) as unknown
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return parsed as CustomerBriefCitationMap
+  } catch {
+    return {}
+  }
+})
+
+const renderedCustomerBrief = computed<string>(() => {
+  const markdownText = customer.value?.customer_brief_markdown?.trim()
+  if (markdownText === undefined || markdownText === null || markdownText === '') return ''
+  return renderSimpleMarkdown(markdownText, customerBriefCitationMap.value)
+})
+
 // ==================== Navigation Tabs ====================
 interface NavTabItem {
   key: string
@@ -138,6 +282,7 @@ interface NavTabItem {
 }
 
 const navTabs: NavTabItem[] = [
+  { key: 'customer-brief', label: '客户概况' },
   { key: 'followup', label: '跟进记录' },
   { key: 'contacts', label: '联系人' },
   { key: 'opportunities', label: '商机' },
@@ -199,6 +344,20 @@ const getLicenseStatusClass = (licenseType: string | null | undefined, expiryDat
   if (isDateBeforeToday(expiryDate)) return 'license-badge--expired'
   if (licenseType === 'TRIAL') return 'license-badge--trial'
   return 'license-badge--official'
+}
+
+const getCustomerBriefStatusLabel = (status: string | null | undefined): string => {
+  if (status === 'COMPLETED') return '已完成'
+  if (status === 'GENERATING') return '生成中'
+  if (status === 'FAILED') return '失败'
+  return '待生成'
+}
+
+const getCustomerBriefStatusClass = (status: string | null | undefined): string => {
+  if (status === 'COMPLETED') return 'brief-status-badge--completed'
+  if (status === 'GENERATING') return 'brief-status-badge--generating'
+  if (status === 'FAILED') return 'brief-status-badge--failed'
+  return 'brief-status-badge--pending'
 }
 
 // ==================== Data Loading ====================
@@ -290,6 +449,20 @@ const handleRegenerateProfile = async (): Promise<void> => {
     handleApiError(error, '生成档案')
   } finally {
     regeneratingProfile.value = false
+  }
+}
+
+const handleRegenerateBrief = async (): Promise<void> => {
+  if (props.customerId === null) return
+  regeneratingBrief.value = true
+  try {
+    await customerApi.regenerateCustomerBrief(props.customerId)
+    toast.success('客户概况生成中，请稍后刷新')
+    await loadAllData(props.customerId)
+  } catch (error) {
+    handleApiError(error, '生成客户概况')
+  } finally {
+    regeneratingBrief.value = false
   }
 }
 
@@ -548,7 +721,7 @@ watch(() => props.visible, (visible): void => {
     loadAllData(props.customerId)
   } else if (!visible) {
     // 清理状态
-    activePanel.value = 'followup'
+    activePanel.value = 'customer-brief'
     customer.value = null
     score.value = null
     followUps.value = []
@@ -572,6 +745,7 @@ watch(() => props.visible, (visible): void => {
 
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
+  activePanel.value = 'customer-brief'
   loadAllData(customerId)
 })
 </script>
@@ -593,6 +767,101 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
       <!-- Content -->
       <ScrollArea class="flex-1">
           <div class="p-6 space-y-6">
+            <template v-if="activePanel === 'customer-brief'">
+              <!-- 客户概况卡片 -->
+              <Card class="customer-brief-card">
+                <CardContent class="p-0">
+                  <div class="brief-card-header">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <Sparkles class="h-4 w-4 text-wolf-primary-v2 flex-shrink-0" aria-hidden="true" />
+                      <h3 class="text-sm font-semibold text-wolf-text-primary-v2">客户概况</h3>
+                      <Badge
+                        variant="outline"
+                        class="brief-status-badge"
+                        :class="getCustomerBriefStatusClass(customer?.customer_brief_status)"
+                      >
+                        {{ getCustomerBriefStatusLabel(customer?.customer_brief_status) }}
+                      </Badge>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-8 w-8 text-wolf-text-tertiary-v2 hover:text-wolf-primary-v2"
+                      :disabled="regeneratingBrief || customer?.customer_brief_status === 'GENERATING'"
+                      @click="handleRegenerateBrief"
+                    >
+                      <RefreshCw
+                        class="h-4 w-4"
+                        :class="{ 'animate-spin': regeneratingBrief || customer?.customer_brief_status === 'GENERATING' }"
+                        aria-hidden="true"
+                      />
+                      <span class="sr-only">生成客户概况</span>
+                    </Button>
+                  </div>
+
+                  <div class="p-4">
+                    <div
+                      v-if="customer?.customer_brief_status === 'COMPLETED' && renderedCustomerBrief"
+                      class="customer-brief-content"
+                      v-html="renderedCustomerBrief"
+                    />
+                    <div
+                      v-else-if="customer?.customer_brief_status === 'GENERATING'"
+                      class="brief-inline-state"
+                    >
+                      <Loader2 class="h-4 w-4 animate-spin text-wolf-primary-v2" aria-hidden="true" />
+                      <span>客户概况正在生成中，请稍后刷新查看</span>
+                    </div>
+                    <Empty
+                      v-else-if="customer?.customer_brief_status === 'FAILED'"
+                      class="min-h-[160px] border-0 py-4"
+                    >
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon">
+                          <Sparkles class="h-5 w-5" aria-hidden="true" />
+                        </EmptyMedia>
+                        <EmptyTitle class="text-sm font-medium">客户概况生成失败</EmptyTitle>
+                        <EmptyDescription>
+                          {{ customer?.customer_brief_error_message || '请稍后重新生成' }}
+                        </EmptyDescription>
+                      </EmptyHeader>
+                      <EmptyContent>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          :disabled="regeneratingBrief"
+                          @click="handleRegenerateBrief"
+                        >
+                          <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingBrief }" />
+                          重新生成
+                        </Button>
+                      </EmptyContent>
+                    </Empty>
+                    <Empty v-else class="min-h-[160px] border-0 py-4">
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon">
+                          <Sparkles class="h-5 w-5" aria-hidden="true" />
+                        </EmptyMedia>
+                        <EmptyTitle class="text-sm font-medium">暂无客户概况</EmptyTitle>
+                        <EmptyDescription>生成后可查看销售侧客户经营摘要</EmptyDescription>
+                      </EmptyHeader>
+                      <EmptyContent>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          :disabled="regeneratingBrief"
+                          @click="handleRegenerateBrief"
+                        >
+                          <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingBrief }" />
+                          生成概况
+                        </Button>
+                      </EmptyContent>
+                    </Empty>
+                  </div>
+                </CardContent>
+              </Card>
+            </template>
+
             <template v-if="activePanel === 'followup'">
               <!-- 基本信息卡片 -->
               <Card class="info-card">
@@ -862,7 +1131,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
             <LicensePanel
               v-if="activePanel === 'license-management'"
               :customer-id="customerId ?? 0"
-              :customer-name="customer?.account_name"
+              :customer-name="customer?.account_name ?? null"
               :license-applications="licenseApplications"
               :deployments="deployments"
               @add-deployment="handleCreateDeployment"
@@ -1120,6 +1389,174 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   &:hover {
     color: $wolf-text-link-hover-v2;
   }
+}
+
+// Customer brief card styles
+.customer-brief-card {
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-lg-v2;
+  background: $wolf-bg-card-v2;
+}
+
+.brief-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $wolf-space-md-v2;
+  padding: $wolf-space-lg-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
+}
+
+.brief-status-badge {
+  height: 22px;
+  border-radius: $wolf-radius-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.brief-status-badge--completed {
+  color: $wolf-success-text-v2;
+  background: $wolf-success-bg-v2;
+  border-color: $wolf-success-bg-v2;
+}
+
+.brief-status-badge--generating {
+  color: $wolf-warning-text-v2;
+  background: $wolf-warning-bg-v2;
+  border-color: $wolf-warning-bg-v2;
+}
+
+.brief-status-badge--failed {
+  color: $wolf-danger-text-v2;
+  background: $wolf-danger-bg-v2;
+  border-color: $wolf-danger-bg-v2;
+}
+
+.brief-status-badge--pending {
+  color: $wolf-text-tertiary-v2;
+  background: $wolf-bg-muted-v2;
+  border-color: $wolf-border-light-v2;
+}
+
+.brief-inline-state {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+  min-height: 96px;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
+}
+
+.customer-brief-content {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.customer-brief-content :deep(h2) {
+  margin: 0 0 $wolf-space-sm-v2;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-title-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  line-height: $wolf-line-height-title-v2;
+}
+
+.customer-brief-content :deep(h3) {
+  margin: $wolf-space-lg-v2 0 $wolf-space-sm-v2;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.customer-brief-content :deep(h2:first-child),
+.customer-brief-content :deep(h3:first-child) {
+  margin-top: 0;
+}
+
+.customer-brief-content :deep(p) {
+  margin: 0 0 $wolf-space-sm-v2;
+}
+
+.customer-brief-content :deep(ul),
+.customer-brief-content :deep(ol) {
+  margin: 0 0 $wolf-space-md-v2;
+  padding-left: $wolf-space-xl-v2;
+}
+
+.customer-brief-content :deep(li) {
+  margin: $wolf-space-xs-v2 0;
+}
+
+.customer-brief-content :deep(strong) {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+}
+
+.customer-brief-content :deep(.customer-brief-citation) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: $wolf-radius-sm-v2;
+  background: $wolf-primary-light-v2;
+  color: $wolf-primary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  line-height: 1;
+  cursor: help;
+  vertical-align: baseline;
+}
+
+.customer-brief-content :deep(.customer-brief-citation:hover),
+.customer-brief-content :deep(.customer-brief-citation:focus-visible) {
+  background: $wolf-bg-hover-v2;
+  color: $wolf-primary-hover-v2;
+  outline: none;
+}
+
+.customer-brief-content :deep(.customer-brief-citation::after) {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  width: max-content;
+  max-width: 280px;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-bg-elevated-v2;
+  box-shadow: $wolf-shadow-modal-v2;
+  color: $wolf-text-primary-v2;
+  content: attr(data-citation-tooltip);
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-normal-v2;
+  line-height: $wolf-line-height-body-v2;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translate(-50%, 4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  white-space: pre-line;
+}
+
+.customer-brief-content :deep(.customer-brief-citation:hover::after),
+.customer-brief-content :deep(.customer-brief-citation:focus-visible::after) {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.customer-brief-content :deep(blockquote) {
+  margin: $wolf-space-md-v2 0;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  border-left: 3px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-sm-v2;
+  background: $wolf-bg-muted-v2;
+  color: $wolf-text-secondary-v2;
 }
 
 // Score card styles

@@ -99,6 +99,14 @@ class Customer(Base):
     profile_generated_time = Column(DateTime, nullable=True, comment="档案生成完成时间")
     profile_error_message = Column(Text, nullable=True, comment="档案生成失败原因")
 
+    # 客户概况字段（AI生成，销售侧经营视图）
+    customer_brief_json = Column(Text, nullable=True, comment="客户概况结构化内容（JSON格式，AI生成）")
+    customer_brief_markdown = Column(Text, nullable=True, comment="客户概况 Markdown 内容（AI生成）")
+    customer_brief_citations = Column(Text, nullable=True, comment="客户概况引用来源映射（JSON格式）")
+    customer_brief_status = Column(String(20), nullable=True, default="PENDING", comment="客户概况生成状态：PENDING/GENERATING/COMPLETED/FAILED")
+    customer_brief_generated_time = Column(DateTime, nullable=True, comment="客户概况生成完成时间")
+    customer_brief_error_message = Column(Text, nullable=True, comment="客户概况生成失败原因")
+
     license_expiry_date = Column(Date, nullable=True, comment="客户 License 最晚到期时间（自动更新）")
     license_type = Column(String(20), nullable=True, comment="客户 License 类型（自动更新）：TRIAL/OFFICIAL")
 
