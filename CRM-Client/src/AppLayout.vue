@@ -8,6 +8,19 @@
         <div class="nav-section">
           <div class="nav-section-title">销售流程</div>
           <a
+            v-if="canViewSalesDashboard"
+            class="nav-item"
+            :class="{ active: currentPath.startsWith('/sales-dashboard') }"
+            role="menuitem"
+            :aria-current="currentPath.startsWith('/sales-dashboard') ? 'page' : undefined"
+            :aria-label="`销售看板${currentPath.startsWith('/sales-dashboard') ? '（当前页面）' : ''}`"
+            @click="handleMenuClick('/sales-dashboard')"
+            @keydown.enter="handleMenuClick('/sales-dashboard')"
+          >
+            <component :is="BarChart3" class="nav-item-icon" aria-hidden="true" />
+            <span class="nav-item-text">销售看板</span>
+          </a>
+          <a
             class="nav-item"
             :class="{ active: currentPath.startsWith('/leads') }"
             role="menuitem"
@@ -358,6 +371,7 @@ import {
 import { confirmLogout } from '@/utils/confirmDialog'
 import {
   Flag,
+  BarChart3,
   Building2,
   TrendingUp,
   Wallet,
@@ -389,6 +403,11 @@ const headerTabs = computed(() => headerStore.tabs)
 const headerActiveTab = computed(() => headerStore.activeTab)
 const headerHasTabs = computed(() => headerStore.hasTabs)
 const visibleHeaderActions = computed<HeaderAction[]>(() => headerStore.actions.filter(action => action.visible !== false))
+const canViewSalesDashboard = computed(() => permissionStore.hasAnyPermission([
+  'sales_dashboard:view:own',
+  'sales_dashboard:view:team',
+  'sales_dashboard:view:all'
+]))
 const mobilePrimaryHeaderAction = computed<HeaderAction | null>(() => {
   return visibleHeaderActions.value.find(action => action.type === 'primary') ?? visibleHeaderActions.value[0] ?? null
 })

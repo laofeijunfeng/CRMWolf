@@ -13,8 +13,10 @@
  * - §1 CRITICAL: aria-label, aria-current
  */
 import { useRoute, useRouter } from 'vue-router'
+import { computed } from 'vue'
 import {
   Banknote,
+  BarChart3,
   Bell,
   Building2,
   FileText,
@@ -27,6 +29,7 @@ import {
 import BottomNavItem from './BottomNavItem.vue'
 import BottomNavOverflow from './BottomNavOverflow.vue'
 import type { Component } from 'vue'
+import { usePermissionStore } from '@/stores/permissions'
 
 interface RouteNavItem {
   kind: 'route'
@@ -50,6 +53,7 @@ const emit = defineEmits<{
 
 const route = useRoute()
 const router = useRouter()
+const permissionStore = usePermissionStore()
 
 // Primary navigation items (§9 bottom-nav-limit: max 5)
 // Only top-level screens (§9 nav-hierarchy)
@@ -61,13 +65,29 @@ const mainNavItems: RouteNavItem[] = [
 ]
 
 // Overflow navigation items (secondary workflows)
-const overflowItems: NavItem[] = [
+const baseOverflowItems: NavItem[] = [
+  { kind: 'route', route: '/sales-dashboard', icon: BarChart3, label: '看板' },
   { kind: 'route', route: '/leads', icon: Flag, label: '线索' },
   { kind: 'route', route: '/invoices', icon: ReceiptText, label: '发票' },
   { kind: 'route', route: '/approvals', icon: Bell, label: '审批' },
   { kind: 'route', route: '/account', icon: Settings, label: '账户设置' },
   { kind: 'action', action: 'logout', icon: LogOut, label: '退出登录' },
 ]
+
+const canViewSalesDashboard = computed(() => permissionStore.hasAnyPermission([
+  'sales_dashboard:view:own',
+  'sales_dashboard:view:team',
+  'sales_dashboard:view:all'
+]))
+
+const overflowItems = computed<NavItem[]>(() => {
+  return baseOverflowItems.filter(item => {
+    if (item.kind === 'route' && item.route === '/sales-dashboard') {
+      return canViewSalesDashboard.value
+    }
+    return true
+  })
+})
 
 /**
  * Check if a route is currently active

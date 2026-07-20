@@ -117,6 +117,9 @@ ALL_PERMISSIONS = [
     {"name": "查看统计数据", "code": "statistics:view", "resource": "statistics", "action": "view"},
     {"name": "查看报表", "code": "report:view:own", "resource": "report", "action": "view", "scope": "own"},
     {"name": "查看团队报表", "code": "report:view:team", "resource": "report", "action": "view", "scope": "team"},
+    {"name": "查看自己的销售看板", "code": "sales_dashboard:view:own", "resource": "sales_dashboard", "action": "view", "scope": "own"},
+    {"name": "查看团队销售看板", "code": "sales_dashboard:view:team", "resource": "sales_dashboard", "action": "view", "scope": "team"},
+    {"name": "查看全部销售看板", "code": "sales_dashboard:view:all", "resource": "sales_dashboard", "action": "view", "scope": "all"},
 
     # 热力值权限
     {"name": "查看热力值配置", "code": "score:config:view", "resource": "score", "action": "config", "scope": "view"},
@@ -212,7 +215,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "payment:view:all", "payment:view:own", "payment:register",
         "payment:approve:own",  # ← 审自己提交的回款
         "payment:plan:create", "payment:plan:edit", "payment:plan:delete", "payment:plan:view:all",
-        "statistics:view", "report:view:own", "report:view:team",
+        "statistics:view", "report:view:own", "report:view:team", "sales_dashboard:view:team",
         "score:config:view", "score:config:edit",
     ],
     "SALES_MEMBER": [
@@ -236,7 +239,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "invoice:title:create", "invoice:title:edit", "invoice:title:delete", "invoice:title:set_default",
         "payment:view:own", "payment:register",
         "payment:plan:view:all", "payment:plan:create", "payment:plan:edit", "payment:plan:delete",
-        "statistics:view", "score:config:view", "report:view:own",
+        "statistics:view", "score:config:view", "report:view:own", "sales_dashboard:view:own",
     ],
     "FINANCE": [
         "invoice:view:all", "invoice:view:own", "invoice:create",
@@ -250,6 +253,6 @@ ROLE_PERMISSIONS_MAPPING = {
         "contract:view:all", "contract:view:own",
         "license:issue",
         "finance:audit:view", "finance:receivables:view", "finance:reports:view",  # ← 补充财务报表权限
-        "statistics:view", "report:view:own",
+        "statistics:view", "report:view:own", "sales_dashboard:view:team",
     ],
 }

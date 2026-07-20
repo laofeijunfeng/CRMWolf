@@ -11,7 +11,7 @@ debug_mode = os.getenv("CRM_DEBUG", "true").lower() == "true"
 setup_logging(debug=debug_mode)
 logger = get_logger(__name__)
 
-from app.api import auth, users, roles, permissions, leads, customers, customer_follow_ups, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, teams, industry, lead_ai, procurement_ai, approval_ai, system_configs
+from app.api import auth, users, roles, permissions, leads, customers, customer_follow_ups, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, teams, industry, lead_ai, procurement_ai, approval_ai, system_configs, sales_dashboard
 from app.api.deployment import router as deployment_router  # 新增
 from app.api.license_application import router as license_application_router  # 新增
 from app.api.customer_ai import router as customer_ai_router
@@ -86,6 +86,7 @@ api_router.include_router(opportunities.analytics_router)
 api_router.include_router(filter_options.router)
 api_router.include_router(contracts.router)
 api_router.include_router(approvals.router)
+api_router.include_router(sales_dashboard.router)
 api_router.include_router(system_configs.router)
 api_router.include_router(payments.router)
 api_router.include_router(invoices.router, prefix="/v1")

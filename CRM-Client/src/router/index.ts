@@ -38,6 +38,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
     children: [
       {
+        path: 'sales-dashboard',
+        name: 'SalesDashboard',
+        component: () => import('@/views/SalesDashboard.vue'),
+        meta: { requiresAuth: true, title: '销售看板' }
+      },
+      {
         path: 'leads',
         name: 'Leads',
         component: () => import('@/views/Leads.vue'),
