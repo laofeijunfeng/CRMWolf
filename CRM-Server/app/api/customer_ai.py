@@ -6,6 +6,7 @@ AI 解析客户信息接口
 2. 客户创建解析（AI 智能创建）- 新增
 """
 import json
+import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -25,6 +26,7 @@ from app.services.ai_parser.factory import EntityAIParserFactory
 
 
 router = APIRouter(prefix="/v1/customers/ai", tags=["AI 客户跟进"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/parse")
@@ -208,7 +210,11 @@ async def parse_customer_create_info(
         db = SessionLocal()
         try:
             async for event in parser.parse_stream(db, request.content, team_id):
-                yield f"data: {json.dumps(event)}\n\n"
+                yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+        except Exception as e:
+            logger.exception("Customer create AI parse stream failed")
+            event = {"event": "error", "message": f"AI 解析失败：{str(e)}"}
+            yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
         finally:
             db.close()
     

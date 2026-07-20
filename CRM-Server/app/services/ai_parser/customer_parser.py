@@ -147,7 +147,7 @@ class CustomerAIParser(EntityAIParserBase):
             格式化后的系统提示词
         """
         current_date = datetime.now().strftime("%Y-%m-%d")
-        return PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE.format(current_date=current_date)
+        return PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE.replace("{current_date}", current_date)
 
     def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
         return {

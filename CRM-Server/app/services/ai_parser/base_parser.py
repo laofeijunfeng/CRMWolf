@@ -8,8 +8,11 @@ from typing import AsyncGenerator, Dict, Any, Optional
 from sqlalchemy.orm import Session
 import httpx
 import json
+import logging
 
 from app.crud.ai_config import ai_config_crud
+
+logger = logging.getLogger(__name__)
 
 
 class EntityAIParserBase(ABC):
@@ -155,30 +158,30 @@ class EntityAIParserBase(ABC):
         # 发送状态事件
         yield {"event": "status", "message": f"正在解析{self.entity_type}信息..."}
 
-        # 构建请求
-        request_body = {
-            "model": config.model_name,
-            "messages": [
-                {"role": "system", "content": self.get_system_prompt()},
-                {"role": "user", "content": user_message}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 1024,
-            "stream": True,
-            "response_format": {"type": "json_object"}
-        }
-
-        full_content = ""
-
         try:
+            # 构建请求
+            request_body = {
+                "model": config.model_name,
+                "messages": [
+                    {"role": "system", "content": self.get_system_prompt()},
+                    {"role": "user", "content": user_message}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 1024,
+                "stream": True
+            }
+
+            full_content = ""
+
             # 流式调用 AI API
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
                 async with client.stream(
                     "POST",
                     f"{config.api_host}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "Accept-Encoding": "identity"
                     },
                     json=request_body
                 ) as response:
@@ -223,6 +226,8 @@ class EntityAIParserBase(ABC):
                     }
 
         except httpx.HTTPStatusError as e:
+            logger.exception("%s AI parse request failed", self.entity_type)
             yield {"event": "error", "message": f"AI 服务请求失败：{e.response.status_code}"}
         except Exception as e:
+            logger.exception("%s AI parse failed", self.entity_type)
             yield {"event": "error", "message": f"AI 服务异常：{str(e)}"}
