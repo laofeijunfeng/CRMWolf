@@ -21,6 +21,7 @@ from app.models.customer import Contact, Customer
 from app.models.customer_follow_up import CustomerFollowUp
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
+from app.services.ai_task_limiter import ai_generation_semaphore
 from app.services.ai_service import ai_service
 
 
@@ -32,66 +33,81 @@ class CustomerBriefService:
 
     async def generate_brief(self, customer_id: int, team_id: int) -> Dict[str, Any]:
         logger.info("开始生成客户概况: customer_id=%s, team_id=%s", customer_id, team_id)
-        db = SessionLocal()
-        try:
-            customer_crud.update_customer_brief_status(db, customer_id, "GENERATING")
+        async with ai_generation_semaphore:
+            try:
+                db = SessionLocal()
+                try:
+                    customer_crud.update_customer_brief_status(db, customer_id, "GENERATING")
 
-            customer = db.query(Customer).filter(
-                Customer.id == customer_id,
-                Customer.team_id == team_id
-            ).first()
-            if not customer:
-                raise ValueError("客户不存在")
+                    customer = db.query(Customer).filter(
+                        Customer.id == customer_id,
+                        Customer.team_id == team_id
+                    ).first()
+                    if not customer:
+                        raise ValueError("客户不存在")
 
-            config = ai_config_crud.get_config(db, team_id)
-            if not config:
-                raise ValueError("AI 配置未设置")
+                    config = ai_config_crud.get_config(db, team_id)
+                    if not config:
+                        raise ValueError("AI 配置未设置")
 
-            api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
-            if not api_key:
-                raise ValueError("无法获取 API Key")
+                    api_host = config.api_host
+                    model_name = config.model_name
+                    api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
+                    if not api_key:
+                        raise ValueError("无法获取 API Key")
 
-            context = self._build_context(db, customer, team_id)
-            prompt = self._build_prompt(context)
-            content = await ai_service._stream_chat_collect(
-                api_host=config.api_host,
-                api_key=api_key,
-                model=config.model_name,
-                messages=[
-                    {"role": "system", "content": self._get_system_prompt()},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=4096,
-                response_format={"type": "json_object"},
-                timeout=120.0,
-            )
+                    context = self._build_context(db, customer, team_id)
+                finally:
+                    db.close()
 
-            brief_json = self._parse_response(content)
-            citation_map = context["citation_map"]
-            markdown = self._render_markdown(brief_json)
+                prompt = self._build_prompt(context)
+                content = await ai_service._stream_chat_collect(
+                    api_host=api_host,
+                    api_key=api_key,
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": self._get_system_prompt()},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=4096,
+                    response_format={"type": "json_object"},
+                    timeout=120.0,
+                )
 
-            customer_crud.update_customer_brief(
-                db,
-                customer_id,
-                {
-                    "customer_brief_json": json.dumps(brief_json, ensure_ascii=False),
-                    "customer_brief_markdown": markdown,
-                    "customer_brief_citations": json.dumps(citation_map, ensure_ascii=False),
-                    "customer_brief_status": "COMPLETED",
-                    "customer_brief_generated_time": datetime.now(),
-                    "customer_brief_error_message": None,
-                },
-            )
-            logger.info("客户概况生成完成: customer_id=%s", customer_id)
-            return {"success": True, "customer_id": customer_id}
+                brief_json = self._parse_response(content)
+                citation_map = context["citation_map"]
+                markdown = self._render_markdown(brief_json)
 
-        except Exception as exc:
-            logger.exception("客户概况生成失败: customer_id=%s", customer_id)
-            customer_crud.update_customer_brief_status(db, customer_id, "FAILED", str(exc))
-            return {"success": False, "customer_id": customer_id, "error": str(exc)}
-        finally:
-            db.close()
+                db = SessionLocal()
+                try:
+                    customer_crud.update_customer_brief(
+                        db,
+                        customer_id,
+                        {
+                            "customer_brief_json": json.dumps(brief_json, ensure_ascii=False),
+                            "customer_brief_markdown": markdown,
+                            "customer_brief_citations": json.dumps(citation_map, ensure_ascii=False),
+                            "customer_brief_status": "COMPLETED",
+                            "customer_brief_generated_time": datetime.now(),
+                            "customer_brief_error_message": None,
+                        },
+                    )
+                finally:
+                    db.close()
+                logger.info("客户概况生成完成: customer_id=%s", customer_id)
+                return {"success": True, "customer_id": customer_id}
+
+            except Exception as exc:
+                logger.exception("客户概况生成失败: customer_id=%s", customer_id)
+                db = SessionLocal()
+                try:
+                    customer_crud.update_customer_brief_status(db, customer_id, "FAILED", str(exc))
+                except Exception:
+                    logger.exception("更新客户概况失败状态失败: customer_id=%s", customer_id)
+                finally:
+                    db.close()
+                return {"success": False, "customer_id": customer_id, "error": str(exc)}
 
     async def trigger_generation(self, customer_id: int, team_id: int) -> None:
         asyncio.create_task(self.generate_brief(customer_id=customer_id, team_id=team_id))

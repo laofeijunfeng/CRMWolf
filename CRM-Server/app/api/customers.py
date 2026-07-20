@@ -87,7 +87,6 @@ async def convert_from_lead(
 ):
     from app.services.feishu import feishu_service
     from app.services.customer_profile_service import customer_profile_service
-    from app.services.customer_brief_service import customer_brief_service
 
     try:
         customer, contact = customer_crud.convert_from_lead(
@@ -111,7 +110,6 @@ async def convert_from_lead(
             source_lead_id=data.lead_id,
             team_id=team_id
         )
-        await customer_brief_service.trigger_generation(customer_id=customer.id, team_id=team_id)
 
         await feishu_service.notify_account_created(
             customer.owner_id,
@@ -437,7 +435,6 @@ async def create_customer(
     db: Session = Depends(get_db)
 ):
     from app.services.customer_profile_service import customer_profile_service
-    from app.services.customer_brief_service import customer_brief_service
 
     existing_customer = customer_crud.get_by_name(db, customer.account_name, team_id)
     if existing_customer:
@@ -464,7 +461,6 @@ async def create_customer(
         source_lead_id=None,
         team_id=team_id
     )
-    await customer_brief_service.trigger_generation(customer_id=new_customer.id, team_id=team_id)
 
     return new_customer
 
