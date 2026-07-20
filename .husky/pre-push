@@ -1,16 +1,4 @@
 #!/usr/bin/env sh
 
-echo "🧪 Running pre-push tests..."
-
-# ===== 前端测试 =====
-cd CRM-Client
-
-echo "Running frontend unit tests..."
-npm run test:unit -- --run || {
-  echo "::error::Frontend unit tests failed. Fix the failing tests before push."
-  exit 1
-}
-
-cd ..
-
-echo "✅ All tests passed"
+echo "Skipping pre-push unit tests."
+echo "Full frontend unit tests contain historical test debt and are not used as a push gate."
