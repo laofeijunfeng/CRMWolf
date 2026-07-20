@@ -970,6 +970,8 @@ class ApprovalCRUD:
         user_roles: List[str],
         tab: str = "pending",
         business_type: Optional[str] = None,
+        business_types: Optional[List[str]] = None,
+        business_types_exclude: Optional[List[str]] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Tuple[List[Dict[str, Any]], int, int]:
@@ -981,7 +983,9 @@ class ApprovalCRUD:
             user_id: 当前用户ID（int，用于 submitted/processed 过滤）
             user_roles: 当前用户在 team_id 下的角色 code 列表（用于 pending 过滤）
             tab: pending / processed / submitted
-            business_type: 可选业务类型过滤（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY）
+            business_type: 可选业务类型过滤（兼容旧调用）
+            business_types: 可选业务类型包含过滤（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY）
+            business_types_exclude: 可选业务类型排除过滤
             page: 页码（1-based）
             page_size: 每页条数
 
@@ -1000,8 +1004,13 @@ class ApprovalCRUD:
         # ---- 主体查询：按 tab 构造过滤 ----
         query = db.query(Approval).filter(Approval.team_id == team_id)
 
-        if business_type:
-            query = query.filter(Approval.business_type == business_type)
+        include_types = business_types or ([business_type] if business_type else [])
+        exclude_types = business_types_exclude or []
+
+        if include_types:
+            query = query.filter(Approval.business_type.in_(include_types))
+        if exclude_types:
+            query = query.filter(~Approval.business_type.in_(exclude_types))
 
         if tab == "pending":
             # JOIN current_node 取 approve_role 过滤

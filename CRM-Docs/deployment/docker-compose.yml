@@ -1,0 +1,41 @@
+# docker-compose.yml - 服务器部署基础服务定义
+# 由 CRM-Docs/deployment/deploy.sh 上传，并配合 docker-compose.server.yml 使用。
+
+services:
+  backend:
+    image: crm-backend:${IMAGE_TAG:-amd64}
+    container_name: crm-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DB_PORT: 3306
+      REDIS_PORT: 6379
+      REDIS_DB: 5
+      CRM_DEBUG: ${CRM_DEBUG:-false}
+    volumes:
+      - backend_logs:/app/logs
+      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    image: crm-frontend:${IMAGE_TAG:-amd64}
+    container_name: crm-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  backend_logs:
+    driver: local

@@ -9,15 +9,14 @@ GUARDRAIL（红线约束）：
 - 所有裁决逻辑 → ActionEntry 入口函数
 - 所有审计日志 → Entry 内部/下游
 
-整改要点（R-1~R-5 合规）：
+整改要点：
 - R-1: 端点调用入口函数，末级是 action_entry → CRUD
 - R-2: Preview 逻辑统一在入口函数，端点不自建
 - R-3: 使用入口函数签名 (preview: bool) → ActionEntryResult
 - R-4: action_id 从入口函数获取（统一归因）
 - R-D: 使用 UserExecCtx 替代裸 User 参数
 
-参见: CRM-Docs/plans/AI-GLUE-DEEP-REMEDIATION-PLAN.md Phase 3
-参见: CRM-Docs/requirements/AI-GLUE-REQUIREMENTS.md 17.3 R-B, R-D
+用于将外部 AI 动作请求适配到 ActionEntry。
 """
 
 from typing import Dict, Any, Optional

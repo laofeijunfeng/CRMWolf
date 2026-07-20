@@ -9,8 +9,7 @@
 
 Contract: (user_ctx: UserExecCtx, params, preview: bool) → ActionEntryResult
 
-参见: CRM-Docs/plans/AI-GLUE-DEEP-REMEDIATION-PLAN.md
-参见: CRM-Docs/requirements/AI-GLUE-REQUIREMENTS.md 17.3 R-D
+用于统一承接 HTTP adapter 和 glue executor 的 AI 动作调用。
 """
 
 from typing import Dict, Any, Optional, List

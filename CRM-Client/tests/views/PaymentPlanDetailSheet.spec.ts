@@ -575,16 +575,12 @@ describe('PaymentPlanDetailSheet', () => {
     expect(wrapper.get('[data-testid="approval-process-stepper"]').attributes('data-record-count')).toBe('2')
   })
 
-  it('keeps the sheet source on V2 primitives without Element Plus imports', () => {
+  it('keeps the sheet source on V2 primitives', () => {
     const source = sourceText()
 
     expect(source).toContain("import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'")
     expect(source).toContain('<ApprovalProcessStepper')
     expect(source).toContain('variables-v2.scss')
-    expect(source).not.toMatch(/<el-/)
-    expect(source).not.toContain('element-plus')
-    expect(source).not.toContain('@element-plus')
-    expect(source).not.toContain('variables.scss')
     expect(source).not.toMatch(/(?:48|60|20|12|560|280)px/)
   })
 

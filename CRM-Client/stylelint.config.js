@@ -61,13 +61,5 @@ export default {
     'dist/**',
     'coverage/**',
     '**/*.css',
-    'src/styles/wolf-design.scss',
-    'src/styles/_typography.scss',
-    'src/styles/buttons.css',
-    'src/styles/colors.css',
-    'src/styles/spacing.css',
-    'src/styles/typography.css',
-    'src/styles/payment.scss',
-    'src/styles/payment-sidebar.scss',
   ],
 }

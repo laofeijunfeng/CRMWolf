@@ -198,7 +198,7 @@ const getMetaTitle = (followUp: FollowUp): string => {
 </script>
 
 <style scoped lang="scss">
-@import '@/styles/variables-v2.scss';
+@use '@/styles/variables-v2.scss' as *;
 
 .follow-up-list-container {
   height: 100%;

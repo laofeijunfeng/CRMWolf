@@ -3,7 +3,7 @@ Guardrails - 护栏系统
 
 置信度拦截 + 异常分层处理，确保 AI 操作安全可控。
 
-参见: CRM-Docs/requirements/CRM-AGENT-CONTROL-PLANE-REQUIREMENTS.md
+用于 AI 操作执行前的风险判断和人工确认分层。
 """
 
 from typing import Dict, Any, Optional, Tuple

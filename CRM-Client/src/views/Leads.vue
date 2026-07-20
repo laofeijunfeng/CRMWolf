@@ -14,7 +14,7 @@
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
  * - ✅ Flexbox 高度管理
- * - ✅ 移除 Element Plus 组件
+ * - ✅ 使用 shadcn-vue 基础组件
  * - ✅ 保留业务逻辑（领取、分配、退回公海、标记无效、转化客户等）
  */
 import { ref, reactive, computed, onMounted, watchEffect } from 'vue'

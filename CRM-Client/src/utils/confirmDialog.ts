@@ -3,7 +3,7 @@
  * UI/UX Pro Max §8: confirmation-dialogs
  *
  * 职责：
- * - 替代 ElMessageBox.confirm
+ * - 提供统一确认交互
  * - 提供函数式调用方式
  * - 符合 UI/UX Pro Max 规范
  *
@@ -21,7 +21,7 @@
  * })
  */
 
-import { createConfirmDialog, type ConfirmDialogOptions } from './confirmDialogImpl'
+import { createConfirmDialog } from './confirmDialogImpl'
 
 export interface ConfirmOptions {
   /** 标题 */
@@ -49,10 +49,10 @@ export async function confirmDialog(
 ): Promise<boolean> {
   return createConfirmDialog({
     message,
-    title: title || '确认',
-    confirmText: options?.confirmText || '确定',
-    cancelText: options?.cancelText || '取消',
-    variant: options?.variant || 'default',
+    title: title ?? '确认',
+    confirmText: options?.confirmText ?? '确定',
+    cancelText: options?.cancelText ?? '取消',
+    variant: options?.variant ?? 'default',
   })
 }
 

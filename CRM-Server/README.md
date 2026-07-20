@@ -38,36 +38,15 @@ cp .env.example .env
 ./run.sh
 ```
 
-或使用 Docker Compose：
-
-```bash
-docker-compose up -d
-```
-
 服务启动后访问：
 - API 文档：http://localhost:8000/docs
 - ReDoc 文档：http://localhost:8000/redoc
 
 ## 📚 文档
 
-完整文档请查看 [docs/](./docs/) 目录：
-
-### 业务文档
-
-- [业务流程概览](./docs/business/00-overview.md) - 系统整体流程介绍
-- [线索管理流程](./docs/business/01-lead-management.md)
-- [客户管理流程](./docs/business/02-customer-management.md)
-- [商机管理流程](./docs/business/03-opportunity-management.md)
-- [合同管理流程](./docs/business/04-contract-management.md)
-
-### 技术文档
-
-- [开发指南](./docs/technical/00-development-guide.md)
-- [异常处理说明](./docs/technical/02-exception-handling.md)
-- [飞书登录集成](./docs/technical/03-feishu-login.md)
-- [合同审批流程](./docs/technical/05-approval-workflow.md)
-
-更多文档请查看 [文档目录](./docs/README.md)
+- API 文档：启动服务后访问 `http://localhost:8000/docs`
+- 项目开发规范：参考根目录 [README.md](../README.md) 和 [CONTRIBUTING.md](../CONTRIBUTING.md)
+- 前端 V2 设计规范：参考 [CRM-Docs/design-system](../CRM-Docs/design-system/README.md)
 
 ## 📁 项目结构
 
@@ -122,7 +101,7 @@ ls tests/
 4. 在 `app/api/` 创建 API 路由
 5. 在 `app/main.py` 注册路由
 
-详细开发指南请参考 [开发文档](./docs/technical/00-development-guide.md)
+详细开发规范请参考根目录 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 ## 📊 数据库
 
@@ -167,7 +146,7 @@ python scripts/init_opportunity_stages.py
 
 ### 配置说明
 
-详细配置请参考 [飞书登录文档](./docs/technical/03-feishu-login.md)
+飞书应用配置通过环境变量维护，具体以 `app/core/config.py` 和部署环境配置为准。
 
 ## 📈 统计分析
 
@@ -188,7 +167,7 @@ python scripts/init_opportunity_stages.py
 线索 → 跟进 → 转化客户 → 创建商机 → 推进阶段 → 商机赢单 → 创建合同 → 审批签署 → 完成
 ```
 
-详细流程说明请参考 [业务流程概览](./docs/business/00-overview.md)
+业务流程以当前 API、数据模型和前端页面实现为准。
 
 ## 🤝 贡献
 

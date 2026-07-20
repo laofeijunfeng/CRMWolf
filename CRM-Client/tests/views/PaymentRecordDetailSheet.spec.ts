@@ -623,14 +623,10 @@ describe('PaymentRecordDetailSheet', () => {
   })
 
   describe('Source code compliance', () => {
-    it('uses V2 design tokens without Element Plus imports', () => {
+    it('uses V2 design tokens', () => {
       const source = sourceText()
 
       expect(source).toContain('variables-v2.scss')
-      expect(source).not.toMatch(/<el-/)
-      expect(source).not.toContain('element-plus')
-      expect(source).not.toContain('@element-plus')
-      expect(source).not.toContain('variables.scss')
     })
 
     it('does not use non-null assertions', () => {

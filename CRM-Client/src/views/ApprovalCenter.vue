@@ -3,7 +3,7 @@
 
   基于 V2 设计规范重构：
   - TopBar 集成 ContextTabs（待我审批/我已处理/我提交的，权限驱动）+ Badge 显示待办数
-  - FilterPanel（单据类型筛选）
+  - DataTable 工具栏筛选（单据类型）
   - DataTable（桌面端表格）+ 键盘快捷键（J/K 上下行、Enter 开 Sheet、Esc 关 Sheet）
   - 移动端卡片列表 + 快速审批按钮（Touch Target ≥44pt）
   - DetailSheetContent（统一详情抽屉样式）
@@ -21,7 +21,7 @@
   性能优化：列表只调 1 次 listApprovals；详情走单点 getApprovalDetail。
 -->
 <template>
-  <div class="approval-center" v-loading="listLoading">
+  <div class="approval-center">
     <!-- 标题 + 全局 ErrorState（403 forbidden / 加载失败） -->
     <ErrorState
       v-if="loadError === 'forbidden'"
@@ -43,28 +43,24 @@
     </ErrorState>
 
     <template v-else>
-      <!-- FilterPanel -->
-      <FilterPanel
-        :fields="filterFields"
-        v-model:values="filterValues"
-        @search="handleFilterChange"
-        @reset="resetFilter"
-      />
-
       <!-- DataTable（桌面端） -->
       <DataTable
         v-if="!isMobile"
+        v-model:filters="activeFilters"
         :columns="columns"
         :data="rows"
         :total="total"
         :page="page"
         :page-size="pageSize"
         :loading="listLoading"
+        :filter-fields="filterFields"
         height="calc(100vh - 248px)"
         empty-title="暂无待审批事项"
         row-interactive
         @update:page="page = $event; fetchList()"
         @update:page-size="pageSize = $event; page = 1; fetchList()"
+        @filter-apply="handleFilterApply"
+        @filter-reset="handleFilterReset"
         @row-click="openDetail"
       >
         <!-- 单号列：mono font + 点击复制 -->
@@ -150,6 +146,20 @@
 
       <!-- 移动端卡片列表 -->
       <div v-if="isMobile" class="space-y-4">
+        <div class="approval-mobile-tools">
+          <ListFilterPopover
+            :model-value="activeFilters"
+            :fields="filterFields"
+            @update:model-value="activeFilters = $event"
+            @apply="handleFilterApply"
+            @reset="handleFilterReset"
+          />
+        </div>
+
+        <div v-if="listLoading" class="approval-mobile-loading">
+          加载中...
+        </div>
+
         <Card
           v-for="(row, $index) in rows"
           :key="row.id"
@@ -253,7 +263,7 @@
 
         <!-- 移动端空态 -->
         <Empty
-          v-if="rows.length === 0"
+          v-if="!listLoading && rows.length === 0"
           class="min-h-[220px] border-0"
         >
           <EmptyHeader>
@@ -465,12 +475,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, ref, watch, watchEffect, reactive } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Clock, Copy } from 'lucide-vue-next'
-import { AmountText, FilterPanel, DataTable, Badge, Separator } from '@/components/crmwolf'
+import { AmountText, DataTable, Badge, Separator, ListFilterPopover } from '@/components/crmwolf'
+import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from '@/components/ui/pagination'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet'
@@ -487,7 +498,6 @@ import {
   EmptyTitle
 } from '@/components/ui/empty'
 import { cn } from '@/lib/utils'
-// Element Plus components for remaining template sections (none remaining after refactor)
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -523,9 +533,7 @@ const router = useRouter()
 
 // ==================== State ====================
 const activeTab = ref<Tab>('pending')
-const filterValues = reactive({
-  business_type: '' as EntityType | ''
-})
+const activeFilters = ref<ListFilterCondition[]>([])
 
 const page = ref<number>(1)
 const pageSize = ref<number>(20)
@@ -853,13 +861,12 @@ const tabs = computed(() => {
   ]
 })
 
-// ==================== FilterPanel 配置 ====================
-const filterFields = [
+// ==================== 筛选配置 ====================
+const filterFields: ListFilterField[] = [
   {
     key: 'business_type',
-    type: 'select' as const,
+    type: 'enum',
     label: '单据类型',
-    placeholder: '全部类型',
     options: [
       { value: 'PAYMENT', label: '回款' },
       { value: 'INVOICE', label: '发票' },
@@ -982,11 +989,14 @@ const fetchList = async (): Promise<void> => {
   loadError.value = null
   listLoading.value = true
   try {
+    const businessType = getBusinessTypeFilter()
+    const businessTypeExclude = getBusinessTypeExcludeFilter()
     const query = {
       tab: activeTab.value,
       page: page.value,
       page_size: pageSize.value,
-      ...(filterValues.business_type ? { business_type: filterValues.business_type } : {})
+      ...(businessType !== null ? { business_type: businessType } : {}),
+      ...(businessTypeExclude !== null ? { business_type_exclude: businessTypeExclude } : {})
     }
     const res = await store.fetchList(query)
     rows.value = activeTab.value === 'pending'
@@ -1040,13 +1050,34 @@ const reload = (): void => {
   fetchList()
 }
 
-const handleFilterChange = (): void => {
+const getBusinessTypeFilterValue = (operators: ListFilterCondition['op'][]): string | null => {
+  const values = activeFilters.value
+    .filter((item) => item.field === 'business_type' && operators.includes(item.op))
+    .flatMap((condition) => {
+      const value = condition.value
+      if (Array.isArray(value)) return value.map(String)
+      if (value === undefined || value === null || value === '') return []
+      return [String(value)]
+    })
+    .filter((value, index, list) => value !== '' && list.indexOf(value) === index)
+
+  return values.length > 0 ? values.join(',') : null
+}
+
+const getBusinessTypeFilter = (): string | null =>
+  getBusinessTypeFilterValue(['contains', 'eq'])
+
+const getBusinessTypeExcludeFilter = (): string | null =>
+  getBusinessTypeFilterValue(['not_contains', 'neq'])
+
+const handleFilterApply = (filters: ListFilterCondition[]): void => {
+  activeFilters.value = filters
   page.value = 1
   fetchList()
 }
 
-const resetFilter = (): void => {
-  filterValues.business_type = ''
+const handleFilterReset = (): void => {
+  activeFilters.value = []
   page.value = 1
   fetchList()
 }
@@ -1331,6 +1362,22 @@ watch(rows, async () => {
   color: $wolf-warning-text-v2;
   background: $wolf-warning-bg-v2;
   border: none;
+}
+
+.approval-mobile-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 36px;
+}
+
+.approval-mobile-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
 }
 
 // 行级聚焦态（键盘导航 + 抽屉关闭后焦点回归）

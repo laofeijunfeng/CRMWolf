@@ -8,7 +8,7 @@
  * - Loading, error/empty, responsive states
  * - Dialogs intentionally remain outside this Sheet; approve/reject events are seams for later tasks.
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { AlertCircle, FileText, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
 import {
@@ -34,13 +34,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ContractPaymentPlans from '@/components/ContractPaymentPlans.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
-import { AmountText, FileAttachment } from '@/components/crmwolf'
+import { AmountText } from '@/components/crmwolf'
 import contractApi, { type ContractResponse, type ContractStatus, type LicenseType } from '@/api/contract'
-import { createContractFileObjectUrl, downloadContractFile as downloadContractFileApi } from '@/api/fileUpload'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { handleApiError } from '@/utils/errorHandler'
-import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -79,9 +77,6 @@ const contractInfo = ref<ContractResponse | null>(null)
 const errorMessage = ref('')
 const activeRequestId = ref(0)
 const editDialogOpen = ref<boolean>(false)
-const contractFilePreviewUrl = ref<string>('')
-const contractFilePreviewLoading = ref<boolean>(false)
-const contractFilePreviewRequestId = ref<number>(0)
 
 const statusesWithPaymentPlans: readonly ContractStatus[] = [
   'SIGNED',
@@ -148,40 +143,6 @@ const paymentContractInfo = computed<PaymentContractInfo | undefined>(() => {
   return info
 })
 
-const hasContractFile = computed<boolean>(() =>
-  contractInfo.value?.contract_file_path != null &&
-  contractInfo.value.contract_file_path.length > 0
-)
-
-const contractFiles = computed<FileAttachmentItem[]>(() => {
-  const contract = contractInfo.value
-  if (contract === null || !hasContractFile.value) return []
-
-  const filePath = contract.contract_file_path ?? ''
-  const trimmedFileName = contract.contract_file_name?.trim()
-  const fileName = trimmedFileName != null && trimmedFileName.length > 0
-    ? trimmedFileName
-    : getContractFileName(filePath)
-  const file: FileAttachmentItem = {
-    id: contract.id,
-    name: fileName,
-    extension: getFileExtension(fileName.length > 0 ? fileName : filePath),
-    status: contractFilePreviewLoading.value ? 'processing' : 'done'
-  }
-
-  if (contract.contract_file_size != null) {
-    file.size = contract.contract_file_size
-  }
-  if (contract.contract_file_mime_type != null) {
-    file.mimeType = contract.contract_file_mime_type
-  }
-  if (contractFilePreviewUrl.value.length > 0) {
-    file.url = contractFilePreviewUrl.value
-  }
-
-  return [file]
-})
-
 // ==================== Data Loading ====================
 const fetchContractDetail = async (contractId: number): Promise<void> => {
   const requestId = activeRequestId.value + 1
@@ -211,8 +172,6 @@ const fetchContractDetail = async (contractId: number): Promise<void> => {
 
 const resetState = (): void => {
   activeRequestId.value += 1
-  contractFilePreviewRequestId.value += 1
-  revokeContractFilePreviewUrl()
   loading.value = false
   contractInfo.value = null
   errorMessage.value = ''
@@ -276,50 +235,6 @@ const handleApprovalRejected = async (): Promise<void> => {
 const handleApprovalResubmit = (): void => {
   if (!isSubmitterGeneric.value) return
   editDialogOpen.value = true
-}
-
-const revokeContractFilePreviewUrl = (): void => {
-  if (contractFilePreviewUrl.value.length === 0) return
-  window.URL.revokeObjectURL(contractFilePreviewUrl.value)
-  contractFilePreviewUrl.value = ''
-}
-
-const loadContractFilePreviewUrl = async (): Promise<void> => {
-  const contract = contractInfo.value
-  const requestId = contractFilePreviewRequestId.value + 1
-  contractFilePreviewRequestId.value = requestId
-  revokeContractFilePreviewUrl()
-
-  if (contract === null || !hasContractFile.value) {
-    contractFilePreviewLoading.value = false
-    return
-  }
-
-  contractFilePreviewLoading.value = true
-  try {
-    const objectUrl = await createContractFileObjectUrl(contract.id)
-    if (requestId === contractFilePreviewRequestId.value && hasContractFile.value) {
-      contractFilePreviewUrl.value = objectUrl
-    } else {
-      window.URL.revokeObjectURL(objectUrl)
-    }
-  } catch {
-    handleApiError(new Error('合同附件预览加载失败'), '合同附件预览')
-  } finally {
-    if (requestId === contractFilePreviewRequestId.value) {
-      contractFilePreviewLoading.value = false
-    }
-  }
-}
-
-const downloadContractFile = async (): Promise<void> => {
-  const contract = contractInfo.value
-  if (contract === null || !hasContractFile.value) return
-  try {
-    await downloadContractFileApi(contract.id, contract.contract_file_name ?? undefined)
-  } catch {
-    handleApiError(new Error('合同附件下载失败'), '下载合同附件')
-  }
 }
 
 // ==================== Format Helpers ====================
@@ -392,15 +307,6 @@ const getLicenseTypeText = (type: LicenseType | undefined): string => {
   return map[type]
 }
 
-const getFileExtension = (filePath: string): string => {
-  return filePath.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
-}
-
-const getContractFileName = (filePath: string): string => {
-  const extension = getFileExtension(filePath)
-  return extension ? `合同附件.${extension}` : '合同附件'
-}
-
 // ==================== Watch ====================
 watch(
   [(): boolean => props.visible, (): number | null => props.contractId],
@@ -415,18 +321,6 @@ watch(
   },
   { immediate: true }
 )
-
-watch(
-  [hasContractFile, (): number | undefined => contractInfo.value?.id],
-  (): void => {
-    void loadContractFilePreviewUrl()
-  }
-)
-
-onBeforeUnmount((): void => {
-  contractFilePreviewRequestId.value += 1
-  revokeContractFilePreviewUrl()
-})
 </script>
 
 <template>
@@ -565,23 +459,6 @@ onBeforeUnmount((): void => {
                       <div class="attribute-value">{{ formatDateTime(contractInfo.created_time) }}</div>
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card v-if="hasContractFile" class="info-card">
-              <CardContent class="p-0">
-                <div class="section-heading">
-                  <h3 class="section-title">合同邮件附件</h3>
-                </div>
-                <div class="section-content">
-                  <FileAttachment
-                    title="合同邮件附件"
-                    mode="readonly"
-                    :files="contractFiles"
-                    empty-text="暂无合同附件"
-                    @download="downloadContractFile"
-                  />
                 </div>
               </CardContent>
             </Card>

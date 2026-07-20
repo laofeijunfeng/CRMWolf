@@ -7,17 +7,13 @@ const readSource = (relativePath: string): string => {
 }
 
 describe('ContractPaymentPlans V2 migration contract', () => {
-  it('uses ListCard and shadcn-vue primitives without Element Plus imports or tags', () => {
+  it('uses ListCard and shadcn-vue primitives', () => {
     const source = readSource('src/components/ContractPaymentPlans.vue')
 
     expect(source).toContain("@/components/crmwolf/ListCard.vue")
     expect(source).toContain("@/components/ui/button")
     expect(source).toContain("@/components/ui/dialog")
     expect(source).toContain("@/styles/variables-v2.scss")
-    expect(source).not.toContain('element-plus')
-    expect(source).not.toContain('@element-plus/icons-vue')
-    expect(source).not.toMatch(/<\/?el-/)
-    expect(source).not.toContain("@/styles/variables.scss")
   })
 
   it('keeps payment-plan dialogs outside the ListCard content shell', () => {

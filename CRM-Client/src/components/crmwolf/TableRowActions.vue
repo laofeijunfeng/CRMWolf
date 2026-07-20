@@ -13,14 +13,14 @@
  */
 import { computed, type Component } from 'vue'
 import { MoreHorizontal } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
 import {
-  Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator
-} from '@/components/crmwolf'
+} from '@/components/ui/dropdown-menu'
 
 /**
  * 操作配置类型
@@ -79,7 +79,7 @@ const showDropdownMenu = computed(() => visibleSecondaryActions.value.length > 0
  * 执行操作（阻止事件冒泡）
  */
 const executeAction = (action: ActionConfig): void => {
-  if (action.disabled) return
+  if (action.disabled === true) return
   action.handler(props.row)
 }
 </script>

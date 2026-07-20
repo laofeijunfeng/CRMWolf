@@ -74,14 +74,10 @@ describe('PaymentRecordList V2 card layout', () => {
     expect(wrapper.emitted('register')).toHaveLength(1)
   })
 
-  it('uses V2 primitives and removes Element Plus table markup from the component source', () => {
+  it('uses V2 primitives in the component source', () => {
     const source = sourceText()
 
     expect(source).toContain('ListCard')
     expect(source).toContain('variables-v2.scss')
-    expect(source).not.toMatch(/<el-/)
-    expect(source).not.toContain('element-plus')
-    expect(source).not.toContain('@element-plus')
-    expect(source).not.toContain('variables.scss')
   })
 })

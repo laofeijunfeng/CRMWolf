@@ -239,7 +239,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 })
 
 const handleDelete = async (record: RoleResponse): Promise<void> => {
-  // 使用 confirm 代替 ElMessageBox
+  // 删除前二次确认
   if (!confirm(`确定要删除角色"${record.name}"吗？删除后不可恢复。`)) {
     return
   }

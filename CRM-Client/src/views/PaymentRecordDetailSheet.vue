@@ -9,7 +9,7 @@
  * - Conditional approval progress display using V2 design system
  * - Footer close button
  *
- * Design: shadcn-vue + variables-v2.scss; no Element Plus imports.
+ * Design: shadcn-vue + variables-v2.scss.
  * Accessibility: focus-visible states, aria labels, touch targets >= 44px, semantic status display.
  */
 import { computed, ref, watch } from 'vue'

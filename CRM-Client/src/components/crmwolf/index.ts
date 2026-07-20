@@ -17,7 +17,6 @@ export { default as TopBarTabs } from './TopBarTabs.vue'
 // Data display components
 export { default as DataTable } from './DataTable.vue'
 export { default as AmountText } from './AmountText.vue'
-export { default as FilterPanel } from './FilterPanel.vue'
 export { default as FileAttachment } from './FileAttachment.vue'
 export { default as ListCard } from './ListCard.vue'
 export { default as ListFilterPopover } from './ListFilterPopover.vue'

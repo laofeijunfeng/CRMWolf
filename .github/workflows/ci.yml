@@ -210,6 +210,6 @@ jobs:
         with:
           node-version: '18'
       - name: Test design-system documentation checker
-        run: node scripts/tests/check-design-system-docs.test.js
+        run: node CRM-Docs/scripts/tests/check-design-system-docs.test.js
       - name: Check design-system documentation
-        run: node scripts/check-design-system-docs.js
+        run: node CRM-Docs/scripts/check-design-system-docs.js

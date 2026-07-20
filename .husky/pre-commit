@@ -11,7 +11,7 @@ if [ -f "$SCRIPT_PATH" ]; then
 
     # ===== 设计系统文档质量门禁 =====
     if git diff --cached --name-only | grep -q '^CRM-Docs/design-system/'; then
-      node scripts/check-design-system-docs.js
+      node CRM-Docs/scripts/check-design-system-docs.js
     fi
   fi
 fi

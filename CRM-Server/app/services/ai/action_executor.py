@@ -5,17 +5,16 @@
 - 不记录审计日志（由 action_entry 负责）
 - 仅被 action_entry 调用
 
-整改要点（Phase 4）：
+整改要点：
 - 移除 _log_ai_action（审计职责上移到 action_entry）
 - 保持纯 CRUD 调用职责
 - 不持有 Preview/Gate 逻辑
 
-R-D 合规（Phase 9）：
+执行上下文：
 - 使用 UserExecCtx 替代裸 User 参数
 - Entry 内部管理 db，Executor 接收 UserExecCtx
 
-参见: CRM-Docs/plans/AI-GLUE-DEEP-REMEDIATION-PLAN.md Phase 4
-参见: CRM-Docs/requirements/AI-GLUE-REQUIREMENTS.md 17.3 R-D
+用于统一执行 ActionEntry 下发的 CRUD 操作。
 """
 
 from typing import Optional, Dict, Any, List

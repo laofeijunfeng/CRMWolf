@@ -1,8 +1,6 @@
 """Session UUID 寻址测试
 
 Task 3.2: 统一 Session API 为 uuid 寻址
-
-参见: .claude/sdd/task-3.2-brief.md
 """
 
 import pytest

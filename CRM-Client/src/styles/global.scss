@@ -1,8 +1,83 @@
-// ==================== CRMWolf 全局样式 ====================
-// 基于 CRMWolf 设计系统的全局样式
-// 符合 UI/UX Pro Max 专业标准
+// ==================== CRMWolf V2 全局样式 ====================
+// 规则来源: CRM-Docs/design-system/README.md
 
-@use './variables.scss' as *;
+@use './variables-v2.scss' as *;
+
+// ==================== CSS 变量兼容层 ====================
+
+:root {
+  --wolf-primary: #{$wolf-primary-v2};
+  --wolf-primary-hover: #{$wolf-primary-hover-v2};
+  --wolf-primary-active: #{$wolf-primary-active-v2};
+  --wolf-primary-light: #{$wolf-primary-light-v2};
+
+  --wolf-bg-page: #{$wolf-bg-page-v2};
+  --wolf-bg-card: #{$wolf-bg-card-v2};
+  --wolf-bg-sidebar: #{$wolf-bg-sidebar-v2};
+  --wolf-bg-hover: #{$wolf-bg-hover-v2};
+  --wolf-bg-active: #{$wolf-bg-active-v2};
+  --wolf-bg-muted: #{$wolf-bg-muted-v2};
+  --wolf-bg-elevated: #{$wolf-bg-elevated-v2};
+
+  --wolf-text-primary: #{$wolf-text-primary-v2};
+  --wolf-text-secondary: #{$wolf-text-secondary-v2};
+  --wolf-text-tertiary: #{$wolf-text-tertiary-v2};
+  --wolf-text-placeholder: #{$wolf-text-placeholder-v2};
+  --wolf-text-disabled: #{$wolf-disabled-text-v2};
+  --wolf-text-link: #{$wolf-text-link-v2};
+  --wolf-text-link-hover: #{$wolf-text-link-hover-v2};
+  --wolf-text-inverse: #{$wolf-text-inverse-v2};
+
+  --wolf-border-default: #{$wolf-border-default-v2};
+  --wolf-border-hover: #{$wolf-border-hover-v2};
+  --wolf-border-light: #{$wolf-border-light-v2};
+  --wolf-border-divider: #{$wolf-border-divider-v2};
+
+  --wolf-success-text: #{$wolf-success-text-v2};
+  --wolf-success-bg: #{$wolf-success-bg-v2};
+  --wolf-warning-text: #{$wolf-warning-text-v2};
+  --wolf-warning-bg: #{$wolf-warning-bg-v2};
+  --wolf-danger-text: #{$wolf-danger-text-v2};
+  --wolf-danger-bg: #{$wolf-danger-bg-v2};
+
+  --wolf-radius-sm: #{$wolf-radius-sm-v2};
+  --wolf-radius-md: #{$wolf-radius-v2};
+  --wolf-radius-lg: #{$wolf-radius-lg-v2};
+  --wolf-radius-full: #{$wolf-radius-full-v2};
+
+  --wolf-space-xs: #{$wolf-space-xs-v2};
+  --wolf-space-sm: #{$wolf-space-sm-v2};
+  --wolf-space-md: #{$wolf-space-md-v2};
+  --wolf-space-lg: #{$wolf-space-lg-v2};
+  --wolf-space-xl: #{$wolf-space-xl-v2};
+  --wolf-page-padding: #{$wolf-page-padding-v2};
+  --wolf-card-padding: #{$wolf-card-padding-v2};
+  --wolf-button-gap: #{$wolf-space-xs-v2};
+
+  --wolf-font-family: #{$wolf-font-family-v2};
+  --wolf-font-size-title: #{$wolf-font-size-title-v2};
+  --wolf-font-size-body: #{$wolf-font-size-body-v2};
+  --wolf-font-size-auxiliary: #{$wolf-font-size-auxiliary-v2};
+  --wolf-font-size-caption: #{$wolf-font-size-caption-v2};
+  --wolf-font-weight-normal: #{$wolf-font-weight-normal-v2};
+  --wolf-font-weight-medium: #{$wolf-font-weight-medium-v2};
+  --wolf-font-weight-semibold: #{$wolf-font-weight-semibold-v2};
+  --wolf-line-height-title: #{$wolf-line-height-title-v2};
+  --wolf-line-height-body: #{$wolf-line-height-body-v2};
+
+  --wolf-focus-ring-color: #{$wolf-focus-ring-color-v2};
+  --wolf-transition-duration: #{$wolf-motion-state-duration-v2};
+  --wolf-reduced-motion-duration: #{$wolf-reduced-motion-duration-v2};
+
+  --wolf-approval-pending-text: #{$wolf-warning-text-v2};
+  --wolf-approval-pending-bg: #{$wolf-warning-bg-v2};
+  --wolf-approval-approved-text: #{$wolf-success-text-v2};
+  --wolf-approval-approved-bg: #{$wolf-success-bg-v2};
+  --wolf-approval-rejected-text: #{$wolf-danger-text-v2};
+  --wolf-approval-rejected-bg: #{$wolf-danger-bg-v2};
+  --wolf-approval-cancelled-text: #{$wolf-text-tertiary-v2};
+  --wolf-approval-cancelled-bg: #{$wolf-bg-muted-v2};
+}
 
 // ==================== 全局基础样式 ====================
 
@@ -17,18 +92,8 @@
 
 *:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 $wolf-focus-ring-width $wolf-focus-ring-color;
-  outline-offset: $wolf-focus-ring-offset;
-}
-
-// Element Plus 组件 focus 状态覆盖
-.el-button:focus-visible,
-.el-input:focus-visible,
-.el-select:focus-visible,
-.el-checkbox:focus-visible,
-.el-radio:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 $wolf-focus-ring-width $wolf-focus-ring-color;
+  box-shadow: 0 0 0 $wolf-focus-ring-width-v2 $wolf-focus-ring-color-v2;
+  outline-offset: $wolf-focus-ring-offset-v2;
 }
 
 // ==================== Reduced Motion ====================
@@ -38,21 +103,21 @@
   *,
   *::before,
   *::after {
-    animation-duration: $wolf-reduced-motion-duration !important;
+    animation-duration: $wolf-reduced-motion-duration-v2 !important;
     animation-iteration-count: 1 !important;
-    transition-duration: $wolf-reduced-motion-duration !important;
+    transition-duration: $wolf-reduced-motion-duration-v2 !important;
     scroll-behavior: auto !important;
   }
 }
 
 html, body {
-  font-family: $wolf-font-family;
-  font-size: $wolf-font-size-body;
-  color: $wolf-text-primary;
-  background-color: $wolf-bg-page;
+  font-family: $wolf-font-family-v2;
+  font-size: $wolf-font-size-body-v2;
+  color: $wolf-text-primary-v2;
+  background-color: $wolf-bg-page-v2;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  line-height: 1.5;
+  line-height: $wolf-line-height-body-v2;
 }
 
 #app {
@@ -62,34 +127,34 @@ html, body {
 // ==================== 通用布局类 ====================
 
 .page-container {
-  padding: $wolf-page-padding;
-  background-color: $wolf-bg-page;
+  padding: $wolf-page-padding-v2;
+  background-color: $wolf-bg-page-v2;
   min-height: 100vh;
 }
 
 .page-header {
-  margin-bottom: $wolf-section-gap;
+  margin-bottom: $wolf-section-gap-v2;
 
   .page-title {
     margin: 0;
-    font-size: $wolf-font-size-title;
-    font-weight: $wolf-font-weight-semibold;
-    color: $wolf-text-primary;
+    font-size: $wolf-font-size-title-v2;
+    font-weight: $wolf-font-weight-semibold-v2;
+    color: $wolf-text-primary-v2;
   }
 
   .page-subtitle {
     margin: 4px 0 0 0;
-    font-size: $wolf-font-size-body;
-    color: $wolf-text-tertiary;
+    font-size: $wolf-font-size-body-v2;
+    color: $wolf-text-tertiary-v2;
   }
 }
 
 .card-container {
-  background: $wolf-bg-card;
-  border-radius: $wolf-radius-lg;
-  box-shadow: $wolf-shadow-card;
-  padding: $wolf-card-padding;
-  margin-bottom: $wolf-card-gap;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-lg-v2;
+  box-shadow: $wolf-shadow-card-v2;
+  padding: $wolf-card-padding-v2;
+  margin-bottom: $wolf-card-gap-v2;
 }
 
 // ==================== 工具类 ====================
@@ -135,28 +200,28 @@ html, body {
 .mb-xl { margin-bottom: 24px; }
 
 // 文本
-.text-primary { color: $wolf-text-primary; }
-.text-secondary { color: $wolf-text-secondary; }
-.text-tertiary { color: $wolf-text-tertiary; }
-.text-muted { color: $wolf-text-disabled; }
-.text-link { color: $wolf-text-link; }
-.text-success { color: $wolf-success; }
-.text-warning { color: $wolf-warning; }
-.text-danger { color: $wolf-danger; }
-.text-info { color: $wolf-info; }
+.text-primary { color: $wolf-text-primary-v2; }
+.text-secondary { color: $wolf-text-secondary-v2; }
+.text-tertiary { color: $wolf-text-tertiary-v2; }
+.text-muted { color: $wolf-disabled-text-v2; }
+.text-link { color: $wolf-text-link-v2; }
+.text-success { color: $wolf-success-text-v2; }
+.text-warning { color: $wolf-warning-text-v2; }
+.text-danger { color: $wolf-danger-text-v2; }
+.text-info { color: $wolf-primary-v2; }
 
 // 字重
-.font-normal { font-weight: $wolf-font-weight-normal; }
-.font-medium { font-weight: $wolf-font-weight-medium; }
-.font-semibold { font-weight: $wolf-font-weight-semibold; }
-.font-bold { font-weight: $wolf-font-weight-bold; }
+.font-normal { font-weight: $wolf-font-weight-normal-v2; }
+.font-medium { font-weight: $wolf-font-weight-medium-v2; }
+.font-semibold { font-weight: $wolf-font-weight-semibold-v2; }
+.font-bold { font-weight: $wolf-font-weight-semibold-v2; }
 
 // 字号
-.text-xs { font-size: $wolf-font-size-label; }
-.text-sm { font-size: $wolf-font-size-small; }
-.text-base { font-size: $wolf-font-size-body; }
-.text-lg { font-size: $wolf-font-size-card-title; }
-.text-xl { font-size: $wolf-font-size-title; }
+.text-xs { font-size: $wolf-font-size-caption-v2; }
+.text-sm { font-size: $wolf-font-size-auxiliary-v2; }
+.text-base { font-size: $wolf-font-size-body-v2; }
+.text-lg { font-size: $wolf-font-size-title-v2; }
+.text-xl { font-size: $wolf-topbar-title-font-size-v2; }
 
 // 文本溢出
 .text-ellipsis {
@@ -195,15 +260,15 @@ html, body {
 .cursor-not-allowed { cursor: not-allowed; }
 
 // 圆角
-.rounded-sm { border-radius: $wolf-radius-sm; }
-.rounded-md { border-radius: $wolf-radius-md; }
-.rounded-lg { border-radius: $wolf-radius-lg; }
-.rounded-xl { border-radius: $wolf-radius-xl; }
-.rounded-full { border-radius: $wolf-radius-full; }
+.rounded-sm { border-radius: $wolf-radius-sm-v2; }
+.rounded-md { border-radius: $wolf-radius-v2; }
+.rounded-lg { border-radius: $wolf-radius-lg-v2; }
+.rounded-xl { border-radius: $wolf-radius-lg-v2; }
+.rounded-full { border-radius: $wolf-radius-full-v2; }
 
 // 阴影
-.shadow-card { box-shadow: $wolf-shadow-card; }
-.shadow-hover { box-shadow: $wolf-shadow-hover; }
+.shadow-card { box-shadow: $wolf-shadow-card-v2; }
+.shadow-hover { box-shadow: $wolf-shadow-hover-v2; }
 
 // 过渡
 .transition { transition: all 0.2s ease; }
@@ -214,13 +279,13 @@ html, body {
 
 // 链接样式
 .link {
-  color: $wolf-text-link;
+  color: $wolf-text-link-v2;
   cursor: pointer;
   text-decoration: none;
-  transition: color 0.2s ease;
+  transition: color $wolf-motion-state-duration-v2 ease;
 
   &:hover {
-    color: $wolf-primary-hover;
+    color: $wolf-text-link-hover-v2;
     text-decoration: underline;
   }
 }
@@ -228,8 +293,8 @@ html, body {
 // 分割线
 .divider {
   height: 1px;
-  background-color: $wolf-border-color;
-  margin: $wolf-section-gap 0;
+  background-color: $wolf-border-divider-v2;
+  margin: $wolf-section-gap-v2 0;
 
   &.divider-sm {
     margin: 16px 0;
@@ -245,28 +310,28 @@ html, body {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: $wolf-radius-full;
-  font-size: $wolf-font-size-label;
-  font-weight: $wolf-font-weight-medium;
+  border-radius: $wolf-radius-full-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
 
   &.badge-primary {
-    background-color: $wolf-info-bg;
-    color: $wolf-info;
+    background-color: $wolf-primary-light-v2;
+    color: $wolf-primary-v2;
   }
 
   &.badge-success {
-    background-color: $wolf-success-bg;
-    color: $wolf-success;
+    background-color: $wolf-success-bg-v2;
+    color: $wolf-success-text-v2;
   }
 
   &.badge-warning {
-    background-color: $wolf-warning-bg;
-    color: $wolf-warning;
+    background-color: $wolf-warning-bg-v2;
+    color: $wolf-warning-text-v2;
   }
 
   &.badge-danger {
-    background-color: $wolf-danger-bg;
-    color: $wolf-danger;
+    background-color: $wolf-danger-bg-v2;
+    color: $wolf-danger-text-v2;
   }
 }
 
@@ -274,22 +339,22 @@ html, body {
 
 @media (max-width: 768px) {
   .page-container {
-    padding: 16px;
+    padding: $wolf-page-padding-mobile-v2;
   }
 
   .card-container {
-    padding: 16px;
-    margin-bottom: 12px;
+    padding: $wolf-card-padding-mobile-v2;
+    margin-bottom: $wolf-section-gap-mobile-v2;
   }
 }
 
 @media (max-width: 480px) {
   .page-container {
-    padding: 12px;
+    padding: $wolf-card-padding-mobile-v2;
   }
 
   .card-container {
-    padding: 12px;
+    padding: $wolf-card-padding-mobile-v2;
   }
 }
 
@@ -301,31 +366,14 @@ html, body {
 }
 
 ::-webkit-scrollbar-track {
-  background: $wolf-bg-page;
+  background: $wolf-bg-page-v2;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: $wolf-border-color;
-  border-radius: $wolf-radius-sm;
+  background: $wolf-border-default-v2;
+  border-radius: $wolf-radius-sm-v2;
 
   &:hover {
-    background: $wolf-text-tertiary;
-  }
-}
-
-// ==================== Element Plus Empty 组件优化 ====================
-
-// 隐藏 el-empty 的图片，只显示文字
-.el-empty {
-  padding: $wolf-space-4 0;
-
-  .el-empty__image {
-    display: none;
-  }
-
-  .el-empty__description {
-    margin-top: 0;
-    color: $wolf-text-tertiary;
-    font-size: $wolf-font-size-body;
+    background: $wolf-text-tertiary-v2;
   }
 }

@@ -1,9 +1,0 @@
-# VitePress 构建输出（自动生成，不纳入版本控制）
-.vitepress/dist/
-.vitepress/cache/
-
-# Node modules
-node_modules/
-
-# 日志
-*.log

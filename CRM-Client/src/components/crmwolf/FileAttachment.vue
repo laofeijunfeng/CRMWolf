@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, type Component } from 'vue'
 import {
   AlertCircle,
   CheckCircle2,
@@ -139,7 +139,7 @@ const matchesAccept = (file: File): boolean => {
 
 const handlePreview = async (file: FileAttachmentItem): Promise<void> => {
   emit('preview', file)
-  if (!props.previewInDialog || !isPreviewable(file) || !file.url) return
+  if (!props.previewInDialog || !isPreviewable(file) || file.url == null || file.url === '') return
 
   selectedPreview.value = file
   previewOpen.value = true
@@ -160,12 +160,12 @@ const handleRemove = (file: FileAttachmentItem): void => {
 }
 
 const getExtension = (file: FileAttachmentItem): string => {
-  if (file.extension) return file.extension.toLowerCase().replace(/^\./, '')
-  const name = file.name || file.url || ''
+  if (file.extension != null && file.extension !== '') return file.extension.toLowerCase().replace(/^\./, '')
+  const name = file.name ?? file.url ?? ''
   return name.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
 }
 
-const getIcon = (file: FileAttachmentItem) => {
+const getIcon = (file: FileAttachmentItem): Component => {
   const ext = getExtension(file)
   if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return FileImage
   if (['pdf', 'ofd', 'doc', 'docx'].includes(ext)) return FileText
@@ -192,7 +192,7 @@ const getTypeLabel = (file: FileAttachmentItem): string => {
 }
 
 const formatSize = (size?: number): string => {
-  if (!size || size <= 0) return ''
+  if (size == null || size <= 0) return ''
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
@@ -224,7 +224,7 @@ const isPdf = (file: FileAttachmentItem): boolean => getExtension(file) === 'pdf
 const isDocx = (file: FileAttachmentItem): boolean => getExtension(file) === 'docx'
 
 const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
-  if (!file.url || docxPreviewRef.value === null) return
+  if (file.url == null || file.url === '' || docxPreviewRef.value === null) return
 
   docxPreviewLoading.value = true
   docxPreviewError.value = ''
@@ -652,31 +652,39 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
 }
 
 .file-preview-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: calc(100vw - 32px);
   max-width: min(960px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
 }
 
 .file-preview-dialog__body {
-  min-height: 420px;
+  min-height: 0;
+  height: min(70vh, calc(100vh - 160px));
+  overflow: auto;
 }
 
 .file-preview-dialog__image {
   display: block;
   max-width: 100%;
-  max-height: 70vh;
+  max-height: 100%;
   margin: 0 auto;
   object-fit: contain;
 }
 
 .file-preview-dialog__frame {
   width: 100%;
-  min-height: 70vh;
+  height: 100%;
+  min-height: 0;
   border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-sm-v2;
 }
 
 .file-preview-dialog__docx-shell {
-  min-height: 70vh;
-  max-height: 70vh;
+  height: 100%;
+  min-height: 0;
   overflow: auto;
   border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-sm-v2;
@@ -684,6 +692,7 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
 }
 
 .file-preview-dialog__docx {
+  min-width: max-content;
   padding: $wolf-space-md-v2;
 }
 

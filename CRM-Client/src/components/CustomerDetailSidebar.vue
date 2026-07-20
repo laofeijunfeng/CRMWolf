@@ -2,7 +2,7 @@
 /**
  * CustomerDetailSidebar.vue - 客户详情侧边栏导航
  *
- * 改造：使用 shadcn-vue Sidebar 组件替代 Element Plus
+ * 使用 shadcn-vue Sidebar 组件实现详情导航
  */
 import {
   SidebarProvider,

@@ -3,8 +3,6 @@ TraceContext - 全链路追踪
 
 实现 TraceId 生成、Span 管理、AI Decision 记录。
 
-参见: CRM-Docs/requirements/CRM-AGENT-CONTROL-PLANE-REQUIREMENTS.md
-
 设计原则：
 - 全链路 TraceId：串联 Nginx -> App -> AI Service -> Workflow Engine -> Database
 - Decision Audit：记录 AI 为什么建议改数据（Thought + Evidence）

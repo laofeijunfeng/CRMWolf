@@ -1,8 +1,7 @@
 #!/bin/bash
-# scripts/check-doc-location.sh - 检测 CRM-Docs 根目录散落文档
+# CRM-Docs/scripts/check-doc-location.sh - 检测 CRM-Docs 根目录散落文档
 #
-# 用途：确保 CRM-Docs 根目录只有 README.md，其他文档必须在子目录
-# 执行时机：pre-commit hook + CI Pipeline
+# 用途：避免 CRM-Docs 根目录继续产生散落文档。
 #
 # 违规示例：
 #   ❌ CRM-Docs/PHASE-1-SUMMARY.md
@@ -10,9 +9,9 @@
 #   ❌ CRM-Docs/IMPLEMENTATION-PROGRESS.md
 #
 # 正确做法：
-#   ✅ CRM-Docs/README.md（唯一允许）
-#   ✅ CRM-Docs/changelog/technical/2026-06-12-lifecycle.md
-#   ✅ CRM-Docs/plans/xxx-plan.md
+#   - V2 设计规范：CRM-Docs/design-system/
+#   - 服务器部署：CRM-Docs/deployment/
+#   - 脚本说明：CRM-Docs/scripts/README.md
 
 set -e
 
@@ -29,26 +28,22 @@ STRAY_FILES=$(find "$CRM_DOCS_DIR" -maxdepth 1 -name "*.md" ! -name "$ALLOWED_RO
 
 if [ -n "$STRAY_FILES" ]; then
     echo ""
-    echo "❌ 发现根目录散落文档："
+    echo "发现 CRM-Docs 根目录散落文档："
     echo "$STRAY_FILES" | while read -r file; do
         echo "  - $file"
     done
     echo ""
-    echo "📋 根目录唯一允许的 md 文件：README.md（导航入口）"
+    echo "CRM-Docs 根目录只允许保留 README.md。"
     echo ""
-    echo "📂 请将文档移动到正确的子目录："
-    echo "  - 实施进度/阶段总结 → changelog/technical/YYYY-MM-DD-xxx.md"
-    echo "  - 实施计划 → plans/xxx-PLAN.md（完成后 archive/plans/）"
-    echo "  - 需求文档 → requirements/xxx-REQUIREMENTS.md"
-    echo "  - 技术总结 → changelog/technical/YYYY-MM-DD-xxx.md"
+    echo "当前保留的文档入口："
+    echo "  - V2 设计规范：CRM-Docs/design-system/"
+    echo "  - 服务器部署：CRM-Docs/deployment/"
+    echo "  - 脚本说明：CRM-Docs/scripts/README.md"
     echo ""
-    echo "💡 进度跟踪替代方案："
-    echo "  - 使用 TaskCreate/TaskUpdate 工具跟踪进度"
-    echo "  - 使用 Claude Code 内存系统记录临时状态"
-    echo "  - 不要创建 PHASE-X-SUMMARY 等临时文档"
+    echo "临时实施记录、阶段总结、需求草稿不要落到仓库文档目录。"
     echo ""
     exit 1
 fi
 
-echo "✅ 根目录文档结构符合规范（只有 README.md）"
+echo "CRM-Docs 根目录文档结构符合规范。"
 exit 0

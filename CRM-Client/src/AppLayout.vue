@@ -540,7 +540,7 @@ onMounted(async () => {
 /**
  * AppLayout Styles - V2 Design Tokens
  * 规范依据: MASTER.md 二、Design Token 强制规范
- * 导入: variables-v2.scss（禁止使用 variables.scss）
+ * 导入: variables-v2.scss
  */
 @use '@/styles/variables-v2.scss' as *;
 

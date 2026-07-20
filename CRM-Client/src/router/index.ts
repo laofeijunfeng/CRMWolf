@@ -209,7 +209,6 @@ const routes: RouteRecordRaw[] = [
       // 合一指向 ApprovalCenter，business_type 筛选分流。
       //
       // 审批入口优化（2026-07-03）：路由改为 /approvals（不是 /finance/approvals）
-      // 详见：.claude/plans/jolly-frolicking-shell.md
       {
         path: 'approvals',
         name: 'ApprovalCenter',

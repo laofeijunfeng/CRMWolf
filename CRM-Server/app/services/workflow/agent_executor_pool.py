@@ -9,7 +9,7 @@ Phase E 核心功能：
 3. 超时机制：防止死循环或长时间阻塞
 4. 速率限制：防止恶意高频调用
 
-参见: CRM-Docs/requirements/CRM-AGENT-CONTROL-PLANE-REQUIREMENTS.md
+用于 AI Agent 执行资源隔离，避免影响核心 CRM 请求线程。
 """
 
 import asyncio
@@ -24,7 +24,7 @@ from app.core.config import get_settings
 class AgentExecutorPool:
     """Agent 执行线程池
 
-    设计原则（来自 Control Plane Requirements）：
+    设计原则：
     - 资源隔离：Agent 执行线程与核心 CRM 业务线程池隔离
     - 并发限制：防止 Agent 高频调用拖垮整个 CRM 系统
     - 超时保护：防止 Agent 死循环或长时间阻塞

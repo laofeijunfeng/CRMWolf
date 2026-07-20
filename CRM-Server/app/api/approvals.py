@@ -1852,6 +1852,7 @@ def detail_generic_approval(
 **查询参数：**
 - tab: pending / processed / submitted
 - business_type: 可选 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY 维度过滤
+- business_type_exclude: 可选排除业务类型，多个值用英文逗号分隔
 - page / page_size: 分页
 
 **返回字段：**
@@ -1864,6 +1865,7 @@ def detail_generic_approval(
 def list_approvals(
     tab: str = Query("pending", description="过滤维度：pending/processed/submitted"),
     business_type: Optional[str] = Query(None, description="业务类型过滤 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY"),
+    business_type_exclude: Optional[str] = Query(None, description="排除业务类型，多个值用英文逗号分隔"),
     page: int = Query(1, ge=1, description="页码，1-based"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     team_id: int = Depends(get_current_user_team),
@@ -1876,10 +1878,17 @@ def list_approvals(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"非法 tab: {tab}，仅支持 pending / processed / submitted",
         )
-    if business_type is not None and not is_valid_business_type(business_type):
+    business_types = [item.strip() for item in business_type.split(",") if item.strip()] if business_type else []
+    business_types_exclude = [item.strip() for item in business_type_exclude.split(",") if item.strip()] if business_type_exclude else []
+    invalid_business_types = [
+        item for item in [*business_types, *business_types_exclude]
+        if not is_valid_business_type(item)
+    ]
+    if invalid_business_types:
+        invalid_value = invalid_business_types[0]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效的业务单据类型: {business_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
+            detail=f"无效的业务单据类型: {invalid_value}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
         )
 
     # 当前用户在该 team 下的角色 code 集合（pending tab 过滤用）
@@ -1892,7 +1901,8 @@ def list_approvals(
         user_id=current_user.id,
         user_roles=user_roles,
         tab=tab,
-        business_type=business_type,
+        business_types=business_types,
+        business_types_exclude=business_types_exclude,
         page=page,
         page_size=page_size,
     )

@@ -17,7 +17,7 @@
 ## 本地检查
 
 ```bash
-node scripts/check-design-system-docs.js
+node CRM-Docs/scripts/check-design-system-docs.js
 ```
 
 ## 领域索引

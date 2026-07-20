@@ -169,7 +169,8 @@ export type ApprovalListResponse = z.infer<typeof ApprovalListResponseSchema>
 
 export const ApprovalListQuerySchema = z.object({
   tab: ApprovalTabSchema,
-  business_type: EntityTypeSchema.optional(),
+  business_type: z.string().optional(),
+  business_type_exclude: z.string().optional(),
   page: z.number().int().positive().default(1),
   page_size: z.number().int().positive().default(20)
 })

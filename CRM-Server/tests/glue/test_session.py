@@ -1,9 +1,4 @@
-"""Session Manager 单元测试
-
-参见: CRM-Docs/plans/AI-GLUE-IMPLEMENTATION-PLAN.md Phase 6.3
-
-Task 3.2: 更新为 session_id 寻址
-"""
+"""Session Manager 单元测试。"""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock

@@ -47,12 +47,6 @@ vi.mock('@/utils/confirmDialog', () => ({ confirmDelete, confirmDialog }))
 vi.mock('vue-sonner', () => ({ toast }))
 
 vi.mock('@/components/crmwolf', () => ({
-  FilterPanel: defineComponent({
-    name: 'FilterPanel',
-    props: { fields: Array },
-    emits: ['search', 'reset'],
-    setup: () => () => h('div', { 'data-testid': 'filter-panel' }),
-  }),
   DataTable: defineComponent({
     name: 'DataTable',
     props: {

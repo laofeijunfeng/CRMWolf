@@ -13,6 +13,7 @@ CRM-Server/__pycache__/
 CRM-Server/**/__pycache__/
 CRM-Server/*.pyc
 CRM-Server/.pytest_cache/
+/.pytest_cache/
 CRM-Server/.coverage
 CRM-Server/htmlcov/
 CRM-Server/.mypy_cache/
@@ -24,7 +25,8 @@ CRM-Server/.env
 *.env.*.local
 
 # ===== Secrets（敏感信息，绝不提交） =====
-secrets/
+/secrets/
+/CRM-Docs/deployment/secrets/
 *.key
 *.pem
 
@@ -44,15 +46,14 @@ Thumbs.db
 
 # ===== 日志 =====
 *.log
-logs/
+/logs/
+/CRM-Server/logs/*
+!/CRM-Server/logs/.gitkeep
 
 # ===== 临时文件 =====
 *.tmp
 *.temp
 .cache/
-
-# ===== 文档站点 =====
-docs-site/
 
 # ===== 上传文件 =====
 CRM-Server/uploads/**.tar
@@ -62,13 +63,13 @@ CRM-Server/uploads/contracts/
 uploads/*
 !uploads/.gitkeep
 
-# ===== Claude 配置 =====
-# 上传团队共享的规则和技能，不上传用户特定配置
-.claude/settings.local.json
-.claude/memory/
+# ===== 本地工具目录 =====
+.claude/
+/CRM-Client/.agents/
+/CRM-Client/skills-lock.json
 .sdd/
 .superpowers/
+.gstack/
 
 # Docker images
 *.tar
-.gstack/

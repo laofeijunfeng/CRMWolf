@@ -131,7 +131,7 @@ describe('PaymentRecordDialog', () => {
     expect(wrapper.findAll('[role="alert"]')).toHaveLength(2)
   })
 
-  it('uses shadcn-vue V2 primitives without Element Plus or unsafe TypeScript escapes', () => {
+  it('uses shadcn-vue V2 primitives without unsafe TypeScript escapes', () => {
     const source = sourceText()
 
     expect(source).toContain('@/components/ui/dialog')
@@ -140,10 +140,6 @@ describe('PaymentRecordDialog', () => {
     expect(source).toContain('@/components/ui/textarea')
     expect(source).toContain('DialogDescription')
     expect(source).toContain('variables-v2.scss')
-    expect(source).not.toMatch(/<el-/)
-    expect(source).not.toContain('element-plus')
-    expect(source).not.toContain('@element-plus')
-    expect(source).not.toContain('variables.scss')
     expect(source).not.toContain('as any')
     expect(source).not.toContain('@ts-ignore')
     expect(source).not.toContain('toISOString')

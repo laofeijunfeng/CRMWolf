@@ -1,7 +1,4 @@
-"""CorrectionResolver 单元测试
-
-参见: CRM-Docs/plans/AI-GLUE-IMPLEMENTATION-PLAN.md Phase 6.3
-"""
+"""CorrectionResolver 单元测试。"""
 
 import pytest
 
