@@ -304,84 +304,72 @@
         <!-- Content -->
         <ScrollArea class="flex-1">
           <div class="p-6 space-y-6 min-h-[400px]">
-            <!-- 基本信息卡（来自列表行数据，无需额外请求） -->
+            <!-- 申请主体信息：优先展示审批关联业务内容 -->
             <Card v-if="selectedApproval" class="info-card">
               <CardContent class="p-0">
                 <div class="p-4 border-b border-wolf-border-light-v2">
-                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">基本信息</h3>
+                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">{{ approvalSubjectTitle }}</h3>
                 </div>
                 <div class="p-4">
                   <div class="attributes-grid">
-                    <div class="attribute-item">
-                      <div class="attribute-label">单号</div>
-                      <div
-                        class="attribute-value font-mono text-wolf-primary-v2 cursor-pointer hover:underline"
-                        @click="copyNumber(selectedApproval.application_number)"
+                    <div
+                      v-for="field in approvalSubjectFields"
+                      :key="field.key"
+                      :class="cn('attribute-item', field.wide && 'attribute-item-wide')"
+                    >
+                      <div class="attribute-label">{{ field.label }}</div>
+                      <button
+                        v-if="field.type === 'copy'"
+                        type="button"
+                        class="attribute-value attribute-value-link font-mono text-left"
+                        @click="copyNumber(displayFieldValue(field.value))"
                       >
-                        {{ selectedApproval.application_number }}
+                        {{ displayFieldValue(field.value) }}
+                      </button>
+                      <div v-else-if="field.type === 'amount'" class="attribute-value">
+                        <AmountText :value="typeof field.value === 'number' ? field.value : null" tone="warning" />
                       </div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">单据类型</div>
-                      <div class="attribute-value">{{ businessTypeLabel(selectedApproval.business_type) }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">客户/实体</div>
-                      <div class="attribute-value">{{ selectedApproval.entity_name || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">金额</div>
-                      <div class="attribute-value">
-                        <AmountText :value="selectedApproval.entity_amount" tone="warning" />
+                      <div v-else-if="field.type === 'status'" class="attribute-value">
+                        <Badge variant="outline">{{ displayFieldValue(field.value) }}</Badge>
                       </div>
-                    </div>
-                    <div v-if="selectedApproval.business_type === 'PAYMENT'" class="attribute-item">
-                      <div class="attribute-label">实际付款方</div>
-                      <div class="attribute-value">{{ selectedApproval.actual_payer_name || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">提交人</div>
-                      <div class="attribute-value">{{ selectedApproval.submitter_name }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">提交时间</div>
-                      <div class="attribute-value font-mono text-sm">{{ formatDateRelative(selectedApproval.created_time) }}</div>
+                      <div v-else-if="field.type === 'mono'" class="attribute-value font-mono text-sm">{{ displayFieldValue(field.value) }}</div>
+                      <div v-else class="attribute-value">{{ displayFieldValue(field.value) }}</div>
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            <Card v-if="selectedApproval?.customer_info" class="info-card">
+            <Card v-if="approvalCustomerInfo" class="info-card">
               <CardContent class="p-0">
                 <div class="p-4 border-b border-wolf-border-light-v2">
-                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">公司信息</h3>
+                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">关联客户</h3>
                 </div>
                 <div class="p-4">
                   <div class="attributes-grid">
                     <div class="attribute-item">
                       <div class="attribute-label">客户名称</div>
-                      <div class="attribute-value">{{ selectedApproval.customer_info.account_name }}</div>
+                      <div class="attribute-value">{{ approvalCustomerInfo.account_name }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">所在城市</div>
-                      <div class="attribute-value">{{ selectedApproval.customer_info.city || '-' }}</div>
+                      <div class="attribute-value">{{ approvalCustomerInfo.city || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">所属行业</div>
-                      <div class="attribute-value">{{ selectedApproval.customer_info.industry || '-' }}</div>
+                      <div class="attribute-value">{{ approvalCustomerInfo.industry || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">公司规模</div>
-                      <div class="attribute-value">{{ selectedApproval.customer_info.company_scale || '-' }}</div>
+                      <div class="attribute-value">{{ approvalCustomerInfo.company_scale || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">客户来源</div>
-                      <div class="attribute-value">{{ selectedApproval.customer_info.source || '-' }}</div>
+                      <div class="attribute-value">{{ approvalCustomerInfo.source || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">客户状态</div>
-                      <div class="attribute-value">{{ customerStatusLabel(selectedApproval.customer_info.status) }}</div>
+                      <div class="attribute-value">{{ customerStatusLabel(approvalCustomerInfo.status) }}</div>
                     </div>
                   </div>
                 </div>
@@ -512,11 +500,18 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { formatDateRelative } from '@/utils/format'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
 import contractApi from '@/api/contract'
-import type { EntityType, ApprovalListItem } from '@/schemas/approvalGeneric'
+import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem } from '@/schemas/approvalGeneric'
 import type { ContractResponse } from '@/api/contract'
 
 type Tab = 'pending' | 'processed' | 'submitted'
 type LoadError = null | 'error' | 'forbidden'
+interface ApprovalSubjectField {
+  key: string
+  label: string
+  value: string | number | null | undefined
+  type?: 'text' | 'copy' | 'amount' | 'status' | 'mono'
+  wide?: boolean
+}
 
 // ==================== Stores ====================
 usePageTitle()
@@ -566,13 +561,281 @@ const quickRejectReason = ref<string>('')
 const quickRejectRow = ref<ApprovalListItem | null>(null)
 
 // ==================== 计算属性 ====================
+const activeApprovalDetail = computed<ApprovalDetail | null>(() => {
+  const selected = selectedApproval.value
+  const detail = currentApprovalDetail.value
+  if (!selected || !detail) return null
+  return detail.business_type === selected.business_type && detail.business_id === selected.business_id
+    ? detail
+    : null
+})
+
 const showInvoiceUploadFooter = computed<boolean>(() =>
   selectedApproval.value?.business_type === 'INVOICE' &&
-  currentApprovalDetail.value?.business_type === 'INVOICE' &&
-  currentApprovalDetail.value.status === 'APPROVED' &&
-  (currentApprovalDetail.value.invoice_file_path == null || currentApprovalDetail.value.invoice_file_path.length === 0) &&
+  activeApprovalDetail.value?.business_type === 'INVOICE' &&
+  activeApprovalDetail.value.status === 'APPROVED' &&
+  (activeApprovalDetail.value.invoice_file_path == null || activeApprovalDetail.value.invoice_file_path.length === 0) &&
   permissionStore.hasPermission('invoice:mark_issued')
 )
+
+const subjectNumber = computed<string>(() =>
+  activeApprovalDetail.value?.application_number ?? selectedApproval.value?.application_number ?? '-'
+)
+
+const subjectName = computed<string | null | undefined>(() =>
+  activeApprovalDetail.value?.entity_name ?? selectedApproval.value?.entity_name
+)
+
+const subjectAmount = computed<number | null | undefined>(() =>
+  activeApprovalDetail.value?.entity_amount ?? selectedApproval.value?.entity_amount
+)
+
+const subjectActualPayerName = computed<string | null | undefined>(() =>
+  activeApprovalDetail.value?.actual_payer_name ?? selectedApproval.value?.actual_payer_name
+)
+
+const approvalCustomerInfo = computed<ApprovalCustomerInfo | null>(() =>
+  activeApprovalDetail.value?.customer_info ?? selectedApproval.value?.customer_info ?? null
+)
+
+const approvalSubjectTitle = computed<string>(() => {
+  const type = selectedApproval.value?.business_type
+  const map: Partial<Record<EntityType, string>> = {
+    CONTRACT: '合同信息',
+    PAYMENT: '回款信息',
+    INVOICE: '发票申请信息',
+    LICENSE: 'License 申请信息',
+    OPPORTUNITY: '商机信息'
+  }
+  return type ? map[type] ?? '申请信息' : '申请信息'
+})
+
+const licenseStatusLabel = (status?: string | null): string => {
+  const map: Record<string, string> = {
+    DRAFT: '草稿',
+    PENDING_REVIEW: '审批中',
+    APPROVED: '已通过',
+    REJECTED: '已驳回',
+    ISSUED: '已签发'
+  }
+  return status == null ? '-' : (map[status] ?? status)
+}
+
+const licenseTypeLabel = (type?: string | null): string => {
+  const map: Record<string, string> = {
+    TRIAL: '试用版',
+    OFFICIAL: '正式版',
+    SUBSCRIPTION: '订阅',
+    PERPETUAL: '买断'
+  }
+  return type == null ? '-' : (map[type] ?? type)
+}
+
+const purchaseTypeLabel = (type?: string | null): string => {
+  const map: Record<string, string> = {
+    NEW: '新购',
+    RENEWAL: '续购',
+    EXPANSION: '增购'
+  }
+  return type == null ? '-' : (map[type] ?? type)
+}
+
+const paymentConfirmStatusLabel = (status?: string | null): string => {
+  const map: Record<string, string> = {
+    DRAFT: '草稿',
+    PENDING: '待确认',
+    CONFIRMED: '已确认',
+    DISPUTED: '有争议'
+  }
+  return status == null ? '-' : (map[status] ?? status)
+}
+
+const paymentStatusLabel = (status?: string | null): string => {
+  const map: Record<string, string> = {
+    UNPAID: '未回款',
+    PARTIAL: '部分回款',
+    COMPLETED: '已完成',
+    OVERDUE: '已逾期'
+  }
+  return status == null ? '-' : (map[status] ?? status)
+}
+
+const contractStatusLabel = (status?: string | null): string => {
+  const map: Record<string, string> = {
+    DRAFT: '草稿',
+    PENDING_REVIEW: '审批中',
+    SIGNED: '已签署',
+    EFFECTIVE: '已生效',
+    EXPIRED: '已到期',
+    TERMINATED: '已终止'
+  }
+  return status == null ? '-' : (map[status] ?? status)
+}
+
+const invoiceStatusLabel = (status?: string | null): string => {
+  const map: Record<string, string> = {
+    DRAFT: '草稿',
+    PENDING_REVIEW: '审批中',
+    APPROVED: '已通过',
+    REJECTED: '已驳回',
+    ISSUED: '已开票'
+  }
+  return status == null ? '-' : (map[status] ?? status)
+}
+
+const invoiceTypeLabel = (type?: string | null): string => {
+  const map: Record<string, string> = {
+    VAT_SPECIAL: '增值税专用发票',
+    VAT_NORMAL: '普通发票'
+  }
+  return type == null ? '-' : (map[type] ?? type)
+}
+
+const opportunityStatusLabel = (status?: number | string | null): string => {
+  const map: Record<string, string> = {
+    '0': '跟进中',
+    '1': '已赢单',
+    '2': '已输单'
+  }
+  return status == null ? '-' : (map[String(status)] ?? String(status))
+}
+
+const entityDetailValue = (key: string): string | number | null | undefined => {
+  const detail = activeApprovalDetail.value?.entity_detail
+  const value = detail?.[key]
+  if (typeof value === 'string' || typeof value === 'number') return value
+  if (value == null) return null
+  return String(value)
+}
+
+const formatDateValue = (value: string | number | null | undefined): string | null => {
+  if (value == null || value === '') return null
+  return String(value).split('T')[0] ?? String(value)
+}
+
+const displayFieldValue = (value: string | number | null | undefined): string => {
+  if (value == null || value === '') return '-'
+  return String(value)
+}
+
+const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
+  const selected = selectedApproval.value
+  if (!selected) return []
+
+  const commonCustomerField: ApprovalSubjectField = {
+    key: 'customer_name',
+    label: '关联客户',
+    value: approvalCustomerInfo.value?.account_name
+  }
+
+  switch (selected.business_type) {
+    case 'CONTRACT':
+      return [
+        { key: 'number', label: '合同编号', value: entityDetailValue('contract_number') ?? subjectNumber.value, type: 'copy' },
+        { key: 'name', label: '合同名称', value: entityDetailValue('contract_name') ?? subjectName.value, wide: true },
+        commonCustomerField,
+        { key: 'opportunity', label: '关联商机', value: entityDetailValue('opportunity_name') },
+        { key: 'amount', label: '合同金额', value: entityDetailValue('total_amount') ?? subjectAmount.value, type: 'amount' },
+        { key: 'user_count', label: '用户数', value: entityDetailValue('user_count') },
+        { key: 'license_type', label: '授权模式', value: licenseTypeLabel(entityDetailValue('license_type')?.toString()) },
+        { key: 'subscription_years', label: '订阅年限', value: entityDetailValue('subscription_years') },
+        { key: 'unit_price', label: '标准单价', value: entityDetailValue('standard_unit_price'), type: 'amount' },
+        { key: 'status', label: '合同状态', value: contractStatusLabel(entityDetailValue('status')?.toString()), type: 'status' },
+        { key: 'payment_status', label: '回款状态', value: paymentStatusLabel(entityDetailValue('payment_status')?.toString()), type: 'status' },
+        { key: 'signing_date', label: '签署日期', value: formatDateValue(entityDetailValue('signing_date')) },
+        { key: 'effective_date', label: '生效日期', value: formatDateValue(entityDetailValue('effective_date')) },
+        { key: 'expiry_date', label: '到期日期', value: formatDateValue(entityDetailValue('expiry_date')) },
+        { key: 'signing_contact', label: '签约人', value: entityDetailValue('signing_contact_name') },
+        { key: 'contract_file', label: '合同文件', value: activeApprovalDetail.value?.contract_file_name ?? entityDetailValue('contract_file_name'), wide: true }
+      ]
+    case 'INVOICE':
+      return [
+        { key: 'number', label: '申请编号', value: entityDetailValue('application_number') ?? subjectNumber.value, type: 'copy' },
+        { key: 'title', label: '发票抬头', value: entityDetailValue('invoice_title_text') ?? subjectName.value, wide: true },
+        commonCustomerField,
+        { key: 'amount', label: '开票金额', value: entityDetailValue('invoice_amount') ?? subjectAmount.value, type: 'amount' },
+        { key: 'invoice_type', label: '发票类型', value: invoiceTypeLabel(entityDetailValue('invoice_type')?.toString()) },
+        { key: 'status', label: '发票状态', value: invoiceStatusLabel(entityDetailValue('status')?.toString()), type: 'status' },
+        { key: 'taxpayer_id', label: '纳税人识别号', value: entityDetailValue('invoice_taxpayer_id'), type: 'mono', wide: true },
+        { key: 'bank', label: '开户行', value: entityDetailValue('invoice_bank_name') },
+        { key: 'bank_account', label: '银行账号', value: entityDetailValue('invoice_bank_account'), type: 'mono' },
+        { key: 'invoice_address', label: '地址', value: entityDetailValue('invoice_address'), wide: true },
+        { key: 'invoice_phone', label: '电话', value: entityDetailValue('invoice_phone') },
+        { key: 'contract', label: '关联合同', value: entityDetailValue('contract_name') },
+        { key: 'payment_plan', label: '回款阶段', value: entityDetailValue('payment_plan_stage_name') },
+        { key: 'invoice_number', label: '发票号码', value: activeApprovalDetail.value?.invoice_number ?? entityDetailValue('invoice_number') },
+        {
+          key: 'invoice_file',
+          label: '发票文件',
+          value: activeApprovalDetail.value?.invoice_file_path != null && activeApprovalDetail.value.invoice_file_path.length > 0
+            ? '已上传'
+            : null
+        }
+      ]
+    case 'PAYMENT':
+      return [
+        { key: 'number', label: '回款编号', value: entityDetailValue('record_number') ?? subjectNumber.value, type: 'copy' },
+        { key: 'amount', label: '回款金额', value: entityDetailValue('actual_amount') ?? subjectAmount.value, type: 'amount' },
+        { key: 'payer', label: '实际付款方', value: entityDetailValue('actual_payer_name') ?? subjectActualPayerName.value },
+        { key: 'payment_date', label: '回款日期', value: formatDateValue(entityDetailValue('payment_date')) },
+        { key: 'confirm_status', label: '确认状态', value: paymentConfirmStatusLabel(entityDetailValue('confirmation_status')?.toString()), type: 'status' },
+        commonCustomerField,
+        { key: 'contract', label: '关联合同', value: entityDetailValue('contract_name') ?? subjectName.value, wide: true },
+        { key: 'contract_number', label: '合同编号', value: entityDetailValue('contract_number'), type: 'copy' },
+        { key: 'opportunity', label: '关联商机', value: entityDetailValue('opportunity_name') },
+        { key: 'plan_number', label: '计划编号', value: entityDetailValue('plan_number'), type: 'copy' },
+        { key: 'stage_name', label: '回款阶段', value: entityDetailValue('stage_name') },
+        { key: 'planned_amount', label: '计划金额', value: entityDetailValue('planned_amount'), type: 'amount' },
+        { key: 'due_date', label: '计划日期', value: formatDateValue(entityDetailValue('due_date')) },
+        { key: 'proof', label: '回款凭证', value: entityDetailValue('proof_attachment'), wide: true },
+        { key: 'notes', label: '备注', value: entityDetailValue('notes'), wide: true }
+      ]
+    case 'LICENSE':
+      return [
+        { key: 'number', label: '申请编号', value: entityDetailValue('application_number') ?? subjectNumber.value, type: 'copy' },
+        { key: 'type', label: 'License 类型', value: licenseTypeLabel(entityDetailValue('license_type')?.toString() ?? subjectName.value?.toString()) },
+        {
+          key: 'license_status',
+          label: '签发状态',
+          value: licenseStatusLabel(activeApprovalDetail.value?.license_status ?? selected.license_status),
+          type: 'status'
+        },
+        commonCustomerField,
+        { key: 'deployment_name', label: '部署名称', value: entityDetailValue('deployment_name') },
+        { key: 'server_address', label: '服务器地址', value: entityDetailValue('server_address'), type: 'mono', wide: true },
+        { key: 'authorized_users', label: '授权人数', value: entityDetailValue('authorized_users') },
+        { key: 'expiry_date', label: '到期时间', value: formatDateValue(entityDetailValue('expiry_date')) },
+        { key: 'contract', label: '关联合同', value: entityDetailValue('contract_name'), wide: true },
+        { key: 'remark', label: '申请备注', value: entityDetailValue('remark'), wide: true },
+        { key: 'enterprise_id', label: '企业编号', value: entityDetailValue('enterprise_id'), type: 'mono' },
+        { key: 'supported_modules', label: '支持模块', value: entityDetailValue('supported_modules'), wide: true }
+      ]
+    case 'OPPORTUNITY':
+      return [
+        { key: 'number', label: '商机编号', value: subjectNumber.value, type: 'copy' },
+        { key: 'name', label: '商机名称', value: entityDetailValue('opportunity_name') ?? subjectName.value, wide: true },
+        commonCustomerField,
+        { key: 'amount', label: '预计金额', value: entityDetailValue('total_amount') ?? subjectAmount.value, type: 'amount' },
+        { key: 'user_count', label: '用户数', value: entityDetailValue('user_count') },
+        { key: 'unit_price', label: '标准单价', value: entityDetailValue('unit_price'), type: 'amount' },
+        { key: 'license_type', label: '授权模式', value: licenseTypeLabel(entityDetailValue('license_type')?.toString()) },
+        { key: 'subscription_years', label: '订阅年限', value: entityDetailValue('subscription_years') },
+        { key: 'purchase_type', label: '采购类型', value: purchaseTypeLabel(entityDetailValue('purchase_type')?.toString()) },
+        { key: 'decision_maker_count', label: '决策人数', value: entityDetailValue('decision_maker_count') },
+        { key: 'expected_closing_date', label: '预计成交', value: formatDateValue(entityDetailValue('expected_closing_date')) },
+        { key: 'stage', label: '当前阶段', value: entityDetailValue('current_stage_name') },
+        { key: 'win_probability', label: '赢率', value: entityDetailValue('win_probability') != null ? `${entityDetailValue('win_probability')}%` : null },
+        { key: 'status', label: '商机状态', value: opportunityStatusLabel(entityDetailValue('status')) }
+      ]
+    default:
+      return [
+        { key: 'number', label: '单号', value: subjectNumber.value, type: 'copy' },
+        { key: 'name', label: '申请内容', value: subjectName.value },
+        { key: 'amount', label: '金额', value: subjectAmount.value, type: 'amount' },
+        commonCustomerField
+      ]
+  }
+})
 
 // ==================== ContextTabs 配置 ====================
 const tabs = computed(() => {
@@ -825,6 +1088,7 @@ const onSheetClosed = (): void => {
     target.focus()
   }
   selectedApproval.value = null
+  store.clearDetail()
   markIssuedDialogVisible.value = false
   triggerRowIndex.value = -1
 }
@@ -1124,6 +1388,14 @@ watch(rows, async () => {
   gap: $wolf-space-xs-v2;
 }
 
+.attribute-item-wide {
+  grid-column: span 2;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    grid-column: span 1;
+  }
+}
+
 .attribute-label {
   font-size: $wolf-font-size-caption-v2;
   color: $wolf-text-tertiary-v2;
@@ -1135,5 +1407,17 @@ watch(rows, async () => {
   color: $wolf-text-secondary-v2;
   font-weight: $wolf-font-weight-medium-v2;
   word-break: break-all;
+}
+
+.attribute-value-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: $wolf-primary-v2;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 </style>

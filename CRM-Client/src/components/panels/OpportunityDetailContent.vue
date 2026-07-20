@@ -178,6 +178,11 @@ function handleWinSuccess(): void {
   emit('refresh')
 }
 
+function handleStageAdvanced(): void {
+  fetchOpportunityDetail()
+  emit('refresh')
+}
+
 // 输单成功回调
 function handleLoseSuccess(): void {
   loseDialogOpen.value = false
@@ -514,6 +519,7 @@ watch(() => props.opportunityId, () => {
           <OpportunityStageStepper
             v-if="isApprovalApproved"
             :opportunity-id="opportunity.id"
+            @advanced="handleStageAdvanced"
           />
 
           <Card class="approval-card">

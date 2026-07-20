@@ -79,6 +79,10 @@ export const ApprovalDetailSchema = z.object({
   updated_time: z.string().min(1),
   flow_is_active: z.boolean().nullable(),
   flow_disabled_warning: z.string().nullable(),
+  application_number: z.string().min(1).optional(),
+  entity_name: z.string().nullable().optional(),
+  entity_amount: z.number().nullable().optional(),
+  actual_payer_name: z.string().nullable().optional(),
   customer_info: ApprovalCustomerInfoSchema.nullable().optional(),
   records: z.array(ApprovalRecordSchema),
   // 合同附件字段（仅 CONTRACT 类型）
@@ -91,7 +95,8 @@ export const ApprovalDetailSchema = z.object({
   invoice_number: z.string().nullable().optional(),
   issued_time: z.string().nullable().optional(),
   // License 发放状态字段（仅 LICENSE 类型）
-  license_status: LicenseApplicationStatusSchema.nullable().optional()
+  license_status: LicenseApplicationStatusSchema.nullable().optional(),
+  entity_detail: z.record(z.string(), z.unknown()).optional()
 })
 
 export type ApprovalDetail = z.infer<typeof ApprovalDetailSchema>

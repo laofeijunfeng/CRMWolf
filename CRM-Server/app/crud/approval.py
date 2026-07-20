@@ -1168,6 +1168,9 @@ class ApprovalCRUD:
                     "entity_name": inv.invoice_title_text,
                     "entity_amount": float(inv.invoice_amount) if inv.invoice_amount is not None else None,
                     "customer_info": customers_by_id.get(inv.customer_id),
+                    "invoice_file_path": inv.invoice_file_path,
+                    "invoice_number": inv.invoice_number,
+                    "issued_time": inv.issued_time,
                 }
 
         # PAYMENT（通过 payment_plan_id 批量关联获取合同名称和客户信息）

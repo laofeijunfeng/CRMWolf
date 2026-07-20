@@ -36,6 +36,9 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const emit = defineEmits<{
+  advanced: []
+}>()
 
 const loading = ref(false)
 const allStages = ref<OpportunityProcurementStageInfo[]>([])
@@ -48,11 +51,11 @@ const currentStep = computed(() => {
 })
 
 // 获取采购阶段数据
-const fetchStages = async () => {
+const fetchStages = async (): Promise<void> => {
   loading.value = true
   try {
     const data = await procurementApi.getOpportunityProcurementStages(props.opportunityId)
-    allStages.value = data || []
+    allStages.value = data
   } catch (error) {
     handleApiError(error, '获取采购阶段')
   } finally {
@@ -61,7 +64,7 @@ const fetchStages = async () => {
 }
 
 // 点击阶段推进
-const handleStageClick = async (stage: OpportunityProcurementStageInfo, index: number) => {
+const handleStageClick = async (stage: OpportunityProcurementStageInfo, index: number): Promise<void> => {
   if (loading.value) return
 
   const current = allStages.value.find(s => s.is_current)
@@ -85,6 +88,7 @@ const handleStageClick = async (stage: OpportunityProcurementStageInfo, index: n
     })
     toast.success(`阶段已推进至「${stage.stage_name}」`)
     await fetchStages()
+    emit('advanced')
   } catch (error) {
     handleApiError(error, '推进阶段')
   } finally {

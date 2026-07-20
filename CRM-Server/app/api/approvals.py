@@ -1248,6 +1248,7 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
     if approval.business_id:
         summaries = approval_crud._batch_entity_summaries(db, [approval], approval.team_id)
         summary = summaries.get((approval.business_type, approval.business_id))
+    entity_detail = _build_approval_entity_detail(approval, db)
 
     return {
         "id": approval.id,
@@ -1265,14 +1266,187 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
         "updated_time": approval.updated_time,
         "flow_is_active": flow_is_active,
         "flow_disabled_warning": flow_disabled_warning,
+        "application_number": summary.get("application_number") if summary else f"{approval.business_type}-{approval.business_id}",
+        "entity_name": summary.get("entity_name") if summary else None,
+        "entity_amount": summary.get("entity_amount") if summary else None,
+        "actual_payer_name": summary.get("actual_payer_name") if summary else None,
         "customer_info": summary.get("customer_info") if summary else None,
         "contract_file_path": summary.get("contract_file_path") if summary else None,
         "contract_file_name": summary.get("contract_file_name") if summary else None,
         "contract_file_size": summary.get("contract_file_size") if summary else None,
         "contract_file_mime_type": summary.get("contract_file_mime_type") if summary else None,
+        "invoice_file_path": summary.get("invoice_file_path") if summary else None,
+        "invoice_number": summary.get("invoice_number") if summary else None,
+        "issued_time": summary.get("issued_time") if summary else None,
         "license_status": summary.get("license_status") if summary else None,
+        "entity_detail": entity_detail,
         "records": record_list,
     }
+
+
+def _build_approval_entity_detail(approval: Approval, db: Session) -> dict:
+    """Build business-facing detail for approval readers.
+
+    The approval center should present the actual business object under review,
+    not only approval-instance metadata. Keep this payload generic so the
+    frontend can render type-specific fields without extra round trips.
+    """
+    from app.models.contract import Contract
+    from app.models.customer import Contact
+    from app.models.deployment import DeploymentInfo
+    from app.models.invoice import InvoiceApplication
+    from app.models.license_application import LicenseApplication
+    from app.models.opportunity import Opportunity
+    from app.models.payment import PaymentPlan, PaymentRecord
+
+    def money(value):
+        return float(value) if value is not None else None
+
+    team_id = approval.team_id
+    business_id = approval.business_id
+
+    if approval.business_type == BusinessType.CONTRACT:
+        contract = db.query(Contract).filter(
+            Contract.id == business_id,
+            Contract.team_id == team_id,
+        ).first()
+        if not contract:
+            return {}
+        contact = None
+        if contract.signing_contact_id:
+            contact = db.query(Contact).filter(Contact.id == contract.signing_contact_id).first()
+        return {
+            "contract_number": contract.contract_number,
+            "contract_name": contract.contract_name,
+            "user_count": contract.user_count,
+            "total_amount": money(contract.total_amount),
+            "license_type": contract.license_type,
+            "subscription_years": contract.subscription_years,
+            "standard_unit_price": money(contract.standard_unit_price),
+            "signing_date": contract.signing_date,
+            "effective_date": contract.effective_date,
+            "expiry_date": contract.expiry_date,
+            "status": contract.status,
+            "payment_status": contract.payment_status,
+            "opportunity_name": contract.opportunity.opportunity_name if contract.opportunity else None,
+            "signing_contact_name": contact.name if contact else None,
+            "signing_contact_mobile": contact.mobile if contact else None,
+            "contract_file_name": contract.contract_file_name,
+            "contract_file_path": contract.contract_file_path,
+        }
+
+    if approval.business_type == BusinessType.PAYMENT:
+        record = db.query(PaymentRecord).filter(
+            PaymentRecord.id == business_id,
+            PaymentRecord.team_id == team_id,
+        ).first()
+        if not record:
+            return {}
+        plan = db.query(PaymentPlan).filter(
+            PaymentPlan.id == record.payment_plan_id,
+            PaymentPlan.team_id == team_id,
+        ).first()
+        contract = plan.contract if plan else None
+        opportunity = contract.opportunity if contract else None
+        return {
+            "record_number": record.record_number,
+            "actual_amount": money(record.actual_amount),
+            "actual_payer_name": record.actual_payer_name,
+            "payment_date": record.payment_date,
+            "confirmation_status": record.confirmation_status,
+            "confirmed_by_name": record.confirmed_by_name,
+            "confirmed_time": record.confirmed_time,
+            "confirmation_notes": record.confirmation_notes,
+            "proof_attachment": record.proof_attachment,
+            "notes": record.notes,
+            "plan_number": plan.plan_number if plan else None,
+            "stage_name": plan.stage_name if plan else None,
+            "planned_amount": money(plan.planned_amount) if plan else None,
+            "due_date": plan.due_date if plan else None,
+            "contract_name": contract.contract_name if contract else None,
+            "contract_number": contract.contract_number if contract else None,
+            "opportunity_name": opportunity.opportunity_name if opportunity else None,
+        }
+
+    if approval.business_type == BusinessType.INVOICE:
+        invoice = db.query(InvoiceApplication).filter(
+            InvoiceApplication.id == business_id,
+            InvoiceApplication.team_id == team_id,
+        ).first()
+        if not invoice:
+            return {}
+        contract = invoice.contract
+        opportunity = invoice.opportunity
+        plan = invoice.payment_plan
+        return {
+            "application_number": invoice.application_number,
+            "invoice_title_text": invoice.invoice_title_text,
+            "invoice_type": invoice.invoice_type,
+            "invoice_amount": money(invoice.invoice_amount),
+            "invoice_taxpayer_id": invoice.invoice_taxpayer_id,
+            "invoice_bank_name": invoice.invoice_bank_name,
+            "invoice_bank_account": invoice.invoice_bank_account,
+            "invoice_address": invoice.invoice_address,
+            "invoice_phone": invoice.invoice_phone,
+            "status": invoice.status,
+            "invoice_number": invoice.invoice_number,
+            "issued_time": invoice.issued_time,
+            "contract_name": contract.contract_name if contract else None,
+            "opportunity_name": opportunity.opportunity_name if opportunity else None,
+            "payment_plan_stage_name": plan.stage_name if plan else None,
+        }
+
+    if approval.business_type == BusinessType.LICENSE:
+        license_application = db.query(LicenseApplication).filter(
+            LicenseApplication.id == business_id,
+            LicenseApplication.team_id == team_id,
+        ).first()
+        if not license_application:
+            return {}
+        deployment = db.query(DeploymentInfo).filter(
+            DeploymentInfo.id == license_application.deployment_info_id,
+            DeploymentInfo.team_id == team_id,
+        ).first() if license_application.deployment_info_id else None
+        return {
+            "application_number": license_application.application_number,
+            "license_type": license_application.license_type,
+            "expiry_date": license_application.expiry_date,
+            "status": license_application.status,
+            "deployment_name": deployment.deployment_name if deployment else None,
+            "server_address": deployment.server_address if deployment else None,
+            "authorized_users": deployment.authorized_users if deployment else None,
+            "contract_name": license_application.contract.contract_name if license_application.contract else None,
+            "remark": license_application.remark,
+            "enterprise_id": license_application.enterprise_id,
+            "supported_modules": license_application.supported_modules,
+            "server_license_code": license_application.server_license_code,
+            "client_license_code": license_application.client_license_code,
+        }
+
+    if approval.business_type == BusinessType.OPPORTUNITY:
+        opportunity = db.query(Opportunity).filter(
+            Opportunity.id == business_id,
+            Opportunity.team_id == team_id,
+        ).first()
+        if not opportunity:
+            return {}
+        return {
+            "opportunity_name": opportunity.opportunity_name,
+            "total_amount": money(opportunity.total_amount),
+            "user_count": opportunity.user_count,
+            "unit_price": money(opportunity.unit_price),
+            "license_type": opportunity.license_type,
+            "subscription_years": opportunity.subscription_years,
+            "purchase_type": opportunity.purchase_type,
+            "decision_maker_count": opportunity.decision_maker_count,
+            "expected_closing_date": opportunity.expected_closing_date,
+            "current_stage_name": opportunity.current_stage_name,
+            "win_probability": opportunity.win_probability,
+            "status": opportunity.status,
+            "owner_id": opportunity.owner_id,
+        }
+
+    return {}
 
 
 def _validate_entity_type(entity_type: str) -> None:

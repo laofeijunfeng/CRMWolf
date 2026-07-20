@@ -195,6 +195,18 @@ const setLockedCustomerOption = (): void => {
   customers.value = [lockedCustomer]
 }
 
+const selectedCustomerName = computed<string>(() => {
+  if (props.customerLocked) {
+    return getLockedCustomerOption()?.account_name ?? ''
+  }
+
+  const customerId = Number(values.customer_id)
+  const selectedCustomer = customers.value.find((customer) => customer.id === customerId)
+  if (selectedCustomer !== undefined) return selectedCustomer.account_name
+
+  return ''
+})
+
 // Fetch procurement methods
 async function fetchProcurementMethods(): Promise<void> {
   loadingMethods.value = true
@@ -411,19 +423,27 @@ function continueEditing(): void {
         <FormField v-slot="{ value, handleChange }" name="customer_id">
           <FormItem>
             <FormLabel>所属客户 <span class="text-destructive">*</span></FormLabel>
+            <FormControl v-if="customerLocked === true">
+              <Input
+                :model-value="selectedCustomerName"
+                readonly
+                class="h-11 sm:h-8 bg-wolf-bg-muted-v2 text-wolf-text-primary-v2"
+                aria-readonly="true"
+              />
+            </FormControl>
             <Select
+              v-else
               :model-value="value"
-              :disabled="customerLocked === true"
               @update:model-value="handleChange"
-              @update:open="(open: boolean) => { if (open && !customerLocked) fetchCustomers(customerSearchKeyword) }"
+              @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
             >
               <FormControl>
                 <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue :placeholder="customerLocked ? '' : '请选择客户'" />
+                  <SelectValue placeholder="请选择客户" />
                 </SelectTrigger>
               </FormControl>
               <SelectContent>
-                <div v-if="!customerLocked" class="p-2 border-b">
+                <div class="p-2 border-b">
                   <Input
                     :model-value="customerSearchKeyword"
                     placeholder="搜索客户名称"
