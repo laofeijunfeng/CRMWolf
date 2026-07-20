@@ -20,7 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
-import { ContextTabs } from '@/components/crmwolf'
+import { ContextTabs, HoverInfo } from '@/components/crmwolf'
 import {
   Accordion,
   AccordionItem,
@@ -141,13 +141,19 @@ interface CustomerBriefCitation {
 
 type CustomerBriefCitationMap = Record<string, CustomerBriefCitation>
 
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+interface CustomerBriefInlineNode {
+  type: 'text' | 'strong' | 'citation'
+  text: string
+  citationKey?: string
+  citation?: CustomerBriefCitation
+  sourceLabel?: string
+}
+
+interface CustomerBriefBlock {
+  type: 'h2' | 'h3' | 'p' | 'ul' | 'ol'
+  nodes?: CustomerBriefInlineNode[]
+  items?: CustomerBriefInlineNode[][]
+}
 
 const getCitationSourceLabel = (sourceType: string | undefined): string => {
   const labels: Record<string, string> = {
@@ -163,48 +169,57 @@ const getCitationSourceLabel = (sourceType: string | undefined): string => {
   return sourceType !== undefined && sourceType !== '' ? labels[sourceType] ?? sourceType : '来源'
 }
 
-const buildCitationTooltip = (citation: CustomerBriefCitation): string => {
-  const trimmedTitle = citation.title?.trim()
-  const title = trimmedTitle !== undefined && trimmedTitle !== ''
-    ? trimmedTitle
-    : getCitationSourceLabel(citation.source_type)
-  const excerpt = citation.excerpt?.trim()
-  if (excerpt === undefined || excerpt === '') return title
-  return `${title}\n${excerpt}`
-}
+const parseInlineMarkdown = (value: string, citationMap: CustomerBriefCitationMap): CustomerBriefInlineNode[] => {
+  const nodes: CustomerBriefInlineNode[] = []
+  const pattern = /(\*\*([^*]+)\*\*|\[(\d+)\])/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
 
-const renderInlineMarkdown = (value: string, citationMap: CustomerBriefCitationMap): string => {
-  const escaped = escapeHtml(value)
-  return escaped
-    .replace(/\[(\d+)\]/g, (match, citationKey: string) => {
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push({ type: 'text', text: value.slice(lastIndex, match.index) })
+    }
+
+    const strongText = match[2]
+    const citationKey = match[3]
+    if (strongText !== undefined) {
+      nodes.push({ type: 'strong', text: strongText })
+    } else if (citationKey !== undefined) {
       const citation = citationMap[citationKey]
-      if (citation === undefined) return match
+      if (citation === undefined) {
+        nodes.push({ type: 'text', text: match[0] })
+      } else {
+        nodes.push({
+          type: 'citation',
+          text: `[${citationKey}]`,
+          citationKey,
+          citation,
+          sourceLabel: getCitationSourceLabel(citation.source_type)
+        })
+      }
+    }
 
-      const tooltip = escapeHtml(buildCitationTooltip(citation))
-      const sourceLabel = escapeHtml(getCitationSourceLabel(citation.source_type))
-      return [
-        '<span',
-        ' class="customer-brief-citation"',
-        ' tabindex="0"',
-        ` aria-label="引用 ${citationKey}，${sourceLabel}"`,
-        ` data-citation-tooltip="${tooltip}"`,
-        '>',
-        `[${citationKey}]`,
-        '</span>'
-      ].join('')
-    })
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    lastIndex = pattern.lastIndex
+  }
+
+  if (lastIndex < value.length) {
+    nodes.push({ type: 'text', text: value.slice(lastIndex) })
+  }
+
+  return nodes
 }
 
-const renderSimpleMarkdown = (value: string, citationMap: CustomerBriefCitationMap): string => {
+const parseSimpleMarkdown = (value: string, citationMap: CustomerBriefCitationMap): CustomerBriefBlock[] => {
   const lines = value.split('\n')
-  const html: string[] = []
+  const blocks: CustomerBriefBlock[] = []
   let listType: 'ul' | 'ol' | null = null
+  let listItems: CustomerBriefInlineNode[][] = []
 
   const closeList = (): void => {
     if (listType !== null) {
-      html.push(`</${listType}>`)
+      blocks.push({ type: listType, items: listItems })
       listType = null
+      listItems = []
     }
   }
 
@@ -217,23 +232,22 @@ const renderSimpleMarkdown = (value: string, citationMap: CustomerBriefCitationM
 
     if (text.startsWith('## ')) {
       closeList()
-      html.push(`<h2>${renderInlineMarkdown(text.slice(3), citationMap)}</h2>`)
+      blocks.push({ type: 'h2', nodes: parseInlineMarkdown(text.slice(3), citationMap) })
       continue
     }
 
     if (text.startsWith('### ')) {
       closeList()
-      html.push(`<h3>${renderInlineMarkdown(text.slice(4), citationMap)}</h3>`)
+      blocks.push({ type: 'h3', nodes: parseInlineMarkdown(text.slice(4), citationMap) })
       continue
     }
 
     if (/^- /.test(text)) {
       if (listType !== 'ul') {
         closeList()
-        html.push('<ul>')
         listType = 'ul'
       }
-      html.push(`<li>${renderInlineMarkdown(text.slice(2), citationMap)}</li>`)
+      listItems.push(parseInlineMarkdown(text.slice(2), citationMap))
       continue
     }
 
@@ -241,19 +255,18 @@ const renderSimpleMarkdown = (value: string, citationMap: CustomerBriefCitationM
     if (orderedMatch !== null) {
       if (listType !== 'ol') {
         closeList()
-        html.push('<ol>')
         listType = 'ol'
       }
-      html.push(`<li>${renderInlineMarkdown(orderedMatch[1] ?? '', citationMap)}</li>`)
+      listItems.push(parseInlineMarkdown(orderedMatch[1] ?? '', citationMap))
       continue
     }
 
     closeList()
-    html.push(`<p>${renderInlineMarkdown(text, citationMap)}</p>`)
+    blocks.push({ type: 'p', nodes: parseInlineMarkdown(text, citationMap) })
   }
 
   closeList()
-  return html.join('')
+  return blocks
 }
 
 const customerBriefCitationMap = computed<CustomerBriefCitationMap>(() => {
@@ -269,10 +282,10 @@ const customerBriefCitationMap = computed<CustomerBriefCitationMap>(() => {
   }
 })
 
-const renderedCustomerBrief = computed<string>(() => {
+const renderedCustomerBrief = computed<CustomerBriefBlock[]>(() => {
   const markdownText = customer.value?.customer_brief_markdown?.trim()
-  if (markdownText === undefined || markdownText === null || markdownText === '') return ''
-  return renderSimpleMarkdown(markdownText, customerBriefCitationMap.value)
+  if (markdownText === undefined || markdownText === null || markdownText === '') return []
+  return parseSimpleMarkdown(markdownText, customerBriefCitationMap.value)
 })
 
 // ==================== Navigation Tabs ====================
@@ -472,6 +485,11 @@ const handleFollowUpSuccess = (): void => {
   followUpDialogOpen.value = false
   if (props.customerId !== null) {
     loadAllData(props.customerId)
+    window.setTimeout(() => {
+      if (props.visible && props.customerId !== null) {
+        loadAllData(props.customerId)
+      }
+    }, 3000)
   }
 }
 
@@ -801,10 +819,80 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
 
                   <div class="p-4">
                     <div
-                      v-if="customer?.customer_brief_status === 'COMPLETED' && renderedCustomerBrief"
+                      v-if="customer?.customer_brief_status === 'COMPLETED' && renderedCustomerBrief.length > 0"
                       class="customer-brief-content"
-                      v-html="renderedCustomerBrief"
-                    />
+                    >
+                      <template v-for="(block, blockIndex) in renderedCustomerBrief" :key="blockIndex">
+                        <component :is="block.type" v-if="block.type === 'h2' || block.type === 'h3' || block.type === 'p'">
+                          <template v-for="(node, nodeIndex) in block.nodes" :key="`${blockIndex}-${nodeIndex}`">
+                            <strong v-if="node.type === 'strong'">{{ node.text }}</strong>
+                            <HoverInfo
+                              v-else-if="node.type === 'citation' && node.citation"
+                              side="top"
+                              align="center"
+                              content-class="customer-brief-citation-hover-card"
+                            >
+                              <template #trigger>
+                                <span
+                                  class="customer-brief-citation"
+                                  tabindex="0"
+                                  :aria-label="`引用 ${node.citationKey}，${node.sourceLabel}`"
+                                >
+                                  {{ node.text }}
+                                </span>
+                              </template>
+                              <div class="customer-brief-citation-card">
+                                <div class="customer-brief-citation-title">
+                                  {{ node.citation.title?.trim() || node.sourceLabel }}
+                                </div>
+                                <div
+                                  v-if="node.citation.excerpt?.trim()"
+                                  class="customer-brief-citation-excerpt"
+                                >
+                                  {{ node.citation.excerpt.trim() }}
+                                </div>
+                              </div>
+                            </HoverInfo>
+                            <span v-else>{{ node.text }}</span>
+                          </template>
+                        </component>
+                        <component :is="block.type" v-else-if="block.type === 'ul' || block.type === 'ol'">
+                          <li v-for="(item, itemIndex) in block.items" :key="`${blockIndex}-${itemIndex}`">
+                            <template v-for="(node, nodeIndex) in item" :key="`${blockIndex}-${itemIndex}-${nodeIndex}`">
+                              <strong v-if="node.type === 'strong'">{{ node.text }}</strong>
+                              <HoverInfo
+                                v-else-if="node.type === 'citation' && node.citation"
+                                side="top"
+                                align="center"
+                                content-class="customer-brief-citation-hover-card"
+                              >
+                                <template #trigger>
+                                  <span
+                                    class="customer-brief-citation"
+                                    tabindex="0"
+                                    :aria-label="`引用 ${node.citationKey}，${node.sourceLabel}`"
+                                  >
+                                    {{ node.text }}
+                                  </span>
+                                </template>
+                                <div class="customer-brief-citation-card">
+                                  <div class="customer-brief-citation-title">
+                                    {{ node.citation.title?.trim() || node.sourceLabel }}
+                                  </div>
+                                  <div
+                                    v-if="node.citation.excerpt?.trim()"
+                                    class="customer-brief-citation-excerpt"
+                                  >
+                                    {{ node.citation.excerpt.trim() }}
+                                  </div>
+                                </div>
+                              </HoverInfo>
+                              <span v-else>{{ node.text }}</span>
+                            </template>
+                          </li>
+                        </component>
+                      </template>
+                    </div>
                     <div
                       v-else-if="customer?.customer_brief_status === 'GENERATING'"
                       class="brief-inline-state"
@@ -1453,7 +1541,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   line-height: $wolf-line-height-body-v2;
 }
 
-.customer-brief-content :deep(h2) {
+.customer-brief-content h2 {
   margin: 0 0 $wolf-space-sm-v2;
   color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-title-v2;
@@ -1461,7 +1549,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   line-height: $wolf-line-height-title-v2;
 }
 
-.customer-brief-content :deep(h3) {
+.customer-brief-content h3 {
   margin: $wolf-space-lg-v2 0 $wolf-space-sm-v2;
   color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-body-v2;
@@ -1469,32 +1557,31 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   line-height: $wolf-line-height-body-v2;
 }
 
-.customer-brief-content :deep(h2:first-child),
-.customer-brief-content :deep(h3:first-child) {
+.customer-brief-content h2:first-child,
+.customer-brief-content h3:first-child {
   margin-top: 0;
 }
 
-.customer-brief-content :deep(p) {
+.customer-brief-content p {
   margin: 0 0 $wolf-space-sm-v2;
 }
 
-.customer-brief-content :deep(ul),
-.customer-brief-content :deep(ol) {
+.customer-brief-content ul,
+.customer-brief-content ol {
   margin: 0 0 $wolf-space-md-v2;
   padding-left: $wolf-space-xl-v2;
 }
 
-.customer-brief-content :deep(li) {
+.customer-brief-content li {
   margin: $wolf-space-xs-v2 0;
 }
 
-.customer-brief-content :deep(strong) {
+.customer-brief-content strong {
   color: $wolf-text-primary-v2;
   font-weight: $wolf-font-weight-semibold-v2;
 }
 
-.customer-brief-content :deep(.customer-brief-citation) {
-  position: relative;
+.customer-brief-citation {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1512,45 +1599,37 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   vertical-align: baseline;
 }
 
-.customer-brief-content :deep(.customer-brief-citation:hover),
-.customer-brief-content :deep(.customer-brief-citation:focus-visible) {
+.customer-brief-citation:hover,
+.customer-brief-citation:focus-visible {
   background: $wolf-bg-hover-v2;
   color: $wolf-primary-hover-v2;
   outline: none;
 }
 
-.customer-brief-content :deep(.customer-brief-citation::after) {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  z-index: 20;
-  width: max-content;
+:global(.customer-brief-citation-hover-card) {
   max-width: 280px;
   padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-elevated-v2;
-  box-shadow: $wolf-shadow-modal-v2;
+}
+
+.customer-brief-citation-card {
+  display: grid;
+  gap: $wolf-space-xs-v2;
+}
+
+.customer-brief-citation-title {
   color: $wolf-text-primary-v2;
-  content: attr(data-citation-tooltip);
   font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-normal-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+}
+
+.customer-brief-citation-excerpt {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
   line-height: $wolf-line-height-body-v2;
-  opacity: 0;
-  pointer-events: none;
-  text-align: left;
-  transform: translate(-50%, 4px);
-  transition: opacity 120ms ease, transform 120ms ease;
   white-space: pre-line;
 }
 
-.customer-brief-content :deep(.customer-brief-citation:hover::after),
-.customer-brief-content :deep(.customer-brief-citation:focus-visible::after) {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
-.customer-brief-content :deep(blockquote) {
+.customer-brief-content blockquote {
   margin: $wolf-space-md-v2 0;
   padding: $wolf-space-sm-v2 $wolf-space-md-v2;
   border-left: 3px solid $wolf-border-default-v2;

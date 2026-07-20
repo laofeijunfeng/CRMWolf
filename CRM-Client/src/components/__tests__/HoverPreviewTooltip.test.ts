@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import HoverPreviewTooltip from '../HoverPreviewTooltip.vue'
 
 describe('HoverPreviewTooltip.vue', () => {
@@ -9,113 +9,75 @@ describe('HoverPreviewTooltip.vue', () => {
     { label: '状态', value: '活跃' }
   ]
 
-  it('renders tooltip rows correctly', () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows },
-      slots: {
-        default: '<span class="trigger">Hover me</span>'
+  const mountTooltip = (props: { rows: typeof mockRows; minWidth?: number }, slot = '<span>Trigger</span>'): VueWrapper => {
+    return mount(HoverPreviewTooltip, {
+      props,
+      slots: { default: slot },
+      global: {
+        stubs: {
+          HoverInfo: {
+            template: `
+              <div class="hover-info-stub">
+                <div class="hover-info-trigger"><slot name="trigger" /></div>
+                <div class="hover-info-content"><slot /></div>
+              </div>
+            `
+          }
+        }
       }
-    })
+    }) as VueWrapper
+  }
+
+  it('renders tooltip rows correctly', () => {
+    const wrapper = mountTooltip({ rows: mockRows }, '<span class="trigger">Hover me</span>')
 
     expect(wrapper.findAll('.tooltip-row')).toHaveLength(3)
     expect(wrapper.find('.tooltip-label').text()).toBe('客户ID:')
     expect(wrapper.find('.tooltip-value').text()).toBe('16')
   })
 
-  it('is hidden by default', () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows },
-      slots: { default: '<span>Trigger</span>' }
-    })
-
+  it('renders tooltip content through HoverInfo', () => {
+    const wrapper = mountTooltip({ rows: mockRows })
     const tooltip = wrapper.find('.hover-preview-tooltip')
+
     expect(tooltip.exists()).toBe(true)
-    // CSS 控制显示/隐藏，检查元素存在
-  })
-
-  it('shows on hover', async () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows },
-      slots: { default: '<span class="trigger">Trigger</span>' }
-    })
-
-    await wrapper.find('.hover-preview').trigger('mouseenter')
-
-    const tooltip = wrapper.find('.hover-preview-tooltip')
-    expect(tooltip.exists()).toBe(true)
-  })
-
-  it('hides on mouseleave', async () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows },
-      slots: { default: '<span class="trigger">Trigger</span>' }
-    })
-
-    // Hover first
-    await wrapper.find('.hover-preview').trigger('mouseenter')
-
-    // Then leave
-    await wrapper.find('.hover-preview').trigger('mouseleave')
-
-    const tooltip = wrapper.find('.hover-preview-tooltip')
-    expect(tooltip.exists()).toBe(true)
+    expect(wrapper.find('.hover-info-trigger .hover-preview').exists()).toBe(true)
   })
 
   it('has correct min-width 200px by default', () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows },
-      slots: { default: '<span>Trigger</span>' }
-    })
+    const wrapper = mountTooltip({ rows: mockRows })
 
-    expect(wrapper.find('.hover-preview-tooltip').exists()).toBe(true)
+    expect(wrapper.find('.hover-preview-tooltip').attributes('style')).toContain('min-width: 200px')
   })
 
   it('accepts custom minWidth prop', () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows, minWidth: 300 },
-      slots: { default: '<span>Trigger</span>' }
-    })
+    const wrapper = mountTooltip({ rows: mockRows, minWidth: 300 })
 
     const tooltip = wrapper.find('.hover-preview-tooltip')
     expect(tooltip.exists()).toBe(true)
-    // CSS style is applied via :style binding
+    expect(tooltip.attributes('style')).toContain('min-width: 300px')
   })
 
   it('renders slot content', () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows },
-      slots: { default: '<span class="trigger">Custom Trigger</span>' }
-    })
+    const wrapper = mountTooltip({ rows: mockRows }, '<span class="trigger">Custom Trigger</span>')
 
     expect(wrapper.find('.trigger').text()).toBe('Custom Trigger')
   })
 
-  it('has correct transition duration 0.15s', () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows },
-      slots: { default: '<span>Trigger</span>' }
-    })
-
-    expect(wrapper.find('.hover-preview-tooltip').exists()).toBe(true)
-  })
-
   it('displays all rows in correct order', () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: mockRows },
-      slots: { default: '<span>Trigger</span>' }
-    })
+    const wrapper = mountTooltip({ rows: mockRows })
 
     const rows = wrapper.findAll('.tooltip-row')
-    expect(rows[0].find('.tooltip-label').text()).toBe('客户ID:')
-    expect(rows[1].find('.tooltip-label').text()).toBe('行业:')
-    expect(rows[2].find('.tooltip-label').text()).toBe('状态:')
+    expect(rows).toHaveLength(3)
+    expect(rows.map((row) => row.text())).toEqual([
+      '客户ID:16',
+      '行业:金融服务业',
+      '状态:活跃'
+    ])
   })
 
   it('handles empty rows array', () => {
-    const wrapper = mount(HoverPreviewTooltip, {
-      props: { rows: [] },
-      slots: { default: '<span>Trigger</span>' }
-    })
+    const wrapper = mountTooltip({ rows: [] })
 
     expect(wrapper.findAll('.tooltip-row')).toHaveLength(0)
   })

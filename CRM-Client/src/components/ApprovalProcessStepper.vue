@@ -12,7 +12,7 @@
  * - Icon 显示操作类型图标
  * - Title 显示操作名称
  * - Description 显示操作人
- * - Hover Tooltip 显示时间
+ * - HoverInfo 显示时间
  *
  * 规范依据：
  * - MASTER.md §3.5 组件封装原则
@@ -34,12 +34,7 @@ import {
   StepperDescription,
   StepperSeparator
 } from '@/components/ui/stepper'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger
-} from '@/components/ui/tooltip'
+import { HoverInfo } from '@/components/crmwolf'
 import {
   Empty,
   EmptyHeader,
@@ -116,7 +111,6 @@ const formatDateTime = (iso: string): string => {
       class="flex w-full gap-2"
       orientation="horizontal"
     >
-      <TooltipProvider>
         <StepperItem
           v-for="(record, index) in records"
           :key="record.id"
@@ -126,8 +120,8 @@ const formatDateTime = (iso: string): string => {
           <!-- 官方样式：竖向分布 -->
           <div class="flex flex-col items-center gap-2">
             <!-- StepperIndicator：显示 Icon -->
-            <Tooltip>
-              <TooltipTrigger as-child>
+            <HoverInfo side="top" align="center" content-class="approval-stepper-hover-card">
+              <template #trigger>
                 <StepperIndicator
                   :class="[
                     'approval-stepper__indicator',
@@ -139,14 +133,15 @@ const formatDateTime = (iso: string): string => {
                     class="w-5 h-5"
                   />
                 </StepperIndicator>
-              </TooltipTrigger>
-              <TooltipContent side="top">
+              </template>
+              <div class="approval-stepper-hover-content">
+                <div class="approval-stepper-hover-title">{{ getActionConfig(record.action).label }}</div>
                 <div class="flex items-center gap-1.5 text-xs">
                   <Clock class="w-3 h-3" />
                   {{ formatDateTime(record.created_time) }}
                 </div>
-              </TooltipContent>
-            </Tooltip>
+              </div>
+            </HoverInfo>
 
             <!-- StepperTitle：显示操作名称 -->
             <StepperTitle
@@ -167,13 +162,22 @@ const formatDateTime = (iso: string): string => {
             </StepperDescription>
 
             <!-- 驳回理由（仅驳回时显示） -->
-            <p
+            <HoverInfo
               v-if="record.action === 'REJECT' && record.comment"
-              class="approval-stepper__reject-comment max-w-[120px] truncate"
-              :title="record.comment"
+              side="bottom"
+              align="center"
+              content-class="approval-stepper-reject-hover-card"
             >
-              {{ record.comment }}
-            </p>
+              <template #trigger>
+                <p class="approval-stepper__reject-comment max-w-[120px] truncate">
+                  {{ record.comment }}
+                </p>
+              </template>
+              <div class="approval-stepper-hover-content">
+                <div class="approval-stepper-hover-title">驳回原因</div>
+                <div class="approval-stepper-reject-text">{{ record.comment }}</div>
+              </div>
+            </HoverInfo>
           </div>
 
           <!-- StepperSeparator：横线连接 -->
@@ -182,7 +186,6 @@ const formatDateTime = (iso: string): string => {
             class="h-0.5 flex-1 mt-5"
           />
         </StepperItem>
-      </TooltipProvider>
     </Stepper>
   </div>
 </template>
@@ -206,6 +209,31 @@ const formatDateTime = (iso: string): string => {
   border-radius: $wolf-radius-full-v2;
   background: $wolf-bg-muted-v2;
   color: $wolf-text-tertiary-v2;
+  cursor: help;
+}
+
+:global(.approval-stepper-hover-card) {
+  width: auto;
+  min-width: 150px;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+}
+
+:global(.approval-stepper-reject-hover-card) {
+  width: auto;
+  max-width: 280px;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+}
+
+.approval-stepper-hover-content {
+  display: grid;
+  gap: $wolf-space-xs-v2;
+  color: $wolf-text-secondary-v2;
+}
+
+.approval-stepper-hover-title {
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
 }
 
 .approval-stepper__title {
@@ -249,6 +277,14 @@ const formatDateTime = (iso: string): string => {
 .approval-stepper__reject-comment {
   font-size: $wolf-font-size-caption-v2;
   color: $wolf-danger-text-v2;
+  cursor: help;
+}
+
+.approval-stepper-reject-text {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+  white-space: pre-line;
 }
 
 // Reduced Motion 支持

@@ -78,6 +78,13 @@ class CustomerFollowUpResponse(BaseModel):
     created_time: datetime = Field(..., description="创建时间")
     creator_info: Optional[OwnerInfo] = Field(None, description="跟进人信息")
     customer_info: Optional[CustomerBasicInfo] = Field(None, description="客户基本信息")
+    effectiveness_score: Optional[int] = Field(None, description="AI评估有效跟进得分，满分100")
+    effectiveness_is_valid: Optional[bool] = Field(None, description="AI评估是否有效")
+    effectiveness_reason: Optional[str] = Field(None, description="AI评估原因摘要")
+    effectiveness_detail_json: Optional[str] = Field(None, description="AI评估分项明细JSON")
+    effectiveness_status: Optional[str] = Field(None, description="AI评估状态")
+    effectiveness_evaluated_time: Optional[datetime] = Field(None, description="AI评估完成时间")
+    effectiveness_error_message: Optional[str] = Field(None, description="AI评估失败原因")
 
 
 class MessageResponse(BaseModel):

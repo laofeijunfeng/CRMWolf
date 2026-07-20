@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import List, Tuple, Optional
 from app.models.customer_follow_up import CustomerFollowUp
@@ -144,6 +145,57 @@ class CustomerFollowUpCRUD:
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def update_effectiveness_status(
+        self,
+        db: Session,
+        follow_up_id: int,
+        status: str,
+        error_message: Optional[str] = None
+    ) -> Optional[CustomerFollowUp]:
+        follow_up = self.get_by_id(db, follow_up_id)
+        if not follow_up:
+            return None
+
+        follow_up.effectiveness_status = status
+        follow_up.effectiveness_error_message = error_message
+        if status in {"PENDING", "GENERATING"}:
+            follow_up.effectiveness_score = None
+            follow_up.effectiveness_is_valid = None
+            follow_up.effectiveness_reason = None
+            follow_up.effectiveness_detail_json = None
+            follow_up.effectiveness_evaluated_time = None
+        elif status == "FAILED":
+            follow_up.effectiveness_evaluated_time = datetime.now()
+
+        db.commit()
+        db.refresh(follow_up)
+        return follow_up
+
+    def update_effectiveness_result(
+        self,
+        db: Session,
+        follow_up_id: int,
+        score: int,
+        is_valid: bool,
+        reason: str,
+        detail_json: Optional[str] = None
+    ) -> Optional[CustomerFollowUp]:
+        follow_up = self.get_by_id(db, follow_up_id)
+        if not follow_up:
+            return None
+
+        follow_up.effectiveness_score = score
+        follow_up.effectiveness_is_valid = is_valid
+        follow_up.effectiveness_reason = reason
+        follow_up.effectiveness_detail_json = detail_json
+        follow_up.effectiveness_status = "COMPLETED"
+        follow_up.effectiveness_evaluated_time = datetime.now()
+        follow_up.effectiveness_error_message = None
+
+        db.commit()
+        db.refresh(follow_up)
+        return follow_up
 
     def delete(self, db: Session, db_obj: CustomerFollowUp) -> CustomerFollowUp:
         db.delete(db_obj)

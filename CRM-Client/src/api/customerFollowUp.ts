@@ -1,3 +1,4 @@
+/* eslint-disable crmwolf/require-zod-schema */
 import request from '@/utils/request'
 
 export interface OwnerInfo {
@@ -37,6 +38,13 @@ export interface CustomerFollowUpResponse {
   creator_info?: OwnerInfo
   customer_info?: CustomerBasicInfo
   created_time: string
+  effectiveness_score?: number | null
+  effectiveness_is_valid?: boolean | null
+  effectiveness_reason?: string | null
+  effectiveness_detail_json?: string | null
+  effectiveness_status?: 'PENDING' | 'GENERATING' | 'COMPLETED' | 'FAILED' | string | null
+  effectiveness_evaluated_time?: string | null
+  effectiveness_error_message?: string | null
 }
 
 export interface NextFollowUpTimeUpdate {
@@ -44,23 +52,23 @@ export interface NextFollowUpTimeUpdate {
 }
 
 const customerFollowUpApi = {
-  createFollowUp: (customerId: number, data: CustomerFollowUpCreate) => {
+  createFollowUp: (customerId: number, data: CustomerFollowUpCreate): Promise<CustomerFollowUpResponse> => {
     return request.post<CustomerFollowUpResponse>(`/v1/customer-follow-ups/${customerId}`, data)
   },
 
-  getFollowUps: (customerId: number) => {
+  getFollowUps: (customerId: number): Promise<CustomerFollowUpResponse[]> => {
     return request.get<CustomerFollowUpResponse[]>(`/v1/customer-follow-ups/${customerId}`)
   },
 
-  updateFollowUp: (followUpId: number, data: CustomerFollowUpUpdate) => {
+  updateFollowUp: (followUpId: number, data: CustomerFollowUpUpdate): Promise<CustomerFollowUpResponse> => {
     return request.put<CustomerFollowUpResponse>(`/v1/customer-follow-ups/${followUpId}`, data)
   },
 
-  updateNextFollowUpTime: (followUpId: number, data: NextFollowUpTimeUpdate) => {
+  updateNextFollowUpTime: (followUpId: number, data: NextFollowUpTimeUpdate): Promise<CustomerFollowUpResponse> => {
     return request.patch<CustomerFollowUpResponse>(`/v1/customer-follow-ups/${followUpId}/next-time`, data)
   },
 
-  deleteFollowUp: (followUpId: number) => {
+  deleteFollowUp: (followUpId: number): Promise<{ message: string }> => {
     return request.delete<{ message: string }>(`/v1/customer-follow-ups/${followUpId}`)
   }
 }

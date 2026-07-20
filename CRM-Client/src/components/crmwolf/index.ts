@@ -25,6 +25,7 @@ export { default as MultiSelect } from './MultiSelect.vue'
 export { default as TableToolbarButton } from './TableToolbarButton.vue'
 export { default as TableToolbarBuilderPanel } from './TableToolbarBuilderPanel.vue'
 export { default as TableRowActions } from './TableRowActions.vue'
+export { default as HoverInfo } from './HoverInfo.vue'
 export { default as StatusBadge } from '../StatusBadge.vue'
 
 // Export types

@@ -31,49 +31,119 @@
         :key="followUp.id"
         class="follow-up-item"
       >
-        <div class="follow-up-method" :title="followUp.method" aria-hidden="true">
-          <component :is="getMethodIcon(followUp.method)" class="method-icon" />
-        </div>
+        <HoverInfo side="top" align="center" content-class="follow-up-method-hover-card">
+          <template #trigger>
+            <div class="follow-up-method" aria-hidden="true">
+              <component :is="getMethodIcon(followUp.method)" class="method-icon" />
+            </div>
+          </template>
+          <div class="follow-up-hover-text">{{ followUp.method }}</div>
+        </HoverInfo>
 
         <div class="follow-up-body">
           <div class="follow-up-content-row">
-            <p class="follow-up-content" :title="followUp.content">
-              {{ followUp.content }}
-            </p>
-            <Button
-              v-if="canDelete(followUp)"
-              variant="ghost"
-              size="icon-sm"
-              class="delete-btn"
-              :aria-label="`删除 ${formatTime(followUp.created_time)} 的跟进记录`"
-              title="删除"
-              @click.stop="handleDelete(followUp)"
+            <HoverInfo side="top" align="start" content-class="follow-up-content-hover-card">
+              <template #trigger>
+                <p class="follow-up-content">
+                  {{ followUp.content }}
+                </p>
+              </template>
+              <div class="follow-up-hover-text follow-up-hover-text--preline">
+                {{ followUp.content }}
+              </div>
+            </HoverInfo>
+            <div
+              v-if="shouldShowEffectiveness(followUp) || canDelete(followUp)"
+              class="follow-up-actions"
             >
-              <Trash2 class="delete-icon" />
-            </Button>
+              <HoverInfo
+                v-if="shouldShowEffectiveness(followUp)"
+                side="top"
+                align="end"
+                content-class="effectiveness-hover-card"
+              >
+                <template #trigger>
+                  <button
+                    type="button"
+                    class="effectiveness-indicator"
+                    :class="getEffectivenessClass(followUp)"
+                    :aria-label="getEffectivenessLabel(followUp)"
+                    @click.stop
+                  >
+                    <Loader2
+                      v-if="followUp.effectiveness_status === 'GENERATING'"
+                      class="effectiveness-icon effectiveness-icon-loading"
+                    />
+                    <ThumbsUp
+                      v-else-if="followUp.effectiveness_is_valid"
+                      class="effectiveness-icon"
+                    />
+                    <ThumbsDown
+                      v-else
+                      class="effectiveness-icon"
+                    />
+                  </button>
+                </template>
+                <div class="effectiveness-card">
+                  <div class="effectiveness-card-title">
+                    {{ getEffectivenessLabel(followUp) }}
+                  </div>
+                  <div
+                    v-if="typeof followUp.effectiveness_score === 'number'"
+                    class="effectiveness-card-score"
+                  >
+                    {{ followUp.effectiveness_score }} / 100
+                  </div>
+                  <div class="effectiveness-card-text">
+                    {{ getEffectivenessTooltip(followUp) }}
+                  </div>
+                </div>
+              </HoverInfo>
+              <Button
+                v-if="canDelete(followUp)"
+                variant="ghost"
+                size="icon-sm"
+                class="delete-btn"
+                :aria-label="`删除 ${formatTime(followUp.created_time)} 的跟进记录`"
+                title="删除"
+                @click.stop="handleDelete(followUp)"
+              >
+                <Trash2 class="delete-icon" />
+              </Button>
+            </div>
           </div>
 
-          <div class="follow-up-meta" :title="getMetaTitle(followUp)">
-            <span class="meta-item">
-              <User class="meta-icon" />
-              {{ getCreatorName(followUp) }}
-            </span>
-            <span class="meta-separator">·</span>
-            <span>{{ followUp.method }}</span>
-            <span class="meta-separator">·</span>
-            <span>{{ formatTime(followUp.created_time) }}</span>
-            <template v-if="hasText(followUp.next_follow_time)">
-              <span class="meta-separator">·</span>
-              <span class="meta-item">
-                <CalendarClock class="meta-icon" />
-                {{ formatShortDate(followUp.next_follow_time) }}
-              </span>
+          <HoverInfo side="bottom" align="start" content-class="follow-up-meta-hover-card">
+            <template #trigger>
+              <div class="follow-up-meta" tabindex="0">
+                <span class="meta-item">
+                  <User class="meta-icon" />
+                  {{ getCreatorName(followUp) }}
+                </span>
+                <span class="meta-separator">·</span>
+                <span>{{ followUp.method }}</span>
+                <span class="meta-separator">·</span>
+                <span>{{ formatTime(followUp.created_time) }}</span>
+                <template v-if="hasText(followUp.next_follow_time)">
+                  <span class="meta-separator">·</span>
+                  <span class="meta-item">
+                    <CalendarClock class="meta-icon" />
+                    {{ formatShortDate(followUp.next_follow_time) }}
+                  </span>
+                </template>
+                <template v-if="hasText(followUp.next_action)">
+                  <span class="meta-separator">·</span>
+                  <span class="meta-next-action">{{ followUp.next_action }}</span>
+                </template>
+              </div>
             </template>
-            <template v-if="hasText(followUp.next_action)">
-              <span class="meta-separator">·</span>
-              <span class="meta-next-action">{{ followUp.next_action }}</span>
-            </template>
-          </div>
+            <div class="follow-up-meta-card">
+              <div v-for="item in getMetaRows(followUp)" :key="item.label" class="follow-up-meta-card-row">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+          </HoverInfo>
         </div>
       </div>
     </div>
@@ -82,9 +152,10 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { CalendarClock, Mail, MessageCircle, MessageSquare, Phone, Trash2, User, Users } from 'lucide-vue-next'
+import { CalendarClock, Loader2, Mail, MessageCircle, MessageSquare, Phone, ThumbsDown, ThumbsUp, Trash2, User, Users } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { HoverInfo } from '@/components/crmwolf'
 import {
   Empty,
   EmptyHeader,
@@ -107,12 +178,19 @@ interface FollowUp {
   creator_info?: { id: string; name: string; avatar_url?: string | null }
   customer_info?: { id: number; account_name: string }
   created_time: string
+  effectiveness_score?: number | null
+  effectiveness_is_valid?: boolean | null
+  effectiveness_reason?: string | null
+  effectiveness_detail_json?: string | null
+  effectiveness_status?: string | null
+  effectiveness_evaluated_time?: string | null
+  effectiveness_error_message?: string | null
 }
 
 interface Props {
   followUps: FollowUp[]
   loading: boolean
-  currentUserId?: string
+  currentUserId?: string | undefined
 }
 
 type Emits = (e: 'delete', followUp: FollowUp) => void
@@ -151,6 +229,37 @@ const hasText = (value: string | null | undefined): value is string => {
   return value !== undefined && value !== null && value.trim() !== ''
 }
 
+const shouldShowEffectiveness = (followUp: FollowUp): boolean => {
+  return followUp.effectiveness_status === 'GENERATING' ||
+    followUp.effectiveness_status === 'COMPLETED'
+}
+
+const getEffectivenessClass = (followUp: FollowUp): string => {
+  if (followUp.effectiveness_status === 'GENERATING') return 'is-loading'
+  return followUp.effectiveness_is_valid === true ? 'is-valid' : 'is-invalid'
+}
+
+const getEffectivenessLabel = (followUp: FollowUp): string => {
+  if (followUp.effectiveness_status === 'GENERATING') return '正在评估跟进有效性'
+  return followUp.effectiveness_is_valid === true ? '有效跟进记录' : '无效跟进记录'
+}
+
+const getEffectivenessTooltip = (followUp: FollowUp): string => {
+  if (followUp.effectiveness_status === 'GENERATING') return '正在评估跟进有效性'
+
+  const scoreText = typeof followUp.effectiveness_score === 'number'
+    ? `${followUp.effectiveness_score} 分`
+    : '未评分'
+
+  if (followUp.effectiveness_is_valid === true) {
+    return `有效跟进：${scoreText}`
+  }
+
+  return hasText(followUp.effectiveness_reason)
+    ? followUp.effectiveness_reason
+    : `无效跟进：${scoreText}`
+}
+
 const getCreatorName = (followUp: FollowUp): string => {
   const name = followUp.creator_info?.name
   return hasText(name) ? name : '系统'
@@ -179,21 +288,21 @@ const formatShortDate = (dateStr: string): string => {
   return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
 
-const getMetaTitle = (followUp: FollowUp): string => {
+const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => {
   const meta = [
-    `跟进人：${getCreatorName(followUp)}`,
-    `方式：${followUp.method}`,
-    `时间：${formatTime(followUp.created_time)}`
+    { label: '跟进人', value: getCreatorName(followUp) },
+    { label: '方式', value: followUp.method },
+    { label: '时间', value: formatTime(followUp.created_time) }
   ]
 
   if (hasText(followUp.next_follow_time)) {
-    meta.push(`下次跟进：${formatShortDate(followUp.next_follow_time)}`)
+    meta.push({ label: '下次跟进', value: formatShortDate(followUp.next_follow_time) })
   }
   if (hasText(followUp.next_action)) {
-    meta.push(`下一步：${followUp.next_action}`)
+    meta.push({ label: '下一步', value: followUp.next_action })
   }
 
-  return meta.join('，')
+  return meta
 }
 </script>
 
@@ -277,6 +386,7 @@ const getMetaTitle = (followUp: FollowUp): string => {
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: help;
 }
 
 .method-icon {
@@ -310,6 +420,126 @@ const getMetaTitle = (followUp: FollowUp): string => {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+  cursor: help;
+}
+
+:global(.follow-up-method-hover-card) {
+  width: auto;
+  min-width: 56px;
+  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
+}
+
+:global(.follow-up-content-hover-card) {
+  width: 320px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+}
+
+:global(.follow-up-meta-hover-card) {
+  width: 280px;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+}
+
+.follow-up-hover-text {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 18px;
+}
+
+.follow-up-hover-text--preline {
+  white-space: pre-wrap;
+}
+
+.follow-up-meta-card {
+  display: grid;
+  gap: $wolf-space-xs-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 18px;
+}
+
+.follow-up-meta-card-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: $wolf-space-sm-v2;
+  color: $wolf-text-tertiary-v2;
+
+  strong {
+    min-width: 0;
+    color: $wolf-text-secondary-v2;
+    font-weight: $wolf-font-weight-medium-v2;
+    overflow-wrap: anywhere;
+  }
+}
+
+.follow-up-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 24px;
+  margin-top: -4px;
+}
+
+.effectiveness-indicator {
+  border: none;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: $wolf-radius-sm-v2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: $wolf-text-tertiary-v2;
+  background: transparent;
+  cursor: help;
+}
+
+.effectiveness-indicator.is-valid {
+  color: $wolf-success-v2;
+}
+
+.effectiveness-indicator.is-invalid {
+  color: $wolf-danger-v2;
+  background: $wolf-danger-bg-v2;
+}
+
+.effectiveness-indicator.is-loading {
+  color: $wolf-text-tertiary-v2;
+}
+
+.effectiveness-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.effectiveness-icon-loading {
+  animation: spin 1s linear infinite;
+}
+
+:global(.effectiveness-hover-card) {
+  width: 280px;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+}
+
+.effectiveness-card {
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 18px;
+}
+
+.effectiveness-card-title {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+}
+
+.effectiveness-card-score {
+  margin-top: 2px;
+  color: $wolf-text-secondary-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+.effectiveness-card-text {
+  margin-top: $wolf-space-xs-v2;
+  color: $wolf-text-secondary-v2;
+  white-space: pre-wrap;
 }
 
 .follow-up-meta {
@@ -355,7 +585,6 @@ const getMetaTitle = (followUp: FollowUp): string => {
   min-width: 24px !important;
   opacity: 0;
   transition: opacity 0.2s;
-  margin-top: -4px;
 }
 
 .delete-btn:hover {
@@ -381,8 +610,20 @@ const getMetaTitle = (followUp: FollowUp): string => {
 
 @media (prefers-reduced-motion: reduce) {
   .follow-up-item,
-  .delete-btn {
+  .delete-btn,
+  .effectiveness-icon-loading {
     transition-duration: $wolf-reduced-motion-duration-v2;
+    animation-duration: $wolf-reduced-motion-duration-v2;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>
