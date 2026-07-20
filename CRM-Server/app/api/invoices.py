@@ -5,7 +5,16 @@ from datetime import date
 import os
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission, get_current_user_team
+from app.core.deps import (
+    get_current_active_user,
+    require_permission,
+    get_current_user_team,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+    check_invoice_edit_permission,
+    check_invoice_view_permission,
+    check_payment_view_permission,
+)
 from app.models.user import User
 from app.models.customer import Customer
 from app.models.contract import Contract
@@ -35,12 +44,7 @@ def create_invoice_title(
     current_user: User = Depends(require_permission("invoice:title:create")),
     db: Session = Depends(get_db)
 ):
-    customer = db.query(Customer).filter(Customer.id == customer_id, Customer.team_id == team_id).first()
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    check_customer_edit_permission(customer_id, team_id, current_user, db)
 
     existing_title = invoice_title_crud.get_by_taxpayer_id(db, customer_id, title_data.taxpayer_id, team_id)
     if existing_title:
@@ -60,6 +64,7 @@ def list_invoice_titles(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    check_customer_view_permission(customer_id, team_id, current_user, db)
     titles = invoice_title_crud.get_by_customer_id(db, customer_id, team_id)
     return {"invoice_titles": titles}
 
@@ -77,6 +82,7 @@ def get_invoice_title(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="开票抬头不存在"
         )
+    check_customer_view_permission(title.customer_id, team_id, current_user, db)
     return title
 
 
@@ -94,6 +100,7 @@ def update_invoice_title(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="开票抬头不存在"
         )
+    check_customer_edit_permission(title.customer_id, team_id, current_user, db)
 
     updated_title = invoice_title_crud.update(db, title, title_data)
     return updated_title
@@ -112,6 +119,7 @@ def set_default_invoice_title(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="开票抬头不存在"
         )
+    check_customer_edit_permission(title.customer_id, team_id, current_user, db)
 
     updated_title = invoice_title_crud.set_default(db, title.customer_id, title_id, team_id)
     if not updated_title:
@@ -129,11 +137,19 @@ def delete_invoice_title(
     current_user: User = Depends(require_permission("invoice:title:delete")),
     db: Session = Depends(get_db)
 ):
-    success = invoice_title_crud.delete(db, title_id, team_id)
-    if not success:
+    title = invoice_title_crud.get_by_id(db, title_id, team_id)
+    if not title:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="开票抬头不存在"
+        )
+    check_customer_edit_permission(title.customer_id, team_id, current_user, db)
+
+    success = invoice_title_crud.delete(db, title_id, team_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="删除开票抬头失败"
         )
     return {"message": "删除成功"}
 
@@ -260,12 +276,7 @@ def get_invoice_application(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    application = invoice_application_crud.get_by_id(db, application_id, team_id)
-    if not application:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="发票申请不存在"
-        )
+    application = check_invoice_view_permission(application_id, team_id, current_user, db)
 
     return _populate_application_info(db, application, team_id)
 
@@ -278,12 +289,7 @@ def update_invoice_application(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    application = invoice_application_crud.get_by_id(db, application_id, team_id)
-    if not application:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="发票申请不存在"
-        )
+    application = check_invoice_edit_permission(application_id, team_id, current_user, db)
 
     try:
         updated_application = invoice_application_crud.update(db, application, application_data)
@@ -371,6 +377,7 @@ def delete_invoice_application(
     db: Session = Depends(get_db)
 ):
     try:
+        check_invoice_edit_permission(application_id, team_id, current_user, db)
         success = invoice_application_crud.delete(db, application_id, team_id)
         if not success:
             raise HTTPException(
@@ -432,12 +439,7 @@ async def download_invoice_file(
 ):
     """下载发票文件"""
 
-    application = invoice_application_crud.get_by_id(db, application_id, team_id)
-    if not application:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="发票申请不存在",
-        )
+    application = check_invoice_view_permission(application_id, team_id, current_user, db)
 
     if not application.invoice_file_path:
         raise HTTPException(
@@ -498,6 +500,8 @@ def get_payment_plan_invoices(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    check_payment_view_permission(payment_plan_id, team_id, current_user, db)
+
     summary = invoice_application_crud.get_payment_plan_invoice_summary(db, payment_plan_id, team_id)
     if not summary:
         raise HTTPException(

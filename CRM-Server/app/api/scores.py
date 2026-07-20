@@ -11,12 +11,15 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.database import get_db
-from app.core.deps import get_current_user_team, get_current_active_user
+from app.core.deps import (
+    get_current_user_team,
+    get_current_active_user,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+)
 from app.models.lead import Lead
-from app.models.customer import Customer
 from app.models.score_weight import ScoreDetail
 from app.crud.lead import lead_crud
-from app.crud.customer import customer_crud
 from app.crud.score_detail import score_detail_crud
 from app.schemas.score_weight import ScoreResponse, ScoreDetailResponse, get_score_level_info
 
@@ -39,23 +42,6 @@ def check_lead_access(db: Session, lead_id: int, team_id: int, user_id: str) -> 
     # TODO: 添加权限检查（check_lead_access 已在 leads.py 中定义）
     # 这里简化处理，允许团队成员查看
     return lead
-
-
-def check_customer_access(db: Session, customer_id: int, team_id: int, user_id: str) -> Customer:
-    """检查客户访问权限
-
-    - 普通用户只能查看自己负责的客户
-    - 管理员/总监可以查看所有客户
-    """
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
-
-    # TODO: 添加权限检查
-    return customer
 
 
 @router.get("/lead/{lead_id}", response_model=ScoreResponse, summary="获取线索热力值")
@@ -104,7 +90,7 @@ def get_customer_score(
     - updated_at：最后更新时间
     - details：计算明细列表
     """
-    customer = check_customer_access(db, customer_id, team_id, str(current_user.id))
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
 
     # 获取最近一次计算的明细
     details = score_detail_crud.get_latest_details(db, 'CUSTOMER', customer_id)
@@ -161,7 +147,7 @@ def refresh_customer_score(
     通常不需要手动刷新，系统会自动触发。
     仅用于特殊场景或管理员干预。
     """
-    customer = check_customer_access(db, customer_id, team_id, str(current_user.id))
+    customer = check_customer_edit_permission(customer_id, team_id, current_user, db)
 
     from app.services.score_service import score_service
     score_service.calculate_customer_score(db, customer_id, team_id)

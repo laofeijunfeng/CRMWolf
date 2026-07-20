@@ -9,7 +9,13 @@ from urllib.parse import quote
 import os
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, require_permission
+from app.core.deps import (
+    get_current_active_user,
+    get_current_user_team,
+    require_permission,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+)
 from app.crud.crud_license_application import (
     create_license_application,
     get_license_application,
@@ -59,6 +65,7 @@ def create_application(
     db: Session = Depends(get_db)
 ):
     """创建 License 申请（草稿状态）"""
+    check_customer_edit_permission(application.customer_id, team_id, current_user, db)
     return create_license_application(db, team_id, application, current_user.id)
 
 
@@ -70,6 +77,7 @@ def list_applications(
     db: Session = Depends(get_db)
 ):
     """获取客户的 License 申请列表"""
+    check_customer_view_permission(customer_id, team_id, current_user, db)
     applications, _ = get_license_applications_by_customer(db, team_id, customer_id)
     return applications
 
@@ -88,6 +96,7 @@ def get_application(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="License申请不存在"
         )
+    check_customer_view_permission(application.customer_id, team_id, current_user, db)
     return application
 
 
@@ -111,6 +120,7 @@ def update_application(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="仅草稿状态的申请可以编辑"
         )
+    check_customer_edit_permission(existing.customer_id, team_id, current_user, db)
     return update_license_application(db, team_id, application_id, application)
 
 
@@ -133,6 +143,7 @@ def delete_application(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="仅草稿状态的申请可以删除"
         )
+    check_customer_edit_permission(existing.customer_id, team_id, current_user, db)
     delete_license_application(db, team_id, application_id)
 
 
@@ -158,6 +169,13 @@ def submit_application(
     # 获取提交人信息
     submitter_id = str(current_user.id)
     submitter_name = current_user.name
+    existing = get_license_application(db, team_id, application_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="License申请不存在"
+        )
+    check_customer_edit_permission(existing.customer_id, team_id, current_user, db)
 
     try:
         application = license_application_crud.submit(
@@ -276,6 +294,7 @@ def export_application(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="License申请不存在"
         )
+    check_customer_view_permission(existing.customer_id, team_id, current_user, db)
     if existing.status != LicenseApplicationStatus.ISSUED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

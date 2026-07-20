@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 from app.models.customer import Customer, Contact
 from app.models.lead import Lead, LeadStatus
 from app.models.contract import Contract
+from app.models.opportunity import Opportunity
 from app.schemas.customer import (
     CustomerCreate,
     CustomerUpdate,
@@ -540,9 +541,10 @@ class CustomerCRUD:
         self,
         db: Session,
         customer: Customer,
-        new_owner_id: str
-    ) -> Customer:
-        old_owner_id = customer.owner_id
+        new_owner_id: str,
+        team_id: int,
+        opportunity_transfer_scope: str = "none"
+    ) -> Tuple[Customer, int, int]:
         customer.owner_id = new_owner_id
 
         if customer.status == 3:
@@ -551,10 +553,42 @@ class CustomerCRUD:
             customer.returned_time = None
 
         customer.version += 1
+        transferred_opportunities = 0
+        transferred_contracts = 0
+
+        if opportunity_transfer_scope in {"following", "all"}:
+            opportunity_query = db.query(Opportunity).filter(
+                Opportunity.team_id == team_id,
+                Opportunity.customer_id == customer.id
+            )
+            if opportunity_transfer_scope == "following":
+                opportunity_query = opportunity_query.filter(Opportunity.status == 0)
+
+            opportunity_ids = [opportunity.id for opportunity in opportunity_query.all()]
+            transferred_opportunities = len(opportunity_ids)
+
+            if opportunity_ids:
+                db.query(Opportunity).filter(
+                    Opportunity.id.in_(opportunity_ids),
+                    Opportunity.team_id == team_id
+                ).update(
+                    {Opportunity.owner_id: new_owner_id},
+                    synchronize_session=False
+                )
+
+                contract_query = db.query(Contract).filter(
+                    Contract.team_id == team_id,
+                    Contract.opportunity_id.in_(opportunity_ids)
+                )
+                transferred_contracts = contract_query.count()
+                contract_query.update(
+                    {Contract.owner_id: new_owner_id},
+                    synchronize_session=False
+                )
 
         db.commit()
         db.refresh(customer)
-        return customer
+        return customer, transferred_opportunities, transferred_contracts
 
     def mark_as_lost(
         self,

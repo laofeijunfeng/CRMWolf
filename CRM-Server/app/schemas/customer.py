@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator, ConfigDict
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import date, datetime
 from enum import Enum
 import enum
@@ -378,6 +378,10 @@ class CustomerClaimRequest(BaseModel):
 
 class CustomerAssignRequest(BaseModel):
     owner_id: str = Field(..., min_length=1, description="被分配人（负责人）系统用户ID")
+    opportunity_transfer_scope: Literal["none", "following", "all"] = Field(
+        "none",
+        description="关联商机移交范围：none=仅客户，following=跟进中商机，all=全部商机；移交商机会同步移交关联合同"
+    )
     remark: Optional[str] = Field(None, max_length=500, description="分配备注（说明分配原因等）")
     
     @field_validator('owner_id')
@@ -386,6 +390,13 @@ class CustomerAssignRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError('负责人ID不能为空')
         return v
+
+
+class CustomerAssignResponse(BaseModel):
+    customer: CustomerResponse = Field(..., description="移交后的客户信息")
+    transferred_opportunities: int = Field(..., description="已同步移交的商机数量")
+    transferred_contracts: int = Field(..., description="已同步移交的合同数量")
+    message: str = Field(..., description="响应消息")
 
 
 class OwnerOption(BaseModel):

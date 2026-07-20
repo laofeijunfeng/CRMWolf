@@ -5,9 +5,17 @@ from typing import List, Optional
 from datetime import date
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission, get_current_user_team, check_customer_delete_permission
+from app.core.deps import (
+    get_current_active_user,
+    require_permission,
+    get_current_user_team,
+    check_customer_delete_permission,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+)
 from app.crud.customer import customer_crud, contact_crud
 from app.crud.user import user_crud
+from app.crud.team import team_crud
 from app.crud.contract import contract_crud
 from app.crud.payment import payment_plan_crud
 from app.crud.invoice import invoice_application_crud, invoice_title_crud
@@ -19,7 +27,7 @@ from app.schemas.customer import (
     MessageResponse, StatisticsResponse, TrendResponse,
     CustomerStatusEnum, CustomerReturnRequest, CustomerReturnResponse,
     ReturnReasonEnum, CustomerClaimRequest, CustomerAssignRequest,
-    CustomerIndustryOption, CustomerLoseRequest
+    CustomerAssignResponse, CustomerIndustryOption, CustomerLoseRequest
 )
 from app.schemas.contract import ContractListResponse
 from app.schemas.common import PaginatedResponse
@@ -28,6 +36,24 @@ from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
 
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
+
+
+def _get_customer_or_404(db: Session, customer_id: int, team_id: int):
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="客户不存在"
+        )
+    return customer
+
+
+def _get_viewable_customer(db: Session, customer_id: int, team_id: int, current_user):
+    return check_customer_view_permission(customer_id, team_id, current_user, db)
+
+
+def _get_editable_customer(db: Session, customer_id: int, team_id: int, current_user):
+    return check_customer_edit_permission(customer_id, team_id, current_user, db)
 
 
 @router.get("/industries", response_model=List[CustomerIndustryOption], summary="获取客户所属行业选项", description="""
@@ -142,12 +168,7 @@ def get_customer_contracts(
 ):
     from app.models.contract import ContractStatus
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    _get_viewable_customer(db, customer_id, team_id, current_user)
 
     contracts, total = contract_crud.get_multi(
         db=db,
@@ -224,12 +245,7 @@ def get_customer_payment_plans(
 ):
     from app.models.payment import PaymentPlanStatus
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在或不属于当前团队"
-        )
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
     
     from app.models.payment import PaymentPlanStatus
     
@@ -352,12 +368,7 @@ def get_customer_invoices(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
     invoices, total = invoice_application_crud.list_applications(
         db=db,
@@ -410,12 +421,7 @@ def get_customer_invoice_titles(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    _get_viewable_customer(db, customer_id, team_id, current_user)
 
     invoice_titles = invoice_title_crud.get_by_customer_id(db, customer_id, team_id)
     return invoice_titles
@@ -649,14 +655,9 @@ def get_customer(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
-    contacts = contact_crud.get_by_customer_id(db, customer_id)
+    contacts = contact_crud.get_by_customer_id(db, customer_id, team_id)
     
     owner_info = None
     if customer.owner_id:
@@ -733,30 +734,7 @@ def update_customer(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.crud.permission import permission_crud
-
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
-
-    # 权限检查：edit:all 可编辑所有，edit:own 只能编辑自己的
-    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
-    permission_codes = {p.code for p in user_permissions}
-
-    has_edit_all = "customer:edit:all" in permission_codes
-    has_edit_own = "customer:edit:own" in permission_codes
-
-    if not has_edit_all:
-        if has_edit_own and customer.owner_id == str(current_user.id):
-            pass  # 允许编辑自己的客户
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能编辑自己负责的客户"
-            )
+    customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     if customer_update.account_name:
         existing_customer = customer_crud.get_by_name(db, customer_update.account_name, team_id)
@@ -779,12 +757,7 @@ async def update_customer_status(
 ):
     from app.services.feishu import feishu_service
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     new_status = status_update.status
     updated_customer = customer_crud.update_status(db, customer, new_status)
@@ -813,12 +786,7 @@ async def mark_customer_as_lost(
 ):
     from app.services.feishu import feishu_service
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     if customer.status == 2:
         raise HTTPException(
@@ -862,12 +830,7 @@ def create_contact(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    _get_editable_customer(db, customer_id, team_id, current_user)
 
     return contact_crud.create(db, contact, customer_id, team_id)
 
@@ -879,12 +842,7 @@ def get_contacts(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    _get_viewable_customer(db, customer_id, team_id, current_user)
 
     return contact_crud.get_by_customer_id(db, customer_id, team_id)
 
@@ -903,6 +861,7 @@ def update_contact(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="联系人不存在"
         )
+    _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
     return contact_crud.update(db, contact, contact_update)
 
@@ -920,6 +879,7 @@ def set_primary_contact(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="联系人不存在"
         )
+    _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
     return contact_crud.set_primary(db, contact, team_id)
 
@@ -937,6 +897,7 @@ def delete_contact(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="联系人不存在"
         )
+    _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
     try:
         contact_crud.delete(db, contact)
@@ -980,12 +941,7 @@ async def return_customer_to_pool(
 ):
     from app.crud.role import role_crud
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    customer = _get_customer_or_404(db, customer_id, team_id)
 
     if customer.owner_id is None:
         raise HTTPException(
@@ -1066,12 +1022,7 @@ def claim_customer(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    customer = _get_customer_or_404(db, customer_id, team_id)
 
     try:
         updated_customer = customer_crud.claim_customer(
@@ -1085,40 +1036,45 @@ def claim_customer(
         )
 
 
-@router.post("/{customer_id}/assign", response_model=CustomerResponse, summary="分配客户", description="系统管理员和销售总监可将客户分配给指定人员（无论客户是否有归属人）")
+@router.post("/{customer_id}/assign", response_model=CustomerAssignResponse, summary="移交客户", description="有 customer:assign 权限的用户可移交客户，并可选择同步移交关联商机及其合同")
 def assign_customer(
     customer_id: int,
     assign_data: CustomerAssignRequest,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
+    _current_user = Depends(require_permission("customer:assign")),
     db: Session = Depends(get_db)
 ):
-    from app.crud.role import role_crud
-
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-
-    is_admin = "TEAM_ADMIN" in role_codes
-    is_director = "SALES_DIRECTOR" in role_codes
-
-    if not (is_admin or is_director):
+    try:
+        target_user_id = int(assign_data.owner_id)
+    except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="只有系统管理员和销售总监可以分配客户"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="目标负责人ID无效"
         )
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
+    target_user = user_crud.get_by_id(db, target_user_id)
+    if not target_user or not team_crud.is_member(db, team_id, target_user_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
+            detail="目标负责人不存在或不属于当前团队"
         )
 
+    customer = _get_customer_or_404(db, customer_id, team_id)
+
     try:
-        updated_customer = customer_crud.assign_customer(
-            db, customer, assign_data.owner_id, team_id
+        updated_customer, transferred_opportunities, transferred_contracts = customer_crud.assign_customer(
+            db,
+            customer,
+            assign_data.owner_id,
+            team_id,
+            assign_data.opportunity_transfer_scope
         )
-        return updated_customer
+        return CustomerAssignResponse(
+            customer=updated_customer,
+            transferred_opportunities=transferred_opportunities,
+            transferred_contracts=transferred_contracts,
+            message="客户已移交"
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1135,12 +1091,7 @@ async def regenerate_profile(
 ):
     from app.services.customer_profile_service import customer_profile_service
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     # 重置状态为 PENDING
     customer_crud.update_profile_status(db, customer_id, "PENDING")

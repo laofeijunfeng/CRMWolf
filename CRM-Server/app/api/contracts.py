@@ -8,7 +8,15 @@ import logging
 import os
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, check_contract_edit_permission, check_contract_delete_permission, check_contract_view_permission
+from app.core.deps import (
+    get_current_active_user,
+    get_current_user_team,
+    check_contract_edit_permission,
+    check_contract_delete_permission,
+    check_contract_view_permission,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+)
 from app.crud.contract import contract_crud, ApprovalService
 from app.crud.customer import customer_crud, contact_crud
 from app.crud.opportunity import opportunity_crud
@@ -145,12 +153,7 @@ async def create_contract(
             detail="请上传合同邮件附件"
         )
 
-    customer = customer_crud.get_by_id(db, contract.customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    check_customer_edit_permission(contract.customer_id, team_id, current_user, db)
 
     opportunity = opportunity_crud.get_by_id(db, contract.opportunity_id, team_id)
     if not opportunity:
@@ -621,12 +624,7 @@ def get_contract(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id, team_id)
-    if not contract:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="合同不存在"
-        )
+    contract = check_contract_view_permission(contract_id, team_id, current_user, db)
     
     customer_info = None
     if contract.customer_id:
@@ -705,12 +703,7 @@ def get_customer_contracts(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
     
     contracts, total = contract_crud.get_by_customer_id(
         db=db,

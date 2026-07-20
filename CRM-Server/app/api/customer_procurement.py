@@ -2,10 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.deps import (
+    get_current_active_user,
+    get_current_user_team,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+)
 from app.models.user import User
 from app.schemas.procurement import MessageResponse
-from app.crud.customer import customer_crud
 from app.crud.procurement import procurement_method_crud
 
 
@@ -33,20 +37,7 @@ def set_customer_default_procurement_method(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # 检查客户是否存在且属于当前团队
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在或不属于当前团队"
-        )
-    
-    # 权限校验
-    if customer.owner_id != str(current_user.id) and not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="只有客户负责人或管理员可以设置"
-        )
+    customer = check_customer_edit_permission(customer_id, team_id, current_user, db)
     
     # 检查采购方式是否存在
     if procurement_method_id != 0:
@@ -85,13 +76,7 @@ def get_customer_default_procurement_method(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # 检查客户是否存在且属于当前团队
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在或不属于当前团队"
-        )
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
     
     if customer.default_procurement_method_id:
         procurement_method = procurement_method_crud.get(db, customer.default_procurement_method_id)

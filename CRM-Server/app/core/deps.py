@@ -824,6 +824,48 @@ def check_invoice_view_permission(
     )
 
 
+def check_invoice_edit_permission(
+    invoice_application_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    检查发票申请编辑权限（基于权限码）
+
+    权限规则：
+    - invoice:edit:all → 可编辑任何发票申请
+    - invoice:edit:own → 只能编辑自己申请的发票申请
+    """
+    from app.crud.invoice import invoice_application_crud
+
+    application = invoice_application_crud.get_by_id(db, invoice_application_id, team_id)
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="发票申请不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    if "invoice:edit:all" in permission_codes:
+        return application
+
+    if "invoice:edit:own" in permission_codes:
+        if application.applicant_id == str(current_user.id):
+            return application
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能编辑自己申请的发票申请"
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少权限: invoice:edit:own 或 invoice:edit:all"
+    )
+
+
 def check_payment_view_permission(
     payment_plan_id: int,
     team_id: int = Depends(get_current_user_team),

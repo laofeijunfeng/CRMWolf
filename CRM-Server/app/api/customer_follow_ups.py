@@ -3,8 +3,12 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, require_permission
-from app.crud.customer import customer_crud
+from app.core.deps import (
+    get_current_active_user,
+    get_current_user_team,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+)
 from app.crud.customer_follow_up import customer_follow_up_crud
 from app.schemas.customer_follow_up import (
     CustomerFollowUpCreate,
@@ -25,12 +29,7 @@ def create_follow_up(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在或不属于当前团队"
-        )
+    check_customer_edit_permission(customer_id, team_id, current_user, db)
 
     return customer_follow_up_crud.create(
         db=db,
@@ -53,12 +52,7 @@ def get_follow_ups(
 ):
     from sqlalchemy import text
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在或不属于当前团队"
-        )
+    check_customer_view_permission(customer_id, team_id, current_user, db)
 
     follow_ups, total = customer_follow_up_crud.get_by_customer_id(
         db=db,
@@ -134,13 +128,7 @@ def update_follow_up(
             detail="跟进记录不存在"
         )
 
-    # 验证跟进记录的客户属于当前团队
-    customer = customer_crud.get_by_id(db, follow_up.customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="跟进记录不存在或不属于当前团队"
-        )
+    check_customer_edit_permission(follow_up.customer_id, team_id, current_user, db)
 
     # 权限检查：只有创建者可以更新
     if follow_up.creator_id != str(current_user.id):
@@ -217,13 +205,7 @@ def update_next_time(
             detail="跟进记录不存在"
         )
 
-    # 验证跟进记录的客户属于当前团队
-    customer = customer_crud.get_by_id(db, follow_up.customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="跟进记录不存在或不属于当前团队"
-        )
+    check_customer_edit_permission(follow_up.customer_id, team_id, current_user, db)
 
     if next_time.next_follow_time:
         return customer_follow_up_crud.update_next_time(
@@ -249,13 +231,7 @@ def delete_follow_up(
             detail="跟进记录不存在"
         )
 
-    # 验证跟进记录的客户属于当前团队
-    customer = customer_crud.get_by_id(db, follow_up.customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="跟进记录不存在或不属于当前团队"
-        )
+    check_customer_edit_permission(follow_up.customer_id, team_id, current_user, db)
 
     if follow_up.creator_id != str(current_user.id):
         raise HTTPException(

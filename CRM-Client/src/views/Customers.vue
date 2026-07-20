@@ -21,7 +21,7 @@ import { ref, reactive, computed, onMounted, watchEffect, type Component } from 
 import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil } from 'lucide-vue-next'
+import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
 import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import AICustomerCreateDialog from '@/components/AICustomerCreateDialog.vue'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
+import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -66,6 +67,8 @@ const tableData = ref<CustomerTableRow[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const industryFilterOptions = ref<{ value: string; label: string }[]>([])
 const selectedCustomer = ref<CustomerResponse | null>(null)
+const transferCustomer = ref<CustomerResponse | null>(null)
+const transferDialogOpen = ref(false)
 const showAICustomerCreate = ref(false)
 const showCustomerForm = ref(false)
 const editingCustomerId = ref<number | null>(null)
@@ -269,6 +272,7 @@ const canEditOwnCustomer = computed(() => permissionStore.hasPermission('custome
 const canDeleteAllCustomer = computed(() => permissionStore.hasPermission('customer:delete:all'))
 const canDeleteOwnCustomer = computed(() => permissionStore.hasPermission('customer:delete:own'))
 const canReturnCustomer = computed(() => permissionStore.hasPermission('customer:return'))
+const canAssignCustomer = computed(() => permissionStore.hasPermission('customer:assign'))
 const canCreateOpportunity = computed(() => permissionStore.hasPermission('opportunity:create'))
 const canAccessPublic = computed(() => permissionStore.hasAnyPermission(['customer:view:own', 'customer:view:all']))
 
@@ -524,6 +528,23 @@ const handleReturn = (record: CustomerResponse): void => {
   returnForm.return_reason = '' as ReturnReasonEnum
   returnForm.detailed_reason = ''
   returnModalVisible.value = true
+}
+
+const handleTransfer = (record: CustomerResponse): void => {
+  transferCustomer.value = record
+  transferDialogOpen.value = true
+}
+
+const handleTransferDialogOpenChange = (open: boolean): void => {
+  transferDialogOpen.value = open
+  if (!open) {
+    transferCustomer.value = null
+  }
+}
+
+const handleTransferSuccess = (): void => {
+  handleTransferDialogOpenChange(false)
+  fetchCustomerList()
 }
 
 const handleReturnModalOk = async (): Promise<void> => {
@@ -801,6 +822,12 @@ watchEffect(() => {
           ]"
           :secondary-actions="[
             {
+              label: '移交客户',
+              handler: asCustomerActionHandler(handleTransfer),
+              visible: canAssignCustomer,
+              icon: UserRoundCheck as Component
+            },
+            {
               label: '退回公海',
               handler: asCustomerActionHandler(handleReturn),
               visible: canReturnRow(row),
@@ -955,6 +982,12 @@ watchEffect(() => {
           ]"
           :secondary-actions="[
             {
+              label: '移交客户',
+              handler: asCustomerActionHandler(handleTransfer),
+              visible: canAssignCustomer,
+              icon: UserRoundCheck as Component
+            },
+            {
               label: '退回公海',
               handler: asCustomerActionHandler(handleReturn),
               visible: canReturnRow(row),
@@ -1063,6 +1096,14 @@ watchEffect(() => {
       v-model:visible="sheetVisible"
       :customer-id="selectedCustomerId ?? null"
       @refresh="handleSheetRefresh"
+    />
+
+    <!-- 移交客户弹窗 -->
+    <CustomerTransferDialog
+      :open="transferDialogOpen"
+      :customer="transferCustomer"
+      @update:open="handleTransferDialogOpenChange"
+      @success="handleTransferSuccess"
     />
 
     <!-- 新建商机弹窗 -->

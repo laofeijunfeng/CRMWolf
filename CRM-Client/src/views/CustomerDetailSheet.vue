@@ -593,218 +593,220 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
       <!-- Content -->
       <ScrollArea class="flex-1">
           <div class="p-6 space-y-6">
-            <!-- 基本信息卡片 -->
-            <Card class="info-card">
-              <CardContent class="p-0">
-                <div class="p-4 border-b border-wolf-border-light-v2">
-                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">基本信息</h3>
-                </div>
-                <div class="p-4">
-                  <div class="attributes-grid">
-                    <div class="attribute-item">
-                      <div class="attribute-label">客户来源</div>
-                      <div class="attribute-value">{{ customer?.source || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">所在城市</div>
-                      <div class="attribute-value">{{ customer?.city || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">公司地址</div>
-                      <div class="attribute-value">{{ customer?.address || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">负责销售</div>
-                      <div class="attribute-value">{{ customer?.owner_info?.name || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">采购方式</div>
-                      <div class="attribute-value">{{ customer?.default_procurement_method_info?.name || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">授权状态</div>
-                      <div class="attribute-value">
-                        <span
-                          class="license-badge"
-                          :class="getLicenseStatusClass(customer?.license_type, customer?.license_expiry_date)"
-                        >
-                          {{ getLicenseStatusLabel(customer?.license_type, customer?.license_expiry_date) }}
-                        </span>
-                      </div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">授权到期</div>
-                      <div class="attribute-value">{{ formatDate(customer?.license_expiry_date) }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">创建人</div>
-                      <div class="attribute-value">{{ customer?.creator_info?.name || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">创建时间</div>
-                      <div class="attribute-value">{{ customer?.created_time ? formatDate(customer.created_time) : '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">最后修改</div>
-                      <div class="attribute-value">{{ customer?.last_modified_time ? formatDate(customer.last_modified_time) : '-' }}</div>
-                    </div>
+            <template v-if="activePanel === 'followup'">
+              <!-- 基本信息卡片 -->
+              <Card class="info-card">
+                <CardContent class="p-0">
+                  <div class="p-4 border-b border-wolf-border-light-v2">
+                    <h3 class="text-sm font-semibold text-wolf-text-primary-v2">基本信息</h3>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <!-- 热力值卡片 -->
-            <Card v-if="score" class="score-card">
-              <CardContent class="p-0">
-                <div class="p-4 border-b border-wolf-border-light-v2">
-                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">热力值</h3>
-                </div>
-                <div class="p-4">
-                  <div class="flex items-center gap-4">
-                    <div class="flex-shrink-0">
-                      <ScoreIndicator :score="score.score" mode="card" show-level />
-                    </div>
-                    <div class="flex-1">
-                      <Progress
-                        :model-value="score.score || 0"
-                        class="h-2"
-                        :style="{ '--progress-background': getScoreColorValue(score.score) }"
-                      />
-                      <div class="flex items-center gap-2 mt-3 text-xs text-wolf-text-tertiary-v2">
-                        <template v-for="(detail, idx) in score.details?.slice(0, 2)" :key="detail.id">
-                          <span>
-                            {{ detail.factor_name }}:
-                            <span :class="detail.score_change >= 0 ? 'text-wolf-success-text-v2' : 'text-wolf-danger-text-v2'">
-                              {{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}
-                            </span>
+                  <div class="p-4">
+                    <div class="attributes-grid">
+                      <div class="attribute-item">
+                        <div class="attribute-label">客户来源</div>
+                        <div class="attribute-value">{{ customer?.source || '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">所在城市</div>
+                        <div class="attribute-value">{{ customer?.city || '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">公司地址</div>
+                        <div class="attribute-value">{{ customer?.address || '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">负责销售</div>
+                        <div class="attribute-value">{{ customer?.owner_info?.name || '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">采购方式</div>
+                        <div class="attribute-value">{{ customer?.default_procurement_method_info?.name || '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">授权状态</div>
+                        <div class="attribute-value">
+                          <span
+                            class="license-badge"
+                            :class="getLicenseStatusClass(customer?.license_type, customer?.license_expiry_date)"
+                          >
+                            {{ getLicenseStatusLabel(customer?.license_type, customer?.license_expiry_date) }}
                           </span>
-                          <span v-if="idx < 1 && score.details?.length > 1">·</span>
-                        </template>
-                        <Button
-                          v-if="score.details?.length > 0"
-                          variant="link"
-                          size="sm"
-                          class="h-auto p-0 text-xs"
-                          @click="scoreDetailsDialogOpen = true"
-                        >
-                          详情
-                        </Button>
+                        </div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">授权到期</div>
+                        <div class="attribute-value">{{ formatDate(customer?.license_expiry_date) }}</div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">创建人</div>
+                        <div class="attribute-value">{{ customer?.creator_info?.name || '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">创建时间</div>
+                        <div class="attribute-value">{{ customer?.created_time ? formatDate(customer.created_time) : '-' }}</div>
+                      </div>
+                      <div class="attribute-item">
+                        <div class="attribute-label">最后修改</div>
+                        <div class="attribute-value">{{ customer?.last_modified_time ? formatDate(customer.last_modified_time) : '-' }}</div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
 
-            <!-- 客户档案卡片（Accordion） -->
-            <Accordion type="single" collapsible class="profile-accordion">
-              <AccordionItem value="profile">
-                <AccordionTrigger class="px-4 py-3 hover:no-underline">
-                  <div class="flex items-center gap-2 w-full">
-                    <span class="text-sm font-semibold text-wolf-text-primary-v2">客户档案</span>
-                    <Badge
-                      v-if="customer?.profile_status"
-                      variant="outline"
-                      class="ml-2"
-                    >
-                      {{ customer.profile_status === 'PENDING' ? '待生成' : customer.profile_status === 'GENERATING' ? '生成中' : customer.profile_status === 'COMPLETED' ? '已完成' : '失败' }}
-                    </Badge>
+              <!-- 热力值卡片 -->
+              <Card v-if="score" class="score-card">
+                <CardContent class="p-0">
+                  <div class="p-4 border-b border-wolf-border-light-v2">
+                    <h3 class="text-sm font-semibold text-wolf-text-primary-v2">热力值</h3>
                   </div>
-                </AccordionTrigger>
-                <AccordionContent class="px-4 pb-4">
-                  <!-- 生成中状态 -->
-                  <div v-if="customer?.profile_status === 'GENERATING'" class="flex items-center gap-3 py-4">
-                    <Loader2 class="w-5 h-5 animate-spin text-wolf-primary-v2" />
-                    <span class="text-sm text-wolf-text-secondary-v2">档案正在生成中，请稍后刷新查看...</span>
-                  </div>
-
-                  <!-- 待生成状态 -->
-                  <Empty v-else-if="customer?.profile_status === 'PENDING' || !customer?.profile_status" class="min-h-[160px] border-0 py-4">
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <RefreshCw class="h-5 w-5" aria-hidden="true" />
-                      </EmptyMedia>
-                      <EmptyTitle class="text-sm font-medium">暂无客户档案</EmptyTitle>
-                      <EmptyDescription>生成后可查看客户画像与分析摘要</EmptyDescription>
-                    </EmptyHeader>
-                    <EmptyContent>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      :disabled="regeneratingProfile"
-                      @click="handleRegenerateProfile"
-                    >
-                      <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
-                      生成档案
-                    </Button>
-                    </EmptyContent>
-                  </Empty>
-
-                  <!-- 失败状态 -->
-                  <div v-else-if="customer?.profile_status === 'FAILED'" class="flex flex-col gap-3 py-4">
-                    <div class="text-sm text-wolf-danger-text-v2">
-                      档案生成失败: {{ customer?.profile_error_message || '未知错误' }}
+                  <div class="p-4">
+                    <div class="flex items-center gap-4">
+                      <div class="flex-shrink-0">
+                        <ScoreIndicator :score="score.score" mode="card" show-level />
+                      </div>
+                      <div class="flex-1">
+                        <Progress
+                          :model-value="score.score || 0"
+                          class="h-2"
+                          :style="{ '--progress-background': getScoreColorValue(score.score) }"
+                        />
+                        <div class="flex items-center gap-2 mt-3 text-xs text-wolf-text-tertiary-v2">
+                          <template v-for="(detail, idx) in score.details?.slice(0, 2)" :key="detail.id">
+                            <span>
+                              {{ detail.factor_name }}:
+                              <span :class="detail.score_change >= 0 ? 'text-wolf-success-text-v2' : 'text-wolf-danger-text-v2'">
+                                {{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}
+                              </span>
+                            </span>
+                            <span v-if="idx < 1 && score.details?.length > 1">·</span>
+                          </template>
+                          <Button
+                            v-if="score.details?.length > 0"
+                            variant="link"
+                            size="sm"
+                            class="h-auto p-0 text-xs"
+                            @click="scoreDetailsDialogOpen = true"
+                          >
+                            详情
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      :disabled="regeneratingProfile"
-                      @click="handleRegenerateProfile"
-                    >
-                      <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
-                      重新生成
-                    </Button>
                   </div>
+                </CardContent>
+              </Card>
 
-                  <!-- 已完成状态 -->
-                  <div v-else-if="customer?.profile_status === 'COMPLETED'" class="space-y-4">
-                    <!-- 企业背景 -->
-                    <div v-if="customer?.company_background" class="profile-item">
-                      <div class="profile-label">企业背景</div>
-                      <div class="profile-value">{{ customer.company_background }}</div>
-                    </div>
-
-                    <!-- 公司网站 -->
-                    <div v-if="customer?.company_website" class="profile-item">
-                      <div class="profile-label">公司网站</div>
-                      <a
-                        :href="customer.company_website"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="profile-link"
+              <!-- 客户档案卡片（Accordion） -->
+              <Accordion type="single" collapsible class="profile-accordion">
+                <AccordionItem value="profile">
+                  <AccordionTrigger class="px-4 py-3 hover:no-underline">
+                    <div class="flex items-center gap-2 w-full">
+                      <span class="text-sm font-semibold text-wolf-text-primary-v2">客户档案</span>
+                      <Badge
+                        v-if="customer?.profile_status"
+                        variant="outline"
+                        class="ml-2"
                       >
-                        {{ customer.company_website }}
-                      </a>
+                        {{ customer.profile_status === 'PENDING' ? '待生成' : customer.profile_status === 'GENERATING' ? '生成中' : customer.profile_status === 'COMPLETED' ? '已完成' : '失败' }}
+                      </Badge>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent class="px-4 pb-4">
+                    <!-- 生成中状态 -->
+                    <div v-if="customer?.profile_status === 'GENERATING'" class="flex items-center gap-3 py-4">
+                      <Loader2 class="w-5 h-5 animate-spin text-wolf-primary-v2" />
+                      <span class="text-sm text-wolf-text-secondary-v2">档案正在生成中，请稍后刷新查看...</span>
                     </div>
 
-                    <!-- 主营业务 -->
-                    <div v-if="customer?.main_business" class="profile-item">
-                      <div class="profile-label">主营业务</div>
-                      <div class="profile-value">{{ customer.main_business }}</div>
-                    </div>
-
-                    <!-- 项目背景 -->
-                    <div v-if="customer?.project_background" class="profile-item">
-                      <div class="profile-label">项目背景</div>
-                      <div class="profile-value">{{ customer.project_background }}</div>
-                    </div>
-
-                    <!-- 重新生成按钮 -->
-                    <div class="pt-2">
+                    <!-- 待生成状态 -->
+                    <Empty v-else-if="customer?.profile_status === 'PENDING' || !customer?.profile_status" class="min-h-[160px] border-0 py-4">
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon">
+                          <RefreshCw class="h-5 w-5" aria-hidden="true" />
+                        </EmptyMedia>
+                        <EmptyTitle class="text-sm font-medium">暂无客户档案</EmptyTitle>
+                        <EmptyDescription>生成后可查看客户画像与分析摘要</EmptyDescription>
+                      </EmptyHeader>
+                      <EmptyContent>
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
                         :disabled="regeneratingProfile"
                         @click="handleRegenerateProfile"
                       >
                         <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
-                        重新生成档案
+                        生成档案
+                      </Button>
+                      </EmptyContent>
+                    </Empty>
+
+                    <!-- 失败状态 -->
+                    <div v-else-if="customer?.profile_status === 'FAILED'" class="flex flex-col gap-3 py-4">
+                      <div class="text-sm text-wolf-danger-text-v2">
+                        档案生成失败: {{ customer?.profile_error_message || '未知错误' }}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        :disabled="regeneratingProfile"
+                        @click="handleRegenerateProfile"
+                      >
+                        <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
+                        重新生成
                       </Button>
                     </div>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+
+                    <!-- 已完成状态 -->
+                    <div v-else-if="customer?.profile_status === 'COMPLETED'" class="space-y-4">
+                      <!-- 企业背景 -->
+                      <div v-if="customer?.company_background" class="profile-item">
+                        <div class="profile-label">企业背景</div>
+                        <div class="profile-value">{{ customer.company_background }}</div>
+                      </div>
+
+                      <!-- 公司网站 -->
+                      <div v-if="customer?.company_website" class="profile-item">
+                        <div class="profile-label">公司网站</div>
+                        <a
+                          :href="customer.company_website"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="profile-link"
+                        >
+                          {{ customer.company_website }}
+                        </a>
+                      </div>
+
+                      <!-- 主营业务 -->
+                      <div v-if="customer?.main_business" class="profile-item">
+                        <div class="profile-label">主营业务</div>
+                        <div class="profile-value">{{ customer.main_business }}</div>
+                      </div>
+
+                      <!-- 项目背景 -->
+                      <div v-if="customer?.project_background" class="profile-item">
+                        <div class="profile-label">项目背景</div>
+                        <div class="profile-value">{{ customer.project_background }}</div>
+                      </div>
+
+                      <!-- 重新生成按钮 -->
+                      <div class="pt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          :disabled="regeneratingProfile"
+                          @click="handleRegenerateProfile"
+                        >
+                          <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
+                          重新生成档案
+                        </Button>
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </template>
 
             <!-- 根据 activePanel 显示对应面板 -->
             <FollowUpPanel

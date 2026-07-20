@@ -1,12 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from app.core.deps import require_permission
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import date
 import logging
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, require_permission
+from app.core.deps import (
+    get_current_active_user,
+    get_current_user_team,
+    require_permission,
+    check_contract_edit_permission,
+    check_contract_view_permission,
+    check_payment_view_permission,
+)
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.payment import payment_plan_crud, payment_record_crud, query_pending_approval_me
 from app.crud.contract import contract_crud
@@ -80,12 +86,7 @@ def create_payment_plans(
     current_user = Depends(require_permission("payment:plan:create")),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id, team_id)
-    if not contract:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="合同不存在"
-        )
+    contract = check_contract_edit_permission(contract_id, team_id, current_user, db)
 
     from app.models.contract import ContractStatus
     if contract.status not in [ContractStatus.SIGNED, ContractStatus.EFFECTIVE]:
@@ -117,12 +118,7 @@ def get_payment_plans(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_id(db, contract_id, team_id)
-    if not contract:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="合同不存在"
-        )
+    check_contract_view_permission(contract_id, team_id, current_user, db)
 
     plans = payment_plan_crud.get_by_contract_id(db, contract_id, status)
 
@@ -342,13 +338,7 @@ def get_payment_summary(
     from app.models.customer import Customer
     from app.models.opportunity import Opportunity
 
-    contract = db.query(Contract).filter(Contract.id == contract_id, Contract.team_id == team_id).first()
-    
-    if not contract:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="合同不存在"
-        )
+    contract = check_contract_view_permission(contract_id, team_id, current_user, db)
     
     plans = payment_plan_crud.get_by_contract_id(db, contract_id)
     
@@ -405,12 +395,7 @@ def get_payment_plan_detail(
     - PaymentRecord 列表
     - latest_approval：最新回款记录的审批信息
     """
-    plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
-    if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="回款计划不存在"
-        )
+    plan = check_payment_view_permission(plan_id, team_id, current_user, db)
 
     # 从关联对象获取信息（不修改 plan 对象）
     contract_name = None
@@ -590,12 +575,7 @@ def update_payment_plan(
     current_user = Depends(require_permission("payment:plan:edit")),
     db: Session = Depends(get_db)
 ):
-    plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
-    if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="回款计划不存在"
-        )
+    plan = check_payment_view_permission(plan_id, team_id, current_user, db)
 
     if plan.status in [PaymentPlanStatus.COMPLETED]:
         raise HTTPException(
@@ -628,6 +608,7 @@ def delete_payment_plan(
     db: Session = Depends(get_db)
 ):
     try:
+        check_payment_view_permission(plan_id, team_id, current_user, db)
         success = payment_plan_crud.delete(db, plan_id, team_id)
         if not success:
             raise HTTPException(
@@ -657,12 +638,7 @@ async def create_payment_record(
     2. 创建回款记录（CRUD 层）
     3. 发送审批通知（API 层 - 异步）
     """
-    plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
-    if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="回款计划不存在"
-        )
+    plan = check_payment_view_permission(plan_id, team_id, current_user, db)
 
     if plan.status == PaymentPlanStatus.COMPLETED:
         raise HTTPException(
@@ -744,12 +720,7 @@ def get_payment_records(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    plan = payment_plan_crud.get_by_id(db, plan_id, team_id)
-    if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="回款计划不存在"
-        )
+    check_payment_view_permission(plan_id, team_id, current_user, db)
     
     return payment_record_crud.get_by_plan_id(db, plan_id)
 
@@ -779,6 +750,7 @@ def update_payment_record(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款记录不存在"
         )
+    check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
 
     # Task 8.1: 检查审批状态 - 只有驳回的记录才能更新
     # 查询该回款记录关联的审批
@@ -812,6 +784,14 @@ def delete_payment_record(
     db: Session = Depends(get_db)
 ):
     try:
+        record = payment_record_crud.get_by_id(db, record_id, team_id)
+        if not record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="回款记录不存在"
+            )
+        check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
+
         success = payment_record_crud.delete(db, record_id, team_id)
         if not success:
             raise HTTPException(
@@ -1143,6 +1123,7 @@ def submit_payment_approval(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款记录不存在"
         )
+    check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
 
     # 匹配 PAYMENT 审批流程
     flow, error_msg = approval_flow_crud.match_flow_generic(

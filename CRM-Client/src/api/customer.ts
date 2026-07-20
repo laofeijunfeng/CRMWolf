@@ -331,6 +331,21 @@ export interface CustomerClaimRequest {
   owner_id: string
 }
 
+export type CustomerOpportunityTransferScope = 'none' | 'following' | 'all'
+
+export interface CustomerAssignRequest {
+  owner_id: string
+  opportunity_transfer_scope: CustomerOpportunityTransferScope
+  remark?: string
+}
+
+export interface CustomerAssignResponse {
+  customer: CustomerResponse
+  transferred_opportunities: number
+  transferred_contracts: number
+  message: string
+}
+
 export interface CustomerLoseRequest {
   loss_reason: string
 }
@@ -453,6 +468,9 @@ const customerApi = {
 
   claimCustomer: (customerId: number, data: CustomerClaimRequest): Promise<CustomerResponse> =>
     api.post('/v1/customers/' + customerId + '/claim', data, undefined, CustomerResponseSchema),
+
+  assignCustomer: (customerId: number, data: CustomerAssignRequest): Promise<CustomerAssignResponse> =>
+    api.post<CustomerAssignResponse>('/v1/customers/' + customerId + '/assign', data),
 
   getPublicCustomers: (params?: PublicCustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
     api.get<CustomerResponse[] | PaginatedResponse<CustomerResponse>>('/v1/customers/public/list', { params }),

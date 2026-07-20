@@ -13,7 +13,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
-from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.deps import (
+    get_current_active_user,
+    get_current_user_team,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+)
 from app.models.user import User
 
 # 已有功能（MagicWand）
@@ -33,7 +38,8 @@ logger = logging.getLogger(__name__)
 async def parse_customer_follow_up(
     request: CustomerAIParseRequest,
     current_user: User = Depends(get_current_active_user),
-    team_id: int = Depends(get_current_user_team)
+    team_id: int = Depends(get_current_user_team),
+    db: Session = Depends(get_db)
 ):
     """
     AI 解析客户跟进信息（SSE 流式响应）
@@ -44,6 +50,8 @@ async def parse_customer_follow_up(
     - parsed: 解析完成，返回结构化信息
     - error: 错误信息
     """
+    check_customer_view_permission(request.customer_id, team_id, current_user, db)
+
     async def generate_sse():
         db = SessionLocal()
         try:
@@ -87,16 +95,9 @@ async def create_customer_follow_up(
     处理 next_action 和 next_follow_time（相对时间转换为具体日期）
     """
     from app.crud.customer_follow_up import customer_follow_up_crud
-    from app.crud.customer import customer_crud
     from app.schemas.customer_follow_up import CustomerFollowUpCreate
 
-    # 获取客户信息并验证团队归属
-    customer = customer_crud.get_by_id(db, request.customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在或不属于当前团队"
-        )
+    customer = check_customer_edit_permission(request.customer_id, team_id, current_user, db)
 
     # 推断跟进方式
     method_str = "其他"

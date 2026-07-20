@@ -4,7 +4,16 @@ from typing import List, Optional
 from datetime import date
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission, get_current_user_team, check_opportunity_edit_permission, check_opportunity_delete_permission
+from app.core.deps import (
+    get_current_active_user,
+    require_permission,
+    get_current_user_team,
+    check_opportunity_edit_permission,
+    check_opportunity_delete_permission,
+    check_opportunity_view_permission,
+    check_customer_edit_permission,
+    check_customer_view_permission,
+)
 from app.crud.opportunity import opportunity_crud, opportunity_stage_crud
 from app.crud.customer import customer_crud
 from app.schemas.opportunity import (
@@ -61,12 +70,7 @@ def create_opportunity(
     current_user = Depends(require_permission("opportunity:create")),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, opportunity.customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    check_customer_edit_permission(opportunity.customer_id, team_id, current_user, db)
 
     from app.crud.user import user_crud
 
@@ -288,12 +292,7 @@ def get_available_opportunities_for_contract(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
-    if not customer:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="客户不存在"
-        )
+    check_customer_view_permission(customer_id, team_id, current_user, db)
 
     opportunities = opportunity_crud.get_available_for_contract(db, customer_id, team_id)
     
@@ -374,12 +373,7 @@ def get_opportunity(
     from app.schemas.opportunity import CurrentStageSnapshotInfo
     from app.schemas.customer import ProcurementMethodInfo
 
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
+    opportunity = check_opportunity_view_permission(opportunity_id, team_id, current_user, db)
 
     customer = customer_crud.get_by_id(db, opportunity.customer_id, team_id)
     
@@ -503,12 +497,7 @@ def get_opportunity_procurement_stages(
     from sqlalchemy import text
     from app.crud.procurement import procurement_stage_template_crud
 
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
+    opportunity = check_opportunity_view_permission(opportunity_id, team_id, current_user, db)
     
     if not opportunity.procurement_method_id:
         return []
@@ -661,12 +650,7 @@ async def mark_opportunity_as_won(
     current_user = Depends(require_permission("opportunity:win")),
     db: Session = Depends(get_db)
 ):
-    db_opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not db_opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
+    db_opportunity = check_opportunity_edit_permission(opportunity_id, team_id, current_user, db)
     _ensure_opportunity_approved(db_opportunity)
 
     updated_opportunity = opportunity_crud.mark_as_won(db, db_opportunity, win_data, str(current_user.id))
@@ -691,12 +675,7 @@ async def mark_opportunity_as_lost(
     current_user = Depends(require_permission("opportunity:lose")),
     db: Session = Depends(get_db)
 ):
-    db_opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not db_opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
+    db_opportunity = check_opportunity_edit_permission(opportunity_id, team_id, current_user, db)
     _ensure_opportunity_approved(db_opportunity)
 
     updated_opportunity = opportunity_crud.mark_as_lost(db, db_opportunity, lose_data, str(current_user.id))
