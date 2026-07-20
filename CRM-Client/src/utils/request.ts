@@ -1,8 +1,10 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { useUserStore } from '@/stores/user'
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+
 const axiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
+  baseURL: apiBaseUrl === undefined || apiBaseUrl === null || apiBaseUrl.trim() === '' ? '/api' : apiBaseUrl,
   timeout: 30000, // 普通请求超时 30 秒（AI SSE 不使用 axios）
 })
 
