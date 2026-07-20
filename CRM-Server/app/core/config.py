@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = ""
     DB_PASSWORD_FILE: str = ""  # Docker secrets 文件路径
     DB_NAME: str = "crm_db"
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
 
     # 兼容旧配置（如果直接传入 DATABASE_URL，优先使用）
     DATABASE_URL: str = ""
