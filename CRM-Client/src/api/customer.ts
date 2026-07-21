@@ -114,6 +114,7 @@ export interface CustomerCreate {
   company_scale?: string | null
   source?: string | null
   default_procurement_method_id?: number | null
+  primary_contact?: ContactCreate | null
 }
 
 export interface CustomerUpdate {
@@ -256,8 +257,8 @@ export interface CustomerDetailResponse {
 
 export interface ContactCreate {
   name: string
-  gender?: string | null
-  position?: string | null
+  gender: string
+  position: string
   is_decision_maker?: boolean
   mobile: string
   email?: string | null

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useForm } from 'vee-validate'
+import { useForm, useField } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { toast } from 'vue-sonner'
 import {
@@ -38,6 +38,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Label } from '@/components/ui/label'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
@@ -80,9 +82,14 @@ const { handleSubmit, resetForm, setValues, values } = useForm<CustomerForm | Cu
     address: '',
     company_scale: undefined,
     source: undefined,
-    default_procurement_method_id: undefined
+    default_procurement_method_id: undefined,
+    contact_name: '',
+    contact_mobile: '',
+    contact_position: '',
+    contact_gender: undefined
   } as unknown as CustomerCreateForm
 })
+const { value: contactGenderValue, errorMessage: contactGenderError } = useField<string>('contact_gender')
 
 // State
 const submitting = ref(false)
@@ -128,6 +135,10 @@ function normalizeCustomerSource(value: string | null): CustomerForm['source'] |
     : undefined
 }
 
+function mapContactGenderToApi(gender: string): '1' | '2' {
+  return gender === '女' ? '2' : '1'
+}
+
 // Load customer detail in edit mode
 watch([(): boolean => props.open, (): number | undefined => props.customerId], async ([open, customerId]): Promise<void> => {
   if (open) {
@@ -168,7 +179,11 @@ watch([(): boolean => props.open, (): number | undefined => props.customerId], a
         address: '',
         company_scale: undefined,
         source: undefined,
-        default_procurement_method_id: undefined
+        default_procurement_method_id: undefined,
+        contact_name: '',
+        contact_mobile: '',
+        contact_position: '',
+        contact_gender: undefined
       } as unknown as CustomerCreateForm
     })
     isDirty.value = false
@@ -188,7 +203,14 @@ const onSubmit = handleSubmit(async (formValues): Promise<void> => {
         address: createData.address !== '' && createData.address !== undefined ? createData.address : null,
         company_scale: createData.company_scale ?? null,
         source: createData.source ?? null,
-        default_procurement_method_id: createData.default_procurement_method_id ?? null
+        default_procurement_method_id: createData.default_procurement_method_id ?? null,
+        primary_contact: {
+          name: createData.contact_name,
+          mobile: createData.contact_mobile,
+          position: createData.contact_position,
+          gender: mapContactGenderToApi(createData.contact_gender),
+          is_decision_maker: false
+        }
       }
       await customerApi.createCustomer(data)
       toast.success('客户创建成功')
@@ -245,7 +267,7 @@ function continueEditing(): void {
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent>
+    <DialogContent class="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建客户' : '编辑客户' }}</DialogTitle>
         <DialogDescription class="sr-only">填写客户信息</DialogDescription>
@@ -379,6 +401,77 @@ function continueEditing(): void {
               <FormMessage />
             </FormItem>
           </FormField>
+        </div>
+
+        <div v-if="mode === 'create'" class="space-y-4 pt-4 border-t">
+          <h3 class="text-sm font-medium text-muted-foreground">联系人信息</h3>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <FormField v-slot="{ componentField }" name="contact_name">
+              <FormItem>
+                <FormLabel>联系人姓名 <span class="text-destructive">*</span></FormLabel>
+                <FormControl>
+                  <Input
+                    v-bind="componentField as any"
+                    autocomplete="name"
+                    class="h-11 sm:h-8"
+                    placeholder="请输入联系人姓名"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+
+            <FormField v-slot="{ componentField }" name="contact_mobile">
+              <FormItem>
+                <FormLabel>联系电话 <span class="text-destructive">*</span></FormLabel>
+                <FormControl>
+                  <Input
+                    v-bind="componentField as any"
+                    type="tel"
+                    autocomplete="tel"
+                    class="h-11 sm:h-8"
+                    placeholder="请输入联系电话"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+
+            <FormField v-slot="{ componentField }" name="contact_position">
+              <FormItem>
+                <FormLabel>职位 <span class="text-destructive">*</span></FormLabel>
+                <FormControl>
+                  <Input
+                    v-bind="componentField as any"
+                    class="h-11 sm:h-8"
+                    placeholder="请输入职位"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
+
+            <div class="space-y-2">
+              <Label class="text-sm font-medium">性别 <span class="text-destructive">*</span></Label>
+              <RadioGroup
+                v-model="contactGenderValue"
+                class="flex h-11 items-center gap-4 sm:h-8"
+              >
+                <div class="flex items-center space-x-2">
+                  <RadioGroupItem id="customer-contact-gender-male" value="男" />
+                  <Label for="customer-contact-gender-male" class="cursor-pointer">男</Label>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <RadioGroupItem id="customer-contact-gender-female" value="女" />
+                  <Label for="customer-contact-gender-female" class="cursor-pointer">女</Label>
+                </div>
+              </RadioGroup>
+              <p v-if="contactGenderError" class="text-sm font-medium text-destructive">
+                {{ contactGenderError }}
+              </p>
+            </div>
+          </div>
         </div>
 
         <!-- Profile Section (only in edit mode) -->

@@ -81,4 +81,22 @@ describe('DataTable row interaction', () => {
 
     expect(wrapper.emitted('row-click')).toHaveLength(1)
   })
+
+  it('emits kebab-case page size updates and resets to the first page', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns,
+        data,
+        total: 200,
+        page: 3,
+        pageSize: 20
+      }
+    })
+
+    await wrapper.get('.page-size-select').setValue('100')
+
+    expect(wrapper.emitted('update:page-size')).toEqual([[100]])
+    expect(wrapper.emitted('update:page')).toEqual([[1]])
+    expect(wrapper.emitted('update:pageSize')).toBeUndefined()
+  })
 })

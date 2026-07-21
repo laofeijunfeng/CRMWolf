@@ -121,7 +121,7 @@ const props = withDefaults(defineProps<Props>(), {
 // ==================== Emits ====================
 const emit = defineEmits<{
   'update:page': [value: number]
-  'update:pageSize': [value: number]
+  'update:page-size': [value: number]
   'row-click': [row: T]
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
@@ -264,7 +264,7 @@ function handlePageChange(p: number): void {
 
 function handlePageSizeChange(event: Event): void {
   const target = event.target as HTMLSelectElement
-  emit('update:pageSize', parseInt(target.value, 10))
+  emit('update:page-size', parseInt(target.value, 10))
   emit('update:page', 1)  // 重置到第一页
 }
 

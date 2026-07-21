@@ -97,6 +97,20 @@ export const customerCreateSchema = customerFormSchema.pick({
   company_scale: true,
   source: true,
   default_procurement_method_id: true
+}).extend({
+  contact_name: z.string()
+    .min(1, '请输入联系人姓名')
+    .max(50, '联系人姓名不能超过50字'),
+  contact_mobile: z.string()
+    .min(1, '请输入联系电话')
+    .regex(/^1[3-9]\d{9}$/, '请输入正确的手机号'),
+  contact_position: z.string()
+    .min(1, '请输入职位')
+    .max(50, '职位不能超过50字'),
+  contact_gender: z.enum(['男', '女'], {
+    required_error: '请选择性别',
+    invalid_type_error: '请选择性别'
+  })
 })
 
 export type CustomerCreateForm = z.infer<typeof customerCreateSchema>

@@ -86,8 +86,8 @@ class GenderEnum(str, Enum):
 
 class ContactBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="联系人姓名")
-    gender: Optional[GenderEnum] = Field(None, description="性别：0:未知, 1:男, 2:女")
-    position: Optional[str] = Field(None, max_length=100, description="职务（如：CTO、采购经理等）")
+    gender: GenderEnum = Field(..., description="性别：1:男, 2:女")
+    position: str = Field(..., min_length=1, max_length=100, description="职务（如：CTO、采购经理等）")
     is_decision_maker: bool = Field(False, description="是否关键决策人（影响销售策略）")
     mobile: str = Field(..., min_length=1, max_length=20, description="手机号（必填，主要联系方式）")
     email: Optional[str] = Field(None, max_length=100, description="邮箱地址")
@@ -109,6 +109,13 @@ class ContactBase(BaseModel):
             raise ValueError('手机号不能为空')
         return v.strip() if v else v
 
+    @field_validator('position')
+    @classmethod
+    def position_must_not_be_empty(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('职位不能为空')
+        return v.strip() if v else v
+
 
 class ContactCreate(ContactBase):
     pass
@@ -117,7 +124,7 @@ class ContactCreate(ContactBase):
 class ContactUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="联系人姓名")
     gender: Optional[GenderEnum] = Field(None, description="性别")
-    position: Optional[str] = Field(None, max_length=100, description="职务")
+    position: Optional[str] = Field(None, min_length=1, max_length=100, description="职务")
     is_decision_maker: Optional[bool] = Field(None, description="是否关键决策人")
     mobile: Optional[str] = Field(None, min_length=1, max_length=20, description="手机号")
     email: Optional[str] = Field(None, max_length=100, description="邮箱")
@@ -137,6 +144,13 @@ class ContactUpdate(BaseModel):
     def mobile_must_not_be_empty(cls, v):
         if v is not None and (not v or not v.strip()):
             raise ValueError('手机号不能为空')
+        return v.strip() if v else v
+
+    @field_validator('position')
+    @classmethod
+    def position_must_not_be_empty(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('职位不能为空')
         return v.strip() if v else v
 
 
@@ -184,6 +198,7 @@ class CustomerBase(BaseModel):
 class CustomerCreate(CustomerBase):
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID，不传则默认为创建人")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
+    primary_contact: Optional[ContactCreate] = Field(None, description="创建客户时同步创建的主联系人")
 
 
 class CustomerUpdate(BaseModel):

@@ -142,7 +142,7 @@ class CustomerCRUD:
     def create(self, db: Session, obj_in: CustomerCreate, creator_id: str, team_id: int, operator_name: Optional[str] = None) -> Customer:
         from app.services.operation_log_service import operation_log_service
 
-        customer_data = obj_in.model_dump()
+        customer_data = obj_in.model_dump(exclude={'primary_contact'})
         customer_data['creator_id'] = creator_id
         customer_data['status'] = 0
         customer_data['team_id'] = team_id

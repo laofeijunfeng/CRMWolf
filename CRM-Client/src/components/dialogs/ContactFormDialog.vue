@@ -49,8 +49,11 @@ import customerApi, { type ContactResponse, type ContactCreate, type ContactUpda
 const schema = toTypedSchema(
   z.object({
     name: z.string().min(1, '请输入姓名').max(50, '姓名不能超过50字'),
-    gender: z.enum(['男', '女']).optional(),
-    position: z.string().max(50, '职位不能超过50字').optional(),
+    gender: z.enum(['男', '女'], {
+      required_error: '请选择性别',
+      invalid_type_error: '请选择性别'
+    }),
+    position: z.string().min(1, '请输入职位').max(50, '职位不能超过50字'),
     is_decision_maker: z.boolean().optional(),
     mobile: z.string().min(1, '请输入手机号').regex(/^1[3-9]\d{9}$/, '请输入正确的手机号'),
     email: z.string().email('请输入正确的邮箱').optional().or(z.literal('')),
@@ -80,7 +83,6 @@ const { handleSubmit, resetForm, setValues, values } = useForm({
   validationSchema: schema,
   initialValues: {
     name: '',
-    gender: undefined,
     position: '',
     is_decision_maker: false,
     mobile: '',
@@ -92,8 +94,14 @@ const { handleSubmit, resetForm, setValues, values } = useForm({
 })
 
 // Use useField for RadioGroup and Switch to handle type compatibility
-const { value: genderValue } = useField<string>('gender', undefined, { initialValue: '' })
+const { value: genderValue, errorMessage: genderError } = useField<string | undefined>('gender')
 const { value: isDecisionMakerValue } = useField<boolean>('is_decision_maker')
+const genderRadioValue = computed({
+  get: () => genderValue.value ?? '',
+  set: (value: string) => {
+    genderValue.value = value || undefined
+  }
+})
 
 // State
 const submitting = ref(false)
@@ -115,10 +123,10 @@ function mapContactGenderToForm(gender: number | null): '男' | '女' | undefine
   return undefined
 }
 
-function mapContactGenderToApi(gender: string | undefined): '1' | '2' | null {
+function mapContactGenderToApi(gender: string): '1' | '2' {
   if (gender === '男') return '1'
   if (gender === '女') return '2'
-  return null
+  return '1'
 }
 
 // Watch for form changes
@@ -131,9 +139,10 @@ watch(() => props.open, (newOpen) => {
   if (newOpen) {
     if (props.contact) {
       // Edit mode: populate form with contact data
+      const formGender = mapContactGenderToForm(props.contact.gender)
       setValues({
         name: props.contact.name,
-        gender: mapContactGenderToForm(props.contact.gender),
+        ...(formGender ? { gender: formGender } : {}),
         position: props.contact.position ?? '',
         is_decision_maker: props.contact.is_decision_maker,
         mobile: props.contact.mobile,
@@ -142,12 +151,12 @@ watch(() => props.open, (newOpen) => {
         remark: props.contact.remark ?? '',
         reports_to: props.contact.reports_to?.toString() ?? null
       })
+      genderValue.value = formGender
     } else {
       // Create mode: reset form
       resetForm({
         values: {
           name: '',
-          gender: undefined,
           position: '',
           is_decision_maker: false,
           mobile: '',
@@ -157,6 +166,7 @@ watch(() => props.open, (newOpen) => {
           reports_to: null
         }
       })
+      genderValue.value = undefined
     }
     // Reset dirty state immediately (no setTimeout)
     isDirty.value = false
@@ -244,9 +254,9 @@ function continueEditing(): void {
 
         <!-- Gender (RadioGroup) -->
         <div class="space-y-2">
-          <Label class="text-sm font-medium">性别</Label>
+          <Label class="text-sm font-medium">性别 <span class="text-destructive">*</span></Label>
           <RadioGroup
-            v-model="genderValue"
+            v-model="genderRadioValue"
             class="flex gap-4"
           >
             <div class="flex items-center space-x-2">
@@ -258,12 +268,15 @@ function continueEditing(): void {
               <Label for="gender-female" class="cursor-pointer">女</Label>
             </div>
           </RadioGroup>
+          <p v-if="genderError" class="text-sm font-medium text-destructive">
+            {{ genderError }}
+          </p>
         </div>
 
         <!-- Position -->
         <FormField v-slot="{ componentField }" name="position">
           <FormItem>
-            <FormLabel>职位</FormLabel>
+            <FormLabel>职位 <span class="text-destructive">*</span></FormLabel>
             <FormControl>
               <Input
                 v-bind="componentField as any"

@@ -56,7 +56,6 @@ const schema = toTypedSchema(
       const parsed = Number(value)
       return Number.isInteger(parsed) && parsed > 0
     }, '请选择客户'),
-    opportunity_name: z.string().min(1, '请输入商机名称').max(100, '商机名称不能超过100字'),
     total_amount: z.coerce.number().min(0, '金额不能为负数'),
     user_count: z.coerce.number().int('用户数必须为整数').min(1, '用户数至少为1'),
     license_type: z.nativeEnum(LicenseType, { errorMap: () => ({ message: '请选择授权类型' }) }),
@@ -109,7 +108,6 @@ const { handleSubmit, resetForm, values, setFieldValue } = useForm({
   validationSchema: schema,
   initialValues: {
     customer_id: '',
-    opportunity_name: '',
     total_amount: 0,
     user_count: 1,
     license_type: LicenseType.SUBSCRIPTION,
@@ -195,9 +193,15 @@ const setLockedCustomerOption = (): void => {
   customers.value = [lockedCustomer]
 }
 
+const getOpportunityCustomerOption = (opportunity: Opportunity): CustomerOption => ({
+  id: opportunity.customer_id,
+  account_name: opportunity.customer_info?.account_name ?? opportunity.customer_name ?? `客户 #${opportunity.customer_id}`
+})
+
 const selectedCustomerName = computed<string>(() => {
   if (props.customerLocked) {
-    return getLockedCustomerOption()?.account_name ?? ''
+    const lockedCustomer = getLockedCustomerOption()
+    if (lockedCustomer !== null) return lockedCustomer.account_name
   }
 
   const customerId = Number(values.customer_id)
@@ -206,6 +210,16 @@ const selectedCustomerName = computed<string>(() => {
 
   return ''
 })
+
+const buildOpportunityName = (formValues: typeof values): string => {
+  const customerName = selectedCustomerName.value.trim() || '未命名客户'
+  const userCount = Number(formValues.user_count) || 1
+  const suffix = formValues.license_type === LicenseType.SUBSCRIPTION
+    ? `${userCount}人-订阅${Number(formValues.subscription_years) || 1}年`
+    : `${userCount}人-买断`
+  const maxCustomerNameLength = Math.max(1, 255 - suffix.length - 1)
+  return `${customerName.slice(0, maxCustomerNameLength)}-${suffix}`
+}
 
 // Fetch procurement methods
 async function fetchProcurementMethods(): Promise<void> {
@@ -249,107 +263,110 @@ watch(values, () => {
   isDirty.value = true
 }, { deep: true })
 
-// Reset form when dialog opens
-watch(() => props.open, async (newOpen) => {
-  if (newOpen) {
-    customerSearchKeyword.value = ''
+const initializeForm = async (): Promise<void> => {
+  customerSearchKeyword.value = ''
 
-    // Edit mode: populate form with opportunity data
-    if (isEdit.value && props.opportunity) {
-      const opp = props.opportunity
-      resetForm({
-        values: {
-          customer_id: String(opp.customer_id),
-          opportunity_name: opp.opportunity_name,
-          total_amount: opp.total_amount,
-          user_count: opp.user_count,
-          license_type: opp.license_type,
-          subscription_years: opp.subscription_years ?? 1,
-          purchase_type: opp.purchase_type,
-          expected_closing_date: opp.expected_closing_date,
-          procurement_method_id: opp.procurement_method_id
-        }
-      })
-
-      // Set locked customer option for edit mode
-      if (props.customerLocked && props.customerId !== undefined) {
-        setLockedCustomerOption()
-      } else {
-        // Fetch customer detail for display
-        try {
-          const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(opp.customer_id)
-          customers.value = [toCustomerOption(customerDetail)]
-        } catch (error) {
-          handleApiError(error, '获取客户详情')
-        }
+  // Edit mode: populate form with opportunity data
+  if (isEdit.value && props.opportunity) {
+    const opp = props.opportunity
+    resetForm({
+      values: {
+        customer_id: String(opp.customer_id),
+        total_amount: opp.total_amount,
+        user_count: opp.user_count,
+        license_type: opp.license_type,
+        subscription_years: opp.subscription_years ?? 1,
+        purchase_type: opp.purchase_type,
+        expected_closing_date: opp.expected_closing_date,
+        procurement_method_id: opp.procurement_method_id
       }
+    })
+
+    customers.value = [getOpportunityCustomerOption(opp)]
+
+    if (props.customerLocked && props.customerId !== undefined) {
+      setLockedCustomerOption()
+      setFieldValue('customer_id', String(props.customerId))
     } else {
-      // Create mode
-      const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
-      resetForm({
-        values: {
-          customer_id: initialCustomerId,
-          opportunity_name: '',
-          total_amount: 0,
-          user_count: 1,
-          license_type: LicenseType.SUBSCRIPTION,
-          subscription_years: 1,
-          purchase_type: PurchaseType.NEW,
-          expected_closing_date: getDefaultDate(),
-          procurement_method_id: null
-        }
-      })
-
-      if (props.customerLocked && props.customerId !== undefined) {
-        setLockedCustomerOption()
-      }
-
-      if (props.customerId === undefined) {
-        await fetchCustomers()
-      } else {
-        try {
-          const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(props.customerId)
-          customers.value = [toCustomerOption(customerDetail)]
-
-          setFieldValue('opportunity_name', `${customerDetail.account_name}项目`)
-          if (customerDetail.default_opportunity) {
-            setFieldValue('total_amount', customerDetail.default_opportunity.total_amount ?? 0)
-            setFieldValue('user_count', customerDetail.default_opportunity.user_count ?? 1)
-            setFieldValue(
-              'license_type',
-              isLicenseType(customerDetail.default_opportunity.license_type)
-                ? customerDetail.default_opportunity.license_type
-                : LicenseType.SUBSCRIPTION
-            )
-            setFieldValue('subscription_years', customerDetail.default_opportunity.subscription_years ?? 1)
-            setFieldValue(
-              'purchase_type',
-              isPurchaseType(customerDetail.default_opportunity.purchase_type)
-                ? customerDetail.default_opportunity.purchase_type
-                : PurchaseType.NEW
-            )
-            if (customerDetail.default_opportunity.expected_closing_date !== null) {
-              setFieldValue('expected_closing_date', customerDetail.default_opportunity.expected_closing_date)
-            }
-            if (customerDetail.default_opportunity.procurement_method_id !== null) {
-              setFieldValue('procurement_method_id', customerDetail.default_opportunity.procurement_method_id)
-            }
-          }
-          if (customerDetail.default_procurement_method_id !== null) {
-            setFieldValue('procurement_method_id', customerDetail.default_procurement_method_id)
-          }
-        } catch (error) {
-          if (props.customerLocked) {
-            setLockedCustomerOption()
-          }
-          handleApiError(error, '获取客户详情')
-        }
+      try {
+        const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(opp.customer_id)
+        customers.value = [toCustomerOption(customerDetail)]
+      } catch (error) {
+        handleApiError(error, '获取客户详情')
       }
     }
+  } else {
+    const initialCustomerId = props.customerId === undefined ? '' : String(props.customerId)
+    resetForm({
+      values: {
+        customer_id: initialCustomerId,
+        total_amount: 0,
+        user_count: 1,
+        license_type: LicenseType.SUBSCRIPTION,
+        subscription_years: 1,
+        purchase_type: PurchaseType.NEW,
+        expected_closing_date: getDefaultDate(),
+        procurement_method_id: null
+      }
+    })
 
-    isDirty.value = false
+    if (props.customerId === undefined) {
+      await fetchCustomers()
+    } else {
+      if (props.customerLocked) {
+        setLockedCustomerOption()
+        setFieldValue('customer_id', String(props.customerId))
+      }
+      try {
+        const customerDetail: CustomerDetailResponse = await customerApi.getCustomerDetail(props.customerId)
+        customers.value = [toCustomerOption(customerDetail)]
+        setFieldValue('customer_id', String(customerDetail.id))
+
+        if (customerDetail.default_opportunity) {
+          setFieldValue('total_amount', customerDetail.default_opportunity.total_amount ?? 0)
+          setFieldValue('user_count', customerDetail.default_opportunity.user_count ?? 1)
+          setFieldValue(
+            'license_type',
+            isLicenseType(customerDetail.default_opportunity.license_type)
+              ? customerDetail.default_opportunity.license_type
+              : LicenseType.SUBSCRIPTION
+          )
+          setFieldValue('subscription_years', customerDetail.default_opportunity.subscription_years ?? 1)
+          setFieldValue(
+            'purchase_type',
+            isPurchaseType(customerDetail.default_opportunity.purchase_type)
+              ? customerDetail.default_opportunity.purchase_type
+              : PurchaseType.NEW
+          )
+          if (customerDetail.default_opportunity.expected_closing_date !== null) {
+            setFieldValue('expected_closing_date', customerDetail.default_opportunity.expected_closing_date)
+          }
+          if (customerDetail.default_opportunity.procurement_method_id !== null) {
+            setFieldValue('procurement_method_id', customerDetail.default_opportunity.procurement_method_id)
+          }
+        }
+        if (customerDetail.default_procurement_method_id !== null) {
+          setFieldValue('procurement_method_id', customerDetail.default_procurement_method_id)
+        }
+      } catch (error) {
+        if (props.customerLocked) {
+          setLockedCustomerOption()
+          setFieldValue('customer_id', String(props.customerId))
+        }
+        handleApiError(error, '获取客户详情')
+      }
+    }
   }
-})
+
+  isDirty.value = false
+}
+
+// Reset form when dialog opens
+watch(() => props.open, (newOpen) => {
+  if (newOpen) {
+    void initializeForm()
+  }
+}, { immediate: true })
 
 // Fetch data on mount
 onMounted(() => {
@@ -361,7 +378,7 @@ const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
   try {
     const data: OpportunityCreate | OpportunityUpdate = {
-      opportunity_name: formValues['opportunity_name'],
+      opportunity_name: buildOpportunityName(formValues),
       customer_id: Number(formValues['customer_id']),
       total_amount: formValues['total_amount'],
       user_count: formValues['user_count'],
@@ -470,21 +487,6 @@ function continueEditing(): void {
                 </SelectItem>
               </SelectContent>
             </Select>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- Opportunity Name (required) -->
-        <FormField v-slot="{ componentField }" name="opportunity_name">
-          <FormItem>
-            <FormLabel>商机名称 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入商机名称"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>

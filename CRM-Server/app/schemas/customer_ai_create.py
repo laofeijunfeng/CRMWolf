@@ -27,6 +27,7 @@ class CustomerAIContactInfo(BaseModel):
     contact_name: Optional[str] = Field(None, description="联系人姓名")
     contact_phone: Optional[str] = Field(None, description="联系电话")
     contact_position: Optional[str] = Field(None, description="职务")
+    contact_gender: Optional[str] = Field(None, description="性别：1=男, 2=女")
     contact_email: Optional[str] = Field(None, description="邮箱")
 
 

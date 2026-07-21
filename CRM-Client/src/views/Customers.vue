@@ -232,8 +232,6 @@ const sortFields = computed<ListSortField[]>(() =>
 const columns = [
   { key: 'account_name', title: '客户名称', width: '220px' },
   { key: 'owner', title: '负责人', width: '100px' },
-  { key: 'industry', title: '行业', width: '120px' },
-  { key: 'source', title: '来源', width: '120px' },
   { key: 'city', title: '城市', width: '100px' },
   { key: 'company_scale', title: '规模', width: '120px' },
   { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
@@ -241,6 +239,8 @@ const columns = [
   { key: 'license_status', title: '授权状态', align: 'center' as const, width: '100px' },
   { key: 'license_expiry_date', title: '授权到期', width: '120px' },
   { key: 'default_procurement_method', title: '默认采购方式', width: '140px' },
+  { key: 'industry', title: '行业', width: '120px' },
+  { key: 'source', title: '来源', width: '120px' },
   { key: 'creator', title: '创建人', width: '100px' },
   { key: 'created_time', title: '创建时间', width: '160px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }

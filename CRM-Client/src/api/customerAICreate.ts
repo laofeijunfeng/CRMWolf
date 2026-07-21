@@ -3,6 +3,8 @@
  */
 import request from '@/utils/request'
 
+/* eslint-disable crmwolf/require-zod-schema */
+
 export interface CustomerAICreateParseRequest {
   content: string
 }
@@ -20,6 +22,7 @@ export interface CustomerAIContactInfo {
   contact_name: string | null
   contact_phone: string | null
   contact_position: string | null
+  contact_gender: string | null
   contact_email: string | null
 }
 
@@ -83,7 +86,7 @@ export const customerAiCreateApi = {
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
+      buffer = lines.pop() ?? ''
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -105,7 +108,7 @@ export const customerAiCreateApi = {
   /**
    * 从 AI 解析结果创建客户
    */
-  createFromAI: (data: CustomerAICreateRequest) => {
+  createFromAI: (data: CustomerAICreateRequest): Promise<{ id: number; account_name: string }> => {
     return request.post<{ id: number; account_name: string }>(
       '/v1/customers/ai/create/submit',
       data

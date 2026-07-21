@@ -162,6 +162,43 @@
 
           <div class="form-grid">
             <div class="form-item">
+              <Label for="preview-contact-position" class="form-label">
+                职位 <span class="required">*</span>
+              </Label>
+              <Input
+                id="preview-contact-position"
+                v-model="previewForm.contact_position"
+                placeholder="请输入职位"
+                aria-required="true"
+                :aria-invalid="!previewForm.contact_position"
+                class="dialog-input"
+              />
+              <span v-if="!previewForm.contact_position" class="error-message" role="alert">
+                请输入职位
+              </span>
+            </div>
+
+            <div class="form-item">
+              <Label for="preview-contact-gender" class="form-label">
+                性别 <span class="required">*</span>
+              </Label>
+              <Select v-model="previewForm.contact_gender">
+                <SelectTrigger id="preview-contact-gender" class="dialog-select">
+                  <SelectValue placeholder="请选择性别" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">男</SelectItem>
+                  <SelectItem value="2">女</SelectItem>
+                </SelectContent>
+              </Select>
+              <span v-if="!previewForm.contact_gender" class="error-message" role="alert">
+                请选择性别
+              </span>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-item">
               <Label for="preview-source" class="form-label">
                 客户来源
               </Label>
@@ -356,43 +393,50 @@ const previewForm = reactive({
   city: '',
   contact_name: '',
   contact_phone: '',
+  contact_position: '',
+  contact_gender: '',
   source: '',
   company_scale: ''
 })
 
 // 手机号验证
-const isValidPhone = (phone: string) => /^1[3-9]\d{9}$/.test(phone)
+const isValidPhone = (phone: string): boolean => /^1[3-9]\d{9}$/.test(phone)
 
 // 计算是否有缺失必填字段
-const hasMissingRequiredFields = computed(() => {
-  return !previewForm.account_name ||
-    !previewForm.city ||
-    !previewForm.contact_name ||
-    !previewForm.contact_phone ||
+const hasMissingRequiredFields = computed<boolean>(() => {
+  return previewForm.account_name.trim() === '' ||
+    previewForm.city.trim() === '' ||
+    previewForm.contact_name.trim() === '' ||
+    previewForm.contact_phone.trim() === '' ||
+    previewForm.contact_position.trim() === '' ||
+    previewForm.contact_gender.trim() === '' ||
     !isValidPhone(previewForm.contact_phone)
 })
 
 // 计算是否有跟进信息
-const hasFollowUpInfo = computed(() => {
-  return parseResult.value?.follow_up_info &&
-    (parseResult.value.follow_up_info.content ||
-      parseResult.value.follow_up_info.next_action ||
-      parseResult.value.follow_up_info.next_follow_time)
+const hasFollowUpInfo = computed<boolean>(() => {
+  const followUpInfo = parseResult.value?.follow_up_info
+  if (followUpInfo === null || followUpInfo === undefined) return false
+  return (followUpInfo.content ?? '').trim() !== '' ||
+    (followUpInfo.next_action ?? '').trim() !== '' ||
+    (followUpInfo.next_follow_time ?? '').trim() !== ''
 })
 
 // 格式化缺失字段列表
-const formatMissingFields = (fields: string[]) => {
+const formatMissingFields = (fields: string[]): string => {
   const fieldNames: Record<string, string> = {
     account_name: '客户名称',
     city: '所在城市',
     contact_name: '联系人姓名',
-    contact_phone: '联系电话'
+    contact_phone: '联系电话',
+    contact_position: '职位',
+    contact_gender: '性别'
   }
-  return fields.map(f => fieldNames[f] || f).join('、')
+  return fields.map(f => fieldNames[f] ?? f).join('、')
 }
 
 // 重置状态
-const resetState = () => {
+const resetState = (): void => {
   stage.value = 'input'
   inputText.value = ''
   isParsing.value = false
@@ -406,21 +450,23 @@ const resetState = () => {
     city: '',
     contact_name: '',
     contact_phone: '',
+    contact_position: '',
+    contact_gender: '',
     source: '',
     company_scale: ''
   })
 }
 
 // 处理关闭
-const handleClose = () => {
+const handleClose = (): void => {
   resetState()
   visible.value = false
 }
 
 // 处理解析
-const handleParse = async () => {
+const handleParse = async (): Promise<void> => {
   const content = inputText.value.trim()
-  if (!content || isParsing.value) return
+  if (content === '' || isParsing.value) return
 
   stage.value = 'parsing'
   isParsing.value = true
@@ -429,7 +475,7 @@ const handleParse = async () => {
   parseResult.value = null
 
   const token = userStore.token
-  if (!token) {
+  if (token === null || token === undefined || token === '') {
     toast.error('请先登录')
     stage.value = 'input'
     isParsing.value = false
@@ -442,47 +488,50 @@ const handleParse = async () => {
       (event: CustomerAIParseSSEEvent) => {
         switch (event.event) {
           case 'status':
-            statusMessage.value = event.message || '正在解析...'
+            statusMessage.value = event.message ?? '正在解析...'
             break
           case 'content':
-            thinkingContent.value += event.content || ''
+            thinkingContent.value += event.content ?? ''
             break
           case 'parsed':
-            if (event.customer_info) {
+            if (event.customer_info !== undefined) {
               parseResult.value = {
                 customer_info: event.customer_info,
-                contact_info: event.contact_info || {
+                contact_info: event.contact_info ?? {
                   contact_name: null,
                   contact_phone: null,
                   contact_position: null,
+                  contact_gender: null,
                   contact_email: null
                 },
-                follow_up_info: event.follow_up_info || null,
-                thinking_process: event.thinking_process || null
+                follow_up_info: event.follow_up_info ?? null,
+                thinking_process: event.thinking_process ?? null
               }
 
               // 填充预览表单
               Object.assign(previewForm, {
-                account_name: event.customer_info.account_name || '',
-                city: event.customer_info.city || '',
-                contact_name: event.contact_info?.contact_name || '',
-                contact_phone: event.contact_info?.contact_phone || '',
-                source: event.customer_info.source || '',
-                company_scale: event.customer_info.company_scale || ''
+                account_name: event.customer_info.account_name ?? '',
+                city: event.customer_info.city ?? '',
+                contact_name: event.contact_info?.contact_name ?? '',
+                contact_phone: event.contact_info?.contact_phone ?? '',
+                contact_position: event.contact_info?.contact_position ?? '',
+                contact_gender: event.contact_info?.contact_gender ?? '',
+                source: event.customer_info.source ?? '',
+                company_scale: event.customer_info.company_scale ?? ''
               })
 
               stage.value = 'preview'
             }
             break
           case 'error':
-            toast.error(event.message || '解析失败')
+            toast.error(event.message ?? '解析失败')
             stage.value = 'input'
             break
         }
       },
       token
     )
-  } catch (error) {
+  } catch {
     toast.error('解析请求失败')
     stage.value = 'input'
   } finally {
@@ -491,12 +540,12 @@ const handleParse = async () => {
 }
 
 // 返回输入阶段
-const handleBackToInput = () => {
+const handleBackToInput = (): void => {
   stage.value = 'input'
 }
 
 // 处理创建
-const handleCreate = async () => {
+const handleCreate = async (): Promise<void> => {
   if (hasMissingRequiredFields.value) {
     toast.error('请填写所有必填字段')
     return
@@ -509,23 +558,26 @@ const handleCreate = async () => {
       customer_info: {
         account_name: previewForm.account_name,
         city: previewForm.city,
-        company_scale: previewForm.company_scale || null,
-        source: previewForm.source || null,
+        company_scale: previewForm.company_scale.trim() === '' ? null : previewForm.company_scale,
+        source: previewForm.source.trim() === '' ? null : previewForm.source,
         industry_hint: null,
         missing_fields: []
       },
       contact_info: {
         contact_name: previewForm.contact_name,
         contact_phone: previewForm.contact_phone,
-        contact_position: null,
+        contact_position: previewForm.contact_position,
+        contact_gender: previewForm.contact_gender,
         contact_email: null
       },
-      ...(parseResult.value?.follow_up_info ? { follow_up_info: parseResult.value.follow_up_info } : {})
+      ...(parseResult.value?.follow_up_info !== null && parseResult.value?.follow_up_info !== undefined
+        ? { follow_up_info: parseResult.value.follow_up_info }
+        : {})
     }
     const response = await customerAiCreateApi.createFromAI(createData)
 
     // 后端直接返回创建成功的客户数据
-    if (response && response.id) {
+    if (response.id !== undefined && response.id !== null) {
       createdCustomerId.value = response.id
       stage.value = 'success'
       toast.success('客户创建成功')
@@ -542,8 +594,8 @@ const handleCreate = async () => {
 }
 
 // 查看客户
-const handleViewCustomer = () => {
-  if (createdCustomerId.value) {
+const handleViewCustomer = (): void => {
+  if (createdCustomerId.value !== null) {
     router.push(`/customers/${createdCustomerId.value}`)
   }
   handleClose()
