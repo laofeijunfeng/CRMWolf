@@ -22,7 +22,8 @@ from app.schemas.team import (
     TeamMemberResponse,
     RoleSimpleResponse,
     UserTeamsListResponse,
-    ResetPasswordRequest
+    ResetPasswordRequest,
+    UpdateMemberNameRequest
 )
 
 router = APIRouter(prefix="/v1/teams", tags=["团队"])
@@ -429,6 +430,46 @@ def get_member_roles(
 
     roles = role_crud.get_user_roles(db, user_id, team_id)
     return [RoleSimpleResponse(id=r.id, name=r.name, code=r.code) for r in roles]
+
+
+@router.put("/{team_id}/members/{user_id}/name", summary="修改成员用户名", description="修改团队成员用户名（仅 TEAM_ADMIN 可调用）")
+async def update_member_name(
+    team_id: int,
+    user_id: int,
+    request: UpdateMemberNameRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    修改团队成员用户名（仅 TEAM_ADMIN 可调用）
+    """
+    # 权限检查：仅 TEAM_ADMIN 可调用
+    if not is_team_admin(db, team_id, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="仅团队所有者可修改成员用户名"
+        )
+
+    # 检查目标用户是否属于该团队
+    target_user = user_crud.get_by_id(db, user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在"
+        )
+
+    user_roles = role_crud.get_user_roles(db, user_id, team_id)
+    if not user_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该用户不属于当前团队"
+        )
+
+    target_user.name = request.name
+    db.commit()
+    db.refresh(target_user)
+
+    return {"message": f"已修改 {target_user.email} 的用户名", "user_id": target_user.id, "name": target_user.name}
 
 
 @router.post("/{team_id}/members/{user_id}/reset-password", summary="重置成员密码", description="重置团队成员密码（仅 TEAM_ADMIN 可调用）")

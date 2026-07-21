@@ -55,6 +55,10 @@ export interface ResetPasswordRequest {
   new_password: string
 }
 
+export interface UpdateMemberNameRequest {
+  name: string
+}
+
 export const teamApi = {
   createTeam: (data: TeamCreateRequest) => {
     return request.post<TeamResponse>('/v1/teams/', data)
@@ -118,5 +122,12 @@ export const teamApi = {
   // 重置成员密码（新增）
   resetMemberPassword: (teamId: number, userId: string, data: ResetPasswordRequest) => {
     return request.post<{ message: string }>(`/v1/teams/${teamId}/members/${userId}/reset-password`, data)
+  },
+
+  updateMemberName: (teamId: number, userId: string, data: UpdateMemberNameRequest) => {
+    return request.put<{ message: string; user_id: number; name: string }>(
+      `/v1/teams/${teamId}/members/${userId}/name`,
+      data
+    )
   }
 }

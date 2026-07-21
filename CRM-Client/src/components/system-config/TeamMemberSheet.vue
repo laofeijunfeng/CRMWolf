@@ -20,7 +20,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
-import { Search, RefreshCw, UserPlus, Key, Shield, Trash2, Loader2 } from 'lucide-vue-next'
+import { Search, RefreshCw, UserPlus, Key, Shield, Trash2, Loader2, Pencil } from 'lucide-vue-next'
 import {
   Sheet,
   SheetHeader,
@@ -105,7 +105,19 @@ const resetPasswordDialogOpen = ref(false)
 const resetPasswordTargetUser = ref<TeamMemberResponse | null>(null)
 const resetPasswordSubmitting = ref(false)
 
+// 修改用户名 Dialog
+const updateNameDialogOpen = ref(false)
+const updateNameTargetUser = ref<TeamMemberResponse | null>(null)
+const updateNameSubmitting = ref(false)
+const updateNameValue = ref('')
+const updateNameError = ref('')
+
 // ==================== Zod Schema ====================
+const updateNameSchema = z.string()
+  .trim()
+  .min(1, '用户名不能为空')
+  .max(100, '用户名不能超过100个字符')
+
 const resetPasswordSchema = toTypedSchema(
   z.object({
     newPassword: z.string()
@@ -245,6 +257,42 @@ const handleSaveRoles = async (): Promise<void> => {
     handleApiError(error, '分配角色')
   } finally {
     saveRolesLoading.value = false
+  }
+}
+
+// ==================== Update Member Name ====================
+const showUpdateNameDialog = (member: TeamMemberResponse): void => {
+  updateNameTargetUser.value = member
+  updateNameValue.value = member.name
+  updateNameError.value = ''
+  updateNameDialogOpen.value = true
+}
+
+const onUpdateNameSubmit = async (event?: Event): Promise<void> => {
+  event?.preventDefault()
+  if (teamId.value === undefined || updateNameTargetUser.value === null) return
+
+  const parsedName = updateNameSchema.safeParse(updateNameValue.value)
+  if (!parsedName.success) {
+    updateNameError.value = parsedName.error.issues[0]?.message ?? '用户名格式不正确'
+    return
+  }
+
+  updateNameError.value = ''
+  updateNameSubmitting.value = true
+  try {
+    const response = await teamApi.updateMemberName(
+      teamId.value,
+      updateNameTargetUser.value.id,
+      { name: parsedName.data }
+    )
+    toast.success(`已将用户名修改为 ${response.name}`)
+    updateNameDialogOpen.value = false
+    await fetchMembers()
+  } catch (error) {
+    handleApiError(error, '修改用户名')
+  } finally {
+    updateNameSubmitting.value = false
   }
 }
 
@@ -434,6 +482,15 @@ function handleRoleChange(roleId: number, checked: boolean): void {
                 v-if="item.id !== currentUserId && isTeamAdmin"
                 variant="ghost"
                 size="icon"
+                title="修改用户名"
+                @click="showUpdateNameDialog(item)"
+              >
+                <Pencil class="h-4 w-4" />
+              </Button>
+              <Button
+                v-if="item.id !== currentUserId && isTeamAdmin"
+                variant="ghost"
+                size="icon"
                 title="重置密码"
                 @click="showResetPasswordDialog(item)"
               >
@@ -585,6 +642,39 @@ function handleRoleChange(roleId: number, checked: boolean): void {
     </DialogContent>
   </Dialog>
 
+  <!-- 修改用户名 Dialog (z-[1000]) -->
+  <Dialog v-model:open="updateNameDialogOpen">
+    <DialogContent class="max-w-md z-[1000]">
+      <DialogHeader>
+        <DialogTitle>修改用户名 - {{ updateNameTargetUser?.name }}</DialogTitle>
+        <DialogDescription>
+          修改该成员在系统中的显示名称
+        </DialogDescription>
+      </DialogHeader>
+
+      <form class="space-y-4" @submit="onUpdateNameSubmit">
+        <div class="space-y-2">
+          <Label for="member-name">用户名 <span class="text-destructive">*</span></Label>
+          <Input
+            id="member-name"
+            v-model="updateNameValue"
+            placeholder="请输入用户名"
+            :aria-invalid="updateNameError ? 'true' : 'false'"
+            @input="updateNameError = ''"
+          />
+          <p v-if="updateNameError" class="text-sm font-medium text-destructive">{{ updateNameError }}</p>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" @click="updateNameDialogOpen = false">取消</Button>
+          <Button type="submit" :loading="updateNameSubmitting">
+            {{ updateNameSubmitting ? '保存中...' : '保存' }}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
+
   <!-- 重置密码 Dialog (z-[1000]) -->
   <Dialog v-model:open="resetPasswordDialogOpen">
     <DialogContent class="max-w-md z-[1000]">
@@ -625,7 +715,7 @@ function handleRoleChange(roleId: number, checked: boolean): void {
         </FormField>
 
         <DialogFooter>
-          <Button variant="outline" @click="resetPasswordDialogOpen = false">取消</Button>
+          <Button type="button" variant="outline" @click="resetPasswordDialogOpen = false">取消</Button>
           <Button type="submit" :loading="resetPasswordSubmitting">
             {{ resetPasswordSubmitting ? '提交中...' : '确认重置' }}
           </Button>

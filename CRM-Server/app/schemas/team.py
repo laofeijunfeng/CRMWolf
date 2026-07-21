@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -93,3 +93,15 @@ class ResetPasswordRequest(BaseModel):
         max_length=50,
         description="新密码（6-50位）"
     )
+
+
+class UpdateMemberNameRequest(BaseModel):
+    """修改成员用户名请求"""
+    name: str = Field(..., min_length=1, max_length=100, description="用户姓名")
+
+    @field_validator('name')
+    @classmethod
+    def name_must_not_be_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('用户名不能为空')
+        return v.strip()
