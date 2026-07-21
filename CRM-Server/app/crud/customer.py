@@ -116,7 +116,16 @@ class CustomerCRUD:
 
         total = query.count()
 
-        allowed_sort_fields = ['created_time', 'account_name', 'city', 'status', 'industry']
+        allowed_sort_fields = [
+            'created_time',
+            'account_name',
+            'status',
+            'industry',
+            'source',
+            'city',
+            'company_scale',
+            'owner_id',
+        ]
         if order_by and order_dir and order_by in allowed_sort_fields:
             order_column = getattr(Customer, order_by)
             if order_dir.lower() == 'desc':

@@ -27,7 +27,7 @@ from app.schemas.approval_generic import (
 from app.constants.business_types import is_valid_business_type, BusinessType
 from app.services.approval_adapter import get_adapter
 from app.services.notification import notification_service_factory
-from datetime import datetime as _datetime
+from datetime import date, datetime as _datetime
 
 
 router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
@@ -1866,6 +1866,14 @@ def list_approvals(
     tab: str = Query("pending", description="过滤维度：pending/processed/submitted"),
     business_type: Optional[str] = Query(None, description="业务类型过滤 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY"),
     business_type_exclude: Optional[str] = Query(None, description="排除业务类型，多个值用英文逗号分隔"),
+    approval_status: Optional[str] = Query(None, alias="status", description="审批状态过滤 PENDING/APPROVED/REJECTED/CANCELLED，多个值用英文逗号分隔"),
+    status_exclude: Optional[str] = Query(None, description="排除审批状态，多个值用英文逗号分隔"),
+    application_number: Optional[str] = Query(None, description="单号模糊搜索"),
+    entity_name: Optional[str] = Query(None, description="实体名称模糊搜索"),
+    submitter_name: Optional[str] = Query(None, description="提交人模糊搜索"),
+    entity_amount: Optional[float] = Query(None, description="金额精确筛选"),
+    created_time_start: Optional[date] = Query(None, description="提交时间起始"),
+    created_time_end: Optional[date] = Query(None, description="提交时间结束"),
     page: int = Query(1, ge=1, description="页码，1-based"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     team_id: int = Depends(get_current_user_team),
@@ -1890,6 +1898,21 @@ def list_approvals(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"无效的业务单据类型: {invalid_value}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
         )
+    statuses = [item.strip() for item in approval_status.split(",") if item.strip()] if approval_status else []
+    statuses_exclude = [item.strip() for item in status_exclude.split(",") if item.strip()] if status_exclude else []
+    valid_statuses = {
+        ApprovalStatus.PENDING,
+        ApprovalStatus.APPROVED,
+        ApprovalStatus.REJECTED,
+        ApprovalStatus.CANCELLED,
+    }
+    invalid_statuses = [item for item in [*statuses, *statuses_exclude] if item not in valid_statuses]
+    if invalid_statuses:
+        invalid_value = invalid_statuses[0]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效的审批状态: {invalid_value}，仅支持 PENDING / APPROVED / REJECTED / CANCELLED",
+        )
 
     # 当前用户在该 team 下的角色 code 集合（pending tab 过滤用）
     user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
@@ -1903,6 +1926,14 @@ def list_approvals(
         tab=tab,
         business_types=business_types,
         business_types_exclude=business_types_exclude,
+        statuses=statuses,
+        statuses_exclude=statuses_exclude,
+        application_number=application_number,
+        entity_name=entity_name,
+        submitter_name=submitter_name,
+        entity_amount=entity_amount,
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
         page=page,
         page_size=page_size,
     )

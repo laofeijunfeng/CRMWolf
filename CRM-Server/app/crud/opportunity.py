@@ -217,9 +217,26 @@ class OpportunityCRUD:
 
         total = query.count()
 
-        allowed_sort_fields = ['created_time', 'opportunity_name', 'total_amount', 'status', 'expected_closing_date']
+        allowed_sort_fields = [
+            'created_time',
+            'opportunity_name',
+            'customer_name',
+            'total_amount',
+            'status',
+            'license_type',
+            'purchase_type',
+            'expected_closing_date',
+            'stage_name',
+            'owner_id',
+        ]
         if order_by and order_dir and order_by in allowed_sort_fields:
-            order_column = getattr(Opportunity, order_by)
+            if order_by == 'customer_name':
+                query = query.join(Customer, Opportunity.customer_id == Customer.id)
+                order_column = Customer.account_name
+            elif order_by == 'stage_name':
+                order_column = Opportunity.current_stage_name
+            else:
+                order_column = getattr(Opportunity, order_by)
             if order_dir.lower() == 'desc':
                 query = query.order_by(order_column.desc())
             else:

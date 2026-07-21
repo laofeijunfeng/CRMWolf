@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from typing import Optional, List, Tuple, Dict, Any
 from decimal import Decimal
+from datetime import date, time
 import logging
 
 from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalStatus, ApprovalAction
@@ -972,6 +973,14 @@ class ApprovalCRUD:
         business_type: Optional[str] = None,
         business_types: Optional[List[str]] = None,
         business_types_exclude: Optional[List[str]] = None,
+        statuses: Optional[List[str]] = None,
+        statuses_exclude: Optional[List[str]] = None,
+        application_number: Optional[str] = None,
+        entity_name: Optional[str] = None,
+        submitter_name: Optional[str] = None,
+        entity_amount: Optional[float] = None,
+        created_time_start: Optional[date] = None,
+        created_time_end: Optional[date] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Tuple[List[Dict[str, Any]], int, int]:
@@ -986,6 +995,14 @@ class ApprovalCRUD:
             business_type: 可选业务类型过滤（兼容旧调用）
             business_types: 可选业务类型包含过滤（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY）
             business_types_exclude: 可选业务类型排除过滤
+            statuses: 可选审批状态包含过滤
+            statuses_exclude: 可选审批状态排除过滤
+            application_number: 可选单号模糊搜索（摘要字段，组装后过滤）
+            entity_name: 可选实体名称模糊搜索（摘要字段，组装后过滤）
+            submitter_name: 可选提交人模糊搜索
+            entity_amount: 可选金额精确筛选（摘要字段，组装后过滤）
+            created_time_start: 可选提交时间起始
+            created_time_end: 可选提交时间结束
             page: 页码（1-based）
             page_size: 每页条数
 
@@ -1011,6 +1028,16 @@ class ApprovalCRUD:
             query = query.filter(Approval.business_type.in_(include_types))
         if exclude_types:
             query = query.filter(~Approval.business_type.in_(exclude_types))
+        if statuses:
+            query = query.filter(Approval.status.in_(statuses))
+        if statuses_exclude:
+            query = query.filter(~Approval.status.in_(statuses_exclude))
+        if submitter_name:
+            query = query.filter(Approval.submitter_name.ilike(f"%{submitter_name.strip()}%"))
+        if created_time_start:
+            query = query.filter(Approval.created_time >= datetime.combine(created_time_start, time.min))
+        if created_time_end:
+            query = query.filter(Approval.created_time <= datetime.combine(created_time_end, time.max))
 
         if tab == "pending":
             # JOIN current_node 取 approve_role 过滤
@@ -1041,16 +1068,39 @@ class ApprovalCRUD:
         else:
             raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted")
 
-        total = query.count()
-        rows = (
-            query.order_by(Approval.created_time.desc())
-            .offset(skip)
-            .limit(page_size)
-            .all()
-        )
+        needs_summary_filter = any([
+            application_number,
+            entity_name,
+            entity_amount is not None,
+        ])
+        ordered_query = query.order_by(Approval.created_time.desc())
+        if needs_summary_filter:
+            rows = ordered_query.all()
+        else:
+            total = query.count()
+            rows = ordered_query.offset(skip).limit(page_size).all()
 
         # ---- E9：按 business_type 批量预取实体摘要，内存 join 避免 N+1 ----
         summaries = self._batch_entity_summaries(db, rows, team_id)
+
+        def matches_summary_filters(item: Dict[str, Any]) -> bool:
+            if application_number:
+                needle = application_number.strip().lower()
+                value = (item.get("application_number") or "").lower()
+                if needle not in value:
+                    return False
+            if entity_name:
+                needle = entity_name.strip().lower()
+                value = (item.get("entity_name") or "").lower()
+                if needle not in value:
+                    return False
+            if entity_amount is not None:
+                value = item.get("entity_amount")
+                if value is None:
+                    return False
+                if Decimal(str(value)) != Decimal(str(entity_amount)):
+                    return False
+            return True
 
         # ---- 组装列表项 + overdue_hours Python 计算 ----
         now = datetime.now()
@@ -1078,6 +1128,11 @@ class ApprovalCRUD:
                 "updated_time": ap.updated_time.isoformat() if ap.updated_time else "",
                 "overdue_hours": overdue_hours,
             })
+
+        if needs_summary_filter:
+            items = [item for item in items if matches_summary_filters(item)]
+            total = len(items)
+            items = items[skip:skip + page_size]
 
         # ---- pending_count：当前用户待我审批总数，任意 tab 都附 ----
         pending_count = self._count_pending_for_user(db, team_id, user_roles)

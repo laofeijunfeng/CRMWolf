@@ -48,7 +48,7 @@ import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { customerSourceOptions, companyScaleOptions } from '@/schemas/customer-form'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
-import { getPrimarySort } from '@/utils/listSorts'
+import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -224,32 +224,14 @@ const filterFields = computed<ListFilterField[]>(() => {
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 
-const sortFields = computed<ListSortField[]>(() => [
-  { key: 'account_name', type: 'text', label: '客户名称' },
-  {
-    key: 'industry',
-    type: 'enum',
-    label: '行业',
-    options: industryFilterOptions.value
-  },
-  { key: 'city', type: 'text', label: '城市' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: '0', label: '跟进中' },
-      { value: '1', label: '已赢单' },
-      { value: '2', label: '已输单' },
-      { value: '3', label: '已失效' }
-    ]
-  },
-  { key: 'created_time', type: 'date', label: '创建时间' }
-])
+const sortFields = computed<ListSortField[]>(() =>
+  buildSortFieldsFromFilterFields(filterFields.value)
+)
 
 // ==================== DataTable 配置 ====================
 const columns = [
   { key: 'account_name', title: '客户名称', width: '220px' },
+  { key: 'owner', title: '负责人', width: '100px' },
   { key: 'industry', title: '行业', width: '120px' },
   { key: 'source', title: '来源', width: '120px' },
   { key: 'city', title: '城市', width: '100px' },
@@ -259,7 +241,6 @@ const columns = [
   { key: 'license_status', title: '授权状态', align: 'center' as const, width: '100px' },
   { key: 'license_expiry_date', title: '授权到期', width: '120px' },
   { key: 'default_procurement_method', title: '默认采购方式', width: '140px' },
-  { key: 'owner', title: '负责人', width: '100px' },
   { key: 'creator', title: '创建人', width: '100px' },
   { key: 'created_time', title: '创建时间', width: '160px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }

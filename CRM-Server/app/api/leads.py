@@ -515,6 +515,8 @@ def get_public_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    order_by: Optional[str] = Query(None, description="排序字段"),
+    order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -524,7 +526,9 @@ def get_public_leads(
         team_id,
         skip,
         limit,
-        filters=parse_filter_conditions(filters)
+        filters=parse_filter_conditions(filters),
+        order_by=order_by,
+        order_dir=order_dir
     )
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
@@ -542,6 +546,8 @@ def get_my_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
+    order_by: Optional[str] = Query(None, description="排序字段"),
+    order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -552,7 +558,9 @@ def get_my_leads(
         str(current_user.id),
         skip,
         limit,
-        filters=parse_filter_conditions(filters)
+        filters=parse_filter_conditions(filters),
+        order_by=order_by,
+        order_dir=order_dir
     )
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0

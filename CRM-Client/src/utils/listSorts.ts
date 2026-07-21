@@ -1,4 +1,20 @@
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
+import type { ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortField } from '@/components/crmwolf/listSortTypes'
+
+export function buildSortFieldsFromFilterFields(
+  fields: ListFilterField[],
+  extraFields: ListSortField[] = []
+): ListSortField[] {
+  return [
+    ...fields.map((field) => (
+      field.options === undefined
+        ? { key: field.key, label: field.label, type: field.type }
+        : { key: field.key, label: field.label, type: field.type, options: [...field.options] }
+    )),
+    ...extraFields
+  ]
+}
 
 export function serializeListSorts(sorts: ListSortCondition[]): string | null {
   const parts = sorts

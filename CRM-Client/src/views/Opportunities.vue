@@ -32,7 +32,7 @@ import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
-import { getPrimarySort } from '@/utils/listSorts'
+import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
@@ -144,26 +144,18 @@ const filterFields = computed<ListFilterField[]>(() => {
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 
-const sortFields: ListSortField[] = [
-  { key: 'opportunity_name', type: 'text', label: '商机名称' },
+const extraSortFields: ListSortField[] = [
   { key: 'total_amount', type: 'number', label: '预计金额' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: '0', label: '跟进中' },
-      { value: '1', label: '已赢单' },
-      { value: '2', label: '已输单' }
-    ]
-  },
-  { key: 'expected_closing_date', type: 'date', label: '预计成交日期' },
   { key: 'created_time', type: 'date', label: '创建时间' }
 ]
+const sortFields = computed<ListSortField[]>(() =>
+  buildSortFieldsFromFilterFields(filterFields.value, extraSortFields)
+)
 
 // ==================== DataTable 配置 ====================
 const columns = [
   { key: 'opportunity_name', title: '商机名称', width: '220px' },
+  { key: 'owner', title: '负责人', width: '100px' },
   { key: 'customer_name', title: '客户名称', width: '150px' },
   { key: 'total_amount', title: '预计金额', align: 'right' as const, width: '130px' },
   { key: 'user_count', title: '用户数', align: 'right' as const, width: '100px' },
@@ -172,7 +164,6 @@ const columns = [
   { key: 'expected_closing_date', title: '预计成交日期', width: '140px' },
   { key: 'stage', title: '销售阶段', width: '120px' },
   { key: 'win_probability', title: '赢率', align: 'right' as const, width: '80px' },
-  { key: 'owner', title: '负责人', width: '100px' },
   { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
   { key: 'approval_phase', title: '审批', align: 'center' as const, width: '110px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }

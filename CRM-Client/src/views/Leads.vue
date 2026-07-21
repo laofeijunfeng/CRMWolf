@@ -55,7 +55,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { normalizePaginatedResponse } from '@/types/pagination'
-import { getPrimarySort } from '@/utils/listSorts'
+import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -172,27 +172,17 @@ const filterFields = computed<ListFilterField[]>(() => {
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 
-const sortFields: ListSortField[] = [
-  { key: 'lead_name', type: 'text', label: '线索名称' },
-  { key: 'city', type: 'text', label: '城市' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: 0, label: '新建' },
-      { value: 1, label: '跟进中' },
-      { value: 3, label: '无效' }
-    ]
-  },
-  { key: 'score', type: 'number', label: '热力值' },
-  { key: 'created_time', type: 'date', label: '创建时间' },
+const extraSortFields: ListSortField[] = [
   { key: 'last_modified_time', type: 'date', label: '最后更新' }
 ]
+const sortFields = computed<ListSortField[]>(() =>
+  buildSortFieldsFromFilterFields(filterFields.value, extraSortFields)
+)
 
 // ==================== DataTable 配置 ====================
 const columns = [
   { key: 'lead_name', title: '线索名称', width: '220px' },
+  { key: 'owner', title: '负责人', width: '100px' },
   { key: 'contact_name', title: '联系人', width: '120px' },
   { key: 'contact_phone', title: '联系电话', width: '140px' },
   { key: 'source', title: '来源', width: '120px' },
@@ -200,7 +190,6 @@ const columns = [
   { key: 'company_scale', title: '规模', width: '120px' },
   { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
   { key: 'score', title: '热力值', align: 'center' as const, width: '100px' },
-  { key: 'owner', title: '负责人', width: '100px' },
   { key: 'created_time', title: '创建时间', width: '160px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
 ]

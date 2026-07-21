@@ -171,6 +171,14 @@ export const ApprovalListQuerySchema = z.object({
   tab: ApprovalTabSchema,
   business_type: z.string().optional(),
   business_type_exclude: z.string().optional(),
+  status: z.string().optional(),
+  status_exclude: z.string().optional(),
+  application_number: z.string().optional(),
+  entity_name: z.string().optional(),
+  submitter_name: z.string().optional(),
+  entity_amount: z.number().optional(),
+  created_time_start: z.string().optional(),
+  created_time_end: z.string().optional(),
   page: z.number().int().positive().default(1),
   page_size: z.number().int().positive().default(20)
 })

@@ -54,7 +54,7 @@
         :page-size="pageSize"
         :loading="listLoading"
         :filter-fields="filterFields"
-        height="calc(100vh - 248px)"
+        height="calc(100vh - 136px)"
         empty-title="暂无待审批事项"
         row-interactive
         @update:page="page = $event; fetchList()"
@@ -508,9 +508,10 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { formatDateRelative } from '@/utils/format'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
 import contractApi from '@/api/contract'
-import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem } from '@/schemas/approvalGeneric'
+import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery } from '@/schemas/approvalGeneric'
 import type { ContractResponse } from '@/api/contract'
 
 type Tab = 'pending' | 'processed' | 'submitted'
@@ -863,6 +864,8 @@ const tabs = computed(() => {
 
 // ==================== 筛选配置 ====================
 const filterFields: ListFilterField[] = [
+  { key: 'application_number', type: 'text', label: '单号' },
+  { key: 'entity_name', type: 'text', label: '实体' },
   {
     key: 'business_type',
     type: 'enum',
@@ -874,7 +877,21 @@ const filterFields: ListFilterField[] = [
       { value: 'LICENSE', label: 'License' },
       { value: 'OPPORTUNITY', label: '商机' }
     ]
-  }
+  },
+  {
+    key: 'status',
+    type: 'enum',
+    label: '审批状态',
+    options: [
+      { value: 'PENDING', label: '审批中' },
+      { value: 'APPROVED', label: '已通过' },
+      { value: 'REJECTED', label: '已驳回' },
+      { value: 'CANCELLED', label: '已撤回' }
+    ]
+  },
+  { key: 'submitter_name', type: 'text', label: '提交人' },
+  { key: 'entity_amount', type: 'number', label: '金额' },
+  { key: 'created_time', type: 'date', label: '提交时间' }
 ]
 
 // ==================== DataTable Columns 配置 ====================
@@ -989,14 +1006,29 @@ const fetchList = async (): Promise<void> => {
   loadError.value = null
   listLoading.value = true
   try {
-    const businessType = getBusinessTypeFilter()
-    const businessTypeExclude = getBusinessTypeExcludeFilter()
-    const query = {
+    const businessType = getDelimitedFilterValues(activeFilters.value, 'business_type')
+    const businessTypeExclude = getDelimitedFilterValues(activeFilters.value, 'business_type', ['neq', 'not_contains'])
+    const status = getDelimitedFilterValues(activeFilters.value, 'status')
+    const statusExclude = getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains'])
+    const applicationNumber = getFilterValue(activeFilters.value, 'application_number')
+    const entityName = getFilterValue(activeFilters.value, 'entity_name')
+    const submitterName = getFilterValue(activeFilters.value, 'submitter_name')
+    const entityAmount = getNumericFilterValue(activeFilters.value, 'entity_amount')
+    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
+    const query: ApprovalListQuery = {
       tab: activeTab.value,
       page: page.value,
       page_size: pageSize.value,
       ...(businessType !== null ? { business_type: businessType } : {}),
-      ...(businessTypeExclude !== null ? { business_type_exclude: businessTypeExclude } : {})
+      ...(businessTypeExclude !== null ? { business_type_exclude: businessTypeExclude } : {}),
+      ...(status !== null ? { status } : {}),
+      ...(statusExclude !== null ? { status_exclude: statusExclude } : {}),
+      ...(applicationNumber !== null && applicationNumber !== '' ? { application_number: applicationNumber } : {}),
+      ...(entityName !== null && entityName !== '' ? { entity_name: entityName } : {}),
+      ...(submitterName !== null && submitterName !== '' ? { submitter_name: submitterName } : {}),
+      ...(entityAmount !== null ? { entity_amount: entityAmount } : {}),
+      ...(createdTimeBounds.start !== undefined ? { created_time_start: createdTimeBounds.start } : {}),
+      ...(createdTimeBounds.end !== undefined ? { created_time_end: createdTimeBounds.end } : {})
     }
     const res = await store.fetchList(query)
     rows.value = activeTab.value === 'pending'
@@ -1049,26 +1081,6 @@ const getPageItems = (): number[] => {
 const reload = (): void => {
   fetchList()
 }
-
-const getBusinessTypeFilterValue = (operators: ListFilterCondition['op'][]): string | null => {
-  const values = activeFilters.value
-    .filter((item) => item.field === 'business_type' && operators.includes(item.op))
-    .flatMap((condition) => {
-      const value = condition.value
-      if (Array.isArray(value)) return value.map(String)
-      if (value === undefined || value === null || value === '') return []
-      return [String(value)]
-    })
-    .filter((value, index, list) => value !== '' && list.indexOf(value) === index)
-
-  return values.length > 0 ? values.join(',') : null
-}
-
-const getBusinessTypeFilter = (): string | null =>
-  getBusinessTypeFilterValue(['contains', 'eq'])
-
-const getBusinessTypeExcludeFilter = (): string | null =>
-  getBusinessTypeFilterValue(['not_contains', 'neq'])
 
 const handleFilterApply = (filters: ListFilterCondition[]): void => {
   activeFilters.value = filters

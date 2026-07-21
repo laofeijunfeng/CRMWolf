@@ -64,15 +64,7 @@ class LeadCRUD:
 
         total = query.count()
 
-        allowed_sort_fields = ['created_time', 'lead_name', 'city', 'status', 'score', 'last_modified_time']
-        if order_by and order_dir and order_by in allowed_sort_fields:
-            order_column = getattr(Lead, order_by)
-            if order_dir.lower() == 'desc':
-                query = query.order_by(order_column.desc())
-            else:
-                query = query.order_by(order_column.asc())
-        else:
-            query = query.order_by(Lead.created_time.desc())
+        query = self._apply_sort(query, order_by, order_dir)
 
         leads = query.offset(skip).limit(limit).all()
 
@@ -339,7 +331,9 @@ class LeadCRUD:
         owner_id: str,
         skip: int = 0,
         limit: int = 100,
-        filters: Optional[List[Dict[str, Any]]] = None
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None
     ) -> Tuple[List[Lead], int]:
         query = db.query(Lead).filter(
             and_(
@@ -351,7 +345,8 @@ class LeadCRUD:
         if filters:
             query = self._apply_filters(query, filters)
         total = query.count()
-        leads = query.order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
+        query = self._apply_sort(query, order_by, order_dir)
+        leads = query.offset(skip).limit(limit).all()
         return leads, total
 
     def get_public_leads(
@@ -360,7 +355,9 @@ class LeadCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        filters: Optional[List[Dict[str, Any]]] = None
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order_by: Optional[str] = None,
+        order_dir: Optional[str] = None
     ) -> Tuple[List[Lead], int]:
         query = db.query(Lead).filter(
             and_(
@@ -372,8 +369,30 @@ class LeadCRUD:
         if filters:
             query = self._apply_filters(query, filters)
         total = query.count()
-        leads = query.order_by(Lead.created_time.desc()).offset(skip).limit(limit).all()
+        query = self._apply_sort(query, order_by, order_dir)
+        leads = query.offset(skip).limit(limit).all()
         return leads, total
+
+    def _apply_sort(self, query, order_by: Optional[str], order_dir: Optional[str]):
+        allowed_sort_fields = [
+            'created_time',
+            'lead_name',
+            'contact_name',
+            'contact_phone',
+            'source',
+            'city',
+            'company_scale',
+            'owner_id',
+            'status',
+            'score',
+            'last_modified_time',
+        ]
+        if order_by and order_dir and order_by in allowed_sort_fields:
+            order_column = getattr(Lead, order_by)
+            if order_dir.lower() == 'desc':
+                return query.order_by(order_column.desc())
+            return query.order_by(order_column.asc())
+        return query.order_by(Lead.created_time.desc())
 
     def get_leads_need_follow_up(self, db: Session, team_id: int, user_id: str, days: int = 7) -> List[Lead]:
         cutoff_date = datetime.now() - timedelta(days=days)
