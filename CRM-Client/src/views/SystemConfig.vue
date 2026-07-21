@@ -21,7 +21,7 @@ import { computed, ref, defineAsyncComponent } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
 import { Card, CardContent } from '@/components/ui/card'
-import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users } from 'lucide-vue-next'
+import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users, KeyRound } from 'lucide-vue-next'
 
 // 懒加载 Sheet 组件（性能优化）
 const RoleSheet = defineAsyncComponent(() =>
@@ -42,6 +42,9 @@ const NotificationSheet = defineAsyncComponent(() =>
 const TeamMemberSheet = defineAsyncComponent(() =>
   import('@/components/system-config/TeamMemberSheet.vue')
 )
+const LoginIntegrationSheet = defineAsyncComponent(() =>
+  import('@/components/system-config/LoginIntegrationSheet.vue')
+)
 const permissionStore = usePermissionStore()
 
 // Sheet 状态
@@ -51,6 +54,7 @@ const showProcurementSheet = ref(false)
 const showAIConfigSheet = ref(false)
 const showNotificationSheet = ref(false)
 const showTeamMemberSheet = ref(false)
+const showLoginIntegrationSheet = ref(false)
 
 // 用户角色（用于判断是否为 TEAM_ADMIN）
 const userRoles = ref<RoleResponse[]>([])
@@ -92,6 +96,9 @@ const openSheet = (type: string): void => {
       break
     case 'team-members':
       showTeamMemberSheet.value = true
+      break
+    case 'login-integration':
+      showLoginIntegrationSheet.value = true
       break
   }
 }
@@ -185,6 +192,18 @@ fetchUserRoles()
         </CardContent>
       </Card>
 
+      <Card
+        v-if="canManageTeam"
+        class="system-config-card"
+        @click="openSheet('login-integration')"
+      >
+        <CardContent class="p-6">
+          <KeyRound class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">登录集成</h3>
+          <p class="text-sm text-wolf-text-secondary">配置团队第三方登录</p>
+        </CardContent>
+      </Card>
+
     </div>
 
     <!-- Sheet 组件 -->
@@ -194,6 +213,7 @@ fetchUserRoles()
     <AIConfigSheet v-model:open="showAIConfigSheet" />
     <NotificationSheet v-model:open="showNotificationSheet" />
     <TeamMemberSheet v-model:open="showTeamMemberSheet" />
+    <LoginIntegrationSheet v-model:open="showLoginIntegrationSheet" />
   </div>
 </template>
 

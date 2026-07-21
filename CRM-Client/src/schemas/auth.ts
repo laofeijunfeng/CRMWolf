@@ -40,3 +40,61 @@ export const registerFormSchema = z.object({
 })
 
 export type RegisterForm = z.infer<typeof registerFormSchema>
+
+const NullableStringSchema = z.string().nullable().optional()
+
+export const RoleResponseSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  code: z.string(),
+  description: NullableStringSchema,
+  created_at: z.string(),
+  updated_at: z.string(),
+}).passthrough()
+
+export const UserResponseSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  email: z.string(),
+  mobile: NullableStringSchema,
+  avatar_url: NullableStringSchema,
+  employee_no: NullableStringSchema,
+  region: NullableStringSchema,
+  status: z.string(),
+  created_at: z.string().nullable(),
+  updated_at: z.string().nullable(),
+  roles: z.array(RoleResponseSchema).nullable().optional(),
+}).passthrough()
+
+export const PermissionResponseSchema = z.object({
+  id: z.number(),
+  code: z.string(),
+  name: z.string(),
+  resource: z.string(),
+  action: z.string(),
+  scope: NullableStringSchema,
+  description: NullableStringSchema,
+}).passthrough()
+
+export const LoginResponseSchema = z.object({
+  access_token: z.string(),
+  token_type: z.string(),
+  user: UserResponseSchema,
+})
+
+export const MessageResponseSchema = z.object({
+  message: z.string(),
+})
+
+export const UserPermissionsResponseSchema = z.object({
+  permissions: z.array(PermissionResponseSchema),
+  total: z.number(),
+  cached: z.boolean(),
+})
+
+export type LoginResponse = z.infer<typeof LoginResponseSchema>
+export type UserResponse = z.infer<typeof UserResponseSchema>
+export type RoleResponse = z.infer<typeof RoleResponseSchema>
+export type PermissionResponse = z.infer<typeof PermissionResponseSchema>
+export type MessageResponse = z.infer<typeof MessageResponseSchema>
+export type UserPermissionsResponse = z.infer<typeof UserPermissionsResponseSchema>

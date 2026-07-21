@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { toTypedSchema } from '@vee-validate/zod'
 import { ErrorMessage, useForm } from 'vee-validate'
@@ -36,10 +36,12 @@ import {
 } from '@/components/ui/empty'
 import { FormControl, FormDescription, FormField, FormItem, FormLabel } from '@/components/ui/form'
 import { authApi } from '@/api/auth'
+import { oauthApi, type OAuthBindingStatusResponse } from '@/api/oauth'
 import { changePasswordSchema, type ChangePasswordFormValues } from '@/schemas/account-settings'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { handleApiError } from '@/utils/errorHandler'
+import { Link2, Loader2, Unlink } from 'lucide-vue-next'
 
 const userStore = useUserStore()
 const headerStore = useHeaderStore()
@@ -50,10 +52,18 @@ const loadError = ref<boolean>(false)
 const avatarFailed = ref<boolean>(false)
 const passwordDialogOpen = ref<boolean>(false)
 const passwordSubmitting = ref<boolean>(false)
+const oauthLoading = ref<boolean>(false)
+const oauthSubmitting = ref<boolean>(false)
+const feishuBinding = ref<OAuthBindingStatusResponse | null>(null)
 const passwordVisible = reactive<Record<'oldPassword' | 'newPassword' | 'confirmPassword', boolean>>({
   oldPassword: false,
   newPassword: false,
   confirmPassword: false,
+})
+const userRoles = computed(() => userInfo.value?.roles ?? [])
+const avatarUrl = computed(() => {
+  const url = userInfo.value?.avatar_url?.trim()
+  return url !== undefined && url.length > 0 ? url : ''
 })
 
 const { handleSubmit, resetForm } = useForm<ChangePasswordFormValues>({
@@ -65,9 +75,12 @@ const { handleSubmit, resetForm } = useForm<ChangePasswordFormValues>({
   },
 })
 
-const displayValue = (value?: string | null): string => value?.trim() || '未设置'
-const formatDateTime = (value?: string): string => {
-  if (!value || Number.isNaN(Date.parse(value))) return '未设置'
+const displayValue = (value?: string | null): string => {
+  const trimmed = value?.trim()
+  return trimmed !== undefined && trimmed.length > 0 ? trimmed : '未设置'
+}
+const formatDateTime = (value?: string | null): string => {
+  if (value === undefined || value === null || value.trim().length === 0 || Number.isNaN(Date.parse(value))) return '未设置'
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
@@ -81,6 +94,17 @@ const loadUser = async (): Promise<void> => {
     handleApiError(error, '获取账户信息')
   } finally {
     isInitialLoad.value = false
+  }
+}
+
+const loadFeishuBinding = async (): Promise<void> => {
+  oauthLoading.value = true
+  try {
+    feishuBinding.value = await oauthApi.getFeishuBindingStatus()
+  } catch {
+    feishuBinding.value = null
+  } finally {
+    oauthLoading.value = false
   }
 }
 
@@ -133,11 +157,39 @@ const copyUserId = async (): Promise<void> => {
   }
 }
 
-const initials = (): string => userInfo.value?.name?.trim().slice(0, 1) || '用'
+const bindFeishu = async (): Promise<void> => {
+  oauthSubmitting.value = true
+  try {
+    const response = await oauthApi.getFeishuBindUrl()
+    window.location.href = response.auth_url
+  } catch (error: unknown) {
+    oauthSubmitting.value = false
+    handleApiError(error, '绑定飞书账号')
+  }
+}
+
+const unbindFeishu = async (): Promise<void> => {
+  oauthSubmitting.value = true
+  try {
+    const response = await oauthApi.unbindFeishu()
+    toast.success(response.message)
+    await loadFeishuBinding()
+  } catch (error: unknown) {
+    handleApiError(error, '解绑飞书账号')
+  } finally {
+    oauthSubmitting.value = false
+  }
+}
+
+const initials = (): string => {
+  const name = userInfo.value?.name?.trim()
+  return name !== undefined && name.length > 0 ? name.slice(0, 1) : '用'
+}
 
 onMounted(() => {
   headerStore.clear()
   if (userInfo.value === null) void loadUser()
+  void loadFeishuBinding()
 })
 </script>
 
@@ -170,7 +222,7 @@ onMounted(() => {
         <CardHeader><h2>个人信息</h2></CardHeader>
         <CardContent class="account-settings__profile">
           <Avatar class="h-16 w-16">
-            <AvatarImage v-if="userInfo.avatar_url && !avatarFailed" :src="userInfo.avatar_url" :alt="`${displayValue(userInfo.name)}的头像`" @error="avatarFailed = true" />
+            <AvatarImage v-if="avatarUrl.length > 0 && !avatarFailed" :src="avatarUrl" :alt="`${displayValue(userInfo.name)}的头像`" @error="avatarFailed = true" />
             <AvatarFallback>{{ initials() }}</AvatarFallback>
           </Avatar>
           <dl class="account-settings__details">
@@ -191,7 +243,7 @@ onMounted(() => {
             <div><dt>账户状态</dt><dd><Badge>{{ displayValue(userInfo.status) }}</Badge></dd></div>
             <div><dt>创建时间</dt><dd>{{ formatDateTime(userInfo.created_at) }}</dd></div>
             <div><dt>更新时间</dt><dd>{{ formatDateTime(userInfo.updated_at) }}</dd></div>
-            <div><dt>角色</dt><dd class="flex flex-wrap gap-2"><Badge v-for="role in userInfo.roles" :key="role.id" variant="secondary">{{ role.name }}</Badge><span v-if="!userInfo.roles?.length">未设置</span></dd></div>
+            <div><dt>角色</dt><dd class="flex flex-wrap gap-2"><Badge v-for="role in userRoles" :key="role.id" variant="secondary">{{ role.name }}</Badge><span v-if="userRoles.length === 0">未设置</span></dd></div>
           </dl>
         </CardContent>
       </Card>
@@ -201,6 +253,39 @@ onMounted(() => {
         <CardContent class="flex items-center justify-between gap-4">
           <div><Label class="font-medium">登录密码</Label><p class="text-sm text-muted-foreground">定期更新密码有助于保护账户安全。</p></div>
           <Button data-testid="change-password-trigger" @click="passwordDialogOpen = true">修改密码</Button>
+        </CardContent>
+      </Card>
+
+      <Card v-if="oauthLoading || feishuBinding?.enabled">
+        <CardHeader><h2>登录授权</h2></CardHeader>
+        <CardContent class="account-settings__oauth">
+          <div>
+            <Label class="font-medium">飞书账号</Label>
+            <p class="text-sm text-muted-foreground">
+              <span v-if="oauthLoading">正在加载授权状态</span>
+              <span v-else-if="feishuBinding?.bound === true">已绑定 {{ displayValue(feishuBinding.name ?? feishuBinding.email) }}</span>
+              <span v-else>当前未绑定飞书账号</span>
+            </p>
+          </div>
+          <Button
+            v-if="!oauthLoading && feishuBinding?.bound === true"
+            variant="outline"
+            :disabled="oauthSubmitting"
+            @click="unbindFeishu"
+          >
+            <Loader2 v-if="oauthSubmitting" class="mr-2 h-4 w-4 animate-spin" />
+            <Unlink v-else class="mr-2 h-4 w-4" />
+            解绑
+          </Button>
+          <Button
+            v-else-if="!oauthLoading"
+            :disabled="oauthSubmitting"
+            @click="bindFeishu"
+          >
+            <Loader2 v-if="oauthSubmitting" class="mr-2 h-4 w-4 animate-spin" />
+            <Link2 v-else class="mr-2 h-4 w-4" />
+            绑定飞书
+          </Button>
         </CardContent>
       </Card>
     </div>
@@ -278,6 +363,7 @@ onMounted(() => {
   &__details div { min-width: 0; }
   &__details dt { color: $wolf-text-secondary-v2; font-size: 0.875rem; }
   &__details dd { margin: $wolf-space-xs-v2 0 0; overflow-wrap: anywhere; word-break: break-word; }
+  &__oauth { display: flex; align-items: center; justify-content: space-between; gap: $wolf-space-lg-v2; }
   &__password-input { display: flex; align-items: center; gap: $wolf-space-sm-v2; }
   &__password-input > :first-child { flex: 1; }
 
@@ -285,6 +371,7 @@ onMounted(() => {
     padding: $wolf-page-padding-mobile-v2;
     &__profile { gap: $wolf-card-padding-mobile-v2; }
     &__details { grid-template-columns: 1fr; gap: $wolf-form-item-gap-mobile-v2; }
+    &__oauth { align-items: stretch; flex-direction: column; }
     &__password-input :deep(input) { min-height: $wolf-input-height-mobile-v2; padding-inline: $wolf-input-padding-mobile-v2; font-size: $wolf-font-size-body-mobile-v2; }
     &__password-input :deep(button) { min-height: $wolf-button-height-mobile-v2; }
   }

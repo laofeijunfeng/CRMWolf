@@ -1,4 +1,16 @@
 import request from '@/utils/request'
+import {
+  LoginResponseSchema,
+  MessageResponseSchema,
+  RoleResponseSchema,
+  UserPermissionsResponseSchema,
+  UserResponseSchema,
+  type LoginResponse,
+  type MessageResponse,
+  type RoleResponse,
+  type UserPermissionsResponse,
+  type UserResponse,
+} from '@/schemas/auth'
 
 export interface SendCodeParams {
   email: string
@@ -28,44 +40,13 @@ export interface LoginPasswordRequest {
   password: string
 }
 
-export interface LoginResponse {
-  access_token: string
-  token_type: string
-  user: UserResponse
-}
-
-export interface UserResponse {
-  id: number
-  name: string
-  email: string
-  mobile?: string
-  avatar_url?: string
-  employee_no?: string
-  region?: string
-  status: string
-  created_at: string
-  updated_at: string
-  roles?: RoleResponse[]
-}
-
-export interface RoleResponse {
-  id: number
-  name: string
-  code: string
-  description?: string
-  created_at: string
-  updated_at: string
-}
-
-export interface PermissionResponse {
-  id: number
-  code: string
-  name: string
-  resource: string
-  action: string
-  scope?: string
-  description?: string
-}
+export type {
+  LoginResponse,
+  PermissionResponse,
+  RoleResponse,
+  UserPermissionsResponse,
+  UserResponse,
+} from '@/schemas/auth'
 
 export interface ChangePasswordRequest {
   old_password: string
@@ -74,47 +55,65 @@ export interface ChangePasswordRequest {
 
 export const authApi = {
   // 发送验证码
-  sendCode: (params: SendCodeParams) => {
-    return request.post<{ message: string }>('/v1/auth/send-code', params)
+  async sendCode(params: SendCodeParams): Promise<MessageResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.post('/v1/auth/send-code', params)
+    return MessageResponseSchema.parse(raw)
   },
 
   // 邮箱注册
-  register: (data: RegisterRequest) => {
-    return request.post<LoginResponse>('/v1/auth/register', data)
+  async register(data: RegisterRequest): Promise<LoginResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.post('/v1/auth/register', data)
+    return LoginResponseSchema.parse(raw)
   },
 
   // 验证码登录
-  loginWithCode: (data: LoginCodeRequest) => {
-    return request.post<LoginResponse>('/v1/auth/login', data)
+  async loginWithCode(data: LoginCodeRequest): Promise<LoginResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.post('/v1/auth/login', data)
+    return LoginResponseSchema.parse(raw)
   },
 
   // 密码登录
-  loginWithPassword: (data: LoginPasswordRequest) => {
-    return request.post<LoginResponse>('/v1/auth/login-password', data)
+  async loginWithPassword(data: LoginPasswordRequest): Promise<LoginResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.post('/v1/auth/login-password', data)
+    return LoginResponseSchema.parse(raw)
   },
 
   // 密码注册
-  registerWithPassword: (data: RegisterPasswordRequest) => {
-    return request.post<LoginResponse>('/v1/auth/register-password', data)
+  async registerWithPassword(data: RegisterPasswordRequest): Promise<LoginResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.post('/v1/auth/register-password', data)
+    return LoginResponseSchema.parse(raw)
   },
 
   // 获取当前用户信息
-  getUserInfo: () => {
-    return request.get<UserResponse>('/v1/auth/me')
+  async getUserInfo(): Promise<UserResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.get('/v1/auth/me')
+    return UserResponseSchema.parse(raw)
   },
 
   // 获取当前用户角色
-  getUserRoles: () => {
-    return request.get<RoleResponse[]>('/v1/auth/me/roles')
+  async getUserRoles(): Promise<RoleResponse[]> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.get('/v1/auth/me/roles')
+    return RoleResponseSchema.array().parse(raw)
   },
 
   // 获取当前用户权限
-  getUserPermissions: (useCache = true) => {
-    return request.get<{ permissions: PermissionResponse[], total: number, cached: boolean }>('/v1/auth/me/permissions', { params: { use_cache: useCache } })
+  async getUserPermissions(useCache = true): Promise<UserPermissionsResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.get('/v1/auth/me/permissions', { params: { use_cache: useCache } })
+    return UserPermissionsResponseSchema.parse(raw)
   },
 
   // 修改密码
-  changePassword: (data: ChangePasswordRequest) => {
-    return request.post<{ message: string }>('/v1/auth/me/change-password', data)
+  async changePassword(data: ChangePasswordRequest): Promise<MessageResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.post('/v1/auth/me/change-password', data)
+    return MessageResponseSchema.parse(raw)
   }
 }

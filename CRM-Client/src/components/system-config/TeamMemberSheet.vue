@@ -20,7 +20,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
-import { Search, RefreshCw, UserPlus, Key, Shield, Trash2, Loader2, Pencil } from 'lucide-vue-next'
+import { Search, RefreshCw, UserPlus, Key, Shield, Trash2, Loader2, Pencil, Copy } from 'lucide-vue-next'
 import {
   Sheet,
   SheetHeader,
@@ -148,21 +148,30 @@ const isTeamAdmin = computed(() => {
 })
 
 const filteredMembers = computed(() => {
-  if (!searchText.value) return members.value
-  const search = searchText.value.toLowerCase()
+  const search = searchText.value.trim().toLowerCase()
+  if (search.length === 0) return members.value
   return members.value.filter(member =>
     member.name.toLowerCase().includes(search) ||
     member.email.toLowerCase().includes(search)
   )
 })
 
+const inviteLink = computed(() => {
+  const code = team.value?.code
+  if (code === undefined || code.length === 0) return ''
+  return `${window.location.origin}/invite/${code}`
+})
+
 const listTitle = computed(() => `成员列表（${filteredMembers.value.length}）`)
 
 // ==================== API Methods ====================
+const currentTeamId = (): number | null => teamId.value ?? null
+
 const fetchTeamInfo = async (): Promise<void> => {
-  if (!teamId.value) return
+  const id = currentTeamId()
+  if (id === null) return
   try {
-    const response = await teamApi.getTeamDetail(teamId.value)
+    const response = await teamApi.getTeamDetail(id)
     team.value = response
   } catch (error) {
     handleApiError(error, '获取团队信息')
@@ -170,10 +179,11 @@ const fetchTeamInfo = async (): Promise<void> => {
 }
 
 const fetchMembers = async (): Promise<void> => {
-  if (!teamId.value) return
+  const id = currentTeamId()
+  if (id === null) return
   loading.value = true
   try {
-    const response = await teamApi.getTeamMembers(teamId.value)
+    const response = await teamApi.getTeamMembers(id)
     members.value = response
     pagination.value.total = members.value.length
   } catch (error) {
@@ -201,7 +211,8 @@ const showInviteDialog = (): void => {
 }
 
 const handleSearchEmail = async (): Promise<void> => {
-  if (!inviteEmail.value || inviteEmail.value.trim().length === 0) {
+  const email = inviteEmail.value.trim()
+  if (email.length === 0) {
     toast.warning('请输入邮箱')
     return
   }
@@ -209,7 +220,7 @@ const handleSearchEmail = async (): Promise<void> => {
   searchLoading.value = true
   hasSearched.value = false
   try {
-    const response = await userApi.searchUsers(inviteEmail.value.trim())
+    const response = await userApi.searchUsers(email)
     searchResults.value = response
     hasSearched.value = true
   } catch (error) {
@@ -225,10 +236,11 @@ const isInTeam = (userId: number): boolean => {
 }
 
 const handleInviteUser = async (user: UserSearchResult): Promise<void> => {
-  if (!teamId.value) return
+  const id = currentTeamId()
+  if (id === null) return
 
   try {
-    await teamApi.addMemberDirect(teamId.value, user.id)
+    await teamApi.addMemberDirect(id, user.id)
     toast.success(`${user.name} 已加入团队`)
     inviteDialogOpen.value = false
     fetchMembers()
@@ -240,16 +252,17 @@ const handleInviteUser = async (user: UserSearchResult): Promise<void> => {
 // ==================== Role Assignment ====================
 const handleAssignRoles = (member: TeamMemberResponse): void => {
   selectedMember.value = member
-  selectedRoleIds.value = member.roles?.map(r => r.id) || []
+  selectedRoleIds.value = member.roles?.map(r => r.id) ?? []
   roleDialogOpen.value = true
 }
 
 const handleSaveRoles = async (): Promise<void> => {
-  if (!teamId.value || !selectedMember.value) return
+  const id = currentTeamId()
+  if (id === null || selectedMember.value === null) return
 
   saveRolesLoading.value = true
   try {
-    await teamApi.assignMemberRoles(teamId.value, selectedMember.value.id, selectedRoleIds.value)
+    await teamApi.assignMemberRoles(id, selectedMember.value.id, selectedRoleIds.value)
     toast.success('角色已分配')
     roleDialogOpen.value = false
     fetchMembers()
@@ -309,12 +322,13 @@ const showResetPasswordDialog = (member: TeamMemberResponse): void => {
 }
 
 const onResetPasswordSubmit = handleResetPasswordSubmit(async (formValues) => {
-  if (!teamId.value || !resetPasswordTargetUser.value) return
+  const id = currentTeamId()
+  if (id === null || resetPasswordTargetUser.value === null) return
 
   resetPasswordSubmitting.value = true
   try {
     await teamApi.resetMemberPassword(
-      teamId.value,
+      id,
       resetPasswordTargetUser.value.id,
       { new_password: formValues.newPassword }
     )
@@ -330,10 +344,11 @@ const onResetPasswordSubmit = handleResetPasswordSubmit(async (formValues) => {
 // ==================== Remove Member ====================
 const handleRemoveMember = async (member: TeamMemberResponse): Promise<void> => {
   const confirmed = await confirmDelete(`成员"${member.name}"`)
-  if (!confirmed || !teamId.value) return
+  const id = currentTeamId()
+  if (!confirmed || id === null) return
 
   try {
-    await teamApi.removeMember(teamId.value, member.id.toString())
+    await teamApi.removeMember(id, member.id.toString())
     toast.success('成员已移除')
     fetchMembers()
   } catch (error) {
@@ -343,7 +358,8 @@ const handleRemoveMember = async (member: TeamMemberResponse): Promise<void> => 
 
 // ==================== Regenerate Invite Code ====================
 const handleRegenerateCode = async (): Promise<void> => {
-  if (!teamId.value) return
+  const id = currentTeamId()
+  if (id === null) return
 
   const confirmed = await confirmDialog(
     '确定要重置邀请码吗？重置后旧邀请码将失效。',
@@ -353,8 +369,8 @@ const handleRegenerateCode = async (): Promise<void> => {
 
   codeLoading.value = true
   try {
-    const response = await teamApi.regenerateInviteCode(teamId.value)
-    if (team.value) {
+    const response = await teamApi.regenerateInviteCode(id)
+    if (team.value !== null) {
       team.value = { ...team.value, code: response.code }
     }
     toast.success('邀请码已重置')
@@ -362,6 +378,16 @@ const handleRegenerateCode = async (): Promise<void> => {
     handleApiError(error, '重置邀请码')
   } finally {
     codeLoading.value = false
+  }
+}
+
+const handleCopyInviteLink = async (): Promise<void> => {
+  if (inviteLink.value.length === 0) return
+  try {
+    await navigator.clipboard.writeText(inviteLink.value)
+    toast.success('邀请链接已复制')
+  } catch {
+    toast.warning('复制失败，请手动复制')
   }
 }
 
@@ -376,7 +402,7 @@ watch(() => props.open, (open) => {
 
 // ==================== Helper Functions ====================
 function formatDate(dateStr: string): string {
-  if (!dateStr) return '-'
+  if (dateStr.length === 0) return '-'
   const date = new Date(dateStr)
   return date.toLocaleDateString('zh-CN', {
     year: 'numeric',
@@ -417,6 +443,10 @@ function handleRoleChange(roleId: number, checked: boolean): void {
               <Button @click="showInviteDialog">
                 <UserPlus class="w-4 h-4 mr-2" />
                 邀请成员
+              </Button>
+              <Button variant="outline" :disabled="!inviteLink" @click="handleCopyInviteLink">
+                <Copy class="w-4 h-4 mr-2" />
+                复制邀请链接
               </Button>
               <Button variant="outline" :loading="codeLoading" @click="handleRegenerateCode">
                 <RefreshCw class="w-4 h-4 mr-2" />

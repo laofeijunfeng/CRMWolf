@@ -20,6 +20,7 @@ from app.models.email_verification_code import EmailVerificationCode, Verificati
 from app.models.system_config import SystemConfig, ConfigType
 from app.models.deployment import DeploymentInfo
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
+from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
 
 __all__ = [
     "User", "UserStatus",
@@ -44,5 +45,6 @@ __all__ = [
     "EmailVerificationCode", "VerificationPurpose",
     "SystemConfig", "ConfigType",
     "DeploymentInfo",
-    "LicenseApplication", "LicenseApplicationStatus", "LicenseType"
+    "LicenseApplication", "LicenseApplicationStatus", "LicenseType",
+    "OAuthProviderConfig", "UserOAuthAccount"
 ]

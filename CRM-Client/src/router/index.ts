@@ -15,6 +15,18 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false }
   },
   {
+    path: '/invite/:code',
+    name: 'InviteLogin',
+    component: () => import('@/views/InviteLogin.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/auth/feishu/callback',
+    name: 'FeishuCallback',
+    component: () => import('@/views/FeishuCallback.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
     path: '/onboarding',
     name: 'Onboarding',
     component: () => import('@/views/Onboarding.vue'),
