@@ -116,6 +116,13 @@ class ContactBase(BaseModel):
             raise ValueError('职位不能为空')
         return v.strip() if v else v
 
+    @field_validator('email', 'wechat_id')
+    @classmethod
+    def optional_text_empty_to_none(cls, v):
+        if v is not None and not v.strip():
+            return None
+        return v.strip() if v else v
+
 
 class ContactCreate(ContactBase):
     pass
@@ -151,6 +158,13 @@ class ContactUpdate(BaseModel):
     def position_must_not_be_empty(cls, v):
         if v is not None and (not v or not v.strip()):
             raise ValueError('职位不能为空')
+        return v.strip() if v else v
+
+    @field_validator('email', 'wechat_id')
+    @classmethod
+    def optional_text_empty_to_none(cls, v):
+        if v is not None and not v.strip():
+            return None
         return v.strip() if v else v
 
 

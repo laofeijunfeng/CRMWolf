@@ -70,11 +70,13 @@ import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
 import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite } from '@/api/payment'
 import paymentApi from '@/api/payment'
-import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
+import invoiceApi, { type InvoiceApplicationResponse, type InvoiceTitleResponse } from '@/api/invoice'
 import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import { getCustomerScore, type ScoreResponse } from '@/api/score'
 import { normalizePaginatedResponse } from '@/types/pagination'
+import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
+import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -128,8 +130,10 @@ const opportunities = ref<OpportunityListResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
 const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
+const invoiceApplications = ref<InvoiceApplicationResponse[]>([])
 const licenseApplications = ref<LicenseApplicationResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
+const downloadingInvoiceApplicationId = ref<number | null>(null)
 let latestLoadRequestId = 0
 
 interface CustomerBriefCitation {
@@ -387,6 +391,7 @@ const loadAllData = async (customerId: number): Promise<void> => {
       opportunitiesData,
       contractsData,
       invoiceTitlesData,
+      invoiceApplicationsData,
       licenseApplicationsData,
       deploymentsData
     ] = await Promise.all([
@@ -396,6 +401,13 @@ const loadAllData = async (customerId: number): Promise<void> => {
       opportunityApi.getOpportunities({ customer_id: customerId }).catch(() => []),
       contractApi.getCustomerContracts(customerId).catch(() => []),
       invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
+      invoiceApi.getInvoiceApplications({
+        customer_id: customerId,
+        page: 1,
+        page_size: 100,
+        order_by: 'created_time',
+        order_dir: 'desc'
+      }).catch(() => ({ items: [], total: 0, page: 1, page_size: 100 })),
       licenseApplicationApi.list(customerId).catch(() => []),
       deploymentApi.list(customerId).catch(() => [])
     ])
@@ -410,6 +422,7 @@ const loadAllData = async (customerId: number): Promise<void> => {
     opportunities.value = normalizePaginatedResponse(opportunitiesData).items
     contracts.value = contractsData
     invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
+    invoiceApplications.value = invoiceApplicationsData.items ?? []
     licenseApplications.value = licenseApplicationsData
     deployments.value = deploymentsData
 
@@ -627,6 +640,26 @@ const handleInvoiceApplicationSuccess = (): void => {
   }
 }
 
+const handleDownloadInvoiceApplication = async (application: InvoiceApplicationResponse): Promise<void> => {
+  if (application.status !== 'ISSUED' || application.invoice_file_path === null || application.invoice_file_path.trim() === '') {
+    toast.warning('发票文件尚未生成')
+    return
+  }
+
+  downloadingInvoiceApplicationId.value = application.id
+  try {
+    await downloadInvoiceFileApi(
+      application.id,
+      buildInvoiceDownloadFileName(application.customer_name ?? customer.value?.account_name, application.invoice_file_path)
+    )
+    toast.success('发票文件下载成功')
+  } catch (error) {
+    handleApiError(error, '下载发票文件')
+  } finally {
+    downloadingInvoiceApplicationId.value = null
+  }
+}
+
 // Payment handlers
 const handleRecordPayment = (): void => {
   // TODO: 打开回款记录对话框
@@ -747,6 +780,7 @@ watch(() => props.visible, (visible): void => {
     contracts.value = []
     paymentPlans.value = []
     invoiceTitles.value = []
+    invoiceApplications.value = []
     licenseApplications.value = []
     deployments.value = []
     // Clear nested sheet states
@@ -1209,11 +1243,14 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               v-if="activePanel === 'invoices'"
               :customer-id="customerId ?? 0"
               :invoice-titles="invoiceTitles"
+              :invoice-applications="invoiceApplications"
+              :downloading-application-id="downloadingInvoiceApplicationId"
               @add="invoiceTitleDialogOpen = true"
               @edit="handleEditInvoiceTitle"
               @delete="handleDeleteInvoiceTitle"
               @set-default="handleSetDefaultInvoiceTitle"
               @apply="handleApplyInvoice"
+              @download-application="handleDownloadInvoiceApplication"
             />
 
             <LicensePanel

@@ -166,6 +166,11 @@ export const CustomerReturnResponseSchema = z.object({
 
 export type CustomerReturnResponse = z.infer<typeof CustomerReturnResponseSchema>
 
+const NullableEmailSchema = z.preprocess(
+  (value) => typeof value === 'string' && value.trim() === '' ? null : value,
+  z.string().email().nullable()
+)
+
 // ===== 联系人响应 =====
 export const ContactResponseSchema = z.object({
   id: z.number().int().positive(),
@@ -175,7 +180,7 @@ export const ContactResponseSchema = z.object({
   position: z.string().nullable(),
   is_decision_maker: z.boolean(),
   mobile: z.string().min(1),
-  email: z.string().email().nullable(),
+  email: NullableEmailSchema,
   wechat_id: z.string().nullable(),
   remark: z.string().nullable(),
   reports_to: z.number().int().nullable(),

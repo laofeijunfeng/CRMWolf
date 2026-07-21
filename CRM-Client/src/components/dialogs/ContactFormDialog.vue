@@ -129,6 +129,11 @@ function mapContactGenderToApi(gender: string): '1' | '2' {
   return '1'
 }
 
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed === '' ? null : trimmed
+}
+
 // Watch for form changes
 watch(values, () => {
   isDirty.value = true
@@ -178,14 +183,14 @@ const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
   try {
     const data: ContactCreate | ContactUpdate = {
-      name: formValues.name,
+      name: formValues.name.trim(),
       gender: mapContactGenderToApi(formValues.gender),
-      position: formValues.position ?? null,
+      position: formValues.position.trim(),
       is_decision_maker: formValues.is_decision_maker ?? false,
-      mobile: formValues.mobile,
-      email: formValues.email ?? null,
-      wechat_id: formValues.wechat_id ?? null,
-      remark: formValues.remark ?? null,
+      mobile: formValues.mobile.trim(),
+      email: normalizeOptionalText(formValues.email),
+      wechat_id: normalizeOptionalText(formValues.wechat_id),
+      remark: normalizeOptionalText(formValues.remark),
       reports_to: formValues.reports_to ?? null
     }
 
