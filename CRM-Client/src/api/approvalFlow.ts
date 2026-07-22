@@ -7,6 +7,7 @@ export interface ApprovalNode {
   node_order: number
   description?: string
   approve_role: string
+  notify_user_ids?: number[] | null
   is_required: number
 }
 

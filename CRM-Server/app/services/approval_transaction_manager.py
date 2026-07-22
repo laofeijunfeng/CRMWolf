@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 import logging
 
 from app.constants.approval_phase import ApprovalPhase
-from app.services.approval_adapter import get_adapter
+from app.services.approval_adapter import get_adapter, get_approval_customer_name, get_approval_type_name
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.models.approval import Approval
 
@@ -259,7 +259,7 @@ class ApprovalTransactionManager:
         import asyncio
 
         try:
-            from app.services.notification import notification_service_factory
+            from app.services.feishu_notification import feishu_notification_service
             from app.crud.role import role_crud
 
             # 获取审批人信息
@@ -282,27 +282,31 @@ class ApprovalTransactionManager:
                 return
 
             approvers = role_crud.get_role_users(db, role.id, team_id)
+            notify_user_ids = current_node.notify_user_ids or []
+            if notify_user_ids:
+                notify_id_set = {int(user_id) for user_id in notify_user_ids}
+                approvers = [user for user in approvers if int(user.id) in notify_id_set]
             if not approvers:
                 logger.warning(
                     f"审批角色无成员（approval_id={approval.id}, role={current_node.approve_role}），跳过通知"
                 )
                 return
 
-            notification_service = notification_service_factory(db, team_id)
-
-            for approver in approvers:
-                # 使用 asyncio.run 调用异步通知方法
-                asyncio.run(
-                    notification_service.notify_approval_pending(
-                        entity_type=approval.business_type,
-                        entity_name=entity_name,
-                        flow_name=approval.flow.flow_name if approval.flow else "",
-                        node_name=current_node.node_name,
-                        approver_open_id=approver.feishu_open_id or "",
-                        approver_name=approver.name or "",
-                        business_id=approval.business_id,
-                    )
+            asyncio.run(
+                feishu_notification_service.notify_approval_pending(
+                    db=db,
+                    team_id=team_id,
+                    user_ids=[user.id for user in approvers],
+                    entity_type=approval.business_type,
+                    entity_name=entity_name,
+                    flow_name=approval.flow.flow_name if approval.flow else "",
+                    node_name=current_node.node_name,
+                    business_id=approval.business_id,
+                    submitter_name=approval.submitter_name,
+                    approval_type_name=get_approval_type_name(approval.business_type),
+                    customer_name=get_approval_customer_name(db, approval.business_type, entity),
                 )
+            )
 
             logger.info(
                 f"审批通知发送成功（approval_id={approval.id}, "

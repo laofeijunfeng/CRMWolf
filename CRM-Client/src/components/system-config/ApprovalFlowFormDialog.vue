@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Empty,
   EmptyHeader,
@@ -33,7 +34,7 @@ import approvalFlowApi, {
   type ApprovalFlowDetail,
   type ApprovalNode,
 } from '@/api/approvalFlow'
-import roleApi, { type RoleResponse } from '@/api/role'
+import roleApi, { type RoleResponse, type RoleUserResponse } from '@/api/role'
 import { handleApiError } from '@/utils/errorHandler'
 
 interface Props {
@@ -52,6 +53,7 @@ interface FlowNodeForm {
   nodeName: string
   nodeCode: string
   approveRole: string
+  notifyUserIds: number[]
   description: string
   required: boolean
 }
@@ -83,6 +85,8 @@ const emit = defineEmits<Emits>()
 
 const roles = ref<RoleResponse[]>([])
 const rolesLoading = ref(false)
+const roleUsers = ref<Record<string, RoleUserResponse[]>>({})
+const roleUsersLoading = ref<Record<string, boolean>>({})
 const loadingDetail = ref(false)
 const submitting = ref(false)
 
@@ -143,7 +147,7 @@ function hydrateForm(flow: ApprovalFlowDetail): void {
   form.flowName = flow.flow_name ?? ''
   form.flowCode = flow.flow_code ?? ''
   form.description = flow.description ?? ''
-  form.licenseType = flow.license_type && flow.license_type !== '' ? flow.license_type : 'ALL'
+  form.licenseType = flow.license_type !== null && flow.license_type !== undefined && flow.license_type !== '' ? flow.license_type : 'ALL'
   form.businessType = flow.business_type ?? 'CONTRACT'
   form.minAmount = flow.min_amount !== null && flow.min_amount !== undefined ? String(flow.min_amount) : ''
   form.maxAmount = flow.max_amount !== null && flow.max_amount !== undefined ? String(flow.max_amount) : ''
@@ -155,6 +159,7 @@ function hydrateForm(flow: ApprovalFlowDetail): void {
         nodeName: node.node_name,
         nodeCode: node.node_code,
         approveRole: node.approve_role,
+        notifyUserIds: node.notify_user_ids ?? [],
         description: node.description ?? '',
         required: node.is_required !== 0,
       }
@@ -165,6 +170,7 @@ function hydrateForm(flow: ApprovalFlowDetail): void {
 
       return formNode
     })
+  void preloadNodeRoleUsers()
   clearErrors()
 }
 
@@ -174,11 +180,71 @@ async function fetchRoles(): Promise<void> {
   rolesLoading.value = true
   try {
     roles.value = await roleApi.getRoles()
+    void preloadNodeRoleUsers()
   } catch (error: unknown) {
     handleApiError(error, '获取角色列表')
   } finally {
     rolesLoading.value = false
   }
+}
+
+function getRoleByCode(roleCode: string): RoleResponse | undefined {
+  return roles.value.find((role) => role.code === roleCode)
+}
+
+async function fetchRoleUsersByCode(roleCode: string): Promise<void> {
+  if (
+    roleCode.trim() === ''
+    || roleUsers.value[roleCode] !== undefined
+    || roleUsersLoading.value[roleCode] === true
+  ) return
+
+  const role = getRoleByCode(roleCode)
+  if (role === undefined) return
+
+  roleUsersLoading.value = { ...roleUsersLoading.value, [roleCode]: true }
+  try {
+    const users = await roleApi.getRoleUsers(role.id)
+    roleUsers.value = { ...roleUsers.value, [roleCode]: users }
+  } catch (error: unknown) {
+    handleApiError(error, '获取角色成员')
+  } finally {
+    roleUsersLoading.value = { ...roleUsersLoading.value, [roleCode]: false }
+  }
+}
+
+async function preloadNodeRoleUsers(): Promise<void> {
+  const roleCodes = [...new Set(form.nodes.map((node) => node.approveRole).filter(Boolean))]
+  await Promise.all(roleCodes.map((roleCode) => fetchRoleUsersByCode(roleCode)))
+}
+
+function getNodeRoleUsers(node: FlowNodeForm): RoleUserResponse[] {
+  return roleUsers.value[node.approveRole] ?? []
+}
+
+function handleNodeRoleChange(node: FlowNodeForm, roleCode: string): void {
+  node.approveRole = roleCode
+  node.notifyUserIds = []
+  void fetchRoleUsersByCode(roleCode)
+}
+
+function handleNotifyUserChange(node: FlowNodeForm, userId: number, checked: boolean | 'indeterminate'): void {
+  if (checked === true) {
+    if (!node.notifyUserIds.includes(userId)) {
+      node.notifyUserIds = [...node.notifyUserIds, userId]
+    }
+    return
+  }
+
+  node.notifyUserIds = node.notifyUserIds.filter((id) => id !== userId)
+}
+
+function selectAllNotifyUsers(node: FlowNodeForm): void {
+  node.notifyUserIds = getNodeRoleUsers(node).map((user) => user.id)
+}
+
+function useDefaultNotifyUsers(node: FlowNodeForm): void {
+  node.notifyUserIds = []
 }
 
 async function fetchFlowDetail(): Promise<void> {
@@ -200,6 +266,7 @@ function addNode(): void {
     nodeName: '',
     nodeCode: '',
     approveRole: '',
+    notifyUserIds: [],
     description: '',
     required: true,
   })
@@ -280,6 +347,7 @@ function buildPayload(): ApprovalFlow {
         node_code: node.nodeCode.trim(),
         node_order: index + 1,
         approve_role: node.approveRole.trim(),
+        notify_user_ids: node.notifyUserIds,
         is_required: node.required ? 1 : 0,
       }
 
@@ -570,7 +638,11 @@ watch(
                 <div class="form-grid">
                   <div class="form-field">
                     <Label>审批角色 <span class="required">*</span></Label>
-                    <Select v-model="node.approveRole" :disabled="rolesLoading">
+                    <Select
+                      :model-value="node.approveRole"
+                      :disabled="rolesLoading"
+                      @update:model-value="handleNodeRoleChange(node, String($event))"
+                    >
                       <SelectTrigger>
                         <SelectValue :placeholder="rolesLoading ? '角色加载中' : '选择审批角色'" />
                       </SelectTrigger>
@@ -594,6 +666,39 @@ watch(
                     />
                     <Label :for="`node-required-${index}`" class="cursor-pointer">必须审批</Label>
                   </div>
+                </div>
+
+                <div v-if="node.approveRole" class="notify-panel">
+                  <div class="notify-panel__header">
+                    <Label>通知对象</Label>
+                    <div class="notify-actions">
+                      <Button type="button" size="sm" variant="ghost" @click="selectAllNotifyUsers(node)">
+                        全选
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" @click="useDefaultNotifyUsers(node)">
+                        默认全部
+                      </Button>
+                    </div>
+                  </div>
+                  <div v-if="roleUsersLoading[node.approveRole]" class="notify-empty">成员加载中...</div>
+                  <div v-else-if="getNodeRoleUsers(node).length === 0" class="notify-empty">该角色暂无成员</div>
+                  <div v-else class="notify-users">
+                    <label
+                      v-for="user in getNodeRoleUsers(node)"
+                      :key="user.id"
+                      class="notify-user"
+                    >
+                      <Checkbox
+                        :checked="node.notifyUserIds.includes(user.id)"
+                        @update:checked="handleNotifyUserChange(node, user.id, $event)"
+                      />
+                      <span class="notify-user__name">{{ user.name }}</span>
+                      <span class="notify-user__email">{{ user.email }}</span>
+                    </label>
+                  </div>
+                  <p class="notify-hint">
+                    {{ node.notifyUserIds.length === 0 ? '当前默认通知该角色全部成员' : `当前通知 ${node.notifyUserIds.length} 人` }}
+                  </p>
                 </div>
 
                 <div class="form-field">
@@ -741,6 +846,79 @@ watch(
   gap: $wolf-space-xs-v2;
 }
 
+.notify-panel {
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-sm-v2;
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-sm-v2;
+  margin-bottom: $wolf-space-md-v2;
+  padding: $wolf-space-md-v2;
+}
+
+.notify-panel__header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.notify-actions {
+  display: flex;
+  gap: $wolf-space-xs-v2;
+}
+
+.notify-users {
+  display: grid;
+  gap: $wolf-space-xs-v2;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 156px;
+  overflow-y: auto;
+}
+
+.notify-user {
+  align-items: center;
+  border-radius: $wolf-radius-sm-v2;
+  display: grid;
+  gap: $wolf-space-xs-v2;
+  grid-template-columns: auto minmax(72px, max-content) minmax(0, 1fr);
+  min-height: $wolf-touch-target-min-v2;
+  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
+}
+
+.notify-user:hover {
+  background: $wolf-bg-hover-v2;
+}
+
+.notify-user__name {
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.notify-user__email,
+.notify-empty,
+.notify-hint {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.notify-user__email {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notify-empty {
+  min-height: $wolf-touch-target-min-v2;
+}
+
+.notify-hint {
+  margin: 0;
+}
+
 @media (max-width: $wolf-breakpoint-sm-v2) {
   .approval-flow-form-dialog {
     width: calc(100vw - 16px);
@@ -758,6 +936,10 @@ watch(
   .switch-row--node {
     align-self: start;
     margin-bottom: 0;
+  }
+
+  .notify-users {
+    grid-template-columns: 1fr;
   }
 }
 </style>

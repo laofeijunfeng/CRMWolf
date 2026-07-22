@@ -49,6 +49,17 @@ class UserRoleResponse(BaseModel):
         from_attributes = True
 
 
+class RoleUserResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+    avatar_url: Optional[str] = None
+    status: str
+
+    class Config:
+        from_attributes = True
+
+
 class RolePermissionsUpdate(BaseModel):
     """批量更新角色权限的请求"""
     permission_ids: List[int] = Field(..., description="权限ID列表")

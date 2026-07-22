@@ -150,8 +150,10 @@ const detail = computed<ApprovalDetail | null>(() => currentApprovalDetail.value
 
 const status = computed<ApprovalDetail['status'] | undefined>(() => detail.value?.status)
 const isPending = computed<boolean>(() => status.value === 'PENDING')
-// C-DSG-7 条4：REJECTED 态提交人可见「修改并重新提交」CTA（抽屉侧入口）
+// C-DSG-7 条4：REJECTED/CANCELLED 态提交人可见重新提交 CTA（抽屉侧入口）
 const isRejected = computed<boolean>(() => status.value === 'REJECTED')
+const isCancelled = computed<boolean>(() => status.value === 'CANCELLED')
+const canResubmit = computed<boolean>(() => isRejected.value || isCancelled.value)
 // 冲突重载后启用提交
 const isLocked = computed<boolean>(() => conflictNotice.value.length > 0)
 
@@ -197,11 +199,14 @@ const contractFiles = computed<FileAttachmentItem[]>(() => {
   if (!hasContractFile.value || detail.value == null) return []
 
   const filePath = detail.value.contract_file_path ?? ''
-  const fileName = detail.value.contract_file_name?.trim() || getContractFileName(filePath)
+  const configuredFileName = detail.value.contract_file_name?.trim()
+  const fileName = configuredFileName != null && configuredFileName.length > 0
+    ? configuredFileName
+    : getContractFileName(filePath)
   const file: FileAttachmentItem = {
     id: props.entityId,
     name: fileName,
-    extension: getFileExtension(fileName || filePath),
+    extension: getFileExtension(fileName.length > 0 ? fileName : filePath),
     status: contractFilePreviewLoading.value ? 'processing' : 'done'
   }
 
@@ -420,13 +425,22 @@ const confirmWithdraw = async (): Promise<void> => {
   }
 }
 
-// C-DSG-7 条4：REJECTED 态提交人「修改并重新提交」CTA（抽屉侧入口）
+// C-DSG-7 条4：REJECTED/CANCELLED 态提交人重新提交 CTA（抽屉侧入口）
 // 组件本身不导航（COMPONENTS.md「组件禁直接调 API/禁导航」），仅 emit resubmit
 // 由父视图（FinanceApprovalCenter）据 currentRow 走 router.push 跳对应编辑页。
 const handleResubmit = (): void => {
   if (actionPending.value || isLocked.value || !isRejected.value) return
   if (!props.isSubmitter) return
   emit('resubmit')
+}
+
+const handleResubmitAction = (): void => {
+  if (!props.isSubmitter || actionPending.value || isLocked.value || !canResubmit.value) return
+  if (isCancelled.value) {
+    void handleSubmit()
+    return
+  }
+  handleResubmit()
 }
 
 // 发票文件下载 - 使用 invoice API 的下载接口
@@ -624,13 +638,13 @@ onBeforeUnmount((): void => {
           撤回审批
         </Button>
         <Button
-          v-if="isSubmitter && isRejected"
+          v-if="isSubmitter && canResubmit"
           data-testid="resubmit-btn"
           :disabled="actionPending || isLocked"
-          @click="handleResubmit"
+          @click="handleResubmitAction"
         >
           <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" />
-          修改并重新提交
+          {{ isCancelled ? '重新提交审批' : '修改并重新提交' }}
         </Button>
         <Button
           v-if="canApprove && isPending"

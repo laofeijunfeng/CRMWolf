@@ -155,7 +155,7 @@ class ApprovalFlowCRUD:
                     for field, value in node_fields.items():
                         setattr(existing_nodes[node_id], field, value)
                 else:
-                    new_node = ApprovalNode(flow_id=db_obj.id, **node_fields)
+                    new_node = ApprovalNode(flow_id=db_obj.id, team_id=db_obj.team_id, **node_fields)
                     db.add(new_node)
             
             node_ids_to_keep = {n.get('id') for n in nodes_data if n.get('id')}

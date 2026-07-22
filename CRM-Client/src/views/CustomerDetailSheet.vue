@@ -77,6 +77,7 @@ import { getCustomerScore, type ScoreResponse } from '@/api/score'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
+import { useUserStore } from '@/stores/user'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -91,6 +92,7 @@ defineEmits<{
 }>()
 
 const router = useRouter()
+const userStore = useUserStore()
 
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
@@ -503,6 +505,18 @@ const handleFollowUpSuccess = (): void => {
         loadAllData(props.customerId)
       }
     }, 3000)
+  }
+}
+
+const handleFollowUpDelete = async (followUp: { id: number }): Promise<void> => {
+  try {
+    await customerFollowUpApi.deleteFollowUp(followUp.id)
+    toast.success('跟进记录已删除')
+    if (props.customerId !== null) {
+      await loadAllData(props.customerId)
+    }
+  } catch (error) {
+    handleApiError(error, '删除跟进记录')
   }
 }
 
@@ -1203,7 +1217,9 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
             <FollowUpPanel
               v-if="activePanel === 'followup'"
               :follow-ups="followUps"
+              :current-user-id="String(userStore.userInfo?.id)"
               @add="followUpDialogOpen = true"
+              @delete="handleFollowUpDelete"
             />
 
             <ContactsPanel

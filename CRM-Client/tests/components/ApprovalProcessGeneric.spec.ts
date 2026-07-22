@@ -448,4 +448,29 @@ describe('ApprovalProcessGeneric', () => {
     await flushPromises()
     expect(w.find('[data-testid="resubmit-btn"]').exists()).toBe(false)
   })
+
+  it('shows direct submit CTA for submitter when CANCELLED', async () => {
+    api.getApprovalDetail
+      .mockResolvedValueOnce(buildDetail({ status: 'CANCELLED' }))
+      .mockResolvedValueOnce(buildDetail({ status: 'PENDING' }))
+    api.submitApproval.mockResolvedValue({ approval_id: 2, status: 'PENDING' })
+
+    const w = mountComp({
+      entityType: 'OPPORTUNITY',
+      entityId: 9,
+      canApprove: false,
+      isSubmitter: true
+    })
+    await flushPromises()
+
+    const btn = w.find('[data-testid="resubmit-btn"]')
+    expect(btn.exists()).toBe(true)
+    expect(btn.text()).toContain('重新提交审批')
+
+    await btn.trigger('click')
+    await flushPromises()
+
+    expect(api.submitApproval).toHaveBeenCalledWith('OPPORTUNITY', 9, undefined)
+    expect(w.emitted('resubmit')).toBeFalsy()
+  })
 })

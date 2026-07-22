@@ -21,14 +21,14 @@ from app.crud.contract import contract_crud, ApprovalService
 from app.crud.customer import customer_crud, contact_crud
 from app.crud.opportunity import opportunity_crud
 from app.crud.role import role_crud
-from app.crud.user import user_crud
 from app.schemas.contract import (
     ContractCreate, ContractUpdate,
     ContractResponse, ContractListResponse, ContractDetailResponse,
     ContractStatusEnum, LicenseTypeEnum, MessageResponse
 )
 from app.schemas.common import PaginatedResponse
-from app.services.notification import notification_service_factory
+from app.services.approval_adapter import get_approval_customer_name, get_approval_type_name
+from app.services.feishu_notification import feishu_notification_service
 from app.services.file_storage import file_storage_service, FileStorageError
 from app.models.approval import BusinessType
 
@@ -47,6 +47,19 @@ def _get_approvers_by_role(db: Session, role_code: Optional[str], team_id: int) 
         return []
 
     return role_crud.get_role_users(db, role.id, team_id)
+
+
+def _get_notification_users_for_node(db: Session, node, team_id: int) -> list:
+    if not node:
+        return []
+
+    approvers = _get_approvers_by_role(db, node.approve_role, team_id)
+    notify_user_ids = node.notify_user_ids or []
+    if not notify_user_ids:
+        return approvers
+
+    notify_id_set = {int(user_id) for user_id in notify_user_ids}
+    return [user for user in approvers if int(user.id) in notify_id_set]
 
 
 def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
@@ -215,20 +228,21 @@ async def create_contract(
         approval = ApprovalService.submit_for_approval(db, db_contract.id)
         if approval and approval.current_node:
             try:
-                approvers = _get_approvers_by_role(db, approval.current_node.approve_role, team_id)
-                notification_service = notification_service_factory(db, team_id)
-
-                for approver in approvers:
-                    await notification_service.notify_approval_pending(
-                        entity_type=BusinessType.CONTRACT,
-                        entity_name=db_contract.contract_name,
-                        flow_name=approval.flow.flow_name if approval.flow else "",
-                        node_name=approval.current_node.node_name,
-                        approver_open_id=approver.feishu_open_id or "",
-                        approver_name=approver.name or "",
-                        business_id=db_contract.id,
-                    )
-                logger.info(f"合同审批通知发送完成（contract_id={db_contract.id}, approver_count={len(approvers)}）")
+                notify_users = _get_notification_users_for_node(db, approval.current_node, team_id)
+                result = await feishu_notification_service.notify_approval_pending(
+                    db=db,
+                    team_id=team_id,
+                    user_ids=[user.id for user in notify_users],
+                    entity_type=BusinessType.CONTRACT,
+                    entity_name=db_contract.contract_name,
+                    flow_name=approval.flow.flow_name if approval.flow else "",
+                    node_name=approval.current_node.node_name,
+                    business_id=db_contract.id,
+                    submitter_name=current_user.name,
+                    approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
+                    customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, db_contract),
+                )
+                logger.info(f"合同审批通知发送完成（contract_id={db_contract.id}, result={result}）")
             except Exception as notify_error:
                 # 通知失败不阻断业务流程
                 logger.error(f"合同审批通知发送失败（contract_id={db_contract.id}）: {notify_error}", exc_info=True)
@@ -377,20 +391,21 @@ async def create_contract_from_opportunity(
         approval = ApprovalService.submit_for_approval(db, db_contract.id)
         if approval and approval.current_node:
             try:
-                approvers = _get_approvers_by_role(db, approval.current_node.approve_role, team_id)
-                notification_service = notification_service_factory(db, team_id)
-
-                for approver in approvers:
-                    await notification_service.notify_approval_pending(
-                        entity_type=BusinessType.CONTRACT,
-                        entity_name=db_contract.contract_name,
-                        flow_name=approval.flow.flow_name if approval.flow else "",
-                        node_name=approval.current_node.node_name,
-                        approver_open_id=approver.feishu_open_id or "",
-                        approver_name=approver.name or "",
-                        business_id=db_contract.id,
-                    )
-                logger.info(f"合同审批通知发送完成（contract_id={db_contract.id}, approver_count={len(approvers)}）")
+                notify_users = _get_notification_users_for_node(db, approval.current_node, team_id)
+                result = await feishu_notification_service.notify_approval_pending(
+                    db=db,
+                    team_id=team_id,
+                    user_ids=[user.id for user in notify_users],
+                    entity_type=BusinessType.CONTRACT,
+                    entity_name=db_contract.contract_name,
+                    flow_name=approval.flow.flow_name if approval.flow else "",
+                    node_name=approval.current_node.node_name,
+                    business_id=db_contract.id,
+                    submitter_name=current_user.name,
+                    approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
+                    customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, db_contract),
+                )
+                logger.info(f"合同审批通知发送完成（contract_id={db_contract.id}, result={result}）")
             except Exception as notify_error:
                 # 通知失败不阻断业务流程
                 logger.error(f"合同审批通知发送失败（contract_id={db_contract.id}）: {notify_error}", exc_info=True)

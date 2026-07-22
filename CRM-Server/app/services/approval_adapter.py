@@ -16,10 +16,20 @@ from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
 from app.models.contract import Contract, ContractStatus
-from app.models.payment import PaymentRecord, PaymentConfirmationStatus
+from app.models.payment import PaymentPlan, PaymentRecord, PaymentConfirmationStatus
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
 from app.models.opportunity import Opportunity
+from app.models.customer import Customer
+
+
+_BUSINESS_TYPE_DISPLAY_NAMES = {
+    BusinessType.CONTRACT: "合同",
+    BusinessType.PAYMENT: "回款登记",
+    BusinessType.INVOICE: "发票申请",
+    BusinessType.LICENSE: "License申请",
+    BusinessType.OPPORTUNITY: "商机",
+}
 
 
 class ApprovalEntityAdapter(Protocol):
@@ -277,3 +287,44 @@ def get_adapter(business_type: str) -> ApprovalEntityAdapter:
     if adapter is None:
         raise ValueError(f"不支持的业务单据类型: {business_type}")
     return adapter
+
+
+def get_approval_type_name(business_type: str) -> str:
+    return _BUSINESS_TYPE_DISPLAY_NAMES.get(business_type, "审批")
+
+
+def get_approval_customer_name(db: Session, business_type: str, entity: Any) -> Optional[str]:
+    if entity is None:
+        return None
+
+    customer = getattr(entity, "customer", None)
+    if customer is not None:
+        return getattr(customer, "account_name", None)
+
+    if business_type == BusinessType.PAYMENT:
+        payment_plan = getattr(entity, "payment_plan", None)
+        contract = getattr(payment_plan, "contract", None) if payment_plan is not None else None
+        customer = getattr(contract, "customer", None) if contract is not None else None
+        if customer is not None:
+            return getattr(customer, "account_name", None)
+
+        payment_plan_id = getattr(entity, "payment_plan_id", None)
+        if payment_plan_id:
+            payment_plan = db.query(PaymentPlan).filter(
+                PaymentPlan.id == payment_plan_id,
+                PaymentPlan.team_id == getattr(entity, "team_id", None),
+            ).first()
+            contract = getattr(payment_plan, "contract", None) if payment_plan is not None else None
+            customer = getattr(contract, "customer", None) if contract is not None else None
+            if customer is not None:
+                return getattr(customer, "account_name", None)
+
+    customer_id = getattr(entity, "customer_id", None)
+    if customer_id:
+        customer = db.query(Customer).filter(
+            Customer.id == customer_id,
+            Customer.team_id == getattr(entity, "team_id", None),
+        ).first()
+        return customer.account_name if customer else None
+
+    return None

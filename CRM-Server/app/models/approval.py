@@ -1,4 +1,5 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Numeric, ForeignKey, Index
+from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -75,6 +76,7 @@ class ApprovalNode(Base):
     description = Column(Text, nullable=True, comment="节点描述")
 
     approve_role = Column(String(50), nullable=True, comment="审批角色（TEAM_ADMIN, SALES_DIRECTOR等）")
+    notify_user_ids = Column(JSON().with_variant(Text(), "sqlite"), nullable=True, comment="通知对象用户ID列表")
     is_required = Column(Integer, nullable=False, default=1, comment="是否必须审批：0:否, 1:是")
 
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")

@@ -27,7 +27,8 @@ from app.schemas.payment import (
     ContractPaymentSummary, PaymentReminder, PaginatedResponse,
     PaymentRecordListItem, PaymentRecordListResponse
 )
-from app.services.approval_adapter import get_adapter
+from app.services.approval_adapter import get_adapter, get_approval_customer_name, get_approval_type_name
+from app.services.feishu_notification import feishu_notification_service
 
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
@@ -660,35 +661,32 @@ async def create_payment_record(
         # 发送审批通知（API 层 - 异步）
         # 注意：通知失败不阻断业务流程，只记录日志
         if record.approval_id:
-            from app.services.notification import notification_service_factory
-            from app.api.approvals import get_approvers_by_role
+            from app.api.approvals import get_notification_users_for_node
             from app.constants.business_types import BusinessType
-
-            notification_service = notification_service_factory(db, team_id)
 
             # 获取审批实例
             from app.crud.approval import approval_crud
             approval = approval_crud.get_by_id(db, record.approval_id, team_id)
 
             if approval and approval.current_node:
-                approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+                notify_users = get_notification_users_for_node(db, approval.current_node, team_id)
 
-                # 构造通知内容
-                from app.models.contract import Contract
-                contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
-                entity_name = contract.contract_name if contract else f"回款登记#{record.id}"
+                entity_name = get_adapter(BusinessType.PAYMENT).get_name(record)
 
                 try:
-                    for approver in approvers:
-                        await notification_service.notify_approval_pending(
-                            entity_type=BusinessType.PAYMENT,
-                            entity_name=entity_name,
-                            flow_name=approval.flow.flow_name if approval.flow else "",
-                            node_name=approval.current_node.node_name,
-                            approver_open_id=approver.feishu_open_id or "",
-                            approver_name=approver.name or "",
-                            business_id=record.id,
-                        )
+                    await feishu_notification_service.notify_approval_pending(
+                        db=db,
+                        team_id=team_id,
+                        user_ids=[user.id for user in notify_users],
+                        entity_type=BusinessType.PAYMENT,
+                        entity_name=entity_name,
+                        flow_name=approval.flow.flow_name if approval.flow else "",
+                        node_name=approval.current_node.node_name,
+                        business_id=record.id,
+                        submitter_name=current_user.name,
+                        approval_type_name=get_approval_type_name(BusinessType.PAYMENT),
+                        customer_name=get_approval_customer_name(db, BusinessType.PAYMENT, record),
+                    )
                 except Exception as notify_error:
                     # 通知失败不阻断业务，记录日志
                     logger.error(

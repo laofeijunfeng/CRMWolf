@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from sqlalchemy.orm import Session
 from typing import List
 from app.core.database import get_db
-from app.core.deps import require_permission
+from app.core.deps import get_current_user_team, require_permission
 from app.crud.role import role_crud
 from app.crud.permission import permission_crud
-from app.schemas.role import RoleCreate, RoleUpdate, RoleResponse, RoleWithPermissions, UserRoleCreate, RolePermissionsUpdate
+from app.schemas.role import RoleCreate, RoleUpdate, RoleResponse, RoleWithPermissions, UserRoleCreate, RolePermissionsUpdate, RoleUserResponse
 from app.schemas.permission import PermissionResponse
 from app.services.permission_service import permission_service
 
@@ -46,6 +46,33 @@ def get_role(
         updated_at=role.updated_at,
         permissions=permissions
     )
+
+
+@router.get("/{role_id}/users", response_model=List[RoleUserResponse], summary="获取角色成员", description="获取当前团队内拥有指定角色的成员")
+def get_role_users(
+    role_id: int,
+    current_user = Depends(require_permission("approval:flow:edit")),
+    team_id: int = Depends(get_current_user_team),
+    db: Session = Depends(get_db)
+):
+    role = role_crud.get_by_id(db, role_id)
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="角色不存在"
+        )
+
+    users = role_crud.get_role_users(db, role_id, team_id)
+    return [
+        RoleUserResponse(
+            id=user.id,
+            name=user.name,
+            email=user.email,
+            avatar_url=user.avatar_url,
+            status=user.status.value if hasattr(user.status, "value") else str(user.status),
+        )
+        for user in users
+    ]
 
 
 @router.post("", response_model=RoleResponse, status_code=status.HTTP_201_CREATED, summary="创建角色", description="创建新的角色，需要提供角色名称和代码")

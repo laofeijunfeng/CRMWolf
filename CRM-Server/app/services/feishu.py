@@ -8,6 +8,8 @@ from app.schemas.user import FeishuTokenResponse, FeishuUserInfo
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+# DEPRECATED: 旧飞书通知服务，仅保留兼容历史调用。新的团队 OAuth 绑定和个人消息通知
+# 请使用 app.services.feishu_notification.feishu_notification_service。
 
 # 单据类型展示名 —— 通知文案标题里 fallback 用，避免硬编码"合同"
 _ENTITY_TYPE_LABEL = {

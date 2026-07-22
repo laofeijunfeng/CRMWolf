@@ -37,6 +37,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.database import Base
+from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
 from app.core import deps
 from app.api.approvals import router as approvals_router
@@ -335,6 +336,7 @@ def test_submit_invoice_approval(client, seed_invoice_draft, seed_invoice_flow_w
     body = r.json()
     assert body["status"] == "PENDING"
     assert "approval_id" in body
+    assert seed_invoice_draft.approval_phase == ApprovalPhase.PENDING_REVIEW
 
 
 def test_invalid_entity_type_rejected(client):

@@ -70,6 +70,10 @@ class ApprovalNodeCreate(BaseModel):
         ...,
         description="审批角色代码，拥有该角色的用户才能审批，如：SALES_MANAGER、FINANCE、GENERAL_MANAGER"
     )
+    notify_user_ids: Optional[List[int]] = Field(
+        None,
+        description="通知对象用户ID列表；为空时默认通知该审批角色下所有成员"
+    )
     is_required: int = Field(
         1,
         ge=0,
@@ -109,6 +113,10 @@ class ApprovalNodeUpdate(BaseModel):
         None,
         description="审批角色代码"
     )
+    notify_user_ids: Optional[List[int]] = Field(
+        None,
+        description="通知对象用户ID列表；为空时默认通知该审批角色下所有成员"
+    )
     is_required: Optional[int] = Field(
         None,
         ge=0,
@@ -126,6 +134,7 @@ class ApprovalNodeResponse(BaseModel):
     node_order: int = Field(..., description="节点顺序，决定审批流转顺序")
     description: Optional[str] = Field(None, description="节点描述，说明审批职责")
     approve_role: str = Field(..., description="审批角色代码，如：SALES_MANAGER")
+    notify_user_ids: Optional[List[int]] = Field(None, description="通知对象用户ID列表")
     is_required: int = Field(..., description="是否必须审批，1-必须，0-可选")
     created_time: datetime = Field(..., description="创建时间，节点创建时间")
     
