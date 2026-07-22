@@ -1,12 +1,11 @@
 <script setup lang="ts">
 /**
- * ContextTabs - Segmented Control 模式标签栏
- * MASTER.md §5.6 规范：
- * - 容器高度 48px，背景 #F1F5FD，padding 4px，圆角 8px
- * - Item 高度 40px，Active 背景 #FFFFFF，阴影 0 1px 2px rgba(0,0,0,0.05)
- * - 字号 14px，字重 default 500，active 600
- * - 动画 150ms fade，支持 prefers-reduced-motion
- * - UI/UX Pro Max: §2 Touch Target 44px（移动端）
+ * ContextTabs - 轻量扁平标签栏
+ * 与 TopBarTabs 的视觉方向保持一致：
+ * - 无容器背景
+ * - 内容左对齐
+ * - Active 使用主题色文字和更高字重
+ * - Hover 使用轻量背景
  *
  * 基于 shadcn-vue Tabs 组件改造（MASTER.md §3.1）
  */
@@ -62,9 +61,7 @@ function handleTabChange(value: string): void {
     <TabsList
       :class="cn(
         'context-tabs-container',
-        'inline-flex items-center justify-center',
-        'rounded-wolf-lg bg-wolf-bg-muted',
-        'p-wolf-xs',
+        'inline-flex items-center justify-start',
         props.class
       )"
     >
@@ -88,12 +85,10 @@ function handleTabChange(value: string): void {
           // Disabled state（MASTER.md §11.1）
           'disabled:pointer-events-none',
           'disabled:opacity-40',
-          // Active state（MASTER.md §5.6）
-          'data-[state=active]:bg-wolf-bg-card',
+          // Active state
           'data-[state=active]:text-wolf-primary',
           'data-[state=active]:font-wolf-semibold',
-          'data-[state=active]:shadow-wolf-card',
-          // Hover state（MASTER.md §5.6）
+          // Hover state
           'hover:text-wolf-primary'
         )"
       >
@@ -115,39 +110,52 @@ function handleTabChange(value: string): void {
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-// ==================== 容器样式（MASTER.md §5.6）====================
 .context-tabs-container {
-  height: 48px;  // 容器高度
-  padding: 4px;  // 为内部元素留出呼吸空间
-  background: $wolf-bg-muted-v2;  // #F1F5FD
-  border-radius: $wolf-radius-lg-v2;  // 8px
-  gap: 0;  // 无 gap（Item 紧凑排列）
+  width: 100%;
+  height: 40px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  gap: $wolf-space-xs-v2;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
-// ==================== Item 样式（MASTER.md §5.6）====================
 .context-tab-item {
-  height: 40px;  // Item 高度（比容器小 8px）
-  font-size: $wolf-font-size-body-v2;  // 14px
-  font-weight: $wolf-font-weight-medium-v2;  // 500
-  color: $wolf-text-tertiary-v2;  // #94A3B8（default 状态）
+  height: 32px;
+  min-height: 44px;
+  padding: $wolf-button-padding-sm-v2;
+  border-radius: $wolf-radius-v2;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
 
-  // Active 状态（MASTER.md §5.6）
   &[data-state="active"] {
-    background: $wolf-bg-card-v2;  // #FFFFFF
-    color: $wolf-primary-v2;  // #2563EB
-    font-weight: $wolf-font-weight-semibold-v2;  // 600
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);  // Active 阴影
+    background: transparent;
+    color: $wolf-primary-v2;
+    font-weight: $wolf-font-weight-semibold-v2;
+    box-shadow: none;
+
+    &:hover {
+      background: transparent;
+      color: $wolf-primary-v2;
+    }
   }
 
-  // Hover 状态（MASTER.md §5.6）
   &:hover:not([data-state="active"]):not(:disabled) {
-    color: $wolf-primary-v2;  // #2563EB
+    background: $wolf-bg-hover-v2;
+    color: $wolf-text-secondary-v2;
   }
 
-  // 移动端 Touch Target 合规（UI/UX Pro Max §2）
   @media (max-width: $wolf-breakpoint-md-v2 - 1) {
-    min-height: 44px;  // Touch Target 合规
-    font-size: $wolf-font-size-body-mobile-v2;  // 16px（避免 iOS auto-zoom）
+    height: 44px;
+    flex-shrink: 0;
+    padding: 8px 16px;
+    font-size: $wolf-font-size-body-mobile-v2;
   }
 }
 

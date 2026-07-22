@@ -7,31 +7,59 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Pencil, Trophy, XCircle, ExternalLink, ArrowLeft, FileText } from 'lucide-vue-next'
+import { Pencil, Trophy, XCircle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
 import { AmountText } from '@/components/crmwolf'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger
+} from '@/components/ui/accordion'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator
+} from '@/components/ui/breadcrumb'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import OpportunityStageStepper from '@/components/OpportunityStageStepper.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
 import OpportunityLoseDialog from '@/components/dialogs/OpportunityLoseDialog.vue'
+import PaymentPlanFormDialog from '@/components/dialogs/PaymentPlanFormDialog.vue'
+import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
+import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
+import LicenseApplicationFormDialog from '@/components/dialogs/LicenseApplicationFormDialog.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
+import ContractsPanel from '@/components/panels/ContractsPanel.vue'
+import PaymentsPanel from '@/components/panels/PaymentsPanel.vue'
+import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
+import LicensePanel from '@/components/panels/LicensePanel.vue'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
+import paymentApi, { type PaymentPlanResponse, type PaymentRecordCreate } from '@/api/payment'
+import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
+import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
+import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
+import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 
@@ -55,8 +83,11 @@ const emit = defineEmits<{
   'back': []
   'close': []
   'refresh': []
-  'open-full-page': [opportunityId: number]
   'edit': [opportunityId: number]
+  'edit-contract': [contract: ContractListResponse]
+  'submit-contract-approval': [contract: ContractListResponse]
+  'withdraw-contract-approval': [contract: ContractListResponse]
+  'delete-contract': [contract: ContractListResponse]
   'create-contract': [{
     opportunityId: number
     customerId: number
@@ -78,9 +109,30 @@ const contentRootRef = ref<HTMLElement | null>(null)
 const opportunity = ref<Opportunity | null>(null)
 const relatedContract = ref<ContractListResponse | null>(null)
 const contractLoading = ref(false)
+const relationLoading = ref(false)
+const paymentPlans = ref<PaymentPlanResponse[]>([])
+const invoiceApplications = ref<InvoiceApplicationResponse[]>([])
+const licenseApplications = ref<LicenseApplicationResponse[]>([])
+const deployments = ref<DeploymentInfoResponse[]>([])
+const downloadingInvoiceApplicationId = ref<number | null>(null)
+const approvalAccordionValue = ref('approval')
+const stageAccordionValue = ref('')
+const isStageComplete = ref(false)
+const stageWinProbability = ref(0)
+const approvedContractStatuses: readonly ContractStatus[] = ['SIGNED', 'EFFECTIVE']
 
 const winDialogOpen = ref(false)
 const loseDialogOpen = ref(false)
+const paymentPlanDialogOpen = ref(false)
+const paymentPlanDialogMode = ref<'create' | 'edit'>('create')
+const editingPaymentPlan = ref<PaymentPlanResponse | null>(null)
+const selectedPaymentPlan = ref<PaymentPlanResponse | null>(null)
+const paymentRecordDialogOpen = ref(false)
+const paymentRecordSubmitting = ref(false)
+const paymentPlanToDelete = ref<PaymentPlanResponse | null>(null)
+const paymentPlanDeleting = ref(false)
+const invoiceApplicationDialogOpen = ref(false)
+const licenseApplicationDialogOpen = ref(false)
 
 // 编辑弹窗状态
 const editDialogOpen = ref(false)
@@ -90,6 +142,15 @@ const canEdit = computed(() =>
 )
 const canWin = computed(() => permissionStore.hasPermission('opportunity:win'))
 const canLose = computed(() => permissionStore.hasPermission('opportunity:lose'))
+const canEditAllContract = computed(() => permissionStore.hasPermission('contract:edit:all'))
+const canEditOwnContract = computed(() => permissionStore.hasPermission('contract:edit:own'))
+const canDeleteAllContract = computed(() => permissionStore.hasPermission('contract:delete:all'))
+const canDeleteOwnContract = computed(() => permissionStore.hasPermission('contract:delete:own'))
+const canCreatePaymentPlanPermission = computed(() => permissionStore.hasPermission('payment:plan:create'))
+const canEditPaymentPlanPermission = computed(() => permissionStore.hasPermission('payment:plan:edit'))
+const canDeletePaymentPlanPermission = computed(() => permissionStore.hasPermission('payment:plan:delete'))
+const canRecordPaymentPermission = computed(() => permissionStore.hasPermission('payment:confirm'))
+const canCreateInvoice = computed(() => permissionStore.hasPermission('invoice:create'))
 
 const isActive = computed(() => opportunity.value?.status === 0)
 const approvalPhase = computed(() => opportunity.value?.approval_phase)
@@ -106,6 +167,10 @@ const canSubmitApproval = computed(() => {
     && opportunity.value?.owner_id === currentUserId
 })
 
+const relatedContracts = computed<ContractListResponse[]>(() =>
+  relatedContract.value === null ? [] : [relatedContract.value]
+)
+
 function firstNonEmpty(...values: (string | null | undefined)[]): string {
   const value = values.find(item => item !== undefined && item !== null && item.trim() !== '')
   return value ?? '-'
@@ -119,6 +184,73 @@ const displayCustomerName = computed(() =>
   )
 )
 
+const stageProgressText = computed(() => `${Math.round(stageWinProbability.value)}%`)
+const isRelatedContractApproved = computed(() =>
+  relatedContract.value !== null && approvedContractStatuses.includes(relatedContract.value.status)
+)
+const canCreateRelatedContract = computed(() =>
+  opportunity.value?.status === 1 && isApprovalApproved.value && relatedContract.value === null
+)
+const relatedContractTotalAmount = computed(() => Number(relatedContract.value?.total_amount ?? 0))
+const plannedPaymentAmount = computed(() =>
+  paymentPlans.value.reduce((total, plan) => total + Number(plan.planned_amount ?? 0), 0)
+)
+const remainingPaymentPlanAmount = computed(() =>
+  Math.max(0, relatedContractTotalAmount.value - plannedPaymentAmount.value)
+)
+const isPaymentPlanAmountComplete = computed(() =>
+  relatedContractTotalAmount.value > 0
+    && plannedPaymentAmount.value >= relatedContractTotalAmount.value - 0.01
+)
+const canCreatePaymentPlan = computed(() =>
+  isRelatedContractApproved.value
+    && canCreatePaymentPlanPermission.value
+    && !isPaymentPlanAmountComplete.value
+)
+const fixedContractForPaymentPlan = computed(() => {
+  const contract = relatedContract.value
+  if (contract === null) return null
+  return {
+    id: contract.id,
+    contract_name: contract.contract_name,
+    total_amount: remainingPaymentPlanAmount.value > 0
+      ? remainingPaymentPlanAmount.value
+      : contract.total_amount,
+    customer_name: displayCustomerName.value
+  }
+})
+const paymentRecordDefaultAmount = computed(() => {
+  const plan = selectedPaymentPlan.value
+  if (plan === null) return null
+  return Number(plan.remaining_amount ?? plan.planned_amount)
+})
+const paymentRecordDefaultPayerName = computed(() => {
+  const planCustomerName = selectedPaymentPlan.value?.customer_name?.trim()
+  return planCustomerName !== undefined && planCustomerName !== ''
+    ? planCustomerName
+    : displayCustomerName.value
+})
+
+const canEditContractRow = (contract: ContractListResponse): boolean => {
+  if (contract.status !== 'DRAFT') return false
+  if (canEditAllContract.value) return true
+  return canEditOwnContract.value && contract.owner_id === String(userStore.userInfo?.id)
+}
+
+const canDeleteContractRow = (contract: ContractListResponse): boolean => {
+  if (contract.status !== 'DRAFT') return false
+  if (canDeleteAllContract.value) return true
+  return canDeleteOwnContract.value && contract.owner_id === String(userStore.userInfo?.id)
+}
+
+const canSubmitContractApproval = (contract: ContractListResponse): boolean => {
+  return contract.status === 'DRAFT'
+}
+
+const canWithdrawContractApproval = (contract: ContractListResponse): boolean => {
+  return contract.status === 'PENDING_REVIEW' && contract.creator_id === String(userStore.userInfo?.id)
+}
+
 interface ResponseStatusError {
   response?: {
     status?: number
@@ -131,13 +263,23 @@ function hasResponseStatus(error: unknown, status: number): boolean {
   return candidate.response?.status === status
 }
 
+function syncStageStateFromOpportunity(opportunityData: Opportunity): void {
+  const winProbability = opportunityData.win_probability ?? 0
+  const isComplete = winProbability >= 100
+  stageWinProbability.value = winProbability
+  isStageComplete.value = isComplete
+  stageAccordionValue.value = isComplete ? '' : 'stage'
+}
+
 async function fetchOpportunityDetail(): Promise<void> {
   loading.value = true
   loadError.value = false
   try {
     const data = await opportunityApi.getOpportunity(props.opportunityId)
     opportunity.value = data
+    syncStageStateFromOpportunity(data)
     await fetchRelatedContract(data.id)
+    await fetchRelatedBusinessData(data)
   } catch (error) {
     loadError.value = true
     opportunity.value = null
@@ -158,6 +300,47 @@ async function fetchRelatedContract(opportunityId: number): Promise<void> {
     relatedContract.value = null
   } finally {
     contractLoading.value = false
+  }
+}
+
+async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<void> {
+  relationLoading.value = true
+  paymentPlans.value = []
+  invoiceApplications.value = []
+  licenseApplications.value = []
+  deployments.value = []
+
+  const contract = relatedContract.value
+  if (contract === null || !approvedContractStatuses.includes(contract.status)) {
+    relationLoading.value = false
+    return
+  }
+
+  try {
+    const [
+      plansData,
+      invoicesData,
+      licensesData,
+      deploymentsData
+    ] = await Promise.all([
+      paymentApi.getPaymentPlans(contract.id).catch(() => []),
+      invoiceApi.getInvoiceApplications({
+        contract_id: contract.id,
+        page: 1,
+        page_size: 100,
+        order_by: 'created_time',
+        order_dir: 'desc'
+      }).catch(() => ({ items: [], total: 0, page: 1, page_size: 100 })),
+      licenseApplicationApi.list(opportunityData.customer_id).catch(() => []),
+      deploymentApi.list(opportunityData.customer_id).catch(() => [])
+    ])
+
+    paymentPlans.value = plansData
+    invoiceApplications.value = invoicesData.items ?? []
+    licenseApplications.value = licensesData.filter(item => item.contract_id === contract.id)
+    deployments.value = deploymentsData
+  } finally {
+    relationLoading.value = false
   }
 }
 
@@ -215,14 +398,225 @@ function handleCreateContract(): void {
   })
 }
 
-function handleViewContract(): void {
+function handleViewContract(_contractId?: number): void {
   toast.info('请在合同列表查看合同详情')
 }
 
-// TODO: 打开完整详情功能待优化，暂时用 toast 提示
-function handleOpenFullPage(): void {
-  toast.info('完整详情功能优化中')
-  // emit('open-full-page', props.opportunityId)
+function handleEditContract(contract: ContractListResponse): void {
+  emit('edit-contract', contract)
+}
+
+function handleSubmitContractApproval(contract: ContractListResponse): void {
+  emit('submit-contract-approval', contract)
+}
+
+function handleWithdrawContractApproval(contract: ContractListResponse): void {
+  emit('withdraw-contract-approval', contract)
+}
+
+function handleDeleteContract(contract: ContractListResponse): void {
+  emit('delete-contract', contract)
+}
+
+function handleViewPaymentPlan(_planId?: number): void {
+  toast.info('回款计划详情下钻将统一接入')
+}
+
+function canRecordPaymentPlan(plan: PaymentPlanResponse): boolean {
+  return canRecordPaymentPermission.value && plan.status !== 'COMPLETED'
+}
+
+function canEditPaymentPlan(plan: PaymentPlanResponse): boolean {
+  return canEditPaymentPlanPermission.value && plan.status !== 'COMPLETED'
+}
+
+function canDeletePaymentPlan(plan: PaymentPlanResponse): boolean {
+  return canDeletePaymentPlanPermission.value
+    && plan.status !== 'COMPLETED'
+    && plan.payment_records.length === 0
+}
+
+function handleCreatePaymentPlan(): void {
+  if (!canCreatePaymentPlan.value) return
+  editingPaymentPlan.value = null
+  paymentPlanDialogMode.value = 'create'
+  paymentPlanDialogOpen.value = true
+}
+
+function handleEditPaymentPlan(plan: PaymentPlanResponse): void {
+  if (!canEditPaymentPlan(plan)) return
+  editingPaymentPlan.value = plan
+  paymentPlanDialogMode.value = 'edit'
+  paymentPlanDialogOpen.value = true
+}
+
+function handleRequestDeletePaymentPlan(plan: PaymentPlanResponse): void {
+  if (!canDeletePaymentPlan(plan)) {
+    if (plan.payment_records.length > 0) {
+      toast.warning('存在回款记录的计划不能删除')
+    }
+    return
+  }
+  paymentPlanToDelete.value = plan
+}
+
+async function handleDeletePaymentPlan(): Promise<void> {
+  const plan = paymentPlanToDelete.value
+  if (plan === null) return
+
+  paymentPlanDeleting.value = true
+  try {
+    await paymentApi.deletePaymentPlan(plan.id)
+    toast.success('回款计划删除成功')
+    paymentPlanToDelete.value = null
+    await fetchOpportunityDetail()
+    emit('refresh')
+  } catch (error) {
+    handleApiError(error, '删除回款计划')
+  } finally {
+    paymentPlanDeleting.value = false
+  }
+}
+
+function handlePaymentPlanDialogOpenChange(open: boolean): void {
+  paymentPlanDialogOpen.value = open
+  if (!open) {
+    editingPaymentPlan.value = null
+  }
+}
+
+async function handlePaymentPlanSaved(): Promise<void> {
+  await fetchOpportunityDetail()
+  emit('refresh')
+}
+
+function handleRecordPayment(plan: PaymentPlanResponse): void {
+  if (!canRecordPaymentPlan(plan)) return
+  selectedPaymentPlan.value = plan
+  paymentRecordDialogOpen.value = true
+}
+
+function handlePaymentRecordDialogOpenChange(open: boolean): void {
+  paymentRecordDialogOpen.value = open
+  if (!open && !paymentRecordSubmitting.value) {
+    selectedPaymentPlan.value = null
+  }
+}
+
+async function handlePaymentRecordSubmit(payload: PaymentRecordCreate): Promise<void> {
+  const plan = selectedPaymentPlan.value
+  if (plan === null) return
+
+  paymentRecordSubmitting.value = true
+  try {
+    await paymentApi.createPaymentRecord(plan.id, payload)
+    toast.success('回款登记成功')
+    paymentRecordDialogOpen.value = false
+    selectedPaymentPlan.value = null
+    await fetchOpportunityDetail()
+    emit('refresh')
+  } catch (error) {
+    handleApiError(error, '登记回款')
+  } finally {
+    paymentRecordSubmitting.value = false
+  }
+}
+
+function handleDeletePaymentPlanDialogOpenChange(open: boolean): void {
+  if (!open && !paymentPlanDeleting.value) {
+    paymentPlanToDelete.value = null
+  }
+}
+
+function handleAddInvoiceTitle(): void {
+  toast.info('请先在客户详情中维护发票抬头')
+}
+
+function handleInvoiceTitleAction(..._args: unknown[]): void {
+  toast.info('商机详情仅展示关联发票申请')
+}
+
+function handleCreateInvoiceApplication(): void {
+  if (!canCreateInvoice.value) return
+  if (!isRelatedContractApproved.value) {
+    toast.warning('合同审批通过后才能申请发票')
+    return
+  }
+  invoiceApplicationDialogOpen.value = true
+}
+
+function handleInvoiceApplicationDialogOpenChange(open: boolean): void {
+  invoiceApplicationDialogOpen.value = open
+}
+
+async function handleInvoiceApplicationSuccess(): Promise<void> {
+  invoiceApplicationDialogOpen.value = false
+  await fetchOpportunityDetail()
+  emit('refresh')
+}
+
+async function handleDownloadInvoiceApplication(application: InvoiceApplicationResponse): Promise<void> {
+  if (downloadingInvoiceApplicationId.value !== null) return
+  downloadingInvoiceApplicationId.value = application.id
+  try {
+    await downloadInvoiceFileApi(application.id, application.invoice_number ?? undefined)
+    toast.success('发票文件已开始下载')
+  } catch (error) {
+    handleApiError(error, '下载发票文件')
+  } finally {
+    downloadingInvoiceApplicationId.value = null
+  }
+}
+
+function handleAddDeployment(): void {
+  toast.info('请先在客户详情中维护部署信息')
+}
+
+function handleApplyLicense(): void {
+  if (!isRelatedContractApproved.value) {
+    toast.warning('合同审批通过后才能申请 License')
+    return
+  }
+  if (deployments.value.length === 0) {
+    toast.info('请先在客户详情中维护部署信息')
+    return
+  }
+  licenseApplicationDialogOpen.value = true
+}
+
+function handleLicenseApplicationDialogOpenChange(open: boolean): void {
+  licenseApplicationDialogOpen.value = open
+}
+
+async function handleLicenseApplicationSuccess(): Promise<void> {
+  licenseApplicationDialogOpen.value = false
+  await fetchOpportunityDetail()
+  emit('refresh')
+}
+
+function normalizeAccordionValue(value: string | string[] | undefined): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function handleApprovalAccordionUpdate(value: string | string[] | undefined): void {
+  approvalAccordionValue.value = normalizeAccordionValue(value)
+}
+
+function handleStageAccordionUpdate(value: string | string[] | undefined): void {
+  stageAccordionValue.value = normalizeAccordionValue(value)
+}
+
+function handleStageStatusChange(status: { currentWinProbability: number; isComplete: boolean }): void {
+  const wasComplete = isStageComplete.value
+  stageWinProbability.value = status.currentWinProbability
+  isStageComplete.value = status.isComplete
+  if (!status.isComplete) {
+    stageAccordionValue.value = 'stage'
+    return
+  }
+  if (!wasComplete) {
+    stageAccordionValue.value = ''
+  }
 }
 
 async function focusBackButton(): Promise<void> {
@@ -235,6 +629,10 @@ async function focusBackButton(): Promise<void> {
 function retryFetchOpportunityDetail(): void {
   fetchOpportunityDetail()
 }
+
+defineExpose({
+  refresh: fetchOpportunityDetail
+})
 
 function formatDate(dateStr: string | undefined | null): string {
   if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return '-'
@@ -308,38 +706,30 @@ function getLicenseTypeText(type: string | undefined): string {
   return type === 'SUBSCRIPTION' ? '订阅制' : '买断制'
 }
 
-function getContractStatusText(status: ContractStatus | undefined): string {
-  if (status === undefined) return '-'
-  const map: Record<string, string> = {
-    DRAFT: '草稿',
-    PENDING_REVIEW: '待审核',
-    SIGNED: '已签署',
-    EFFECTIVE: '生效中',
-    EXPIRED: '已过期',
-    TERMINATED: '已终止'
-  }
-  return map[status] ?? status
-}
-
-function getContractStatusClass(status: ContractStatus | undefined): string {
-  if (status === undefined) return ''
-  const map: Record<string, string> = {
-    DRAFT: 'status-default',
-    PENDING_REVIEW: 'status-warning',
-    SIGNED: 'status-info',
-    EFFECTIVE: 'status-success',
-    EXPIRED: 'status-danger',
-    TERMINATED: 'status-danger'
-  }
-  return map[status] ?? ''
-}
-
 watch(() => props.opportunityId, () => {
   opportunity.value = null
   relatedContract.value = null
+  paymentPlans.value = []
+  invoiceApplications.value = []
+  licenseApplications.value = []
+  deployments.value = []
+  stageWinProbability.value = 0
+  isStageComplete.value = false
   fetchOpportunityDetail()
   focusBackButton()
 }, { immediate: true })
+
+watch(approvalPhase, phase => {
+  approvalAccordionValue.value = phase === 'approved' ? '' : 'approval'
+  if (phase !== 'approved') {
+    stageAccordionValue.value = ''
+    isStageComplete.value = false
+    return
+  }
+  if (opportunity.value) {
+    syncStageStateFromOpportunity(opportunity.value)
+  }
+})
 </script>
 
 <template>
@@ -350,19 +740,27 @@ watch(() => props.opportunityId, () => {
     :data-opportunity-id="opportunityId"
   >
     <div class="opportunity-detail-header p-6 pb-4 border-b border-wolf-border-default-v2">
-      <Button
-        v-if="embedded"
-        type="button"
-        variant="ghost"
-        size="sm"
-        class="mb-4"
-        aria-label="返回商机列表"
-        data-testid="opportunity-detail-back"
-        @click="emit('back')"
-      >
-        <ArrowLeft class="w-4 h-4 mr-2" />
-        返回商机列表
-      </Button>
+      <Breadcrumb v-if="embedded" class="detail-breadcrumb">
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink as-child>
+              <button
+                type="button"
+                class="detail-breadcrumb-link"
+                aria-label="返回客户详情"
+                data-testid="opportunity-detail-back"
+                @click="emit('back')"
+              >
+                客户详情
+              </button>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>商机详情</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
 
       <div class="flex items-center gap-4">
         <div v-if="opportunity" class="title-avatar">
@@ -523,118 +921,132 @@ watch(() => props.opportunityId, () => {
             </CardContent>
           </Card>
 
-          <OpportunityStageStepper
-            v-if="isApprovalApproved"
-            :opportunity-id="opportunity.id"
-            @advanced="handleStageAdvanced"
-          />
+          <Accordion
+            :model-value="approvalAccordionValue"
+            type="single"
+            collapsible
+            class="approval-accordion"
+            @update:model-value="handleApprovalAccordionUpdate"
+          >
+            <AccordionItem value="approval">
+              <AccordionTrigger class="px-4 py-3 hover:no-underline">
+                <div class="flex items-center gap-2 w-full">
+                  <span class="text-sm font-semibold text-wolf-text-primary-v2">审批流程</span>
+                  <Badge :class="['status-badge', getApprovalPhaseClass(opportunity.approval_phase)]">
+                    {{ getApprovalPhaseText(opportunity.approval_phase) }}
+                  </Badge>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent class="px-4 pb-4">
+                <ApprovalProcessGeneric
+                  entity-type="OPPORTUNITY"
+                  :entity-id="opportunity.id"
+                  :is-submitter="canSubmitApproval"
+                  @submitted="fetchOpportunityDetail"
+                  @approved="fetchOpportunityDetail"
+                  @rejected="fetchOpportunityDetail"
+                  @withdrawn="fetchOpportunityDetail"
+                  @resubmit="handleEdit"
+                />
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
 
-          <Card class="approval-card">
-            <CardHeader class="p-4 border-b border-wolf-border-light-v2">
-              <h3 class="text-sm font-semibold text-wolf-text-primary-v2">审批流程</h3>
-            </CardHeader>
-            <CardContent class="p-4">
-              <ApprovalProcessGeneric
-                entity-type="OPPORTUNITY"
-                :entity-id="opportunity.id"
-                :is-submitter="canSubmitApproval"
-                @submitted="fetchOpportunityDetail"
-                @approved="fetchOpportunityDetail"
-                @rejected="fetchOpportunityDetail"
-                @withdrawn="fetchOpportunityDetail"
-                @resubmit="handleEdit"
+          <template v-if="isApprovalApproved">
+            <Accordion
+              :model-value="stageAccordionValue"
+              type="single"
+              collapsible
+              class="stage-accordion"
+              @update:model-value="handleStageAccordionUpdate"
+            >
+              <AccordionItem value="stage">
+                <AccordionTrigger class="px-4 py-3 hover:no-underline">
+                  <div class="flex items-center gap-2 w-full">
+                    <span class="text-sm font-semibold text-wolf-text-primary-v2">采购阶段</span>
+                    <Badge :class="['status-badge', isStageComplete ? 'status-success' : 'status-info']">
+                      {{ stageProgressText }}
+                    </Badge>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent class="px-4 pb-4">
+                  <OpportunityStageStepper
+                    :opportunity-id="opportunity.id"
+                    embedded
+                    @advanced="handleStageAdvanced"
+                    @stage-status-change="handleStageStatusChange"
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+
+            <template v-if="isStageComplete">
+              <ContractsPanel
+                :customer-id="opportunity.customer_id"
+                :contracts="relatedContracts"
+                :loading="contractLoading"
+                :show-add="canCreateRelatedContract"
+                :can-edit="canEditContractRow"
+                :can-submit-approval="canSubmitContractApproval"
+                :can-withdraw-approval="canWithdrawContractApproval"
+                :can-delete="canDeleteContractRow"
+                @add="handleCreateContract"
+                @view="handleViewContract"
+                @edit="handleEditContract"
+                @submit-approval="handleSubmitContractApproval"
+                @withdraw-approval="handleWithdrawContractApproval"
+                @delete="handleDeleteContract"
               />
-            </CardContent>
-          </Card>
 
-          <Card class="contract-card">
-            <CardHeader class="p-4 border-b border-wolf-border-light-v2">
-              <h3 class="text-sm font-semibold text-wolf-text-primary-v2">关联合同</h3>
-            </CardHeader>
-            <CardContent class="p-4">
-              <div v-if="contractLoading" class="py-8 text-center text-wolf-text-tertiary-v2">
-                加载中...
-              </div>
+              <template v-if="isRelatedContractApproved">
+                <PaymentsPanel
+                  :customer-id="opportunity.customer_id"
+                  :payments="paymentPlans"
+                  :loading="relationLoading"
+                  :show-add="canCreatePaymentPlan"
+                  :can-record="canRecordPaymentPlan"
+                  :can-edit="canEditPaymentPlan"
+                  :can-delete="canDeletePaymentPlan"
+                  @add="handleCreatePaymentPlan"
+                  @record="handleRecordPayment"
+                  @view="handleViewPaymentPlan"
+                  @edit="handleEditPaymentPlan"
+                  @delete="handleRequestDeletePaymentPlan"
+                />
 
-              <Empty v-else-if="!relatedContract" class="min-h-[180px] border-0 py-6">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <FileText class="h-5 w-5" aria-hidden="true" />
-                  </EmptyMedia>
-                  <EmptyTitle class="text-sm font-medium">暂无关联合同</EmptyTitle>
-                  <EmptyDescription v-if="opportunity.status === 1">
-                    商机已赢单，请及时创建合同以锁定交易
-                  </EmptyDescription>
-                </EmptyHeader>
-                <EmptyContent v-if="opportunity.status === 1 && isApprovalApproved">
-                  <Button size="sm" @click="handleCreateContract">创建合同</Button>
-                </EmptyContent>
-              </Empty>
+                <InvoicesPanel
+                  :customer-id="opportunity.customer_id"
+                  :invoice-titles="[]"
+                  :invoice-applications="invoiceApplications"
+                  :downloading-application-id="downloadingInvoiceApplicationId"
+                  :show-invoice-titles="false"
+                  :show-add-application="canCreateInvoice"
+                  @add="handleAddInvoiceTitle"
+                  @add-application="handleCreateInvoiceApplication"
+                  @edit="handleInvoiceTitleAction"
+                  @delete="handleInvoiceTitleAction"
+                  @set-default="handleInvoiceTitleAction"
+                  @apply="handleInvoiceTitleAction"
+                  @download-application="handleDownloadInvoiceApplication"
+                />
 
-              <div v-else class="contract-content">
-                <div class="contract-header">
-                  <div class="flex items-center gap-3">
-                    <div class="contract-avatar">
-                      {{ relatedContract.contract_name?.charAt(0) || '合' }}
-                    </div>
-                    <div>
-                      <div class="font-medium text-wolf-text-primary-v2">{{ relatedContract.contract_name }}</div>
-                      <div class="flex items-center gap-2 mt-1">
-                        <Badge :class="['status-badge', getContractStatusClass(relatedContract.status)]">
-                          {{ getContractStatusText(relatedContract.status) }}
-                        </Badge>
-                        <span class="text-xs text-wolf-text-tertiary-v2">{{ relatedContract.contract_number }}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="sm" @click="handleViewContract">
-                    <ExternalLink class="w-4 h-4 mr-1" />
-                    查看详情
-                  </Button>
-                </div>
-
-                <Separator class="my-4" />
-
-                <div class="attributes-grid grid-cols-4">
-                  <div class="attribute-item">
-                    <div class="attribute-label">采购用户数</div>
-                    <span class="attribute-value">{{ relatedContract.user_count || '-' }} 人</span>
-                  </div>
-                  <div class="attribute-item">
-                    <div class="attribute-label">合同金额</div>
-                    <span class="attribute-value">
-                      <AmountText :value="relatedContract.total_amount" />
-                    </span>
-                  </div>
-                  <div v-if="relatedContract.license_type === 'SUBSCRIPTION'" class="attribute-item">
-                    <div class="attribute-label">订阅年限</div>
-                    <span class="attribute-value" :class="{ 'not-filled': !relatedContract.subscription_years }">
-                      {{ relatedContract.subscription_years ? `${relatedContract.subscription_years} 年` : '-' }}
-                    </span>
-                  </div>
-                  <div class="attribute-item">
-                    <div class="attribute-label">到期日期</div>
-                    <span class="attribute-value" :class="{ 'not-filled': !relatedContract.expiry_date }">
-                      {{ relatedContract.expiry_date || '-' }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                <LicensePanel
+                  :customer-id="opportunity.customer_id"
+                  :customer-name="displayCustomerName"
+                  :license-applications="licenseApplications"
+                  :deployments="deployments"
+                  :show-deployments="false"
+                  @add-deployment="handleAddDeployment"
+                  @apply="handleApplyLicense"
+                />
+              </template>
+            </template>
+          </template>
         </template>
       </div>
     </ScrollArea>
 
-    <div class="opportunity-detail-footer p-4 border-t border-wolf-border-default-v2 flex flex-row gap-2">
-      <Button
-        v-if="embedded"
-        variant="outline"
-        @click="handleOpenFullPage"
-      >
-        <ExternalLink class="w-4 h-4 mr-2" />
-        打开完整商机详情
-      </Button>
+    <div class="opportunity-detail-footer p-4 border-t border-wolf-border-default-v2 flex flex-row justify-end gap-2">
       <Button
         v-if="isActive && canWin && isApprovalApproved"
         variant="default"
@@ -688,6 +1100,65 @@ watch(() => props.opportunityId, () => {
       @update:open="editDialogOpen = $event"
       @success="handleEditSuccess"
     />
+
+    <PaymentPlanFormDialog
+      :open="paymentPlanDialogOpen"
+      :mode="paymentPlanDialogMode"
+      :plan="editingPaymentPlan"
+      :fixed-contract="fixedContractForPaymentPlan"
+      @update:open="handlePaymentPlanDialogOpenChange"
+      @success="handlePaymentPlanSaved"
+    />
+
+    <PaymentRecordDialog
+      :open="paymentRecordDialogOpen"
+      :default-amount="paymentRecordDefaultAmount"
+      :default-payer-name="paymentRecordDefaultPayerName"
+      :submitting="paymentRecordSubmitting"
+      @update:open="handlePaymentRecordDialogOpenChange"
+      @submit="handlePaymentRecordSubmit"
+    />
+
+    <InvoiceApplicationFormDialog
+      v-if="opportunity !== null"
+      mode="create"
+      :open="invoiceApplicationDialogOpen"
+      :fixed-customer="{ id: opportunity.customer_id, account_name: displayCustomerName }"
+      :fixed-contract-id="relatedContract?.id ?? null"
+      @update:open="handleInvoiceApplicationDialogOpenChange"
+      @success="handleInvoiceApplicationSuccess"
+    />
+
+    <LicenseApplicationFormDialog
+      v-if="opportunity !== null && relatedContract !== null"
+      :customer-id="opportunity.customer_id"
+      :open="licenseApplicationDialogOpen"
+      :deployments="deployments"
+      :contracts="relatedContracts"
+      :fixed-contract-id="relatedContract.id"
+      @update:open="handleLicenseApplicationDialogOpenChange"
+      @success="handleLicenseApplicationSuccess"
+    />
+
+    <AlertDialog
+      :open="paymentPlanToDelete !== null"
+      @update:open="handleDeletePaymentPlanDialogOpenChange"
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除回款计划？</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定要删除回款计划“{{ paymentPlanToDelete?.stage_name }}”吗？此操作不可恢复。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel :disabled="paymentPlanDeleting">取消</AlertDialogCancel>
+          <AlertDialogAction :disabled="paymentPlanDeleting" @click="handleDeletePaymentPlan">
+            {{ paymentPlanDeleting ? '删除中...' : '删除' }}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>
 
@@ -716,18 +1187,35 @@ watch(() => props.opportunityId, () => {
   flex-shrink: 0;
 }
 
-.contract-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-weight: $wolf-font-weight-semibold-v2;
-  flex-shrink: 0;
+.detail-breadcrumb {
+  margin-bottom: $wolf-space-md-v2;
+}
+
+.detail-breadcrumb-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: $wolf-text-link-v2;
+  cursor: pointer;
+  font: inherit;
+
+  &:hover {
+    color: $wolf-text-link-hover-v2;
+  }
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+    border-radius: $wolf-radius-sm-v2;
+  }
+}
+
+.approval-accordion,
+.stage-accordion {
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-lg-v2;
+  background: $wolf-bg-card-v2;
+  overflow: hidden;
 }
 
 .attributes-grid {
@@ -810,17 +1298,6 @@ watch(() => props.opportunityId, () => {
 .status-danger {
   background: $wolf-danger-bg-v2;
   color: $wolf-danger-text-v2;
-}
-
-.contract-content {
-  width: 100%;
-}
-
-.contract-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: $wolf-space-md-v2;
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2 - 1) {

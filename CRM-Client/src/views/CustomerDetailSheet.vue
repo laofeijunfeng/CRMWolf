@@ -22,12 +22,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { ContextTabs, HoverInfo } from '@/components/crmwolf'
 import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent
-} from '@/components/ui/accordion'
-import {
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -40,23 +34,21 @@ import {
 import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
 import ContactsPanel from '@/components/panels/ContactsPanel.vue'
 import OpportunitiesPanel from '@/components/panels/OpportunitiesPanel.vue'
-import ContractsPanel from '@/components/panels/ContractsPanel.vue'
-import PaymentsPanel from '@/components/panels/PaymentsPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
+import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
+import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
 
 // Dialogs
 import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
+import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import ContactFormDialog from '@/components/dialogs/ContactFormDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
-import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import DeploymentInfoFormDialog from '@/components/dialogs/DeploymentInfoFormDialog.vue'
-import LicenseApplicationFormDialog from '@/components/dialogs/LicenseApplicationFormDialog.vue'
 
 // Detail Sheets (Task 6)
-import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 
@@ -70,14 +62,13 @@ import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
 import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite } from '@/api/payment'
 import paymentApi from '@/api/payment'
-import invoiceApi, { type InvoiceApplicationResponse, type InvoiceTitleResponse } from '@/api/invoice'
-import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
+import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import { getCustomerScore, type ScoreResponse } from '@/api/score'
 import { normalizePaginatedResponse } from '@/types/pagination'
-import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
-import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { useUserStore } from '@/stores/user'
+import approvalGenericApi from '@/api/approvalGeneric'
+import { confirmDelete } from '@/utils/confirmDialog'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -86,7 +77,7 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-defineEmits<{
+const emit = defineEmits<{
   'update:visible': [value: boolean]
   'refresh': []
 }>()
@@ -97,32 +88,58 @@ const userStore = useUserStore()
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
 const activePanel = ref('customer-brief')  // Sidebar 导航切换
-const regeneratingProfile = ref(false)  // 档案重新生成状态
 const regeneratingBrief = ref(false)
 
 // ==================== Dialog States ====================
 const followUpDialogOpen = ref(false)
+const customerEditDialogOpen = ref(false)
 const contactDialogOpen = ref(false)
 const opportunityDialogOpen = ref(false)
 const contractDialogOpen = ref(false)
 const invoiceTitleDialogOpen = ref(false)
-const invoiceApplicationDialogOpen = ref(false)
 const deploymentDialogOpen = ref(false)
-const licenseApplicationDialogOpen = ref(false)
 
 // ==================== Edit States ====================
 const editingContact = ref<ContactResponse | null>(null)
 const editingContract = ref<ContractResponse | null>(null)
 const editingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
-const applyingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
 
 // ==================== Detail Sheet States (Task 6) ====================
 const selectedContractId = ref<number | null>(null)
-const contractSheetVisible = ref(false)
 const selectedPlanId = ref<number | null>(null)
 const planSheetVisible = ref(false)
 const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string; approval: ApprovalInfo | ApprovalInfoLite | null } | null>(null)
 const recordSheetVisible = ref(false)
+const selectedOpportunityId = ref<number | null>(null)
+
+interface ContractOpportunityContext {
+  id: number
+  opportunity_name: string
+  customer_id: number
+  customer_name?: string
+  total_amount: number
+  user_count: number
+  license_type: string
+  subscription_years: number | null
+}
+
+interface CreateContractPayload {
+  opportunityId: number
+  customerId: number
+  customerName: string
+  opportunityName: string
+  totalAmount: number
+  userCount: number
+  licenseType: string
+  subscriptionYears: number | null
+}
+
+interface OpportunityDetailContentExpose {
+  refresh: () => Promise<void>
+}
+
+const fixedContractOpportunity = ref<ContractOpportunityContext | null>(null)
+const opportunityDetailContentRef = ref<OpportunityDetailContentExpose | null>(null)
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
@@ -132,10 +149,7 @@ const opportunities = ref<OpportunityListResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
 const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
-const invoiceApplications = ref<InvoiceApplicationResponse[]>([])
-const licenseApplications = ref<LicenseApplicationResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
-const downloadingInvoiceApplicationId = ref<number | null>(null)
 let latestLoadRequestId = 0
 
 interface CustomerBriefCitation {
@@ -170,7 +184,7 @@ const getCitationSourceLabel = (sourceType: string | undefined): string => {
     contract: '合同',
     payment_plan: '回款计划',
     payment_record: '回款记录',
-    follow_up: '跟进记录'
+    follow_up: '客户活动'
   }
   return sourceType !== undefined && sourceType !== '' ? labels[sourceType] ?? sourceType : '来源'
 }
@@ -301,14 +315,10 @@ interface NavTabItem {
 }
 
 const navTabs: NavTabItem[] = [
-  { key: 'customer-brief', label: '客户概况' },
-  { key: 'followup', label: '跟进记录' },
-  { key: 'contacts', label: '联系人' },
-  { key: 'opportunities', label: '商机' },
-  { key: 'contracts', label: '合同' },
-  { key: 'payments', label: '回款' },
-  { key: 'invoices', label: '发票' },
-  { key: 'license-management', label: 'License' }
+  { key: 'customer-brief', label: '客户档案' },
+  { key: 'customer-info', label: '客户信息' },
+  { key: 'followup', label: '客户活动' },
+  { key: 'opportunities', label: '项目旅程' }
 ]
 
 // ==================== Methods ====================
@@ -317,12 +327,8 @@ const handleCreateOpportunity = (): void => {
   opportunityDialogOpen.value = true
 }
 
-const handleCreateContract = (): void => {
-  // TODO: 打开新建合同弹窗
-}
-
 const handleEdit = (): void => {
-  // TODO: 跳转编辑页面
+  customerEditDialogOpen.value = true
 }
 
 // 占位方法：Sidebar 面板切换
@@ -393,8 +399,6 @@ const loadAllData = async (customerId: number): Promise<void> => {
       opportunitiesData,
       contractsData,
       invoiceTitlesData,
-      invoiceApplicationsData,
-      licenseApplicationsData,
       deploymentsData
     ] = await Promise.all([
       customerApi.getCustomerDetail(customerId),
@@ -403,14 +407,6 @@ const loadAllData = async (customerId: number): Promise<void> => {
       opportunityApi.getOpportunities({ customer_id: customerId }).catch(() => []),
       contractApi.getCustomerContracts(customerId).catch(() => []),
       invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
-      invoiceApi.getInvoiceApplications({
-        customer_id: customerId,
-        page: 1,
-        page_size: 100,
-        order_by: 'created_time',
-        order_dir: 'desc'
-      }).catch(() => ({ items: [], total: 0, page: 1, page_size: 100 })),
-      licenseApplicationApi.list(customerId).catch(() => []),
       deploymentApi.list(customerId).catch(() => [])
     ])
 
@@ -424,8 +420,6 @@ const loadAllData = async (customerId: number): Promise<void> => {
     opportunities.value = normalizePaginatedResponse(opportunitiesData).items
     contracts.value = contractsData
     invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
-    invoiceApplications.value = invoiceApplicationsData.items ?? []
-    licenseApplications.value = licenseApplicationsData
     deployments.value = deploymentsData
 
     if (contractsData.length > 0) {
@@ -466,35 +460,29 @@ const getScoreColorValue = (scoreValue: number | null): string => {
 
 const scoreDetailsDialogOpen = ref(false)
 
-// ==================== Profile Actions ====================
-const handleRegenerateProfile = async (): Promise<void> => {
-  if (props.customerId === null) return
-  regeneratingProfile.value = true
-  try {
-    await customerApi.regenerateProfile(props.customerId)
-    toast.success('档案生成中，请稍后刷新')
-  } catch (error) {
-    handleApiError(error, '生成档案')
-  } finally {
-    regeneratingProfile.value = false
-  }
-}
-
 const handleRegenerateBrief = async (): Promise<void> => {
   if (props.customerId === null) return
   regeneratingBrief.value = true
   try {
     await customerApi.regenerateCustomerBrief(props.customerId)
-    toast.success('客户概况生成中，请稍后刷新')
+    toast.success('客户档案生成中，请稍后刷新')
     await loadAllData(props.customerId)
   } catch (error) {
-    handleApiError(error, '生成客户概况')
+    handleApiError(error, '生成客户档案')
   } finally {
     regeneratingBrief.value = false
   }
 }
 
 // ==================== Dialog Handlers ====================
+const handleCustomerEditSuccess = (): void => {
+  customerEditDialogOpen.value = false
+  if (props.customerId !== null) {
+    void loadAllData(props.customerId)
+  }
+  emit('refresh')
+}
+
 // FollowUp handlers
 const handleFollowUpSuccess = (): void => {
   followUpDialogOpen.value = false
@@ -511,12 +499,12 @@ const handleFollowUpSuccess = (): void => {
 const handleFollowUpDelete = async (followUp: { id: number }): Promise<void> => {
   try {
     await customerFollowUpApi.deleteFollowUp(followUp.id)
-    toast.success('跟进记录已删除')
+    toast.success('客户活动已删除')
     if (props.customerId !== null) {
       await loadAllData(props.customerId)
     }
   } catch (error) {
-    handleApiError(error, '删除跟进记录')
+    handleApiError(error, '删除客户活动')
   }
 }
 
@@ -573,19 +561,102 @@ const handleOpportunitySuccess = (): void => {
   }
 }
 
-// Contract handlers
+const handleViewOpportunity = (opportunityId: number): void => {
+  selectedOpportunityId.value = opportunityId
+}
+
+const handleBackFromOpportunity = (): void => {
+  selectedOpportunityId.value = null
+}
+
+const handleBackFromContract = (): void => {
+  selectedContractId.value = null
+}
+
+const handleOpportunityDetailRefresh = (): void => {
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+const handleOpportunityDetailCreateContract = (payload: CreateContractPayload): void => {
+  fixedContractOpportunity.value = {
+    id: payload.opportunityId,
+    opportunity_name: payload.opportunityName,
+    customer_id: payload.customerId,
+    customer_name: payload.customerName,
+    total_amount: payload.totalAmount,
+    user_count: payload.userCount,
+    license_type: payload.licenseType,
+    subscription_years: payload.subscriptionYears
+  }
+  contractDialogOpen.value = true
+}
+
 const handleContractDialogClose = (open: boolean): void => {
   contractDialogOpen.value = open
   if (!open) {
     editingContract.value = null
+    fixedContractOpportunity.value = null
   }
 }
 
 const handleContractSuccess = (): void => {
   contractDialogOpen.value = false
   editingContract.value = null
+  fixedContractOpportunity.value = null
+  void opportunityDetailContentRef.value?.refresh()
   if (props.customerId !== null) {
     loadAllData(props.customerId)
+  }
+}
+
+const refreshContractRelations = (): void => {
+  void opportunityDetailContentRef.value?.refresh()
+  if (props.customerId !== null) {
+    loadAllData(props.customerId)
+  }
+}
+
+const handleEditContract = async (contract: ContractListResponse): Promise<void> => {
+  try {
+    editingContract.value = await contractApi.getContract(contract.id)
+    contractDialogOpen.value = true
+  } catch (error) {
+    handleApiError(error, '获取合同详情')
+  }
+}
+
+const handleDeleteContract = async (contract: ContractListResponse): Promise<void> => {
+  const confirmed = await confirmDelete(`合同 "${contract.contract_name}"`)
+  if (!confirmed) return
+
+  try {
+    await contractApi.deleteContract(contract.id)
+    toast.success('合同删除成功')
+    refreshContractRelations()
+  } catch (error) {
+    handleApiError(error, '删除合同')
+  }
+}
+
+const handleSubmitContractApproval = async (contract: ContractListResponse): Promise<void> => {
+  try {
+    await approvalGenericApi.submitApproval('CONTRACT', contract.id)
+    toast.success('合同已提交审批')
+    refreshContractRelations()
+  } catch (error) {
+    handleApiError(error, '提交审批')
+  }
+}
+
+const handleWithdrawContractApproval = async (contract: ContractListResponse): Promise<void> => {
+  try {
+    await approvalGenericApi.cancelApproval('CONTRACT', contract.id)
+    toast.success('合同审批已撤回')
+    refreshContractRelations()
+  } catch (error) {
+    handleApiError(error, '撤回审批')
   }
 }
 
@@ -634,52 +705,6 @@ const handleSetDefaultInvoiceTitle = async (titleId: number): Promise<void> => {
   }
 }
 
-const handleApplyInvoice = (invoiceTitle: InvoiceTitleResponse): void => {
-  applyingInvoiceTitle.value = invoiceTitle
-  invoiceApplicationDialogOpen.value = true
-}
-
-const handleInvoiceApplicationDialogClose = (open: boolean): void => {
-  invoiceApplicationDialogOpen.value = open
-  if (!open) {
-    applyingInvoiceTitle.value = null
-  }
-}
-
-const handleInvoiceApplicationSuccess = (): void => {
-  invoiceApplicationDialogOpen.value = false
-  applyingInvoiceTitle.value = null
-  if (props.customerId !== null) {
-    loadAllData(props.customerId)
-  }
-}
-
-const handleDownloadInvoiceApplication = async (application: InvoiceApplicationResponse): Promise<void> => {
-  if (application.status !== 'ISSUED' || application.invoice_file_path === null || application.invoice_file_path.trim() === '') {
-    toast.warning('发票文件尚未生成')
-    return
-  }
-
-  downloadingInvoiceApplicationId.value = application.id
-  try {
-    await downloadInvoiceFileApi(
-      application.id,
-      buildInvoiceDownloadFileName(application.customer_name ?? customer.value?.account_name, application.invoice_file_path)
-    )
-    toast.success('发票文件下载成功')
-  } catch (error) {
-    handleApiError(error, '下载发票文件')
-  } finally {
-    downloadingInvoiceApplicationId.value = null
-  }
-}
-
-// Payment handlers
-const handleRecordPayment = (): void => {
-  // TODO: 打开回款记录对话框
-  toast.info('回款记录功能开发中')
-}
-
 // License handlers
 const handleCreateDeployment = (): void => {
   deploymentDialogOpen.value = true
@@ -692,33 +717,15 @@ const handleDeploymentSuccess = (): void => {
   }
 }
 
-const handleApplyLicense = (): void => {
-  licenseApplicationDialogOpen.value = true
-}
-
-const handleLicenseApplicationSuccess = (): void => {
-  licenseApplicationDialogOpen.value = false
-  if (props.customerId !== null) {
-    loadAllData(props.customerId)
-  }
-}
-
 // Contract detail sheet handlers (Task 6)
 const handleViewContract = (contractId: number): void => {
   selectedContractId.value = contractId
-  contractSheetVisible.value = true
 }
 
 const handleContractSheetRefresh = (): void => {
   if (props.customerId !== null) {
     loadAllData(props.customerId)
   }
-}
-
-// Payment plan detail sheet handlers (Task 6)
-const handleViewPaymentPlan = (planId: number): void => {
-  selectedPlanId.value = planId
-  planSheetVisible.value = true
 }
 
 const handlePlanSheetRefresh = (): void => {
@@ -742,23 +749,21 @@ const handleRecordClick = (record: PaymentRecordInfo): void => {
   recordSheetVisible.value = true
 }
 
-// Contract detail sheet approval handlers (Task 6 fix)
+// Contract detail approval handlers (Task 6 fix)
 const handleContractApprove = (): void => {
-  // ContractDetailSheet handles the action internally, just refresh parent data
+  // ContractDetailContent handles the action internally, just refresh parent data
   handleContractSheetRefresh()
 }
 
 const handleContractReject = (): void => {
-  // ContractDetailSheet handles the action internally, just refresh parent data
+  // ContractDetailContent handles the action internally, just refresh parent data
   handleContractSheetRefresh()
 }
 
 // Payment plan detail sheet nested event handlers (Task 6 fix)
 const handlePaymentPlanDetailViewContract = (contractId: number): void => {
-  // Close the plan sheet and open contract sheet
   planSheetVisible.value = false
   selectedPlanId.value = null
-  // Open contract sheet
   handleViewContract(contractId)
 }
 
@@ -794,53 +799,85 @@ watch(() => props.visible, (visible): void => {
     contracts.value = []
     paymentPlans.value = []
     invoiceTitles.value = []
-    invoiceApplications.value = []
-    licenseApplications.value = []
     deployments.value = []
     // Clear nested sheet states
     selectedContractId.value = null
-    contractSheetVisible.value = false
     selectedPlanId.value = null
     planSheetVisible.value = false
     selectedRecord.value = null
     recordSheetVisible.value = false
+    selectedOpportunityId.value = null
+    fixedContractOpportunity.value = null
+    customerEditDialogOpen.value = false
     deploymentDialogOpen.value = false
-    licenseApplicationDialogOpen.value = false
   }
 }, { immediate: true })
 
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
   activePanel.value = 'customer-brief'
+  selectedOpportunityId.value = null
+  selectedContractId.value = null
   loadAllData(customerId)
 })
 </script>
 
 <template>
-  <Sheet :open="visible" @update:open="$emit('update:visible', $event)">
+  <Sheet :open="visible" @update:open="emit('update:visible', $event)">
     <DetailSheetContent>
-      <!-- Header -->
-      <SheetHeader class="p-6 border-b border-wolf-border-default-v2">
-        <!-- ContextTabs 导航 -->
-        <ContextTabs
-          :tabs="navTabs"
-          :active-tab="activePanel"
-          @update:active-tab="setActivePanel"
-          class="w-full"
-        />
-      </SheetHeader>
+      <OpportunityDetailContent
+        v-if="selectedOpportunityId !== null"
+        ref="opportunityDetailContentRef"
+        :opportunity-id="selectedOpportunityId"
+        embedded
+        :customer-context="{
+          customerId: customerId ?? 0,
+          customerName: customer?.account_name
+        }"
+        @back="handleBackFromOpportunity"
+        @close="emit('update:visible', false)"
+        @refresh="handleOpportunityDetailRefresh"
+        @create-contract="handleOpportunityDetailCreateContract"
+        @edit-contract="handleEditContract"
+        @submit-contract-approval="handleSubmitContractApproval"
+        @withdraw-contract-approval="handleWithdrawContractApproval"
+        @delete-contract="handleDeleteContract"
+      />
 
-      <!-- Content -->
-      <ScrollArea class="flex-1">
+      <ContractDetailContent
+        v-else-if="selectedContractId !== null"
+        :contract-id="selectedContractId"
+        embedded
+        @back="handleBackFromContract"
+        @close="emit('update:visible', false)"
+        @refresh="handleContractSheetRefresh"
+        @approve="handleContractApprove"
+        @reject="handleContractReject"
+      />
+
+      <template v-else>
+        <!-- Header -->
+        <SheetHeader class="customer-detail-sheet__header p-6 border-b border-wolf-border-default-v2">
+          <!-- ContextTabs 导航 -->
+          <ContextTabs
+            :tabs="navTabs"
+            :active-tab="activePanel"
+            @update:active-tab="setActivePanel"
+            class="w-full"
+          />
+        </SheetHeader>
+
+        <!-- Content -->
+        <ScrollArea class="flex-1">
           <div class="p-6 space-y-6">
             <template v-if="activePanel === 'customer-brief'">
-              <!-- 客户概况卡片 -->
+              <!-- 客户档案卡片 -->
               <Card class="customer-brief-card">
                 <CardContent class="p-0">
                   <div class="brief-card-header">
                     <div class="flex items-center gap-2 min-w-0">
                       <Sparkles class="h-4 w-4 text-wolf-primary-v2 flex-shrink-0" aria-hidden="true" />
-                      <h3 class="text-sm font-semibold text-wolf-text-primary-v2">客户概况</h3>
+                      <h3 class="text-sm font-semibold text-wolf-text-primary-v2">客户档案</h3>
                       <Badge
                         variant="outline"
                         class="brief-status-badge"
@@ -861,7 +898,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                         :class="{ 'animate-spin': regeneratingBrief || customer?.customer_brief_status === 'GENERATING' }"
                         aria-hidden="true"
                       />
-                      <span class="sr-only">生成客户概况</span>
+                      <span class="sr-only">生成客户档案</span>
                     </Button>
                   </div>
 
@@ -946,7 +983,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                       class="brief-inline-state"
                     >
                       <Loader2 class="h-4 w-4 animate-spin text-wolf-primary-v2" aria-hidden="true" />
-                      <span>客户概况正在生成中，请稍后刷新查看</span>
+                      <span>客户档案正在生成中，请稍后刷新查看</span>
                     </div>
                     <Empty
                       v-else-if="customer?.customer_brief_status === 'FAILED'"
@@ -956,7 +993,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                         <EmptyMedia variant="icon">
                           <Sparkles class="h-5 w-5" aria-hidden="true" />
                         </EmptyMedia>
-                        <EmptyTitle class="text-sm font-medium">客户概况生成失败</EmptyTitle>
+                        <EmptyTitle class="text-sm font-medium">客户档案生成失败</EmptyTitle>
                         <EmptyDescription>
                           {{ customer?.customer_brief_error_message || '请稍后重新生成' }}
                         </EmptyDescription>
@@ -978,7 +1015,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                         <EmptyMedia variant="icon">
                           <Sparkles class="h-5 w-5" aria-hidden="true" />
                         </EmptyMedia>
-                        <EmptyTitle class="text-sm font-medium">暂无客户概况</EmptyTitle>
+                        <EmptyTitle class="text-sm font-medium">暂无客户档案</EmptyTitle>
                         <EmptyDescription>生成后可查看销售侧客户经营摘要</EmptyDescription>
                       </EmptyHeader>
                       <EmptyContent>
@@ -998,7 +1035,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               </Card>
             </template>
 
-            <template v-if="activePanel === 'followup'">
+            <template v-if="activePanel === 'customer-info'">
               <!-- 基本信息卡片 -->
               <Card class="info-card">
                 <CardContent class="p-0">
@@ -1102,115 +1139,35 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                 </CardContent>
               </Card>
 
-              <!-- 客户档案卡片（Accordion） -->
-              <Accordion type="single" collapsible class="profile-accordion">
-                <AccordionItem value="profile">
-                  <AccordionTrigger class="px-4 py-3 hover:no-underline">
-                    <div class="flex items-center gap-2 w-full">
-                      <span class="text-sm font-semibold text-wolf-text-primary-v2">客户档案</span>
-                      <Badge
-                        v-if="customer?.profile_status"
-                        variant="outline"
-                        class="ml-2"
-                      >
-                        {{ customer.profile_status === 'PENDING' ? '待生成' : customer.profile_status === 'GENERATING' ? '生成中' : customer.profile_status === 'COMPLETED' ? '已完成' : '失败' }}
-                      </Badge>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent class="px-4 pb-4">
-                    <!-- 生成中状态 -->
-                    <div v-if="customer?.profile_status === 'GENERATING'" class="flex items-center gap-3 py-4">
-                      <Loader2 class="w-5 h-5 animate-spin text-wolf-primary-v2" />
-                      <span class="text-sm text-wolf-text-secondary-v2">档案正在生成中，请稍后刷新查看...</span>
-                    </div>
+              <ContactsPanel
+                :customer-id="customerId ?? 0"
+                :contacts="customer?.contacts ?? []"
+                @add="contactDialogOpen = true"
+                @edit="handleEditContact"
+                @delete="handleDeleteContact"
+                @set-primary="handleSetPrimaryContact"
+              />
 
-                    <!-- 待生成状态 -->
-                    <Empty v-else-if="customer?.profile_status === 'PENDING' || !customer?.profile_status" class="min-h-[160px] border-0 py-4">
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <RefreshCw class="h-5 w-5" aria-hidden="true" />
-                        </EmptyMedia>
-                        <EmptyTitle class="text-sm font-medium">暂无客户档案</EmptyTitle>
-                        <EmptyDescription>生成后可查看客户画像与分析摘要</EmptyDescription>
-                      </EmptyHeader>
-                      <EmptyContent>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        :disabled="regeneratingProfile"
-                        @click="handleRegenerateProfile"
-                      >
-                        <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
-                        生成档案
-                      </Button>
-                      </EmptyContent>
-                    </Empty>
+              <InvoicesPanel
+                :customer-id="customerId ?? 0"
+                :invoice-titles="invoiceTitles"
+                :invoice-applications="[]"
+                :show-invoice-applications="false"
+                :show-title-apply-action="false"
+                @add="invoiceTitleDialogOpen = true"
+                @edit="handleEditInvoiceTitle"
+                @delete="handleDeleteInvoiceTitle"
+                @set-default="handleSetDefaultInvoiceTitle"
+              />
 
-                    <!-- 失败状态 -->
-                    <div v-else-if="customer?.profile_status === 'FAILED'" class="flex flex-col gap-3 py-4">
-                      <div class="text-sm text-wolf-danger-text-v2">
-                        档案生成失败: {{ customer?.profile_error_message || '未知错误' }}
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        :disabled="regeneratingProfile"
-                        @click="handleRegenerateProfile"
-                      >
-                        <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
-                        重新生成
-                      </Button>
-                    </div>
-
-                    <!-- 已完成状态 -->
-                    <div v-else-if="customer?.profile_status === 'COMPLETED'" class="space-y-4">
-                      <!-- 企业背景 -->
-                      <div v-if="customer?.company_background" class="profile-item">
-                        <div class="profile-label">企业背景</div>
-                        <div class="profile-value">{{ customer.company_background }}</div>
-                      </div>
-
-                      <!-- 公司网站 -->
-                      <div v-if="customer?.company_website" class="profile-item">
-                        <div class="profile-label">公司网站</div>
-                        <a
-                          :href="customer.company_website"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="profile-link"
-                        >
-                          {{ customer.company_website }}
-                        </a>
-                      </div>
-
-                      <!-- 主营业务 -->
-                      <div v-if="customer?.main_business" class="profile-item">
-                        <div class="profile-label">主营业务</div>
-                        <div class="profile-value">{{ customer.main_business }}</div>
-                      </div>
-
-                      <!-- 项目背景 -->
-                      <div v-if="customer?.project_background" class="profile-item">
-                        <div class="profile-label">项目背景</div>
-                        <div class="profile-value">{{ customer.project_background }}</div>
-                      </div>
-
-                      <!-- 重新生成按钮 -->
-                      <div class="pt-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          :disabled="regeneratingProfile"
-                          @click="handleRegenerateProfile"
-                        >
-                          <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingProfile }" />
-                          重新生成档案
-                        </Button>
-                      </div>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+              <LicensePanel
+                :customer-id="customerId ?? 0"
+                :customer-name="customer?.account_name ?? null"
+                :license-applications="[]"
+                :deployments="deployments"
+                :show-license-applications="false"
+                @add-deployment="handleCreateDeployment"
+              />
             </template>
 
             <!-- 根据 activePanel 显示对应面板 -->
@@ -1218,18 +1175,9 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               v-if="activePanel === 'followup'"
               :follow-ups="followUps"
               :current-user-id="String(userStore.userInfo?.id)"
+              :show-header="false"
               @add="followUpDialogOpen = true"
               @delete="handleFollowUpDelete"
-            />
-
-            <ContactsPanel
-              v-if="activePanel === 'contacts'"
-              :customer-id="customerId ?? 0"
-              :contacts="customer?.contacts ?? []"
-              @add="contactDialogOpen = true"
-              @edit="handleEditContact"
-              @delete="handleDeleteContact"
-              @set-primary="handleSetPrimaryContact"
             />
 
             <OpportunitiesPanel
@@ -1237,67 +1185,63 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               :customer-id="customerId ?? 0"
               :opportunities="opportunities"
               @add="opportunityDialogOpen = true"
-            />
-
-            <ContractsPanel
-              v-if="activePanel === 'contracts'"
-              :customer-id="customerId ?? 0"
-              :contracts="contracts"
-              @add="contractDialogOpen = true"
-              @view="handleViewContract"
-            />
-
-            <PaymentsPanel
-              v-if="activePanel === 'payments'"
-              :customer-id="customerId ?? 0"
-              :payments="paymentPlans"
-              @record="handleRecordPayment"
-              @view="handleViewPaymentPlan"
-            />
-
-            <InvoicesPanel
-              v-if="activePanel === 'invoices'"
-              :customer-id="customerId ?? 0"
-              :invoice-titles="invoiceTitles"
-              :invoice-applications="invoiceApplications"
-              :downloading-application-id="downloadingInvoiceApplicationId"
-              @add="invoiceTitleDialogOpen = true"
-              @edit="handleEditInvoiceTitle"
-              @delete="handleDeleteInvoiceTitle"
-              @set-default="handleSetDefaultInvoiceTitle"
-              @apply="handleApplyInvoice"
-              @download-application="handleDownloadInvoiceApplication"
-            />
-
-            <LicensePanel
-              v-if="activePanel === 'license-management'"
-              :customer-id="customerId ?? 0"
-              :customer-name="customer?.account_name ?? null"
-              :license-applications="licenseApplications"
-              :deployments="deployments"
-              @add-deployment="handleCreateDeployment"
-              @apply="handleApplyLicense"
+              @view="handleViewOpportunity"
             />
           </div>
         </ScrollArea>
 
         <!-- Footer -->
-        <SheetFooter class="p-4 border-t border-wolf-border-default-v2 flex flex-row gap-2">
-          <Button variant="default" @click="handleCreateOpportunity">
-            <Plus class="w-4 h-4 mr-2" />
-            新建商机
-          </Button>
-          <Button variant="outline" @click="handleCreateContract">
-            <Plus class="w-4 h-4 mr-2" />
-            新建合同
-          </Button>
-          <Button variant="outline" @click="handleEdit">
-            <Pencil class="w-4 h-4 mr-2" />
-            编辑
-          </Button>
+        <SheetFooter class="customer-detail-sheet__footer p-4 border-t border-wolf-border-default-v2">
+          <template v-if="activePanel === 'customer-brief'">
+            <Button
+              variant="default"
+              :disabled="regeneratingBrief || customer?.customer_brief_status === 'GENERATING'"
+              @click="handleRegenerateBrief"
+            >
+              <RefreshCw
+                class="w-4 h-4 mr-2"
+                :class="{ 'animate-spin': regeneratingBrief || customer?.customer_brief_status === 'GENERATING' }"
+              />
+              生成概况
+            </Button>
+          </template>
+
+          <template v-else-if="activePanel === 'customer-info'">
+            <Button variant="default" @click="contactDialogOpen = true">
+              <Plus class="w-4 h-4 mr-2" />
+              新建联系人
+            </Button>
+            <Button variant="outline" @click="invoiceTitleDialogOpen = true">
+              <Plus class="w-4 h-4 mr-2" />
+              新建抬头
+            </Button>
+            <Button variant="outline" @click="handleCreateDeployment">
+              <Plus class="w-4 h-4 mr-2" />
+              新建部署
+            </Button>
+            <Button variant="outline" @click="handleEdit">
+              <Pencil class="w-4 h-4 mr-2" />
+              编辑
+            </Button>
+          </template>
+
+          <template v-else-if="activePanel === 'followup'">
+            <Button variant="default" @click="followUpDialogOpen = true">
+              <Plus class="w-4 h-4 mr-2" />
+              添加跟进
+            </Button>
+          </template>
+
+          <template v-else-if="activePanel === 'opportunities'">
+            <Button variant="default" @click="handleCreateOpportunity">
+              <Plus class="w-4 h-4 mr-2" />
+              新建商机
+            </Button>
+          </template>
         </SheetFooter>
-      </DetailSheetContent>
-    </Sheet>
+      </template>
+    </DetailSheetContent>
+  </Sheet>
 
   <!-- Dialogs -->
   <FollowUpFormDialog
@@ -1306,6 +1250,15 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     :open="followUpDialogOpen"
     @update:open="followUpDialogOpen = $event"
     @success="handleFollowUpSuccess"
+  />
+
+  <CustomerFormDialog
+    v-if="customerId !== null"
+    mode="edit"
+    :customer-id="customerId"
+    :open="customerEditDialogOpen"
+    @update:open="customerEditDialogOpen = $event"
+    @success="handleCustomerEditSuccess"
   />
 
   <ContactFormDialog
@@ -1335,6 +1288,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     :customer-locked="true"
     :open="contractDialogOpen"
     :contract="editingContract"
+    :fixed-opportunity="fixedContractOpportunity"
     @update:open="handleContractDialogClose"
     @success="handleContractSuccess"
   />
@@ -1348,42 +1302,12 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     @success="handleInvoiceTitleSuccess"
   />
 
-  <InvoiceApplicationFormDialog
-    v-if="customerId !== null && customer !== null"
-    mode="create"
-    :open="invoiceApplicationDialogOpen"
-    :fixed-customer="{ id: customer.id, account_name: customer.account_name }"
-    :fixed-invoice-title="applyingInvoiceTitle"
-    @update:open="handleInvoiceApplicationDialogClose"
-    @success="handleInvoiceApplicationSuccess"
-  />
-
   <DeploymentInfoFormDialog
     v-if="customerId !== null"
     :customer-id="customerId"
     :open="deploymentDialogOpen"
     @update:open="deploymentDialogOpen = $event"
     @success="handleDeploymentSuccess"
-  />
-
-  <LicenseApplicationFormDialog
-    v-if="customerId !== null"
-    :customer-id="customerId"
-    :open="licenseApplicationDialogOpen"
-    :deployments="deployments"
-    :contracts="contracts"
-    @update:open="licenseApplicationDialogOpen = $event"
-    @success="handleLicenseApplicationSuccess"
-  />
-
-  <!-- Contract Detail Sheet (Task 6) -->
-  <ContractDetailSheet
-    :contract-id="selectedContractId"
-    :visible="contractSheetVisible"
-    @update:visible="contractSheetVisible = $event"
-    @refresh="handleContractSheetRefresh"
-    @approve="handleContractApprove"
-    @reject="handleContractReject"
   />
 
   <!-- Payment Plan Detail Sheet (Task 6) -->
@@ -1411,6 +1335,17 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
+
+.customer-detail-sheet__header {
+  padding-right: 72px;
+}
+
+.customer-detail-sheet__footer {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  gap: $wolf-space-sm-v2;
+}
 
 .title-avatar {
   width: 48px;
@@ -1495,41 +1430,6 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   color: $wolf-text-tertiary-v2;
   background: $wolf-bg-muted-v2;
   border-color: $wolf-border-light-v2;
-}
-
-// Profile card styles
-.profile-accordion {
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-lg-v2;
-  background: $wolf-bg-card-v2;
-}
-
-.profile-item {
-  display: flex;
-  flex-direction: column;
-  gap: $wolf-space-xs-v2;
-}
-
-.profile-label {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-}
-
-.profile-value {
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.profile-link {
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-link-v2;
-  text-decoration: underline;
-
-  &:hover {
-    color: $wolf-text-link-hover-v2;
-  }
 }
 
 // Customer brief card styles

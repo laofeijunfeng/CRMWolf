@@ -9,11 +9,6 @@
  * 无障碍：WCAG AA 级别（焦点、对比度、aria-label）
  */
 import { Card } from '@/components/ui/card'
-import {
-  Empty,
-  EmptyHeader,
-  EmptyTitle
-} from '@/components/ui/empty'
 
 interface Props {
   /** 标题 */
@@ -51,7 +46,8 @@ const handleRowClick = (event: MouseEvent, item: T): void => {
 const isNestedInteractiveElement = (target: EventTarget | null, currentTarget: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement) || !(currentTarget instanceof HTMLElement)) return false
   if (target === currentTarget) return false
-  return target.closest('button, a, input, select, textarea, [role="button"], [role="link"]') !== null
+  const nestedInteractive = target.closest('button, a, input, select, textarea, [role="button"], [role="link"]')
+  return nestedInteractive !== null && nestedInteractive !== currentTarget
 }
 
 const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
@@ -84,11 +80,9 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
       <!-- Empty State -->
       <div v-else-if="items.length === 0" class="list-card-empty">
         <slot name="empty">
-          <Empty class="min-h-[160px] border-0 p-0">
-            <EmptyHeader>
-              <EmptyTitle class="text-sm font-medium">{{ emptyText }}</EmptyTitle>
-            </EmptyHeader>
-          </Empty>
+          <div class="list-card-empty-state" role="status">
+            {{ emptyText }}
+          </div>
         </slot>
       </div>
 
@@ -134,7 +128,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 .list-card {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: auto;
   background: $wolf-bg-card-v2;
   border-radius: $wolf-radius-lg-v2;
   border: 1px solid $wolf-border-default-v2;
@@ -164,7 +158,8 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 
 // ==================== Content ====================
 .list-card-content {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -225,7 +220,19 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 
 // ==================== Empty State ====================
 .list-card-empty {
-  padding: $wolf-space-2xl-v2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 68px;
+  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
+}
+
+.list-card-empty-state {
+  width: 100%;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-tertiary-v2;
+  text-align: center;
 }
 
 // ==================== List Items ====================
@@ -239,7 +246,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: $wolf-space-md-v2;
-  min-height: $wolf-touch-target-min-v2; // 44px - touch target compliance
+  min-height: 68px;
   padding: $wolf-space-md-v2 $wolf-space-lg-v2;
   border-bottom: 1px solid $wolf-border-light-v2;
   transition: background 150ms ease;
@@ -312,6 +319,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 // ==================== Responsive ====================
 @media (max-width: $wolf-breakpoint-md-v2 - 1) {
   .list-card-header,
+  .list-card-empty,
   .list-card-item {
     padding-left: $wolf-space-md-v2;
     padding-right: $wolf-space-md-v2;

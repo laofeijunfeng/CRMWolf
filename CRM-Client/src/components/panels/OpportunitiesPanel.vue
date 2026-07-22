@@ -29,10 +29,15 @@ defineProps<Props>()
 
 const emit = defineEmits<{
   'add': []
+  'view': [opportunityId: number]
 }>()
 
 const handleAdd = (): void => {
   emit('add')
+}
+
+const handleView = (opportunity: OpportunityListResponse): void => {
+  emit('view', opportunity.id)
 }
 
 const mapStatus = (status: OpportunityStatus): string => {
@@ -57,6 +62,8 @@ const formatDate = (dateStr: string): string => {
       title="商机"
       :items="opportunities"
       empty-text="暂无商机"
+      row-interactive
+      @row-click="handleView"
     >
       <template #headerActions>
         <Button size="sm" @click="handleAdd">

@@ -246,6 +246,7 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
     docxPreviewLoading.value = false
   }
 }
+
 </script>
 
 <template>

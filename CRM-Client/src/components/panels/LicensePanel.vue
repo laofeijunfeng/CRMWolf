@@ -11,6 +11,7 @@ import { Plus, Server, FileText, Download, Calendar, Hash, Loader2 } from 'lucid
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ListCard from '@/components/crmwolf/ListCard.vue'
+import { HoverInfo } from '@/components/crmwolf'
 import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseApplicationStatus, type LicenseType } from '@/api/licenseApplication'
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { toast } from 'vue-sonner'
@@ -22,9 +23,15 @@ interface Props {
   customerName?: string | null
   licenseApplications: LicenseApplicationResponse[]
   deployments: DeploymentInfoResponse[]
+  showDeployments?: boolean
+  showLicenseApplications?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  customerName: null,
+  showDeployments: true,
+  showLicenseApplications: true
+})
 
 const emit = defineEmits<{
   'add-deployment': []
@@ -129,6 +136,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
   <div class="license-panel">
     <!-- Deployments Section -->
     <ListCard
+      v-if="showDeployments"
       title="部署信息"
       :items="deployments"
       empty-text="暂无部署信息"
@@ -166,6 +174,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
 
     <!-- License Applications Section -->
     <ListCard
+      v-if="showLicenseApplications"
       title="许可证申请"
       :items="licenseApplications"
       empty-text="暂无许可证申请"
@@ -212,18 +221,27 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       </template>
 
       <template #itemActions="{ item }">
-        <Button
+        <HoverInfo
           v-if="item.status === 'ISSUED'"
-          variant="ghost"
-          size="icon"
-          :aria-label="`下载申请 ${item.application_number} License 文件`"
-          :title="`下载 License 文件`"
-          :disabled="downloadingApplicationId !== null"
-          @click.stop="handleDownload(item)"
+          side="top"
+          align="center"
+          content-class="license-action-hover-card"
         >
-          <Loader2 v-if="downloadingApplicationId === item.id" class="w-4 h-4 animate-spin" />
-          <Download v-else class="w-4 h-4" />
-        </Button>
+          <template #trigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="license-action-button license-action-button--primary"
+              :aria-label="`下载申请 ${item.application_number} License 文件`"
+              :disabled="downloadingApplicationId !== null"
+              @click.stop="handleDownload(item)"
+            >
+              <Loader2 v-if="downloadingApplicationId === item.id" class="w-4 h-4 animate-spin" />
+              <Download v-else class="w-4 h-4" />
+            </Button>
+          </template>
+          <span class="license-action-hover-text">下载 License</span>
+        </HoverInfo>
       </template>
     </ListCard>
   </div>
@@ -235,5 +253,30 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
 .license-panel {
   display: flex;
   flex-direction: column;
+}
+
+.license-action-button {
+  width: 32px;
+  height: 32px;
+  color: $wolf-text-secondary-v2;
+}
+
+.license-action-button--primary {
+  &:hover {
+    color: $wolf-primary-v2;
+  }
+}
+
+:global(.license-action-hover-card) {
+  width: auto;
+  padding: 6px 10px;
+}
+
+.license-action-hover-text {
+  display: inline-flex;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  white-space: nowrap;
 }
 </style>

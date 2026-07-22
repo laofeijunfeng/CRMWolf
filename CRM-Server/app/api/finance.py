@@ -18,7 +18,7 @@ from app.schemas.payment import (
     PaymentRecordWithConfirmation,
     PaymentPlanResponse
 )
-from app.crud.payment import payment_record_crud, payment_plan_crud
+from app.crud.payment import payment_record_crud, payment_plan_crud, sum_approved_payment_amount
 
 router = APIRouter(prefix="/finance", tags=["财务管理"])
 
@@ -127,7 +127,7 @@ def get_receivables_aging_analysis(
     details = []
     
     for plan in overdue_plans:
-        paid_amount = sum(Decimal(str(r.actual_amount)) for r in plan.payment_records)
+        paid_amount = Decimal(str(sum_approved_payment_amount(plan.payment_records)))
         remaining_amount = plan.planned_amount - paid_amount
         
         if remaining_amount <= 0:
@@ -208,7 +208,7 @@ def get_overdue_alerts(
     
     alerts = []
     for plan in overdue_plans:
-        paid_amount = sum(Decimal(str(r.actual_amount)) for r in plan.payment_records)
+        paid_amount = Decimal(str(sum_approved_payment_amount(plan.payment_records)))
         remaining_amount = plan.planned_amount - paid_amount
         
         if remaining_amount <= 0:

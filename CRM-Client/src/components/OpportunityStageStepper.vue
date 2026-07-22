@@ -25,7 +25,7 @@ import {
   StepperTitle,
   StepperSeparator
 } from '@/components/ui/stepper'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { confirmDialog } from '@/utils/confirmDialog'
 import procurementApi, {
   type OpportunityProcurementStageInfo
@@ -33,11 +33,18 @@ import procurementApi, {
 
 interface Props {
   opportunityId: number
+  embedded?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  embedded: false
+})
 const emit = defineEmits<{
   advanced: []
+  'stage-status-change': [{
+    currentWinProbability: number
+    isComplete: boolean
+  }]
 }>()
 
 const loading = ref(false)
@@ -50,14 +57,28 @@ const currentStep = computed(() => {
   return allStages.value.findIndex(s => s.id === current.id)
 })
 
+const emitStageStatus = (): void => {
+  const current = allStages.value.find(stage => stage.is_current)
+  const currentWinProbability = current?.win_probability ?? 0
+  emit('stage-status-change', {
+    currentWinProbability,
+    isComplete: currentWinProbability >= 100
+  })
+}
+
 // 获取采购阶段数据
 const fetchStages = async (): Promise<void> => {
   loading.value = true
   try {
     const data = await procurementApi.getOpportunityProcurementStages(props.opportunityId)
     allStages.value = data
+    emitStageStatus()
   } catch (error) {
     handleApiError(error, '获取采购阶段')
+    emit('stage-status-change', {
+      currentWinProbability: 0,
+      isComplete: false
+    })
   } finally {
     loading.value = false
   }
@@ -100,11 +121,12 @@ onMounted(fetchStages)
 </script>
 
 <template>
-  <Card v-if="!loading && allStages.length > 0" class="stage-card">
-    <CardHeader class="p-4 border-b border-wolf-border-light-v2">
-      <h3 class="text-sm font-semibold text-wolf-text-primary-v2">采购阶段</h3>
-    </CardHeader>
-    <CardContent class="p-4">
+  <component
+    :is="embedded ? 'div' : Card"
+    v-if="!loading && allStages.length > 0"
+    :class="embedded ? 'stage-content' : 'stage-card'"
+  >
+    <CardContent :class="embedded ? 'p-0' : 'p-4'">
       <Stepper
         :model-value="currentStep + 1"
         class="flex w-full gap-2"
@@ -145,7 +167,7 @@ onMounted(fetchStages)
         点击未完成阶段可推进商机状态
       </p>
     </CardContent>
-  </Card>
+  </component>
 </template>
 
 <style scoped lang="scss">
@@ -155,6 +177,10 @@ onMounted(fetchStages)
   background: $wolf-bg-card-v2;
   border-radius: $wolf-radius-v2;
   box-shadow: $wolf-shadow-card-v2;
+}
+
+.stage-content {
+  min-width: 0;
 }
 
 // Reduced Motion 支持

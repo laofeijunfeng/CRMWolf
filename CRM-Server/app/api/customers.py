@@ -258,29 +258,50 @@ def get_customer_payment_plans(
     
     from sqlalchemy import text
     
-    contracts_query = text("""
-        SELECT id FROM crm_contracts
-        WHERE customer_id = :customer_id
-    """)
-    contract_ids_result = db.execute(contracts_query, {"customer_id": customer_id}).fetchall()
-    contract_ids = [row[0] for row in contract_ids_result] if contract_ids_result else []
-    
-    if not contract_ids:
-        return []
-    
     plans_query = text("""
-        SELECT * FROM crm_contract_payment_plans
-        WHERE contract_id IN :contract_ids
+        SELECT
+            p.*,
+            c.contract_name AS contract_name,
+            c.contract_number AS contract_number,
+            c.customer_id AS customer_id,
+            c.opportunity_id AS opportunity_id,
+            o.opportunity_name AS opportunity_name,
+            c.owner_id AS owner_id,
+            c.creator_id AS creator_id
+        FROM crm_contract_payment_plans p
+        JOIN crm_contracts c ON p.contract_id = c.id
+        LEFT JOIN crm_opportunities o ON c.opportunity_id = o.id
+        WHERE c.customer_id = :customer_id
+          AND p.team_id = :team_id
+          AND c.team_id = :team_id
+          AND c.deleted_at IS NULL
+        ORDER BY p.due_date ASC, p.id DESC
     """)
     if status:
         plans_query = text("""
-            SELECT * FROM crm_contract_payment_plans
-            WHERE contract_id IN :contract_ids AND status = :status
+            SELECT
+                p.*,
+                c.contract_name AS contract_name,
+                c.contract_number AS contract_number,
+                c.customer_id AS customer_id,
+                c.opportunity_id AS opportunity_id,
+                o.opportunity_name AS opportunity_name,
+                c.owner_id AS owner_id,
+                c.creator_id AS creator_id
+            FROM crm_contract_payment_plans p
+            JOIN crm_contracts c ON p.contract_id = c.id
+            LEFT JOIN crm_opportunities o ON c.opportunity_id = o.id
+            WHERE c.customer_id = :customer_id
+              AND p.team_id = :team_id
+              AND c.team_id = :team_id
+              AND c.deleted_at IS NULL
+              AND p.status = :status
+            ORDER BY p.due_date ASC, p.id DESC
         """)
     
     plans_result = db.execute(
         plans_query,
-        {"contract_ids": tuple(contract_ids), "status": status}
+        {"customer_id": customer_id, "team_id": team_id, "status": status}
     ).fetchall()
     
     plans = []
@@ -300,14 +321,15 @@ def get_customer_payment_plans(
         for record_row in records_result:
             record_dict = dict(record_row._mapping)
             payment_records.append(record_dict)
-            paid_amount += float(record_dict['actual_amount'])
+            if record_dict.get('approval_phase') == 'approved':
+                paid_amount += float(record_dict['actual_amount'])
         
         plan_dict['paid_amount'] = paid_amount
         plan_dict['remaining_amount'] = float(plan_dict['planned_amount']) - paid_amount
         plan_dict['payment_records'] = payment_records
-        plan_dict['contract_name'] = None
+        plan_dict['contract_name'] = plan_dict.get('contract_name')
         plan_dict['customer_name'] = customer.account_name
-        plan_dict['opportunity_name'] = None
+        plan_dict['opportunity_name'] = plan_dict.get('opportunity_name')
         plan_dict['status_name'] = status_map.get(plan_dict['status'], plan_dict['status'])
         
         invoice_query = text("""

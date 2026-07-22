@@ -1,6 +1,7 @@
 """Tests for PaymentPlan model computed properties."""
 import pytest
 from decimal import Decimal
+from app.constants.approval_phase import ApprovalPhase
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 
@@ -15,8 +16,8 @@ class TestPaymentPlanRemainingAmount:
         )
         # Simulate payment_records relationship
         plan.payment_records = [
-            PaymentRecord(actual_amount=Decimal('3000.00'), payment_date=None),
-            PaymentRecord(actual_amount=Decimal('2000.00'), payment_date=None),
+            PaymentRecord(actual_amount=Decimal('3000.00'), payment_date=None, approval_phase=ApprovalPhase.APPROVED),
+            PaymentRecord(actual_amount=Decimal('2000.00'), payment_date=None, approval_phase=ApprovalPhase.APPROVED),
         ]
         assert plan.remaining_amount == Decimal('5000.00')
 
@@ -26,7 +27,7 @@ class TestPaymentPlanRemainingAmount:
             planned_amount=Decimal('10000.00')
         )
         plan.payment_records = [
-            PaymentRecord(actual_amount=Decimal('10000.00'), payment_date=None),
+            PaymentRecord(actual_amount=Decimal('10000.00'), payment_date=None, approval_phase=ApprovalPhase.APPROVED),
         ]
         assert plan.remaining_amount == Decimal('0.00')
 
@@ -44,10 +45,23 @@ class TestPaymentPlanRemainingAmount:
             planned_amount=Decimal('10000.00')
         )
         plan.payment_records = [
-            PaymentRecord(actual_amount=Decimal('12000.00'), payment_date=None),
+            PaymentRecord(actual_amount=Decimal('12000.00'), payment_date=None, approval_phase=ApprovalPhase.APPROVED),
         ]
         # Should return negative amount when overpaid
         assert plan.remaining_amount == Decimal('-2000.00')
+
+    def test_remaining_amount_ignores_unapproved_records(self):
+        """Test remaining_amount only counts approved payment records."""
+        plan = PaymentPlan(
+            planned_amount=Decimal('10000.00')
+        )
+        plan.payment_records = [
+            PaymentRecord(actual_amount=Decimal('3000.00'), payment_date=None, approval_phase=ApprovalPhase.PENDING_REVIEW),
+            PaymentRecord(actual_amount=Decimal('2000.00'), payment_date=None, approval_phase=ApprovalPhase.REJECTED),
+            PaymentRecord(actual_amount=Decimal('1000.00'), payment_date=None, approval_phase=ApprovalPhase.APPROVED),
+        ]
+        assert plan.paid_amount == Decimal('1000.00')
+        assert plan.remaining_amount == Decimal('9000.00')
 
 
 class TestPaymentPlanInvoicedAmount:

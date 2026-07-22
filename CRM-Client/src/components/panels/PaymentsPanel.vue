@@ -8,32 +8,60 @@
  *
  * Task 6: 添加 'view' 事件用于查看回款计划详情
  */
-import { Plus, ExternalLink } from 'lucide-vue-next'
+import { CreditCard, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import StatusBadge from '@/components/StatusBadge.vue'
 import AmountText from '@/components/crmwolf/AmountText.vue'
+import { HoverInfo } from '@/components/crmwolf'
 import ListCard from '@/components/crmwolf/ListCard.vue'
-import type { PaymentPlanResponse, PaymentPlanStatus } from '@/api/payment'
+import type { PaymentPlanResponse } from '@/api/payment'
+
+type PaymentPlanActionPredicate = (plan: PaymentPlanResponse) => boolean
 
 interface Props {
   customerId: number
   payments: PaymentPlanResponse[]
+  loading?: boolean
+  showAdd?: boolean
+  canRecord?: PaymentPlanActionPredicate | null
+  canEdit?: PaymentPlanActionPredicate | null
+  canDelete?: PaymentPlanActionPredicate | null
 }
 
-defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  loading: false,
+  showAdd: false,
+  canRecord: null,
+  canEdit: null,
+  canDelete: null
+})
 
 const emit = defineEmits<{
+  'add': []
   'record': [plan: PaymentPlanResponse]
   'view': [planId: number]
+  'edit': [plan: PaymentPlanResponse]
+  'delete': [plan: PaymentPlanResponse]
 }>()
+
+const handleAdd = (): void => {
+  emit('add')
+}
 
 const handleRecord = (plan: PaymentPlanResponse): void => {
   emit('record', plan)
 }
 
-const handleView = (planId: number): void => {
-  emit('view', planId)
+const handleView = (plan: PaymentPlanResponse): void => {
+  emit('view', plan.id)
+}
+
+const handleEdit = (plan: PaymentPlanResponse): void => {
+  emit('edit', plan)
+}
+
+const handleDelete = (plan: PaymentPlanResponse): void => {
+  emit('delete', plan)
 }
 
 const formatDate = (dateStr: string): string => {
@@ -42,14 +70,35 @@ const formatDate = (dateStr: string): string => {
   return date.toLocaleDateString('zh-CN')
 }
 
-const mapStatus = (status: PaymentPlanStatus): string => {
-  const statusMap: Record<PaymentPlanStatus, string> = {
-    PENDING: 'pending',
-    OVERDUE: 'overdue',
-    PARTIAL: 'partial',
-    COMPLETED: 'completed'
+const getPaymentStateText = (plan: PaymentPlanResponse): string => {
+  const paidAmount = Number(plan.paid_amount ?? 0)
+  const plannedAmount = Number(plan.planned_amount ?? 0)
+  if (plan.status === 'COMPLETED' || (plannedAmount > 0 && paidAmount >= plannedAmount)) {
+    return '已回款'
   }
-  return statusMap[status]
+  if (paidAmount > 0) {
+    return '部分回款'
+  }
+  if (plan.latest_approval?.status === 'PENDING' || plan.payment_records.some(record => record.approval?.status === 'PENDING')) {
+    return '审批中'
+  }
+  if (plan.payment_records.length > 0) {
+    return '已登记'
+  }
+  if (plan.status === 'OVERDUE') {
+    return '已逾期'
+  }
+  return '未登记'
+}
+
+const getPaymentStateClass = (plan: PaymentPlanResponse): string => {
+  const state = getPaymentStateText(plan)
+  if (state === '已回款') return 'payment-state--completed'
+  if (state === '部分回款') return 'payment-state--partial'
+  if (state === '审批中') return 'payment-state--reviewing'
+  if (state === '已登记') return 'payment-state--registered'
+  if (state === '已逾期') return 'payment-state--overdue'
+  return 'payment-state--pending'
 }
 
 const calculateProgress = (plan: PaymentPlanResponse): number => {
@@ -58,6 +107,16 @@ const calculateProgress = (plan: PaymentPlanResponse): number => {
   }
   return Math.round((plan.paid_amount / plan.planned_amount) * 100)
 }
+
+const shouldShowAction = (
+  predicate: PaymentPlanActionPredicate | null | undefined,
+  plan: PaymentPlanResponse
+): boolean => predicate?.(plan) === true
+
+const hasActions = (plan: PaymentPlanResponse): boolean =>
+  shouldShowAction(props.canRecord, plan)
+  || shouldShowAction(props.canEdit, plan)
+  || shouldShowAction(props.canDelete, plan)
 </script>
 
 <template>
@@ -65,7 +124,17 @@ const calculateProgress = (plan: PaymentPlanResponse): number => {
     title="回款计划"
     :items="payments"
     empty-text="暂无回款计划"
+    :loading="loading === true"
+    row-interactive
+    @row-click="handleView"
   >
+    <template #headerActions>
+      <Button v-if="showAdd" size="sm" @click="handleAdd">
+        <Plus class="w-4 h-4 mr-1" />
+        新建计划
+      </Button>
+    </template>
+
     <template #itemMain="{ item }">
       <div class="payment-plan-main">
         <span class="font-medium text-wolf-text-primary-v2 truncate">
@@ -93,32 +162,73 @@ const calculateProgress = (plan: PaymentPlanResponse): number => {
     </template>
 
     <template #itemBadges="{ item }">
-      <StatusBadge
-        :status="mapStatus(item.status)"
-        type="paymentPlan"
-        size="small"
-      />
+      <span :class="['payment-state-badge', getPaymentStateClass(item)]">
+        {{ getPaymentStateText(item) }}
+      </span>
     </template>
 
     <template #itemActions="{ item }">
-      <Button
-        variant="ghost"
-        size="sm"
-        :aria-label="`查看 ${item.stage_name} 详情`"
-        @click.stop="handleView(item.id)"
-      >
-        <ExternalLink class="w-4 h-4" />
-      </Button>
-      <Button
-        v-if="item.status !== 'COMPLETED'"
-        size="sm"
-        variant="outline"
-        :aria-label="`为 ${item.stage_name} 登记回款`"
-        @click.stop="handleRecord(item)"
-      >
-        <Plus class="w-4 h-4 mr-1" />
-        登记回款
-      </Button>
+      <div v-if="hasActions(item)" class="payment-plan-actions" @click.stop>
+        <HoverInfo
+          v-if="shouldShowAction(canRecord, item)"
+          side="top"
+          align="center"
+          content-class="payment-plan-action-hover-card"
+        >
+          <template #trigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="payment-plan-action-button payment-plan-action-button--primary"
+              :aria-label="`为 ${item.stage_name} 登记回款`"
+              @click="handleRecord(item)"
+            >
+              <CreditCard class="w-4 h-4" />
+            </Button>
+          </template>
+          <span class="payment-plan-action-hover-text">登记回款</span>
+        </HoverInfo>
+
+        <HoverInfo
+          v-if="shouldShowAction(canEdit, item)"
+          side="top"
+          align="center"
+          content-class="payment-plan-action-hover-card"
+        >
+          <template #trigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="payment-plan-action-button payment-plan-action-button--primary"
+              :aria-label="`编辑回款计划 ${item.stage_name}`"
+              @click="handleEdit(item)"
+            >
+              <Pencil class="w-4 h-4" />
+            </Button>
+          </template>
+          <span class="payment-plan-action-hover-text">编辑</span>
+        </HoverInfo>
+
+        <HoverInfo
+          v-if="shouldShowAction(canDelete, item)"
+          side="top"
+          align="center"
+          content-class="payment-plan-action-hover-card"
+        >
+          <template #trigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="payment-plan-action-button payment-plan-action-button--danger"
+              :aria-label="`删除回款计划 ${item.stage_name}`"
+              @click="handleDelete(item)"
+            >
+              <Trash2 class="w-4 h-4" />
+            </Button>
+          </template>
+          <span class="payment-plan-action-hover-text">删除</span>
+        </HoverInfo>
+      </div>
     </template>
   </ListCard>
 </template>
@@ -136,5 +246,79 @@ const calculateProgress = (plan: PaymentPlanResponse): number => {
 .payment-plan-progress {
   width: min(160px, 100%);
   height: 6px;
+}
+
+.payment-state-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: $wolf-radius-full-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  white-space: nowrap;
+}
+
+.payment-state--pending {
+  background: $wolf-bg-muted-v2;
+  color: $wolf-text-tertiary-v2;
+}
+
+.payment-state--registered {
+  background: $wolf-primary-light-v2;
+  color: $wolf-primary-v2;
+}
+
+.payment-state--reviewing,
+.payment-state--partial {
+  background: $wolf-warning-bg-v2;
+  color: $wolf-warning-text-v2;
+}
+
+.payment-state--completed {
+  background: $wolf-success-bg-v2;
+  color: $wolf-success-text-v2;
+}
+
+.payment-state--overdue {
+  background: $wolf-danger-bg-v2;
+  color: $wolf-danger-text-v2;
+}
+
+.payment-plan-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.payment-plan-action-button {
+  width: 32px;
+  height: 32px;
+  color: $wolf-text-secondary-v2;
+}
+
+.payment-plan-action-button--primary {
+  &:hover {
+    color: $wolf-primary-v2;
+  }
+}
+
+.payment-plan-action-button--danger {
+  &:hover {
+    color: $wolf-danger-v2;
+  }
+}
+
+:global(.payment-plan-action-hover-card) {
+  width: auto;
+  padding: 6px 10px;
+}
+
+.payment-plan-action-hover-text {
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  white-space: nowrap;
 }
 </style>

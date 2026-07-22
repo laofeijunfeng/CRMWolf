@@ -9,13 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import contractApi, { type ContractListResponse } from '@/api/contract'
@@ -32,6 +25,8 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency } from '@/utils/format'
 import { normalizePaginatedResponse } from '@/types/pagination'
+import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
+import SelectionSummary from '@/components/crmwolf/SelectionSummary.vue'
 
 interface FixedCustomer {
   id: number
@@ -44,6 +39,7 @@ interface Props {
   application?: InvoiceApplicationResponse | null
   fixedCustomer?: FixedCustomer | null
   fixedInvoiceTitle?: InvoiceTitleResponse | null
+  fixedContractId?: number | null
 }
 
 interface Emits {
@@ -72,6 +68,7 @@ const props = withDefaults(defineProps<Props>(), {
   application: null,
   fixedCustomer: null,
   fixedInvoiceTitle: null,
+  fixedContractId: null,
 })
 const emit = defineEmits<Emits>()
 
@@ -90,7 +87,7 @@ const form = reactive<InvoiceApplicationForm>({
   contractId: '',
   paymentPlanId: '',
   invoiceTitleId: '',
-  invoiceType: 'VAT_NORMAL',
+  invoiceType: 'VAT_SPECIAL',
   invoiceAmount: '',
 })
 
@@ -110,6 +107,7 @@ const visible = computed({
 const isCreateMode = computed<boolean>(() => props.mode === 'create')
 const hasFixedCustomer = computed<boolean>(() => props.fixedCustomer !== null)
 const hasFixedInvoiceTitle = computed<boolean>(() => props.fixedInvoiceTitle !== null)
+const hasFixedContract = computed<boolean>(() => props.fixedContractId !== null)
 const title = computed<string>(() => isCreateMode.value ? '申请发票' : '编辑发票申请')
 const description = computed<string>(() => {
   if (isCreateMode.value && hasFixedInvoiceTitle.value) {
@@ -136,6 +134,16 @@ const selectedContract = computed<ContractListResponse | null>(() => {
 const selectedPaymentPlan = computed<PaymentPlanResponse | null>(() => {
   return paymentPlans.value.find(plan => String(plan.id) === form.paymentPlanId) ?? null
 })
+const selectedInvoiceTitleSummaryItems = computed(() => {
+  if (selectedInvoiceTitle.value === null) return []
+
+  return [
+    { label: '税号', value: selectedInvoiceTitle.value.taxpayer_id },
+    { label: '开户行', value: nullText(selectedInvoiceTitle.value.bank_name) },
+    { label: '银行账号', value: nullText(selectedInvoiceTitle.value.bank_account) },
+    { label: '地址电话', value: `${nullText(selectedInvoiceTitle.value.address)} / ${nullText(selectedInvoiceTitle.value.phone)}` },
+  ]
+})
 const isEditContextLoading = computed<boolean>(() => {
   return !isCreateMode.value && (loadingContracts.value || loadingPaymentPlans.value || loadingInvoiceTitles.value)
 })
@@ -157,14 +165,14 @@ function resetForm(): void {
     : application?.customer_id !== undefined ? String(application.customer_id) : ''
   form.contractId = application?.contract_id !== null && application?.contract_id !== undefined
     ? String(application.contract_id)
-    : ''
+    : props.fixedContractId !== null ? String(props.fixedContractId) : ''
   form.paymentPlanId = application?.payment_plan_id !== null && application?.payment_plan_id !== undefined
     ? String(application.payment_plan_id)
     : ''
   form.invoiceTitleId = props.fixedInvoiceTitle !== null
     ? String(props.fixedInvoiceTitle.id)
     : application?.invoice_title_id !== undefined ? String(application.invoice_title_id) : ''
-  form.invoiceType = application?.invoice_type ?? 'VAT_NORMAL'
+  form.invoiceType = application?.invoice_type ?? 'VAT_SPECIAL'
   form.invoiceAmount = application?.invoice_amount !== undefined ? String(application.invoice_amount) : ''
   clearErrors()
 }
@@ -260,7 +268,38 @@ async function fetchPaymentPlans(contractId: number): Promise<void> {
   }
 }
 
-function handleCustomerChange(): void {
+function normalizeSelectValue(value: unknown): string | null {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  return null
+}
+
+function getNativeSelectValue(event: Event): string {
+  return event.target instanceof HTMLSelectElement ? event.target.value : ''
+}
+
+function handleCustomerSelectChange(event: Event): void {
+  handleCustomerChange(getNativeSelectValue(event))
+}
+
+function handleContractSelectChange(event: Event): void {
+  handleContractChange(getNativeSelectValue(event))
+}
+
+function handlePaymentPlanSelectChange(event: Event): void {
+  handlePaymentPlanChange(getNativeSelectValue(event))
+}
+
+function handleInvoiceTitleSelectChange(event: Event): void {
+  handleInvoiceTitleChange(getNativeSelectValue(event))
+}
+
+function handleCustomerChange(value: unknown): void {
+  const nextCustomerId = normalizeSelectValue(value)
+  if (nextCustomerId === null || nextCustomerId === '') return
+  if (nextCustomerId === form.customerId) return
+
+  form.customerId = nextCustomerId
   form.contractId = ''
   form.paymentPlanId = ''
   form.invoiceTitleId = ''
@@ -275,7 +314,14 @@ function handleCustomerChange(): void {
   }
 }
 
-function handleContractChange(): void {
+function handleContractChange(value: unknown): void {
+  if (hasFixedContract.value) return
+
+  const nextContractId = normalizeSelectValue(value)
+  if (nextContractId === null || nextContractId === '') return
+  if (nextContractId === form.contractId) return
+
+  form.contractId = nextContractId
   form.paymentPlanId = ''
   form.invoiceAmount = ''
   paymentPlans.value = []
@@ -286,12 +332,23 @@ function handleContractChange(): void {
   }
 }
 
-function handlePaymentPlanChange(): void {
+function handlePaymentPlanChange(value: unknown): void {
+  const nextPaymentPlanId = normalizeSelectValue(value)
+  if (nextPaymentPlanId === null || nextPaymentPlanId === '') return
+
+  form.paymentPlanId = nextPaymentPlanId
   const plan = selectedPaymentPlan.value
   if (plan === null || !isCreateMode.value) return
 
   const amount = plan.remaining_amount ?? plan.planned_amount
   form.invoiceAmount = String(amount)
+}
+
+function handleInvoiceTitleChange(value: unknown): void {
+  const nextInvoiceTitleId = normalizeSelectValue(value)
+  if (nextInvoiceTitleId === null || nextInvoiceTitleId === '') return
+
+  form.invoiceTitleId = nextInvoiceTitleId
 }
 
 async function handleSubmit(): Promise<void> {
@@ -354,7 +411,7 @@ function nullText(value: string | null | undefined): string {
 }
 
 watch(
-  () => [props.open, props.mode, props.application?.id, props.fixedCustomer?.id, props.fixedInvoiceTitle?.id] as const,
+  () => [props.open, props.mode, props.application?.id, props.fixedCustomer?.id, props.fixedInvoiceTitle?.id, props.fixedContractId] as const,
   ([open]) => {
     if (!open) {
       clearErrors()
@@ -404,29 +461,24 @@ watch(
             客户
             <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
           </label>
-          <Select
-            v-model="form.customerId"
+          <select
+            id="invoice-application-customer"
+            :value="form.customerId"
+            class="invoice-application-dialog__control invoice-application-dialog__select h-11 min-h-11"
             :disabled="loadingCustomers || submitting || !isCreateMode"
-            @update:model-value="handleCustomerChange"
+            :aria-invalid="errors.customerId !== ''"
+            aria-describedby="invoice-application-customer-error"
+            @change="handleCustomerSelectChange"
           >
-            <SelectTrigger
-              id="invoice-application-customer"
-              class="invoice-application-dialog__control h-11 min-h-11"
-              :aria-invalid="errors.customerId !== ''"
-              aria-describedby="invoice-application-customer-error"
+            <option value="" disabled>{{ loadingCustomers ? '加载客户中...' : '请选择客户' }}</option>
+            <option
+              v-for="customer in customers"
+              :key="customer.id"
+              :value="String(customer.id)"
             >
-              <SelectValue :placeholder="loadingCustomers ? '加载客户中...' : '请选择客户'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="customer in customers"
-                :key="customer.id"
-                :value="String(customer.id)"
-              >
-                {{ customerOptionLabel(customer) }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+              {{ customerOptionLabel(customer) }}
+            </option>
+          </select>
           <p
             v-if="errors.customerId"
             id="invoice-application-customer-error"
@@ -443,29 +495,24 @@ watch(
               合同
               <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
             </label>
-            <Select
-              v-model="form.contractId"
-              :disabled="loadingContracts || submitting || form.customerId === ''"
-              @update:model-value="handleContractChange"
+            <select
+              id="invoice-application-contract"
+              :value="form.contractId"
+              class="invoice-application-dialog__control invoice-application-dialog__select h-11 min-h-11"
+              :disabled="loadingContracts || submitting || form.customerId === '' || hasFixedContract"
+              :aria-invalid="errors.contractId !== ''"
+              aria-describedby="invoice-application-contract-error"
+              @change="handleContractSelectChange"
             >
-              <SelectTrigger
-                id="invoice-application-contract"
-                class="invoice-application-dialog__control h-11 min-h-11"
-                :aria-invalid="errors.contractId !== ''"
-                aria-describedby="invoice-application-contract-error"
+              <option value="" disabled>{{ loadingContracts ? '加载合同中...' : '请选择合同' }}</option>
+              <option
+                v-for="contract in contracts"
+                :key="contract.id"
+                :value="String(contract.id)"
               >
-                <SelectValue :placeholder="loadingContracts ? '加载合同中...' : '请选择合同'" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="contract in contracts"
-                  :key="contract.id"
-                  :value="String(contract.id)"
-                >
-                  {{ contractOptionLabel(contract) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+                {{ contractOptionLabel(contract) }}
+              </option>
+            </select>
             <p
               v-if="errors.contractId"
               id="invoice-application-contract-error"
@@ -481,29 +528,24 @@ watch(
               回款计划
               <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
             </label>
-            <Select
-              v-model="form.paymentPlanId"
+            <select
+              id="invoice-application-plan"
+              :value="form.paymentPlanId"
+              class="invoice-application-dialog__control invoice-application-dialog__select h-11 min-h-11"
               :disabled="loadingPaymentPlans || submitting || form.contractId === ''"
-              @update:model-value="handlePaymentPlanChange"
+              :aria-invalid="errors.paymentPlanId !== ''"
+              aria-describedby="invoice-application-plan-error"
+              @change="handlePaymentPlanSelectChange"
             >
-              <SelectTrigger
-                id="invoice-application-plan"
-                class="invoice-application-dialog__control h-11 min-h-11"
-                :aria-invalid="errors.paymentPlanId !== ''"
-                aria-describedby="invoice-application-plan-error"
+              <option value="" disabled>{{ loadingPaymentPlans ? '加载计划中...' : '请选择回款计划' }}</option>
+              <option
+                v-for="plan in paymentPlans"
+                :key="plan.id"
+                :value="String(plan.id)"
               >
-                <SelectValue :placeholder="loadingPaymentPlans ? '加载计划中...' : '请选择回款计划'" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="plan in paymentPlans"
-                  :key="plan.id"
-                  :value="String(plan.id)"
-                >
-                  {{ paymentPlanOptionLabel(plan) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+                {{ paymentPlanOptionLabel(plan) }}
+              </option>
+            </select>
             <p
               v-if="errors.paymentPlanId"
               id="invoice-application-plan-error"
@@ -544,28 +586,24 @@ watch(
               发票抬头
               <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
             </label>
-            <Select
-              v-model="form.invoiceTitleId"
+            <select
+              id="invoice-application-title"
+              :value="form.invoiceTitleId"
+              class="invoice-application-dialog__control invoice-application-dialog__select h-11 min-h-11"
               :disabled="loadingInvoiceTitles || submitting || form.customerId === ''"
+              :aria-invalid="errors.invoiceTitleId !== ''"
+              aria-describedby="invoice-application-title-error"
+              @change="handleInvoiceTitleSelectChange"
             >
-              <SelectTrigger
-                id="invoice-application-title"
-                class="invoice-application-dialog__control h-11 min-h-11"
-                :aria-invalid="errors.invoiceTitleId !== ''"
-                aria-describedby="invoice-application-title-error"
+              <option value="" disabled>{{ loadingInvoiceTitles ? '加载抬头中...' : '请选择发票抬头' }}</option>
+              <option
+                v-for="invoiceTitle in invoiceTitles"
+                :key="invoiceTitle.id"
+                :value="String(invoiceTitle.id)"
               >
-                <SelectValue :placeholder="loadingInvoiceTitles ? '加载抬头中...' : '请选择发票抬头'" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="invoiceTitle in invoiceTitles"
-                  :key="invoiceTitle.id"
-                  :value="String(invoiceTitle.id)"
-                >
-                  {{ invoiceTitle.title }} · {{ invoiceTitleTypeLabel(invoiceTitle.title_type) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+                {{ invoiceTitle.title }} · {{ invoiceTitleTypeLabel(invoiceTitle.title_type) }}
+              </option>
+            </select>
             <p
               v-if="errors.invoiceTitleId"
               id="invoice-application-title-error"
@@ -577,19 +615,16 @@ watch(
           </div>
 
           <div class="invoice-application-dialog__field">
-            <label class="invoice-application-dialog__label" for="invoice-application-type">
+            <label class="invoice-application-dialog__label" id="invoice-application-type-label">
               发票类型
               <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
             </label>
-            <Select v-model="form.invoiceType" :disabled="submitting">
-              <SelectTrigger id="invoice-application-type" class="invoice-application-dialog__control h-11 min-h-11">
-                <SelectValue placeholder="请选择发票类型" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="VAT_NORMAL">增值税普通发票</SelectItem>
-                <SelectItem value="VAT_SPECIAL">增值税专用发票</SelectItem>
-              </SelectContent>
-            </Select>
+            <InvoiceTypeSegmentedControl
+              v-model="form.invoiceType"
+              class="invoice-application-dialog__control h-11 min-h-11"
+              :disabled="submitting"
+              labelled-by="invoice-application-type-label"
+            />
           </div>
         </div>
 
@@ -621,24 +656,10 @@ watch(
           </p>
         </div>
 
-        <div v-if="selectedInvoiceTitle !== null" class="invoice-application-dialog__title-summary">
-          <div>
-            <span>税号</span>
-            <strong>{{ selectedInvoiceTitle.taxpayer_id }}</strong>
-          </div>
-          <div>
-            <span>开户行</span>
-            <strong>{{ nullText(selectedInvoiceTitle.bank_name) }}</strong>
-          </div>
-          <div>
-            <span>银行账号</span>
-            <strong>{{ nullText(selectedInvoiceTitle.bank_account) }}</strong>
-          </div>
-          <div>
-            <span>地址电话</span>
-            <strong>{{ nullText(selectedInvoiceTitle.address) }} / {{ nullText(selectedInvoiceTitle.phone) }}</strong>
-          </div>
-        </div>
+        <SelectionSummary
+          v-if="selectedInvoiceTitle !== null"
+          :items="selectedInvoiceTitleSummaryItems"
+        />
 
         <p v-if="isEditContextLoading" class="invoice-application-dialog__hint">
           正在加载原申请上下文...
@@ -698,6 +719,36 @@ watch(
   width: 100%;
 }
 
+.invoice-application-dialog__select {
+  appearance: none;
+  padding: 0 $wolf-space-2xl-v2 0 $wolf-space-md-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-v2;
+  background:
+    linear-gradient(45deg, transparent 50%, $wolf-text-secondary-v2 50%) calc(100% - 18px) 50% / 5px 5px no-repeat,
+    linear-gradient(135deg, $wolf-text-secondary-v2 50%, transparent 50%) calc(100% - 13px) 50% / 5px 5px no-repeat,
+    $wolf-bg-card-v2;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+  line-height: $wolf-line-height-body-v2;
+
+  &:focus-visible {
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+    outline-offset: $wolf-focus-ring-offset-v2;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    background-color: $wolf-bg-muted-v2;
+    color: $wolf-text-tertiary-v2;
+    opacity: 1;
+  }
+
+  &[aria-invalid="true"] {
+    border-color: $wolf-danger-v2;
+  }
+}
+
 .invoice-application-dialog__error,
 .invoice-application-dialog__hint {
   margin: 0;
@@ -709,8 +760,7 @@ watch(
   color: $wolf-text-secondary-v2;
 }
 
-.invoice-application-dialog__readonly-grid,
-.invoice-application-dialog__title-summary {
+.invoice-application-dialog__readonly-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $wolf-space-sm-v2 $wolf-space-md-v2;
@@ -720,8 +770,7 @@ watch(
   background: $wolf-bg-muted-v2;
 }
 
-.invoice-application-dialog__readonly-item,
-.invoice-application-dialog__title-summary > div {
+.invoice-application-dialog__readonly-item {
   display: flex;
   flex-direction: column;
   gap: $wolf-space-xs-v2;
@@ -746,8 +795,7 @@ watch(
 
 @media (max-width: $wolf-breakpoint-sm-v2) {
   .invoice-application-dialog__grid,
-  .invoice-application-dialog__readonly-grid,
-  .invoice-application-dialog__title-summary {
+  .invoice-application-dialog__readonly-grid {
     grid-template-columns: 1fr;
   }
 }

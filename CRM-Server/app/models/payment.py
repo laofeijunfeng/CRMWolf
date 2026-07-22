@@ -51,11 +51,14 @@ class PaymentPlan(Base):
 
     @property
     def paid_amount(self) -> Decimal:
-        """累计已回款金额 = sum of payment_records.actual_amount"""
+        """累计已回款金额 = 审批通过的回款记录金额合计"""
         try:
             if not self.payment_records:
                 return Decimal('0.00')
-            return sum(Decimal(str(r.actual_amount)) for r in self.payment_records)
+            return sum(
+                Decimal(str(r.actual_amount)) for r in self.payment_records
+                if getattr(r.approval_phase, "value", r.approval_phase) == ApprovalPhase.APPROVED.value
+            )
         except Exception:
             # Handle detached instance or other errors
             return Decimal('0.00')

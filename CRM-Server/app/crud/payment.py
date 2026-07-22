@@ -14,6 +14,14 @@ from app.schemas.payment import (
 from app.services.business_number_generator import BusinessNumberGenerator
 
 
+def _is_approved_payment_record(record: PaymentRecord) -> bool:
+    return getattr(record.approval_phase, "value", record.approval_phase) == "approved"
+
+
+def sum_approved_payment_amount(records: List[PaymentRecord]) -> float:
+    return sum(float(r.actual_amount) for r in records if _is_approved_payment_record(r))
+
+
 def _split_csv(value: Optional[str]) -> List[str]:
     if value is None:
         return []
@@ -284,7 +292,7 @@ class PaymentPlanCRUD:
             PaymentRecord.payment_plan_id == plan.id
         ).all()
         
-        total_paid = sum(float(r.actual_amount) for r in payment_records)
+        total_paid = sum_approved_payment_amount(payment_records)
         planned = float(plan.planned_amount)
         
         if total_paid >= planned:
@@ -536,7 +544,7 @@ class PaymentRecordCRUD:
         planned = float(plan.planned_amount)
 
         if total_paid + obj_in.actual_amount > planned:
-            raise ValueError(f"回款金额超出计划，计划金额: {planned}，已回款: {total_paid}，本次: {obj_in.actual_amount}")
+            raise ValueError(f"回款金额超出计划，计划金额: {planned}，已登记: {total_paid}，本次: {obj_in.actual_amount}")
 
         # 生成记录编号
         record_number = BusinessNumberGenerator.generate('PAY', db)
@@ -708,7 +716,7 @@ class PaymentRecordCRUD:
             contract.payment_status = PaymentStatus.UNPAID
             contract.total_paid_amount = 0
         else:
-            total_paid = sum(float(r.actual_amount) for p in plans for r in p.payment_records)
+            total_paid = sum(sum_approved_payment_amount(p.payment_records) for p in plans)
             contract.total_paid_amount = total_paid
             
             total_planned = sum(float(p.planned_amount) for p in plans)

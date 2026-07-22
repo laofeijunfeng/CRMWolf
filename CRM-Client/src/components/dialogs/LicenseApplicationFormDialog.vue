@@ -10,10 +10,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  RadioGroup,
-  RadioGroupItem,
-} from '@/components/ui/radio-group'
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -24,6 +20,8 @@ import { Button } from '@/components/ui/button'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.vue'
+import SelectionSummary from '@/components/crmwolf/SelectionSummary.vue'
 import licenseApplicationApi, { type LicenseApplicationCreate, type LicenseType } from '@/api/licenseApplication'
 import type { ContractListResponse } from '@/api/contract'
 import type { DeploymentInfoResponse } from '@/api/deployment'
@@ -36,6 +34,7 @@ interface Props {
   customerId: number
   deployments: DeploymentInfoResponse[]
   contracts: ContractListResponse[]
+  fixedContractId?: number | null
 }
 
 interface Emits {
@@ -57,7 +56,9 @@ interface LicenseFormErrors {
   expiryDate: string
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  fixedContractId: null
+})
 const emit = defineEmits<Emits>()
 
 const submitting = ref(false)
@@ -87,7 +88,33 @@ const approvedContracts = computed<ContractListResponse[]>(() => {
     .sort((a, b) => new Date(b.created_time).getTime() - new Date(a.created_time).getTime())
 })
 
+const selectedContract = computed<ContractListResponse | null>(() => {
+  return approvedContracts.value.find((contract) => String(contract.id) === form.contractId) ?? null
+})
+const selectedDeployment = computed<DeploymentInfoResponse | null>(() => {
+  return props.deployments.find((deployment) => String(deployment.id) === form.deploymentId) ?? null
+})
+
+const selectedContractLabel = computed<string>(() => {
+  return selectedContract.value !== null ? contractOptionLabel(selectedContract.value) : ''
+})
+const selectedDeploymentSummaryItems = computed(() => {
+  if (selectedDeployment.value === null) return []
+
+  return [
+    { label: '部署名称', value: selectedDeployment.value.deployment_name },
+    { label: '服务器地址', value: selectedDeployment.value.server_address },
+    { label: '授权人数', value: `${selectedDeployment.value.authorized_users} 人` },
+    { label: '默认部署', value: selectedDeployment.value.is_default ? '是' : '否' },
+  ]
+})
+
 const hasDeployments = computed<boolean>(() => props.deployments.length > 0)
+const hasFixedContract = computed<boolean>(() => props.fixedContractId !== null)
+const licenseTypeOptions: { value: LicenseType, label: string, tone: 'success' | 'primary' }[] = [
+  { value: 'TRIAL', label: '试用', tone: 'success' },
+  { value: 'OFFICIAL', label: '正式', tone: 'primary' },
+]
 
 function clearErrors(): void {
   errors.deploymentId = ''
@@ -119,8 +146,8 @@ function resetForm(): void {
   form.deploymentId = defaultDeployment !== undefined
     ? String(defaultDeployment.id)
     : props.deployments[0] !== undefined ? String(props.deployments[0].id) : ''
-  form.licenseType = 'TRIAL'
-  form.contractId = ''
+  form.licenseType = hasFixedContract.value ? 'OFFICIAL' : 'TRIAL'
+  form.contractId = props.fixedContractId !== null ? String(props.fixedContractId) : ''
   form.expiryDate = ''
   form.remark = ''
   clearErrors()
@@ -189,6 +216,11 @@ function handleCancel(): void {
   }
 }
 
+function handleLicenseTypeChange(value: string): void {
+  if (value !== 'TRIAL' && value !== 'OFFICIAL') return
+  form.licenseType = value
+}
+
 function contractOptionLabel(contract: ContractListResponse): string {
   return `${contract.contract_name} · ${contract.contract_number}`
 }
@@ -196,6 +228,11 @@ function contractOptionLabel(contract: ContractListResponse): string {
 watch(
   () => form.licenseType,
   (type) => {
+    if (hasFixedContract.value) {
+      form.licenseType = 'OFFICIAL'
+      form.contractId = String(props.fixedContractId)
+      return
+    }
     if (type === 'OFFICIAL' && form.contractId === '' && approvedContracts.value[0] !== undefined) {
       form.contractId = String(approvedContracts.value[0].id)
     }
@@ -206,7 +243,7 @@ watch(
 )
 
 watch(
-  () => [props.open, props.deployments.length] as const,
+  () => [props.open, props.deployments.length, props.fixedContractId] as const,
   ([open]) => {
     if (open) {
       resetForm()
@@ -227,96 +264,112 @@ watch(
       </DialogHeader>
 
       <form class="license-application-dialog__form" novalidate @submit.prevent="handleSubmit">
-        <div class="license-application-dialog__field">
-          <Label for="license-deployment" class="license-application-dialog__label">
-            部署信息
-            <span class="license-application-dialog__required" aria-hidden="true">*</span>
-          </Label>
-          <Select v-model="form.deploymentId" :disabled="submitting || !hasDeployments">
-            <SelectTrigger
-              id="license-deployment"
-              class="license-application-dialog__control h-11 min-h-11"
-              :aria-invalid="errors.deploymentId !== ''"
-              aria-describedby="license-deployment-error"
-            >
-              <SelectValue :placeholder="hasDeployments ? '请选择部署信息' : '请先新增部署信息'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="deployment in deployments"
-                :key="deployment.id"
-                :value="String(deployment.id)"
+        <div class="license-application-dialog__grid">
+          <div class="license-application-dialog__field">
+            <Label for="license-deployment" class="license-application-dialog__label">
+              部署信息
+              <span class="license-application-dialog__required" aria-hidden="true">*</span>
+            </Label>
+            <Select v-model="form.deploymentId" :disabled="submitting || !hasDeployments">
+              <SelectTrigger
+                id="license-deployment"
+                class="license-application-dialog__control h-11 min-h-11"
+                :aria-invalid="errors.deploymentId !== ''"
+                aria-describedby="license-deployment-error"
               >
-                {{ deployment.deployment_name }}{{ deployment.is_default ? ' · 默认' : '' }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <p v-if="errors.deploymentId" id="license-deployment-error" class="license-application-dialog__error" role="alert">
-            {{ errors.deploymentId }}
-          </p>
-        </div>
+                <SelectValue :placeholder="hasDeployments ? '请选择部署信息' : '请先新增部署信息'" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="deployment in deployments"
+                  :key="deployment.id"
+                  :value="String(deployment.id)"
+                >
+                  {{ deployment.deployment_name }}{{ deployment.is_default ? ' · 默认' : '' }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p v-if="errors.deploymentId" id="license-deployment-error" class="license-application-dialog__error" role="alert">
+              {{ errors.deploymentId }}
+            </p>
+          </div>
 
-        <div class="license-application-dialog__field">
-          <Label class="license-application-dialog__label">
-            License 类型
-            <span class="license-application-dialog__required" aria-hidden="true">*</span>
-          </Label>
-          <RadioGroup v-model="form.licenseType" class="license-application-dialog__radio-group" :disabled="submitting">
-            <div class="license-application-dialog__radio-item">
-              <RadioGroupItem id="license-type-trial" value="TRIAL" />
-              <Label for="license-type-trial" class="license-application-dialog__radio-label">试用 License</Label>
-            </div>
-            <div class="license-application-dialog__radio-item">
-              <RadioGroupItem id="license-type-official" value="OFFICIAL" />
-              <Label for="license-type-official" class="license-application-dialog__radio-label">正式 License</Label>
-            </div>
-          </RadioGroup>
-        </div>
-
-        <div v-if="form.licenseType === 'OFFICIAL'" class="license-application-dialog__field">
-          <Label for="license-contract" class="license-application-dialog__label">
-            关联合同
-            <span class="license-application-dialog__required" aria-hidden="true">*</span>
-          </Label>
-          <Select v-model="form.contractId" :disabled="submitting || approvedContracts.length === 0">
-            <SelectTrigger
-              id="license-contract"
+          <div class="license-application-dialog__field">
+            <Label id="license-type-label" class="license-application-dialog__label">
+              License 类型
+              <span class="license-application-dialog__required" aria-hidden="true">*</span>
+            </Label>
+            <SegmentedChoiceControl
+              :model-value="form.licenseType"
+              :options="licenseTypeOptions"
               class="license-application-dialog__control h-11 min-h-11"
-              :aria-invalid="errors.contractId !== ''"
-              aria-describedby="license-contract-error"
-            >
-              <SelectValue :placeholder="approvedContracts.length > 0 ? '请选择合同' : '暂无可关联的已签署/已生效合同'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="contract in approvedContracts"
-                :key="contract.id"
-                :value="String(contract.id)"
-              >
-                {{ contractOptionLabel(contract) }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <p v-if="errors.contractId" id="license-contract-error" class="license-application-dialog__error" role="alert">
-            {{ errors.contractId }}
-          </p>
+              :disabled="submitting || hasFixedContract"
+              labelled-by="license-type-label"
+              @update:model-value="handleLicenseTypeChange"
+            />
+          </div>
         </div>
 
-        <div class="license-application-dialog__field">
-          <Label class="license-application-dialog__label">
-            到期日期
-            <span class="license-application-dialog__required" aria-hidden="true">*</span>
-          </Label>
-          <DatePicker
-            :model-value="parseLocalDate(form.expiryDate)"
-            placeholder="请选择到期日期"
-            class="license-application-dialog__control"
-            :disabled="submitting"
-            @update:model-value="handleExpiryDateChange"
-          />
-          <p v-if="errors.expiryDate" class="license-application-dialog__error" role="alert">
-            {{ errors.expiryDate }}
-          </p>
+        <SelectionSummary
+          v-if="selectedDeployment !== null"
+          :items="selectedDeploymentSummaryItems"
+        />
+
+        <div class="license-application-dialog__grid">
+          <div v-if="form.licenseType === 'OFFICIAL'" class="license-application-dialog__field">
+            <Label for="license-contract" class="license-application-dialog__label">
+              关联合同
+              <span class="license-application-dialog__required" aria-hidden="true">*</span>
+            </Label>
+            <Select v-model="form.contractId" :disabled="submitting || hasFixedContract || approvedContracts.length === 0">
+              <SelectTrigger
+                id="license-contract"
+                class="license-application-dialog__control license-application-dialog__contract-trigger h-11 min-h-11"
+                :aria-invalid="errors.contractId !== ''"
+                aria-describedby="license-contract-error"
+                :title="selectedContractLabel || undefined"
+              >
+                <SelectValue :placeholder="approvedContracts.length > 0 ? '请选择合同' : '暂无可关联的已签署/已生效合同'" />
+              </SelectTrigger>
+              <SelectContent class="license-application-dialog__contract-content">
+                <SelectItem
+                  v-for="contract in approvedContracts"
+                  :key="contract.id"
+                  class="license-application-dialog__contract-option"
+                  :value="String(contract.id)"
+                >
+                  <span class="license-application-dialog__contract-option-text">
+                    <span class="license-application-dialog__contract-option-name">
+                      {{ contract.contract_name }}
+                    </span>
+                    <span class="license-application-dialog__contract-option-number">
+                      {{ contract.contract_number }}
+                    </span>
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p v-if="errors.contractId" id="license-contract-error" class="license-application-dialog__error" role="alert">
+              {{ errors.contractId }}
+            </p>
+          </div>
+
+          <div class="license-application-dialog__field">
+            <Label class="license-application-dialog__label">
+              到期日期
+              <span class="license-application-dialog__required" aria-hidden="true">*</span>
+            </Label>
+            <DatePicker
+              :model-value="parseLocalDate(form.expiryDate)"
+              placeholder="请选择到期日期"
+              class="license-application-dialog__control h-11 min-h-11"
+              :disabled="submitting"
+              @update:model-value="handleExpiryDateChange"
+            />
+            <p v-if="errors.expiryDate" class="license-application-dialog__error" role="alert">
+              {{ errors.expiryDate }}
+            </p>
+          </div>
         </div>
 
         <div class="license-application-dialog__field">
@@ -347,13 +400,19 @@ watch(
 @use '@/styles/variables-v2.scss' as *;
 
 .license-application-dialog {
-  max-width: 640px;
+  max-width: 720px;
 }
 
 .license-application-dialog__form {
   display: flex;
   flex-direction: column;
   gap: $wolf-space-lg-v2;
+}
+
+.license-application-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $wolf-space-md-v2;
 }
 
 .license-application-dialog__field {
@@ -363,8 +422,7 @@ watch(
   min-width: 0;
 }
 
-.license-application-dialog__label,
-.license-application-dialog__radio-label {
+.license-application-dialog__label {
   color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-medium-v2;
@@ -375,23 +433,49 @@ watch(
   width: 100%;
 }
 
+.license-application-dialog__contract-trigger {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.license-application-dialog__contract-trigger :deep(span) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.license-application-dialog__contract-content {
+  width: min(560px, calc(100vw - 32px));
+  max-width: min(560px, calc(100vw - 32px));
+}
+
+.license-application-dialog__contract-option {
+  align-items: flex-start;
+  min-width: 0;
+  white-space: normal;
+}
+
+.license-application-dialog__contract-option-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.license-application-dialog__contract-option-name {
+  overflow-wrap: anywhere;
+  color: $wolf-text-primary-v2;
+}
+
+.license-application-dialog__contract-option-number {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
 .license-application-dialog__textarea {
   min-height: 96px;
-}
-
-.license-application-dialog__radio-group {
-  display: flex;
-  gap: $wolf-space-lg-v2;
-}
-
-.license-application-dialog__radio-item {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-xs-v2;
-}
-
-.license-application-dialog__radio-label {
-  cursor: pointer;
 }
 
 .license-application-dialog__required,
@@ -410,9 +494,8 @@ watch(
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2) {
-  .license-application-dialog__radio-group {
-    flex-direction: column;
-    gap: $wolf-space-sm-v2;
+  .license-application-dialog__grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

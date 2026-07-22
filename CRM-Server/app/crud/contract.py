@@ -132,10 +132,25 @@ class ContractCRUD:
         opportunity_id: int,
         team_id: Optional[int] = None
     ) -> Optional[Contract]:
-        query = db.query(Contract).filter(Contract.opportunity_id == opportunity_id)
+        query = db.query(Contract).filter(
+            Contract.opportunity_id == opportunity_id,
+            Contract.deleted_at.is_(None)
+        )
         if team_id is not None:
             query = query.filter(Contract.team_id == team_id)
         return query.first()
+
+    def has_active_contract_for_opportunity(
+        self,
+        db: Session,
+        opportunity_id: int,
+        team_id: int
+    ) -> bool:
+        return db.query(Contract.id).filter(
+            Contract.opportunity_id == opportunity_id,
+            Contract.team_id == team_id,
+            Contract.deleted_at.is_(None)
+        ).first() is not None
 
     def get_multi(
         self,
@@ -282,6 +297,9 @@ class ContractCRUD:
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
 
+        if self.has_active_contract_for_opportunity(db, contract_data['opportunity_id'], team_id):
+            raise ValueError("该商机已创建合同")
+
         opportunity = db.query(Opportunity).filter(
             Opportunity.id == contract_data['opportunity_id'],
             Opportunity.team_id == team_id
@@ -349,6 +367,9 @@ class ContractCRUD:
     ) -> Contract:
         from app.models.opportunity import Opportunity
         from app.models.customer import Customer
+
+        if self.has_active_contract_for_opportunity(db, opportunity_id, team_id):
+            raise ValueError("该商机已创建合同")
 
         opportunity = db.query(Opportunity).filter(Opportunity.id == opportunity_id).first()
         if not opportunity:
@@ -545,6 +566,9 @@ class ContractCRUD:
         contract = self.get_by_id(db, contract_id)
         if not contract or not contract.deleted_at:
             return False
+
+        if self.has_active_contract_for_opportunity(db, contract.opportunity_id, contract.team_id):
+            raise ValueError("该商机已创建合同，无法恢复该合同")
 
         contract.deleted_at = None
         db.commit()

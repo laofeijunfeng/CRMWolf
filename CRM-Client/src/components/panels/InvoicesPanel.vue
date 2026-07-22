@@ -10,6 +10,7 @@ import { Plus, Pencil, Trash2, Star, Building2, User, ReceiptText, Download, Loa
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ListCard from '@/components/crmwolf/ListCard.vue'
+import { HoverInfo } from '@/components/crmwolf'
 import type { InvoiceApplicationResponse, InvoiceApplicationStatus, InvoiceTitleResponse, InvoiceType, TitleType } from '@/api/invoice'
 
 // ==================== Props & Emits ====================
@@ -18,14 +19,23 @@ interface Props {
   invoiceTitles: InvoiceTitleResponse[]
   invoiceApplications: InvoiceApplicationResponse[]
   downloadingApplicationId?: number | null
+  showInvoiceTitles?: boolean
+  showInvoiceApplications?: boolean
+  showAddApplication?: boolean
+  showTitleApplyAction?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
-  downloadingApplicationId: null
+  downloadingApplicationId: null,
+  showInvoiceTitles: true,
+  showInvoiceApplications: true,
+  showAddApplication: false,
+  showTitleApplyAction: true
 })
 
 const emit = defineEmits<{
   'add': []
+  'add-application': []
   'edit': [invoiceTitle: InvoiceTitleResponse]
   'delete': [titleId: number]
   'set-default': [titleId: number]
@@ -36,6 +46,10 @@ const emit = defineEmits<{
 // ==================== Methods ====================
 const handleAdd = (): void => {
   emit('add')
+}
+
+const handleAddApplication = (): void => {
+  emit('add-application')
 }
 
 const handleEdit = (invoiceTitle: InvoiceTitleResponse): void => {
@@ -100,6 +114,14 @@ const canDownloadApplication = (application: InvoiceApplicationResponse): boolea
   application.invoice_file_path !== null &&
   application.invoice_file_path.trim() !== ''
 
+const getApplicationCompanyName = (application: InvoiceApplicationResponse): string => {
+  const customerName = application.customer_name?.trim()
+  if (customerName !== undefined && customerName !== '') {
+    return customerName
+  }
+  return application.invoice_title_text
+}
+
 const formatCurrency = (value: string): string => {
   const amount = Number(value)
   if (!Number.isFinite(amount)) return '-'
@@ -126,6 +148,7 @@ const formatDate = (value: string | null): string => {
 <template>
   <div class="invoices-panel">
     <ListCard
+      v-if="showInvoiceTitles"
       title="发票抬头"
       :items="invoiceTitles"
       empty-text="暂无发票抬头"
@@ -168,6 +191,7 @@ const formatDate = (value: string | null): string => {
 
       <template #itemActions="{ item }">
         <Button
+          v-if="showTitleApplyAction"
           variant="ghost"
           size="sm"
           :aria-label="`使用 ${item.title} 申请发票`"
@@ -205,14 +229,21 @@ const formatDate = (value: string | null): string => {
     </ListCard>
 
     <ListCard
+      v-if="showInvoiceApplications"
       title="发票申请"
       :items="invoiceApplications"
       empty-text="暂无发票申请"
     >
+      <template #headerActions>
+        <Button v-if="showAddApplication" size="sm" @click="handleAddApplication">
+          <Plus class="w-4 h-4 mr-1" />
+          申请发票
+        </Button>
+      </template>
+
       <template #itemMain="{ item }">
         <div class="invoice-application-main">
-          <span class="invoice-application-number">{{ item.application_number }}</span>
-          <span class="invoice-application-title">{{ item.invoice_title_text }}</span>
+          <span class="invoice-application-title">{{ getApplicationCompanyName(item) }}</span>
         </div>
       </template>
 
@@ -231,18 +262,27 @@ const formatDate = (value: string | null): string => {
       </template>
 
       <template #itemActions="{ item }">
-        <Button
+        <HoverInfo
           v-if="canDownloadApplication(item)"
-          variant="ghost"
-          size="sm"
-          :aria-label="`下载发票申请 ${item.application_number} 的发票文件`"
-          :disabled="downloadingApplicationId !== null"
-          @click.stop="handleDownloadApplication(item)"
+          side="top"
+          align="center"
+          content-class="invoice-action-hover-card"
         >
-          <Loader2 v-if="downloadingApplicationId === item.id" class="w-4 h-4 animate-spin" />
-          <Download v-else class="w-4 h-4" />
-          下载
-        </Button>
+          <template #trigger>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="invoice-action-button invoice-action-button--primary"
+              :aria-label="`下载发票申请 ${item.application_number} 的发票文件`"
+              :disabled="downloadingApplicationId !== null"
+              @click.stop="handleDownloadApplication(item)"
+            >
+              <Loader2 v-if="downloadingApplicationId === item.id" class="w-4 h-4 animate-spin" />
+              <Download v-else class="w-4 h-4" />
+            </Button>
+          </template>
+          <span class="invoice-action-hover-text">下载发票</span>
+        </HoverInfo>
       </template>
     </ListCard>
   </div>
@@ -268,18 +308,11 @@ const formatDate = (value: string | null): string => {
   min-width: 0;
 }
 
-.invoice-application-number {
-  font-family: $wolf-font-mono-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  white-space: nowrap;
-}
-
 .invoice-application-title {
   min-width: 0;
   overflow: hidden;
-  color: $wolf-text-secondary-v2;
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -308,5 +341,30 @@ const formatDate = (value: string | null): string => {
 .invoice-status--cancelled {
   background: $wolf-danger-bg-v2;
   color: $wolf-danger-text-v2;
+}
+
+.invoice-action-button {
+  width: 32px;
+  height: 32px;
+  color: $wolf-text-secondary-v2;
+}
+
+.invoice-action-button--primary {
+  &:hover {
+    color: $wolf-primary-v2;
+  }
+}
+
+:global(.invoice-action-hover-card) {
+  width: auto;
+  padding: 6px 10px;
+}
+
+.invoice-action-hover-text {
+  display: inline-flex;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  white-space: nowrap;
 }
 </style>

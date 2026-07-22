@@ -110,21 +110,32 @@ class PaymentRecordAdapter:
         if entity is None: return  # E4 守卫
         # 审批通过即确认入账
         entity.confirmation_status = PaymentConfirmationStatus.CONFIRMED
+        self._refresh_payment_status(db, entity)
 
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
         # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = REJECTED）
         # 此处不切换 confirmation_status（保持 PENDING）
-        pass
+        self._refresh_payment_status(db, entity)
 
     def on_cancelled(self, db, entity):
         if entity is None: return  # E4 守卫
         # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = DRAFT）
         # 撤回后切回 DRAFT（允许重新提交）
         entity.confirmation_status = PaymentConfirmationStatus.DRAFT
+        self._refresh_payment_status(db, entity)
 
     def get_name(self, entity):
         return f"回款登记#{entity.id}"
+
+    def _refresh_payment_status(self, db, entity):
+        from app.crud.payment import payment_plan_crud, payment_record_crud
+
+        plan = db.query(PaymentPlan).filter(PaymentPlan.id == entity.payment_plan_id).first()
+        if not plan:
+            return
+        payment_plan_crud.update_status(db, plan, commit=False)
+        payment_record_crud._update_contract_payment_status(db, plan.contract_id, commit=False)
 
 
 class InvoiceApplicationAdapter:

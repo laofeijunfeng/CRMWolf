@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * FollowUpPanel.vue - 跟进记录面板组件
+ * FollowUpPanel.vue - 客户活动面板组件
  *
- * 用于 CustomerDetailSheet 中的跟进记录面板
+ * 用于 CustomerDetailSheet 中的客户活动面板
  * 包装 FollowUpList 组件，提供标题和添加按钮
  *
  * 技术栈：shadcn-vue + variables-v2.scss
@@ -38,11 +38,13 @@ interface Props {
   followUps: FollowUp[]
   loading?: boolean | undefined
   currentUserId?: string | undefined
+  showHeader?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
-  currentUserId: undefined
+  currentUserId: undefined,
+  showHeader: true
 })
 
 const emit = defineEmits<{
@@ -63,9 +65,9 @@ const handleDelete = (followUp: FollowUp): void => {
 <template>
   <div class="follow-up-panel">
     <!-- Panel Header -->
-    <div class="panel-header">
+    <div v-if="showHeader" class="panel-header">
       <div class="panel-title-group">
-        <h3 class="panel-title">跟进记录</h3>
+        <h3 class="panel-title">客户活动</h3>
         <HoverInfo side="bottom" align="start" content-class="principle-hover-card">
           <template #trigger>
             <Button
@@ -91,7 +93,7 @@ const handleDelete = (followUp: FollowUp): void => {
       </div>
       <Button size="sm" @click="handleAdd">
         <Plus class="w-4 h-4 mr-1" />
-        添加跟进
+        添加活动
       </Button>
     </div>
 

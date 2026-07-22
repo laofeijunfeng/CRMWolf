@@ -856,12 +856,15 @@ class OpportunityCRUD:
         if team_id is not None:
             query = query.filter(Opportunity.team_id == team_id)
         
-        # 排除已经创建合同的商机
-        opportunity_ids_with_contract = db.query(
-            Contract.opportunity_id
-        ).filter(
-            Contract.opportunity_id.isnot(None)
-        ).all()
+        # 排除已经创建未删除合同的商机
+        contract_query = db.query(Contract.opportunity_id).filter(
+            Contract.opportunity_id.isnot(None),
+            Contract.deleted_at.is_(None)
+        )
+        if team_id is not None:
+            contract_query = contract_query.filter(Contract.team_id == team_id)
+
+        opportunity_ids_with_contract = contract_query.all()
         
         contract_opportunity_ids = {opp.opportunity_id for opp in opportunity_ids_with_contract}
         

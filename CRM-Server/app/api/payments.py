@@ -128,9 +128,30 @@ def get_payment_plans(
 
     plans = payment_plan_crud.get_by_contract_id(db, contract_id, status)
 
-    # Task 1.2: Add computed fields to each plan
-    # Note: paid_amount, remaining_amount, invoiced_amount, invoice_count, is_invoiced
-    # are computed properties on the model, no need to set them
+    contract = plans[0].contract if plans and plans[0].contract else None
+    if contract is None:
+        from app.models.contract import Contract
+        contract = db.query(Contract).filter(Contract.id == contract_id, Contract.team_id == team_id).first()
+
+    if contract:
+        customer = None
+        opportunity = None
+        if contract.customer_id:
+            from app.crud.customer import customer_crud
+            customer = customer_crud.get_by_id(db, contract.customer_id, team_id)
+        if contract.opportunity_id:
+            from app.crud.opportunity import opportunity_crud
+            opportunity = opportunity_crud.get_by_id(db, contract.opportunity_id, team_id)
+
+        for plan in plans:
+            plan.contract = contract
+            plan.contract_name = contract.contract_name
+            plan.creator_id = contract.creator_id
+            plan.customer_id = contract.customer_id
+            plan.customer_name = customer.account_name if customer else None
+            plan.opportunity_id = contract.opportunity_id
+            plan.opportunity_name = opportunity.opportunity_name if opportunity else None
+            plan.owner_id = contract.owner_id
 
     return plans
 

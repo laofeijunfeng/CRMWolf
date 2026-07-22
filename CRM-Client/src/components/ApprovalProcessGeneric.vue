@@ -30,7 +30,6 @@ import {
   Loader2,
   AlertTriangle
 } from 'lucide-vue-next'
-import { storeToRefs } from 'pinia'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 import type {
@@ -121,10 +120,10 @@ const emit = defineEmits<{
 }>()
 
 const store = useApprovalStore()
-const { currentApprovalDetail } = storeToRefs(store)
 const permissionStore = usePermissionStore()
 
 // ===== 本地 UI 状态（必须 ref<Type>(...) 显式类型）=====
+const detail = ref<ApprovalDetail | null>(null)
 const loadError = ref<boolean>(false)
 const notFound = ref<boolean>(false)
 const actionPending = ref<boolean>(false)
@@ -138,6 +137,7 @@ const invoiceFilePreviewRequestId = ref<number>(0)
 const contractFilePreviewUrl = ref<string>('')
 const contractFilePreviewLoading = ref<boolean>(false)
 const contractFilePreviewRequestId = ref<number>(0)
+const detailRequestId = ref<number>(0)
 
 // 开票对话框
 const markIssuedDialogVisible = ref<boolean>(false)
@@ -146,8 +146,6 @@ const markIssuedDialogVisible = ref<boolean>(false)
 const issueLicenseDialogVisible = ref<boolean>(false)
 
 // ===== 计算属性（必须返回类型）=====
-const detail = computed<ApprovalDetail | null>(() => currentApprovalDetail.value)
-
 const status = computed<ApprovalDetail['status'] | undefined>(() => detail.value?.status)
 const isPending = computed<boolean>(() => status.value === 'PENDING')
 // C-DSG-7 条4：REJECTED/CANCELLED 态提交人可见重新提交 CTA（抽屉侧入口）
@@ -257,7 +255,7 @@ const revokeContractFilePreviewUrl = (): void => {
   contractFilePreviewUrl.value = ''
 }
 
-const loadInvoiceFilePreviewUrl = async (): Promise<void> => {
+const loadInvoiceFilePreviewUrl = async (showError = false): Promise<void> => {
   const requestId = invoiceFilePreviewRequestId.value + 1
   invoiceFilePreviewRequestId.value = requestId
   revokeInvoiceFilePreviewUrl()
@@ -276,7 +274,10 @@ const loadInvoiceFilePreviewUrl = async (): Promise<void> => {
       window.URL.revokeObjectURL(objectUrl)
     }
   } catch {
-    toast.error('发票文件预览加载失败')
+    // 自动预加载失败不打断详情查看；用户主动下载失败时再给明确反馈。
+    if (showError) {
+      toast.error('发票文件预览加载失败，请下载后查看')
+    }
   } finally {
     if (requestId === invoiceFilePreviewRequestId.value) {
       invoiceFilePreviewLoading.value = false
@@ -284,7 +285,7 @@ const loadInvoiceFilePreviewUrl = async (): Promise<void> => {
   }
 }
 
-const loadContractFilePreviewUrl = async (): Promise<void> => {
+const loadContractFilePreviewUrl = async (showError = false): Promise<void> => {
   const requestId = contractFilePreviewRequestId.value + 1
   contractFilePreviewRequestId.value = requestId
   revokeContractFilePreviewUrl()
@@ -303,7 +304,10 @@ const loadContractFilePreviewUrl = async (): Promise<void> => {
       window.URL.revokeObjectURL(objectUrl)
     }
   } catch {
-    toast.error('合同附件预览加载失败')
+    // 自动预加载失败不打断详情查看；用户主动下载失败时再给明确反馈。
+    if (showError) {
+      toast.error('合同附件预览加载失败，请下载后查看')
+    }
   } finally {
     if (requestId === contractFilePreviewRequestId.value) {
       contractFilePreviewLoading.value = false
@@ -313,13 +317,20 @@ const loadContractFilePreviewUrl = async (): Promise<void> => {
 
 // ===== 方法（必须参数和返回类型）=====
 const loadDetail = async (): Promise<void> => {
+  const requestId = detailRequestId.value + 1
+  detailRequestId.value = requestId
+
   loadError.value = false
   notFound.value = false
   conflictNotice.value = ''
-  store.clearDetail()
+  detail.value = null
   try {
-    await store.fetchDetail(props.entityType, props.entityId)
+    const loadedDetail = await store.fetchDetail(props.entityType, props.entityId)
+    if (requestId === detailRequestId.value) {
+      detail.value = loadedDetail
+    }
   } catch (err) {
+    if (requestId !== detailRequestId.value) return
     if (isAxiosStatus(err, 404)) {
       notFound.value = true
     } else {
@@ -348,9 +359,10 @@ const handleApprove = async (): Promise<void> => {
   if (detail.value == null) return
   actionPending.value = true
   try {
-    await store.approveEntity(
+    const updatedDetail = await store.approveEntity(
       props.entityType, props.entityId, 'APPROVE', '', detail.value.updated_time
     )
+    detail.value = updatedDetail
     toast.success('已同意')
     emit('approved')
   } catch (err) {
@@ -382,10 +394,11 @@ const confirmReject = async (): Promise<void> => {
   if (detail.value == null) return
   actionPending.value = true
   try {
-    await store.approveEntity(
+    const updatedDetail = await store.approveEntity(
       props.entityType, props.entityId, 'REJECT',
       rejectForm.value.reason, detail.value.updated_time
     )
+    detail.value = updatedDetail
     toast.success('已驳回，申请人可修改后重新提交')
     rejectDialogVisible.value = false
     rejectForm.value.reason = ''
@@ -414,6 +427,7 @@ const confirmWithdraw = async (): Promise<void> => {
   actionPending.value = true
   try {
     await store.cancelEntity(props.entityType, props.entityId)
+    detail.value = null
     toast.success('已撤回')
     withdrawDialogVisible.value = false
     emit('withdrawn')
@@ -524,6 +538,7 @@ watch(
 )
 
 onBeforeUnmount((): void => {
+  detailRequestId.value += 1
   invoiceFilePreviewRequestId.value += 1
   contractFilePreviewRequestId.value += 1
   revokeInvoiceFilePreviewUrl()
