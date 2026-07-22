@@ -27,7 +27,12 @@ from app.schemas.payment import (
     ContractPaymentSummary, PaymentReminder, PaginatedResponse,
     PaymentRecordListItem, PaymentRecordListResponse
 )
-from app.services.approval_adapter import get_adapter, get_approval_customer_name, get_approval_type_name
+from app.services.approval_adapter import (
+    get_adapter,
+    get_approval_card_fields,
+    get_approval_customer_name,
+    get_approval_type_name,
+)
 from app.services.feishu_notification import feishu_notification_service
 
 
@@ -686,6 +691,7 @@ async def create_payment_record(
                         submitter_name=current_user.name,
                         approval_type_name=get_approval_type_name(BusinessType.PAYMENT),
                         customer_name=get_approval_customer_name(db, BusinessType.PAYMENT, record),
+                        detail_fields=get_approval_card_fields(db, BusinessType.PAYMENT, record),
                     )
                 except Exception as notify_error:
                     # 通知失败不阻断业务，记录日志

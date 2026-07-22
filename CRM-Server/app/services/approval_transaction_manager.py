@@ -19,7 +19,12 @@ from sqlalchemy.orm import Session
 import logging
 
 from app.constants.approval_phase import ApprovalPhase
-from app.services.approval_adapter import get_adapter, get_approval_customer_name, get_approval_type_name
+from app.services.approval_adapter import (
+    get_adapter,
+    get_approval_card_fields,
+    get_approval_customer_name,
+    get_approval_type_name,
+)
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.models.approval import Approval
 
@@ -305,6 +310,7 @@ class ApprovalTransactionManager:
                     submitter_name=approval.submitter_name,
                     approval_type_name=get_approval_type_name(approval.business_type),
                     customer_name=get_approval_customer_name(db, approval.business_type, entity),
+                    detail_fields=get_approval_card_fields(db, approval.business_type, entity),
                 )
             )
 

@@ -9,6 +9,8 @@ E4 守卫规则（强制）：所有 on_submit/on_approved/on_rejected/on_cancel
 `if entity is None: return`——业务单据被软删/跨 team 时 get_entity 返 None，
 避免 `None.status` AttributeError（对齐现有合同 crud/approval.py 的 `if contract:` 守卫）。
 """
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Protocol, Any, Optional
 
 from sqlalchemy import func
@@ -293,6 +295,76 @@ def get_approval_type_name(business_type: str) -> str:
     return _BUSINESS_TYPE_DISPLAY_NAMES.get(business_type, "审批")
 
 
+def get_approval_action_path(business_type: str) -> str:
+    paths = {
+        BusinessType.CONTRACT: "/contracts",
+        BusinessType.PAYMENT: "/payments/records",
+        BusinessType.INVOICE: "/invoices",
+        BusinessType.LICENSE: "/customers",
+        BusinessType.OPPORTUNITY: "/opportunities",
+    }
+    return paths.get(business_type, "/approvals")
+
+
+def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> dict[str, str]:
+    if entity is None:
+        return {}
+
+    if business_type == BusinessType.OPPORTUNITY:
+        return {
+            "客户名称": _customer_name(db, business_type, entity),
+            "商机名称": getattr(entity, "opportunity_name", None),
+            "商机金额": _format_currency(getattr(entity, "total_amount", None)),
+            "采购数量": _format_count(getattr(entity, "user_count", None)),
+            "授权模式": _license_mode_label(getattr(entity, "license_type", None)),
+            "采购类型": _purchase_type_label(getattr(entity, "purchase_type", None)),
+        }
+
+    if business_type == BusinessType.CONTRACT:
+        opportunity = getattr(entity, "opportunity", None)
+        return {
+            "客户名称": _customer_name(db, business_type, entity),
+            "合同名称": getattr(entity, "contract_name", None),
+            "合同金额": _format_currency(getattr(entity, "total_amount", None)),
+            "采购数量": _format_count(getattr(entity, "user_count", None)),
+            "授权模式": _license_mode_label(getattr(entity, "license_type", None)),
+            "采购类型": _purchase_type_label(getattr(opportunity, "purchase_type", None)),
+        }
+
+    if business_type == BusinessType.INVOICE:
+        return {
+            "客户名称": _customer_name(db, business_type, entity),
+            "开票抬头": getattr(entity, "invoice_title_text", None),
+            "发票类型": _invoice_type_label(getattr(entity, "invoice_type", None)),
+            "开票金额": _format_currency(getattr(entity, "invoice_amount", None)),
+        }
+
+    if business_type == BusinessType.PAYMENT:
+        return {
+            "客户名称": _customer_name(db, business_type, entity),
+            "实际付款方": getattr(entity, "actual_payer_name", None),
+            "回款金额": _format_currency(getattr(entity, "actual_amount", None)),
+            "回款日期": _format_date(getattr(entity, "payment_date", None)),
+            "备注": getattr(entity, "notes", None),
+        }
+
+    if business_type == BusinessType.LICENSE:
+        deployment_info = getattr(entity, "deployment_info", None)
+        return {
+            "客户名称": _customer_name(db, business_type, entity),
+            "授权类型": _license_application_type_label(getattr(entity, "license_type", None)),
+            "服务地址": getattr(deployment_info, "server_address", None),
+            "授权人数": _format_count(getattr(deployment_info, "authorized_users", None)),
+            "到期日期": _format_date(getattr(entity, "expiry_date", None)),
+            "备注": getattr(entity, "remark", None),
+        }
+
+    return {
+        "客户名称": _customer_name(db, business_type, entity),
+        f"{get_approval_type_name(business_type)}名称": get_adapter(business_type).get_name(entity),
+    }
+
+
 def get_approval_customer_name(db: Session, business_type: str, entity: Any) -> Optional[str]:
     if entity is None:
         return None
@@ -328,3 +400,76 @@ def get_approval_customer_name(db: Session, business_type: str, entity: Any) -> 
         return customer.account_name if customer else None
 
     return None
+
+
+def _customer_name(db: Session, business_type: str, entity: Any) -> str:
+    name = get_approval_customer_name(db, business_type, entity)
+    if name:
+        return name
+    customer = getattr(entity, "customer", None)
+    if customer is not None:
+        return getattr(customer, "account_name", None) or "-"
+    customer_id = getattr(entity, "customer_id", None)
+    if customer_id:
+        customer = db.query(Customer).filter(
+            Customer.id == customer_id,
+            Customer.team_id == getattr(entity, "team_id", None),
+        ).first()
+        if customer:
+            return customer.account_name or "-"
+    return "-"
+
+
+def _format_currency(value: Any) -> str:
+    if value is None:
+        return "-"
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return str(value) or "-"
+    return f"¥{amount:,.2f}"
+
+
+def _format_count(value: Any) -> str:
+    if value is None:
+        return "-"
+    return f"{value}人"
+
+
+def _format_date(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value) or "-"
+
+
+def _license_mode_label(value: Any) -> str:
+    return {
+        "SUBSCRIPTION": "订阅制",
+        "PERPETUAL": "买断制",
+    }.get(str(value or ""), str(value or "-"))
+
+
+def _purchase_type_label(value: Any) -> str:
+    return {
+        "NEW": "新购",
+        "RENEWAL": "续购",
+        "EXPANSION": "增购",
+    }.get(str(value or ""), str(value or "-"))
+
+
+def _invoice_type_label(value: Any) -> str:
+    return {
+        "VAT_SPECIAL": "增值税专用发票",
+        "VAT_NORMAL": "普通发票",
+    }.get(str(value or ""), str(value or "-"))
+
+
+def _license_application_type_label(value: Any) -> str:
+    return {
+        "TRIAL": "试用",
+        "OFFICIAL": "正式",
+    }.get(str(value or ""), str(value or "-"))

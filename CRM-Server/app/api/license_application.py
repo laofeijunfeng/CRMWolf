@@ -33,10 +33,16 @@ from app.schemas.license_application import (
     LicenseApplicationResponse
 )
 from app.models.license_application import LicenseApplicationStatus
+from app.constants.business_types import BusinessType
+from app.crud.approval import approval_crud
+from app.services.approval_adapter import get_adapter, get_approval_card_fields
+from app.services.feishu_notification import feishu_notification_service
 from app.services.license_export_service import export_license_document
+from app.core.logging import get_logger
 
 
 router = APIRouter(prefix="/v1/license-applications", tags=["License申请管理"])
+logger = get_logger(__name__)
 
 
 def _content_disposition(filename: str) -> str:
@@ -241,7 +247,7 @@ def reject_application(
 
 
 @router.post("/{application_id}/issue", response_model=LicenseApplicationResponse, summary="发放License申请")
-def issue_application(
+async def issue_application(
     application_id: int,
     issue_data: LicenseApplicationApproveFull,
     team_id: int = Depends(get_current_user_team),
@@ -260,6 +266,7 @@ def issue_application(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"License申请状态为 {existing.status}，不可发放"
         )
+    approval = approval_crud.get_by_entity(db, BusinessType.LICENSE, application_id, team_id)
     try:
         issued = issue_license_application_full(db, team_id, application_id, issue_data, str(current_user.id))
         if not issued:
@@ -267,6 +274,21 @@ def issue_application(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="License申请不存在"
             )
+        if approval and approval.submitter_id:
+            try:
+                await feishu_notification_service.notify_approval_issued(
+                    db=db,
+                    team_id=team_id,
+                    user_id=int(approval.submitter_id),
+                    entity_type=BusinessType.LICENSE,
+                    entity_name=get_adapter(BusinessType.LICENSE).get_name(issued),
+                    detail_fields=get_approval_card_fields(db, BusinessType.LICENSE, issued),
+                    button_path="/customers",
+                )
+            except Exception as notify_error:
+                logger.error(
+                    f"[License] Issue notification failed: application_id={application_id}, error={str(notify_error)}"
+                )
         return issued
     except ValueError as e:
         raise HTTPException(

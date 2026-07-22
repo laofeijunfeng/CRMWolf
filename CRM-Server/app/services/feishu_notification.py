@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import Any, Dict, Iterable, Optional
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy.orm import Session
@@ -120,15 +120,21 @@ class FeishuNotificationService:
         submitter_name: Optional[str] = None,
         approval_type_name: Optional[str] = None,
         customer_name: Optional[str] = None,
+        detail_fields: Optional[Dict[str, str]] = None,
     ) -> Dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
-        content = self._approval_pending_card(
-            title=f"{submitter_name or '有人'}有个{approval_type_name}需要你处理",
-            template="blue",
-            entity_name=entity_name,
+        fields = detail_fields or self._fallback_approval_fields(
             approval_type_name=approval_type_name,
+            entity_name=entity_name,
             customer_name=customer_name,
-            button_url=self._approval_center_url(db, team_id, entity_type),
+        )
+        content = self._approval_card(
+            entity_type=entity_type,
+            title=f"{submitter_name or '有人'}有个{approval_type_name}需要你审批",
+            template="blue",
+            fields=fields,
+            button_text="去处理",
+            button_url=self._absolute_frontend_url(db, team_id, "/approvals"),
         )
         return await self.send_to_users(db, team_id, user_ids, "interactive", content)
 
@@ -140,13 +146,20 @@ class FeishuNotificationService:
         entity_type: str,
         entity_name: str,
         business_id: Optional[int] = None,
+        detail_fields: Optional[Dict[str, str]] = None,
+        button_path: Optional[str] = None,
     ) -> Dict[str, int]:
         approval_type_name = self._entity_type_label(entity_type)
-        content = self._approval_result_card(
-            title=f"你的{approval_type_name}申请已通过",
+        content = self._approval_card(
+            entity_type=entity_type,
+            title=f"你的{approval_type_name}已通过",
             template="green",
-            entity_name=entity_name,
-            approval_type_name=approval_type_name,
+            fields=detail_fields or self._fallback_approval_fields(
+                approval_type_name=approval_type_name,
+                entity_name=entity_name,
+            ),
+            button_text="去看看",
+            button_url=self._absolute_frontend_url(db, team_id, button_path),
         )
         return await self.send_to_users(db, team_id, [user_id], "interactive", content)
 
@@ -159,71 +172,92 @@ class FeishuNotificationService:
         entity_name: str,
         reject_reason: str,
         business_id: Optional[int] = None,
+        detail_fields: Optional[Dict[str, str]] = None,
+        button_path: Optional[str] = None,
     ) -> Dict[str, int]:
+        approval_type_name = self._entity_type_label(entity_type)
         content = self._approval_card(
-            title="审批已拒绝",
-            template="red",
             entity_type=entity_type,
-            entity_name=entity_name,
-            fields={
-                "原因": reject_reason,
-                "单据ID": str(business_id) if business_id else "",
-            },
+            title=f"你的{approval_type_name}被驳回了",
+            template="red",
+            fields=detail_fields or self._fallback_approval_fields(
+                approval_type_name=approval_type_name,
+                entity_name=entity_name,
+            ),
+            button_text="去看看",
+            button_url=self._absolute_frontend_url(db, team_id, button_path),
+        )
+        return await self.send_to_users(db, team_id, [user_id], "interactive", content)
+
+    async def notify_approval_cancelled(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        entity_type: str,
+        entity_name: str,
+        submitter_name: Optional[str] = None,
+        approval_type_name: Optional[str] = None,
+        detail_fields: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, int]:
+        approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        content = self._approval_card(
+            entity_type=entity_type,
+            title=f"{submitter_name or '有人'}撤回了{approval_type_name}的审批申请",
+            template="yellow",
+            fields=detail_fields or self._fallback_approval_fields(
+                approval_type_name=approval_type_name,
+                entity_name=entity_name,
+            ),
+        )
+        return await self.send_to_users(db, team_id, user_ids, "interactive", content)
+
+    async def notify_approval_issued(
+        self,
+        db: Session,
+        team_id: int,
+        user_id: int,
+        entity_type: str,
+        entity_name: str,
+        detail_fields: Optional[Dict[str, str]] = None,
+        button_path: Optional[str] = None,
+    ) -> Dict[str, int]:
+        approval_type_name = self._entity_type_label(entity_type)
+        content = self._approval_card(
+            entity_type=entity_type,
+            title=f"你的{approval_type_name}文件已下发",
+            template="blue",
+            fields=detail_fields or self._fallback_approval_fields(
+                approval_type_name=approval_type_name,
+                entity_name=entity_name,
+            ),
+            button_text="去下载",
+            button_url=self._absolute_frontend_url(db, team_id, button_path),
         )
         return await self.send_to_users(db, team_id, [user_id], "interactive", content)
 
     def _approval_card(
         self,
-        title: str,
-        template: str,
         entity_type: str,
-        entity_name: str,
-        fields: Dict[str, str],
-    ) -> Dict[str, Any]:
-        elements = [
-            {"tag": "div", "text": {"tag": "lark_md", "content": f"**类型**：{entity_type}"}},
-            {"tag": "div", "text": {"tag": "lark_md", "content": f"**名称**：{entity_name}"}},
-        ]
-        for label, value in fields.items():
-            if value:
-                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{label}**：{value}"}})
-
-        return {
-            "config": {"wide_screen_mode": True},
-            "header": {
-                "template": template,
-                "title": {"tag": "plain_text", "content": title},
-            },
-            "elements": elements,
-        }
-
-    def _approval_pending_card(
-        self,
         title: str,
         template: str,
-        entity_name: str,
-        approval_type_name: str,
-        customer_name: Optional[str],
-        button_url: Optional[str],
+        fields: Dict[str, str],
+        button_text: Optional[str] = None,
+        button_url: Optional[str] = None,
     ) -> Dict[str, Any]:
-        elements = [
-            {
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": f"**{approval_type_name}名称**：{entity_name}"},
-            },
-            {
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": f"**客户名称**：{customer_name or '-'}"},
-            },
-        ]
-        if button_url:
+        elements = []
+        for label, value in fields.items():
+            display_value = value if value not in (None, "") else "-"
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{label}**：{display_value}"}})
+
+        if button_text and button_url:
             elements.append(
                 {
                     "tag": "action",
                     "actions": [
                         {
                             "tag": "button",
-                            "text": {"tag": "plain_text", "content": "去处理"},
+                            "text": {"tag": "plain_text", "content": button_text},
                             "type": "primary",
                             "url": button_url,
                         }
@@ -240,41 +274,40 @@ class FeishuNotificationService:
             "elements": elements,
         }
 
-    def _approval_result_card(
+    def _fallback_approval_fields(
         self,
-        title: str,
-        template: str,
-        entity_name: str,
         approval_type_name: str,
-    ) -> Dict[str, Any]:
-        return {
-            "config": {"wide_screen_mode": True},
-            "header": {
-                "template": template,
-                "title": {"tag": "plain_text", "content": title},
-            },
-            "elements": [
-                {
-                    "tag": "div",
-                    "text": {"tag": "lark_md", "content": f"**{approval_type_name}名称**：{entity_name}"},
-                },
-            ],
-        }
+        entity_name: str,
+        customer_name: Optional[str] = None,
+    ) -> Dict[str, str]:
+        fields = {}
+        if customer_name is not None:
+            fields["客户名称"] = customer_name or "-"
+        fields[f"{approval_type_name}名称"] = entity_name or "-"
+        return fields
 
     def _entity_type_label(self, entity_type: Optional[str]) -> str:
         return BUSINESS_TYPE_DISPLAY_NAMES.get(entity_type or "", "审批")
 
-    def _approval_center_url(self, db: Session, team_id: int, entity_type: str) -> Optional[str]:
+    def _frontend_base_url(self, db: Session, team_id: int) -> Optional[str]:
         frontend_url = (settings.FRONTEND_URL or "").rstrip("/")
         if not frontend_url:
             config = oauth_provider_config_crud.get(db, team_id, "feishu")
             parsed = urlparse(config.redirect_uri) if config and config.redirect_uri else None
             if parsed and parsed.scheme and parsed.netloc:
                 frontend_url = f"{parsed.scheme}://{parsed.netloc}"
+        return frontend_url or None
+
+    def _absolute_frontend_url(self, db: Session, team_id: int, path: Optional[str]) -> Optional[str]:
+        if not path:
+            return None
+        if path.startswith("http://") or path.startswith("https://"):
+            return path
+        frontend_url = self._frontend_base_url(db, team_id)
         if not frontend_url:
             return None
-        query = urlencode({"status": "PENDING", "business_type": entity_type})
-        return f"{frontend_url}/approvals?{query}"
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        return f"{frontend_url}{normalized_path}"
 
 
 feishu_notification_service = FeishuNotificationService()

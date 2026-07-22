@@ -98,6 +98,13 @@ const isApprovalApproved = computed(() => approvalPhase.value === 'approved')
 const isApprovalSubmitter = computed(() =>
   opportunity.value?.creator_id === String(userStore.userInfo?.id)
 )
+const canSubmitApproval = computed(() => {
+  const currentUserId = String(userStore.userInfo?.id ?? '')
+  if (isApprovalSubmitter.value) return true
+  if (permissionStore.hasPermission('opportunity:edit:all')) return true
+  return permissionStore.hasPermission('opportunity:edit:own')
+    && opportunity.value?.owner_id === currentUserId
+})
 
 function firstNonEmpty(...values: (string | null | undefined)[]): string {
   const value = values.find(item => item !== undefined && item !== null && item.trim() !== '')
@@ -530,7 +537,7 @@ watch(() => props.opportunityId, () => {
               <ApprovalProcessGeneric
                 entity-type="OPPORTUNITY"
                 :entity-id="opportunity.id"
-                :is-submitter="isApprovalSubmitter"
+                :is-submitter="canSubmitApproval"
                 @submitted="fetchOpportunityDetail"
                 @approved="fetchOpportunityDetail"
                 @rejected="fetchOpportunityDetail"

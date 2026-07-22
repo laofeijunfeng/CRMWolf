@@ -25,7 +25,13 @@ from app.schemas.approval_generic import (
 )
 from app.constants.business_types import is_valid_business_type, BusinessType
 from app.constants.approval_phase import ApprovalPhase
-from app.services.approval_adapter import get_adapter, get_approval_customer_name, get_approval_type_name
+from app.services.approval_adapter import (
+    get_adapter,
+    get_approval_action_path,
+    get_approval_card_fields,
+    get_approval_customer_name,
+    get_approval_type_name,
+)
 from app.services.feishu_notification import feishu_notification_service
 from datetime import date, datetime as _datetime
 
@@ -531,6 +537,7 @@ async def submit_contract_approval(
                     submitter_name=current_user.name,
                     approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
                     customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, contract),
+                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
                 )
                 notification_status = _feishu_notification_status(result)
             except Exception as notify_error:
@@ -686,6 +693,8 @@ async def approve_contract(
                         entity_type=BusinessType.CONTRACT,
                         entity_name=contract.contract_name,
                         business_id=contract_id,
+                        detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
+                        button_path=get_approval_action_path(BusinessType.CONTRACT),
                     )
                     notification_status = _feishu_notification_status(result)
                 except Exception as notify_error:
@@ -711,6 +720,7 @@ async def approve_contract(
                         submitter_name=approval.submitter_name,
                         approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
                         customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, contract),
+                        detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
                     )
                     notification_status = _feishu_notification_status(result)
                 except Exception as notify_error:
@@ -747,6 +757,8 @@ async def approve_contract(
                     entity_name=contract.contract_name,
                     reject_reason=action_request.comment or "无",
                     business_id=contract_id,
+                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
+                    button_path=get_approval_action_path(BusinessType.CONTRACT),
                 )
                 notification_status = _feishu_notification_status(result)
             except Exception as notify_error:
@@ -838,7 +850,7 @@ async def approve_contract(
 - 成功：返回"审批已撤回"
 - 失败：返回具体错误信息
 """)
-def cancel_approval(
+async def cancel_approval(
     contract_id: int,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -854,9 +866,33 @@ def cancel_approval(
     # 记录撤回前的状态
     current_node_name = approval.current_node.node_name if approval.current_node else ""
     flow_name = approval.flow.flow_name if approval.flow else ""
+    current_node = approval.current_node
+    contract = contract_crud.get_by_id(db, contract_id, team_id)
+    notify_user_ids = []
+    if current_node:
+        notify_user_ids = [user.id for user in get_notification_users_for_node(db, current_node, team_id)]
 
     try:
         approval = approval_crud.cancel(db, approval, str(current_user.id))
+        notification_status = "skipped"
+        if notify_user_ids and contract:
+            try:
+                result = await feishu_notification_service.notify_approval_cancelled(
+                    db=db,
+                    team_id=team_id,
+                    user_ids=notify_user_ids,
+                    entity_type=BusinessType.CONTRACT,
+                    entity_name=contract.contract_name,
+                    submitter_name=current_user.name,
+                    approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
+                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, contract),
+                )
+                notification_status = _feishu_notification_status(result)
+            except Exception as notify_error:
+                notification_status = "failed"
+                logger.error(
+                    f"[Approval] Cancel notification failed: contract_id={contract_id}, error={str(notify_error)}"
+                )
 
         # 记录撤回日志
         log_approval_operation(
@@ -866,7 +902,8 @@ def cancel_approval(
             flow_name=flow_name,
             node_name=current_node_name,
             operator=current_user.name,
-            flow_direction="cancelled"
+            flow_direction="cancelled",
+            notification_status=notification_status,
         )
 
         return MessageResponse(message="审批已撤回")
@@ -1543,7 +1580,8 @@ async def submit_generic_approval(
             detail=err or "未找到匹配的审批流程，请联系管理员创建或完善审批流程",
         )
 
-    submitter_id, submitter_name = adapter.get_submitter(entity)
+    submitter_id = str(current_user.id)
+    submitter_name = current_user.name
 
     try:
         ap = approval_crud.create_approval_generic(
@@ -1589,6 +1627,7 @@ async def submit_generic_approval(
                 submitter_name=current_user.name,
                 approval_type_name=get_approval_type_name(entity_type),
                 customer_name=get_approval_customer_name(db, entity_type, entity),
+                detail_fields=get_approval_card_fields(db, entity_type, entity),
             )
             notification_status = _feishu_notification_status(result)
         except Exception as notify_error:
@@ -1736,6 +1775,8 @@ async def approve_generic_approval(
                     entity_type=entity_type,
                     entity_name=entity_name,
                     business_id=entity_id,
+                    detail_fields=get_approval_card_fields(db, entity_type, entity),
+                    button_path=get_approval_action_path(entity_type),
                 )
                 notification_status = _feishu_notification_status(result)
             elif approval.current_node:
@@ -1753,6 +1794,7 @@ async def approve_generic_approval(
                     submitter_name=approval.submitter_name,
                     approval_type_name=get_approval_type_name(entity_type),
                     customer_name=get_approval_customer_name(db, entity_type, entity),
+                    detail_fields=get_approval_card_fields(db, entity_type, entity),
                 )
                 notification_status = _feishu_notification_status(result)
         elif action_request.action.value == ApprovalAction.REJECT:
@@ -1764,6 +1806,8 @@ async def approve_generic_approval(
                 entity_name=entity_name,
                 reject_reason=action_request.comment or "无",
                 business_id=entity_id,
+                detail_fields=get_approval_card_fields(db, entity_type, entity),
+                button_path=get_approval_action_path(entity_type),
             )
             notification_status = _feishu_notification_status(result)
     except Exception as notify_error:
@@ -1797,7 +1841,7 @@ async def approve_generic_approval(
 撤回审批中的业务单据审批流程。只有提交人本人可撤回，且仅限 PENDING 状态。
 """,
 )
-def cancel_generic_approval(
+async def cancel_generic_approval(
     entity_type: str,
     entity_id: int,
     db: Session = Depends(get_db),
@@ -1815,6 +1859,13 @@ def cancel_generic_approval(
 
     current_node_name = approval.current_node.node_name if approval.current_node else ""
     flow_name = approval.flow.flow_name if approval.flow else ""
+    current_node = approval.current_node
+    adapter = get_adapter(entity_type)
+    entity = adapter.get_entity(db, entity_id, team_id)
+    entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{entity_id}"
+    notify_user_ids = []
+    if current_node:
+        notify_user_ids = [user.id for user in get_notification_users_for_node(db, current_node, team_id)]
 
     try:
         approval = approval_crud.cancel(db, approval, str(current_user.id))
@@ -1833,6 +1884,27 @@ def cancel_generic_approval(
             detail=str(e),
         )
 
+    notification_status = "skipped"
+    if notify_user_ids:
+        try:
+            result = await feishu_notification_service.notify_approval_cancelled(
+                db=db,
+                team_id=team_id,
+                user_ids=notify_user_ids,
+                entity_type=entity_type,
+                entity_name=entity_name,
+                submitter_name=current_user.name,
+                approval_type_name=get_approval_type_name(entity_type),
+                detail_fields=get_approval_card_fields(db, entity_type, entity),
+            )
+            notification_status = _feishu_notification_status(result)
+        except Exception as notify_error:
+            notification_status = "failed"
+            logger.error(
+                f"[Approval] Generic cancel notification failed: entity_type={entity_type}, "
+                f"business_id={entity_id}, error={str(notify_error)}"
+            )
+
     log_approval_operation(
         operation="Cancel",
         approval_id=approval.id,
@@ -1840,6 +1912,7 @@ def cancel_generic_approval(
         node_name=current_node_name,
         operator=current_user.name,
         flow_direction="cancelled",
+        notification_status=notification_status,
         business_type=entity_type,
         business_id=entity_id,
     )

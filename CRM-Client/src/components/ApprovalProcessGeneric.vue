@@ -81,12 +81,12 @@ import {
 } from '@/api/fileUpload'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
 
-const SUBMIT_PERMISSION: Record<EntityType, string> = {
-  CONTRACT: 'contract:submit',
-  PAYMENT: 'payment:submit',
-  INVOICE: 'invoice:submit',
-  LICENSE: 'license:submit',
-  OPPORTUNITY: 'opportunity:create'
+const SUBMIT_PERMISSIONS: Record<EntityType, string[]> = {
+  CONTRACT: ['contract:submit'],
+  PAYMENT: ['payment:submit'],
+  INVOICE: ['invoice:submit'],
+  LICENSE: ['license:submit'],
+  OPPORTUNITY: ['opportunity:create', 'opportunity:edit:own', 'opportunity:edit:all']
 }
 
 const props = defineProps({
@@ -159,7 +159,7 @@ const isLocked = computed<boolean>(() => conflictNotice.value.length > 0)
 
 const records = computed<ApprovalRecord[]>(() => detail.value?.records ?? [])
 
-const submitPermissionCode = computed<string>(() => SUBMIT_PERMISSION[props.entityType])
+const submitPermissionCodes = computed<string[]>(() => SUBMIT_PERMISSIONS[props.entityType])
 
 // 发票是否已上传文件（用于显示下载链接）
 const hasInvoiceFile = computed<boolean>(() =>
@@ -566,7 +566,7 @@ onBeforeUnmount((): void => {
       </EmptyHeader>
       <EmptyContent v-if="isSubmitter">
         <Button
-          v-permission="submitPermissionCode"
+          v-any-permission="submitPermissionCodes"
           data-testid="submit-approval-btn"
           :disabled="actionPending"
           @click="handleSubmit"

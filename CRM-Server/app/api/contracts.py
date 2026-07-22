@@ -27,7 +27,7 @@ from app.schemas.contract import (
     ContractStatusEnum, LicenseTypeEnum, MessageResponse
 )
 from app.schemas.common import PaginatedResponse
-from app.services.approval_adapter import get_approval_customer_name, get_approval_type_name
+from app.services.approval_adapter import get_approval_card_fields, get_approval_customer_name, get_approval_type_name
 from app.services.feishu_notification import feishu_notification_service
 from app.services.file_storage import file_storage_service, FileStorageError
 from app.models.approval import BusinessType
@@ -241,6 +241,7 @@ async def create_contract(
                     submitter_name=current_user.name,
                     approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
                     customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, db_contract),
+                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, db_contract),
                 )
                 logger.info(f"合同审批通知发送完成（contract_id={db_contract.id}, result={result}）")
             except Exception as notify_error:
@@ -404,6 +405,7 @@ async def create_contract_from_opportunity(
                     submitter_name=current_user.name,
                     approval_type_name=get_approval_type_name(BusinessType.CONTRACT),
                     customer_name=get_approval_customer_name(db, BusinessType.CONTRACT, db_contract),
+                    detail_fields=get_approval_card_fields(db, BusinessType.CONTRACT, db_contract),
                 )
                 logger.info(f"合同审批通知发送完成（contract_id={db_contract.id}, result={result}）")
             except Exception as notify_error:

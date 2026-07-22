@@ -31,7 +31,13 @@ from app.schemas.invoice import (
 )
 from app.crud.invoice import invoice_title_crud, invoice_application_crud
 from app.crud.approval import approval_crud
+from app.services.approval_adapter import get_adapter, get_approval_card_fields
+from app.services.feishu_notification import feishu_notification_service
 from app.services.file_storage import file_storage_service, FileStorageError
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/invoice-titles", tags=["开票抬头管理"])
 
@@ -361,6 +367,20 @@ async def mark_invoice_issued(
             invoice_file_path=invoice_file_path,
             invoice_number=normalized_invoice_number,
         )
+        try:
+            await feishu_notification_service.notify_approval_issued(
+                db=db,
+                team_id=team_id,
+                user_id=int(approval.submitter_id),
+                entity_type=BusinessType.INVOICE,
+                entity_name=get_adapter(BusinessType.INVOICE).get_name(issued_application),
+                detail_fields=get_approval_card_fields(db, BusinessType.INVOICE, issued_application),
+                button_path="/invoices",
+            )
+        except Exception as notify_error:
+            logger.error(
+                f"[Invoice] Issue notification failed: application_id={application_id}, error={str(notify_error)}"
+            )
         return _populate_application_info(db, issued_application, team_id)
     except ValueError as e:
         raise HTTPException(
