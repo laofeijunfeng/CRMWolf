@@ -145,51 +145,6 @@ async def create_customer_follow_up(
     }
 
 
-# ==================== ReAct Agent 接口（已迁移到 LangGraph） ====================
-
-from pydantic import BaseModel
-
-# 注意：ai_tool_service 已删除，ReAct 接口已迁移到 web_assistant.py
-# 使用 POST /v1/assistant/chat 和 /v1/assistant/workflow/continue 替代
-
-
-class ReactContinueRequest(BaseModel):
-    """继续 ReAct 循环请求（已废弃）"""
-    session_id: str
-    user_response: str
-
-
-# 此接口已废弃，请使用 /v1/assistant/workflow/continue
-# @router.post("/react/continue")  # 已移除
-
-
-@router.get("/react/session/{session_id}")
-async def get_react_session_status(
-    session_id: str,
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    获取 ReAct 会话状态
-
-    Returns:
-        - session_id
-        - round_num
-        - execution_history
-        - status
-    """
-    session = ai_tool_service._load_react_session(session_id)
-
-    if not session:
-        return {"status": "expired", "message": "会话已过期"}
-
-    return {
-        "status": "active",
-        "session_id": session_id,
-        "round_num": session.get("round_num", 0),
-        "execution_history": session.get("execution_history", []),
-        "entity_context": session.get("entity_context")
-    }
-
 # ==================== 新增功能：AI 创建客户 ====================
 
 @router.post("/create/parse")

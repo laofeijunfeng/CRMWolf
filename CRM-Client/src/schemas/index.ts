@@ -24,6 +24,3 @@ export * from './payment'
 
 // Invoice
 export * from './invoice'
-
-// Conversation
-export * from './conversation'

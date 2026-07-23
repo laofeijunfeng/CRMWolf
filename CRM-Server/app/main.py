@@ -15,10 +15,7 @@ from app.api import auth, users, roles, permissions, leads, customers, customer_
 from app.api.deployment import router as deployment_router  # 新增
 from app.api.license_application import router as license_application_router  # 新增
 from app.api.customer_ai import router as customer_ai_router
-# from app.api.web_assistant import router as web_assistant_router  # 暂时禁用（依赖旧的 LangGraph）
 from app.api.ai_config import router as ai_config_router
-# from app.api.chat import router as chat_router  # 暂时禁用（依赖旧的 LangGraph）
-from app.api.workflow_undo import router as workflow_undo_router
 # Frontend Logs 路由
 from app.api.frontend_logs import router as frontend_logs_router
 from app.core.exceptions import (
@@ -106,9 +103,6 @@ api_router.include_router(ai_config_router)
 api_router.include_router(frontend_logs_router)
 api_router.include_router(score_weights_router)
 api_router.include_router(scores_router)
-
-# === Workflow Undo 路由 ===
-api_router.include_router(workflow_undo_router)
 
 # 注册主 API 路由到 app（添加统一的 /api 前缀）
 app.include_router(api_router, prefix="/api")
