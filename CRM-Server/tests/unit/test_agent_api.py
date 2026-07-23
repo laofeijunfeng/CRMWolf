@@ -160,3 +160,87 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
             db.close()
     finally:
         engine.dispose()
+
+
+def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatch):
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "customer_selection_required",
+                "action": "select_customer_for_follow_up",
+                "customers": [
+                    {"id": 101, "account_name": "越秀金融"},
+                    {"id": 102, "account_name": "越秀金融科技"},
+                ],
+                "payload": {
+                    "content": input_state["content"],
+                    "next_action": "下周三继续跟进",
+                    "next_follow_time_text": "下周三",
+                },
+            }
+            yield {"event": "final", "content": "我找到了多个可能的客户，请回复序号或客户名称确认。"}
+
+    class FakeToolService:
+        async def create_customer_follow_up(self, context, **kwargs):
+            assert context.authorization == "Bearer test-token"
+            assert context.task_id is not None
+            assert kwargs["customer_id"] == 102
+            assert kwargs["customer_name"] == "越秀金融科技"
+            assert kwargs["content"] == "今天和越秀金融的王总沟通了项目进展，下周三继续跟进"
+            assert kwargs["next_follow_time"] == "下周三"
+            return AgentToolResult(
+                tool_name="create_customer_follow_up",
+                success=True,
+                data={"id": 9002, "customer_id": 102},
+                tool_call_id=7002,
+            )
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "跟进会话"})
+        session = create_response.json()
+
+        plan_response = client.post(
+            "/v1/agent/chat/stream",
+            json={
+                "session_id": session["id"],
+                "content": "今天和越秀金融的王总沟通了项目进展，下周三继续跟进",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert plan_response.status_code == 200, plan_response.text
+        assert '"event": "customer_selection_required"' in plan_response.text
+        assert '"task_id": 1' in plan_response.text
+
+        select_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "2"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert select_response.status_code == 200, select_response.text
+        assert '"event": "customer_selected"' in select_response.text
+        assert "请确认是否创建这条跟进记录" in select_response.text
+
+        confirm_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert confirm_response.status_code == 200, confirm_response.text
+        assert '"event": "task_completed"' in confirm_response.text
+        assert "跟进记录已创建" in confirm_response.text
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.COMPLETED
+            assert task.target_id == 102
+            assert task.result_json == {"id": 9002, "customer_id": 102}
+        finally:
+            db.close()
+    finally:
+        engine.dispose()

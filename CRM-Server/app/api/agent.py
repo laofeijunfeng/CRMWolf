@@ -87,9 +87,31 @@ def _is_confirmation(content: str) -> bool:
     return normalized in {"是", "确认", "可以", "执行", "好的", "好", "yes", "y", "ok"}
 
 
+def _is_customer_selection_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "select_customer_for_follow_up"
+
+
+def _select_customer_candidate(content: str, customers: list[dict]) -> Optional[dict]:
+    normalized = content.strip()
+    if normalized.isdigit():
+        index = int(normalized)
+        if 1 <= index <= len(customers):
+            return customers[index - 1]
+
+    for customer in customers:
+        account_name = str(customer.get("account_name") or "")
+        if account_name and (normalized == account_name or normalized in account_name or account_name in normalized):
+            return customer
+    return None
+
+
 def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user_id: int, session_id: int):
     action = event.get("action")
     payload = event.get("payload") or {}
+    customer = event.get("customer")
+    customers = event.get("customers") or []
+    intent = "CUSTOMER_FOLLOW_UP" if action in {"create_customer_follow_up", "select_customer_for_follow_up"} else None
     task = agent_task_crud.create(
         db,
         AgentTaskCreate(
@@ -97,18 +119,49 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
             team_id=team_id,
             user_id=user_id,
             session_id=session_id,
-            intent="CUSTOMER_FOLLOW_UP" if action == "create_customer_follow_up" else None,
+            intent=intent,
             status=AgentTaskStatus.WAITING_USER,
             target_type="customer",
             target_id=payload.get("customer_id"),
             summary=f"等待确认执行：{action}",
             input_json=payload,
-            state_json={"action": action, "payload": payload, "customer": event.get("customer")},
+            state_json={"action": action, "payload": payload, "customer": customer, "customers": customers},
         ),
     )
     event["task_id"] = task.id
     event["task_key"] = task.task_key
     return task
+
+
+def _apply_customer_selection(db: Session, task, content: str):
+    state = task.state_json or {}
+    customers = state.get("customers") or []
+    customer = _select_customer_candidate(content, customers)
+    if not customer:
+        candidate_names = "；".join(
+            f"{index}. {item.get('account_name')}"
+            for index, item in enumerate(customers, start=1)
+        )
+        return None, f"没有匹配到你选择的客户，请回复序号或完整客户名称：{candidate_names}"
+
+    payload = state.get("payload") or {}
+    payload["customer_id"] = customer.get("id")
+    new_state = {
+        "action": "create_customer_follow_up",
+        "payload": payload,
+        "customer": customer,
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            target_id=customer.get("id"),
+            summary="等待确认执行：create_customer_follow_up",
+            input_json=payload,
+            state_json=new_state,
+        ),
+    )
+    return customer, f"已选择客户「{customer.get('account_name')}」。请确认是否创建这条跟进记录？"
 
 
 async def _execute_waiting_task(
@@ -290,13 +343,29 @@ async def stream_agent_chat(
 
             assistant_content = None
             authorization = _authorization_header(credentials)
-            if _is_confirmation(request.content):
-                task = agent_task_crud.get_latest_waiting(
-                    db,
-                    session_id=session.id,
-                    team_id=team_id,
-                    user_id=user_id,
-                )
+            task = agent_task_crud.get_latest_waiting(
+                db,
+                session_id=session.id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+            if task and _is_customer_selection_task(task):
+                customer, assistant_content = _apply_customer_selection(db, task, request.content)
+                if customer:
+                    yield _encode_sse({
+                        "event": "customer_selected",
+                        "task_id": task.id,
+                        "customer": customer,
+                        "content": assistant_content,
+                    })
+                else:
+                    yield _encode_sse({
+                        "event": "customer_selection_failed",
+                        "task_id": task.id,
+                        "content": assistant_content,
+                    })
+                yield _encode_sse({"event": "final", "content": assistant_content})
+            elif _is_confirmation(request.content):
                 if task:
                     result, assistant_content = await _execute_waiting_task(
                         db,
@@ -326,7 +395,7 @@ async def stream_agent_chat(
                     "content": request.content,
                     "authorization": authorization,
                 }):
-                    if event.get("event") == "confirmation_required":
+                    if event.get("event") in {"confirmation_required", "customer_selection_required"}:
                         _create_waiting_task_from_event(db, event, team_id, user_id, session.id)
                     if event.get("event") == "final":
                         assistant_content = event.get("content")

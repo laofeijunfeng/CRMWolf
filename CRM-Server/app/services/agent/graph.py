@@ -88,7 +88,12 @@ class CRMAgentGraphService:
 
         response, action = self._build_business_response(intent, parsed, candidates)
         if action:
-            events.append({"event": "confirmation_required", **action})
+            event_name = (
+                "customer_selection_required"
+                if action.get("action") == "select_customer_for_follow_up"
+                else "confirmation_required"
+            )
+            events.append({"event": event_name, **action})
         events.append({
             "event": "final",
             "intent": intent,
@@ -178,7 +183,22 @@ class CRMAgentGraphService:
                     },
                 }
             if len(candidates) > 1:
-                return f"我找到了多个可能的客户，请先确认要记录到哪一个客户：{customer_name}", None
+                candidate_lines = [
+                    f"{index}. {customer.get('account_name')}"
+                    for index, customer in enumerate(candidates, start=1)
+                ]
+                return (
+                    "我找到了多个可能的客户，请回复序号或客户名称确认要记录到哪一个客户："
+                    + "；".join(candidate_lines)
+                ), {
+                    "action": "select_customer_for_follow_up",
+                    "customers": candidates,
+                    "payload": {
+                        "content": parsed.get("follow_up_content"),
+                        "next_action": parsed.get("next_action"),
+                        "next_follow_time_text": parsed.get("next_follow_time_text"),
+                    },
+                }
             return f"我识别到客户「{customer_name}」，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
 
         if intent == "PAYMENT_RECORD":

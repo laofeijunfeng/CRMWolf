@@ -6,15 +6,16 @@ from app.services.agent.tools.base import AgentToolResult
 
 
 class FakeToolService:
-    def __init__(self):
+    def __init__(self, items=None):
         self.searches = []
+        self.items = items or [{"id": 101, "account_name": "越秀金融"}]
 
     async def search_customers(self, context, keyword, limit=10):
         self.searches.append({"context": context, "keyword": keyword, "limit": limit})
         return AgentToolResult(
             tool_name="search_customers",
             success=True,
-            data={"items": [{"id": 101, "account_name": "越秀金融"}], "total": 1},
+            data={"items": self.items, "total": len(self.items)},
             tool_call_id=501,
         )
 
@@ -83,3 +84,26 @@ async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
     assert confirmation_events[0]["action"] == "create_customer_follow_up"
     assert confirmation_events[0]["payload"]["customer_id"] == 101
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_customer_selection_when_multiple_candidates():
+    tool_service = FakeToolService(items=[
+        {"id": 101, "account_name": "越秀金融"},
+        {"id": 102, "account_name": "越秀金融科技"},
+    ])
+    service = CRMAgentGraphService(tool_service=tool_service)
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "authorization": "Bearer test-token",
+        "content": "今天和越秀金融的王总沟通了项目进展，下周三继续跟进",
+    })
+
+    selection_events = [event for event in result["events"] if event["event"] == "customer_selection_required"]
+    assert selection_events[0]["action"] == "select_customer_for_follow_up"
+    assert selection_events[0]["customers"][1]["id"] == 102
+    assert "请回复序号或客户名称" in result["response"]
