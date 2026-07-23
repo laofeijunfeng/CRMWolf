@@ -29,6 +29,8 @@ interface Props {
   customerId: number
   deployments: DeploymentInfoResponse[]
   contracts: ContractListResponse[]
+  defaultLicenseType?: LicenseType | null
+  defaultContractId?: number | null
   fixedContractId?: number | null
 }
 
@@ -52,6 +54,8 @@ interface LicenseFormErrors {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  defaultLicenseType: null,
+  defaultContractId: null,
   fixedContractId: null
 })
 const emit = defineEmits<Emits>()
@@ -118,6 +122,10 @@ const selectedDeploymentSummaryItems = computed(() => {
 
 const hasDeployments = computed<boolean>(() => props.deployments.length > 0)
 const hasFixedContract = computed<boolean>(() => props.fixedContractId !== null)
+const defaultApprovedContract = computed<ContractListResponse | null>(() => {
+  if (props.defaultContractId === null) return null
+  return approvedContracts.value.find((contract) => contract.id === props.defaultContractId) ?? null
+})
 const licenseTypeOptions: { value: LicenseType, label: string, tone: 'success' | 'primary' }[] = [
   { value: 'TRIAL', label: '试用', tone: 'success' },
   { value: 'OFFICIAL', label: '正式', tone: 'primary' },
@@ -148,13 +156,28 @@ function handleExpiryDateChange(date: Date | null): void {
   form.expiryDate = date !== null ? formatLocalDate(date) : ''
 }
 
+function getInitialLicenseType(): LicenseType {
+  if (hasFixedContract.value) return 'OFFICIAL'
+  if (props.defaultLicenseType === 'OFFICIAL' && defaultApprovedContract.value !== null) return 'OFFICIAL'
+  if (props.defaultLicenseType === 'TRIAL') return 'TRIAL'
+  return defaultApprovedContract.value !== null ? 'OFFICIAL' : 'TRIAL'
+}
+
+function getInitialContractId(licenseType: LicenseType): string {
+  if (props.fixedContractId !== null) return String(props.fixedContractId)
+  if (licenseType !== 'OFFICIAL') return ''
+  if (defaultApprovedContract.value !== null) return String(defaultApprovedContract.value.id)
+  return approvedContracts.value[0] !== undefined ? String(approvedContracts.value[0].id) : ''
+}
+
 function resetForm(): void {
   const defaultDeployment = props.deployments.find((deployment) => deployment.is_default)
+  const initialLicenseType = getInitialLicenseType()
   form.deploymentId = defaultDeployment !== undefined
     ? String(defaultDeployment.id)
     : props.deployments[0] !== undefined ? String(props.deployments[0].id) : ''
-  form.licenseType = hasFixedContract.value ? 'OFFICIAL' : 'TRIAL'
-  form.contractId = props.fixedContractId !== null ? String(props.fixedContractId) : ''
+  form.licenseType = initialLicenseType
+  form.contractId = getInitialContractId(initialLicenseType)
   form.expiryDate = ''
   form.remark = ''
   clearErrors()
@@ -250,7 +273,13 @@ watch(
 )
 
 watch(
-  () => [props.open, props.deployments.length, props.fixedContractId] as const,
+  () => [
+    props.open,
+    props.deployments.length,
+    props.fixedContractId,
+    props.defaultContractId,
+    props.defaultLicenseType,
+  ] as const,
   ([open]) => {
     if (open) {
       resetForm()

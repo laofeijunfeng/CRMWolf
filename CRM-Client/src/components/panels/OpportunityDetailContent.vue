@@ -57,7 +57,7 @@ import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import paymentApi, { type PaymentPlanResponse, type PaymentRecordCreate } from '@/api/payment'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
-import licenseApplicationApi, { type LicenseApplicationResponse } from '@/api/licenseApplication'
+import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseType as LicenseApplicationType } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
 import { usePermissionStore } from '@/stores/permissions'
@@ -203,6 +203,12 @@ const stageProgressText = computed(() => `${Math.round(stageWinProbability.value
 const isRelatedContractApproved = computed(() =>
   relatedContract.value !== null && approvedContractStatuses.includes(relatedContract.value.status)
 )
+const approvedRelatedContract = computed<ContractListResponse | null>(() =>
+  isRelatedContractApproved.value ? relatedContract.value : null
+)
+const defaultLicenseApplicationType = computed<LicenseApplicationType>(() =>
+  approvedRelatedContract.value !== null ? 'OFFICIAL' : 'TRIAL'
+)
 const canCreateRelatedContract = computed(() =>
   canCreateContractPermission.value
     && (props.canEditCustomerContext ?? true)
@@ -331,33 +337,33 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
   deployments.value = []
 
   const contract = relatedContract.value
-  if (contract === null || !approvedContractStatuses.includes(contract.status)) {
-    relationLoading.value = false
-    return
-  }
-
   try {
+    const hasApprovedContract = contract !== null && approvedContractStatuses.includes(contract.status)
     const [
       plansData,
       invoicesData,
       licensesData,
       deploymentsData
     ] = await Promise.all([
-      paymentApi.getPaymentPlans(contract.id).catch(() => []),
-      invoiceApi.getInvoiceApplications({
-        contract_id: contract.id,
-        page: 1,
-        page_size: 100,
-        order_by: 'created_time',
-        order_dir: 'desc'
-      }).catch(() => ({ items: [], total: 0, page: 1, page_size: 100 })),
+      hasApprovedContract ? paymentApi.getPaymentPlans(contract.id).catch(() => []) : Promise.resolve([]),
+      hasApprovedContract
+        ? invoiceApi.getInvoiceApplications({
+          contract_id: contract.id,
+          page: 1,
+          page_size: 100,
+          order_by: 'created_time',
+          order_dir: 'desc'
+        }).catch(() => ({ items: [], total: 0, page: 1, page_size: 100 }))
+        : Promise.resolve({ items: [], total: 0, page: 1, page_size: 100 }),
       licenseApplicationApi.list(opportunityData.customer_id).catch(() => []),
       deploymentApi.list(opportunityData.customer_id).catch(() => [])
     ])
 
     paymentPlans.value = plansData
     invoiceApplications.value = invoicesData.items ?? []
-    licenseApplications.value = licensesData.filter(item => item.contract_id === contract.id)
+    licenseApplications.value = hasApprovedContract
+      ? licensesData.filter(item => item.contract_id === null || item.contract_id === contract.id)
+      : licensesData.filter(item => item.contract_id === null)
     deployments.value = deploymentsData
   } finally {
     relationLoading.value = false
@@ -603,10 +609,6 @@ function handleAddDeployment(): void {
 function handleApplyLicense(): void {
   if (!canCreateLicenseApplication.value) {
     toast.error('你没有在该客户下申请 License 的权限')
-    return
-  }
-  if (!isRelatedContractApproved.value) {
-    toast.warning('合同审批通过后才能申请 License')
     return
   }
   if (deployments.value.length === 0) {
@@ -1062,19 +1064,19 @@ watch(approvalPhase, phase => {
                   @apply="handleInvoiceTitleAction"
                   @download-application="handleDownloadInvoiceApplication"
                 />
-
-                <LicensePanel
-                  :customer-id="opportunity.customer_id"
-                  :customer-name="displayCustomerName"
-                  :license-applications="licenseApplications"
-                  :deployments="deployments"
-                  :show-deployments="false"
-                  :show-apply="canCreateLicenseApplication"
-                  @add-deployment="handleAddDeployment"
-                  @apply="handleApplyLicense"
-                />
               </template>
             </template>
+
+            <LicensePanel
+              :customer-id="opportunity.customer_id"
+              :customer-name="displayCustomerName"
+              :license-applications="licenseApplications"
+              :deployments="deployments"
+              :show-deployments="false"
+              :show-apply="canCreateLicenseApplication"
+              @add-deployment="handleAddDeployment"
+              @apply="handleApplyLicense"
+            />
           </template>
         </template>
       </div>
@@ -1165,12 +1167,13 @@ watch(approvalPhase, phase => {
     />
 
     <LicenseApplicationFormDialog
-      v-if="opportunity !== null && relatedContract !== null"
+      v-if="opportunity !== null"
       :customer-id="opportunity.customer_id"
       :open="licenseApplicationDialogOpen"
       :deployments="deployments"
       :contracts="relatedContracts"
-      :fixed-contract-id="relatedContract.id"
+      :default-license-type="defaultLicenseApplicationType"
+      :default-contract-id="approvedRelatedContract?.id ?? null"
       @update:open="handleLicenseApplicationDialogOpenChange"
       @success="handleLicenseApplicationSuccess"
     />
