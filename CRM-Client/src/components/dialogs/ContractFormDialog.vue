@@ -22,28 +22,18 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { DatePicker } from '@/components/ui/date-picker'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
-  Empty,
-  EmptyHeader,
-  EmptyTitle
-} from '@/components/ui/empty'
-import { FileAttachment } from '@/components/crmwolf'
+  DateField,
+  FileAttachment,
+  InputField,
+  SearchableSelectField,
+  SelectField,
+} from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import contractApi, { type ContractCreate, type ContractUpdate, type ContractResponse, type LicenseType } from '@/api/contract'
 import { opportunityApi } from '@/api/opportunity'
@@ -223,6 +213,27 @@ const opportunitySelectPlaceholder = computed<string>(() => {
   if (Number(values.customer_id) <= 0) return '请先选择客户'
   return loadingOpportunities.value ? '加载商机中...' : '请选择商机'
 })
+const customerSelectOptions = computed(() =>
+  customers.value.map(customer => ({
+    value: customer.id,
+    label: customer.account_name,
+  }))
+)
+const opportunitySelectOptions = computed(() =>
+  opportunities.value.map(opportunity => ({
+    value: opportunity.id,
+    label: opportunity.opportunity_name,
+  }))
+)
+const contactSelectOptions = computed(() =>
+  contacts.value.map(contact => {
+    const position = contact.position?.trim()
+    return {
+      value: contact.id,
+      label: `${contact.name}${position !== undefined && position !== '' ? ` (${position})` : ''}`,
+    }
+  })
+)
 
 // Fetch available opportunities for this customer
 async function fetchOpportunities(customerId: number): Promise<void> {
@@ -564,46 +575,33 @@ function continueEditing(): void {
         <!-- Customer (required, only in create mode) -->
         <FormField v-if="!isEdit" v-slot="{ value, handleChange }" name="customer_id">
           <FormItem>
-            <FormLabel>所属客户 <span class="text-destructive">*</span></FormLabel>
-            <Select
-              :model-value="value"
-              :disabled="customerLocked === true"
+            <InputField
+              v-if="customerLocked === true"
+              id="contract-customer-locked"
+              :model-value="selectedCustomerName"
+              label="所属客户"
+              required
+              readonly
+              control-class="bg-wolf-bg-muted-v2 text-wolf-text-primary-v2"
+              aria-readonly="true"
+            />
+            <SearchableSelectField
+              v-else
+              id="contract-customer"
+              :model-value="String(value ?? '')"
+              label="所属客户"
+              required
+              :options="customerSelectOptions"
+              :search-value="customerSearchKeyword"
+              placeholder="请选择客户"
+              search-placeholder="搜索客户名称"
+              :loading="loadingCustomers"
+              loading-text="加载中..."
+              empty-text="暂无客户"
               @update:model-value="handleChange"
-              @update:open="(open: boolean) => { if (open && !customerLocked) fetchCustomers(customerSearchKeyword) }"
-            >
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue :placeholder="customerLocked ? '' : '请选择客户'" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <div v-if="!customerLocked" class="p-2 border-b">
-                  <Input
-                    :model-value="customerSearchKeyword"
-                    placeholder="搜索客户名称"
-                    class="h-9"
-                    @update:model-value="handleCustomerSearch"
-                    @keydown.stop
-                    @pointerdown.stop
-                  />
-                </div>
-                <div v-if="loadingCustomers" class="px-2 py-1.5 text-sm text-muted-foreground">
-                  加载中...
-                </div>
-                <Empty v-else-if="customers.length === 0" class="min-h-0 border-0 px-2 py-2">
-                  <EmptyHeader>
-                    <EmptyTitle class="text-sm font-normal text-muted-foreground">暂无客户</EmptyTitle>
-                  </EmptyHeader>
-                </Empty>
-                <SelectItem
-                  v-for="customer in customers"
-                  :key="customer.id"
-                  :value="customer.id.toString()"
-                >
-                  {{ customer.account_name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
+              @update:search-value="handleCustomerSearch"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
@@ -611,50 +609,31 @@ function continueEditing(): void {
         <!-- Opportunity (required, only in create mode) -->
         <FormField v-if="!isEdit" v-slot="{ value }" name="opportunity_id">
           <FormItem>
-            <FormLabel>关联商机 <span class="text-destructive">*</span></FormLabel>
-            <Select
-              :model-value="value !== undefined && value !== null ? String(value) : null"
+            <SelectField
+              id="contract-opportunity"
+              :model-value="value !== undefined && value !== null ? String(value) : ''"
+              label="关联商机"
+              required
+              :options="opportunitySelectOptions"
+              :placeholder="opportunitySelectPlaceholder"
               :disabled="opportunitySelectDisabled"
               @update:model-value="handleOpportunityChange"
-            >
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue :placeholder="opportunitySelectPlaceholder" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <div v-if="loadingOpportunities" class="px-2 py-1.5 text-sm text-muted-foreground">
-                  加载中...
-                </div>
-                <Empty v-else-if="opportunities.length === 0" class="min-h-0 border-0 px-2 py-2">
-                  <EmptyHeader>
-                    <EmptyTitle class="text-sm font-normal text-muted-foreground">暂无可关联商机</EmptyTitle>
-                  </EmptyHeader>
-                </Empty>
-                <SelectItem
-                  v-for="opportunity in opportunities"
-                  :key="opportunity.id"
-                  :value="opportunity.id.toString()"
-                >
-                  {{ opportunity.opportunity_name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Contract Name (required) -->
-        <FormField v-slot="{ componentField }" name="contract_name">
+        <FormField v-slot="{ value, handleChange }" name="contract_name">
           <FormItem>
-            <FormLabel>合同名称 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="选择商机后自动生成，可手动修改"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contract-name"
+              :model-value="String(value ?? '')"
+              label="合同名称"
+              required
+              placeholder="选择商机后自动生成，可手动修改"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
@@ -676,102 +655,87 @@ function continueEditing(): void {
         />
 
         <!-- Signing Contact (required) -->
-        <FormField v-slot="{ componentField }" name="signing_contact_id">
+        <FormField v-slot="{ value, handleChange }" name="signing_contact_id">
           <FormItem>
-            <FormLabel>签署联系人 <span class="text-destructive">*</span></FormLabel>
-            <Select v-bind="componentField as any">
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="请选择签署联系人" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem
-                  v-for="contact in contacts"
-                  :key="contact.id"
-                  :value="contact.id.toString()"
-                >
-                  {{ contact.name }}{{ contact.position ? ` (${contact.position})` : '' }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <SelectField
+              id="contract-signing-contact"
+              :model-value="value !== undefined && value !== null ? String(value) : ''"
+              label="签署联系人"
+              required
+              :options="contactSelectOptions"
+              :placeholder="loadingContacts ? '加载联系人中...' : '请选择签署联系人'"
+              :disabled="loadingContacts"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- User Count (required) -->
-        <FormField v-slot="{ componentField }" name="user_count">
+        <FormField v-slot="{ value, handleChange }" name="user_count">
           <FormItem>
-            <FormLabel>用户数 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="number"
-                min="1"
-                placeholder="请输入用户数"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contract-user-count"
+              :model-value="Number(value ?? 1)"
+              label="用户数"
+              required
+              type="number"
+              min="1"
+              placeholder="请输入用户数"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Total Amount (required) -->
-        <FormField v-slot="{ componentField }" name="total_amount">
+        <FormField v-slot="{ value, handleChange }" name="total_amount">
           <FormItem>
-            <FormLabel>总金额 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="请输入总金额"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contract-total-amount"
+              :model-value="Number(value ?? 0)"
+              label="总金额"
+              required
+              type="number"
+              inputmode="decimal"
+              step="0.01"
+              min="0"
+              placeholder="请输入总金额"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- License Type (Select) -->
-        <FormField v-slot="{ componentField }" name="license_type">
+        <FormField v-slot="{ value, handleChange }" name="license_type">
           <FormItem>
-            <FormLabel>授权类型 <span class="text-destructive">*</span></FormLabel>
-            <Select v-bind="componentField as any">
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="请选择授权类型" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem
-                  v-for="option in licenseTypeOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <SelectField
+              id="contract-license-type"
+              :model-value="String(value ?? '')"
+              label="授权类型"
+              required
+              :options="licenseTypeOptions"
+              placeholder="请选择授权类型"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Subscription Years (optional, only for SUBSCRIPTION) -->
-        <FormField v-if="values.license_type === 'SUBSCRIPTION'" v-slot="{ componentField }" name="subscription_years">
+        <FormField v-if="values.license_type === 'SUBSCRIPTION'" v-slot="{ value, handleChange }" name="subscription_years">
           <FormItem>
-            <FormLabel>订阅年限</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="number"
-                min="1"
-                max="10"
-                placeholder="请输入订阅年限"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contract-subscription-years"
+              :model-value="Number(value ?? 1)"
+              label="订阅年限"
+              type="number"
+              min="1"
+              max="10"
+              placeholder="请输入订阅年限"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
@@ -779,14 +743,13 @@ function continueEditing(): void {
         <!-- Signing Date (optional) -->
         <FormField v-slot="{ value, handleChange }" name="signing_date">
           <FormItem>
-            <FormLabel>签署日期</FormLabel>
-            <FormControl>
-              <DatePicker
-                :model-value="value ? new Date(value as string) : null"
-                placeholder="请选择签署日期"
-                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
-              />
-            </FormControl>
+            <DateField
+              id="contract-signing-date"
+              :model-value="value ? new Date(String(value)) : null"
+              label="签署日期"
+              placeholder="请选择签署日期"
+              @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
@@ -794,14 +757,13 @@ function continueEditing(): void {
         <!-- Effective Date (optional) -->
         <FormField v-slot="{ value, handleChange }" name="effective_date">
           <FormItem>
-            <FormLabel>生效日期</FormLabel>
-            <FormControl>
-              <DatePicker
-                :model-value="value ? new Date(value as string) : null"
-                placeholder="请选择生效日期"
-                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
-              />
-            </FormControl>
+            <DateField
+              id="contract-effective-date"
+              :model-value="value ? new Date(String(value)) : null"
+              label="生效日期"
+              placeholder="请选择生效日期"
+              @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
