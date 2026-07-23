@@ -94,6 +94,7 @@ def _is_customer_selection_task(task) -> bool:
         "select_customer_for_follow_up",
         "select_customer_for_contact",
         "select_customer_for_invoice_title",
+        "select_customer_for_deployment_info",
     }
 
 
@@ -105,6 +106,11 @@ def _is_contact_fields_task(task) -> bool:
 def _is_invoice_title_fields_task(task) -> bool:
     state = task.state_json or {}
     return state.get("action") == "collect_invoice_title_fields"
+
+
+def _is_deployment_info_fields_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "collect_deployment_info_fields"
 
 
 def _select_customer_candidate(content: str, customers: list[dict]) -> Optional[dict]:
@@ -145,6 +151,29 @@ def _contact_task_next_state(action: str, state: dict, customer: dict):
             f"已选择客户「{customer.get('account_name')}」。请确认是否创建发票抬头「{invoice_title.get('title')}」？",
         )
 
+    if action == "select_customer_for_deployment_info":
+        deployment_info = payload.get("deployment_info") or {}
+        deployment_info["customer_id"] = customer.get("id")
+        payload["customer_id"] = customer.get("id")
+        payload["deployment_info"] = deployment_info
+        missing_fields = CRMAgentGraphService.missing_deployment_info_fields(deployment_info)
+        if missing_fields:
+            payload["missing_fields"] = missing_fields
+            return (
+                "collect_deployment_info_fields",
+                payload,
+                f"已选择客户「{customer.get('account_name')}」，还需要补充："
+                f"{CRMAgentGraphService.format_deployment_info_missing_fields(missing_fields)}。",
+            )
+        return (
+            "create_deployment_info",
+            {
+                "customer_id": customer.get("id"),
+                "deployment_info": deployment_info,
+            },
+            f"已选择客户「{customer.get('account_name')}」。请确认是否创建部署信息「{deployment_info.get('deployment_name')}」？",
+        )
+
     contact = payload.get("contact") or {}
     if action == "select_customer_for_contact":
         payload["customer_id"] = customer.get("id")
@@ -183,6 +212,8 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
         intent = "CREATE_CONTACT"
     elif action in {"create_invoice_title", "select_customer_for_invoice_title", "collect_invoice_title_fields"}:
         intent = "CREATE_INVOICE_TITLE"
+    elif action in {"create_deployment_info", "select_customer_for_deployment_info", "collect_deployment_info_fields"}:
+        intent = "CREATE_DEPLOYMENT_INFO"
     task = agent_task_crud.create(
         db,
         AgentTaskCreate(
@@ -245,6 +276,11 @@ def _merge_invoice_title_fields(existing_invoice_title: dict, content: str) -> d
     merged = {**existing_invoice_title, **parsed_invoice_title}
     merged.pop("set_default", None)
     return merged
+
+
+def _merge_deployment_info_fields(existing_deployment_info: dict, content: str) -> dict:
+    parsed_deployment_info = CRMAgentGraphService.parse_deployment_info_fields_from_text(content)
+    return {**existing_deployment_info, **parsed_deployment_info}
 
 
 def _apply_contact_fields(db: Session, task, content: str):
@@ -323,6 +359,44 @@ def _apply_invoice_title_fields(db: Session, task, content: str):
     return True, f"发票抬头信息已补齐。请确认是否为「{customer.get('account_name')}」创建发票抬头「{invoice_title.get('title')}」？"
 
 
+def _apply_deployment_info_fields(db: Session, task, content: str):
+    state = task.state_json or {}
+    customer = state.get("customer") or {}
+    payload = state.get("payload") or {}
+    deployment_info = _merge_deployment_info_fields(payload.get("deployment_info") or {}, content)
+    deployment_info["customer_id"] = payload.get("customer_id") or deployment_info.get("customer_id")
+    missing_fields = CRMAgentGraphService.missing_deployment_info_fields(deployment_info)
+    payload["deployment_info"] = deployment_info
+    payload["missing_fields"] = missing_fields
+
+    if missing_fields:
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        return False, (
+            "还需要补充："
+            f"{CRMAgentGraphService.format_deployment_info_missing_fields(missing_fields)}。"
+        )
+
+    payload = {
+        "customer_id": deployment_info.get("customer_id"),
+        "deployment_info": deployment_info,
+    }
+    new_state = {
+        "action": "create_deployment_info",
+        "payload": payload,
+        "customer": customer,
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            summary="等待确认执行：create_deployment_info",
+            input_json=payload,
+            state_json=new_state,
+        ),
+    )
+    return True, f"部署信息已补齐。请确认是否为「{customer.get('account_name')}」创建部署信息「{deployment_info.get('deployment_name')}」？"
+
+
 async def _execute_waiting_task(
     db: Session,
     task,
@@ -369,6 +443,11 @@ async def _execute_waiting_task(
             invoice_title=payload["invoice_title"],
             set_default=bool(payload.get("set_default")),
         )
+    elif action == "create_deployment_info":
+        result = await tool_service.create_deployment_info(
+            context,
+            deployment_info=payload["deployment_info"],
+        )
     else:
         result = None
 
@@ -382,6 +461,8 @@ async def _execute_waiting_task(
             return result, "联系人已创建。"
         if action == "create_invoice_title":
             return result, "发票抬头已创建。"
+        if action == "create_deployment_info":
+            return result, "部署信息已创建。"
         return result, "跟进记录已创建。"
 
     error_message = result.error_message if result else f"暂不支持的执行动作：{action}"
@@ -541,6 +622,14 @@ async def stream_agent_chat(
                     "content": assistant_content,
                 })
                 yield _encode_sse({"event": "final", "content": assistant_content})
+            elif task and _is_deployment_info_fields_task(task):
+                ready, assistant_content = _apply_deployment_info_fields(db, task, request.content)
+                yield _encode_sse({
+                    "event": "deployment_info_fields_completed" if ready else "deployment_info_fields_required",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                })
+                yield _encode_sse({"event": "final", "content": assistant_content})
             elif task and _is_customer_selection_task(task):
                 customer, assistant_content = _apply_customer_selection(db, task, request.content)
                 if customer:
@@ -592,6 +681,7 @@ async def stream_agent_chat(
                         "customer_selection_required",
                         "contact_fields_required",
                         "invoice_title_fields_required",
+                        "deployment_info_fields_required",
                     }:
                         _create_waiting_task_from_event(db, event, team_id, user_id, session.id)
                     if event.get("event") == "final":

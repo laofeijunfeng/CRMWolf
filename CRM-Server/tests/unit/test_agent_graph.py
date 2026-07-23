@@ -79,6 +79,20 @@ async def test_agent_graph_classifies_invoice_title_intent():
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_classifies_deployment_info_intent():
+    service = CRMAgentGraphService()
+
+    result = await service.run({
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "content": "帮我给越秀金融创建部署信息",
+    })
+
+    assert result["intent"] == "CREATE_DEPLOYMENT_INFO"
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation():
     tool_service = FakeToolService()
     service = CRMAgentGraphService(tool_service=tool_service)
@@ -211,3 +225,54 @@ async def test_agent_graph_requires_invoice_title_fields_when_missing():
     field_events = [event for event in result["events"] if event["event"] == "invoice_title_fields_required"]
     assert field_events[0]["action"] == "collect_invoice_title_fields"
     assert field_events[0]["payload"]["missing_fields"] == ["title", "taxpayer_id"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_deployment_info_confirmation_when_fields_complete():
+    tool_service = FakeToolService()
+    service = CRMAgentGraphService(tool_service=tool_service)
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "authorization": "Bearer test-token",
+        "content": "帮我给越秀金融创建部署信息，部署名称是生产环境，服务器地址 https://crm.example.com，授权人数100，设为默认",
+    })
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_deployment_info"
+    assert confirmation_events[0]["payload"] == {
+        "customer_id": 101,
+        "deployment_info": {
+            "is_default": True,
+            "deployment_name": "生产环境",
+            "server_address": "https://crm.example.com",
+            "authorized_users": 100,
+            "customer_id": 101,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_deployment_info_fields_when_missing():
+    tool_service = FakeToolService()
+    service = CRMAgentGraphService(tool_service=tool_service)
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "authorization": "Bearer test-token",
+        "content": "帮我给越秀金融创建部署信息",
+    })
+
+    field_events = [event for event in result["events"] if event["event"] == "deployment_info_fields_required"]
+    assert field_events[0]["action"] == "collect_deployment_info_fields"
+    assert field_events[0]["payload"]["missing_fields"] == [
+        "deployment_name",
+        "server_address",
+        "authorized_users",
+    ]

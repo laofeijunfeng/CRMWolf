@@ -136,12 +136,31 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_invoice_title", payload, action_key, call_api)
 
+    async def create_deployment_info(
+        self,
+        context: AgentToolContext,
+        deployment_info: JsonDict,
+    ) -> AgentToolResult:
+        payload = {"deployment_info": deployment_info}
+        action_key = self._action_key("create_deployment_info", context, payload, None)
+
+        async def call_api():
+            return await self.api_client.request(
+                "POST",
+                "/v1/deployment-infos/",
+                context.authorization,
+                json=deployment_info,
+            )
+
+        return await self._run_write_tool(context, "create_deployment_info", payload, action_key, call_api)
+
     async def _get_customer_related_context(self, context: AgentToolContext, customer_id: int) -> JsonDict:
         related_paths = {
             "contracts": f"/v1/customers/{customer_id}/contracts",
             "payment_plans": f"/v1/customers/{customer_id}/payment-plans",
             "invoices": f"/v1/customers/{customer_id}/invoices",
             "invoice_titles": f"/v1/customers/{customer_id}/invoice-titles",
+            "deployment_infos": f"/v1/deployment-infos/?customer_id={customer_id}",
             "follow_ups": f"/v1/customer-follow-ups/{customer_id}",
         }
         result: JsonDict = {}

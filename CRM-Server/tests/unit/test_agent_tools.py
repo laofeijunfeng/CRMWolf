@@ -49,6 +49,8 @@ class FakeCRMAPIClient:
             return {"id": 6001, "customer_id": params["customer_id"], **json, "is_default": False}
         if method == "PATCH" and path == "/v1/invoice-titles/6001/set-default":
             return {"id": 6001, "customer_id": 101, "title": "越秀金融控股有限公司", "is_default": True}
+        if method == "POST" and path == "/v1/deployment-infos/":
+            return {"id": 6101, **json}
         return {}
 
 
@@ -187,6 +189,44 @@ async def test_agent_tool_create_invoice_title_calls_existing_api_and_sets_defau
             },
         ]
         assert db.query(AgentToolCall).one().tool_name == "create_invoice_title"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_create_deployment_info_calls_existing_api():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    try:
+        result = await service.create_deployment_info(
+            _context(db),
+            deployment_info={
+                "customer_id": 101,
+                "deployment_name": "生产环境",
+                "server_address": "https://crm.example.com",
+                "authorized_users": 100,
+                "is_default": True,
+            },
+        )
+
+        assert result.success is True
+        assert result.data["id"] == 6101
+        assert fake_client.calls == [{
+            "method": "POST",
+            "path": "/v1/deployment-infos/",
+            "authorization": "Bearer test-token",
+            "params": None,
+            "json": {
+                "customer_id": 101,
+                "deployment_name": "生产环境",
+                "server_address": "https://crm.example.com",
+                "authorized_users": 100,
+                "is_default": True,
+            },
+        }]
+        assert db.query(AgentToolCall).one().tool_name == "create_deployment_info"
     finally:
         db.close()
         engine.dispose()

@@ -31,7 +31,9 @@ class CRMAgentGraphService:
         content = state.get("content", "")
         intent = "GENERAL"
 
-        if "发票抬头" in content or "开票抬头" in content:
+        if re.search(r"(?:创建|新增|添加|新建).*?(?:部署信息|部署)", content):
+            intent = "CREATE_DEPLOYMENT_INFO"
+        elif "发票抬头" in content or "开票抬头" in content:
             intent = "CREATE_INVOICE_TITLE"
         elif "回款" in content or "到账" in content or "打款" in content:
             intent = "PAYMENT_RECORD"
@@ -48,6 +50,9 @@ class CRMAgentGraphService:
         customer_name = self._extract_customer_name(content, intent)
         contact = self.parse_contact_fields_from_text(content) if intent == "CREATE_CONTACT" else {}
         invoice_title = self.parse_invoice_title_fields_from_text(content) if intent == "CREATE_INVOICE_TITLE" else {}
+        deployment_info = (
+            self.parse_deployment_info_fields_from_text(content) if intent == "CREATE_DEPLOYMENT_INFO" else {}
+        )
         next_follow_time = self._extract_next_follow_time(content)
         next_action = self._extract_next_action(content, next_follow_time)
         parsed = {
@@ -58,6 +63,10 @@ class CRMAgentGraphService:
             "invoice_title": invoice_title,
             "missing_invoice_title_fields": (
                 self.missing_invoice_title_fields(invoice_title) if intent == "CREATE_INVOICE_TITLE" else []
+            ),
+            "deployment_info": deployment_info,
+            "missing_deployment_info_fields": (
+                self.missing_deployment_info_fields(deployment_info) if intent == "CREATE_DEPLOYMENT_INFO" else []
             ),
             "next_action": next_action,
             "next_follow_time_text": next_follow_time,
@@ -103,12 +112,15 @@ class CRMAgentGraphService:
                 "select_customer_for_follow_up",
                 "select_customer_for_contact",
                 "select_customer_for_invoice_title",
+                "select_customer_for_deployment_info",
             }:
                 event_name = "customer_selection_required"
             elif action.get("action") == "collect_contact_fields":
                 event_name = "contact_fields_required"
             elif action.get("action") == "collect_invoice_title_fields":
                 event_name = "invoice_title_fields_required"
+            elif action.get("action") == "collect_deployment_info_fields":
+                event_name = "deployment_info_fields_required"
             events.append({"event": event_name, **action})
         events.append({
             "event": "final",
@@ -133,6 +145,7 @@ class CRMAgentGraphService:
             r"和(?P<name>.+?)的[^，,。；;]*?(?:沟通|聊|交流|确认)",
             r"给(?P<name>.+?)(?:创建|新增|加).*?联系人",
             r"给(?P<name>.+?)(?:创建|新增|添加).*?(?:发票抬头|开票抬头)",
+            r"给(?P<name>.+?)(?:创建|新增|添加|新建).*?(?:部署信息|部署)",
             r"(?P<name>[\u4e00-\u9fa5A-Za-z0-9（）()·]{2,30}?)(?:今天|已|刚刚|昨日|昨天)?.*?(?:回款|到账|打款)",
         ]
         for pattern in patterns:
@@ -326,7 +339,57 @@ class CRMAgentGraphService:
                 }
             return f"我识别到要为「{customer_name}」创建发票抬头，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
 
-        return "已收到消息。当前 Agent 优先处理客户跟进、联系人维护、发票抬头和回款登记场景。", None
+        if intent == "CREATE_DEPLOYMENT_INFO":
+            if not customer_name:
+                return "我识别到这是创建部署信息，但还缺少明确客户名称。请补充客户名称。", None
+            deployment_info = parsed.get("deployment_info") or {}
+            missing_fields = CRMAgentGraphService.missing_deployment_info_fields(deployment_info)
+            if len(candidates) == 1:
+                customer = candidates[0]
+                deployment_info["customer_id"] = customer.get("id")
+                if missing_fields:
+                    return (
+                        f"我识别到要为「{customer.get('account_name')}」创建部署信息，"
+                        f"还需要补充：{CRMAgentGraphService.format_deployment_info_missing_fields(missing_fields)}。"
+                    ), {
+                        "action": "collect_deployment_info_fields",
+                        "customer": customer,
+                        "payload": {
+                            "customer_id": customer.get("id"),
+                            "deployment_info": deployment_info,
+                            "missing_fields": missing_fields,
+                        },
+                    }
+                return (
+                    f"我识别到要为「{customer.get('account_name')}」创建部署信息「{deployment_info.get('deployment_name')}」。"
+                    "请确认是否创建？"
+                ), {
+                    "action": "create_deployment_info",
+                    "customer": customer,
+                    "payload": {
+                        "customer_id": customer.get("id"),
+                        "deployment_info": deployment_info,
+                    },
+                }
+            if len(candidates) > 1:
+                candidate_lines = [
+                    f"{index}. {customer.get('account_name')}"
+                    for index, customer in enumerate(candidates, start=1)
+                ]
+                return (
+                    "我找到了多个可能的客户，请回复序号或客户名称确认要把部署信息创建到哪一个客户："
+                    + "；".join(candidate_lines)
+                ), {
+                    "action": "select_customer_for_deployment_info",
+                    "customers": candidates,
+                    "payload": {
+                        "deployment_info": deployment_info,
+                        "missing_fields": missing_fields,
+                    },
+                }
+            return f"我识别到要为「{customer_name}」创建部署信息，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+
+        return "已收到消息。当前 Agent 优先处理客户跟进、联系人维护、发票抬头、部署信息和回款登记场景。", None
 
     @staticmethod
     def parse_contact_fields_from_text(content: str) -> Dict[str, Any]:
@@ -421,6 +484,48 @@ class CRMAgentGraphService:
             "title_type": "抬头类型（单位/个人）",
             "title": "开票抬头",
             "taxpayer_id": "纳税人识别号",
+        }
+        return "、".join(labels.get(field, field) for field in fields)
+
+    @staticmethod
+    def parse_deployment_info_fields_from_text(content: str) -> Dict[str, Any]:
+        deployment_info: Dict[str, Any] = {"is_default": bool(re.search(r"默认|设为默认|设置默认", content))}
+
+        name_patterns = [
+            r"(?:部署名称|环境名称)(?:是|为|[:：])(?P<value>[^，,。；;]+)",
+            r"(?:创建|新增|添加|新建)(?:部署信息|部署)(?P<value>[^，,。；;]+)",
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, content)
+            if match:
+                deployment_name = match.group("value").strip()
+                if deployment_name and deployment_name != "信息":
+                    deployment_info["deployment_name"] = deployment_name
+                    break
+
+        server_match = re.search(r"https?://[^\s，,。；;]+", content)
+        if server_match:
+            deployment_info["server_address"] = server_match.group(0).strip()
+
+        users_match = re.search(r"(?:授权人数|授权用户|授权用户数|用户数)(?:是|为|[:：])?(?P<value>\d+)", content)
+        if not users_match:
+            users_match = re.search(r"(?P<value>\d+)\s*(?:人|个用户)", content)
+        if users_match:
+            deployment_info["authorized_users"] = int(users_match.group("value"))
+
+        return {key: value for key, value in deployment_info.items() if value not in (None, "")}
+
+    @staticmethod
+    def missing_deployment_info_fields(deployment_info: Dict[str, Any]) -> List[str]:
+        required_fields = ["deployment_name", "server_address", "authorized_users"]
+        return [field for field in required_fields if not deployment_info.get(field)]
+
+    @staticmethod
+    def format_deployment_info_missing_fields(fields: List[str]) -> str:
+        labels = {
+            "deployment_name": "部署名称",
+            "server_address": "服务器地址（需以 http:// 或 https:// 开头）",
+            "authorized_users": "授权人数",
         }
         return "、".join(labels.get(field, field) for field in fields)
 

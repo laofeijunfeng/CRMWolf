@@ -423,3 +423,94 @@ def test_agent_stream_collects_invoice_title_fields_then_executes_confirmation(m
             db.close()
     finally:
         engine.dispose()
+
+
+def test_agent_stream_collects_deployment_info_fields_then_executes_confirmation(monkeypatch):
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "deployment_info_fields_required",
+                "action": "collect_deployment_info_fields",
+                "customer": {"id": 101, "account_name": "越秀金融"},
+                "payload": {
+                    "customer_id": 101,
+                    "deployment_info": {"customer_id": 101, "is_default": False},
+                    "missing_fields": ["deployment_name", "server_address", "authorized_users"],
+                },
+            }
+            yield {"event": "final", "content": "还需要补充：部署名称、服务器地址、授权人数。"}
+
+    class FakeToolService:
+        async def create_deployment_info(self, context, **kwargs):
+            assert context.authorization == "Bearer test-token"
+            assert context.task_id is not None
+            assert kwargs["deployment_info"] == {
+                "customer_id": 101,
+                "is_default": True,
+                "deployment_name": "生产环境",
+                "server_address": "https://crm.example.com",
+                "authorized_users": 100,
+            }
+            return AgentToolResult(
+                tool_name="create_deployment_info",
+                success=True,
+                data={
+                    "id": 6101,
+                    "customer_id": 101,
+                    "deployment_name": "生产环境",
+                },
+                tool_call_id=7301,
+            )
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "部署信息会话"})
+        session = create_response.json()
+
+        plan_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮我给越秀金融创建部署信息"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert plan_response.status_code == 200, plan_response.text
+        assert '"event": "deployment_info_fields_required"' in plan_response.text
+        assert '"task_id": 1' in plan_response.text
+
+        fill_response = client.post(
+            "/v1/agent/chat/stream",
+            json={
+                "session_id": session["id"],
+                "content": "部署名称是生产环境，服务器地址 https://crm.example.com，授权人数100，设为默认",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert fill_response.status_code == 200, fill_response.text
+        assert '"event": "deployment_info_fields_completed"' in fill_response.text
+        assert "请确认是否为" in fill_response.text
+
+        confirm_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert confirm_response.status_code == 200, confirm_response.text
+        assert '"event": "task_completed"' in confirm_response.text
+        assert "部署信息已创建" in confirm_response.text
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.COMPLETED
+            assert task.result_json == {
+                "id": 6101,
+                "customer_id": 101,
+                "deployment_name": "生产环境",
+            }
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
