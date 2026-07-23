@@ -187,24 +187,39 @@ function clearErrors(): void {
   errors.invoiceAmount = ''
 }
 
-function resetForm(): void {
+function resetForm(keepCurrentCreatePaymentPlan = false): void {
   const application = props.application
   const fixedCustomerId = props.fixedCustomer?.id ?? props.fixedInvoiceTitle?.customer_id
+  const previousCustomerId = form.customerId
+  const previousContractId = form.contractId
+  const previousPaymentPlanId = form.paymentPlanId
+  const previousInvoiceAmount = form.invoiceAmount
 
-  form.customerId = fixedCustomerId !== undefined
+  const nextCustomerId = fixedCustomerId !== undefined
     ? String(fixedCustomerId)
     : application?.customer_id !== undefined ? String(application.customer_id) : ''
-  form.contractId = application?.contract_id !== null && application?.contract_id !== undefined
+  const nextContractId = application?.contract_id !== null && application?.contract_id !== undefined
     ? String(application.contract_id)
     : props.fixedContractId !== null ? String(props.fixedContractId) : ''
+  const shouldKeepCreatePaymentPlan = isCreateMode.value
+    && keepCurrentCreatePaymentPlan
+    && application === null
+    && previousPaymentPlanId !== ''
+    && previousCustomerId === nextCustomerId
+    && previousContractId === nextContractId
+
+  form.customerId = nextCustomerId
+  form.contractId = nextContractId
   form.paymentPlanId = application?.payment_plan_id !== null && application?.payment_plan_id !== undefined
     ? String(application.payment_plan_id)
-    : ''
+    : shouldKeepCreatePaymentPlan ? previousPaymentPlanId : ''
   form.invoiceTitleId = props.fixedInvoiceTitle !== null
     ? String(props.fixedInvoiceTitle.id)
     : application?.invoice_title_id !== undefined ? String(application.invoice_title_id) : ''
   form.invoiceType = application?.invoice_type ?? 'VAT_SPECIAL'
-  form.invoiceAmount = application?.invoice_amount !== undefined ? String(application.invoice_amount) : ''
+  form.invoiceAmount = application?.invoice_amount !== undefined
+    ? String(application.invoice_amount)
+    : shouldKeepCreatePaymentPlan ? previousInvoiceAmount : ''
   clearErrors()
 }
 
@@ -346,6 +361,7 @@ function handleContractChange(value: unknown): void {
 function handlePaymentPlanChange(value: unknown): void {
   const nextPaymentPlanId = normalizeSelectValue(value)
   if (nextPaymentPlanId === null || nextPaymentPlanId === '') return
+  if (nextPaymentPlanId === form.paymentPlanId) return
 
   form.paymentPlanId = nextPaymentPlanId
   const plan = selectedPaymentPlan.value
@@ -358,6 +374,7 @@ function handlePaymentPlanChange(value: unknown): void {
 function handleInvoiceTitleChange(value: unknown): void {
   const nextInvoiceTitleId = normalizeSelectValue(value)
   if (nextInvoiceTitleId === null || nextInvoiceTitleId === '') return
+  if (nextInvoiceTitleId === form.invoiceTitleId) return
 
   form.invoiceTitleId = nextInvoiceTitleId
 }
@@ -423,13 +440,13 @@ function nullText(value: string | null | undefined): string {
 
 watch(
   () => [props.open, props.mode, props.application?.id, props.fixedCustomer?.id, props.fixedInvoiceTitle?.id, props.fixedContractId] as const,
-  ([open]) => {
+  ([open], previousValues) => {
     if (!open) {
       clearErrors()
       return
     }
 
-    resetForm()
+    resetForm(previousValues?.[0] === true)
     void fetchCustomers()
 
     const customerId = Number(form.customerId)
