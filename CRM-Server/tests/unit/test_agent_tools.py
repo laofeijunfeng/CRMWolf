@@ -45,6 +45,10 @@ class FakeCRMAPIClient:
                 "content": json["content"],
                 "next_follow_time": "2026-07-29T00:00:00",
             }
+        if method == "POST" and path == "/v1/invoice-titles":
+            return {"id": 6001, "customer_id": params["customer_id"], **json, "is_default": False}
+        if method == "PATCH" and path == "/v1/invoice-titles/6001/set-default":
+            return {"id": 6001, "customer_id": 101, "title": "越秀金融控股有限公司", "is_default": True}
         return {}
 
 
@@ -138,6 +142,51 @@ async def test_agent_tool_create_follow_up_is_idempotent():
         assert fake_client.calls[0]["json"]["next_follow_time"] == "下周三"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_create_invoice_title_calls_existing_api_and_sets_default():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    try:
+        result = await service.create_invoice_title(
+            _context(db),
+            customer_id=101,
+            invoice_title={
+                "title_type": "COMPANY",
+                "title": "越秀金融控股有限公司",
+                "taxpayer_id": "91440000123456789X",
+            },
+            set_default=True,
+        )
+
+        assert result.success is True
+        assert result.data["set_default"] is True
+        assert fake_client.calls == [
+            {
+                "method": "POST",
+                "path": "/v1/invoice-titles",
+                "authorization": "Bearer test-token",
+                "params": {"customer_id": 101},
+                "json": {
+                    "title_type": "COMPANY",
+                    "title": "越秀金融控股有限公司",
+                    "taxpayer_id": "91440000123456789X",
+                },
+            },
+            {
+                "method": "PATCH",
+                "path": "/v1/invoice-titles/6001/set-default",
+                "authorization": "Bearer test-token",
+                "params": None,
+                "json": None,
+            },
+        ]
+        assert db.query(AgentToolCall).one().tool_name == "create_invoice_title"
     finally:
         db.close()
         engine.dispose()

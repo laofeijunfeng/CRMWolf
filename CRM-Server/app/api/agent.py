@@ -90,12 +90,21 @@ def _is_confirmation(content: str) -> bool:
 
 def _is_customer_selection_task(task) -> bool:
     state = task.state_json or {}
-    return state.get("action") in {"select_customer_for_follow_up", "select_customer_for_contact"}
+    return state.get("action") in {
+        "select_customer_for_follow_up",
+        "select_customer_for_contact",
+        "select_customer_for_invoice_title",
+    }
 
 
 def _is_contact_fields_task(task) -> bool:
     state = task.state_json or {}
     return state.get("action") == "collect_contact_fields"
+
+
+def _is_invoice_title_fields_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "collect_invoice_title_fields"
 
 
 def _select_customer_candidate(content: str, customers: list[dict]) -> Optional[dict]:
@@ -114,6 +123,28 @@ def _select_customer_candidate(content: str, customers: list[dict]) -> Optional[
 
 def _contact_task_next_state(action: str, state: dict, customer: dict):
     payload = state.get("payload") or {}
+    if action == "select_customer_for_invoice_title":
+        invoice_title = payload.get("invoice_title") or {}
+        payload["customer_id"] = customer.get("id")
+        missing_fields = CRMAgentGraphService.missing_invoice_title_fields(invoice_title)
+        if missing_fields:
+            payload["missing_fields"] = missing_fields
+            return (
+                "collect_invoice_title_fields",
+                payload,
+                f"已选择客户「{customer.get('account_name')}」，还需要补充："
+                f"{CRMAgentGraphService.format_invoice_title_missing_fields(missing_fields)}。",
+            )
+        return (
+            "create_invoice_title",
+            {
+                "customer_id": customer.get("id"),
+                "invoice_title": invoice_title,
+                "set_default": bool(payload.get("set_default")),
+            },
+            f"已选择客户「{customer.get('account_name')}」。请确认是否创建发票抬头「{invoice_title.get('title')}」？",
+        )
+
     contact = payload.get("contact") or {}
     if action == "select_customer_for_contact":
         payload["customer_id"] = customer.get("id")
@@ -150,6 +181,8 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
         intent = "CUSTOMER_FOLLOW_UP"
     elif action in {"create_contact", "select_customer_for_contact", "collect_contact_fields"}:
         intent = "CREATE_CONTACT"
+    elif action in {"create_invoice_title", "select_customer_for_invoice_title", "collect_invoice_title_fields"}:
+        intent = "CREATE_INVOICE_TITLE"
     task = agent_task_crud.create(
         db,
         AgentTaskCreate(
@@ -207,6 +240,13 @@ def _merge_contact_fields(existing_contact: dict, content: str) -> dict:
     return {**existing_contact, **parsed_contact}
 
 
+def _merge_invoice_title_fields(existing_invoice_title: dict, content: str) -> dict:
+    parsed_invoice_title = CRMAgentGraphService.parse_invoice_title_fields_from_text(content)
+    merged = {**existing_invoice_title, **parsed_invoice_title}
+    merged.pop("set_default", None)
+    return merged
+
+
 def _apply_contact_fields(db: Session, task, content: str):
     state = task.state_json or {}
     customer = state.get("customer") or {}
@@ -239,6 +279,48 @@ def _apply_contact_fields(db: Session, task, content: str):
         ),
     )
     return True, f"联系人信息已补齐。请确认是否为「{customer.get('account_name')}」创建联系人「{contact.get('name')}」？"
+
+
+def _apply_invoice_title_fields(db: Session, task, content: str):
+    state = task.state_json or {}
+    customer = state.get("customer") or {}
+    payload = state.get("payload") or {}
+    invoice_title = _merge_invoice_title_fields(payload.get("invoice_title") or {}, content)
+    missing_fields = CRMAgentGraphService.missing_invoice_title_fields(invoice_title)
+    set_default = bool(payload.get("set_default")) or bool(
+        CRMAgentGraphService.parse_invoice_title_fields_from_text(content).get("set_default")
+    )
+    payload["invoice_title"] = invoice_title
+    payload["missing_fields"] = missing_fields
+    payload["set_default"] = set_default
+
+    if missing_fields:
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        return False, (
+            "还需要补充："
+            f"{CRMAgentGraphService.format_invoice_title_missing_fields(missing_fields)}。"
+        )
+
+    payload = {
+        "customer_id": payload.get("customer_id"),
+        "invoice_title": invoice_title,
+        "set_default": set_default,
+    }
+    new_state = {
+        "action": "create_invoice_title",
+        "payload": payload,
+        "customer": customer,
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            summary="等待确认执行：create_invoice_title",
+            input_json=payload,
+            state_json=new_state,
+        ),
+    )
+    return True, f"发票抬头信息已补齐。请确认是否为「{customer.get('account_name')}」创建发票抬头「{invoice_title.get('title')}」？"
 
 
 async def _execute_waiting_task(
@@ -280,6 +362,13 @@ async def _execute_waiting_task(
             customer_id=payload["customer_id"],
             contact=payload["contact"],
         )
+    elif action == "create_invoice_title":
+        result = await tool_service.create_invoice_title(
+            context,
+            customer_id=payload["customer_id"],
+            invoice_title=payload["invoice_title"],
+            set_default=bool(payload.get("set_default")),
+        )
     else:
         result = None
 
@@ -291,6 +380,8 @@ async def _execute_waiting_task(
         )
         if action == "create_contact":
             return result, "联系人已创建。"
+        if action == "create_invoice_title":
+            return result, "发票抬头已创建。"
         return result, "跟进记录已创建。"
 
     error_message = result.error_message if result else f"暂不支持的执行动作：{action}"
@@ -442,6 +533,14 @@ async def stream_agent_chat(
                     "content": assistant_content,
                 })
                 yield _encode_sse({"event": "final", "content": assistant_content})
+            elif task and _is_invoice_title_fields_task(task):
+                ready, assistant_content = _apply_invoice_title_fields(db, task, request.content)
+                yield _encode_sse({
+                    "event": "invoice_title_fields_completed" if ready else "invoice_title_fields_required",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                })
+                yield _encode_sse({"event": "final", "content": assistant_content})
             elif task and _is_customer_selection_task(task):
                 customer, assistant_content = _apply_customer_selection(db, task, request.content)
                 if customer:
@@ -492,6 +591,7 @@ async def stream_agent_chat(
                         "confirmation_required",
                         "customer_selection_required",
                         "contact_fields_required",
+                        "invoice_title_fields_required",
                     }:
                         _create_waiting_task_from_event(db, event, team_id, user_id, session.id)
                     if event.get("event") == "final":

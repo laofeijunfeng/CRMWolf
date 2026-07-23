@@ -65,6 +65,20 @@ async def test_agent_graph_classifies_contact_intent():
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_classifies_invoice_title_intent():
+    service = CRMAgentGraphService()
+
+    result = await service.run({
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "content": "帮我给越秀金融创建发票抬头",
+    })
+
+    assert result["intent"] == "CREATE_INVOICE_TITLE"
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation():
     tool_service = FakeToolService()
     service = CRMAgentGraphService(tool_service=tool_service)
@@ -151,3 +165,49 @@ async def test_agent_graph_requires_contact_fields_when_missing():
     field_events = [event for event in result["events"] if event["event"] == "contact_fields_required"]
     assert field_events[0]["action"] == "collect_contact_fields"
     assert field_events[0]["payload"]["missing_fields"] == ["mobile", "position", "gender"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_invoice_title_confirmation_when_fields_complete():
+    tool_service = FakeToolService()
+    service = CRMAgentGraphService(tool_service=tool_service)
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "authorization": "Bearer test-token",
+        "content": "帮我给越秀金融创建发票抬头，抬头是越秀金融控股有限公司，税号91440000123456789X，设为默认",
+    })
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_invoice_title"
+    assert confirmation_events[0]["payload"] == {
+        "customer_id": 101,
+        "invoice_title": {
+            "title_type": "COMPANY",
+            "title": "越秀金融控股有限公司",
+            "taxpayer_id": "91440000123456789X",
+        },
+        "set_default": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_invoice_title_fields_when_missing():
+    tool_service = FakeToolService()
+    service = CRMAgentGraphService(tool_service=tool_service)
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "authorization": "Bearer test-token",
+        "content": "帮我给越秀金融创建发票抬头",
+    })
+
+    field_events = [event for event in result["events"] if event["event"] == "invoice_title_fields_required"]
+    assert field_events[0]["action"] == "collect_invoice_title_fields"
+    assert field_events[0]["payload"]["missing_fields"] == ["title", "taxpayer_id"]

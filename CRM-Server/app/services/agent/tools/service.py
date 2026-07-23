@@ -103,6 +103,39 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_contact", payload, action_key, call_api)
 
+    async def create_invoice_title(
+        self,
+        context: AgentToolContext,
+        customer_id: int,
+        invoice_title: JsonDict,
+        set_default: bool = False,
+    ) -> AgentToolResult:
+        payload = {
+            "customer_id": customer_id,
+            "invoice_title": invoice_title,
+            "set_default": set_default,
+        }
+        action_key = self._action_key("create_invoice_title", context, payload, None)
+
+        async def call_api():
+            created = await self.api_client.request(
+                "POST",
+                "/v1/invoice-titles",
+                context.authorization,
+                params={"customer_id": customer_id},
+                json=invoice_title,
+            )
+            if set_default and isinstance(created, dict) and created.get("id"):
+                updated = await self.api_client.request(
+                    "PATCH",
+                    f"/v1/invoice-titles/{created['id']}/set-default",
+                    context.authorization,
+                )
+                return {"invoice_title": updated, "set_default": True}
+            return {"invoice_title": created, "set_default": False}
+
+        return await self._run_write_tool(context, "create_invoice_title", payload, action_key, call_api)
+
     async def _get_customer_related_context(self, context: AgentToolContext, customer_id: int) -> JsonDict:
         related_paths = {
             "contracts": f"/v1/customers/{customer_id}/contracts",

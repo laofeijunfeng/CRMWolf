@@ -325,3 +325,101 @@ def test_agent_stream_collects_contact_fields_then_executes_confirmation(monkeyp
             db.close()
     finally:
         engine.dispose()
+
+
+def test_agent_stream_collects_invoice_title_fields_then_executes_confirmation(monkeypatch):
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "invoice_title_fields_required",
+                "action": "collect_invoice_title_fields",
+                "customer": {"id": 101, "account_name": "越秀金融"},
+                "payload": {
+                    "customer_id": 101,
+                    "invoice_title": {"title_type": "COMPANY"},
+                    "missing_fields": ["title", "taxpayer_id"],
+                    "set_default": False,
+                },
+            }
+            yield {"event": "final", "content": "还需要补充：开票抬头、纳税人识别号。"}
+
+    class FakeToolService:
+        async def create_invoice_title(self, context, **kwargs):
+            assert context.authorization == "Bearer test-token"
+            assert context.task_id is not None
+            assert kwargs["customer_id"] == 101
+            assert kwargs["invoice_title"] == {
+                "title_type": "COMPANY",
+                "title": "越秀金融控股有限公司",
+                "taxpayer_id": "91440000123456789X",
+            }
+            assert kwargs["set_default"] is True
+            return AgentToolResult(
+                tool_name="create_invoice_title",
+                success=True,
+                data={
+                    "invoice_title": {
+                        "id": 6001,
+                        "customer_id": 101,
+                        "title": "越秀金融控股有限公司",
+                    },
+                    "set_default": True,
+                },
+                tool_call_id=7201,
+            )
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "发票抬头会话"})
+        session = create_response.json()
+
+        plan_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮我给越秀金融创建发票抬头"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert plan_response.status_code == 200, plan_response.text
+        assert '"event": "invoice_title_fields_required"' in plan_response.text
+        assert '"task_id": 1' in plan_response.text
+
+        fill_response = client.post(
+            "/v1/agent/chat/stream",
+            json={
+                "session_id": session["id"],
+                "content": "抬头是越秀金融控股有限公司，税号91440000123456789X，设为默认",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert fill_response.status_code == 200, fill_response.text
+        assert '"event": "invoice_title_fields_completed"' in fill_response.text
+        assert "请确认是否为" in fill_response.text
+
+        confirm_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert confirm_response.status_code == 200, confirm_response.text
+        assert '"event": "task_completed"' in confirm_response.text
+        assert "发票抬头已创建" in confirm_response.text
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.COMPLETED
+            assert task.result_json == {
+                "invoice_title": {
+                    "id": 6001,
+                    "customer_id": 101,
+                    "title": "越秀金融控股有限公司",
+                },
+                "set_default": True,
+            }
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
