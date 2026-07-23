@@ -143,6 +143,11 @@ function mapContactGenderToApi(gender: string): '1' | '2' {
   return gender === '女' ? '2' : '1'
 }
 
+function handleProcurementMethodChange(value: string, handleChange: (value: number | undefined) => void): void {
+  const procurementMethodId = Number(value)
+  handleChange(Number.isFinite(procurementMethodId) && procurementMethodId > 0 ? procurementMethodId : undefined)
+}
+
 // Load customer detail in edit mode
 watch([(): boolean => props.open, (): number | undefined => props.customerId], async ([open, customerId]): Promise<void> => {
   if (open) {
@@ -360,7 +365,7 @@ function continueEditing(): void {
                   :options="procurementMethodSelectOptions"
                   :placeholder="procurementMethodsLoading ? '采购方式加载中' : '请选择采购方式'"
                   :disabled="procurementMethodsLoading"
-                  @update:model-value="handleChange"
+                  @update:model-value="(selectedValue) => handleProcurementMethodChange(selectedValue, handleChange)"
                 />
                 <FormMessage />
               </FormItem>
