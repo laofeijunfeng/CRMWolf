@@ -56,6 +56,7 @@ class CRMAgentToolService:
         context: AgentToolContext,
         customer_id: int,
         content: str,
+        customer_name: Optional[str] = None,
         method: str = "AI录入",
         next_action: Optional[str] = None,
         next_follow_time: Optional[str] = None,
@@ -63,6 +64,7 @@ class CRMAgentToolService:
     ) -> AgentToolResult:
         payload = {
             "customer_id": customer_id,
+            "customer_name": customer_name,
             "content": content,
             "method": method,
             "next_action": next_action,
@@ -73,9 +75,11 @@ class CRMAgentToolService:
         async def call_api():
             return await self.api_client.request(
                 "POST",
-                f"/v1/customer-follow-ups/{customer_id}",
+                "/v1/customers/ai/create",
                 context.authorization,
                 json={
+                    "customer_id": customer_id,
+                    "customer_name": customer_name or str(customer_id),
                     "content": content,
                     "method": method,
                     "next_action": next_action,

@@ -111,7 +111,9 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
             assert context.authorization == "Bearer test-token"
             assert context.task_id is not None
             assert kwargs["customer_id"] == 101
+            assert kwargs["customer_name"] == "越秀金融"
             assert kwargs["content"] == "今天和越秀金融的王总沟通了项目进展，下周三继续跟进"
+            assert kwargs["next_follow_time"] == "下周三"
             return AgentToolResult(
                 tool_name="create_customer_follow_up",
                 success=True,

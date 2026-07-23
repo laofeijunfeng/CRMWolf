@@ -38,8 +38,13 @@ class FakeCRMAPIClient:
         })
         if method == "GET" and path == "/v1/customers/":
             return {"items": [{"id": 101, "account_name": "越秀金融"}], "total": 1}
-        if method == "POST" and path == "/v1/customer-follow-ups/101":
-            return {"id": 9001, "customer_id": 101, "content": json["content"]}
+        if method == "POST" and path == "/v1/customers/ai/create":
+            return {
+                "id": 9001,
+                "customer_id": json["customer_id"],
+                "content": json["content"],
+                "next_follow_time": "2026-07-29T00:00:00",
+            }
         return {}
 
 
@@ -108,15 +113,19 @@ async def test_agent_tool_create_follow_up_is_idempotent():
         first = await service.create_customer_follow_up(
             context,
             customer_id=101,
+            customer_name="越秀金融",
             content="今天和王总沟通了项目进展",
             next_action="下周三确认进展",
+            next_follow_time="下周三",
             idempotency_suffix="msg-001",
         )
         second = await service.create_customer_follow_up(
             context,
             customer_id=101,
+            customer_name="越秀金融",
             content="今天和王总沟通了项目进展",
             next_action="下周三确认进展",
+            next_follow_time="下周三",
             idempotency_suffix="msg-001",
         )
 
@@ -124,7 +133,9 @@ async def test_agent_tool_create_follow_up_is_idempotent():
         assert second.success is True
         assert second.idempotent_replay is True
         assert len(fake_client.calls) == 1
-        assert fake_client.calls[0]["path"] == "/v1/customer-follow-ups/101"
+        assert fake_client.calls[0]["path"] == "/v1/customers/ai/create"
+        assert fake_client.calls[0]["json"]["customer_name"] == "越秀金融"
+        assert fake_client.calls[0]["json"]["next_follow_time"] == "下周三"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
     finally:

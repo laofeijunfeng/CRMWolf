@@ -122,6 +122,7 @@ async def _execute_waiting_task(
     state = task.state_json or {}
     action = state.get("action")
     payload = state.get("payload") or {}
+    customer = state.get("customer") or {}
     context = AgentToolContext(
         db=db,
         team_id=team_id,
@@ -137,9 +138,10 @@ async def _execute_waiting_task(
         result = await tool_service.create_customer_follow_up(
             context,
             customer_id=payload["customer_id"],
+            customer_name=customer.get("account_name"),
             content=payload["content"],
             next_action=payload.get("next_action"),
-            next_follow_time=None,
+            next_follow_time=payload.get("next_follow_time_text"),
             idempotency_suffix=task.task_key,
         )
     else:

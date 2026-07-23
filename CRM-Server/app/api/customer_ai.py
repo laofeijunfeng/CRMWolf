@@ -22,11 +22,11 @@ from app.core.deps import (
 from app.models.user import User
 
 # 已有功能（MagicWand）
-from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest
+from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest as CustomerFollowUpAICreateRequest
 from app.services.follow_up_parser import follow_up_parser_service
 
 # 新增功能（AI 创建客户）
-from app.schemas.customer_ai_create import CustomerAICreateParseRequest, CustomerAICreateRequest
+from app.schemas.customer_ai_create import CustomerAICreateParseRequest, CustomerAICreateRequest as CustomerCreateAIRequest
 from app.services.ai_parser.factory import EntityAIParserFactory
 
 
@@ -84,7 +84,7 @@ async def parse_customer_follow_up(
 
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 async def create_customer_follow_up(
-    request: CustomerAICreateRequest,
+    request: CustomerFollowUpAICreateRequest,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -187,7 +187,7 @@ async def parse_customer_create_info(
 
 @router.post("/create/submit", status_code=status.HTTP_201_CREATED)
 async def create_customer_from_ai(
-    request: CustomerAICreateRequest,
+    request: CustomerCreateAIRequest,
     current_user: User = Depends(get_current_active_user),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
