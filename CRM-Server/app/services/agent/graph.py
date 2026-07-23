@@ -44,11 +44,14 @@ class CRMAgentGraphService:
         content = state.get("content", "")
         intent = state.get("intent") or "GENERAL"
         customer_name = self._extract_customer_name(content, intent)
+        contact = self.parse_contact_fields_from_text(content) if intent == "CREATE_CONTACT" else {}
         next_follow_time = self._extract_next_follow_time(content)
         next_action = self._extract_next_action(content, next_follow_time)
         parsed = {
             "customer_name": customer_name,
             "follow_up_content": content,
+            "contact": contact,
+            "missing_contact_fields": self.missing_contact_fields(contact) if intent == "CREATE_CONTACT" else [],
             "next_action": next_action,
             "next_follow_time_text": next_follow_time,
         }
@@ -88,11 +91,11 @@ class CRMAgentGraphService:
 
         response, action = self._build_business_response(intent, parsed, candidates)
         if action:
-            event_name = (
-                "customer_selection_required"
-                if action.get("action") == "select_customer_for_follow_up"
-                else "confirmation_required"
-            )
+            event_name = "confirmation_required"
+            if action.get("action") in {"select_customer_for_follow_up", "select_customer_for_contact"}:
+                event_name = "customer_selection_required"
+            elif action.get("action") == "collect_contact_fields":
+                event_name = "contact_fields_required"
             events.append({"event": event_name, **action})
         events.append({
             "event": "final",
@@ -209,9 +212,102 @@ class CRMAgentGraphService:
         if intent == "CREATE_CONTACT":
             if not customer_name:
                 return "我识别到这是创建联系人，但还缺少明确客户名称。请补充客户名称。", None
-            return f"我识别到要为「{customer_name}」创建联系人。下一步需要确认联系人手机号、职务等必填信息。", None
+            contact = parsed.get("contact") or {}
+            missing_fields = CRMAgentGraphService.missing_contact_fields(contact)
+            if len(candidates) == 1:
+                customer = candidates[0]
+                if missing_fields:
+                    return (
+                        f"我识别到要为「{customer.get('account_name')}」创建联系人，"
+                        f"还需要补充：{CRMAgentGraphService.format_contact_missing_fields(missing_fields)}。"
+                    ), {
+                        "action": "collect_contact_fields",
+                        "customer": customer,
+                        "payload": {
+                            "customer_id": customer.get("id"),
+                            "contact": contact,
+                            "missing_fields": missing_fields,
+                        },
+                    }
+                return (
+                    f"我识别到要为「{customer.get('account_name')}」创建联系人「{contact.get('name')}」。"
+                    "请确认是否创建？"
+                ), {
+                    "action": "create_contact",
+                    "customer": customer,
+                    "payload": {
+                        "customer_id": customer.get("id"),
+                        "contact": contact,
+                    },
+                }
+            if len(candidates) > 1:
+                candidate_lines = [
+                    f"{index}. {customer.get('account_name')}"
+                    for index, customer in enumerate(candidates, start=1)
+                ]
+                return (
+                    "我找到了多个可能的客户，请回复序号或客户名称确认要把联系人创建到哪一个客户："
+                    + "；".join(candidate_lines)
+                ), {
+                    "action": "select_customer_for_contact",
+                    "customers": candidates,
+                    "payload": {
+                        "contact": contact,
+                        "missing_fields": missing_fields,
+                    },
+                }
+            return f"我识别到要为「{customer_name}」创建联系人，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
 
         return "已收到消息。当前 Agent 优先处理客户跟进、联系人维护和回款登记场景。", None
+
+    @staticmethod
+    def parse_contact_fields_from_text(content: str) -> Dict[str, Any]:
+        contact: Dict[str, Any] = {"is_decision_maker": False}
+        name_match = re.search(
+            r"联系人(?P<name>[\u4e00-\u9fa5A-Za-z·]{2,20})(?:，|,|。|；|;|\s|$)",
+            content,
+        )
+        if name_match:
+            contact["name"] = name_match.group("name").strip()
+
+        mobile_match = re.search(r"1[3-9]\d{9}", content)
+        if mobile_match:
+            contact["mobile"] = mobile_match.group(0)
+
+        position_match = re.search(r"(?:职务|职位|岗位)[:：是为\s]*(?P<position>[^，,。；;\s]+)", content)
+        if position_match:
+            contact["position"] = position_match.group("position").strip()
+
+        if re.search(r"未知|不清楚|不确定", content):
+            contact["gender"] = "0"
+        elif re.search(r"女士|女性|女\b", content):
+            contact["gender"] = "2"
+        elif re.search(r"先生|男性|男\b", content):
+            contact["gender"] = "1"
+
+        if re.search(r"决策人|关键人|关键决策", content):
+            contact["is_decision_maker"] = True
+
+        email_match = re.search(r"[\w.\-+]+@[\w.\-]+\.\w+", content)
+        if email_match:
+            contact["email"] = email_match.group(0)
+
+        return {key: value for key, value in contact.items() if value not in (None, "")}
+
+    @staticmethod
+    def missing_contact_fields(contact: Dict[str, Any]) -> List[str]:
+        required_fields = ["name", "mobile", "position", "gender"]
+        return [field for field in required_fields if not contact.get(field)]
+
+    @staticmethod
+    def format_contact_missing_fields(fields: List[str]) -> str:
+        labels = {
+            "name": "联系人姓名",
+            "mobile": "手机号",
+            "position": "职务",
+            "gender": "性别（男/女/未知）",
+        }
+        return "、".join(labels.get(field, field) for field in fields)
 
 
 crm_agent_graph_service = CRMAgentGraphService()

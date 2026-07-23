@@ -25,6 +25,7 @@ from app.schemas.agent import (
 )
 from app.schemas.common import PaginatedResponse
 from app.services.agent import crm_agent_graph_service
+from app.services.agent.graph import CRMAgentGraphService
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext
 from app.utils.sse_encoder import SSEJsonEncoder
@@ -89,7 +90,12 @@ def _is_confirmation(content: str) -> bool:
 
 def _is_customer_selection_task(task) -> bool:
     state = task.state_json or {}
-    return state.get("action") == "select_customer_for_follow_up"
+    return state.get("action") in {"select_customer_for_follow_up", "select_customer_for_contact"}
+
+
+def _is_contact_fields_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "collect_contact_fields"
 
 
 def _select_customer_candidate(content: str, customers: list[dict]) -> Optional[dict]:
@@ -106,12 +112,44 @@ def _select_customer_candidate(content: str, customers: list[dict]) -> Optional[
     return None
 
 
+def _contact_task_next_state(action: str, state: dict, customer: dict):
+    payload = state.get("payload") or {}
+    contact = payload.get("contact") or {}
+    if action == "select_customer_for_contact":
+        payload["customer_id"] = customer.get("id")
+        missing_fields = CRMAgentGraphService.missing_contact_fields(contact)
+        if missing_fields:
+            payload["missing_fields"] = missing_fields
+            return (
+                "collect_contact_fields",
+                payload,
+                f"已选择客户「{customer.get('account_name')}」，还需要补充："
+                f"{CRMAgentGraphService.format_contact_missing_fields(missing_fields)}。",
+            )
+        return (
+            "create_contact",
+            {"customer_id": customer.get("id"), "contact": contact},
+            f"已选择客户「{customer.get('account_name')}」。请确认是否创建联系人「{contact.get('name')}」？",
+        )
+
+    payload["customer_id"] = customer.get("id")
+    return (
+        "create_customer_follow_up",
+        payload,
+        f"已选择客户「{customer.get('account_name')}」。请确认是否创建这条跟进记录？",
+    )
+
+
 def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user_id: int, session_id: int):
     action = event.get("action")
     payload = event.get("payload") or {}
     customer = event.get("customer")
     customers = event.get("customers") or []
-    intent = "CUSTOMER_FOLLOW_UP" if action in {"create_customer_follow_up", "select_customer_for_follow_up"} else None
+    intent = None
+    if action in {"create_customer_follow_up", "select_customer_for_follow_up"}:
+        intent = "CUSTOMER_FOLLOW_UP"
+    elif action in {"create_contact", "select_customer_for_contact", "collect_contact_fields"}:
+        intent = "CREATE_CONTACT"
     task = agent_task_crud.create(
         db,
         AgentTaskCreate(
@@ -135,6 +173,7 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
 
 def _apply_customer_selection(db: Session, task, content: str):
     state = task.state_json or {}
+    action = state.get("action")
     customers = state.get("customers") or []
     customer = _select_customer_candidate(content, customers)
     if not customer:
@@ -144,10 +183,9 @@ def _apply_customer_selection(db: Session, task, content: str):
         )
         return None, f"没有匹配到你选择的客户，请回复序号或完整客户名称：{candidate_names}"
 
-    payload = state.get("payload") or {}
-    payload["customer_id"] = customer.get("id")
+    next_action, payload, message = _contact_task_next_state(action, state, customer)
     new_state = {
-        "action": "create_customer_follow_up",
+        "action": next_action,
         "payload": payload,
         "customer": customer,
     }
@@ -156,12 +194,51 @@ def _apply_customer_selection(db: Session, task, content: str):
         task,
         AgentTaskUpdate(
             target_id=customer.get("id"),
-            summary="等待确认执行：create_customer_follow_up",
+            summary=f"等待确认执行：{next_action}",
             input_json=payload,
             state_json=new_state,
         ),
     )
-    return customer, f"已选择客户「{customer.get('account_name')}」。请确认是否创建这条跟进记录？"
+    return customer, message
+
+
+def _merge_contact_fields(existing_contact: dict, content: str) -> dict:
+    parsed_contact = CRMAgentGraphService.parse_contact_fields_from_text(content)
+    return {**existing_contact, **parsed_contact}
+
+
+def _apply_contact_fields(db: Session, task, content: str):
+    state = task.state_json or {}
+    customer = state.get("customer") or {}
+    payload = state.get("payload") or {}
+    contact = _merge_contact_fields(payload.get("contact") or {}, content)
+    missing_fields = CRMAgentGraphService.missing_contact_fields(contact)
+    payload["contact"] = contact
+    payload["missing_fields"] = missing_fields
+
+    if missing_fields:
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        return False, (
+            "还需要补充："
+            f"{CRMAgentGraphService.format_contact_missing_fields(missing_fields)}。"
+        )
+
+    payload = {"customer_id": payload.get("customer_id"), "contact": contact}
+    new_state = {
+        "action": "create_contact",
+        "payload": payload,
+        "customer": customer,
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            summary="等待确认执行：create_contact",
+            input_json=payload,
+            state_json=new_state,
+        ),
+    )
+    return True, f"联系人信息已补齐。请确认是否为「{customer.get('account_name')}」创建联系人「{contact.get('name')}」？"
 
 
 async def _execute_waiting_task(
@@ -197,6 +274,12 @@ async def _execute_waiting_task(
             next_follow_time=payload.get("next_follow_time_text"),
             idempotency_suffix=task.task_key,
         )
+    elif action == "create_contact":
+        result = await tool_service.create_contact(
+            context,
+            customer_id=payload["customer_id"],
+            contact=payload["contact"],
+        )
     else:
         result = None
 
@@ -206,6 +289,8 @@ async def _execute_waiting_task(
             task,
             AgentTaskUpdate(status=AgentTaskStatus.COMPLETED, result_json=result.data),
         )
+        if action == "create_contact":
+            return result, "联系人已创建。"
         return result, "跟进记录已创建。"
 
     error_message = result.error_message if result else f"暂不支持的执行动作：{action}"
@@ -349,7 +434,15 @@ async def stream_agent_chat(
                 team_id=team_id,
                 user_id=user_id,
             )
-            if task and _is_customer_selection_task(task):
+            if task and _is_contact_fields_task(task):
+                ready, assistant_content = _apply_contact_fields(db, task, request.content)
+                yield _encode_sse({
+                    "event": "contact_fields_completed" if ready else "contact_fields_required",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                })
+                yield _encode_sse({"event": "final", "content": assistant_content})
+            elif task and _is_customer_selection_task(task):
                 customer, assistant_content = _apply_customer_selection(db, task, request.content)
                 if customer:
                     yield _encode_sse({
@@ -395,7 +488,11 @@ async def stream_agent_chat(
                     "content": request.content,
                     "authorization": authorization,
                 }):
-                    if event.get("event") in {"confirmation_required", "customer_selection_required"}:
+                    if event.get("event") in {
+                        "confirmation_required",
+                        "customer_selection_required",
+                        "contact_fields_required",
+                    }:
                         _create_waiting_task_from_event(db, event, team_id, user_id, session.id)
                     if event.get("event") == "final":
                         assistant_content = event.get("content")

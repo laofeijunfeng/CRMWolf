@@ -244,3 +244,84 @@ def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatc
             db.close()
     finally:
         engine.dispose()
+
+
+def test_agent_stream_collects_contact_fields_then_executes_confirmation(monkeypatch):
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "contact_fields_required",
+                "action": "collect_contact_fields",
+                "customer": {"id": 101, "account_name": "越秀金融"},
+                "payload": {
+                    "customer_id": 101,
+                    "contact": {"name": "王总", "is_decision_maker": False},
+                    "missing_fields": ["mobile", "position", "gender"],
+                },
+            }
+            yield {"event": "final", "content": "还需要补充：手机号、职务、性别。"}
+
+    class FakeToolService:
+        async def create_contact(self, context, **kwargs):
+            assert context.authorization == "Bearer test-token"
+            assert context.task_id is not None
+            assert kwargs["customer_id"] == 101
+            assert kwargs["contact"] == {
+                "name": "王总",
+                "is_decision_maker": False,
+                "mobile": "13800138000",
+                "position": "总经理",
+                "gender": "1",
+            }
+            return AgentToolResult(
+                tool_name="create_contact",
+                success=True,
+                data={"id": 8001, "customer_id": 101, "name": "王总"},
+                tool_call_id=7101,
+            )
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "联系人会话"})
+        session = create_response.json()
+
+        plan_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮我给越秀金融创建联系人王总"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert plan_response.status_code == 200, plan_response.text
+        assert '"event": "contact_fields_required"' in plan_response.text
+        assert '"task_id": 1' in plan_response.text
+
+        fill_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "手机号13800138000，职务总经理，男"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert fill_response.status_code == 200, fill_response.text
+        assert '"event": "contact_fields_completed"' in fill_response.text
+        assert "请确认是否为" in fill_response.text
+
+        confirm_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert confirm_response.status_code == 200, confirm_response.text
+        assert '"event": "task_completed"' in confirm_response.text
+        assert "联系人已创建" in confirm_response.text
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.COMPLETED
+            assert task.result_json == {"id": 8001, "customer_id": 101, "name": "王总"}
+        finally:
+            db.close()
+    finally:
+        engine.dispose()

@@ -107,3 +107,47 @@ async def test_agent_graph_requires_customer_selection_when_multiple_candidates(
     assert selection_events[0]["action"] == "select_customer_for_follow_up"
     assert selection_events[0]["customers"][1]["id"] == 102
     assert "请回复序号或客户名称" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_contact_confirmation_when_fields_complete():
+    tool_service = FakeToolService()
+    service = CRMAgentGraphService(tool_service=tool_service)
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "authorization": "Bearer test-token",
+        "content": "帮我给越秀金融创建联系人王总，手机号13800138000，职务总经理，男",
+    })
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_contact"
+    assert confirmation_events[0]["payload"]["contact"] == {
+        "is_decision_maker": False,
+        "name": "王总",
+        "mobile": "13800138000",
+        "position": "总经理",
+        "gender": "1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_contact_fields_when_missing():
+    tool_service = FakeToolService()
+    service = CRMAgentGraphService(tool_service=tool_service)
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "authorization": "Bearer test-token",
+        "content": "帮我给越秀金融创建联系人王总",
+    })
+
+    field_events = [event for event in result["events"] if event["event"] == "contact_fields_required"]
+    assert field_events[0]["action"] == "collect_contact_fields"
+    assert field_events[0]["payload"]["missing_fields"] == ["mobile", "position", "gender"]
