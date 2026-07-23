@@ -56,6 +56,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '销售看板' }
       },
       {
+        path: 'agent',
+        name: 'AgentChat',
+        component: () => import('@/views/AgentChat.vue'),
+        meta: { requiresAuth: true, title: 'CRM AI Agent' }
+      },
+      {
         path: 'leads',
         name: 'Leads',
         component: () => import('@/views/Leads.vue'),

@@ -22,6 +22,18 @@
           </a>
           <a
             class="nav-item"
+            :class="{ active: currentPath.startsWith('/agent') }"
+            role="menuitem"
+            :aria-current="currentPath.startsWith('/agent') ? 'page' : undefined"
+            :aria-label="`CRM AI Agent${currentPath.startsWith('/agent') ? '（当前页面）' : ''}`"
+            @click="handleMenuClick('/agent')"
+            @keydown.enter="handleMenuClick('/agent')"
+          >
+            <component :is="Bot" class="nav-item-icon" aria-hidden="true" />
+            <span class="nav-item-text">CRM AI Agent</span>
+          </a>
+          <a
+            class="nav-item"
             :class="{ active: currentPath.startsWith('/leads') }"
             role="menuitem"
             :aria-current="currentPath.startsWith('/leads') ? 'page' : undefined"
@@ -384,6 +396,7 @@ import {
   Check,
   ArrowLeft,
   MoreHorizontal,
+  Bot,
 } from 'lucide-vue-next'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import BottomNav from '@/components/crmwolf/BottomNav.vue'
