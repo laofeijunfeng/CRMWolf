@@ -339,7 +339,10 @@ class CustomerCRUD:
             team_id = db_obj.team_id
 
         # 检查是否存在关联合同
-        contracts = db.query(Contract).filter(Contract.customer_id == db_obj.id).count()
+        contracts = db.query(Contract).filter(
+            Contract.customer_id == db_obj.id,
+            Contract.deleted_at.is_(None)
+        ).count()
         if contracts > 0:
             raise ValueError(f"该客户存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
 
