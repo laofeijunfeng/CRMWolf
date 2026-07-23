@@ -200,6 +200,7 @@ async def stream_agent_chat(
 
             assistant_content = None
             async for event in crm_agent_graph_service.stream_events({
+                "db": db,
                 "team_id": team_id,
                 "user_id": user_id,
                 "session_id": session.id,
