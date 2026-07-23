@@ -45,6 +45,7 @@ from app.schemas.deployment import (
 )
 from app.schemas.agent import (
     AgentSessionCreate,
+    AgentCreateSessionRequest,
     AgentSessionUpdate,
     AgentSessionResponse,
     AgentSessionDetailResponse,
@@ -59,6 +60,7 @@ from app.schemas.agent import (
     AgentIdempotencyKeyCreate,
     AgentIdempotencyKeyUpdate,
     AgentIdempotencyKeyResponse,
+    AgentChatRequest,
 )
 
 __all__ = [
@@ -96,6 +98,7 @@ __all__ = [
     "DeploymentInfoListResponse",
     "DeploymentInfoMessageResponse",
     "AgentSessionCreate",
+    "AgentCreateSessionRequest",
     "AgentSessionUpdate",
     "AgentSessionResponse",
     "AgentSessionDetailResponse",
@@ -110,4 +113,5 @@ __all__ = [
     "AgentIdempotencyKeyCreate",
     "AgentIdempotencyKeyUpdate",
     "AgentIdempotencyKeyResponse",
+    "AgentChatRequest",
 ]

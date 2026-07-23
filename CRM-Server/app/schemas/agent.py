@@ -16,6 +16,11 @@ class AgentSessionCreate(BaseModel):
     context_json: Optional[JsonDict] = Field(None, description="会话上下文快照")
 
 
+class AgentCreateSessionRequest(BaseModel):
+    title: Optional[str] = Field(None, max_length=200, description="会话标题")
+    context_json: Optional[JsonDict] = Field(None, description="会话上下文快照")
+
+
 class AgentSessionUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=200, description="会话标题")
     status: Optional[str] = Field(None, max_length=20, description="会话状态")
@@ -186,3 +191,9 @@ class AgentIdempotencyKeyResponse(BaseModel):
 class AgentSessionDetailResponse(AgentSessionResponse):
     messages: List[AgentMessageResponse] = Field(default_factory=list, description="会话消息")
     tasks: List[AgentTaskResponse] = Field(default_factory=list, description="会话任务")
+
+
+class AgentChatRequest(BaseModel):
+    content: str = Field(..., min_length=1, description="用户消息内容")
+    session_id: Optional[int] = Field(None, description="Agent会话ID")
+    session_key: Optional[str] = Field(None, max_length=64, description="Agent会话唯一标识")
