@@ -1,85 +1,117 @@
 """CRM AI Agent LangGraph service."""
-import re
+from __future__ import annotations
+
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
 
+from app.services.agent.memory import AgentMemoryService, agent_memory_service
+from app.services.agent.schemas import AgentSemanticParseResult
+from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.state import AgentGraphState
+from app.services.agent.temporal import AgentTemporalResolver, agent_temporal_resolver
+from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_registry
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext
 
 
 class CRMAgentGraphService:
-    def __init__(self, tool_service: Optional[CRMAgentToolService] = None) -> None:
-        self.tool_service = tool_service or CRMAgentToolService()
+    def __init__(
+        self,
+        tool_service: Optional[CRMAgentToolService] = None,
+        semantic_parser: Optional[AgentSemanticParser] = None,
+        memory_service: Optional[AgentMemoryService] = None,
+        tool_registry: Optional[AgentToolRegistry] = None,
+        temporal_resolver: Optional[AgentTemporalResolver] = None,
+    ) -> None:
+        self.semantic_parser = semantic_parser or agent_semantic_parser
+        self.memory_service = memory_service or agent_memory_service
+        self.temporal_resolver = temporal_resolver or agent_temporal_resolver
+        if tool_registry:
+            self.tool_registry = tool_registry
+        elif tool_service:
+            self.tool_registry = AgentToolRegistry(tool_service)
+        else:
+            self.tool_registry = agent_tool_registry
         self._graph = self._build_graph()
 
     def _build_graph(self):
         graph = StateGraph(AgentGraphState)
-        graph.add_node("classify_intent", self._classify_intent)
-        graph.add_node("parse_message", self._parse_message)
+        graph.add_node("load_memory", self._load_memory)
+        graph.add_node("semantic_parse", self._semantic_parse)
         graph.add_node("search_customer", self._search_customer)
         graph.add_node("build_response", self._build_response)
-        graph.add_edge(START, "classify_intent")
-        graph.add_edge("classify_intent", "parse_message")
-        graph.add_edge("parse_message", "search_customer")
+        graph.add_edge(START, "load_memory")
+        graph.add_edge("load_memory", "semantic_parse")
+        graph.add_edge("semantic_parse", "search_customer")
         graph.add_edge("search_customer", "build_response")
         graph.add_edge("build_response", END)
         return graph.compile()
 
-    def _classify_intent(self, state: AgentGraphState) -> AgentGraphState:
-        content = state.get("content", "")
-        intent = "GENERAL"
-
-        if re.search(r"(?:创建|新增|添加|新建).*?(?:部署信息|部署)", content):
-            intent = "CREATE_DEPLOYMENT_INFO"
-        elif "发票抬头" in content or "开票抬头" in content:
-            intent = "CREATE_INVOICE_TITLE"
-        elif "回款" in content or "到账" in content or "打款" in content:
-            intent = "PAYMENT_RECORD"
-        elif "联系人" in content:
-            intent = "CREATE_CONTACT"
-        elif "跟进" in content or "沟通" in content or "客户" in content:
-            intent = "CUSTOMER_FOLLOW_UP"
-
-        return {"intent": intent}
-
-    def _parse_message(self, state: AgentGraphState) -> AgentGraphState:
-        content = state.get("content", "")
-        intent = state.get("intent") or "GENERAL"
-        customer_name = self._extract_customer_name(content, intent)
-        contact = self.parse_contact_fields_from_text(content) if intent == "CREATE_CONTACT" else {}
-        invoice_title = self.parse_invoice_title_fields_from_text(content) if intent == "CREATE_INVOICE_TITLE" else {}
-        deployment_info = (
-            self.parse_deployment_info_fields_from_text(content) if intent == "CREATE_DEPLOYMENT_INFO" else {}
+    def _load_memory(self, state: AgentGraphState) -> AgentGraphState:
+        db = state.get("db")
+        if not db:
+            return {}
+        memory = self.memory_service.load_snapshot(
+            db,
+            team_id=state["team_id"],
+            user_id=state["user_id"],
+            session_id=state["session_id"],
         )
-        next_follow_time = self._extract_next_follow_time(content)
-        next_action = self._extract_next_action(content, next_follow_time)
-        parsed = {
-            "customer_name": customer_name,
-            "follow_up_content": content,
-            "contact": contact,
-            "missing_contact_fields": self.missing_contact_fields(contact) if intent == "CREATE_CONTACT" else [],
-            "invoice_title": invoice_title,
-            "missing_invoice_title_fields": (
-                self.missing_invoice_title_fields(invoice_title) if intent == "CREATE_INVOICE_TITLE" else []
-            ),
-            "deployment_info": deployment_info,
-            "missing_deployment_info_fields": (
-                self.missing_deployment_info_fields(deployment_info) if intent == "CREATE_DEPLOYMENT_INFO" else []
-            ),
-            "next_action": next_action,
-            "next_follow_time_text": next_follow_time,
-        }
         return {
+            "memory": memory,
+            "events": [{"event": "memory_loaded"}],
+        }
+
+    async def _semantic_parse(self, state: AgentGraphState) -> AgentGraphState:
+        try:
+            if hasattr(self.semantic_parser, "parse_with_metadata"):
+                envelope = await self.semantic_parser.parse_with_metadata(
+                    state["db"],
+                    team_id=state["team_id"],
+                    user_message=state.get("content", ""),
+                    memory=state.get("memory"),
+                )
+                semantic_result = envelope.result
+                parse_source = envelope.parse_source
+                model_name = envelope.model
+            else:
+                semantic_result = await self.semantic_parser.parse(
+                    state["db"],
+                    team_id=state["team_id"],
+                    user_message=state.get("content", ""),
+                    memory=state.get("memory"),
+                )
+                parse_source = "test_parser"
+                model_name = None
+        except AgentSemanticParserError as exc:
+            return {
+                "intent": "UNKNOWN",
+                "semantic_error": str(exc),
+                "events": [{"event": "semantic_parse_failed", "message": str(exc)}],
+            }
+
+        parsed = self._parsed_from_semantic(semantic_result, state.get("content", ""))
+        return {
+            "intent": semantic_result.intent,
+            "semantic_result": semantic_result,
+            "semantic_metadata": {
+                "parse_source": parse_source,
+                "model": model_name,
+            },
             "parsed": parsed,
-            "events": [{"event": "entity_parse", "intent": intent, "parsed": parsed}],
         }
 
     async def _search_customer(self, state: AgentGraphState) -> AgentGraphState:
+        semantic_result = state.get("semantic_result")
         parsed = state.get("parsed") or {}
         customer_name = parsed.get("customer_name")
-        if not customer_name or not state.get("authorization") or not state.get("db"):
+        if (
+            not customer_name
+            or not state.get("authorization")
+            or not state.get("db")
+            or self._requires_clarification(semantic_result)
+        ):
             return {}
 
         context = AgentToolContext(
@@ -89,7 +121,11 @@ class CRMAgentGraphService:
             session_id=state["session_id"],
             authorization=state["authorization"],
         )
-        result = await self.tool_service.search_customers(context, customer_name, limit=10)
+        result = await self.tool_registry.execute(
+            "search_customers",
+            context,
+            {"keyword": customer_name, "limit": 10},
+        )
         events = [result.to_event()]
         candidates = self._extract_customer_candidates(result.data) if result.success else []
         if candidates:
@@ -97,13 +133,42 @@ class CRMAgentGraphService:
         return {"customer_candidates": candidates, "events": events}
 
     def _build_response(self, state: AgentGraphState) -> AgentGraphState:
-        intent = state.get("intent") or "GENERAL"
+        intent = state.get("intent") or "UNKNOWN"
+        semantic_result = state.get("semantic_result")
         parsed = state.get("parsed") or {}
         candidates = state.get("customer_candidates") or []
         events = [{"event": "intent", "intent": intent}]
 
+        if semantic_result:
+            semantic_metadata = state.get("semantic_metadata") or {}
+            events.append({
+                "event": "semantic_parsed",
+                "intent": semantic_result.intent,
+                "confidence": semantic_result.intent_confidence,
+                "parse_source": semantic_metadata.get("parse_source"),
+                "model": semantic_metadata.get("model"),
+                "need_clarification": semantic_result.need_clarification,
+                "parsed": parsed,
+            })
+
         if state.get("events"):
             events.extend(state["events"])
+
+        if state.get("semantic_error"):
+            response = state["semantic_error"]
+            events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
+            return {"response": response, "events": events}
+
+        if self._requires_clarification(semantic_result):
+            response = semantic_result.clarification_question or "我还不能可靠理解你的诉求，请补充客户名称、业务内容或要执行的动作。"
+            events.append({
+                "event": "clarification_required",
+                "intent": intent,
+                "content": response,
+                "semantic": semantic_result.model_dump(exclude_none=True) if semantic_result else None,
+            })
+            events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
+            return {"response": response, "events": events}
 
         response, action = self._build_business_response(intent, parsed, candidates)
         if action:
@@ -140,39 +205,63 @@ class CRMAgentGraphService:
             yield event
 
     @staticmethod
-    def _extract_customer_name(content: str, intent: str) -> Optional[str]:
-        patterns = [
-            r"和(?P<name>.+?)的[^，,。；;]*?(?:沟通|聊|交流|确认)",
-            r"给(?P<name>.+?)(?:创建|新增|加).*?联系人",
-            r"给(?P<name>.+?)(?:创建|新增|添加).*?(?:发票抬头|开票抬头)",
-            r"给(?P<name>.+?)(?:创建|新增|添加|新建).*?(?:部署信息|部署)",
-            r"(?P<name>[\u4e00-\u9fa5A-Za-z0-9（）()·]{2,30}?)(?:今天|已|刚刚|昨日|昨天)?.*?(?:回款|到账|打款)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, content)
-            if match:
-                name = match.group("name").strip(" ，,。；;")
-                return name or None
-        if intent == "CUSTOMER_FOLLOW_UP":
-            match = re.search(r"([\u4e00-\u9fa5A-Za-z0-9（）()·]{2,30}?)(?:项目|客户|王总|李总|张总)", content)
-            if match:
-                return match.group(1).strip(" ，,。；;")
-        return None
+    def _requires_clarification(semantic_result: Optional[AgentSemanticParseResult]) -> bool:
+        if semantic_result is None:
+            return False
+        return (
+            semantic_result.need_clarification
+            or semantic_result.intent == "UNKNOWN"
+            or semantic_result.intent_confidence < 0.75
+            or (
+                semantic_result.intent != "UNKNOWN"
+                and semantic_result.intent != "CUSTOMER_QUERY"
+                and semantic_result.customer.confidence < 0.7
+            )
+        )
+
+    def _parsed_from_semantic(self, semantic_result: AgentSemanticParseResult, original_content: str) -> Dict[str, Any]:
+        contact = dict(semantic_result.contact or {})
+        invoice_title = dict(semantic_result.invoice_title or {})
+        deployment_info = dict(semantic_result.deployment_info or {})
+        next_follow_time_iso = self.temporal_resolver.resolve_follow_up_time(
+            semantic_result.follow_up.next_follow_time,
+        )
+        return {
+            "customer_name": semantic_result.customer.name_text,
+            "follow_up_content": semantic_result.follow_up.content or original_content,
+            "method": semantic_result.follow_up.method or "AI录入",
+            "contact": CRMAgentGraphService._drop_empty_values(contact),
+            "missing_contact_fields": (
+                semantic_result.missing_fields
+                if semantic_result.intent == "CREATE_CONTACT" and semantic_result.missing_fields
+                else CRMAgentGraphService.missing_contact_fields(contact)
+                if semantic_result.intent == "CREATE_CONTACT"
+                else []
+            ),
+            "invoice_title": CRMAgentGraphService._drop_empty_values(invoice_title),
+            "missing_invoice_title_fields": (
+                semantic_result.missing_fields
+                if semantic_result.intent == "CREATE_INVOICE_TITLE" and semantic_result.missing_fields
+                else CRMAgentGraphService.missing_invoice_title_fields(invoice_title)
+                if semantic_result.intent == "CREATE_INVOICE_TITLE"
+                else []
+            ),
+            "deployment_info": CRMAgentGraphService._drop_empty_values(deployment_info),
+            "missing_deployment_info_fields": (
+                semantic_result.missing_fields
+                if semantic_result.intent == "CREATE_DEPLOYMENT_INFO" and semantic_result.missing_fields
+                else CRMAgentGraphService.missing_deployment_info_fields(deployment_info)
+                if semantic_result.intent == "CREATE_DEPLOYMENT_INFO"
+                else []
+            ),
+            "next_action": semantic_result.follow_up.next_action,
+            "next_follow_time_text": semantic_result.follow_up.next_follow_time_text,
+            "next_follow_time_iso": next_follow_time_iso,
+        }
 
     @staticmethod
-    def _extract_next_follow_time(content: str) -> Optional[str]:
-        match = re.search(r"(下周[一二三四五六日天]|明天|后天|下个月|月底|周[一二三四五六日天])", content)
-        return match.group(1) if match else None
-
-    @staticmethod
-    def _extract_next_action(content: str, next_follow_time: Optional[str]) -> Optional[str]:
-        if not next_follow_time:
-            return None
-        start = content.find(next_follow_time)
-        if start < 0:
-            return None
-        action = content[start:].strip(" ，,。；;")
-        return action or None
+    def _drop_empty_values(payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {key: value for key, value in payload.items() if value not in (None, "")}
 
     @staticmethod
     def _extract_customer_candidates(data: Any) -> List[Dict[str, Any]]:
@@ -208,8 +297,10 @@ class CRMAgentGraphService:
                     "payload": {
                         "customer_id": customer.get("id"),
                         "content": parsed.get("follow_up_content"),
+                        "method": parsed.get("method") or "AI录入",
                         "next_action": parsed.get("next_action"),
                         "next_follow_time_text": parsed.get("next_follow_time_text"),
+                        "next_follow_time_iso": parsed.get("next_follow_time_iso"),
                     },
                 }
             if len(candidates) > 1:
@@ -225,8 +316,10 @@ class CRMAgentGraphService:
                     "customers": candidates,
                     "payload": {
                         "content": parsed.get("follow_up_content"),
+                        "method": parsed.get("method") or "AI录入",
                         "next_action": parsed.get("next_action"),
                         "next_follow_time_text": parsed.get("next_follow_time_text"),
+                        "next_follow_time_iso": parsed.get("next_follow_time_iso"),
                     },
                 }
             return f"我识别到客户「{customer_name}」，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
@@ -290,9 +383,9 @@ class CRMAgentGraphService:
                 return "我识别到这是创建发票抬头，但还缺少明确客户名称。请补充客户名称。", None
             invoice_title = parsed.get("invoice_title") or {}
             missing_fields = CRMAgentGraphService.missing_invoice_title_fields(invoice_title)
+            set_default = bool(invoice_title.pop("set_default", False))
             if len(candidates) == 1:
                 customer = candidates[0]
-                set_default = bool(invoice_title.pop("set_default", False))
                 if missing_fields:
                     return (
                         f"我识别到要为「{customer.get('account_name')}」创建发票抬头，"
@@ -324,7 +417,6 @@ class CRMAgentGraphService:
                     f"{index}. {customer.get('account_name')}"
                     for index, customer in enumerate(candidates, start=1)
                 ]
-                set_default = bool(invoice_title.pop("set_default", False))
                 return (
                     "我找到了多个可能的客户，请回复序号或客户名称确认要把发票抬头创建到哪一个客户："
                     + "；".join(candidate_lines)
@@ -389,41 +481,10 @@ class CRMAgentGraphService:
                 }
             return f"我识别到要为「{customer_name}」创建部署信息，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
 
-        return "已收到消息。当前 Agent 优先处理客户跟进、联系人维护、发票抬头、部署信息和回款登记场景。", None
+        if intent == "CUSTOMER_QUERY":
+            return "我识别到这是查询请求。下一步会接入客户上下文查询和汇总能力。", None
 
-    @staticmethod
-    def parse_contact_fields_from_text(content: str) -> Dict[str, Any]:
-        contact: Dict[str, Any] = {"is_decision_maker": False}
-        name_match = re.search(
-            r"联系人(?P<name>[\u4e00-\u9fa5A-Za-z·]{2,20})(?:，|,|。|；|;|\s|$)",
-            content,
-        )
-        if name_match:
-            contact["name"] = name_match.group("name").strip()
-
-        mobile_match = re.search(r"1[3-9]\d{9}", content)
-        if mobile_match:
-            contact["mobile"] = mobile_match.group(0)
-
-        position_match = re.search(r"(?:职务|职位|岗位)[:：是为\s]*(?P<position>[^，,。；;\s]+)", content)
-        if position_match:
-            contact["position"] = position_match.group("position").strip()
-
-        if re.search(r"未知|不清楚|不确定", content):
-            contact["gender"] = "0"
-        elif re.search(r"女士|女性|女\b", content):
-            contact["gender"] = "2"
-        elif re.search(r"先生|男性|男\b", content):
-            contact["gender"] = "1"
-
-        if re.search(r"决策人|关键人|关键决策", content):
-            contact["is_decision_maker"] = True
-
-        email_match = re.search(r"[\w.\-+]+@[\w.\-]+\.\w+", content)
-        if email_match:
-            contact["email"] = email_match.group(0)
-
-        return {key: value for key, value in contact.items() if value not in (None, "")}
+        return "我还不能可靠理解这条消息，请补充客户名称、业务内容或你希望我执行的动作。", None
 
     @staticmethod
     def missing_contact_fields(contact: Dict[str, Any]) -> List[str]:
@@ -441,39 +502,6 @@ class CRMAgentGraphService:
         return "、".join(labels.get(field, field) for field in fields)
 
     @staticmethod
-    def parse_invoice_title_fields_from_text(content: str) -> Dict[str, Any]:
-        invoice_title: Dict[str, Any] = {
-            "title_type": "PERSONAL" if re.search(r"个人(?:发票|抬头|开票抬头)", content) else "COMPANY",
-        }
-
-        title_patterns = [
-            r"(?:抬头|发票抬头|开票抬头)(?:是|为|[:：])(?P<title>[^，,。；;]+)",
-            r"(?:创建|新增|添加)(?:发票抬头|开票抬头)(?P<title>[^，,。；;]+)",
-        ]
-        for pattern in title_patterns:
-            match = re.search(pattern, content)
-            if match:
-                invoice_title["title"] = match.group("title").strip()
-                break
-
-        field_patterns = {
-            "taxpayer_id": r"(?:税号|纳税人识别号)(?:是|为|[:：])?(?P<value>[A-Za-z0-9]{8,30})",
-            "bank_name": r"(?:开户行)(?:是|为|[:：])(?P<value>[^，,。；;]+)",
-            "bank_account": r"(?:开户账号|银行账号|账号)(?:是|为|[:：])(?P<value>[A-Za-z0-9\- ]{6,40})",
-            "address": r"(?:开票地址|地址)(?:是|为|[:：])(?P<value>[^，,。；;]+)",
-            "phone": r"(?:开票电话|电话)(?:是|为|[:：])(?P<value>[0-9\- ]{6,30})",
-        }
-        for field, pattern in field_patterns.items():
-            match = re.search(pattern, content)
-            if match:
-                invoice_title[field] = match.group("value").strip()
-
-        if re.search(r"默认|设为默认|设置默认", content):
-            invoice_title["set_default"] = True
-
-        return {key: value for key, value in invoice_title.items() if value not in (None, "")}
-
-    @staticmethod
     def missing_invoice_title_fields(invoice_title: Dict[str, Any]) -> List[str]:
         required_fields = ["title_type", "title", "taxpayer_id"]
         return [field for field in required_fields if not invoice_title.get(field)]
@@ -486,34 +514,6 @@ class CRMAgentGraphService:
             "taxpayer_id": "纳税人识别号",
         }
         return "、".join(labels.get(field, field) for field in fields)
-
-    @staticmethod
-    def parse_deployment_info_fields_from_text(content: str) -> Dict[str, Any]:
-        deployment_info: Dict[str, Any] = {"is_default": bool(re.search(r"默认|设为默认|设置默认", content))}
-
-        name_patterns = [
-            r"(?:部署名称|环境名称)(?:是|为|[:：])(?P<value>[^，,。；;]+)",
-            r"(?:创建|新增|添加|新建)(?:部署信息|部署)(?P<value>[^，,。；;]+)",
-        ]
-        for pattern in name_patterns:
-            match = re.search(pattern, content)
-            if match:
-                deployment_name = match.group("value").strip()
-                if deployment_name and deployment_name != "信息":
-                    deployment_info["deployment_name"] = deployment_name
-                    break
-
-        server_match = re.search(r"https?://[^\s，,。；;]+", content)
-        if server_match:
-            deployment_info["server_address"] = server_match.group(0).strip()
-
-        users_match = re.search(r"(?:授权人数|授权用户|授权用户数|用户数)(?:是|为|[:：])?(?P<value>\d+)", content)
-        if not users_match:
-            users_match = re.search(r"(?P<value>\d+)\s*(?:人|个用户)", content)
-        if users_match:
-            deployment_info["authorized_users"] = int(users_match.group("value"))
-
-        return {key: value for key, value in deployment_info.items() if value not in (None, "")}
 
     @staticmethod
     def missing_deployment_info_fields(deployment_info: Dict[str, Any]) -> List[str]:

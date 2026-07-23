@@ -19,6 +19,7 @@ from app.models.agent import (
     AgentTaskStatus,
     AgentToolCall,
 )
+from app.services.agent.schemas import AgentSemanticParseResult
 from app.services.agent.tools.base import AgentToolResult
 
 
@@ -57,7 +58,27 @@ def _build_client(monkeypatch):
     return TestClient(app), engine
 
 
+class FakeSemanticParser:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    async def parse(self, db, *, team_id, user_message, memory=None):
+        self.calls.append({
+            "team_id": team_id,
+            "user_message": user_message,
+            "memory": memory,
+        })
+        return AgentSemanticParseResult.model_validate(self.result)
+
+
 def test_agent_session_and_stream_api(monkeypatch):
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {"event": "final", "content": f"已收到：{input_state['content']}"}
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+
     client, engine = _build_client(monkeypatch)
     try:
         create_response = client.post("/v1/agent/sessions", json={"title": "跟进会话"})
@@ -102,6 +123,7 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
                     "content": input_state["content"],
                     "next_action": "下周三继续跟进",
                     "next_follow_time_text": "下周三",
+                    "next_follow_time_iso": "2026-07-29T09:00:00",
                 },
             }
             yield {"event": "final", "content": "请确认是否创建这条跟进记录？"}
@@ -113,7 +135,7 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
             assert kwargs["customer_id"] == 101
             assert kwargs["customer_name"] == "越秀金融"
             assert kwargs["content"] == "今天和越秀金融的王总沟通了项目进展，下周三继续跟进"
-            assert kwargs["next_follow_time"] == "下周三"
+            assert kwargs["next_follow_time"] == "2026-07-29T09:00:00"
             return AgentToolResult(
                 tool_name="create_customer_follow_up",
                 success=True,
@@ -176,6 +198,7 @@ def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatc
                     "content": input_state["content"],
                     "next_action": "下周三继续跟进",
                     "next_follow_time_text": "下周三",
+                    "next_follow_time_iso": "2026-07-29T09:00:00",
                 },
             }
             yield {"event": "final", "content": "我找到了多个可能的客户，请回复序号或客户名称确认。"}
@@ -187,7 +210,7 @@ def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatc
             assert kwargs["customer_id"] == 102
             assert kwargs["customer_name"] == "越秀金融科技"
             assert kwargs["content"] == "今天和越秀金融的王总沟通了项目进展，下周三继续跟进"
-            assert kwargs["next_follow_time"] == "下周三"
+            assert kwargs["next_follow_time"] == "2026-07-29T09:00:00"
             return AgentToolResult(
                 tool_name="create_customer_follow_up",
                 success=True,
@@ -282,6 +305,21 @@ def test_agent_stream_collects_contact_fields_then_executes_confirmation(monkeyp
 
     monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
     monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+    monkeypatch.setattr(agent_api, "agent_semantic_parser", FakeSemanticParser({
+        "intent": "CREATE_CONTACT",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "越秀金融", "confidence": 0.95},
+        "follow_up": {},
+        "contact": {"mobile": "13800138000", "position": "总经理", "gender": "1"},
+        "invoice_title": {},
+        "deployment_info": {},
+        "business_signals": [],
+        "requested_actions": [],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["手机号13800138000，职务总经理，男"],
+    }))
 
     client, engine = _build_client(monkeypatch)
     try:
@@ -370,6 +408,25 @@ def test_agent_stream_collects_invoice_title_fields_then_executes_confirmation(m
 
     monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
     monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+    monkeypatch.setattr(agent_api, "agent_semantic_parser", FakeSemanticParser({
+        "intent": "CREATE_INVOICE_TITLE",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "越秀金融", "confidence": 0.95},
+        "follow_up": {},
+        "contact": {},
+        "invoice_title": {
+            "title": "越秀金融控股有限公司",
+            "taxpayer_id": "91440000123456789X",
+            "set_default": True,
+        },
+        "deployment_info": {},
+        "business_signals": [],
+        "requested_actions": [],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["抬头是越秀金融控股有限公司，税号91440000123456789X，设为默认"],
+    }))
 
     client, engine = _build_client(monkeypatch)
     try:
@@ -464,6 +521,26 @@ def test_agent_stream_collects_deployment_info_fields_then_executes_confirmation
 
     monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
     monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+    monkeypatch.setattr(agent_api, "agent_semantic_parser", FakeSemanticParser({
+        "intent": "CREATE_DEPLOYMENT_INFO",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "越秀金融", "confidence": 0.95},
+        "follow_up": {},
+        "contact": {},
+        "invoice_title": {},
+        "deployment_info": {
+            "deployment_name": "生产环境",
+            "server_address": "https://crm.example.com",
+            "authorized_users": 100,
+            "is_default": True,
+        },
+        "business_signals": [],
+        "requested_actions": [],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["部署名称是生产环境，服务器地址 https://crm.example.com，授权人数100，设为默认"],
+    }))
 
     client, engine = _build_client(monkeypatch)
     try:

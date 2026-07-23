@@ -7,14 +7,16 @@
 1. 统一 Agent 对话入口。
 2. Agent 会话、消息、任务、工具调用、幂等记录可保存。
 3. 基于 LangGraph 管理多轮状态。
-4. 客户识别与客户候选选择。
-5. 客户唯一明确时自动创建客户跟进记录。
-6. 查询客户上下文并生成业务摘要。
-7. 支持两个高价值 tool：
+4. 基于 LangChain structured output 完成 AI 语义解析，不使用正则、关键词或硬编码规则做语义理解。
+5. Prompt、Memory、Tool Registry、Middleware/Guardrails 模块化，并有测试约束。
+6. 客户识别与客户候选选择。
+7. 客户唯一明确时自动创建客户跟进记录。
+8. 查询客户上下文并生成业务摘要。
+9. 支持两个高价值 tool：
    - 创建联系人，验证客户资料维护类动作。
    - 登记回款，验证业务推进类动作、确认摘要、佣金归属人和防重复。
-8. 所有业务 tool 只调用现有 API，不直接操作数据库，不绕过权限体系。
-9. 前端聊天 UI 复用 shadcn-vue `Message`、`MessageScroller`，并做业务封装。
+10. 所有业务 tool 只调用现有 API，不直接操作数据库，不绕过权限体系。
+11. 前端聊天 UI 复用 shadcn-vue `Message`、`MessageScroller`，并做业务封装。
 
 ## 2. MVP 不做范围
 
@@ -29,6 +31,8 @@
 - 不绕过系统 API。
 - 不绕过权限体系。
 - 不直接读写业务数据库。
+- 不使用正则表达式、关键词匹配或硬编码规则做意图识别、实体抽取、下一步动作理解和缺失字段语义判断。
+- 不返回 mock 业务执行结果。
 
 ## 3. 开发阶段拆分
 
@@ -43,7 +47,7 @@
 - 确认后端 Python 版本与 LangGraph 可用版本。
 - 确认需要新增依赖：
   - `langgraph`
-  - 如需要，补充 LangChain core 相关依赖。
+  - LangChain `create_agent`、structured output、middleware、HITL/checkpointer 所需依赖。
 - 确认依赖写入 `CRM-Server/requirements.txt` 的版本策略。
 
 验收：
@@ -201,6 +205,7 @@ POST /api/v1/agent/sessions/{session_id}/events
 MVP SSE 事件：
 
 ```text
+thinking
 message_delta
 customer_candidates
 follow_up_created
@@ -218,6 +223,8 @@ error
 
 - 前端可连续接收事件。
 - 后端异常能输出 `error` 事件，并保存日志。
+- 不用纯调试文本替代结构化业务事件。
+- `final` 明确区分已完成、等待用户确认、缺信息、权限不足和失败。
 
 ### 6.3 用户结构化事件
 
@@ -225,10 +232,12 @@ error
 
 - `POST /events` 支持：
   - 选择客户。
-  - 确认执行。
+  - 确认执行，对应 `approve`。
+  - 编辑确认字段，对应 `edit`。
   - 拒绝建议。
   - 补充缺失字段。
   - 选择候选业务对象。
+  - 普通补充回答，对应 `respond`。
 
 验收：
 
@@ -244,20 +253,62 @@ error
 - 新增 `CRM-Server/app/services/agent/state.py`。
 - 定义 Agent 状态 TypedDict 或 Pydantic model。
 - 支持序列化到 `crm_agent_tasks.state_json`。
+- 状态包含 Agent memory 摘要、结构化语义结果、guardrail 检查结果、pending HITL 决策、幂等 key 和 tool 执行结果。
 
 验收：
 
 - 状态可保存、恢复、继续执行。
 - 状态中不保存敏感 token。
 
-### 7.2 Agent Graph
+### 7.2 Prompt 与结构化语义解析
+
+任务：
+
+- 新增 `CRM-Server/app/services/agent/prompts.py`。
+- 新增 `CRM-Server/app/services/agent/semantic.py`。
+- 定义 CRM 业务 system prompt，覆盖产品定位、输入类型、API/权限边界、低置信度追问、候选不唯一确认、禁止规则式语义解析。
+- 使用 LangChain structured output 或等价 Pydantic schema 约束输出：
+  - intent
+  - confidence
+  - customer_name
+  - follow_up_content
+  - next_action
+  - next_follow_time
+  - entities
+  - missing_fields
+  - proposed_actions
+  - clarification_question
+
+验收：
+
+- 语义解析主路径调用系统配置的 AI 供应商。
+- 不存在正则/关键词/硬编码意图分类器。
+- Pydantic 校验失败时重新请求结构化输出或进入追问，不用正则兜底。
+- 单元测试覆盖典型输入、低置信度、字段缺失、模型返回非法结构。
+
+### 7.3 Memory 服务
+
+任务：
+
+- 新增 `CRM-Server/app/services/agent/memory.py`。
+- 读取 Agent 自有会话、消息、任务、确认、工具调用和幂等状态。
+- 为语义解析和建议生成提供最近上下文摘要。
+
+验收：
+
+- Memory 不读取 CRM 业务表。
+- Memory 不把旧业务上下文当成当前事实。
+- 恢复任务后，进入业务动作前必须重新调用系统 API 校验对象状态和权限。
+
+### 7.4 Agent Graph
 
 任务：
 
 - 新增 `CRM-Server/app/services/agent/graph.py`。
 - 实现 MVP 节点：
-  - `load_or_create_session`
-  - `classify_intent`
+  - `load_memory`
+  - `semantic_parse`
+  - `apply_input_guardrails`
   - `resolve_customer`
   - `create_follow_up_if_required`
   - `build_business_context`
@@ -266,6 +317,7 @@ error
   - `collect_missing_fields`
   - `confirm_action_if_required`
   - `execute_tool`
+  - `apply_output_guardrails`
   - `finalize_response`
 
 验收：
@@ -275,30 +327,26 @@ error
 - 客户不唯一时进入等待选择状态。
 - 缺字段时进入等待补充状态。
 - 需要确认时进入等待确认状态。
+- 等待确认、字段补充、客户选择都可刷新后恢复。
 
-### 7.3 Intent 识别
+### 7.5 Middleware 与 Guardrails
 
 任务：
 
-- 新增 `intent_classifier.py`。
-- MVP 意图：
-  - `customer_query`
-  - `follow_up_record`
-  - `create_contact`
-  - `payment_received`
-  - `unknown`
-- 先采用 LLM + 规则兜底。
-- 对低置信度结果追问。
+- 新增 `CRM-Server/app/services/agent/middleware.py`。
+- 新增 `CRM-Server/app/services/agent/guardrails.py`。
+- 实现 tool allowlist、写入确认校验、写入禁止自动重试、查询有限重试、工具调用审计、权限/API 错误标准化。
+- 拦截直接数据库操作、伪造对象 ID、绕过审批/权限等输入指令。
+- 拦截“已完成但实际未执行 API”的输出。
 
 验收：
 
-- 可识别典型输入：
-  - “光大证券今天回款了”
-  - “今天和越秀金融王总沟通了项目进展”
-  - “帮我给越秀金融创建联系人王总，电话 138...”
-  - “光大证券有哪些合同和回款计划”
+- 业务写入没有确认摘要和幂等 key 时不能执行。
+- 模型臆造的业务对象 ID 不能进入 tool。
+- 用户要求绕过权限/数据库直改时被拒绝。
+- 权限错误如实反馈给用户。
 
-### 7.4 客户识别
+### 7.6 客户识别
 
 任务：
 
@@ -320,12 +368,18 @@ error
 任务：
 
 - 新增 `tool_registry.py`。
-- 注册 tool 名称、输入 schema、执行函数、是否写入、是否需要确认、幂等策略。
+- 注册 tool 名称、描述、输入 schema、输出 schema、执行函数、是否写入、是否需要确认、允许的 HITL 决策类型、幂等策略、审计对象类型。
+- 提供 LangChain `StructuredTool` 导出能力。
+- tool 入参必须先通过 Pydantic schema 校验。
+- 所有 tool executor 只能调用系统现有 API。
 
 验收：
 
 - 所有 tool 调用经过统一入口。
 - 所有写入 tool 都记录 tool call。
+- Graph 节点不直接调用具体业务函数。
+- Agent service/API 中不出现业务 CRUD、业务 ORM model、SQL 查询或数据库连接操作。
+- Tool Registry 有单元测试覆盖 allowlist、schema 校验、确认要求和 API 错误透传。
 
 ### 8.2 客户上下文 Tool
 
@@ -333,8 +387,8 @@ error
 
 - 实现 `get_customer_context`。
 - 优先复用现有 API。
-- 如果现有 API 分散导致前端/Agent 反复调用，可新增只读聚合 API：
-  - `GET /api/v1/agent/customers/{customer_id}/context`
+- 如果现有 API 分散导致 Agent 反复调用，第一版先由 `get_customer_context` 编排调用现有 API。
+- 确需新增聚合查询能力时，必须先作为标准业务 API 设计、验收权限与数据隔离，再纳入 Agent tool；Agent 不得为了聚合上下文直接查业务数据库。
 
 聚合范围 MVP：
 
@@ -518,11 +572,17 @@ error
 
 - Agent CRUD 单元测试。
 - 幂等逻辑测试。
+- Prompt/semantic structured output 测试。
+- Memory 读取范围测试。
+- Tool Registry schema/allowlist/确认要求测试。
+- Middleware/Guardrails 测试。
 - 客户识别测试。
 - 跟进记录自动创建测试。
 - 创建联系人 tool 测试。
 - 登记回款 tool 测试。
 - 权限错误透传测试。
+- 禁止正则/关键词语义解析扫描测试。
+- 禁止业务 DB 直连/业务 CRUD 调用扫描测试。
 
 关键用例：
 
@@ -531,6 +591,8 @@ error
 - 客户不存在，提示先创建客户。
 - 回款登记重复确认，只创建一次。
 - 当前用户无权限时，Agent 反馈权限错误。
+- AI 供应商未配置时，不返回 mock 业务结果。
+- 模型解析低置信度时进入追问。
 
 ### 10.2 前端测试
 
@@ -617,11 +679,13 @@ error
 1. `docs: add crm ai agent mvp task breakdown`
 2. `feat(agent): add backend agent persistence models`
 3. `feat(agent): add agent api and sse runtime`
-4. `feat(agent): add langgraph mvp flow`
-5. `feat(agent): add follow-up and customer context tools`
-6. `feat(agent): add contact and payment tools`
-7. `feat(agent-ui): add chat shell and message components`
-8. `feat(agent-ui): wire agent conversation flow`
+4. `feat(agent): add prompt memory semantic foundation`
+5. `feat(agent): add tool registry middleware guardrails`
+6. `feat(agent): add langgraph mvp flow`
+7. `feat(agent): add follow-up and customer context tools`
+8. `feat(agent): add contact and payment tools`
+9. `feat(agent-ui): add chat shell and message components`
+10. `feat(agent-ui): wire agent conversation flow`
 
 ## 12. 开工前必须确认项
 
@@ -629,9 +693,10 @@ error
 
 1. 是否同意 MVP 只先做“创建联系人 + 登记回款”两个业务 tool。
 2. 是否同意新增 Agent 自有会话/审计/幂等表。
-3. 是否同意新增只读客户上下文聚合 API。
+3. 是否同意客户上下文第一版先由现有 API 编排完成；确需聚合查询时，先补标准业务 API。
 4. 是否同意后端 Agent 模块放在现有 FastAPI 服务内。
 5. 是否同意前端统一入口先接入 `AppLayout.vue`。
 6. 是否同意通过 shadcn-vue 官方组件或源码方式引入 `Message`、`MessageScroller`。
+7. 是否同意底层先完成 Prompt、Memory、Tool Registry、Middleware/Guardrails，再扩展更多业务 tool。
 
 确认后即可从阶段 1 开始开发。

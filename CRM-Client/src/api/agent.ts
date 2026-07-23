@@ -1,4 +1,5 @@
 import request from "@/utils/request"
+import type { PaginatedResponse } from "@/types/pagination"
 
 /* eslint-disable crmwolf/require-zod-schema */
 
@@ -6,6 +7,7 @@ export type AgentEventType =
   | "session"
   | "message"
   | "intent"
+  | "semantic_parsed"
   | "entity_parse"
   | "tool_result"
   | "customer_candidates"
@@ -61,6 +63,9 @@ export interface AgentChatSSEEvent {
   task_id?: number
   task_key?: string
   intent?: string
+  confidence?: number
+  parse_source?: string | null
+  model?: string | null
   action?: string
   tool_name?: string
   success?: boolean
@@ -74,12 +79,12 @@ export interface AgentChatSSEEvent {
 }
 
 export const agentApi = {
-  listSessions: (): Promise<{ items: AgentSessionResponse[]; total: number }> => {
-    return request.get<{ items: AgentSessionResponse[]; total: number }>("/v1/agent/sessions")
+  listSessions: (): Promise<PaginatedResponse<AgentSessionResponse>> => {
+    return request.get<PaginatedResponse<AgentSessionResponse>>("/v1/agent/sessions")
   },
 
-  listMessages: (sessionId: number): Promise<AgentMessageResponse[]> => {
-    return request.get<AgentMessageResponse[]>(`/v1/agent/sessions/${sessionId}/messages`)
+  listMessages: (sessionId: number): Promise<PaginatedResponse<AgentMessageResponse>> => {
+    return request.get<PaginatedResponse<AgentMessageResponse>>(`/v1/agent/sessions/${sessionId}/messages`)
   },
 
   chatStream: async (

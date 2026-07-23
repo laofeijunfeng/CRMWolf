@@ -77,11 +77,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
 import { toast } from "vue-sonner"
 import { Bot, Loader2, SendHorizontal, Sparkles } from "lucide-vue-next"
 import { useUserStore } from "@/stores/user"
-import { agentApi, type AgentChatSSEEvent } from "@/api/agent"
+import { agentApi, type AgentChatSSEEvent, type AgentMessageResponse } from "@/api/agent"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Bubble } from "@/components/ui/bubble"
@@ -108,6 +108,9 @@ const sessionId = ref<number | undefined>(undefined)
 const sessionKey = ref<string | undefined>(undefined)
 const messages = ref<ChatMessage[]>([])
 const eventLogs = ref<EventLog[]>([])
+const isLoadingHistory = ref(false)
+
+const LAST_SESSION_STORAGE_KEY = "crm_agent_last_session_id"
 
 const canSend = computed(() => input.value.trim().length > 0 && !isStreaming.value)
 const userInitial = computed(() => {
@@ -132,6 +135,59 @@ const addAssistantMessage = (content: string, id?: string | number): void => {
   messages.value.push({ id: String(id ?? nextId("assistant")), role: "assistant", content })
 }
 
+const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
+  const role = normalizeRole(message.role)
+  const content = message.content ?? ""
+  if (role === null || content.length === 0) return null
+  return {
+    id: String(message.id),
+    role,
+    content,
+  }
+}
+
+const loadSessionMessages = async (targetSessionId: number): Promise<boolean> => {
+  const response = await agentApi.listMessages(targetSessionId)
+  const loadedMessages = response.items
+    .map(toChatMessage)
+    .filter((message): message is ChatMessage => message !== null)
+
+  messages.value = loadedMessages
+  eventLogs.value = []
+  sessionId.value = targetSessionId
+  localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(targetSessionId))
+  return true
+}
+
+const loadInitialSession = async (): Promise<void> => {
+  if (!userStore.token || isLoadingHistory.value) return
+
+  isLoadingHistory.value = true
+  try {
+    const storedSessionId = Number(localStorage.getItem(LAST_SESSION_STORAGE_KEY))
+    if (Number.isInteger(storedSessionId) && storedSessionId > 0) {
+      try {
+        await loadSessionMessages(storedSessionId)
+        return
+      } catch {
+        localStorage.removeItem(LAST_SESSION_STORAGE_KEY)
+      }
+    }
+
+    const sessions = await agentApi.listSessions()
+    const latestSession = sessions.items[0]
+    if (latestSession === undefined) return
+
+    sessionKey.value = latestSession.session_key
+    await loadSessionMessages(latestSession.id)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "加载 Agent 历史消息失败"
+    addEventLog(message)
+  } finally {
+    isLoadingHistory.value = false
+  }
+}
+
 const addEventLog = (text: string): void => {
   eventLogs.value.push({ id: nextId("evt"), text })
 }
@@ -153,6 +209,8 @@ const formatCustomerNames = (customers?: Record<string, unknown>[]): string => {
 
 const eventToLogText = (event: AgentChatSSEEvent): string | null => {
   switch (event.event) {
+    case "semantic_parsed":
+      return `AI 语义解析：${stringifyValue(event.parse_source)}，模型：${stringifyValue(event.model)}`
     case "intent":
       return `识别意图：${stringifyValue(event.intent)}`
     case "entity_parse":
@@ -196,6 +254,9 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
   if (event.event === "session") {
     sessionId.value = event.session_id
     sessionKey.value = event.session_key
+    if (event.session_id !== undefined) {
+      localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(event.session_id))
+    }
     return
   }
 
@@ -259,6 +320,10 @@ const sendMessage = async (): Promise<void> => {
 const useExample = (example: string): void => {
   input.value = example
 }
+
+onMounted(() => {
+  void loadInitialSession()
+})
 </script>
 
 <style scoped lang="scss">

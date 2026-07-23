@@ -1,6 +1,6 @@
 """Shared types for CRM AI Agent tools."""
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,10 @@ class AgentToolContext:
     session_id: int
     authorization: str
     task_id: Optional[int] = None
+    hitl_decision: Optional[str] = None
+    confirmed_by_user: bool = False
+    allowed_tool_names: Optional[List[str]] = None
+    allowed_customer_ids: Optional[List[int]] = None
 
 
 @dataclass

@@ -26,6 +26,11 @@ from app.schemas.agent import (
 from app.schemas.common import PaginatedResponse
 from app.services.agent import crm_agent_graph_service
 from app.services.agent.graph import CRMAgentGraphService
+from app.services.agent.guardrails import AgentToolExecutionPolicy
+from app.services.agent.runtime import AgentToolRuntime
+from app.services.agent.schemas import AgentHITLPolicy, AgentMemorySnapshot, AgentSemanticParseResult
+from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
+from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext
 from app.utils.sse_encoder import SSEJsonEncoder
@@ -214,6 +219,10 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
         intent = "CREATE_INVOICE_TITLE"
     elif action in {"create_deployment_info", "select_customer_for_deployment_info", "collect_deployment_info_fields"}:
         intent = "CREATE_DEPLOYMENT_INFO"
+    hitl_policy = AgentHITLPolicy(
+        required_for_tools=[_tool_name_for_action(action)] if _tool_name_for_action(action) else [],
+        confirmation_summary=event.get("content") or event.get("message") or f"等待确认执行：{action}",
+    )
     task = agent_task_crud.create(
         db,
         AgentTaskCreate(
@@ -227,7 +236,13 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
             target_id=payload.get("customer_id"),
             summary=f"等待确认执行：{action}",
             input_json=payload,
-            state_json={"action": action, "payload": payload, "customer": customer, "customers": customers},
+            state_json={
+                "action": action,
+                "payload": payload,
+                "customer": customer,
+                "customers": customers,
+                "hitl": hitl_policy.model_dump(exclude_none=True),
+            },
         ),
     )
     event["task_id"] = task.id
@@ -252,6 +267,10 @@ def _apply_customer_selection(db: Session, task, content: str):
         "action": next_action,
         "payload": payload,
         "customer": customer,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=[_tool_name_for_action(next_action)] if _tool_name_for_action(next_action) else [],
+            confirmation_summary=message,
+        ).model_dump(exclude_none=True),
     }
     agent_task_crud.update(
         db,
@@ -266,28 +285,52 @@ def _apply_customer_selection(db: Session, task, content: str):
     return customer, message
 
 
-def _merge_contact_fields(existing_contact: dict, content: str) -> dict:
-    parsed_contact = CRMAgentGraphService.parse_contact_fields_from_text(content)
-    return {**existing_contact, **parsed_contact}
+async def _parse_task_field_supplement(db: Session, task, content: str) -> AgentSemanticParseResult:
+    memory = AgentMemorySnapshot(
+        pending_task={
+            "id": task.id,
+            "intent": task.intent,
+            "target_type": task.target_type,
+            "target_id": task.target_id,
+            "summary": task.summary,
+            "state": task.state_json,
+        },
+    )
+    return await agent_semantic_parser.parse(
+        db,
+        team_id=task.team_id,
+        user_message=content,
+        memory=memory,
+    )
 
 
-def _merge_invoice_title_fields(existing_invoice_title: dict, content: str) -> dict:
-    parsed_invoice_title = CRMAgentGraphService.parse_invoice_title_fields_from_text(content)
-    merged = {**existing_invoice_title, **parsed_invoice_title}
+def _merge_contact_fields(existing_contact: dict, semantic_result: AgentSemanticParseResult) -> dict:
+    return {**existing_contact, **_drop_empty_values(semantic_result.contact)}
+
+
+def _merge_invoice_title_fields(existing_invoice_title: dict, semantic_result: AgentSemanticParseResult) -> dict:
+    merged = {**existing_invoice_title, **_drop_empty_values(semantic_result.invoice_title)}
     merged.pop("set_default", None)
     return merged
 
 
-def _merge_deployment_info_fields(existing_deployment_info: dict, content: str) -> dict:
-    parsed_deployment_info = CRMAgentGraphService.parse_deployment_info_fields_from_text(content)
-    return {**existing_deployment_info, **parsed_deployment_info}
+def _merge_deployment_info_fields(existing_deployment_info: dict, semantic_result: AgentSemanticParseResult) -> dict:
+    return {**existing_deployment_info, **_drop_empty_values(semantic_result.deployment_info)}
 
 
-def _apply_contact_fields(db: Session, task, content: str):
+def _drop_empty_values(payload: dict) -> dict:
+    return {key: value for key, value in (payload or {}).items() if value not in (None, "")}
+
+
+async def _apply_contact_fields(db: Session, task, content: str):
     state = task.state_json or {}
     customer = state.get("customer") or {}
     payload = state.get("payload") or {}
-    contact = _merge_contact_fields(payload.get("contact") or {}, content)
+    try:
+        semantic_result = await _parse_task_field_supplement(db, task, content)
+    except AgentSemanticParserError as exc:
+        return False, f"我没有可靠识别到补充的联系人信息，请换一种说法补充。原因：{str(exc)}"
+    contact = _merge_contact_fields(payload.get("contact") or {}, semantic_result)
     missing_fields = CRMAgentGraphService.missing_contact_fields(contact)
     payload["contact"] = contact
     payload["missing_fields"] = missing_fields
@@ -304,6 +347,10 @@ def _apply_contact_fields(db: Session, task, content: str):
         "action": "create_contact",
         "payload": payload,
         "customer": customer,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=["create_contact"],
+            confirmation_summary=f"为「{customer.get('account_name')}」创建联系人「{contact.get('name')}」",
+        ).model_dump(exclude_none=True),
     }
     agent_task_crud.update(
         db,
@@ -317,15 +364,17 @@ def _apply_contact_fields(db: Session, task, content: str):
     return True, f"联系人信息已补齐。请确认是否为「{customer.get('account_name')}」创建联系人「{contact.get('name')}」？"
 
 
-def _apply_invoice_title_fields(db: Session, task, content: str):
+async def _apply_invoice_title_fields(db: Session, task, content: str):
     state = task.state_json or {}
     customer = state.get("customer") or {}
     payload = state.get("payload") or {}
-    invoice_title = _merge_invoice_title_fields(payload.get("invoice_title") or {}, content)
+    try:
+        semantic_result = await _parse_task_field_supplement(db, task, content)
+    except AgentSemanticParserError as exc:
+        return False, f"我没有可靠识别到补充的发票抬头信息，请换一种说法补充。原因：{str(exc)}"
+    invoice_title = _merge_invoice_title_fields(payload.get("invoice_title") or {}, semantic_result)
     missing_fields = CRMAgentGraphService.missing_invoice_title_fields(invoice_title)
-    set_default = bool(payload.get("set_default")) or bool(
-        CRMAgentGraphService.parse_invoice_title_fields_from_text(content).get("set_default")
-    )
+    set_default = bool(payload.get("set_default")) or bool((semantic_result.invoice_title or {}).get("set_default"))
     payload["invoice_title"] = invoice_title
     payload["missing_fields"] = missing_fields
     payload["set_default"] = set_default
@@ -346,6 +395,10 @@ def _apply_invoice_title_fields(db: Session, task, content: str):
         "action": "create_invoice_title",
         "payload": payload,
         "customer": customer,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=["create_invoice_title"],
+            confirmation_summary=f"为「{customer.get('account_name')}」创建发票抬头「{invoice_title.get('title')}」",
+        ).model_dump(exclude_none=True),
     }
     agent_task_crud.update(
         db,
@@ -359,11 +412,15 @@ def _apply_invoice_title_fields(db: Session, task, content: str):
     return True, f"发票抬头信息已补齐。请确认是否为「{customer.get('account_name')}」创建发票抬头「{invoice_title.get('title')}」？"
 
 
-def _apply_deployment_info_fields(db: Session, task, content: str):
+async def _apply_deployment_info_fields(db: Session, task, content: str):
     state = task.state_json or {}
     customer = state.get("customer") or {}
     payload = state.get("payload") or {}
-    deployment_info = _merge_deployment_info_fields(payload.get("deployment_info") or {}, content)
+    try:
+        semantic_result = await _parse_task_field_supplement(db, task, content)
+    except AgentSemanticParserError as exc:
+        return False, f"我没有可靠识别到补充的部署信息，请换一种说法补充。原因：{str(exc)}"
+    deployment_info = _merge_deployment_info_fields(payload.get("deployment_info") or {}, semantic_result)
     deployment_info["customer_id"] = payload.get("customer_id") or deployment_info.get("customer_id")
     missing_fields = CRMAgentGraphService.missing_deployment_info_fields(deployment_info)
     payload["deployment_info"] = deployment_info
@@ -384,6 +441,10 @@ def _apply_deployment_info_fields(db: Session, task, content: str):
         "action": "create_deployment_info",
         "payload": payload,
         "customer": customer,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=["create_deployment_info"],
+            confirmation_summary=f"为「{customer.get('account_name')}」创建部署信息「{deployment_info.get('deployment_name')}」",
+        ).model_dump(exclude_none=True),
     }
     agent_task_crud.update(
         db,
@@ -409,6 +470,8 @@ async def _execute_waiting_task(
     action = state.get("action")
     payload = state.get("payload") or {}
     customer = state.get("customer") or {}
+    tool_name = _tool_name_for_action(action)
+    tool_payload = _tool_payload_for_action(action, payload, customer, task.task_key)
     context = AgentToolContext(
         db=db,
         team_id=team_id,
@@ -416,40 +479,27 @@ async def _execute_waiting_task(
         session_id=session_id,
         task_id=task.id,
         authorization=authorization,
+        hitl_decision="approve",
+        confirmed_by_user=True,
+        allowed_tool_names=[tool_name] if tool_name else [],
+        allowed_customer_ids=[customer["id"]] if customer.get("id") else [],
     )
-    tool_service = CRMAgentToolService()
+    registry = AgentToolRegistry(CRMAgentToolService())
+    runtime = AgentToolRuntime(registry)
 
     agent_task_crud.update(db, task, AgentTaskUpdate(status=AgentTaskStatus.RUNNING))
-    if action == "create_customer_follow_up":
-        result = await tool_service.create_customer_follow_up(
+    result = None
+    if tool_name and tool_payload:
+        result = await runtime.execute(
+            tool_name,
             context,
-            customer_id=payload["customer_id"],
-            customer_name=customer.get("account_name"),
-            content=payload["content"],
-            next_action=payload.get("next_action"),
-            next_follow_time=payload.get("next_follow_time_text"),
-            idempotency_suffix=task.task_key,
+            tool_payload,
+            policy=AgentToolExecutionPolicy(
+                hitl_decision="approve",
+                allowed_tool_names=[tool_name],
+                allowed_customer_ids=[customer["id"]] if customer.get("id") else [],
+            ),
         )
-    elif action == "create_contact":
-        result = await tool_service.create_contact(
-            context,
-            customer_id=payload["customer_id"],
-            contact=payload["contact"],
-        )
-    elif action == "create_invoice_title":
-        result = await tool_service.create_invoice_title(
-            context,
-            customer_id=payload["customer_id"],
-            invoice_title=payload["invoice_title"],
-            set_default=bool(payload.get("set_default")),
-        )
-    elif action == "create_deployment_info":
-        result = await tool_service.create_deployment_info(
-            context,
-            deployment_info=payload["deployment_info"],
-        )
-    else:
-        result = None
 
     if result and result.success:
         agent_task_crud.update(
@@ -472,6 +522,41 @@ async def _execute_waiting_task(
         AgentTaskUpdate(status=AgentTaskStatus.FAILED, error_message=error_message),
     )
     return result, f"执行失败：{error_message}"
+
+
+def _tool_name_for_action(action: Optional[str]) -> Optional[str]:
+    return {
+        "create_customer_follow_up": "create_customer_follow_up",
+        "create_contact": "create_contact",
+        "create_invoice_title": "create_invoice_title",
+        "create_deployment_info": "create_deployment_info",
+    }.get(action or "")
+
+
+def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dict, task_key: str) -> Optional[dict]:
+    if action == "create_customer_follow_up":
+        return {
+            "customer_id": payload["customer_id"],
+            "customer_name": customer.get("account_name"),
+            "content": payload["content"],
+            "method": payload.get("method") or "AI录入",
+            "next_action": payload.get("next_action"),
+            "next_follow_time": payload.get("next_follow_time_iso"),
+            "idempotency_suffix": task_key,
+        }
+    if action == "create_contact":
+        return {"customer_id": payload["customer_id"], "contact": payload["contact"]}
+    if action == "create_invoice_title":
+        return {
+            "customer_id": payload["customer_id"],
+            "invoice_title": payload["invoice_title"],
+            "set_default": bool(payload.get("set_default")),
+        }
+    if action == "create_deployment_info":
+        deployment_info = dict(payload["deployment_info"])
+        deployment_info["customer_id"] = payload.get("customer_id") or deployment_info.get("customer_id")
+        return {"deployment_info": deployment_info}
+    return None
 
 
 @router.post("/sessions", response_model=AgentSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -607,7 +692,7 @@ async def stream_agent_chat(
                 user_id=user_id,
             )
             if task and _is_contact_fields_task(task):
-                ready, assistant_content = _apply_contact_fields(db, task, request.content)
+                ready, assistant_content = await _apply_contact_fields(db, task, request.content)
                 yield _encode_sse({
                     "event": "contact_fields_completed" if ready else "contact_fields_required",
                     "task_id": task.id,
@@ -615,7 +700,7 @@ async def stream_agent_chat(
                 })
                 yield _encode_sse({"event": "final", "content": assistant_content})
             elif task and _is_invoice_title_fields_task(task):
-                ready, assistant_content = _apply_invoice_title_fields(db, task, request.content)
+                ready, assistant_content = await _apply_invoice_title_fields(db, task, request.content)
                 yield _encode_sse({
                     "event": "invoice_title_fields_completed" if ready else "invoice_title_fields_required",
                     "task_id": task.id,
@@ -623,7 +708,7 @@ async def stream_agent_chat(
                 })
                 yield _encode_sse({"event": "final", "content": assistant_content})
             elif task and _is_deployment_info_fields_task(task):
-                ready, assistant_content = _apply_deployment_info_fields(db, task, request.content)
+                ready, assistant_content = await _apply_deployment_info_fields(db, task, request.content)
                 yield _encode_sse({
                     "event": "deployment_info_fields_completed" if ready else "deployment_info_fields_required",
                     "task_id": task.id,

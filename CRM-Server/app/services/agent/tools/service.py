@@ -75,11 +75,9 @@ class CRMAgentToolService:
         async def call_api():
             return await self.api_client.request(
                 "POST",
-                "/v1/customers/ai/create",
+                f"/v1/customer-follow-ups/{customer_id}",
                 context.authorization,
                 json={
-                    "customer_id": customer_id,
-                    "customer_name": customer_name or str(customer_id),
                     "content": content,
                     "method": method,
                     "next_action": next_action,

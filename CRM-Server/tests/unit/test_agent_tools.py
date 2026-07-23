@@ -16,6 +16,8 @@ from app.models.agent import (
     AgentToolCallStatus,
 )
 from app.services.agent.tools.base import AgentToolContext
+from app.services.agent.middleware import build_langchain_hitl_middleware
+from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools.service import CRMAgentToolService
 
 
@@ -38,10 +40,10 @@ class FakeCRMAPIClient:
         })
         if method == "GET" and path == "/v1/customers/":
             return {"items": [{"id": 101, "account_name": "越秀金融"}], "total": 1}
-        if method == "POST" and path == "/v1/customers/ai/create":
+        if method == "POST" and path == "/v1/customer-follow-ups/101":
             return {
                 "id": 9001,
-                "customer_id": json["customer_id"],
+                "customer_id": 101,
                 "content": json["content"],
                 "next_follow_time": "2026-07-29T00:00:00",
             }
@@ -83,6 +85,16 @@ def _context(db):
     )
 
 
+def _confirmed_context(db):
+    context = _context(db)
+    context.task_id = 99
+    context.confirmed_by_user = True
+    context.hitl_decision = "approve"
+    context.allowed_tool_names = ["create_customer_follow_up"]
+    context.allowed_customer_ids = [101]
+    return context
+
+
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_calls_existing_api_and_audits():
     engine, db = _db_session()
@@ -122,7 +134,7 @@ async def test_agent_tool_create_follow_up_is_idempotent():
             customer_name="越秀金融",
             content="今天和王总沟通了项目进展",
             next_action="下周三确认进展",
-            next_follow_time="下周三",
+            next_follow_time="2026-07-29T09:00:00",
             idempotency_suffix="msg-001",
         )
         second = await service.create_customer_follow_up(
@@ -131,7 +143,7 @@ async def test_agent_tool_create_follow_up_is_idempotent():
             customer_name="越秀金融",
             content="今天和王总沟通了项目进展",
             next_action="下周三确认进展",
-            next_follow_time="下周三",
+            next_follow_time="2026-07-29T09:00:00",
             idempotency_suffix="msg-001",
         )
 
@@ -139,9 +151,8 @@ async def test_agent_tool_create_follow_up_is_idempotent():
         assert second.success is True
         assert second.idempotent_replay is True
         assert len(fake_client.calls) == 1
-        assert fake_client.calls[0]["path"] == "/v1/customers/ai/create"
-        assert fake_client.calls[0]["json"]["customer_name"] == "越秀金融"
-        assert fake_client.calls[0]["json"]["next_follow_time"] == "下周三"
+        assert fake_client.calls[0]["path"] == "/v1/customer-follow-ups/101"
+        assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
     finally:
@@ -230,3 +241,71 @@ async def test_agent_tool_create_deployment_info_calls_existing_api():
     finally:
         db.close()
         engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_registry_exposes_langchain_structured_tools():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        tools = {tool.name: tool for tool in registry.to_langchain_tools(_context(db))}
+        assert "search_customers" in tools
+
+        result = await tools["search_customers"].ainvoke({"keyword": "越秀金融", "limit": 5})
+
+        assert result["event"] == "tool_result"
+        assert result["tool_name"] == "search_customers"
+        assert result["success"] is True
+        assert fake_client.calls[0]["path"] == "/v1/customers/"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_registry_blocks_write_without_hitl_confirmation():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        with pytest.raises(Exception) as exc_info:
+            await registry.execute(
+                "create_customer_follow_up",
+                _context(db),
+                {"customer_id": 101, "content": "客户项目还在评估"},
+            )
+
+        assert "HITL approve" in str(exc_info.value)
+        assert fake_client.calls == []
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_registry_allows_confirmed_write():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        result = await registry.execute(
+            "create_customer_follow_up",
+            _confirmed_context(db),
+            {"customer_id": 101, "content": "客户项目还在评估"},
+        )
+
+        assert result.success is True
+        assert fake_client.calls[0]["path"] == "/v1/customer-follow-ups/101"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_agent_langchain_hitl_middleware_is_built_from_write_tools():
+    middleware = build_langchain_hitl_middleware()
+
+    assert middleware
