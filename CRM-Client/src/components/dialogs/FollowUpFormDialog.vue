@@ -23,17 +23,16 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { DatePicker } from '@/components/ui/date-picker'
+import {
+  DateField,
+  SegmentedChoiceControl,
+  TextareaField,
+} from '@/components/crmwolf'
 import customerFollowUpApi from '@/api/customerFollowUp'
 import { formatLocalDate } from '@/utils/format'
 
@@ -174,35 +173,32 @@ function continueEditing(): void {
       <form class="space-y-4" @submit="onSubmit">
         <!-- Follow-up Method (RadioGroup) -->
         <div class="space-y-2">
-          <Label class="text-sm font-medium">跟进方式 <span class="text-destructive">*</span></Label>
-          <RadioGroup
+          <p id="follow-up-method-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+            跟进方式 <span class="text-wolf-danger" aria-hidden="true">*</span>
+          </p>
+          <SegmentedChoiceControl
             v-model="methodValue"
-            class="flex flex-wrap gap-4"
-          >
-            <div
-              v-for="option in methodOptions"
-              :key="option.value"
-              class="flex items-center space-x-2"
-            >
-              <RadioGroupItem :id="`method-${option.value}`" :value="option.value" />
-              <Label :for="`method-${option.value}`" class="cursor-pointer">{{ option.label }}</Label>
-            </div>
-          </RadioGroup>
+            :options="methodOptions"
+            labelled-by="follow-up-method-label"
+            id-prefix="follow-up-method"
+            style="--segmented-choice-columns: 5;"
+          />
           <p v-if="methodError" class="text-sm text-destructive">{{ methodError }}</p>
         </div>
 
         <!-- Follow-up Content (Textarea, required) -->
-        <FormField v-slot="{ componentField }" name="content">
+        <FormField v-slot="{ value, handleChange }" name="content">
           <FormItem>
-            <FormLabel>跟进内容 *</FormLabel>
-            <FormControl>
-              <Textarea
-                v-bind="componentField as any"
-                :rows="4"
-                placeholder="请输入跟进内容"
-                class="resize-none"
-              />
-            </FormControl>
+            <TextareaField
+              id="follow-up-content"
+              :model-value="String(value ?? '')"
+              label="跟进内容"
+              required
+              :rows="4"
+              placeholder="请输入跟进内容"
+              control-class="resize-none"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
@@ -210,30 +206,29 @@ function continueEditing(): void {
         <!-- Next Follow-up Time -->
         <FormField v-slot="{ value, handleChange }" name="next_follow_time">
           <FormItem>
-            <FormLabel>下次跟进时间</FormLabel>
-            <FormControl>
-              <DatePicker
-                :model-value="value ? new Date(value as string) : null"
-                placeholder="请选择下次跟进时间"
-                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
-              />
-            </FormControl>
+            <DateField
+              id="follow-up-next-time"
+              :model-value="value ? new Date(value as string) : null"
+              label="下次跟进时间"
+              placeholder="请选择下次跟进时间"
+              @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Next Action (Textarea) -->
-        <FormField v-slot="{ componentField }" name="next_action">
+        <FormField v-slot="{ value, handleChange }" name="next_action">
           <FormItem>
-            <FormLabel>下一步动作</FormLabel>
-            <FormControl>
-              <Textarea
-                v-bind="componentField as any"
-                :rows="3"
-                placeholder="请输入下一步动作（可选）"
-                class="resize-none"
-              />
-            </FormControl>
+            <TextareaField
+              id="follow-up-next-action"
+              :model-value="String(value ?? '')"
+              label="下一步动作"
+              :rows="3"
+              placeholder="请输入下一步动作（可选）"
+              control-class="resize-none"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>

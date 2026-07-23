@@ -18,7 +18,6 @@ from app.api.customer_ai import router as customer_ai_router
 # from app.api.web_assistant import router as web_assistant_router  # 暂时禁用（依赖旧的 LangGraph）
 from app.api.ai_config import router as ai_config_router
 # from app.api.chat import router as chat_router  # 暂时禁用（依赖旧的 LangGraph）
-from app.api.ai import router as ai_openapi_router
 from app.api.workflow_undo import router as workflow_undo_router
 # Frontend Logs 路由
 from app.api.frontend_logs import router as frontend_logs_router
@@ -107,9 +106,6 @@ api_router.include_router(ai_config_router)
 api_router.include_router(frontend_logs_router)
 api_router.include_router(score_weights_router)
 api_router.include_router(scores_router)
-
-# === AI OpenAPI 路由（无 /v1 前缀）===
-api_router.include_router(ai_openapi_router)
 
 # === Workflow Undo 路由 ===
 api_router.include_router(workflow_undo_router)

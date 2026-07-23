@@ -554,6 +554,7 @@ watch(
 
     <PaymentRecordDialog
       :open="registerDialogOpen"
+      :payment-plan-id="selectedConfirmPlan?.id ?? null"
       :default-amount="registerDefaultAmount"
       :default-payer-name="registerDefaultPayerName"
       :submitting="registerSubmitting"

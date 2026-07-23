@@ -301,6 +301,70 @@ class OwnerInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CustomerMemberRole(str, Enum):
+    SALES = "SALES"
+    PRESALES = "PRESALES"
+    DELIVERY = "DELIVERY"
+    SUPPORT = "SUPPORT"
+    OTHER = "OTHER"
+
+
+class CustomerMemberAccessLevel(str, Enum):
+    VIEW = "VIEW"
+    FOLLOW_UP = "FOLLOW_UP"
+    EDIT = "EDIT"
+
+
+class CustomerMemberCreate(BaseModel):
+    user_id: str = Field(..., min_length=1, description="成员系统用户ID")
+    member_role: CustomerMemberRole = Field(CustomerMemberRole.PRESALES, description="成员角色")
+    access_level: CustomerMemberAccessLevel = Field(CustomerMemberAccessLevel.VIEW, description="访问级别")
+    remark: Optional[str] = Field(None, max_length=500, description="备注")
+
+    @field_validator('user_id')
+    @classmethod
+    def user_id_must_be_numeric(cls, v):
+        if not v or not v.strip().isdigit():
+            raise ValueError('成员ID无效')
+        return v.strip()
+
+
+class CustomerMemberUpdate(BaseModel):
+    member_role: Optional[CustomerMemberRole] = Field(None, description="成员角色")
+    access_level: Optional[CustomerMemberAccessLevel] = Field(None, description="访问级别")
+    remark: Optional[str] = Field(None, max_length=500, description="备注")
+
+
+class CustomerMemberUserInfo(BaseModel):
+    id: str = Field(..., description="系统用户ID")
+    name: str = Field(..., description="用户姓名")
+    avatar_url: Optional[str] = Field(None, description="用户头像URL")
+
+
+class CustomerMemberResponse(BaseModel):
+    id: int = Field(..., description="成员记录ID")
+    customer_id: int = Field(..., description="客户ID")
+    user_id: str = Field(..., description="成员系统用户ID")
+    member_role: str = Field(..., description="成员角色")
+    access_level: str = Field(..., description="访问级别")
+    remark: Optional[str] = Field(None, description="备注")
+    created_by: str = Field(..., description="创建人")
+    created_time: datetime = Field(..., description="创建时间")
+    updated_time: datetime = Field(..., description="更新时间")
+    user_info: Optional[CustomerMemberUserInfo] = Field(None, description="成员用户信息")
+    can_manage: bool = Field(False, description="当前用户是否可管理成员")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CustomerMemberCandidate(BaseModel):
+    id: str = Field(..., description="系统用户ID")
+    name: str = Field(..., description="用户姓名")
+    avatar_url: Optional[str] = Field(None, description="用户头像URL")
+    roles: List[str] = Field(default_factory=list, description="团队角色编码")
+    already_member: bool = Field(False, description="是否已是该客户成员")
+
+
 class CustomerListResponse(CustomerResponse):
     industry_info: Optional[CustomerIndustryInfo] = Field(None, description="行业信息")
     owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")

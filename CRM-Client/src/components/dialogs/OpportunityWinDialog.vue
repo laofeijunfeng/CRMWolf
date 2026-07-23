@@ -19,15 +19,15 @@ import {
   DialogFooter
 } from '@/components/ui/dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { DatePicker } from '@/components/ui/date-picker'
+import {
+  DateField,
+  InputField,
+} from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import { getTodayLocalDate, formatLocalDate } from '@/utils/format'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
@@ -121,21 +121,20 @@ const onSubmit = handleSubmit(async (formValues) => {
 
       <form v-else class="grid gap-4 py-4" @submit="onSubmit">
         <!-- 实际成交金额 -->
-        <FormField v-slot="{ componentField }" name="actual_amount">
+        <FormField v-slot="{ value, handleChange }" name="actual_amount">
           <FormItem>
-            <FormLabel>
-              实际成交金额 <span class="text-destructive">*</span>
-            </FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField"
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="请输入金额"
-                :disabled="submitting"
-              />
-            </FormControl>
+            <InputField
+              id="opportunity-win-amount"
+              :model-value="Number(value ?? 0)"
+              label="实际成交金额"
+              required
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="请输入金额"
+              :disabled="submitting"
+              @update:model-value="handleChange(Number($event))"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
@@ -143,17 +142,15 @@ const onSubmit = handleSubmit(async (formValues) => {
         <!-- 实际成交日期 -->
         <FormField v-slot="{ value, handleChange }" name="actual_closing_date">
           <FormItem>
-            <FormLabel>
-              实际成交日期 <span class="text-destructive">*</span>
-            </FormLabel>
-            <FormControl>
-              <DatePicker
-                :model-value="value ? new Date(value) : null"
-                placeholder="请选择实际成交日期"
-                :disabled="submitting"
-                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : '')"
-              />
-            </FormControl>
+            <DateField
+              id="opportunity-win-date"
+              :model-value="value ? new Date(String(value)) : null"
+              label="实际成交日期"
+              required
+              placeholder="请选择实际成交日期"
+              :disabled="submitting"
+              @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : '')"
+            />
             <FormMessage />
           </FormItem>
         </FormField>

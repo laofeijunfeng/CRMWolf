@@ -12,8 +12,10 @@ from app.core.deps import (
     check_customer_delete_permission,
     check_customer_edit_permission,
     check_customer_view_permission,
+    check_customer_member_manage_permission,
 )
 from app.crud.customer import customer_crud, contact_crud
+from app.crud.customer_member import customer_member_crud
 from app.crud.user import user_crud
 from app.crud.team import team_crud
 from app.crud.contract import contract_crud
@@ -27,7 +29,9 @@ from app.schemas.customer import (
     MessageResponse, StatisticsResponse, TrendResponse,
     CustomerStatusEnum, CustomerReturnRequest, CustomerReturnResponse,
     ReturnReasonEnum, CustomerClaimRequest, CustomerAssignRequest,
-    CustomerAssignResponse, CustomerIndustryOption, CustomerLoseRequest
+    CustomerAssignResponse, CustomerIndustryOption, CustomerLoseRequest,
+    CustomerMemberCreate, CustomerMemberUpdate, CustomerMemberResponse,
+    CustomerMemberCandidate, CustomerMemberUserInfo
 )
 from app.schemas.contract import ContractListResponse
 from app.schemas.common import PaginatedResponse
@@ -515,6 +519,7 @@ def get_customers(
     created_time_end: Optional[date] = Query(None, description="创建时间结束"),
     order_by: str = Query(None, description="排序字段（created_time/account_name/city/status/industry）"),
     order_dir: str = Query(None, description="排序方向（asc/desc）"),
+    scope: Optional[str] = Query(None, description="客户范围：owned/collaborated/accessible"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -542,9 +547,24 @@ def get_customers(
                 detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
             )
 
-    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的客户
-    if actual_owner_id is None and not has_view_all:
-        actual_owner_id = str(current_user.id)
+    allowed_scopes = {None, "owned", "collaborated", "accessible"}
+    if scope not in allowed_scopes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope 仅支持 owned/collaborated/accessible"
+        )
+
+    current_user_id = str(current_user.id)
+    include_collaborated = False
+    if scope == "owned":
+        actual_owner_id = current_user_id
+    elif scope == "collaborated":
+        actual_owner_id = None
+    elif scope == "accessible" and not has_view_all:
+        actual_owner_id = None
+        include_collaborated = True
+    elif actual_owner_id is None and not has_view_all:
+        actual_owner_id = current_user_id
 
     customers, total = customer_crud.get_multi(
         db=db,
@@ -566,7 +586,10 @@ def get_customers(
         created_time_start=created_time_start,
         created_time_end=created_time_end,
         order_by=order_by,
-        order_dir=order_dir
+        order_dir=order_dir,
+        scope=scope,
+        current_user_id=current_user_id,
+        include_collaborated=include_collaborated
     )
     
     result = []
@@ -676,6 +699,144 @@ def get_customers(
         page_size=limit,
         total_pages=total_pages
     )
+
+
+def _can_manage_customer_members(db: Session, customer, team_id: int, current_user) -> bool:
+    from app.crud.permission import permission_crud
+    from app.crud.role import role_crud
+
+    if customer.owner_id == str(current_user.id):
+        return True
+
+    permission_codes = {p.code for p in permission_crud.get_user_permissions(db, current_user.id, team_id)}
+    if "customer:assign" in permission_codes or "customer:edit:all" in permission_codes:
+        return True
+
+    role_codes = {r.code for r in role_crud.get_user_roles(db, current_user.id, team_id)}
+    return "TEAM_ADMIN" in role_codes
+
+
+def _build_customer_member_response(db: Session, member, can_manage: bool) -> CustomerMemberResponse:
+    user_info = None
+    if member.user_id:
+        row = db.execute(text("""
+            SELECT id, name, avatar_url
+            FROM users
+            WHERE id = :user_id
+        """), {"user_id": int(member.user_id)}).first()
+        if row:
+            user_info = CustomerMemberUserInfo(
+                id=str(row[0]),
+                name=row[1],
+                avatar_url=row[2],
+            )
+
+    return CustomerMemberResponse(
+        id=member.id,
+        customer_id=member.customer_id,
+        user_id=member.user_id,
+        member_role=member.member_role,
+        access_level=member.access_level,
+        remark=member.remark,
+        created_by=member.created_by,
+        created_time=member.created_time,
+        updated_time=member.updated_time,
+        user_info=user_info,
+        can_manage=can_manage,
+    )
+
+
+@router.get("/{customer_id}/members", response_model=List[CustomerMemberResponse], summary="查询客户团队成员")
+def get_customer_members(
+    customer_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
+    can_manage = _can_manage_customer_members(db, customer, team_id, current_user)
+    members = customer_member_crud.get_by_customer(db, team_id, customer_id)
+    return [_build_customer_member_response(db, member, can_manage) for member in members]
+
+
+@router.get("/{customer_id}/member-candidates", response_model=List[CustomerMemberCandidate], summary="查询客户团队成员候选人")
+def get_customer_member_candidates(
+    customer_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    check_customer_member_manage_permission(customer_id, team_id, current_user, db)
+    return customer_member_crud.get_candidates(db, team_id, customer_id)
+
+
+@router.post("/{customer_id}/members", response_model=CustomerMemberResponse, status_code=status.HTTP_201_CREATED, summary="添加客户团队成员")
+def add_customer_member(
+    customer_id: int,
+    member_in: CustomerMemberCreate,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    customer = check_customer_member_manage_permission(customer_id, team_id, current_user, db)
+    if customer.owner_id == str(member_in.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="客户负责人无需添加为团队成员"
+        )
+    if not team_crud.is_member(db, team_id, int(member_in.user_id)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只能添加当前团队成员"
+        )
+
+    member = customer_member_crud.create_or_restore(
+        db=db,
+        team_id=team_id,
+        customer_id=customer_id,
+        obj_in=member_in,
+        created_by=str(current_user.id),
+    )
+    return _build_customer_member_response(db, member, True)
+
+
+@router.put("/{customer_id}/members/{member_id}", response_model=CustomerMemberResponse, summary="更新客户团队成员")
+def update_customer_member(
+    customer_id: int,
+    member_id: int,
+    member_in: CustomerMemberUpdate,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    check_customer_member_manage_permission(customer_id, team_id, current_user, db)
+    member = customer_member_crud.get_by_id(db, member_id, team_id)
+    if not member or member.customer_id != customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="客户团队成员不存在"
+        )
+    updated = customer_member_crud.update(db, member, member_in)
+    return _build_customer_member_response(db, updated, True)
+
+
+@router.delete("/{customer_id}/members/{member_id}", response_model=MessageResponse, summary="移除客户团队成员")
+def remove_customer_member(
+    customer_id: int,
+    member_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    check_customer_member_manage_permission(customer_id, team_id, current_user, db)
+    member = customer_member_crud.get_by_id(db, member_id, team_id)
+    if not member or member.customer_id != customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="客户团队成员不存在"
+        )
+    customer_member_crud.deactivate(db, member)
+    return MessageResponse(message="移除成功")
 
 
 @router.get("/{customer_id}", response_model=CustomerDetailResponse, summary="获取客户详情", description="返回客户信息及其所有联系人列表")

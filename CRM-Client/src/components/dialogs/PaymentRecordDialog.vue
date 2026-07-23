@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import type { PaymentRecordCreate } from '@/api/payment'
+import paymentApi from '@/api/payment'
+import customerApi, { type CustomerMemberResponse } from '@/api/customer'
+import { useUserStore } from '@/stores/user'
+import { handleApiError } from '@/utils/errorHandler'
 import {
   Dialog,
   DialogContent,
@@ -10,12 +14,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { DatePicker } from '@/components/ui/date-picker'
+import {
+  DateField,
+  InputField,
+  SelectField,
+  TextareaField,
+} from '@/components/crmwolf'
 
 interface Props {
   open: boolean
+  paymentPlanId?: number | null
   defaultAmount?: number | null
   defaultPayerName?: string | null
   submitting?: boolean
@@ -31,6 +39,7 @@ interface PaymentRecordForm {
   actualPayerName: string
   paymentDate: string
   proofAttachment: string
+  commissionMemberId: string
   notes: string
 }
 
@@ -38,22 +47,32 @@ interface PaymentRecordErrors {
   actualAmount: string
   actualPayerName: string
   paymentDate: string
+  commissionMemberId: string
   notes: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  paymentPlanId: null,
   defaultAmount: null,
   defaultPayerName: null,
   submitting: false,
 })
 
 const emit = defineEmits<Emits>()
+const userStore = useUserStore()
+
+interface CommissionMemberOption {
+  id: string
+  name: string
+  source: 'self' | 'customer_member'
+}
 
 const form = reactive<PaymentRecordForm>({
   actualAmount: '',
   actualPayerName: '',
   paymentDate: '',
   proofAttachment: '',
+  commissionMemberId: '',
   notes: '',
 })
 
@@ -61,8 +80,18 @@ const errors = reactive<PaymentRecordErrors>({
   actualAmount: '',
   actualPayerName: '',
   paymentDate: '',
+  commissionMemberId: '',
   notes: '',
 })
+
+const loadingCommissionMembers = ref(false)
+const commissionMemberOptions = ref<CommissionMemberOption[]>([])
+const commissionMemberSelectOptions = computed(() =>
+  commissionMemberOptions.value.map((member) => ({
+    value: member.id,
+    label: `${member.name}${member.source === 'self' ? '（我）' : ''}`,
+  }))
+)
 
 const visible = computed({
   get: (): boolean => props.open,
@@ -73,6 +102,7 @@ const isSubmitting = computed((): boolean => props.submitting === true)
 const hasAmountError = computed((): boolean => errors.actualAmount.length > 0)
 const hasActualPayerNameError = computed((): boolean => errors.actualPayerName.length > 0)
 const hasPaymentDateError = computed((): boolean => errors.paymentDate.length > 0)
+const hasCommissionMemberError = computed((): boolean => errors.commissionMemberId.length > 0)
 const hasNotesError = computed((): boolean => errors.notes.length > 0)
 
 function getLocalDateString(date: Date = new Date()): string {
@@ -105,6 +135,7 @@ function clearErrors(): void {
   errors.actualAmount = ''
   errors.actualPayerName = ''
   errors.paymentDate = ''
+  errors.commissionMemberId = ''
   errors.notes = ''
 }
 
@@ -113,6 +144,7 @@ function resetForm(): void {
   form.actualPayerName = props.defaultPayerName?.trim() ?? ''
   form.paymentDate = getLocalDateString()
   form.proofAttachment = ''
+  form.commissionMemberId = String(userStore.userInfo?.id ?? '')
   form.notes = ''
   clearErrors()
 }
@@ -147,15 +179,23 @@ function validateForm(): boolean {
     errors.paymentDate = '请选择回款日期'
   }
 
+  if (form.commissionMemberId.trim().length === 0) {
+    errors.commissionMemberId = '请选择提成协作成员'
+  }
+
   if (form.notes.length > 200) {
     errors.notes = '备注不能超过 200 字'
   }
 
-  return !hasAmountError.value && !hasActualPayerNameError.value && !hasPaymentDateError.value && !hasNotesError.value
+  return !hasAmountError.value
+    && !hasActualPayerNameError.value
+    && !hasPaymentDateError.value
+    && !hasCommissionMemberError.value
+    && !hasNotesError.value
 }
 
 function handleSubmit(): void {
-  if (isSubmitting.value || !validateForm()) {
+  if (isSubmitting.value || loadingCommissionMembers.value || !validateForm()) {
     return
   }
 
@@ -163,6 +203,7 @@ function handleSubmit(): void {
     actual_amount: Number(form.actualAmount.trim()),
     actual_payer_name: form.actualPayerName.trim(),
     payment_date: form.paymentDate.trim(),
+    commission_member_id: form.commissionMemberId.trim(),
   }
 
   const proofAttachment = trimmedOptional(form.proofAttachment)
@@ -184,11 +225,57 @@ function closeDialog(): void {
   }
 }
 
+function mergeCommissionMemberOptions(members: CustomerMemberResponse[]): CommissionMemberOption[] {
+  const options = new Map<string, CommissionMemberOption>()
+  const currentUserId = String(userStore.userInfo?.id ?? '')
+  if (currentUserId.length > 0) {
+    options.set(currentUserId, {
+      id: currentUserId,
+      name: userStore.userInfo?.name ?? '我',
+      source: 'self',
+    })
+  }
+
+  for (const member of members) {
+    const memberName = member.user_info?.name?.trim()
+    options.set(member.user_id, {
+      id: member.user_id,
+      name: memberName !== undefined && memberName.length > 0 ? memberName : `用户 ${member.user_id}`,
+      source: 'customer_member',
+    })
+  }
+  return Array.from(options.values())
+}
+
+async function loadCommissionMembers(): Promise<void> {
+  if (!props.open || props.paymentPlanId === null) {
+    commissionMemberOptions.value = mergeCommissionMemberOptions([])
+    return
+  }
+
+  loadingCommissionMembers.value = true
+  try {
+    const plan = await paymentApi.getPaymentPlanDetail(props.paymentPlanId)
+    if (plan.customer_id === undefined || plan.customer_id === null) {
+      commissionMemberOptions.value = mergeCommissionMemberOptions([])
+      return
+    }
+    const members = await customerApi.getCustomerMembers(plan.customer_id)
+    commissionMemberOptions.value = mergeCommissionMemberOptions(members)
+  } catch (error) {
+    commissionMemberOptions.value = mergeCommissionMemberOptions([])
+    handleApiError(error, '加载提成协作成员')
+  } finally {
+    loadingCommissionMembers.value = false
+  }
+}
+
 watch(
-  () => [props.open, props.defaultAmount, props.defaultPayerName] as const,
+  () => [props.open, props.defaultAmount, props.defaultPayerName, props.paymentPlanId] as const,
   ([isOpen]) => {
     if (isOpen) {
       resetForm()
+      void loadCommissionMembers()
     } else {
       clearErrors()
     }
@@ -208,135 +295,88 @@ watch(
       </DialogHeader>
 
       <form class="payment-record-dialog__form" novalidate @submit.prevent="handleSubmit">
-        <div class="payment-record-dialog__field">
-          <label class="payment-record-dialog__label" for="payment-record-amount">
-            回款金额
-            <span class="payment-record-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <Input
-            id="payment-record-amount"
-            v-model="form.actualAmount"
-            name="actual_amount"
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="请输入回款金额"
-            class="payment-record-dialog__control h-11 min-h-11"
-            :disabled="isSubmitting"
-            :aria-invalid="hasAmountError"
-            aria-describedby="payment-record-amount-help payment-record-amount-error"
-          />
-          <p id="payment-record-amount-help" class="payment-record-dialog__help">
-            金额需大于 0，可精确到分。
-          </p>
-          <p
-            v-if="hasAmountError"
-            id="payment-record-amount-error"
-            class="payment-record-dialog__error"
-            role="alert"
-          >
-            {{ errors.actualAmount }}
-          </p>
-        </div>
+        <InputField
+          id="payment-record-amount"
+          v-model="form.actualAmount"
+          class="payment-record-dialog__field"
+          label="回款金额"
+          required
+          name="actual_amount"
+          type="number"
+          inputmode="decimal"
+          min="0"
+          step="0.01"
+          placeholder="请输入回款金额"
+          :disabled="isSubmitting"
+          helper-text="金额需大于 0，可精确到分。"
+          :error="errors.actualAmount"
+        />
 
-        <div class="payment-record-dialog__field">
-          <label class="payment-record-dialog__label" for="payment-record-payer-name">
-            实际付款方
-            <span class="payment-record-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <Input
-            id="payment-record-payer-name"
-            v-model="form.actualPayerName"
-            name="actual_payer_name"
-            type="text"
-            maxlength="200"
-            placeholder="请输入实际付款方"
-            class="payment-record-dialog__control h-11 min-h-11"
-            :disabled="isSubmitting"
-            :aria-invalid="hasActualPayerNameError"
-            aria-describedby="payment-record-payer-name-help payment-record-payer-name-error"
-          />
-          <p id="payment-record-payer-name-help" class="payment-record-dialog__help">
-            默认使用客户名称，可按实际付款公司抬头修改。
-          </p>
-          <p
-            v-if="hasActualPayerNameError"
-            id="payment-record-payer-name-error"
-            class="payment-record-dialog__error"
-            role="alert"
-          >
-            {{ errors.actualPayerName }}
-          </p>
-        </div>
+        <InputField
+          id="payment-record-payer-name"
+          v-model="form.actualPayerName"
+          class="payment-record-dialog__field"
+          label="实际付款方"
+          required
+          name="actual_payer_name"
+          type="text"
+          maxlength="200"
+          placeholder="请输入实际付款方"
+          :disabled="isSubmitting"
+          helper-text="默认使用客户名称，可按实际付款公司抬头修改。"
+          :error="errors.actualPayerName"
+        />
 
-        <div class="payment-record-dialog__field">
-          <label class="payment-record-dialog__label" for="payment-record-date">
-            回款日期
-            <span class="payment-record-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <DatePicker
-            :model-value="parseLocalDateString(form.paymentDate)"
-            placeholder="请选择回款日期"
-            class="payment-record-dialog__control"
-            :disabled="isSubmitting"
-            @update:model-value="handlePaymentDateChange"
-          />
-          <p id="payment-record-date-help" class="payment-record-dialog__help">
-            使用本地日期，格式为 YYYY-MM-DD。
-          </p>
-          <p
-            v-if="hasPaymentDateError"
-            id="payment-record-date-error"
-            class="payment-record-dialog__error"
-            role="alert"
-          >
-            {{ errors.paymentDate }}
-          </p>
-        </div>
+        <DateField
+          id="payment-record-date"
+          :model-value="parseLocalDateString(form.paymentDate)"
+          class="payment-record-dialog__field"
+          label="回款日期"
+          required
+          placeholder="请选择回款日期"
+          :disabled="isSubmitting"
+          helper-text="使用本地日期，格式为 YYYY-MM-DD。"
+          :error="errors.paymentDate"
+          @update:model-value="handlePaymentDateChange"
+        />
 
-        <div class="payment-record-dialog__field">
-          <label class="payment-record-dialog__label" for="payment-record-proof">
-            凭证附件 URL
-          </label>
-          <Input
-            id="payment-record-proof"
-            v-model="form.proofAttachment"
-            name="proof_attachment"
-            type="url"
-            placeholder="请输入附件 URL（可选）"
-            class="payment-record-dialog__control h-11 min-h-11"
-            :disabled="isSubmitting"
-          />
-        </div>
+        <SelectField
+          id="payment-record-commission-member"
+          v-model="form.commissionMemberId"
+          class="payment-record-dialog__field"
+          label="提成协作成员"
+          required
+          :options="commissionMemberSelectOptions"
+          :placeholder="loadingCommissionMembers ? '加载成员中...' : '请选择提成协作成员'"
+          :disabled="isSubmitting || loadingCommissionMembers"
+          helper-text="可选择你自己，或当前客户团队成员中的一人。"
+          :error="errors.commissionMemberId"
+        />
 
-        <div class="payment-record-dialog__field">
-          <label class="payment-record-dialog__label" for="payment-record-notes">
-            备注
-          </label>
-          <Textarea
-            id="payment-record-notes"
-            v-model="form.notes"
-            name="notes"
-            maxlength="200"
-            placeholder="请输入备注信息（可选，最多 200 字）"
-            class="payment-record-dialog__textarea min-h-20"
-            :disabled="isSubmitting"
-            :aria-invalid="hasNotesError"
-            aria-describedby="payment-record-notes-help payment-record-notes-error"
-          />
-          <p id="payment-record-notes-help" class="payment-record-dialog__help">
-            {{ form.notes.length }}/200
-          </p>
-          <p
-            v-if="hasNotesError"
-            id="payment-record-notes-error"
-            class="payment-record-dialog__error"
-            role="alert"
-          >
-            {{ errors.notes }}
-          </p>
-        </div>
+        <InputField
+          id="payment-record-proof"
+          v-model="form.proofAttachment"
+          class="payment-record-dialog__field"
+          label="凭证附件 URL"
+          name="proof_attachment"
+          type="url"
+          placeholder="请输入附件 URL（可选）"
+          :disabled="isSubmitting"
+        />
+
+        <TextareaField
+          id="payment-record-notes"
+          v-model="form.notes"
+          class="payment-record-dialog__field"
+          label="备注"
+          name="notes"
+          maxlength="200"
+          placeholder="请输入备注信息（可选，最多 200 字）"
+          control-class="min-h-20"
+          :disabled="isSubmitting"
+          :helper-text="`${form.notes.length}/200`"
+          :error="errors.notes"
+        />
 
         <DialogFooter class="payment-record-dialog__footer">
           <Button
@@ -351,7 +391,7 @@ watch(
           <Button
             type="submit"
             class="payment-record-dialog__button min-h-11"
-            :disabled="isSubmitting"
+            :disabled="isSubmitting || loadingCommissionMembers"
           >
             {{ isSubmitting ? '提交中...' : '确定' }}
           </Button>
@@ -381,36 +421,8 @@ watch(
   gap: $wolf-space-sm-v2;
 }
 
-.payment-record-dialog__label {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.payment-record-dialog__required {
-  color: $wolf-danger-text-v2;
-}
-
-.payment-record-dialog__control,
-.payment-record-dialog__textarea,
 .payment-record-dialog__button {
   min-height: $wolf-touch-target-min-v2;
-}
-
-.payment-record-dialog__help,
-.payment-record-dialog__error {
-  margin: 0;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.payment-record-dialog__help {
-  color: $wolf-text-secondary-v2;
-}
-
-.payment-record-dialog__error {
-  color: $wolf-danger-text-v2;
 }
 
 .payment-record-dialog__footer {

@@ -72,11 +72,13 @@ interface Props {
   opportunityId: number
   embedded?: boolean
   customerContext?: CustomerContext | null
+  canEditCustomerContext?: boolean | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   embedded: false,
-  customerContext: null
+  customerContext: null,
+  canEditCustomerContext: null
 })
 
 const emit = defineEmits<{
@@ -137,11 +139,25 @@ const licenseApplicationDialogOpen = ref(false)
 // 编辑弹窗状态
 const editDialogOpen = ref(false)
 
-const canEdit = computed(() =>
-  permissionStore.hasAnyPermission(['opportunity:edit:own', 'opportunity:edit:all'])
+const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
+const isOwner = computed(() =>
+  opportunity.value !== null && opportunity.value.owner_id === currentUserId.value
 )
-const canWin = computed(() => permissionStore.hasPermission('opportunity:win'))
-const canLose = computed(() => permissionStore.hasPermission('opportunity:lose'))
+const canEditOpportunity = computed(() => {
+  if (opportunity.value === null) return false
+  if (permissionStore.hasPermission('opportunity:edit:all')) return true
+  return permissionStore.hasPermission('opportunity:edit:own') && isOwner.value
+})
+const canAdvanceOpportunityStage = computed(() =>
+  canEditOpportunity.value && isActive.value && isApprovalApproved.value
+)
+const canWin = computed(() =>
+  canEditOpportunity.value && permissionStore.hasPermission('opportunity:win')
+)
+const canLose = computed(() =>
+  canEditOpportunity.value && permissionStore.hasPermission('opportunity:lose')
+)
+const canCreateContractPermission = computed(() => permissionStore.hasPermission('contract:create'))
 const canEditAllContract = computed(() => permissionStore.hasPermission('contract:edit:all'))
 const canEditOwnContract = computed(() => permissionStore.hasPermission('contract:edit:own'))
 const canDeleteAllContract = computed(() => permissionStore.hasPermission('contract:delete:all'))
@@ -160,11 +176,10 @@ const isApprovalSubmitter = computed(() =>
   opportunity.value?.creator_id === String(userStore.userInfo?.id)
 )
 const canSubmitApproval = computed(() => {
-  const currentUserId = String(userStore.userInfo?.id ?? '')
   if (isApprovalSubmitter.value) return true
   if (permissionStore.hasPermission('opportunity:edit:all')) return true
   return permissionStore.hasPermission('opportunity:edit:own')
-    && opportunity.value?.owner_id === currentUserId
+    && opportunity.value?.owner_id === currentUserId.value
 })
 
 const relatedContracts = computed<ContractListResponse[]>(() =>
@@ -189,8 +204,13 @@ const isRelatedContractApproved = computed(() =>
   relatedContract.value !== null && approvedContractStatuses.includes(relatedContract.value.status)
 )
 const canCreateRelatedContract = computed(() =>
-  opportunity.value?.status === 1 && isApprovalApproved.value && relatedContract.value === null
+  canCreateContractPermission.value
+    && (props.canEditCustomerContext ?? true)
+    && opportunity.value?.status === 1
+    && isApprovalApproved.value
+    && relatedContract.value === null
 )
+const canCreateLicenseApplication = computed(() => props.canEditCustomerContext ?? true)
 const relatedContractTotalAmount = computed(() => Number(relatedContract.value?.total_amount ?? 0))
 const plannedPaymentAmount = computed(() =>
   paymentPlans.value.reduce((total, plan) => total + Number(plan.planned_amount ?? 0), 0)
@@ -234,13 +254,13 @@ const paymentRecordDefaultPayerName = computed(() => {
 const canEditContractRow = (contract: ContractListResponse): boolean => {
   if (contract.status !== 'DRAFT') return false
   if (canEditAllContract.value) return true
-  return canEditOwnContract.value && contract.owner_id === String(userStore.userInfo?.id)
+  return canEditOwnContract.value && contract.owner_id === currentUserId.value
 }
 
 const canDeleteContractRow = (contract: ContractListResponse): boolean => {
   if (contract.status !== 'DRAFT') return false
   if (canDeleteAllContract.value) return true
-  return canDeleteOwnContract.value && contract.owner_id === String(userStore.userInfo?.id)
+  return canDeleteOwnContract.value && contract.owner_id === currentUserId.value
 }
 
 const canSubmitContractApproval = (contract: ContractListResponse): boolean => {
@@ -248,7 +268,7 @@ const canSubmitContractApproval = (contract: ContractListResponse): boolean => {
 }
 
 const canWithdrawContractApproval = (contract: ContractListResponse): boolean => {
-  return contract.status === 'PENDING_REVIEW' && contract.creator_id === String(userStore.userInfo?.id)
+  return contract.status === 'PENDING_REVIEW' && contract.creator_id === currentUserId.value
 }
 
 interface ResponseStatusError {
@@ -351,6 +371,10 @@ function handleEdit(): void {
     toast.warning('商机审批中，暂不能编辑')
     return
   }
+  if (!canEditOpportunity.value) {
+    toast.error('你没有编辑该商机的权限')
+    return
+  }
   editDialogOpen.value = true
 }
 
@@ -382,6 +406,10 @@ function handleLoseSuccess(): void {
 
 function handleCreateContract(): void {
   if (!opportunity.value) return
+  if (!canCreateRelatedContract.value) {
+    toast.error('你没有在该商机下创建合同的权限')
+    return
+  }
   if (!isApprovalApproved.value) {
     toast.warning('商机审批通过后才能创建合同')
     return
@@ -573,6 +601,10 @@ function handleAddDeployment(): void {
 }
 
 function handleApplyLicense(): void {
+  if (!canCreateLicenseApplication.value) {
+    toast.error('你没有在该客户下申请 License 的权限')
+    return
+  }
   if (!isRelatedContractApproved.value) {
     toast.warning('合同审批通过后才能申请 License')
     return
@@ -973,6 +1005,7 @@ watch(approvalPhase, phase => {
                   <OpportunityStageStepper
                     :opportunity-id="opportunity.id"
                     embedded
+                    :can-advance="canAdvanceOpportunityStage"
                     @advanced="handleStageAdvanced"
                     @stage-status-change="handleStageStatusChange"
                   />
@@ -1036,6 +1069,7 @@ watch(approvalPhase, phase => {
                   :license-applications="licenseApplications"
                   :deployments="deployments"
                   :show-deployments="false"
+                  :show-apply="canCreateLicenseApplication"
                   @add-deployment="handleAddDeployment"
                   @apply="handleApplyLicense"
                 />
@@ -1066,7 +1100,7 @@ watch(approvalPhase, phase => {
         输单
       </Button>
       <Button
-        v-if="canEdit && !isApprovalPending"
+        v-if="canEditOpportunity && !isApprovalPending"
         variant="outline"
         @click="handleEdit"
       >
@@ -1112,6 +1146,7 @@ watch(approvalPhase, phase => {
 
     <PaymentRecordDialog
       :open="paymentRecordDialogOpen"
+      :payment-plan-id="selectedPaymentPlan?.id ?? null"
       :default-amount="paymentRecordDefaultAmount"
       :default-payer-name="paymentRecordDefaultPayerName"
       :submitting="paymentRecordSubmitting"

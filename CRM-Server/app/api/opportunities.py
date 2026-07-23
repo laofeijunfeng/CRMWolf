@@ -153,8 +153,12 @@ def get_opportunities(
                 detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据"
             )
 
-    # 如果前端未指定 owner_id 且没有 view:all 权限，则限制为只看自己的商机
-    if actual_owner_id is None and not has_view_all:
+    if customer_id is not None and not has_view_all:
+        check_customer_view_permission(customer_id, team_id, current_user, db)
+        actual_owner_id = None
+
+    # 如果前端未指定 owner_id 且没有 view:all 权限，也不是按可访问客户查询，则限制为只看自己的商机
+    if actual_owner_id is None and not has_view_all and customer_id is None:
         actual_owner_id = str(current_user.id)
 
     opportunities, total = opportunity_crud.get_multi(

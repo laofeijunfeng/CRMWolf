@@ -16,7 +16,9 @@ from app.core.deps import (
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.payment import payment_plan_crud, payment_record_crud, query_pending_approval_me
 from app.crud.contract import contract_crud
+from app.crud.customer_member import customer_member_crud
 from app.crud.role import role_crud
+from app.crud.user import user_crud
 from app.constants.business_types import BusinessType
 from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord, PaymentConfirmationStatus
 from app.models.approval import Approval, ApprovalStatus, ApprovalRecord, ApprovalNode
@@ -82,6 +84,56 @@ def _get_current_approver_names(db: Session, approval: Approval, team_id: int) -
 
     # 返回审批人姓名（多个审批人用逗号分隔）
     return ", ".join([user.name for user in users if user.name])
+
+
+def _validate_payment_commission_member(
+    db: Session,
+    team_id: int,
+    customer_id: Optional[int],
+    current_user_id: str,
+    commission_member_id: Optional[str],
+) -> None:
+    if customer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="回款计划未关联合同客户，无法选择提成成员"
+        )
+    if not commission_member_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请选择提成协作成员"
+        )
+
+    normalized_member_id = str(commission_member_id).strip()
+    try:
+        normalized_member_pk = int(normalized_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="提成协作成员不存在"
+        )
+
+    if normalized_member_id == current_user_id:
+        return
+
+    user = user_crud.get_by_id(db, normalized_member_pk)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="提成协作成员不存在"
+        )
+
+    member = customer_member_crud.get_active_member(
+        db,
+        team_id=team_id,
+        customer_id=customer_id,
+        user_id=normalized_member_id,
+    )
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="提成协作成员必须是当前客户的团队成员，或选择你自己"
+        )
 
 
 @router.post("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], status_code=status.HTTP_201_CREATED, summary="创建回款计划", description="为指定合同创建回款计划，支持批量创建多个阶段。只有已签署或已生效的合同可以创建回款计划，所有阶段的计划金额之和不能超过合同总金额。返回创建成功的回款计划列表。")
@@ -567,6 +619,8 @@ def get_payment_plan_detail(
                 "actual_payer_name": r.actual_payer_name,
                 "payment_date": r.payment_date.isoformat(),
                 "proof_attachment": r.proof_attachment,
+                "commission_member_id": r.commission_member_id,
+                "commission_member_name": r.commission_member_name,
                 "creator_name": r.creator_name,
                 "notes": r.notes,
                 "confirmation_status": r.confirmation_status.value if hasattr(r.confirmation_status, 'value') else r.confirmation_status,
@@ -666,6 +720,13 @@ async def create_payment_record(
     3. 发送审批通知（API 层 - 异步）
     """
     plan = check_payment_view_permission(plan_id, team_id, current_user, db)
+    _validate_payment_commission_member(
+        db,
+        team_id=team_id,
+        customer_id=plan.contract.customer_id if plan.contract else None,
+        current_user_id=str(current_user.id),
+        commission_member_id=record_data.commission_member_id,
+    )
 
     if plan.status == PaymentPlanStatus.COMPLETED:
         raise HTTPException(
@@ -776,6 +837,14 @@ def update_payment_record(
             detail="回款记录不存在"
         )
     check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
+    if record_data.commission_member_id is not None:
+        _validate_payment_commission_member(
+            db,
+            team_id=team_id,
+            customer_id=record.payment_plan.contract.customer_id if record.payment_plan and record.payment_plan.contract else None,
+            current_user_id=str(current_user.id),
+            commission_member_id=record_data.commission_member_id,
+        )
 
     # Task 8.1: 检查审批状态 - 只有驳回的记录才能更新
     # 查询该回款记录关联的审批
@@ -941,6 +1010,8 @@ def list_payment_records(
                 "actual_payer_name": record.actual_payer_name,
                 "payment_date": record.payment_date.isoformat(),
                 "proof_attachment": record.proof_attachment,
+                "commission_member_id": record.commission_member_id,
+                "commission_member_name": record.commission_member_name,
                 "notes": record.notes,
                 "creator_id": record.creator_id,
                 "creator_name": record.creator_name,

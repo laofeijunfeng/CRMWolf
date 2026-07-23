@@ -10,7 +10,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import contractApi, { type ContractListResponse } from '@/api/contract'
 import customerApi, { type CustomerResponse } from '@/api/customer'
 import invoiceApi, {
@@ -26,7 +25,11 @@ import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency } from '@/utils/format'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
-import SelectionSummary from '@/components/crmwolf/SelectionSummary.vue'
+import {
+  InputField,
+  SelectField,
+  SelectionSummary,
+} from '@/components/crmwolf'
 
 interface FixedCustomer {
   id: number
@@ -144,6 +147,34 @@ const selectedInvoiceTitleSummaryItems = computed(() => {
     { label: '地址电话', value: `${nullText(selectedInvoiceTitle.value.address)} / ${nullText(selectedInvoiceTitle.value.phone)}` },
   ]
 })
+
+const customerOptions = computed(() =>
+  customers.value.map(customer => ({
+    value: customer.id,
+    label: customerOptionLabel(customer),
+  }))
+)
+
+const contractOptions = computed(() =>
+  contracts.value.map(contract => ({
+    value: contract.id,
+    label: contractOptionLabel(contract),
+  }))
+)
+
+const paymentPlanOptions = computed(() =>
+  paymentPlans.value.map(plan => ({
+    value: plan.id,
+    label: paymentPlanOptionLabel(plan),
+  }))
+)
+
+const invoiceTitleOptions = computed(() =>
+  invoiceTitles.value.map(invoiceTitle => ({
+    value: invoiceTitle.id,
+    label: `${invoiceTitle.title} · ${invoiceTitleTypeLabel(invoiceTitle.title_type)}`,
+  }))
+)
 const isEditContextLoading = computed<boolean>(() => {
   return !isCreateMode.value && (loadingContracts.value || loadingPaymentPlans.value || loadingInvoiceTitles.value)
 })
@@ -272,26 +303,6 @@ function normalizeSelectValue(value: unknown): string | null {
   if (typeof value === 'string') return value
   if (typeof value === 'number') return String(value)
   return null
-}
-
-function getNativeSelectValue(event: Event): string {
-  return event.target instanceof HTMLSelectElement ? event.target.value : ''
-}
-
-function handleCustomerSelectChange(event: Event): void {
-  handleCustomerChange(getNativeSelectValue(event))
-}
-
-function handleContractSelectChange(event: Event): void {
-  handleContractChange(getNativeSelectValue(event))
-}
-
-function handlePaymentPlanSelectChange(event: Event): void {
-  handlePaymentPlanChange(getNativeSelectValue(event))
-}
-
-function handleInvoiceTitleSelectChange(event: Event): void {
-  handleInvoiceTitleChange(getNativeSelectValue(event))
 }
 
 function handleCustomerChange(value: unknown): void {
@@ -444,117 +455,55 @@ watch(
       </DialogHeader>
 
       <form class="invoice-application-dialog__form" novalidate @submit.prevent="handleSubmit">
-        <div v-if="(hasFixedCustomer && fixedCustomer !== null) || !isCreateMode" class="invoice-application-dialog__field">
-          <label class="invoice-application-dialog__label" for="invoice-application-fixed-customer">
-            客户
-          </label>
-          <Input
-            id="invoice-application-fixed-customer"
-            class="invoice-application-dialog__control h-11 min-h-11"
-            :model-value="selectedCustomerName"
-            disabled
-          />
-        </div>
+        <InputField
+          v-if="(hasFixedCustomer && fixedCustomer !== null) || !isCreateMode"
+          id="invoice-application-fixed-customer"
+          class="invoice-application-dialog__field"
+          :model-value="selectedCustomerName"
+          label="客户"
+          disabled
+        />
 
-        <div v-else class="invoice-application-dialog__field">
-          <label class="invoice-application-dialog__label" for="invoice-application-customer">
-            客户
-            <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <select
-            id="invoice-application-customer"
-            :value="form.customerId"
-            class="invoice-application-dialog__control invoice-application-dialog__select h-11 min-h-11"
-            :disabled="loadingCustomers || submitting || !isCreateMode"
-            :aria-invalid="errors.customerId !== ''"
-            aria-describedby="invoice-application-customer-error"
-            @change="handleCustomerSelectChange"
-          >
-            <option value="" disabled>{{ loadingCustomers ? '加载客户中...' : '请选择客户' }}</option>
-            <option
-              v-for="customer in customers"
-              :key="customer.id"
-              :value="String(customer.id)"
-            >
-              {{ customerOptionLabel(customer) }}
-            </option>
-          </select>
-          <p
-            v-if="errors.customerId"
-            id="invoice-application-customer-error"
-            class="invoice-application-dialog__error"
-            role="alert"
-          >
-            {{ errors.customerId }}
-          </p>
-        </div>
+        <SelectField
+          v-else
+          id="invoice-application-customer"
+          :model-value="form.customerId"
+          class="invoice-application-dialog__field"
+          label="客户"
+          required
+          :options="customerOptions"
+          :placeholder="loadingCustomers ? '加载客户中...' : '请选择客户'"
+          :disabled="loadingCustomers || submitting || !isCreateMode"
+          :error="errors.customerId"
+          @update:model-value="handleCustomerChange"
+        />
 
         <div v-if="isCreateMode" class="invoice-application-dialog__grid">
-          <div class="invoice-application-dialog__field">
-            <label class="invoice-application-dialog__label" for="invoice-application-contract">
-              合同
-              <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
-            </label>
-            <select
-              id="invoice-application-contract"
-              :value="form.contractId"
-              class="invoice-application-dialog__control invoice-application-dialog__select h-11 min-h-11"
-              :disabled="loadingContracts || submitting || form.customerId === '' || hasFixedContract"
-              :aria-invalid="errors.contractId !== ''"
-              aria-describedby="invoice-application-contract-error"
-              @change="handleContractSelectChange"
-            >
-              <option value="" disabled>{{ loadingContracts ? '加载合同中...' : '请选择合同' }}</option>
-              <option
-                v-for="contract in contracts"
-                :key="contract.id"
-                :value="String(contract.id)"
-              >
-                {{ contractOptionLabel(contract) }}
-              </option>
-            </select>
-            <p
-              v-if="errors.contractId"
-              id="invoice-application-contract-error"
-              class="invoice-application-dialog__error"
-              role="alert"
-            >
-              {{ errors.contractId }}
-            </p>
-          </div>
+          <SelectField
+            id="invoice-application-contract"
+            :model-value="form.contractId"
+            class="invoice-application-dialog__field"
+            label="合同"
+            required
+            :options="contractOptions"
+            :placeholder="loadingContracts ? '加载合同中...' : '请选择合同'"
+            :disabled="loadingContracts || submitting || form.customerId === '' || hasFixedContract"
+            :error="errors.contractId"
+            @update:model-value="handleContractChange"
+          />
 
-          <div class="invoice-application-dialog__field">
-            <label class="invoice-application-dialog__label" for="invoice-application-plan">
-              回款计划
-              <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
-            </label>
-            <select
-              id="invoice-application-plan"
-              :value="form.paymentPlanId"
-              class="invoice-application-dialog__control invoice-application-dialog__select h-11 min-h-11"
-              :disabled="loadingPaymentPlans || submitting || form.contractId === ''"
-              :aria-invalid="errors.paymentPlanId !== ''"
-              aria-describedby="invoice-application-plan-error"
-              @change="handlePaymentPlanSelectChange"
-            >
-              <option value="" disabled>{{ loadingPaymentPlans ? '加载计划中...' : '请选择回款计划' }}</option>
-              <option
-                v-for="plan in paymentPlans"
-                :key="plan.id"
-                :value="String(plan.id)"
-              >
-                {{ paymentPlanOptionLabel(plan) }}
-              </option>
-            </select>
-            <p
-              v-if="errors.paymentPlanId"
-              id="invoice-application-plan-error"
-              class="invoice-application-dialog__error"
-              role="alert"
-            >
-              {{ errors.paymentPlanId }}
-            </p>
-          </div>
+          <SelectField
+            id="invoice-application-plan"
+            :model-value="form.paymentPlanId"
+            class="invoice-application-dialog__field"
+            label="回款计划"
+            required
+            :options="paymentPlanOptions"
+            :placeholder="loadingPaymentPlans ? '加载计划中...' : '请选择回款计划'"
+            :disabled="loadingPaymentPlans || submitting || form.contractId === ''"
+            :error="errors.paymentPlanId"
+            @update:model-value="handlePaymentPlanChange"
+          />
         </div>
 
         <div v-else class="invoice-application-dialog__readonly-grid">
@@ -569,50 +518,28 @@ watch(
         </div>
 
         <div class="invoice-application-dialog__grid">
-          <div v-if="hasFixedInvoiceTitle && fixedInvoiceTitle !== null" class="invoice-application-dialog__field">
-            <label class="invoice-application-dialog__label" for="invoice-application-fixed-title">
-              发票抬头
-            </label>
-            <Input
-              id="invoice-application-fixed-title"
-              class="invoice-application-dialog__control h-11 min-h-11"
-              :model-value="fixedInvoiceTitle?.title ?? ''"
-              disabled
-            />
-          </div>
+          <InputField
+            v-if="hasFixedInvoiceTitle && fixedInvoiceTitle !== null"
+            id="invoice-application-fixed-title"
+            class="invoice-application-dialog__field"
+            :model-value="fixedInvoiceTitle?.title ?? ''"
+            label="发票抬头"
+            disabled
+          />
 
-          <div v-else class="invoice-application-dialog__field">
-            <label class="invoice-application-dialog__label" for="invoice-application-title">
-              发票抬头
-              <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
-            </label>
-            <select
-              id="invoice-application-title"
-              :value="form.invoiceTitleId"
-              class="invoice-application-dialog__control invoice-application-dialog__select h-11 min-h-11"
-              :disabled="loadingInvoiceTitles || submitting || form.customerId === ''"
-              :aria-invalid="errors.invoiceTitleId !== ''"
-              aria-describedby="invoice-application-title-error"
-              @change="handleInvoiceTitleSelectChange"
-            >
-              <option value="" disabled>{{ loadingInvoiceTitles ? '加载抬头中...' : '请选择发票抬头' }}</option>
-              <option
-                v-for="invoiceTitle in invoiceTitles"
-                :key="invoiceTitle.id"
-                :value="String(invoiceTitle.id)"
-              >
-                {{ invoiceTitle.title }} · {{ invoiceTitleTypeLabel(invoiceTitle.title_type) }}
-              </option>
-            </select>
-            <p
-              v-if="errors.invoiceTitleId"
-              id="invoice-application-title-error"
-              class="invoice-application-dialog__error"
-              role="alert"
-            >
-              {{ errors.invoiceTitleId }}
-            </p>
-          </div>
+          <SelectField
+            v-else
+            id="invoice-application-title"
+            :model-value="form.invoiceTitleId"
+            class="invoice-application-dialog__field"
+            label="发票抬头"
+            required
+            :options="invoiceTitleOptions"
+            :placeholder="loadingInvoiceTitles ? '加载抬头中...' : '请选择发票抬头'"
+            :disabled="loadingInvoiceTitles || submitting || form.customerId === ''"
+            :error="errors.invoiceTitleId"
+            @update:model-value="handleInvoiceTitleChange"
+          />
 
           <div class="invoice-application-dialog__field">
             <label class="invoice-application-dialog__label" id="invoice-application-type-label">
@@ -628,33 +555,20 @@ watch(
           </div>
         </div>
 
-        <div class="invoice-application-dialog__field">
-          <label class="invoice-application-dialog__label" for="invoice-application-amount">
-            开票金额
-            <span class="invoice-application-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <Input
-            id="invoice-application-amount"
-            v-model="form.invoiceAmount"
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.01"
-            class="invoice-application-dialog__control h-11 min-h-11"
-            placeholder="请输入开票金额"
-            :disabled="submitting"
-            :aria-invalid="errors.invoiceAmount !== ''"
-            aria-describedby="invoice-application-amount-error"
-          />
-          <p
-            v-if="errors.invoiceAmount"
-            id="invoice-application-amount-error"
-            class="invoice-application-dialog__error"
-            role="alert"
-          >
-            {{ errors.invoiceAmount }}
-          </p>
-        </div>
+        <InputField
+          id="invoice-application-amount"
+          v-model="form.invoiceAmount"
+          class="invoice-application-dialog__field"
+          label="开票金额"
+          required
+          type="number"
+          inputmode="decimal"
+          min="0"
+          step="0.01"
+          placeholder="请输入开票金额"
+          :disabled="submitting"
+          :error="errors.invoiceAmount"
+        />
 
         <SelectionSummary
           v-if="selectedInvoiceTitle !== null"
@@ -717,36 +631,6 @@ watch(
 
 .invoice-application-dialog__control {
   width: 100%;
-}
-
-.invoice-application-dialog__select {
-  appearance: none;
-  padding: 0 $wolf-space-2xl-v2 0 $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background:
-    linear-gradient(45deg, transparent 50%, $wolf-text-secondary-v2 50%) calc(100% - 18px) 50% / 5px 5px no-repeat,
-    linear-gradient(135deg, $wolf-text-secondary-v2 50%, transparent 50%) calc(100% - 13px) 50% / 5px 5px no-repeat,
-    $wolf-bg-card-v2;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  line-height: $wolf-line-height-body-v2;
-
-  &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    background-color: $wolf-bg-muted-v2;
-    color: $wolf-text-tertiary-v2;
-    opacity: 1;
-  }
-
-  &[aria-invalid="true"] {
-    border-color: $wolf-danger-v2;
-  }
 }
 
 .invoice-application-dialog__error,

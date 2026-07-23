@@ -92,23 +92,6 @@ ALL_PERMISSIONS = [
     {"name": "管理权限", "code": "permission:manage", "resource": "permission", "action": "manage"},
     {"name": "系统配置", "code": "system:config", "resource": "system", "action": "config"},
 
-    # API Key 权限
-    {"name": "管理 API Key", "code": "apikey:manage", "resource": "apikey", "action": "manage"},
-
-    # API 访问权限
-    {"name": "API 线索列表", "code": "lead:api:list", "resource": "api", "action": "list"},
-    {"name": "API 线索详情", "code": "lead:api:read", "resource": "api", "action": "read"},
-    {"name": "API 客户列表", "code": "customer:api:list", "resource": "api", "action": "list"},
-    {"name": "API 客户详情", "code": "customer:api:read", "resource": "api", "action": "read"},
-    {"name": "API 商机列表", "code": "opportunity:api:list", "resource": "api", "action": "list"},
-    {"name": "API 商机详情", "code": "opportunity:api:read", "resource": "api", "action": "read"},
-    {"name": "API 合同列表", "code": "contract:api:list", "resource": "api", "action": "list"},
-    {"name": "API 合同详情", "code": "contract:api:read", "resource": "api", "action": "read"},
-    {"name": "API 创建回款", "code": "payment:api:create", "resource": "api", "action": "create"},
-    {"name": "API 回款列表", "code": "payment:api:list", "resource": "api", "action": "list"},
-    {"name": "API 回款详情", "code": "payment:api:read", "resource": "api", "action": "read"},
-    {"name": "API 发票列表", "code": "invoice:api:list", "resource": "api", "action": "list"},
-
     # AI 相关权限
     {"name": "AI 配置管理", "code": "ai:manage", "resource": "ai", "action": "manage"},
     {"name": "AI 配置查看", "code": "ai:view", "resource": "ai", "action": "view"},

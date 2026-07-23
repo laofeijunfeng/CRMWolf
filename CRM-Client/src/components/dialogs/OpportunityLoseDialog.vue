@@ -19,14 +19,12 @@ import {
   DialogFooter
 } from '@/components/ui/dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import { TextareaField } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
 
@@ -118,20 +116,19 @@ const onSubmit = handleSubmit(async (formValues) => {
 
       <form v-else class="grid gap-4 py-4" @submit="onSubmit">
         <!-- 输单原因 -->
-        <FormField v-slot="{ componentField }" name="loss_reason">
+        <FormField v-slot="{ value, handleChange }" name="loss_reason">
           <FormItem>
-            <FormLabel>
-              输单原因 <span class="text-destructive">*</span>
-            </FormLabel>
-            <FormControl>
-              <Textarea
-                v-bind="componentField as any"
-                :rows="4"
-                placeholder="请输入输单原因"
-                :disabled="submitting"
-                class="resize-none"
-              />
-            </FormControl>
+            <TextareaField
+              id="opportunity-lose-reason"
+              :model-value="String(value ?? '')"
+              label="输单原因"
+              required
+              :rows="4"
+              placeholder="请输入输单原因"
+              :disabled="submitting"
+              control-class="resize-none"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>

@@ -34,10 +34,12 @@ import procurementApi, {
 interface Props {
   opportunityId: number
   embedded?: boolean
+  canAdvance?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  embedded: false
+  embedded: false,
+  canAdvance: true
 })
 const emit = defineEmits<{
   advanced: []
@@ -87,6 +89,7 @@ const fetchStages = async (): Promise<void> => {
 // 点击阶段推进
 const handleStageClick = async (stage: OpportunityProcurementStageInfo, index: number): Promise<void> => {
   if (loading.value) return
+  if (!props.canAdvance) return
 
   const current = allStages.value.find(s => s.is_current)
   const currentStepIndex = current ? allStages.value.findIndex(s => s.id === current.id) : -1
@@ -136,7 +139,8 @@ onMounted(fetchStages)
           v-for="(stage, index) in allStages"
           :key="stage.id"
           :step="index + 1"
-          class="flex-1 cursor-pointer"
+          class="flex-1"
+          :class="{ 'cursor-pointer': canAdvance }"
           @click="handleStageClick(stage, index)"
         >
           <!-- 官方样式：竖向分布 -->
@@ -163,7 +167,7 @@ onMounted(fetchStages)
       </Stepper>
 
       <!-- 帮助提示 -->
-      <p class="mt-4 text-xs text-wolf-text-tertiary-v2 text-center">
+      <p v-if="canAdvance" class="mt-4 text-xs text-wolf-text-tertiary-v2 text-center">
         点击未完成阶段可推进商机状态
       </p>
     </CardContent>

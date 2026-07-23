@@ -25,6 +25,7 @@ import {
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import ListFilterPopover from './ListFilterPopover.vue'
 import ListSortPopover from './ListSortPopover.vue'
+import SelectField from './SelectField.vue'
 import type { ListFilterCondition, ListFilterField } from './listFilterTypes'
 import type { ListSortCondition, ListSortField, ListSortFieldType, ListSortOption } from './listSortTypes'
 import { buildPaginationEntries, type PaginationEntry } from './paginationWindow'
@@ -161,6 +162,12 @@ const normalizedSorts = computed<ListSortCondition[]>(() => props.sorts ?? [])
 const hasTableTools = computed(() =>
   normalizedFilterFields.value.length > 0 || normalizedSortFields.value.length > 0
 )
+const pageSizeOptions = computed(() =>
+  props.pageSizes.map((size) => ({
+    value: String(size),
+    label: `${size} 条/页`
+  }))
+)
 
 /**
  * 计算固定列配置
@@ -262,9 +269,8 @@ function handlePageChange(p: number): void {
   emit('update:page', p)
 }
 
-function handlePageSizeChange(event: Event): void {
-  const target = event.target as HTMLSelectElement
-  emit('update:page-size', parseInt(target.value, 10))
+function handlePageSizeChange(value: string): void {
+  emit('update:page-size', parseInt(value, 10))
   emit('update:page', 1)  // 重置到第一页
 }
 
@@ -547,16 +553,14 @@ watch(() => props.data, () => {
             <PaginationNext />
           </PaginationContent>
         </Pagination>
-        <select
-          class="page-size-select"
-          :value="pageSize"
+        <SelectField
+          :model-value="pageSize"
+          class="page-size-field"
+          trigger-class="page-size-select"
+          :options="pageSizeOptions"
           aria-label="每页显示条数"
-          @change="handlePageSizeChange"
-        >
-          <option v-for="size in pageSizes" :key="size" :value="size">
-            {{ size }} 条/页
-          </option>
-        </select>
+          @update:model-value="handlePageSizeChange"
+        />
       </div>
     </div>
   </div>
@@ -819,14 +823,15 @@ watch(() => props.data, () => {
   flex-shrink: 0; // 不压缩宽度
 }
 
+.page-size-field {
+  width: 112px;
+  flex-shrink: 0;
+}
+
 .page-size-select {
   min-height: $wolf-touch-target-min-v2;
-  padding: 0 $wolf-space-sm-v2;
   border-radius: $wolf-radius-v2;
-  border: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
   font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-secondary-v2;
   cursor: pointer;
 
   &:focus-visible {
@@ -919,7 +924,7 @@ watch(() => props.data, () => {
     text-align: center;
   }
 
-  .data-table-footer .page-size-select {
+  .data-table-footer .page-size-field {
     display: none;
   }
 }

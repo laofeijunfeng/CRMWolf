@@ -15,13 +15,13 @@
           <Info class="hint-icon" aria-hidden="true" />
           <span>请用自然语言描述线索信息，AI 会自动识别并提取关键信息</span>
         </div>
-        <Textarea
+        <TextareaField
           v-model="inputText"
           :rows="4"
           placeholder="例如：张三，13800138000，来自杭州的阿里巴巴，大概500人，网上注册来的，想做电商系统"
           :disabled="isParsing"
           aria-label="输入线索信息描述"
-          class="input-textarea"
+          control-class="input-textarea"
           @keydown.ctrl.enter="handleParse"
         />
         <div class="input-tip">按 Ctrl+Enter 快速识别</div>
@@ -87,119 +87,75 @@
         <form class="preview-form" @submit.prevent="handleCreate">
           <div class="form-grid">
             <div class="form-item">
-              <Label for="preview-lead-name" class="form-label">
-                线索名称 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-lead-name"
                 v-model="previewForm.lead_name"
+                label="线索名称"
+                required
                 placeholder="请输入线索名称"
-                aria-required="true"
-                :aria-invalid="!previewForm.lead_name"
-                class="dialog-input"
+                :error="!previewForm.lead_name ? '请输入线索名称' : ''"
               />
-              <span v-if="!previewForm.lead_name" class="error-message" role="alert">
-                请输入线索名称
-              </span>
             </div>
 
             <div class="form-item">
-              <Label for="preview-source" class="form-label">
-                线索来源 <span class="required">*</span>
-              </Label>
-              <Select v-model="previewForm.source" aria-required="true">
-                <SelectTrigger id="preview-source" class="dialog-select">
-                  <SelectValue placeholder="请选择来源" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="线上注册">线上注册</SelectItem>
-                  <SelectItem value="市场活动">市场活动</SelectItem>
-                  <SelectItem value="客户推荐">客户推荐</SelectItem>
-                  <SelectItem value="电话营销">电话营销</SelectItem>
-                  <SelectItem value="网站咨询">网站咨询</SelectItem>
-                  <SelectItem value="展会">展会</SelectItem>
-                  <SelectItem value="其他">其他</SelectItem>
-                </SelectContent>
-              </Select>
-              <span v-if="!previewForm.source" class="error-message" role="alert">
-                请选择线索来源
-              </span>
+              <SelectField
+                id="preview-source"
+                v-model="previewForm.source"
+                label="线索来源"
+                required
+                :options="sourceOptions"
+                placeholder="请选择来源"
+                :error="!previewForm.source ? '请选择线索来源' : ''"
+              />
             </div>
           </div>
 
           <div class="form-grid">
             <div class="form-item">
-              <Label for="preview-city" class="form-label">
-                所在城市 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-city"
                 v-model="previewForm.city"
+                label="所在城市"
+                required
                 placeholder="请输入城市"
-                aria-required="true"
-                :aria-invalid="!previewForm.city"
-                class="dialog-input"
+                :error="!previewForm.city ? '请输入所在城市' : ''"
               />
-              <span v-if="!previewForm.city" class="error-message" role="alert">
-                请输入所在城市
-              </span>
             </div>
 
             <div class="form-item">
-              <Label for="preview-company-scale" class="form-label">
-                公司规模
-              </Label>
-              <Select v-model="previewForm.company_scale">
-                <SelectTrigger id="preview-company-scale" class="dialog-select">
-                  <SelectValue placeholder="请选择规模" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1-50人">1-50人</SelectItem>
-                  <SelectItem value="51-200人">51-200人</SelectItem>
-                  <SelectItem value="201-500人">201-500人</SelectItem>
-                  <SelectItem value="501-1000人">501-1000人</SelectItem>
-                  <SelectItem value="1000人以上">1000人以上</SelectItem>
-                </SelectContent>
-              </Select>
+              <SelectField
+                id="preview-company-scale"
+                v-model="previewForm.company_scale"
+                label="公司规模"
+                :options="companyScaleOptions"
+                placeholder="请选择规模"
+              />
             </div>
           </div>
 
           <div class="form-grid">
             <div class="form-item">
-              <Label for="preview-contact-name" class="form-label">
-                联系人姓名 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-contact-name"
                 v-model="previewForm.contact_name"
+                label="联系人姓名"
+                required
                 placeholder="请输入联系人姓名"
-                aria-required="true"
-                :aria-invalid="!previewForm.contact_name"
-                class="dialog-input"
+                :error="!previewForm.contact_name ? '请输入联系人姓名' : ''"
               />
-              <span v-if="!previewForm.contact_name" class="error-message" role="alert">
-                请输入联系人姓名
-              </span>
             </div>
 
             <div class="form-item">
-              <Label for="preview-contact-phone" class="form-label">
-                联系电话 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-contact-phone"
                 v-model="previewForm.contact_phone"
+                label="联系电话"
+                required
+                type="tel"
+                autocomplete="tel"
                 placeholder="请输入联系电话"
-                aria-required="true"
-                :aria-invalid="!previewForm.contact_phone || !isValidPhone(previewForm.contact_phone)"
-                class="dialog-input"
+                :error="!previewForm.contact_phone ? '请输入联系电话' : !isValidPhone(previewForm.contact_phone) ? '请输入正确的手机号码' : ''"
               />
-              <span v-if="!previewForm.contact_phone" class="error-message" role="alert">
-                请输入联系电话
-              </span>
-              <span v-else-if="!isValidPhone(previewForm.contact_phone)" class="error-message" role="alert">
-                请输入正确的手机号码
-              </span>
             </div>
           </div>
         </form>
@@ -299,14 +255,9 @@ import {
   DialogHeader,
   DialogTitle,
   Button,
-  Input,
-  Textarea,
-  Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  InputField,
+  SelectField,
+  TextareaField,
   ScrollArea
 } from '@/components/crmwolf'
 import { useUserStore } from '@/stores/user'
@@ -345,6 +296,22 @@ const parseResult = ref<{
   thinking_process: string | null
 } | null>(null)
 const createdLeadId = ref<number | null>(null)
+const sourceOptions = [
+  { value: '线上注册', label: '线上注册' },
+  { value: '市场活动', label: '市场活动' },
+  { value: '客户推荐', label: '客户推荐' },
+  { value: '电话营销', label: '电话营销' },
+  { value: '网站咨询', label: '网站咨询' },
+  { value: '展会', label: '展会' },
+  { value: '其他', label: '其他' },
+]
+const companyScaleOptions = [
+  { value: '1-50人', label: '1-50人' },
+  { value: '51-200人', label: '51-200人' },
+  { value: '201-500人', label: '201-500人' },
+  { value: '501-1000人', label: '501-1000人' },
+  { value: '1000人以上', label: '1000人以上' },
+]
 
 // 预览表单
 const previewForm = reactive({
@@ -360,28 +327,30 @@ const previewForm = reactive({
 })
 
 // 手机号验证
-const isValidPhone = (phone: string) => /^1[3-9]\d{9}$/.test(phone)
+const isValidPhone = (phone: string): boolean => /^1[3-9]\d{9}$/.test(phone)
 
 // 计算是否有缺失必填字段
 const hasMissingRequiredFields = computed(() => {
-  return !previewForm.lead_name ||
-    !previewForm.source ||
-    !previewForm.city ||
-    !previewForm.contact_name ||
-    !previewForm.contact_phone ||
+  return previewForm.lead_name.trim().length === 0 ||
+    previewForm.source.trim().length === 0 ||
+    previewForm.city.trim().length === 0 ||
+    previewForm.contact_name.trim().length === 0 ||
+    previewForm.contact_phone.trim().length === 0 ||
     !isValidPhone(previewForm.contact_phone)
 })
 
 // 计算是否有跟进信息
 const hasFollowUpInfo = computed(() => {
-  return parseResult.value?.follow_up_info &&
-    (parseResult.value.follow_up_info.content ||
-      parseResult.value.follow_up_info.next_action ||
-      parseResult.value.follow_up_info.next_follow_time)
+  const followUpInfo = parseResult.value?.follow_up_info
+  if (followUpInfo === null || followUpInfo === undefined) return false
+
+  return (followUpInfo.content ?? '').trim().length > 0 ||
+    (followUpInfo.next_action ?? '').trim().length > 0 ||
+    (followUpInfo.next_follow_time ?? '').trim().length > 0
 })
 
 // 格式化缺失字段列表
-const formatMissingFields = (fields: string[]) => {
+const formatMissingFields = (fields: string[]): string => {
   const fieldNames: Record<string, string> = {
     lead_name: '线索名称',
     source: '线索来源',
@@ -389,11 +358,11 @@ const formatMissingFields = (fields: string[]) => {
     contact_name: '联系人姓名',
     contact_phone: '联系电话'
   }
-  return fields.map(f => fieldNames[f] || f).join('、')
+  return fields.map(f => fieldNames[f] ?? f).join('、')
 }
 
 // 重置状态
-const resetState = () => {
+const resetState = (): void => {
   stage.value = 'input'
   inputText.value = ''
   isParsing.value = false
@@ -416,13 +385,13 @@ const resetState = () => {
 }
 
 // 处理关闭
-const handleClose = () => {
+const handleClose = (): void => {
   resetState()
   visible.value = false
 }
 
 // 处理解析
-const handleParse = async () => {
+const handleParse = async (): Promise<void> => {
   const content = inputText.value.trim()
   if (!content || isParsing.value) return
 
@@ -446,44 +415,44 @@ const handleParse = async () => {
       (event: LeadAIParseSSEEvent) => {
         switch (event.event) {
           case 'status':
-            statusMessage.value = event.message || '正在解析...'
+            statusMessage.value = event.message ?? '正在解析...'
             break
           case 'content':
-            thinkingContent.value += event.content || ''
+            thinkingContent.value += event.content ?? ''
             break
           case 'parsed':
             if (event.lead_info) {
               parseResult.value = {
                 lead_info: event.lead_info,
-                follow_up_info: event.follow_up_info || null,
-                thinking_process: event.thinking_process || null
+                follow_up_info: event.follow_up_info ?? null,
+                thinking_process: event.thinking_process ?? null
               }
 
               // 填充预览表单
               Object.assign(previewForm, {
-                lead_name: event.lead_info.lead_name || '',
-                source: event.lead_info.source || '',
-                city: event.lead_info.city || '',
-                company_scale: event.lead_info.company_scale || '',
-                contact_name: event.lead_info.contact_name || '',
-                contact_phone: event.lead_info.contact_phone || '',
-                follow_up_content: event.follow_up_info?.content || '',
-                next_action: event.follow_up_info?.next_action || '',
-                next_follow_time: event.follow_up_info?.next_follow_time || ''
+                lead_name: event.lead_info.lead_name ?? '',
+                source: event.lead_info.source ?? '',
+                city: event.lead_info.city ?? '',
+                company_scale: event.lead_info.company_scale ?? '',
+                contact_name: event.lead_info.contact_name ?? '',
+                contact_phone: event.lead_info.contact_phone ?? '',
+                follow_up_content: event.follow_up_info?.content ?? '',
+                next_action: event.follow_up_info?.next_action ?? '',
+                next_follow_time: event.follow_up_info?.next_follow_time ?? ''
               })
 
               stage.value = 'preview'
             }
             break
           case 'error':
-            toast.error(event.message || '解析失败')
+            toast.error(event.message ?? '解析失败')
             stage.value = 'input'
             break
         }
       },
       token
     )
-  } catch (error) {
+  } catch {
     toast.error('解析请求失败')
     stage.value = 'input'
   } finally {
@@ -492,12 +461,12 @@ const handleParse = async () => {
 }
 
 // 返回输入阶段
-const handleBackToInput = () => {
+const handleBackToInput = (): void => {
   stage.value = 'input'
 }
 
 // 处理创建
-const handleCreate = async () => {
+const handleCreate = async (): Promise<void> => {
   if (hasMissingRequiredFields.value) {
     toast.error('请填写所有必填字段')
     return
@@ -512,15 +481,15 @@ const handleCreate = async () => {
       city: previewForm.city,
       contact_name: previewForm.contact_name,
       contact_phone: previewForm.contact_phone,
-      ...(previewForm.company_scale ? { company_scale: previewForm.company_scale } : {}),
-      ...(previewForm.follow_up_content ? { follow_up_content: previewForm.follow_up_content } : {}),
-      ...(previewForm.next_action ? { next_action: previewForm.next_action } : {}),
-      ...(previewForm.next_follow_time ? { next_follow_time: previewForm.next_follow_time } : {})
+      ...(previewForm.company_scale.trim().length > 0 ? { company_scale: previewForm.company_scale } : {}),
+      ...(previewForm.follow_up_content.trim().length > 0 ? { follow_up_content: previewForm.follow_up_content } : {}),
+      ...(previewForm.next_action.trim().length > 0 ? { next_action: previewForm.next_action } : {}),
+      ...(previewForm.next_follow_time.trim().length > 0 ? { next_follow_time: previewForm.next_follow_time } : {})
     }
     const response = await leadAiApi.createFromAI(createData)
 
     // 后端直接返回创建成功的线索数据
-    if (response && response.id) {
+    if (response.id !== undefined && response.id !== null) {
       createdLeadId.value = response.id
       stage.value = 'success'
       toast.success('线索创建成功')
@@ -537,8 +506,8 @@ const handleCreate = async () => {
 }
 
 // 查看线索
-const handleViewLead = () => {
-  if (createdLeadId.value) {
+const handleViewLead = (): void => {
+  if (createdLeadId.value !== null) {
     router.push(`/leads/${createdLeadId.value}`)
   }
   handleClose()

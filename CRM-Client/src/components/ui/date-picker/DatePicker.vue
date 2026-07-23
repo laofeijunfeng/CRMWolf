@@ -16,18 +16,27 @@ import { cn } from '@/lib/utils'
 interface Props {
   /** 选中日期（原生 Date） */
   modelValue?: Date | null
+  /** 触发按钮 id */
+  id?: string | undefined
   /** 占位文字 */
   placeholder?: string
   /** 禁用状态 */
   disabled?: boolean
+  /** 错误状态 */
+  ariaInvalid?: boolean | undefined
+  /** 描述元素 id */
+  ariaDescribedby?: string | undefined
   /** 自定义类名 */
   class?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: null,
+  id: undefined,
   placeholder: '选择日期',
-  disabled: false
+  disabled: false,
+  ariaInvalid: undefined,
+  ariaDescribedby: undefined,
 })
 
 const emit = defineEmits<{
@@ -110,11 +119,14 @@ const handleSelect = (value: DateValue | undefined): void => {
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
       <Button
+        :id="id"
         variant="outline"
         :disabled="disabled"
+        :aria-invalid="ariaInvalid"
+        :aria-describedby="ariaDescribedby"
         :class="cn(
-          'h-input-desktop w-full justify-start rounded-wolf border-wolf-border-default bg-wolf-bg-card px-wolf-md text-left text-wolf-body font-wolf font-wolf-normal text-wolf-text-primary ring-offset-wolf transition-colors duration-wolf hover:border-wolf-border-hover hover:bg-wolf-bg-card focus-visible:ring-wolf-primary disabled:cursor-not-allowed disabled:bg-wolf-bg-muted disabled:text-wolf-text-tertiary disabled:opacity-60',
-          'max-[767px]:h-input-mobile max-[767px]:px-wolf-xl',
+          'h-input-desktop min-h-input-desktop w-full justify-start rounded-wolf border-wolf-border-default bg-wolf-bg-card px-wolf-md text-left text-wolf-body font-wolf font-wolf-normal text-wolf-text-primary ring-offset-wolf transition-colors duration-wolf hover:border-wolf-border-hover hover:bg-wolf-bg-card focus-visible:ring-wolf-primary disabled:cursor-not-allowed disabled:bg-wolf-bg-muted disabled:text-wolf-text-tertiary disabled:opacity-60 aria-[invalid=true]:border-wolf-danger aria-[invalid=true]:ring-wolf-danger',
+          'max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile max-[767px]:px-wolf-xl',
           !dateValue && 'text-wolf-text-placeholder',
           props.class
         )"
@@ -126,7 +138,7 @@ const handleSelect = (value: DateValue | undefined): void => {
       </Button>
     </PopoverTrigger>
     <PopoverContent
-      class="w-auto p-0"
+      class="!w-auto !p-0"
       align="start"
       @interact-outside="handleCalendarInteractOutside"
     >

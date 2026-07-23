@@ -162,6 +162,7 @@ const loseForm = reactive<CustomerLoseRequest>({
 const tabs = [
   { key: 'all', label: '所有客户' },
   { key: 'my', label: '我的客户' },
+  { key: 'collaborated', label: '协作客户' },
   { key: 'public', label: '公海客户' }
 ]
 
@@ -263,6 +264,10 @@ const canEditRow = (row: CustomerResponse): boolean => {
   if (canEditOwnCustomer.value && row['owner_id'] === String(userStore.userInfo?.id)) return true
   return false
 }
+
+const canCreateOpportunityForRow = (row: CustomerResponse): boolean => (
+  canCreateOpportunity.value && canEditRow(row)
+)
 
 const canDeleteRow = (row: CustomerResponse): boolean => {
   if (canDeleteAllCustomer.value) return true
@@ -396,7 +401,9 @@ const fetchCustomerList = async (): Promise<void> => {
       pagination.total = normalized.total
     } else {
       if (activeTab.value === 'my') {
-        params['owner_id'] = 'me'
+        params['scope'] = 'owned'
+      } else if (activeTab.value === 'collaborated') {
+        params['scope'] = 'collaborated'
       } else {
         params['owner_id'] = getDelimitedFilterValues(activeFilters.value, 'owner_id')
         params['owner_id_exclude'] = getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains'])
@@ -474,6 +481,10 @@ const clearOpportunityCustomer = (): void => {
 }
 
 const handleCreateOpportunity = (record: CustomerResponse): void => {
+  if (!canCreateOpportunityForRow(record)) {
+    toast.error('你没有在该客户下新建商机的权限')
+    return
+  }
   opportunityCustomerId.value = record.id
   opportunityCustomerName.value = record.account_name
   opportunityDialogOpen.value = true
@@ -791,7 +802,7 @@ watchEffect(() => {
             {
               label: '新建商机',
               handler: asCustomerActionHandler(handleCreateOpportunity),
-              visible: canCreateOpportunity,
+              visible: canCreateOpportunityForRow(row),
               icon: Sparkles as Component
             },
             {
@@ -951,7 +962,7 @@ watchEffect(() => {
             {
               label: '新建商机',
               handler: asCustomerActionHandler(handleCreateOpportunity),
-              visible: canCreateOpportunity,
+              visible: canCreateOpportunityForRow(row),
               icon: Sparkles as Component
             },
             {

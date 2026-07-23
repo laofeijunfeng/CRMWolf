@@ -10,8 +10,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import {
+  DateField,
+  InputField,
+  TextareaField,
+} from '@/components/crmwolf'
 
 type EditablePaymentRecord = PaymentRecordInfo | PaymentRecordResponse
 
@@ -107,6 +110,25 @@ function isValidLocalDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
 }
 
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseLocalDate(value: string): Date | null {
+  if (!isValidLocalDate(value)) return null
+
+  const [year, month, day] = value.split('-').map(Number)
+  if (year === undefined || month === undefined || day === undefined) return null
+  return new Date(year, month - 1, day)
+}
+
+function handlePaymentDateChange(date: Date | null): void {
+  form.paymentDate = date !== null ? formatLocalDate(date) : ''
+}
+
 function validateForm(): boolean {
   clearErrors()
 
@@ -182,138 +204,75 @@ watch(
       </DialogHeader>
 
       <form class="edit-record-dialog__form" novalidate @submit.prevent="handleSubmit">
-        <div class="edit-record-dialog__field">
-          <label class="edit-record-dialog__label" for="edit-record-amount">
-            回款金额
-            <span class="edit-record-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <Input
-            id="edit-record-amount"
-            v-model="form.actualAmount"
-            name="actual_amount"
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="请输入回款金额"
-            class="edit-record-dialog__control h-11 min-h-11"
-            :disabled="isSubmitting || record === null"
-            :aria-invalid="hasAmountError"
-            aria-describedby="edit-record-amount-help edit-record-amount-error"
-          />
-          <p id="edit-record-amount-help" class="edit-record-dialog__help">
-            金额需大于 0，可精确到分。
-          </p>
-          <p
-            v-if="hasAmountError"
-            id="edit-record-amount-error"
-            class="edit-record-dialog__error"
-            role="alert"
-          >
-            {{ errors.actualAmount }}
-          </p>
-        </div>
+        <InputField
+          id="edit-record-amount"
+          v-model="form.actualAmount"
+          class="edit-record-dialog__field"
+          label="回款金额"
+          required
+          name="actual_amount"
+          type="number"
+          inputmode="decimal"
+          min="0"
+          step="0.01"
+          placeholder="请输入回款金额"
+          :disabled="isSubmitting || record === null"
+          helper-text="金额需大于 0，可精确到分。"
+          :error="errors.actualAmount"
+        />
 
-        <div class="edit-record-dialog__field">
-          <label class="edit-record-dialog__label" for="edit-record-payer-name">
-            实际付款方
-            <span class="edit-record-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <Input
-            id="edit-record-payer-name"
-            v-model="form.actualPayerName"
-            name="actual_payer_name"
-            type="text"
-            maxlength="200"
-            placeholder="请输入实际付款方"
-            class="edit-record-dialog__control h-11 min-h-11"
-            :disabled="isSubmitting || record === null"
-            :aria-invalid="hasActualPayerNameError"
-            aria-describedby="edit-record-payer-name-help edit-record-payer-name-error"
-          />
-          <p id="edit-record-payer-name-help" class="edit-record-dialog__help">
-            可按实际付款公司抬头修改。
-          </p>
-          <p
-            v-if="hasActualPayerNameError"
-            id="edit-record-payer-name-error"
-            class="edit-record-dialog__error"
-            role="alert"
-          >
-            {{ errors.actualPayerName }}
-          </p>
-        </div>
+        <InputField
+          id="edit-record-payer-name"
+          v-model="form.actualPayerName"
+          class="edit-record-dialog__field"
+          label="实际付款方"
+          required
+          name="actual_payer_name"
+          type="text"
+          maxlength="200"
+          placeholder="请输入实际付款方"
+          :disabled="isSubmitting || record === null"
+          helper-text="可按实际付款公司抬头修改。"
+          :error="errors.actualPayerName"
+        />
 
-        <div class="edit-record-dialog__field">
-          <label class="edit-record-dialog__label" for="edit-record-date">
-            回款日期
-            <span class="edit-record-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <Input
-            id="edit-record-date"
-            v-model="form.paymentDate"
-            name="payment_date"
-            type="date"
-            class="edit-record-dialog__control h-11 min-h-11"
-            :disabled="isSubmitting || record === null"
-            :aria-invalid="hasPaymentDateError"
-            aria-describedby="edit-record-date-help edit-record-date-error"
-          />
-          <p id="edit-record-date-help" class="edit-record-dialog__help">
-            使用本地日期，格式为 YYYY-MM-DD。
-          </p>
-          <p
-            v-if="hasPaymentDateError"
-            id="edit-record-date-error"
-            class="edit-record-dialog__error"
-            role="alert"
-          >
-            {{ errors.paymentDate }}
-          </p>
-        </div>
+        <DateField
+          id="edit-record-date"
+          :model-value="parseLocalDate(form.paymentDate)"
+          class="edit-record-dialog__field"
+          label="回款日期"
+          required
+          placeholder="请选择回款日期"
+          :disabled="isSubmitting || record === null"
+          helper-text="使用本地日期，格式为 YYYY-MM-DD。"
+          :error="errors.paymentDate"
+          @update:model-value="handlePaymentDateChange"
+        />
 
-        <div class="edit-record-dialog__field">
-          <label class="edit-record-dialog__label" for="edit-record-proof">
-            凭证附件 URL
-          </label>
-          <Input
-            id="edit-record-proof"
-            v-model="form.proofAttachment"
-            name="proof_attachment"
-            type="url"
-            placeholder="请输入附件 URL（可选）"
-            class="edit-record-dialog__control h-11 min-h-11"
-            :disabled="isSubmitting || record === null"
-          />
-        </div>
+        <InputField
+          id="edit-record-proof"
+          v-model="form.proofAttachment"
+          class="edit-record-dialog__field"
+          label="凭证附件 URL"
+          name="proof_attachment"
+          type="url"
+          placeholder="请输入附件 URL（可选）"
+          :disabled="isSubmitting || record === null"
+        />
 
-        <div class="edit-record-dialog__field">
-          <label class="edit-record-dialog__label" for="edit-record-notes">
-            备注
-          </label>
-          <Textarea
-            id="edit-record-notes"
-            v-model="form.notes"
-            name="notes"
-            maxlength="200"
-            placeholder="请输入备注信息（可选，最多 200 字）"
-            class="edit-record-dialog__textarea min-h-20"
-            :disabled="isSubmitting || record === null"
-            :aria-invalid="hasNotesError"
-            aria-describedby="edit-record-notes-help edit-record-notes-error"
-          />
-          <p id="edit-record-notes-help" class="edit-record-dialog__help">
-            {{ form.notes.length }}/200
-          </p>
-          <p
-            v-if="hasNotesError"
-            id="edit-record-notes-error"
-            class="edit-record-dialog__error"
-            role="alert"
-          >
-            {{ errors.notes }}
-          </p>
-        </div>
+        <TextareaField
+          id="edit-record-notes"
+          v-model="form.notes"
+          class="edit-record-dialog__field"
+          label="备注"
+          name="notes"
+          maxlength="200"
+          placeholder="请输入备注信息（可选，最多 200 字）"
+          control-class="min-h-20"
+          :disabled="isSubmitting || record === null"
+          :helper-text="`${form.notes.length}/200`"
+          :error="errors.notes"
+        />
 
         <DialogFooter class="edit-record-dialog__footer">
           <Button
@@ -358,36 +317,8 @@ watch(
   gap: $wolf-space-sm-v2;
 }
 
-.edit-record-dialog__label {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.edit-record-dialog__required {
-  color: $wolf-danger-text-v2;
-}
-
-.edit-record-dialog__control,
-.edit-record-dialog__textarea,
 .edit-record-dialog__button {
   min-height: $wolf-touch-target-min-v2;
-}
-
-.edit-record-dialog__help,
-.edit-record-dialog__error {
-  margin: 0;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
-}
-
-.edit-record-dialog__help {
-  color: $wolf-text-secondary-v2;
-}
-
-.edit-record-dialog__error {
-  color: $wolf-danger-text-v2;
 }
 
 .edit-record-dialog__footer {

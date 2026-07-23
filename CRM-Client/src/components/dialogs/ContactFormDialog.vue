@@ -23,25 +23,19 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import {
+  InputField,
+  SelectField,
+  SegmentedChoiceControl,
+  TextareaField,
+} from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type ContactResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
 
@@ -102,6 +96,19 @@ const genderRadioValue = computed({
     genderValue.value = value || undefined
   }
 })
+
+const genderOptions = [
+  { value: '男', label: '男', tone: 'primary' as const },
+  { value: '女', label: '女', tone: 'success' as const },
+]
+const reportsToOptions = computed(() =>
+  (props.availableContacts ?? [])
+    .filter(contact => contact.id !== props.contact?.id)
+    .map(contact => ({
+      value: contact.id,
+      label: `${contact.name}${contact.position !== undefined && contact.position !== null && contact.position.trim().length > 0 ? ` (${contact.position})` : ''}`,
+    }))
+)
 
 // State
 const submitting = ref(false)
@@ -242,53 +249,46 @@ function continueEditing(): void {
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
-        <!-- Name (required) -->
-        <FormField v-slot="{ componentField }" name="name">
+        <FormField v-slot="{ value, handleChange }" name="name">
           <FormItem>
-            <FormLabel>姓名 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入姓名"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contact-name"
+              :model-value="String(value ?? '')"
+              label="姓名"
+              required
+              placeholder="请输入姓名"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
-        <!-- Gender (RadioGroup) -->
+        <!-- Gender -->
         <div class="space-y-2">
-          <Label class="text-sm font-medium">性别 <span class="text-destructive">*</span></Label>
-          <RadioGroup
+          <div id="contact-gender-label" class="text-sm font-medium">
+            性别 <span class="text-destructive">*</span>
+          </div>
+          <SegmentedChoiceControl
             v-model="genderRadioValue"
-            class="flex gap-4"
-          >
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="gender-male" value="男" />
-              <Label for="gender-male" class="cursor-pointer">男</Label>
-            </div>
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="gender-female" value="女" />
-              <Label for="gender-female" class="cursor-pointer">女</Label>
-            </div>
-          </RadioGroup>
+            :options="genderOptions"
+            labelled-by="contact-gender-label"
+            id-prefix="contact-gender"
+          />
           <p v-if="genderError" class="text-sm font-medium text-destructive">
             {{ genderError }}
           </p>
         </div>
 
-        <!-- Position -->
-        <FormField v-slot="{ componentField }" name="position">
+        <FormField v-slot="{ value, handleChange }" name="position">
           <FormItem>
-            <FormLabel>职位 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入职位"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contact-position"
+              :model-value="String(value ?? '')"
+              label="职位"
+              required
+              placeholder="请输入职位"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
@@ -303,90 +303,74 @@ function continueEditing(): void {
           <Label for="is_decision_maker" class="cursor-pointer">是否决策者</Label>
         </div>
 
-        <!-- Mobile (required) -->
-        <FormField v-slot="{ componentField }" name="mobile">
+        <FormField v-slot="{ value, handleChange }" name="mobile">
           <FormItem>
-            <FormLabel>手机号 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="tel"
-                autocomplete="tel"
-                placeholder="请输入手机号"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contact-mobile"
+              :model-value="String(value ?? '')"
+              label="手机号"
+              required
+              type="tel"
+              autocomplete="tel"
+              placeholder="请输入手机号"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
-        <!-- Email -->
-        <FormField v-slot="{ componentField }" name="email">
+        <FormField v-slot="{ value, handleChange }" name="email">
           <FormItem>
-            <FormLabel>邮箱</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="email"
-                autocomplete="email"
-                placeholder="请输入邮箱"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contact-email"
+              :model-value="String(value ?? '')"
+              label="邮箱"
+              type="email"
+              autocomplete="email"
+              placeholder="请输入邮箱"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
-        <!-- WeChat ID -->
-        <FormField v-slot="{ componentField }" name="wechat_id">
+        <FormField v-slot="{ value, handleChange }" name="wechat_id">
           <FormItem>
-            <FormLabel>微信号</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入微信号"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="contact-wechat-id"
+              :model-value="String(value ?? '')"
+              label="微信号"
+              placeholder="请输入微信号"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
-        <!-- Reports To (Select) -->
-        <FormField v-if="props.availableContacts && props.availableContacts.length > 0" v-slot="{ componentField }" name="reports_to">
+        <FormField v-if="reportsToOptions.length > 0" v-slot="{ value, handleChange }" name="reports_to">
           <FormItem>
-            <FormLabel>汇报对象</FormLabel>
-            <Select v-bind="componentField as any">
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="选择汇报对象" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem
-                  v-for="contact in props.availableContacts?.filter(c => c.id !== props.contact?.id)"
-                  :key="contact.id"
-                  :value="contact.id.toString()"
-                >
-                  {{ contact.name }}{{ contact.position ? ` (${contact.position})` : '' }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <SelectField
+              id="contact-reports-to"
+              :model-value="String(value ?? '')"
+              label="汇报对象"
+              :options="reportsToOptions"
+              placeholder="选择汇报对象"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
-        <!-- Remark -->
-        <FormField v-slot="{ componentField }" name="remark">
+        <FormField v-slot="{ value, handleChange }" name="remark">
           <FormItem>
-            <FormLabel>备注</FormLabel>
-            <FormControl>
-              <Textarea
-                v-bind="componentField as any"
-                placeholder="请输入备注"
-                class="min-h-[80px] resize-none"
-              />
-            </FormControl>
+            <TextareaField
+              id="contact-remark"
+              :model-value="String(value ?? '')"
+              label="备注"
+              placeholder="请输入备注"
+              control-class="min-h-20 resize-none"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>

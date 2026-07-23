@@ -258,16 +258,18 @@ const config: Config = {
   		outlineOffset: {
   			wolf: '2px'
   		},
-  		minHeight: {
-  			'touch-target': '44px'
-  		},
+			minHeight: {
+				'touch-target': '44px',
+				'input-desktop': '44px',
+				'input-mobile': '44px'
+			},
   		height: {
   			'touch-target': '44px',
   			'button-sm': '24px',
   			'button-md': '32px',
   			'button-lg': '44px',
-  			'input-desktop': '32px',
-  			'input-mobile': '44px',
+				'input-desktop': '44px',
+				'input-mobile': '44px',
   			'wolf-icon-xs': '16px',
   			'wolf-icon-sm': '20px',
   			'wolf-icon-md': '24px',

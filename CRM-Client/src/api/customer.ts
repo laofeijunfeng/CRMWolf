@@ -319,6 +319,7 @@ export interface CustomerQueryParams {
   created_time_end?: string
   order_by?: string
   order_dir?: 'asc' | 'desc'
+  scope?: 'owned' | 'collaborated' | 'accessible'
 }
 
 export type ReturnReasonEnum = '丢单' | '无意向' | '信息错误' | '长期未跟进' | '预算不足' | '其他'
@@ -367,6 +368,44 @@ export interface OwnerFilterOption {
 
 export interface OwnerFilterOptionsResponse {
   data: OwnerFilterOption[]
+}
+
+export type CustomerMemberRole = 'SALES' | 'PRESALES' | 'DELIVERY' | 'SUPPORT' | 'OTHER'
+export type CustomerMemberAccessLevel = 'VIEW' | 'FOLLOW_UP' | 'EDIT'
+
+export interface CustomerMemberUserInfo {
+  id: string
+  name: string
+  avatar_url?: string | null
+}
+
+export interface CustomerMemberResponse {
+  id: number
+  customer_id: number
+  user_id: string
+  member_role: CustomerMemberRole
+  access_level: CustomerMemberAccessLevel
+  remark?: string | null
+  created_by: string
+  created_time: string
+  updated_time: string
+  user_info?: CustomerMemberUserInfo | null
+  can_manage: boolean
+}
+
+export interface CustomerMemberCandidate {
+  id: string
+  name: string
+  avatar_url?: string | null
+  roles: string[]
+  already_member: boolean
+}
+
+export interface CustomerMemberPayload {
+  user_id?: string
+  member_role: CustomerMemberRole
+  access_level: CustomerMemberAccessLevel
+  remark?: string | null
 }
 
 export interface PublicCustomerQueryParams {
@@ -489,6 +528,21 @@ const customerApi = {
 
   getOwnerFilterOptions: (): Promise<OwnerFilterOptionsResponse> =>
     api.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'customer' } }),
+
+  getCustomerMembers: (customerId: number): Promise<CustomerMemberResponse[]> =>
+    api.get<CustomerMemberResponse[]>('/v1/customers/' + customerId + '/members'),
+
+  getCustomerMemberCandidates: (customerId: number): Promise<CustomerMemberCandidate[]> =>
+    api.get<CustomerMemberCandidate[]>('/v1/customers/' + customerId + '/member-candidates'),
+
+  addCustomerMember: (customerId: number, data: CustomerMemberPayload): Promise<CustomerMemberResponse> =>
+    api.post<CustomerMemberResponse>('/v1/customers/' + customerId + '/members', data),
+
+  updateCustomerMember: (customerId: number, memberId: number, data: CustomerMemberPayload): Promise<CustomerMemberResponse> =>
+    api.put<CustomerMemberResponse>('/v1/customers/' + customerId + '/members/' + memberId, data),
+
+  removeCustomerMember: (customerId: number, memberId: number): Promise<{ message: string }> =>
+    api.delete<{ message: string }>('/v1/customers/' + customerId + '/members/' + memberId),
 
   getIndustryOptions: (): Promise<CustomerIndustryOption[]> =>
     api.get<CustomerIndustryOption[]>('/v1/customers/industries'),

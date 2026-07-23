@@ -19,15 +19,15 @@ import {
   DialogFooter
 } from '@/components/ui/dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { FileAttachment } from '@/components/crmwolf'
+import {
+  FileAttachment,
+  InputField,
+} from '@/components/crmwolf'
 import invoiceApi from '@/api/invoice'
 import { handleApiError } from '@/utils/errorHandler'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
@@ -194,17 +194,17 @@ onUnmounted(() => {
         <p v-if="fileError" class="text-sm text-destructive" role="alert">{{ fileError }}</p>
 
         <!-- 发票号码 -->
-        <FormField v-slot="{ componentField }" name="invoice_number">
+        <FormField v-slot="{ value, handleChange }" name="invoice_number">
           <FormItem>
-            <FormLabel>发票号码</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                type="text"
-                placeholder="请输入发票号码（可选）"
-                :disabled="submitting"
-              />
-            </FormControl>
+            <InputField
+              id="invoice-issued-number"
+              :model-value="String(value ?? '')"
+              label="发票号码"
+              type="text"
+              placeholder="请输入发票号码（可选）"
+              :disabled="submitting"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>

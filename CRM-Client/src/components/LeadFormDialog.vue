@@ -21,22 +21,16 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Form,
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import {
+  InputField,
+  SelectField,
+  TextareaField,
+} from '@/components/crmwolf'
 import { leadApi } from '@/api/lead'
 import { leadSchema, type LeadForm } from '@/schemas/lead-form'
 
@@ -204,130 +198,113 @@ const continueEditing = (): void => {
         <div class="space-y-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <!-- 线索名称 -->
-            <FormField v-slot="{ componentField }" name="lead_name">
+            <FormField v-slot="{ value, handleChange }" name="lead_name">
               <FormItem>
-                <FormLabel>线索名称 *</FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField"
-                    autocomplete="organization"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入线索名称"
-                  />
-                </FormControl>
+                <InputField
+                  id="lead-name"
+                  :model-value="String(value ?? '')"
+                  label="线索名称"
+                  required
+                  autocomplete="organization"
+                  placeholder="请输入线索名称"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- 线索来源 -->
-            <FormField v-slot="{ componentField }" name="source">
+            <FormField v-slot="{ value, handleChange }" name="source">
               <FormItem>
-                <FormLabel>线索来源 *</FormLabel>
-                <Select v-bind="componentField">
-                  <FormControl>
-                    <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue placeholder="请选择来源" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in sourceOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <SelectField
+                  id="lead-source"
+                  :model-value="String(value ?? '')"
+                  label="线索来源"
+                  required
+                  :options="sourceOptions"
+                  placeholder="请选择来源"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- 所在城市 -->
-            <FormField v-slot="{ componentField }" name="city">
+            <FormField v-slot="{ value, handleChange }" name="city">
               <FormItem>
-                <FormLabel>所在城市 *</FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField"
-                    autocomplete="address-level2"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入城市"
-                  />
-                </FormControl>
+                <InputField
+                  id="lead-city"
+                  :model-value="String(value ?? '')"
+                  label="所在城市"
+                  required
+                  autocomplete="address-level2"
+                  placeholder="请输入城市"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- 公司规模 -->
-            <FormField v-slot="{ componentField }" name="company_scale">
+            <FormField v-slot="{ value, handleChange }" name="company_scale">
               <FormItem>
-                <FormLabel>公司规模</FormLabel>
-                <Select v-bind="componentField">
-                  <FormControl>
-                    <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue placeholder="请选择规模" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in companyScaleOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <SelectField
+                  id="lead-company-scale"
+                  :model-value="String(value ?? '')"
+                  label="公司规模"
+                  :options="companyScaleOptions"
+                  placeholder="请选择规模"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- 联系人姓名 -->
-            <FormField v-slot="{ componentField }" name="contact_name">
+            <FormField v-slot="{ value, handleChange }" name="contact_name">
               <FormItem>
-                <FormLabel>联系人姓名 *</FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField"
-                    autocomplete="name"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入联系人姓名"
-                  />
-                </FormControl>
+                <InputField
+                  id="lead-contact-name"
+                  :model-value="String(value ?? '')"
+                  label="联系人姓名"
+                  required
+                  autocomplete="name"
+                  placeholder="请输入联系人姓名"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- 联系电话（UX 优化：Input Types） -->
-            <FormField v-slot="{ componentField }" name="contact_phone">
+            <FormField v-slot="{ value, handleChange }" name="contact_phone">
               <FormItem>
-                <FormLabel>联系电话 *</FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField"
-                    type="tel"
-                    autocomplete="tel"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入联系电话"
-                  />
-                </FormControl>
+                <InputField
+                  id="lead-contact-phone"
+                  :model-value="String(value ?? '')"
+                  label="联系电话"
+                  required
+                  type="tel"
+                  autocomplete="tel"
+                  placeholder="请输入联系电话"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
           </div>
 
           <!-- 备注（全宽） -->
-          <FormField v-slot="{ componentField }" name="remark">
+          <FormField v-slot="{ value, handleChange }" name="remark">
             <FormItem>
-              <FormLabel>备注</FormLabel>
-              <FormControl>
-                <Textarea
-                  v-bind="componentField"
-                  :rows="4"
-                  placeholder="请输入备注信息（可选）"
-                />
-              </FormControl>
+              <TextareaField
+                id="lead-remark"
+                :model-value="String(value ?? '')"
+                label="备注"
+                :rows="4"
+                placeholder="请输入备注信息（可选）"
+                @update:model-value="handleChange"
+              />
               <FormMessage />
             </FormItem>
           </FormField>

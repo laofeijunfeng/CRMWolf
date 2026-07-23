@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Label } from '@/components/ui/label'
+
 type SegmentTone = 'primary' | 'success' | 'warning' | 'danger' | 'muted'
 
 interface SegmentOption {
@@ -11,12 +15,14 @@ interface Props {
   modelValue: string
   options: SegmentOption[]
   disabled?: boolean
-  labelledBy?: string
+  labelledBy?: string | undefined
+  idPrefix?: string | undefined
 }
 
 const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   labelledBy: undefined,
+  idPrefix: undefined,
 })
 
 const emit = defineEmits<{
@@ -27,31 +33,50 @@ function selectOption(value: string): void {
   if (props.disabled || value === props.modelValue) return
   emit('update:modelValue', value)
 }
+
+const controlIdPrefix = computed(() =>
+  props.idPrefix ?? `segmented-choice-${Math.random().toString(36).slice(2, 9)}`
+)
+const isDisabled = computed(() => props.disabled === true)
+const ariaBindings = computed(() =>
+  props.labelledBy !== undefined && props.labelledBy.trim().length > 0 ? { 'aria-labelledby': props.labelledBy } : {}
+)
+
+function optionId(value: string): string {
+  return `${controlIdPrefix.value}-${value.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
 </script>
 
 <template>
-  <div
+  <RadioGroup
+    :model-value="modelValue"
     class="segmented-choice"
-    role="radiogroup"
-    :aria-labelledby="labelledBy"
+    v-bind="ariaBindings"
+    :disabled="isDisabled"
+    @update:model-value="selectOption(String($event))"
   >
-    <button
+    <div
       v-for="option in options"
       :key="option.value"
-      type="button"
-      class="segmented-choice__option"
-      :class="[
-        `segmented-choice__option--${option.tone ?? 'muted'}`,
-        { 'segmented-choice__option--active': modelValue === option.value },
-      ]"
-      role="radio"
-      :aria-checked="modelValue === option.value"
-      :disabled="disabled"
-      @click="selectOption(option.value)"
+      class="segmented-choice__item"
     >
+      <RadioGroupItem
+        :id="optionId(option.value)"
+        class="segmented-choice__radio !absolute !h-full !w-full !border-0 !bg-transparent !p-0 !opacity-0 !shadow-none !ring-0"
+        :value="option.value"
+      />
+      <Label
+        :for="optionId(option.value)"
+        class="segmented-choice__option"
+        :class="[
+          `segmented-choice__option--${option.tone ?? 'muted'}`,
+          { 'segmented-choice__option--active': modelValue === option.value },
+        ]"
+      >
       {{ option.label }}
-    </button>
-  </div>
+      </Label>
+    </div>
+  </RadioGroup>
 </template>
 
 <style scoped lang="scss">
@@ -65,15 +90,28 @@ function selectOption(value: string): void {
   min-width: 0;
 }
 
-.segmented-choice__option {
+.segmented-choice__item {
+  position: relative;
+  min-width: 0;
+  min-height: $wolf-input-height-v2;
+}
+
+.segmented-choice__radio {
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
   appearance: none;
+}
+
+.segmented-choice__option {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 0;
   width: 100%;
-  height: 100%;
-  min-height: 0;
+  height: $wolf-input-height-v2;
+  min-height: $wolf-input-height-v2;
   padding: 0 $wolf-space-md-v2;
   border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-v2;
@@ -88,21 +126,24 @@ function selectOption(value: string): void {
     background-color 0.16s ease,
     box-shadow 0.16s ease,
     color 0.16s ease;
+  cursor: pointer;
+  pointer-events: none;
 
-  &:hover:not(:disabled) {
-    border-color: $wolf-border-hover-v2;
-  }
+}
 
-  &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-  }
+.segmented-choice__item:hover .segmented-choice__option {
+  border-color: $wolf-border-hover-v2;
+}
 
-  &:disabled {
-    cursor: not-allowed;
-    color: $wolf-text-tertiary-v2;
-    opacity: 0.72;
-  }
+.segmented-choice__radio:focus-visible + .segmented-choice__option {
+  outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
+  outline-offset: $wolf-focus-ring-offset-v2;
+}
+
+.segmented-choice__radio:disabled + .segmented-choice__option {
+  cursor: not-allowed;
+  color: $wolf-text-tertiary-v2;
+  opacity: 0.72;
 }
 
 .segmented-choice__option--primary:not(.segmented-choice__option--active) {

@@ -44,8 +44,6 @@ PERMISSION_UPDATE = {
     "lead:return_to_pool": ("lead:return", "退回线索到公海", "lead", "return", None),
     "lead:import": ("lead:import", "导入线索", "lead", "import", None),
     "lead:follow_up:create": ("lead:follow_up:create", "创建线索跟进", "lead", "follow_up_create", None),
-    "lead:list": ("lead:api:list", "API 线索列表", "lead", "api_list", None),
-    "lead:read": ("lead:api:read", "API 线索详情", "lead", "api_read", None),
 
     # ========== 客户管理 (customer) ==========
     "customer:create": ("customer:create", "创建客户", "customer", "create", None),
@@ -63,8 +61,6 @@ PERMISSION_UPDATE = {
     "customer:follow_up:create": ("customer:follow_up:create", "创建客户跟进", "customer", "follow_up_create", None),
     "customer:follow_up:edit": ("customer:follow_up:edit", "编辑客户跟进", "customer", "follow_up_edit", None),
     "customer:follow_up:delete": ("customer:follow_up:delete", "删除客户跟进", "customer", "follow_up_delete", None),
-    "customer:list": ("customer:api:list", "API 客户列表", "customer", "api_list", None),
-    "customer:read": ("customer:api:read", "API 客户详情", "customer", "api_read", None),
 
     # ========== 商机管理 (opportunity) ==========
     "opportunity:create": ("opportunity:create", "创建商机", "opportunity", "create", None),
@@ -81,8 +77,6 @@ PERMISSION_UPDATE = {
     "opportunity:stage:delete": ("opportunity:stage:delete", "删除商机阶段", "opportunity", "stage_delete", None),
     "opportunity:stage:manage": ("opportunity:stage:manage", "管理商机阶段", "opportunity", "stage_manage", None),
     "opportunity:analytics:view": ("opportunity:analytics:view", "查看商机分析", "opportunity", "analytics_view", None),
-    "opportunity:list": ("opportunity:api:list", "API 商机列表", "opportunity", "api_list", None),
-    "opportunity:read": ("opportunity:api:read", "API 商机详情", "opportunity", "api_read", None),
 
     # ========== 合同管理 (contract) ==========
     "contract:create": ("contract:create", "创建合同", "contract", "create", None),
@@ -95,8 +89,6 @@ PERMISSION_UPDATE = {
     "contract:approve_all": ("contract:approve:all", "审批所有合同", "contract", "approve", "all"),
     "contract:submit_approval": ("contract:submit", "提交合同审批", "contract", "submit", None),
     "contract:cancel_approval": ("contract:cancel", "撤回合同审批", "contract", "cancel", None),
-    "contract:list": ("contract:api:list", "API 合同列表", "contract", "api_list", None),
-    "contract:read": ("contract:api:read", "API 合同详情", "contract", "api_read", None),
 
     # ========== 回款管理 (payment) ==========
     "payment:plan:create": ("payment:plan:create", "创建回款计划", "payment", "plan_create", None),
@@ -108,9 +100,6 @@ PERMISSION_UPDATE = {
     "payment:view_all": ("payment:view:all", "查看所有回款", "payment", "view", "all"),
     "payment:register": ("payment:register", "登记回款", "payment", "register", None),
     "payment:confirm": ("payment:confirm", "确认回款入账", "payment", "confirm", None),
-    "payment:create": ("payment:api:create", "API 创建回款", "payment", "api_create", None),
-    "payment:list": ("payment:api:list", "API 回款列表", "payment", "api_list", None),
-    "payment:read": ("payment:api:read", "API 回款详情", "payment", "api_read", None),
 
     # ========== 发票管理 (invoice) ==========
     "invoice:create": ("invoice:create", "创建发票申请", "invoice", "create", None),
@@ -118,8 +107,6 @@ PERMISSION_UPDATE = {
     "invoice:view_all": ("invoice:view:all", "查看所有发票", "invoice", "view", "all"),
     "invoice:approve": ("invoice:approve", "审批发票申请", "invoice", "approve", None),
     "invoice:mark_issued": ("invoice:issue", "标记发票已开票", "invoice", "issue", None),
-    "invoice:list": ("invoice:api:list", "API 发票列表", "invoice", "api_list", None),
-    "invoice:read": ("invoice:api:read", "API 发票详情", "invoice", "api_read", None),
 
     # ========== 财务管理 (finance) ==========
     "finance:receivables_view": ("finance:receivables:view", "查看应收账款", "finance", "receivables_view", None),
@@ -133,7 +120,6 @@ PERMISSION_UPDATE = {
     "system:config": ("system:config", "系统配置", "system", "config", None),
     "ai:manage": ("ai:manage", "AI 配置管理", "ai", "manage", None),
     "ai:read": ("ai:view", "AI 配置查看", "ai", "view", None),
-    "apikey:manage": ("apikey:manage", "管理 API Key", "apikey", "manage", None),
     "approval:flow:create": ("approval:flow:create", "创建审批流程", "approval", "flow_create", None),
     "approval:flow:update": ("approval:flow:edit", "编辑审批流程", "approval", "flow_edit", None),
     "statistics:view": ("statistics:view", "查看统计数据", "statistics", "view", None),

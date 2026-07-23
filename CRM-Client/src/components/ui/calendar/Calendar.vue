@@ -140,7 +140,7 @@ const calendarRootProps = computed(() => {
   <CalendarRoot
     v-slot="{ weekDays, grid }"
     v-bind="calendarRootProps as any"
-    :class="cn('p-3', props.class)"
+    :class="cn('date-picker-calendar p-3', props.class)"
     class="rounded-md border bg-white"
     @update:model-value="emit('update:modelValue', $event as DateValue | undefined)"
     @update:placeholder="handlePlaceholderChange($event as DateValue)"
@@ -154,7 +154,7 @@ const calendarRootProps = computed(() => {
 
       <div class="flex flex-1 items-center justify-center gap-2">
         <Select v-model="selectedYear">
-          <SelectTrigger class="h-8 w-[92px] border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
+          <SelectTrigger class="date-picker-calendar__year-trigger h-8 shrink-0 border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
             <SelectValue />
           </SelectTrigger>
           <SelectContent class="max-h-72" data-date-picker-select-content>
@@ -169,7 +169,7 @@ const calendarRootProps = computed(() => {
         </Select>
 
         <Select v-model="selectedMonth">
-          <SelectTrigger class="h-8 w-[76px] border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
+          <SelectTrigger class="date-picker-calendar__month-trigger h-8 shrink-0 border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
             <SelectValue />
           </SelectTrigger>
           <SelectContent data-date-picker-select-content>
@@ -194,14 +194,14 @@ const calendarRootProps = computed(() => {
     <CalendarGrid
       v-for="month in grid"
       :key="month.value.toString()"
-      class="w-full border-collapse"
+      class="date-picker-calendar__grid mt-3 w-full border-collapse"
     >
       <CalendarGridHead>
-        <CalendarGridRow class="flex">
+        <CalendarGridRow class="date-picker-calendar__row">
           <CalendarHeadCell
             v-for="day in weekDays"
             :key="day"
-            class="w-9 text-xs font-normal text-wolf-text-tertiary text-center"
+            class="date-picker-calendar__head-cell text-center text-xs font-normal text-wolf-text-tertiary"
           >
             {{ day }}
           </CalendarHeadCell>
@@ -211,18 +211,18 @@ const calendarRootProps = computed(() => {
         <CalendarGridRow
           v-for="(weekDates, index) in month.rows"
           :key="index"
-          class="flex mt-2 w-full"
+          class="date-picker-calendar__row mt-2"
         >
           <CalendarCell
             v-for="weekDate in weekDates"
             :key="weekDate.toString()"
             :date="weekDate"
-            class="relative p-0 text-center text-sm focus-within:relative focus-within:z-20 w-9"
+            class="date-picker-calendar__cell relative p-0 text-center text-sm focus-within:relative focus-within:z-20"
           >
             <CalendarCellTrigger
               :day="weekDate"
               :month="month.value"
-              class="inline-flex items-center justify-center rounded-md text-sm font-normal w-9 h-9 transition-colors hover:bg-wolf-bg-hover hover:text-wolf-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary disabled:pointer-events-none disabled:opacity-50 data-[selected]:bg-wolf-primary data-[selected]:text-wolf-text-inverse data-[today]:bg-wolf-bg-muted data-[today]:text-wolf-text-primary"
+              class="date-picker-calendar__cell-trigger inline-flex items-center justify-center rounded-md text-sm font-normal transition-colors hover:bg-wolf-bg-hover hover:text-wolf-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary disabled:pointer-events-none disabled:opacity-50 data-[selected]:bg-wolf-primary data-[selected]:text-wolf-text-inverse data-[today]:bg-wolf-bg-muted data-[today]:text-wolf-text-primary"
             />
           </CalendarCell>
         </CalendarGridRow>
@@ -230,3 +230,39 @@ const calendarRootProps = computed(() => {
     </CalendarGrid>
   </CalendarRoot>
 </template>
+
+<style scoped lang="scss">
+.date-picker-calendar {
+  width: 306px;
+}
+
+.date-picker-calendar__year-trigger {
+  width: 112px !important;
+  flex: 0 0 112px;
+}
+
+.date-picker-calendar__month-trigger {
+  width: 88px !important;
+  flex: 0 0 88px;
+}
+
+.date-picker-calendar__grid {
+  width: 100%;
+}
+
+.date-picker-calendar__row {
+  display: grid;
+  grid-template-columns: repeat(7, 40px);
+  justify-content: center;
+}
+
+.date-picker-calendar__head-cell,
+.date-picker-calendar__cell {
+  width: 40px;
+}
+
+.date-picker-calendar__cell-trigger {
+  width: 40px;
+  height: 40px;
+}
+</style>

@@ -36,6 +36,7 @@ import ContactsPanel from '@/components/panels/ContactsPanel.vue'
 import OpportunitiesPanel from '@/components/panels/OpportunitiesPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
+import CustomerMembersPanel from '@/components/panels/CustomerMembersPanel.vue'
 import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
 
@@ -56,7 +57,7 @@ import { Plus, Pencil, RefreshCw, Loader2, Sparkles } from 'lucide-vue-next'
 import ScoreIndicator from '@/components/ScoreIndicator.vue'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
-import customerApi, { type CustomerDetailResponse, type ContactResponse } from '@/api/customer'
+import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
 import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
@@ -67,6 +68,7 @@ import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import { getCustomerScore, type ScoreResponse } from '@/api/score'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { useUserStore } from '@/stores/user'
+import { usePermissionStore } from '@/stores/permissions'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { confirmDelete } from '@/utils/confirmDialog'
 
@@ -84,6 +86,7 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const userStore = useUserStore()
+const permissionStore = usePermissionStore()
 
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
@@ -150,6 +153,7 @@ const contracts = ref<ContractListResponse[]>([])
 const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
+const customerMembers = ref<CustomerMemberResponse[]>([])
 let latestLoadRequestId = 0
 
 interface CustomerBriefCitation {
@@ -323,11 +327,42 @@ const navTabs: NavTabItem[] = [
 
 // ==================== Methods ====================
 const handleCreateOpportunity = (): void => {
-  // 打开新建商机弹窗
+  if (!canCreateOpportunityForCustomer.value) {
+    toast.error('你没有在该客户下新建商机的权限')
+    return
+  }
   opportunityDialogOpen.value = true
 }
 
+const handleCreateContact = (): void => {
+  if (!canCreateContact.value) {
+    toast.error('你没有在该客户下新建联系人的权限')
+    return
+  }
+  contactDialogOpen.value = true
+}
+
+const handleCreateInvoiceTitle = (): void => {
+  if (!canCreateInvoiceTitle.value) {
+    toast.error('你没有在该客户下新建发票抬头的权限')
+    return
+  }
+  invoiceTitleDialogOpen.value = true
+}
+
+const handleCreateFollowUp = (): void => {
+  if (!canCreateFollowUp.value) {
+    toast.error('你没有在该客户下添加跟进的权限')
+    return
+  }
+  followUpDialogOpen.value = true
+}
+
 const handleEdit = (): void => {
+  if (!canEditCurrentCustomer.value) {
+    toast.error('你没有编辑该客户的权限')
+    return
+  }
   customerEditDialogOpen.value = true
 }
 
@@ -385,6 +420,55 @@ const getCustomerBriefStatusClass = (status: string | null | undefined): string 
   return 'brief-status-badge--pending'
 }
 
+const canManageCustomerMembers = computed(() => {
+  if (!customer.value) return false
+  if (customer.value.owner_id === String(userStore.userInfo?.id)) return true
+  if (userStore.userInfo?.roles?.some(role => role.code === 'TEAM_ADMIN') === true) return true
+  return permissionStore.hasAnyPermission(['customer:assign', 'customer:edit:all'])
+})
+
+const currentCustomerMember = computed(() => {
+  const currentUserId = String(userStore.userInfo?.id ?? '')
+  if (currentUserId === '') return undefined
+  return customerMembers.value.find(member => member.user_id === currentUserId)
+})
+
+const canEditCurrentCustomer = computed(() => {
+  if (!customer.value) return false
+  if (permissionStore.hasPermission('customer:edit:all')) return true
+  if (currentCustomerMember.value?.access_level === 'EDIT') return true
+  return customer.value.owner_id === String(userStore.userInfo?.id) && permissionStore.hasPermission('customer:edit:own')
+})
+
+const canCreateFollowUp = computed(() => {
+  if (!customer.value) return false
+  if (permissionStore.hasPermission('customer:edit:all')) return true
+  if (['FOLLOW_UP', 'EDIT'].includes(currentCustomerMember.value?.access_level ?? '')) return true
+  return customer.value.owner_id === String(userStore.userInfo?.id)
+    && permissionStore.hasAnyPermission(['customer:follow_up:create', 'customer:edit:own'])
+})
+
+const canCreateContact = computed(() => canEditCurrentCustomer.value)
+const canEditContact = computed(() => canEditCurrentCustomer.value)
+const canDeleteContact = computed(() => canEditCurrentCustomer.value)
+const canSetPrimaryContact = computed(() => canEditCurrentCustomer.value)
+const canCreateInvoiceTitle = computed(() =>
+  canEditCurrentCustomer.value && permissionStore.hasPermission('invoice:title:create')
+)
+const canEditInvoiceTitle = computed(() =>
+  canEditCurrentCustomer.value && permissionStore.hasPermission('invoice:title:edit')
+)
+const canDeleteInvoiceTitle = computed(() =>
+  canEditCurrentCustomer.value && permissionStore.hasPermission('invoice:title:delete')
+)
+const canSetDefaultInvoiceTitle = computed(() =>
+  canEditCurrentCustomer.value && permissionStore.hasPermission('invoice:title:set_default')
+)
+const canCreateDeployment = computed(() => canEditCurrentCustomer.value)
+const canCreateOpportunityForCustomer = computed(() => (
+  permissionStore.hasPermission('opportunity:create') && canEditCurrentCustomer.value
+))
+
 // ==================== Data Loading ====================
 const loadAllData = async (customerId: number): Promise<void> => {
   const loadRequestId = latestLoadRequestId + 1
@@ -399,7 +483,8 @@ const loadAllData = async (customerId: number): Promise<void> => {
       opportunitiesData,
       contractsData,
       invoiceTitlesData,
-      deploymentsData
+      deploymentsData,
+      customerMembersData
     ] = await Promise.all([
       customerApi.getCustomerDetail(customerId),
       getCustomerScore(customerId).catch(() => null),
@@ -407,7 +492,8 @@ const loadAllData = async (customerId: number): Promise<void> => {
       opportunityApi.getOpportunities({ customer_id: customerId }).catch(() => []),
       contractApi.getCustomerContracts(customerId).catch(() => []),
       invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
-      deploymentApi.list(customerId).catch(() => [])
+      deploymentApi.list(customerId).catch(() => []),
+      customerApi.getCustomerMembers(customerId).catch(() => [])
     ])
 
     if (loadRequestId !== latestLoadRequestId) {
@@ -421,6 +507,7 @@ const loadAllData = async (customerId: number): Promise<void> => {
     contracts.value = contractsData
     invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
     deployments.value = deploymentsData
+    customerMembers.value = customerMembersData
 
     if (contractsData.length > 0) {
       const paymentPlanPromises = contractsData.map((contract) =>
@@ -444,6 +531,15 @@ const loadAllData = async (customerId: number): Promise<void> => {
     if (loadRequestId === latestLoadRequestId) {
       loading.value = false
     }
+  }
+}
+
+const refreshCustomerMembers = async (): Promise<void> => {
+  if (props.customerId === null) return
+  try {
+    customerMembers.value = await customerApi.getCustomerMembers(props.customerId)
+  } catch (error) {
+    handleApiError(error, '刷新客户团队成员')
   }
 }
 
@@ -510,6 +606,10 @@ const handleFollowUpDelete = async (followUp: { id: number }): Promise<void> => 
 
 // Contact handlers
 const handleEditContact = (contact: ContactResponse): void => {
+  if (!canEditContact.value) {
+    toast.error('你没有编辑该客户联系人的权限')
+    return
+  }
   editingContact.value = contact
   contactDialogOpen.value = true
 }
@@ -530,6 +630,10 @@ const handleContactSuccess = (): void => {
 }
 
 const handleDeleteContact = async (contactId: number): Promise<void> => {
+  if (!canDeleteContact.value) {
+    toast.error('你没有删除该客户联系人的权限')
+    return
+  }
   try {
     await customerApi.deleteContact(contactId)
     toast.success('联系人已删除')
@@ -542,6 +646,10 @@ const handleDeleteContact = async (contactId: number): Promise<void> => {
 }
 
 const handleSetPrimaryContact = async (contactId: number): Promise<void> => {
+  if (!canSetPrimaryContact.value) {
+    toast.error('你没有设置主要联系人的权限')
+    return
+  }
   try {
     await customerApi.setPrimaryContact(contactId)
     toast.success('已设为主要联系人')
@@ -662,6 +770,10 @@ const handleWithdrawContractApproval = async (contract: ContractListResponse): P
 
 // Invoice Title handlers
 const handleEditInvoiceTitle = (invoiceTitle: InvoiceTitleResponse): void => {
+  if (!canEditInvoiceTitle.value) {
+    toast.error('你没有编辑该客户发票抬头的权限')
+    return
+  }
   editingInvoiceTitle.value = invoiceTitle
   invoiceTitleDialogOpen.value = true
 }
@@ -682,6 +794,10 @@ const handleInvoiceTitleSuccess = (): void => {
 }
 
 const handleDeleteInvoiceTitle = async (titleId: number): Promise<void> => {
+  if (!canDeleteInvoiceTitle.value) {
+    toast.error('你没有删除该客户发票抬头的权限')
+    return
+  }
   try {
     await invoiceApi.deleteInvoiceTitle(titleId)
     toast.success('发票抬头已删除')
@@ -694,6 +810,10 @@ const handleDeleteInvoiceTitle = async (titleId: number): Promise<void> => {
 }
 
 const handleSetDefaultInvoiceTitle = async (titleId: number): Promise<void> => {
+  if (!canSetDefaultInvoiceTitle.value) {
+    toast.error('你没有设置默认发票抬头的权限')
+    return
+  }
   try {
     await invoiceApi.setDefaultInvoiceTitle(titleId)
     toast.success('已设为默认发票抬头')
@@ -707,6 +827,10 @@ const handleSetDefaultInvoiceTitle = async (titleId: number): Promise<void> => {
 
 // License handlers
 const handleCreateDeployment = (): void => {
+  if (!canCreateDeployment.value) {
+    toast.error('你没有在该客户下新建部署信息的权限')
+    return
+  }
   deploymentDialogOpen.value = true
 }
 
@@ -834,6 +958,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
           customerId: customerId ?? 0,
           customerName: customer?.account_name
         }"
+        :can-edit-customer-context="canEditCurrentCustomer"
         @back="handleBackFromOpportunity"
         @close="emit('update:visible', false)"
         @refresh="handleOpportunityDetailRefresh"
@@ -1040,7 +1165,9 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               <Card class="info-card">
                 <CardContent class="p-0">
                   <div class="p-4 border-b border-wolf-border-light-v2">
-                    <h3 class="text-sm font-semibold text-wolf-text-primary-v2">基本信息</h3>
+                    <h3 class="text-sm font-semibold text-wolf-text-primary-v2 truncate">
+                      {{ customer?.account_name || '基本信息' }}
+                    </h3>
                   </div>
                   <div class="p-4">
                     <div class="attributes-grid">
@@ -1142,7 +1269,11 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               <ContactsPanel
                 :customer-id="customerId ?? 0"
                 :contacts="customer?.contacts ?? []"
-                @add="contactDialogOpen = true"
+                :show-add="canCreateContact"
+                :can-edit="canEditContact"
+                :can-delete="canDeleteContact"
+                :can-set-primary="canSetPrimaryContact"
+                @add="handleCreateContact"
                 @edit="handleEditContact"
                 @delete="handleDeleteContact"
                 @set-primary="handleSetPrimaryContact"
@@ -1153,8 +1284,12 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                 :invoice-titles="invoiceTitles"
                 :invoice-applications="[]"
                 :show-invoice-applications="false"
+                :show-add-title="canCreateInvoiceTitle"
                 :show-title-apply-action="false"
-                @add="invoiceTitleDialogOpen = true"
+                :can-edit-title="canEditInvoiceTitle"
+                :can-delete-title="canDeleteInvoiceTitle"
+                :can-set-default-title="canSetDefaultInvoiceTitle"
+                @add="handleCreateInvoiceTitle"
                 @edit="handleEditInvoiceTitle"
                 @delete="handleDeleteInvoiceTitle"
                 @set-default="handleSetDefaultInvoiceTitle"
@@ -1166,7 +1301,15 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                 :license-applications="[]"
                 :deployments="deployments"
                 :show-license-applications="false"
+                :show-add-deployment="canCreateDeployment"
                 @add-deployment="handleCreateDeployment"
+              />
+
+              <CustomerMembersPanel
+                :customer-id="customerId ?? 0"
+                :members="customerMembers"
+                :can-manage-members="canManageCustomerMembers"
+                @refresh="refreshCustomerMembers"
               />
             </template>
 
@@ -1176,7 +1319,8 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               :follow-ups="followUps"
               :current-user-id="String(userStore.userInfo?.id)"
               :show-header="false"
-              @add="followUpDialogOpen = true"
+              :show-add="canCreateFollowUp"
+              @add="handleCreateFollowUp"
               @delete="handleFollowUpDelete"
             />
 
@@ -1184,7 +1328,8 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               v-if="activePanel === 'opportunities'"
               :customer-id="customerId ?? 0"
               :opportunities="opportunities"
-              @add="opportunityDialogOpen = true"
+              :show-add="canCreateOpportunityForCustomer"
+              @add="handleCreateOpportunity"
               @view="handleViewOpportunity"
             />
           </div>
@@ -1207,32 +1352,32 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
           </template>
 
           <template v-else-if="activePanel === 'customer-info'">
-            <Button variant="default" @click="contactDialogOpen = true">
+            <Button v-if="canCreateContact" variant="default" @click="handleCreateContact">
               <Plus class="w-4 h-4 mr-2" />
               新建联系人
             </Button>
-            <Button variant="outline" @click="invoiceTitleDialogOpen = true">
+            <Button v-if="canCreateInvoiceTitle" variant="outline" @click="handleCreateInvoiceTitle">
               <Plus class="w-4 h-4 mr-2" />
               新建抬头
             </Button>
-            <Button variant="outline" @click="handleCreateDeployment">
+            <Button v-if="canCreateDeployment" variant="outline" @click="handleCreateDeployment">
               <Plus class="w-4 h-4 mr-2" />
               新建部署
             </Button>
-            <Button variant="outline" @click="handleEdit">
+            <Button v-if="canEditCurrentCustomer" variant="outline" @click="handleEdit">
               <Pencil class="w-4 h-4 mr-2" />
               编辑
             </Button>
           </template>
 
-          <template v-else-if="activePanel === 'followup'">
-            <Button variant="default" @click="followUpDialogOpen = true">
+          <template v-else-if="activePanel === 'followup' && canCreateFollowUp">
+            <Button variant="default" @click="handleCreateFollowUp">
               <Plus class="w-4 h-4 mr-2" />
               添加跟进
             </Button>
           </template>
 
-          <template v-else-if="activePanel === 'opportunities'">
+          <template v-else-if="activePanel === 'opportunities' && canCreateOpportunityForCustomer">
             <Button variant="default" @click="handleCreateOpportunity">
               <Plus class="w-4 h-4 mr-2" />
               新建商机

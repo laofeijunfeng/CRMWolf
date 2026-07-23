@@ -3,7 +3,7 @@ from sqlalchemy import or_, and_
 from typing import Optional, List, Tuple
 from datetime import date, datetime, time, timedelta
 
-from app.models.customer import Customer, Contact
+from app.models.customer import Customer, Contact, CustomerMember
 from app.models.lead import Lead, LeadStatus
 from app.models.contract import Contract
 from app.models.opportunity import Opportunity
@@ -73,9 +73,37 @@ class CustomerCRUD:
         created_time_start: Optional[date] = None,
         created_time_end: Optional[date] = None,
         order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
+        order_dir: Optional[str] = None,
+        scope: Optional[str] = None,
+        current_user_id: Optional[str] = None,
+        include_collaborated: bool = False
     ) -> Tuple[List[Customer], int]:
         query = db.query(Customer).filter(Customer.team_id == team_id)
+
+        current_user_id = str(current_user_id) if current_user_id is not None else None
+        if scope == "owned" and current_user_id:
+            query = query.filter(Customer.owner_id == current_user_id)
+        elif scope == "collaborated" and current_user_id:
+            query = query.filter(
+                db.query(CustomerMember.id).filter(
+                    CustomerMember.team_id == team_id,
+                    CustomerMember.customer_id == Customer.id,
+                    CustomerMember.user_id == current_user_id,
+                    CustomerMember.is_active == True,
+                ).exists()
+            )
+        elif include_collaborated and current_user_id:
+            query = query.filter(
+                or_(
+                    Customer.owner_id == current_user_id,
+                    db.query(CustomerMember.id).filter(
+                        CustomerMember.team_id == team_id,
+                        CustomerMember.customer_id == Customer.id,
+                        CustomerMember.user_id == current_user_id,
+                        CustomerMember.is_active == True,
+                    ).exists()
+                )
+            )
 
         status_values = _split_int_csv(status)
         if status_values:

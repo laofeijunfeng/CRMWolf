@@ -10,9 +10,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { InputField } from '@/components/crmwolf'
 import deploymentApi, { type DeploymentInfoCreate } from '@/api/deployment'
 import { handleApiError } from '@/utils/errorHandler'
 
@@ -155,66 +155,42 @@ watch(
       </DialogHeader>
 
       <form class="deployment-dialog__form" novalidate @submit.prevent="handleSubmit">
-        <div class="deployment-dialog__field">
-          <Label for="deployment-name" class="deployment-dialog__label">
-            部署名称
-            <span class="deployment-dialog__required" aria-hidden="true">*</span>
-          </Label>
-          <Input
-            id="deployment-name"
-            v-model="form.deploymentName"
-            class="deployment-dialog__control h-11 min-h-11"
-            placeholder="如：生产环境、测试环境"
-            :disabled="submitting"
-            :aria-invalid="errors.deploymentName !== ''"
-            aria-describedby="deployment-name-error"
-          />
-          <p v-if="errors.deploymentName" id="deployment-name-error" class="deployment-dialog__error" role="alert">
-            {{ errors.deploymentName }}
-          </p>
-        </div>
+        <InputField
+          id="deployment-name"
+          v-model="form.deploymentName"
+          class="deployment-dialog__field"
+          label="部署名称"
+          required
+          placeholder="如：生产环境、测试环境"
+          :disabled="submitting"
+          :error="errors.deploymentName"
+        />
 
-        <div class="deployment-dialog__field">
-          <Label for="deployment-server" class="deployment-dialog__label">
-            服务器地址
-            <span class="deployment-dialog__required" aria-hidden="true">*</span>
-          </Label>
-          <Input
-            id="deployment-server"
-            v-model="form.serverAddress"
-            class="deployment-dialog__control h-11 min-h-11"
-            placeholder="https://crm.example.com:8891"
-            :disabled="submitting"
-            :aria-invalid="errors.serverAddress !== ''"
-            aria-describedby="deployment-server-error"
-          />
-          <p v-if="errors.serverAddress" id="deployment-server-error" class="deployment-dialog__error" role="alert">
-            {{ errors.serverAddress }}
-          </p>
-        </div>
+        <InputField
+          id="deployment-server"
+          v-model="form.serverAddress"
+          class="deployment-dialog__field"
+          label="服务器地址"
+          required
+          placeholder="https://crm.example.com:8891"
+          :disabled="submitting"
+          :error="errors.serverAddress"
+        />
 
-        <div class="deployment-dialog__field">
-          <Label for="deployment-users" class="deployment-dialog__label">
-            授权人数
-            <span class="deployment-dialog__required" aria-hidden="true">*</span>
-          </Label>
-          <Input
-            id="deployment-users"
-            v-model="form.authorizedUsers"
-            type="number"
-            inputmode="numeric"
-            min="1"
-            step="1"
-            class="deployment-dialog__control h-11 min-h-11"
-            placeholder="请输入授权人数"
-            :disabled="submitting"
-            :aria-invalid="errors.authorizedUsers !== ''"
-            aria-describedby="deployment-users-error"
-          />
-          <p v-if="errors.authorizedUsers" id="deployment-users-error" class="deployment-dialog__error" role="alert">
-            {{ errors.authorizedUsers }}
-          </p>
-        </div>
+        <InputField
+          id="deployment-users"
+          v-model="form.authorizedUsers"
+          class="deployment-dialog__field"
+          label="授权人数"
+          required
+          type="number"
+          inputmode="numeric"
+          min="1"
+          step="1"
+          placeholder="请输入授权人数"
+          :disabled="submitting"
+          :error="errors.authorizedUsers"
+        />
 
         <div class="deployment-dialog__switch-row">
           <Switch
@@ -259,32 +235,16 @@ watch(
   min-width: 0;
 }
 
-.deployment-dialog__label,
 .deployment-dialog__switch-label {
   color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-medium-v2;
 }
 
-.deployment-dialog__control {
-  width: 100%;
-}
-
 .deployment-dialog__switch-row {
   display: flex;
   align-items: center;
   gap: $wolf-space-sm-v2;
-}
-
-.deployment-dialog__required,
-.deployment-dialog__error {
-  color: $wolf-danger-v2;
-}
-
-.deployment-dialog__error {
-  margin: 0;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
 }
 
 .deployment-dialog__footer {

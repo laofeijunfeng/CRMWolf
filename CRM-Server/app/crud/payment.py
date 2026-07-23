@@ -552,12 +552,16 @@ class PaymentRecordCRUD:
         if not record_data.get("actual_payer_name"):
             customer = customer_crud.get_by_id(db, plan.contract.customer_id) if plan.contract else None
             record_data["actual_payer_name"] = customer.account_name if customer else None
+        commission_member_id = str(record_data.pop("commission_member_id"))
+        commission_member = user_crud.get_by_id(db, int(commission_member_id))
 
         db_record = PaymentRecord(
             payment_plan_id=plan_id,
             team_id=team_id,
             record_number=record_number,
             **record_data,
+            commission_member_id=commission_member_id,
+            commission_member_name=commission_member.name if commission_member else None,
             creator_id=creator_id,
             creator_name=creator_name
         )
@@ -603,6 +607,8 @@ class PaymentRecordCRUD:
                     "contractName": contract.contract_name,
                     "actualAmount": float(db_record.actual_amount),
                     "paymentDate": db_record.payment_date.isoformat() if db_record.payment_date else None,
+                    "commissionMemberId": db_record.commission_member_id,
+                    "commissionMemberName": db_record.commission_member_name,
                     "customerId": contract.customer_id,
                     "customerName": customer.account_name if customer else None
                 }
@@ -611,10 +617,19 @@ class PaymentRecordCRUD:
         return db_record
     
     def update(self, db: Session, db_obj: PaymentRecord, obj_in: PaymentRecordUpdate) -> PaymentRecord:
+        from app.crud.user import user_crud
+
         update_data = obj_in.model_dump(exclude_unset=True)
+        commission_member_id = update_data.pop("commission_member_id", None)
         
         for field, value in update_data.items():
             setattr(db_obj, field, value)
+
+        if commission_member_id is not None:
+            commission_member_id = str(commission_member_id)
+            commission_member = user_crud.get_by_id(db, int(commission_member_id))
+            db_obj.commission_member_id = commission_member_id
+            db_obj.commission_member_name = commission_member.name if commission_member else None
         
         db.commit()
         

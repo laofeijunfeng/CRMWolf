@@ -6,7 +6,7 @@ import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.
 interface Props {
   modelValue: InvoiceType
   disabled?: boolean
-  labelledBy?: string
+  labelledBy?: string | undefined
 }
 
 type Emits = (event: 'update:modelValue', value: InvoiceType) => void
@@ -25,6 +25,10 @@ const options: { value: InvoiceType, label: string, tone: 'primary' | 'success' 
 const segmentedOptions = computed(() =>
   options.map(option => ({ value: option.value, label: option.label, tone: option.tone }))
 )
+const segmentedProps = computed(() => ({
+  ...(props.disabled !== undefined ? { disabled: props.disabled } : {}),
+  ...(props.labelledBy !== undefined ? { labelledBy: props.labelledBy } : {}),
+}))
 
 function selectType(value: InvoiceType): void {
   if (props.disabled || value === props.modelValue) return
@@ -41,8 +45,7 @@ function handleUpdate(value: string): void {
   <SegmentedChoiceControl
     :model-value="modelValue"
     :options="segmentedOptions"
-    :disabled="disabled"
-    :labelled-by="labelledBy"
+    v-bind="segmentedProps"
     @update:model-value="handleUpdate"
   />
 </template>

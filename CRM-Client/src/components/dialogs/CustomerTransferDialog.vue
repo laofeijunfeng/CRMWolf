@@ -14,16 +14,12 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from '@/components/ui/radio-group'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import {
+  SelectField,
+  TextareaField,
+} from '@/components/crmwolf'
 import customerApi, {
   type CustomerAssignRequest,
   type CustomerOpportunityTransferScope,
@@ -64,6 +60,12 @@ const availableMembers = computed(() => {
   const currentOwnerId = props.customer?.owner_id ?? ''
   return members.value.filter(member => member.id !== currentOwnerId)
 })
+const memberOptions = computed(() =>
+  availableMembers.value.map((member) => ({
+    value: member.id,
+    label: member.name,
+  }))
+)
 
 const selectedCustomerName = computed(() => props.customer?.account_name ?? '客户')
 
@@ -177,22 +179,17 @@ watch(
       </DialogHeader>
 
       <div class="customer-transfer-dialog__body">
-        <div class="customer-transfer-dialog__field">
-          <Label for="customer-transfer-owner">新负责人 <span class="text-destructive">*</span></Label>
-          <Select v-model="form.ownerId" :disabled="loadingMembers || submitting">
-            <SelectTrigger id="customer-transfer-owner" class="h-11 sm:h-8">
-              <SelectValue :placeholder="loadingMembers ? '加载成员中...' : '请选择新负责人'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="member in availableMembers"
-                :key="member.id"
-                :value="member.id"
-              >
-                {{ member.name }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+        <div>
+          <SelectField
+            id="customer-transfer-owner"
+            v-model="form.ownerId"
+            class="customer-transfer-dialog__field"
+            label="新负责人"
+            required
+            :options="memberOptions"
+            :placeholder="loadingMembers ? '加载成员中...' : '请选择新负责人'"
+            :disabled="loadingMembers || submitting"
+          />
           <p v-if="!loadingMembers && availableMembers.length === 0" class="customer-transfer-dialog__hint">
             暂无可移交的团队成员
           </p>
@@ -222,17 +219,16 @@ watch(
           <span>移交商机时，系统会同步移交这些商机关联的合同，确保业务归属一致。</span>
         </div>
 
-        <div class="customer-transfer-dialog__field">
-          <Label for="customer-transfer-remark">备注</Label>
-          <Textarea
-            id="customer-transfer-remark"
-            v-model="form.remark"
-            :disabled="submitting"
-            placeholder="填写移交原因或交接说明"
-            maxlength="500"
-            rows="3"
-          />
-        </div>
+        <TextareaField
+          id="customer-transfer-remark"
+          v-model="form.remark"
+          class="customer-transfer-dialog__field"
+          label="备注"
+          :disabled="submitting"
+          placeholder="填写移交原因或交接说明"
+          maxlength="500"
+          rows="3"
+        />
       </div>
 
       <DialogFooter class="customer-transfer-dialog__footer">

@@ -72,6 +72,8 @@ class PaymentRecordInfo(BaseModel):
     actual_payer_name: Optional[str] = Field(None, description="实际付款方名称")
     payment_date: date
     proof_attachment: Optional[str]
+    commission_member_id: Optional[str] = Field(None, description="提成协作成员用户ID")
+    commission_member_name: Optional[str] = Field(None, description="提成协作成员姓名")
     creator_name: Optional[str]
     created_time: datetime
 
@@ -136,7 +138,7 @@ class PaymentRecordBase(BaseModel):
 
 
 class PaymentRecordCreate(PaymentRecordBase):
-    pass
+    commission_member_id: str = Field(..., min_length=1, max_length=100, description="提成协作成员用户ID")
 
 
 class PaymentRecordUpdate(BaseModel):
@@ -144,6 +146,7 @@ class PaymentRecordUpdate(BaseModel):
     actual_payer_name: Optional[str] = Field(None, max_length=200, description="实际付款方名称")
     payment_date: Optional[date] = Field(None, description="实际回款日期")
     proof_attachment: Optional[str] = Field(None, max_length=500, description="回款凭证附件URL")
+    commission_member_id: Optional[str] = Field(None, min_length=1, max_length=100, description="提成协作成员用户ID")
     notes: Optional[str] = Field(None, description="备注")
 
 
@@ -161,6 +164,8 @@ class PaymentRecordResponse(PaymentRecordBase):
     customer_name: Optional[str] = Field(None, description="客户名称")
     opportunity_id: Optional[int] = Field(None, description="商机ID")
     opportunity_name: Optional[str] = Field(None, description="商机名称")
+    commission_member_id: Optional[str] = Field(None, description="提成协作成员用户ID")
+    commission_member_name: Optional[str] = Field(None, description="提成协作成员姓名")
 
     class Config:
         from_attributes = True

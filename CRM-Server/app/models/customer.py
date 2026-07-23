@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, func, Index, ForeignKey, Text, event
+from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, func, Index, ForeignKey, Text, event, Boolean
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
 from app.core.database import Base
@@ -116,6 +116,7 @@ class Customer(Base):
     license_applications = relationship("LicenseApplication", back_populates="customer", cascade="all, delete-orphan")
     invoice_titles = relationship("InvoiceTitle", back_populates="customer", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="customer", cascade="all, delete-orphan")
+    members = relationship("CustomerMember", back_populates="customer", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index('idx_account_name', 'account_name'),
@@ -169,4 +170,29 @@ class Contact(Base):
         Index('idx_is_primary', 'is_primary'),
         Index('idx_team_id', 'team_id'),
         {'comment': '联系人表'}
+    )
+
+
+class CustomerMember(Base):
+    __tablename__ = "crm_customer_members"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
+    customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="客户ID")
+    user_id = Column(String(100), nullable=False, comment="成员系统用户ID")
+    member_role = Column(String(20), nullable=False, default="PRESALES", comment="成员角色：SALES/PRESALES/DELIVERY/SUPPORT/OTHER")
+    access_level = Column(String(20), nullable=False, default="VIEW", comment="访问级别：VIEW/FOLLOW_UP/EDIT")
+    remark = Column(String(500), nullable=True, comment="备注")
+    created_by = Column(String(100), nullable=False, comment="创建人")
+    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    is_active = Column(Boolean, nullable=False, default=True, comment="是否有效")
+
+    customer = relationship("Customer", back_populates="members")
+
+    __table_args__ = (
+        Index('idx_customer_member_customer', 'customer_id'),
+        Index('idx_customer_member_user', 'user_id'),
+        Index('idx_customer_member_team_customer_user_active', 'team_id', 'customer_id', 'user_id', 'is_active'),
+        {'comment': '客户团队成员表'}
     )

@@ -22,24 +22,17 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Label } from '@/components/ui/label'
+import {
+  InputField,
+  SegmentedChoiceControl,
+  SelectField,
+  TextareaField,
+} from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
@@ -91,11 +84,22 @@ const { handleSubmit, resetForm, setValues, values } = useForm<CustomerForm | Cu
 })
 const { value: contactGenderValue, errorMessage: contactGenderError } = useField<string>('contact_gender')
 
+const genderOptions = [
+  { value: '男', label: '男', tone: 'primary' as const },
+  { value: '女', label: '女', tone: 'success' as const },
+]
+
 // State
 const submitting = ref(false)
 const loading = ref(false)
 const procurementMethodsLoading = ref(false)
 const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
+const procurementMethodSelectOptions = computed(() =>
+  procurementMethodOptions.value.map(option => ({
+    value: option.id,
+    label: option.name,
+  }))
+)
 const isDirty = ref(false)
 const showConfirmDialog = ref(false)
 
@@ -282,122 +286,98 @@ function continueEditing(): void {
         <div class="space-y-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <!-- Customer Name (required) -->
-            <FormField v-slot="{ componentField }" name="account_name">
+            <FormField v-slot="{ value, handleChange }" name="account_name">
               <FormItem>
-                <FormLabel>客户名称 <span class="text-destructive">*</span></FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    autocomplete="organization"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入客户名称"
-                  />
-                </FormControl>
+                <InputField
+                  id="customer-account-name"
+                  :model-value="String(value ?? '')"
+                  label="客户名称"
+                  required
+                  autocomplete="organization"
+                  placeholder="请输入客户名称"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- City (required) -->
-            <FormField v-slot="{ componentField }" name="city">
+            <FormField v-slot="{ value, handleChange }" name="city">
               <FormItem>
-                <FormLabel>所在城市 <span class="text-destructive">*</span></FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    autocomplete="address-level2"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入城市"
-                  />
-                </FormControl>
+                <InputField
+                  id="customer-city"
+                  :model-value="String(value ?? '')"
+                  label="所在城市"
+                  required
+                  autocomplete="address-level2"
+                  placeholder="请输入城市"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- Customer Source -->
-            <FormField v-slot="{ componentField }" name="source">
+            <FormField v-slot="{ value, handleChange }" name="source">
               <FormItem>
-                <FormLabel>客户来源 <span class="text-destructive">*</span></FormLabel>
-                <Select v-bind="componentField as any">
-                  <FormControl>
-                    <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue placeholder="请选择来源" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in customerSourceOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <SelectField
+                  id="customer-source"
+                  :model-value="String(value ?? '')"
+                  label="客户来源"
+                  required
+                  :options="customerSourceOptions"
+                  placeholder="请选择来源"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- Company Scale -->
-            <FormField v-slot="{ componentField }" name="company_scale">
+            <FormField v-slot="{ value, handleChange }" name="company_scale">
               <FormItem>
-                <FormLabel>公司规模 <span class="text-destructive">*</span></FormLabel>
-                <Select v-bind="componentField as any">
-                  <FormControl>
-                    <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue placeholder="请选择规模" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in companyScaleOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <SelectField
+                  id="customer-company-scale"
+                  :model-value="String(value ?? '')"
+                  label="公司规模"
+                  required
+                  :options="companyScaleOptions"
+                  placeholder="请选择规模"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <!-- Default Procurement Method -->
-            <FormField v-slot="{ componentField }" name="default_procurement_method_id">
+            <FormField v-slot="{ value, handleChange }" name="default_procurement_method_id">
               <FormItem>
-                <FormLabel>采购方式 <span class="text-destructive">*</span></FormLabel>
-                <Select v-bind="componentField as any" :disabled="procurementMethodsLoading">
-                  <FormControl>
-                    <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue :placeholder="procurementMethodsLoading ? '采购方式加载中' : '请选择采购方式'" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in procurementMethodOptions"
-                      :key="option.id"
-                      :value="option.id"
-                    >
-                      {{ option.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <SelectField
+                  id="customer-procurement-method"
+                  :model-value="String(value ?? '')"
+                  label="采购方式"
+                  required
+                  :options="procurementMethodSelectOptions"
+                  :placeholder="procurementMethodsLoading ? '采购方式加载中' : '请选择采购方式'"
+                  :disabled="procurementMethodsLoading"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
           </div>
 
           <!-- Address (full width) -->
-          <FormField v-slot="{ componentField }" name="address">
+          <FormField v-slot="{ value, handleChange }" name="address">
             <FormItem>
-              <FormLabel>详细地址</FormLabel>
-              <FormControl>
-                <Input
-                  v-bind="componentField as any"
-                  autocomplete="street-address"
-                  class="h-11 sm:h-8"
-                  placeholder="请输入详细地址"
-                />
-              </FormControl>
+              <InputField
+                id="customer-address"
+                :model-value="String(value ?? '')"
+                label="详细地址"
+                autocomplete="street-address"
+                placeholder="请输入详细地址"
+                @update:model-value="handleChange"
+              />
               <FormMessage />
             </FormItem>
           </FormField>
@@ -407,66 +387,61 @@ function continueEditing(): void {
           <h3 class="text-sm font-medium text-muted-foreground">联系人信息</h3>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FormField v-slot="{ componentField }" name="contact_name">
+            <FormField v-slot="{ value, handleChange }" name="contact_name">
               <FormItem>
-                <FormLabel>联系人姓名 <span class="text-destructive">*</span></FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    autocomplete="name"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入联系人姓名"
-                  />
-                </FormControl>
+                <InputField
+                  id="customer-contact-name"
+                  :model-value="String(value ?? '')"
+                  label="联系人姓名"
+                  required
+                  autocomplete="name"
+                  placeholder="请输入联系人姓名"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
-            <FormField v-slot="{ componentField }" name="contact_mobile">
+            <FormField v-slot="{ value, handleChange }" name="contact_mobile">
               <FormItem>
-                <FormLabel>联系电话 <span class="text-destructive">*</span></FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    type="tel"
-                    autocomplete="tel"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入联系电话"
-                  />
-                </FormControl>
+                <InputField
+                  id="customer-contact-mobile"
+                  :model-value="String(value ?? '')"
+                  label="联系电话"
+                  required
+                  type="tel"
+                  autocomplete="tel"
+                  placeholder="请输入联系电话"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
-            <FormField v-slot="{ componentField }" name="contact_position">
+            <FormField v-slot="{ value, handleChange }" name="contact_position">
               <FormItem>
-                <FormLabel>职位 <span class="text-destructive">*</span></FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    class="h-11 sm:h-8"
-                    placeholder="请输入职位"
-                  />
-                </FormControl>
+                <InputField
+                  id="customer-contact-position"
+                  :model-value="String(value ?? '')"
+                  label="职位"
+                  required
+                  placeholder="请输入职位"
+                  @update:model-value="handleChange"
+                />
                 <FormMessage />
               </FormItem>
             </FormField>
 
             <div class="space-y-2">
-              <Label class="text-sm font-medium">性别 <span class="text-destructive">*</span></Label>
-              <RadioGroup
+              <div id="customer-contact-gender-label" class="text-sm font-medium">
+                性别 <span class="text-destructive">*</span>
+              </div>
+              <SegmentedChoiceControl
                 v-model="contactGenderValue"
-                class="flex h-11 items-center gap-4 sm:h-8"
-              >
-                <div class="flex items-center space-x-2">
-                  <RadioGroupItem id="customer-contact-gender-male" value="男" />
-                  <Label for="customer-contact-gender-male" class="cursor-pointer">男</Label>
-                </div>
-                <div class="flex items-center space-x-2">
-                  <RadioGroupItem id="customer-contact-gender-female" value="女" />
-                  <Label for="customer-contact-gender-female" class="cursor-pointer">女</Label>
-                </div>
-              </RadioGroup>
+                :options="genderOptions"
+                labelled-by="customer-contact-gender-label"
+                id-prefix="customer-contact-gender"
+              />
               <p v-if="contactGenderError" class="text-sm font-medium text-destructive">
                 {{ contactGenderError }}
               </p>
@@ -479,63 +454,62 @@ function continueEditing(): void {
           <h3 class="text-sm font-medium text-muted-foreground">档案信息</h3>
 
           <!-- Company Background -->
-          <FormField v-slot="{ componentField }" name="company_background">
+          <FormField v-slot="{ value, handleChange }" name="company_background">
             <FormItem>
-              <FormLabel>公司背景</FormLabel>
-              <FormControl>
-                <Textarea
-                  v-bind="componentField as any"
-                  :rows="3"
-                  placeholder="请输入公司背景信息"
-                />
-              </FormControl>
+              <TextareaField
+                id="customer-company-background"
+                :model-value="String(value ?? '')"
+                label="公司背景"
+                :rows="3"
+                placeholder="请输入公司背景信息"
+                @update:model-value="handleChange"
+              />
               <FormMessage />
             </FormItem>
           </FormField>
 
           <!-- Company Website -->
-          <FormField v-slot="{ componentField }" name="company_website">
+          <FormField v-slot="{ value, handleChange }" name="company_website">
             <FormItem>
-              <FormLabel>公司网站</FormLabel>
-              <FormControl>
-                <Input
-                  v-bind="componentField as any"
-                  type="url"
-                  autocomplete="url"
-                  class="h-11 sm:h-8"
-                  placeholder="请输入公司网站URL"
-                />
-              </FormControl>
+              <InputField
+                id="customer-company-website"
+                :model-value="String(value ?? '')"
+                label="公司网站"
+                type="url"
+                autocomplete="url"
+                placeholder="请输入公司网站URL"
+                @update:model-value="handleChange"
+              />
               <FormMessage />
             </FormItem>
           </FormField>
 
           <!-- Main Business -->
-          <FormField v-slot="{ componentField }" name="main_business">
+          <FormField v-slot="{ value, handleChange }" name="main_business">
             <FormItem>
-              <FormLabel>主营业务</FormLabel>
-              <FormControl>
-                <Textarea
-                  v-bind="componentField as any"
-                  :rows="3"
-                  placeholder="请输入主营业务信息"
-                />
-              </FormControl>
+              <TextareaField
+                id="customer-main-business"
+                :model-value="String(value ?? '')"
+                label="主营业务"
+                :rows="3"
+                placeholder="请输入主营业务信息"
+                @update:model-value="handleChange"
+              />
               <FormMessage />
             </FormItem>
           </FormField>
 
           <!-- Project Background -->
-          <FormField v-slot="{ componentField }" name="project_background">
+          <FormField v-slot="{ value, handleChange }" name="project_background">
             <FormItem>
-              <FormLabel>项目背景</FormLabel>
-              <FormControl>
-                <Textarea
-                  v-bind="componentField as any"
-                  :rows="3"
-                  placeholder="请输入项目背景信息"
-                />
-              </FormControl>
+              <TextareaField
+                id="customer-project-background"
+                :model-value="String(value ?? '')"
+                label="项目背景"
+                :rows="3"
+                placeholder="请输入项目背景信息"
+                @update:model-value="handleChange"
+              />
               <FormMessage />
             </FormItem>
           </FormField>

@@ -22,27 +22,17 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
-  Empty,
-  EmptyHeader,
-  EmptyTitle
-} from '@/components/ui/empty'
-import { DatePicker } from '@/components/ui/date-picker'
+  DateField,
+  InputField,
+  SearchableSelectField,
+  SelectField,
+} from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import { opportunityApi, type Opportunity, type OpportunityCreate, type OpportunityUpdate, LicenseType, PurchaseType } from '@/api/opportunity'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
@@ -56,7 +46,7 @@ const schema = toTypedSchema(
       const parsed = Number(value)
       return Number.isInteger(parsed) && parsed > 0
     }, '请选择客户'),
-    total_amount: z.coerce.number().min(0, '金额不能为负数'),
+    total_amount: z.coerce.number().gt(0, '商机金额必须大于0'),
     user_count: z.coerce.number().int('用户数必须为整数').min(1, '用户数至少为1'),
     license_type: z.nativeEnum(LicenseType, { errorMap: () => ({ message: '请选择授权类型' }) }),
     subscription_years: z.coerce.number().int('订阅年限必须为整数').min(1, '订阅年限至少为1年').optional().nullable(),
@@ -149,6 +139,18 @@ const purchaseTypeOptions = [
   { value: PurchaseType.RENEWAL, label: '续购' },
   { value: PurchaseType.EXPANSION, label: '增购' }
 ]
+const customerSelectOptions = computed(() =>
+  customers.value.map(customer => ({
+    value: customer.id,
+    label: customer.account_name,
+  }))
+)
+const procurementMethodOptions = computed(() =>
+  procurementMethods.value.map(method => ({
+    value: method.id,
+    label: method.name,
+  }))
+)
 
 interface CustomerOption {
   id: number
@@ -439,155 +441,119 @@ function continueEditing(): void {
         <!-- Customer (required) -->
         <FormField v-slot="{ value, handleChange }" name="customer_id">
           <FormItem>
-            <FormLabel>所属客户 <span class="text-destructive">*</span></FormLabel>
-            <FormControl v-if="customerLocked === true">
-              <Input
+            <InputField
+              v-if="customerLocked === true"
+              id="opportunity-customer-locked"
                 :model-value="selectedCustomerName"
+              label="所属客户"
+              required
                 readonly
-                class="h-11 sm:h-8 bg-wolf-bg-muted-v2 text-wolf-text-primary-v2"
+              control-class="bg-wolf-bg-muted-v2 text-wolf-text-primary-v2"
                 aria-readonly="true"
               />
-            </FormControl>
-            <Select
+            <SearchableSelectField
               v-else
-              :model-value="value"
+              id="opportunity-customer"
+              :model-value="String(value ?? '')"
+              label="所属客户"
+              required
+              :options="customerSelectOptions"
+              :search-value="customerSearchKeyword"
+              placeholder="请选择客户"
+              search-placeholder="搜索客户名称"
+              :loading="loadingCustomers"
+              loading-text="加载中..."
+              empty-text="暂无客户"
               @update:model-value="handleChange"
               @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
-            >
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="请选择客户" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <div class="p-2 border-b">
-                  <Input
-                    :model-value="customerSearchKeyword"
-                    placeholder="搜索客户名称"
-                    class="h-9"
-                    @update:model-value="handleCustomerSearch"
-                    @keydown.stop
-                    @pointerdown.stop
-                  />
-                </div>
-                <div v-if="loadingCustomers" class="px-2 py-1.5 text-sm text-muted-foreground">
-                  加载中...
-                </div>
-                <Empty v-else-if="customers.length === 0" class="min-h-0 border-0 px-2 py-2">
-                  <EmptyHeader>
-                    <EmptyTitle class="text-sm font-normal text-muted-foreground">暂无客户</EmptyTitle>
-                  </EmptyHeader>
-                </Empty>
-                <SelectItem
-                  v-for="customer in customers"
-                  :key="customer.id"
-                  :value="customer.id.toString()"
-                >
-                  {{ customer.account_name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              @update:search-value="handleCustomerSearch"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Total Amount (required) -->
-        <FormField v-slot="{ componentField }" name="total_amount">
+        <FormField v-slot="{ value, handleChange }" name="total_amount">
           <FormItem>
-            <FormLabel>总金额 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
+            <InputField
+                id="opportunity-total-amount"
+                :model-value="Number(value ?? 0)"
+                label="总金额"
+                required
                 type="number"
+                inputmode="decimal"
                 step="0.01"
                 min="0"
                 placeholder="请输入总金额"
-                class="h-11 sm:h-8"
+                @update:model-value="handleChange"
               />
-            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- User Count (required) -->
-        <FormField v-slot="{ componentField }" name="user_count">
+        <FormField v-slot="{ value, handleChange }" name="user_count">
           <FormItem>
-            <FormLabel>用户数 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
+            <InputField
+                id="opportunity-user-count"
+                :model-value="Number(value ?? 1)"
+                label="用户数"
+                required
                 type="number"
                 min="1"
                 placeholder="请输入用户数"
-                class="h-11 sm:h-8"
+                @update:model-value="handleChange"
               />
-            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- License Type (Select) -->
-        <FormField v-slot="{ componentField }" name="license_type">
+        <FormField v-slot="{ value, handleChange }" name="license_type">
           <FormItem>
-            <FormLabel>授权类型 <span class="text-destructive">*</span></FormLabel>
-            <Select v-bind="componentField as any">
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="请选择授权类型" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem
-                  v-for="option in licenseTypeOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <SelectField
+              id="opportunity-license-type"
+              :model-value="String(value ?? '')"
+              label="授权类型"
+              required
+              :options="licenseTypeOptions"
+              placeholder="请选择授权类型"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Subscription Years (required, only for SUBSCRIPTION) -->
-        <FormField v-if="values.license_type === LicenseType.SUBSCRIPTION" v-slot="{ componentField }" name="subscription_years">
+        <FormField v-if="values.license_type === LicenseType.SUBSCRIPTION" v-slot="{ value, handleChange }" name="subscription_years">
           <FormItem>
-            <FormLabel>订阅年限 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
+            <InputField
+                id="opportunity-subscription-years"
+                :model-value="Number(value ?? 1)"
+                label="订阅年限"
+                required
                 type="number"
                 min="1"
                 max="10"
                 placeholder="请输入订阅年限"
-                class="h-11 sm:h-8"
+                @update:model-value="handleChange"
               />
-            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Purchase Type (Select) -->
-        <FormField v-slot="{ componentField }" name="purchase_type">
+        <FormField v-slot="{ value, handleChange }" name="purchase_type">
           <FormItem>
-            <FormLabel>采购类型 <span class="text-destructive">*</span></FormLabel>
-            <Select v-bind="componentField as any">
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="请选择采购类型" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem
-                  v-for="option in purchaseTypeOptions"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <SelectField
+              id="opportunity-purchase-type"
+              :model-value="String(value ?? '')"
+              label="采购类型"
+              required
+              :options="purchaseTypeOptions"
+              placeholder="请选择采购类型"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
@@ -595,38 +561,30 @@ function continueEditing(): void {
         <!-- Expected Closing Date (required) -->
         <FormField v-slot="{ value, handleChange }" name="expected_closing_date">
           <FormItem>
-            <FormLabel>预计成交日期 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <DatePicker
-                :model-value="value ? new Date(value as string) : null"
+            <DateField
+                id="opportunity-expected-closing-date"
+                :model-value="value ? new Date(String(value)) : null"
+                label="预计成交日期"
+                required
                 placeholder="请选择预计成交日期"
-                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
+                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : '')"
               />
-            </FormControl>
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Procurement Method (optional) -->
-        <FormField v-slot="{ componentField }" name="procurement_method_id">
+        <FormField v-slot="{ value, handleChange }" name="procurement_method_id">
           <FormItem>
-            <FormLabel>采购方式</FormLabel>
-            <Select v-bind="componentField as any">
-              <FormControl>
-                <SelectTrigger class="h-11 sm:h-8">
-                  <SelectValue placeholder="请选择采购方式" />
-                </SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem
-                  v-for="method in procurementMethods"
-                  :key="method.id"
-                  :value="method.id.toString()"
-                >
-                  {{ method.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <SelectField
+              id="opportunity-procurement-method"
+              :model-value="String(value ?? '')"
+              label="采购方式"
+              :options="procurementMethodOptions"
+              :placeholder="loadingMethods ? '加载采购方式中...' : '请选择采购方式'"
+              :disabled="loadingMethods"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>

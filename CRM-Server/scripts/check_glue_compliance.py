@@ -4,10 +4,8 @@
 - C-1: glue 层无 CRUD import
 - C-4: glue 层无 Handler import
 - C-DS: glue 层无 DynamicSkillService import
-- C-ACTION: glue 层无 ActionExecutor import（使用 ActionEntry）
 - C-PREVIEW: glue 层无自建 Preview 逻辑
 - C-WRITE-ACCESS: glue 层无直接写型数据操作（R-A）
-- R-3: glue → action_entry 入口函数路径正确
 - R-ST-01: EntityResolver 无裸 CRUD（所有路径汇入 EntitySearchService）
 - R-ST-05: EntitySearchService 有 load_by_id 方法
 
@@ -54,17 +52,6 @@ def check_glue_compliance():
         errors.append("C-DS ❌ glue 层存在 DynamicSkillService import")
     else:
         print("C-DS ✅ 无 DynamicSkillService import")
-
-    # C-ACTION: glue 层无 ActionExecutor import（使用 ActionEntry）
-    result = subprocess.run(
-        ["grep", "-rn", "from app.services.ai.action_executor import|ActionExecutor", "app/glue/", "--include=*.py"],
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip():
-        errors.append("C-ACTION ❌ glue 层存在 ActionExecutor import（应使用 ActionEntry）")
-    else:
-        print("C-ACTION ✅ 无 ActionExecutor import（使用 ActionEntry）")
 
     # C-PREVIEW: glue 层无自建 Preview 逻辑
     result = subprocess.run(
@@ -118,17 +105,6 @@ def check_glue_compliance():
 
     if not any("C-WRITE-ACCESS" in e for e in errors):
         print("C-WRITE-ACCESS ✅ 无直接写型数据操作（R-A 合规）")
-
-    # R-3: glue → action_entry 入口函数路径正确
-    result = subprocess.run(
-        ["grep", "-rn", "from app.services.ai.action_entry import", "app/glue/", "--include=*.py"],
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout.strip():
-        print("R-3 ✅ glue → action_entry 入口函数（发现导入）")
-    else:
-        errors.append("R-3 ❌ glue 层未导入 ActionEntry（入口函数路径缺失）")
 
     # R-ST-01: EntityResolver 无裸 CRUD
     entity_patterns = [

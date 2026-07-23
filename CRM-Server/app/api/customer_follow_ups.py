@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.core.deps import (
     get_current_active_user,
     get_current_user_team,
-    check_customer_edit_permission,
+    check_customer_follow_up_permission,
     check_customer_view_permission,
 )
 from app.crud.customer_follow_up import customer_follow_up_crud
@@ -84,7 +84,7 @@ async def create_follow_up(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    check_customer_edit_permission(customer_id, team_id, current_user, db)
+    check_customer_follow_up_permission(customer_id, team_id, current_user, db)
 
     created_follow_up = customer_follow_up_crud.create(
         db=db,
@@ -141,14 +141,13 @@ async def update_follow_up(
             detail="跟进记录不存在"
         )
 
-    check_customer_edit_permission(follow_up.customer_id, team_id, current_user, db)
-
     # 权限检查：只有创建者可以更新
     if follow_up.creator_id != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权更新此跟进记录"
         )
+    check_customer_follow_up_permission(follow_up.customer_id, team_id, current_user, db)
 
     updated_follow_up = customer_follow_up_crud.update(
         db=db,
@@ -177,7 +176,7 @@ async def update_next_time(
             detail="跟进记录不存在"
         )
 
-    check_customer_edit_permission(follow_up.customer_id, team_id, current_user, db)
+    check_customer_follow_up_permission(follow_up.customer_id, team_id, current_user, db)
 
     if next_time.next_follow_time:
         updated_follow_up = customer_follow_up_crud.update_next_time(
@@ -207,13 +206,12 @@ def delete_follow_up(
             detail="跟进记录不存在"
         )
 
-    check_customer_edit_permission(follow_up.customer_id, team_id, current_user, db)
-
     if follow_up.creator_id != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权删除此记录"
         )
+    check_customer_follow_up_permission(follow_up.customer_id, team_id, current_user, db)
 
     customer_follow_up_crud.delete(db, follow_up)
     return MessageResponse(message="删除成功")

@@ -12,6 +12,25 @@ from app.models.team import UserTeam
 security = HTTPBearer()
 
 
+def _customer_member_has_access(db: Session, team_id: int, customer_id: int, user_id: int, required_level: str) -> bool:
+    from app.crud.customer_member import customer_member_crud
+
+    return customer_member_crud.has_access(
+        db=db,
+        team_id=team_id,
+        customer_id=customer_id,
+        user_id=str(user_id),
+        required_level=required_level
+    )
+
+
+def _user_has_team_role(db: Session, team_id: int, user_id: int, role_code: str) -> bool:
+    from app.crud.role import role_crud
+
+    user_roles = role_crud.get_user_roles(db, user_id, team_id)
+    return role_code in {r.code for r in user_roles}
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
@@ -378,7 +397,8 @@ def check_customer_edit_permission(
 
     权限规则：
     - customer:edit:all → 可编辑任何客户
-    - customer:edit:own → 只能编辑自己负责的客户
+    - customer:edit:own → 可编辑自己负责的客户
+    - 客户团队成员 EDIT → 可编辑被授权的客户
     """
     from app.crud.customer import customer_crud
 
@@ -397,13 +417,16 @@ def check_customer_edit_permission(
     if "customer:edit:all" in permission_codes:
         return customer
 
+    if _customer_member_has_access(db, team_id, customer.id, current_user.id, "EDIT"):
+        return customer
+
     # 检查是否有编辑自己客户的权限
     if "customer:edit:own" in permission_codes:
         if customer.owner_id == str(current_user.id):
             return customer
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="只能编辑自己负责的客户"
+            detail="只能编辑自己负责或被授予编辑权限的客户"
         )
 
     # 无任何编辑权限
@@ -655,7 +678,8 @@ def check_customer_view_permission(
 
     权限规则：
     - customer:view:all → 可查看任何客户
-    - customer:view:own → 只能查看自己负责的客户
+    - customer:view:own → 可查看自己负责的客户
+    - 客户团队成员 VIEW/FOLLOW_UP/EDIT → 可查看被授权的客户
     """
     from app.crud.customer import customer_crud
 
@@ -673,19 +697,89 @@ def check_customer_view_permission(
     if "customer:view:all" in permission_codes:
         return customer
 
+    if _customer_member_has_access(db, team_id, customer.id, current_user.id, "VIEW"):
+        return customer
+
     # 检查是否有查看自己客户的权限
     if "customer:view:own" in permission_codes:
         if customer.owner_id == str(current_user.id):
             return customer
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="只能查看自己负责的客户"
+            detail="只能查看自己负责或参与协作的客户"
         )
 
     # 无任何查看权限
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="缺少权限: customer:view:own 或 customer:view:all"
+    )
+
+
+def check_customer_follow_up_permission(
+    customer_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    from app.crud.customer import customer_crud
+
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="客户不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    if "customer:edit:all" in permission_codes:
+        return customer
+
+    if _customer_member_has_access(db, team_id, customer.id, current_user.id, "FOLLOW_UP"):
+        return customer
+
+    if customer.owner_id == str(current_user.id) and (
+        "customer:follow_up:create" in permission_codes
+        or "customer:edit:own" in permission_codes
+    ):
+        return customer
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少客户跟进权限"
+    )
+
+
+def check_customer_member_manage_permission(
+    customer_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    from app.crud.customer import customer_crud
+
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="客户不存在"
+        )
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    if customer.owner_id == str(current_user.id):
+        return customer
+    if "customer:assign" in permission_codes or "customer:edit:all" in permission_codes:
+        return customer
+    if _user_has_team_role(db, team_id, current_user.id, "TEAM_ADMIN"):
+        return customer
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少客户团队成员管理权限"
     )
 
 
@@ -701,6 +795,7 @@ def check_opportunity_view_permission(
     权限规则：
     - opportunity:view:all → 可查看任何商机
     - opportunity:view:own → 只能查看自己负责的商机
+    - 客户团队成员 VIEW/FOLLOW_UP/EDIT → 可查看该客户下的商机
     """
     from app.crud.opportunity import opportunity_crud
 
@@ -716,6 +811,9 @@ def check_opportunity_view_permission(
 
     # 检查是否有全部查看权限
     if "opportunity:view:all" in permission_codes:
+        return opportunity
+
+    if _customer_member_has_access(db, team_id, opportunity.customer_id, current_user.id, "VIEW"):
         return opportunity
 
     # 检查是否有查看自己商机的权限

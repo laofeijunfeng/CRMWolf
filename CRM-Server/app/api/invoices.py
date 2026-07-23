@@ -167,7 +167,7 @@ invoice_router = APIRouter(prefix="/invoice-applications", tags=["发票申请�
 def create_invoice_application(
     application_data: InvoiceApplicationCreate,
     team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_permission("invoice:create")),
     db: Session = Depends(get_db)
 ):
     try:

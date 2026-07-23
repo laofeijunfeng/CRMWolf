@@ -52,6 +52,8 @@ export interface PaymentRecordInfo {
   actual_payer_name?: string | null
   payment_date: string
   proof_attachment?: string
+  commission_member_id?: string | null
+  commission_member_name?: string | null
   creator_name?: string
   notes?: string
   confirmation_status?: PaymentConfirmationStatus
@@ -112,6 +114,7 @@ export interface PaymentRecordCreate {
   actual_payer_name?: string
   payment_date: string
   proof_attachment?: string
+  commission_member_id: string
   notes?: string
 }
 
@@ -120,6 +123,7 @@ export interface PaymentRecordUpdate {
   actual_payer_name?: string
   payment_date?: string
   proof_attachment?: string
+  commission_member_id?: string
   notes?: string
 }
 
@@ -131,6 +135,8 @@ export interface PaymentRecordResponse {
   actual_payer_name?: string | null
   payment_date: string
   proof_attachment?: string
+  commission_member_id?: string | null
+  commission_member_name?: string | null
   notes?: string
   creator_id?: string
   creator_name?: string

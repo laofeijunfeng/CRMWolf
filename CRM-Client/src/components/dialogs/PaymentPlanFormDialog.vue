@@ -9,17 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { DatePicker } from '@/components/ui/date-picker'
+import {
+  DateField,
+  InputField,
+  SelectField,
+  TextareaField,
+} from '@/components/crmwolf'
 import contractApi, { type ContractListResponse } from '@/api/contract'
 import paymentApi, {
   type PaymentPlanCreate,
@@ -108,6 +104,12 @@ const description = computed<string>(() => {
 const fixedContractLabel = computed<string>(() => {
   return props.fixedContract === null ? '' : contractOptionLabel(props.fixedContract)
 })
+const contractOptions = computed(() =>
+  contracts.value.map((contract) => ({
+    value: String(contract.id),
+    label: contractOptionLabel(contract),
+  }))
+)
 
 function clearErrors(): void {
   errors.contractId = ''
@@ -303,140 +305,76 @@ watch(
       </DialogHeader>
 
       <form class="payment-plan-form-dialog__form" novalidate @submit.prevent="handleSubmit">
-        <div v-if="isCreateMode && hasFixedContract && fixedContract !== null" class="payment-plan-form-dialog__field">
-          <label class="payment-plan-form-dialog__label" for="payment-plan-fixed-contract">
-            所属合同
-          </label>
-          <Input
-            id="payment-plan-fixed-contract"
-            class="payment-plan-form-dialog__control"
-            :model-value="fixedContractLabel"
-            disabled
-          />
-        </div>
+        <InputField
+          v-if="isCreateMode && hasFixedContract && fixedContract !== null"
+          id="payment-plan-fixed-contract"
+          class="payment-plan-form-dialog__field"
+          label="所属合同"
+          :model-value="fixedContractLabel"
+          disabled
+        />
 
-        <div v-else-if="isCreateMode" class="payment-plan-form-dialog__field">
-          <label class="payment-plan-form-dialog__label" for="payment-plan-contract">
-            所属合同
-            <span class="payment-plan-form-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <Select v-model="form.contractId" :disabled="contractsLoading || submitting">
-            <SelectTrigger
-              id="payment-plan-contract"
-              class="payment-plan-form-dialog__control"
-              :aria-invalid="errors.contractId !== ''"
-              aria-describedby="payment-plan-contract-error"
-            >
-              <SelectValue :placeholder="contractsLoading ? '加载合同中...' : '请选择合同'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="contract in contracts"
-                :key="contract.id"
-                :value="String(contract.id)"
-              >
-                {{ contractOptionLabel(contract) }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <p
-            v-if="errors.contractId"
-            id="payment-plan-contract-error"
-            class="payment-plan-form-dialog__error"
-            role="alert"
-          >
-            {{ errors.contractId }}
-          </p>
-        </div>
+        <SelectField
+          v-else-if="isCreateMode"
+          id="payment-plan-contract"
+          v-model="form.contractId"
+          class="payment-plan-form-dialog__field"
+          label="所属合同"
+          required
+          :options="contractOptions"
+          :placeholder="contractsLoading ? '加载合同中...' : '请选择合同'"
+          :disabled="contractsLoading || submitting"
+          :error="errors.contractId"
+        />
 
         <div class="payment-plan-form-dialog__grid">
-          <div class="payment-plan-form-dialog__field">
-            <label class="payment-plan-form-dialog__label" for="payment-plan-stage">
-              阶段名称
-              <span class="payment-plan-form-dialog__required" aria-hidden="true">*</span>
-            </label>
-            <Input
-              id="payment-plan-stage"
-              v-model="form.stageName"
-              class="payment-plan-form-dialog__control"
-              placeholder="如：首付款、尾款"
-              :disabled="submitting"
-              :aria-invalid="errors.stageName !== ''"
-              aria-describedby="payment-plan-stage-error"
-            />
-            <p
-              v-if="errors.stageName"
-              id="payment-plan-stage-error"
-              class="payment-plan-form-dialog__error"
-              role="alert"
-            >
-              {{ errors.stageName }}
-            </p>
-          </div>
-
-          <div class="payment-plan-form-dialog__field">
-            <label class="payment-plan-form-dialog__label" for="payment-plan-amount">
-              计划金额
-              <span class="payment-plan-form-dialog__required" aria-hidden="true">*</span>
-            </label>
-            <Input
-              id="payment-plan-amount"
-              v-model="form.plannedAmount"
-              type="number"
-              inputmode="decimal"
-              min="0"
-              step="0.01"
-              class="payment-plan-form-dialog__control"
-              placeholder="请输入计划金额"
-              :disabled="submitting"
-              :aria-invalid="errors.plannedAmount !== ''"
-              aria-describedby="payment-plan-amount-error"
-            />
-            <p
-              v-if="errors.plannedAmount"
-              id="payment-plan-amount-error"
-              class="payment-plan-form-dialog__error"
-              role="alert"
-            >
-              {{ errors.plannedAmount }}
-            </p>
-          </div>
-        </div>
-
-        <div class="payment-plan-form-dialog__field">
-          <label class="payment-plan-form-dialog__label" for="payment-plan-due-date">
-            计划日期
-            <span class="payment-plan-form-dialog__required" aria-hidden="true">*</span>
-          </label>
-          <DatePicker
-            :model-value="parseLocalDate(form.dueDate)"
-            placeholder="请选择计划日期"
-            class="payment-plan-form-dialog__control"
+          <InputField
+            id="payment-plan-stage"
+            v-model="form.stageName"
+            class="payment-plan-form-dialog__field"
+            label="阶段名称"
+            required
+            placeholder="如：首付款、尾款"
             :disabled="submitting"
-            @update:model-value="handleDueDateChange"
+            :error="errors.stageName"
           />
-          <p
-            v-if="errors.dueDate"
-            id="payment-plan-due-date-error"
-            class="payment-plan-form-dialog__error"
-            role="alert"
-          >
-            {{ errors.dueDate }}
-          </p>
-        </div>
 
-        <div class="payment-plan-form-dialog__field">
-          <label class="payment-plan-form-dialog__label" for="payment-plan-notes">
-            备注
-          </label>
-          <Textarea
-            id="payment-plan-notes"
-            v-model="form.notes"
-            class="payment-plan-form-dialog__textarea"
-            placeholder="请输入备注信息（可选）"
+          <InputField
+            id="payment-plan-amount"
+            v-model="form.plannedAmount"
+            class="payment-plan-form-dialog__field"
+            label="计划金额"
+            required
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.01"
+            placeholder="请输入计划金额"
             :disabled="submitting"
+            :error="errors.plannedAmount"
           />
         </div>
+
+        <DateField
+          id="payment-plan-due-date"
+          :model-value="parseLocalDate(form.dueDate)"
+          class="payment-plan-form-dialog__field"
+          label="计划日期"
+          required
+          placeholder="请选择计划日期"
+          :disabled="submitting"
+          :error="errors.dueDate"
+          @update:model-value="handleDueDateChange"
+        />
+
+        <TextareaField
+          id="payment-plan-notes"
+          v-model="form.notes"
+          class="payment-plan-form-dialog__field"
+          label="备注"
+          placeholder="请输入备注信息（可选）"
+          :disabled="submitting"
+        />
 
         <DialogFooter class="payment-plan-form-dialog__footer">
           <Button type="button" variant="outline" :disabled="submitting" @click="handleCancel">
@@ -475,32 +413,6 @@ watch(
   flex-direction: column;
   gap: $wolf-space-xs-v2;
   min-width: 0;
-}
-
-.payment-plan-form-dialog__label {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-}
-
-.payment-plan-form-dialog__required,
-.payment-plan-form-dialog__error {
-  color: $wolf-danger-v2;
-}
-
-.payment-plan-form-dialog__control,
-.payment-plan-form-dialog__textarea {
-  width: 100%;
-}
-
-.payment-plan-form-dialog__textarea {
-  min-height: 96px;
-}
-
-.payment-plan-form-dialog__error {
-  margin: 0;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
 }
 
 .payment-plan-form-dialog__footer {

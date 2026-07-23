@@ -16,13 +16,13 @@
           <span>请用自然语言描述审批流程，AI 会自动生成节点配置</span>
         </div>
 
-        <Textarea
+        <TextareaField
           v-model="inputText"
           :rows="5"
           placeholder="例如：创建商机审批流程，销售总监审批"
           :disabled="isParsing"
           aria-label="输入审批流程描述"
-          class="input-textarea"
+          control-class="input-textarea"
           @keydown.ctrl.enter="handleParse"
         />
 
@@ -126,110 +126,82 @@
           <form class="preview-form" @submit.prevent="handleCreate">
             <div class="form-grid">
               <div class="form-item">
-                <Label for="flow-name" class="form-label">
-                  流程名称 <span class="required">*</span>
-                </Label>
-                <Input
+                <InputField
                   id="flow-name"
                   v-model="flowForm.flow_name"
+                  label="流程名称"
+                  required
                   placeholder="请输入流程名称"
-                  aria-required="true"
-                  :aria-invalid="!flowForm.flow_name"
-                  class="dialog-input"
+                  :error="!flowForm.flow_name ? '请输入流程名称' : ''"
                 />
-                <span v-if="!flowForm.flow_name" class="error-message" role="alert">
-                  请输入流程名称
-                </span>
               </div>
 
               <div class="form-item">
-                <Label for="flow-code" class="form-label">
-                  流程编码 <span class="required">*</span>
-                </Label>
-                <Input
+                <InputField
                   id="flow-code"
                   v-model="flowForm.flow_code"
+                  label="流程编码"
+                  required
                   placeholder="英文大写+下划线"
-                  aria-required="true"
-                  :aria-invalid="!isFlowCodeValid"
-                  class="dialog-input"
+                  :error="flowForm.flow_code && !isFlowCodeValid ? '编码必须为大写字母、数字和下划线' : !flowForm.flow_code ? '请输入流程编码' : ''"
                 />
-                <span v-if="flowForm.flow_code && !isFlowCodeValid" class="error-message" role="alert">
-                  编码必须为大写字母、数字和下划线
-                </span>
-                <span v-else-if="!flowForm.flow_code" class="error-message" role="alert">
-                  请输入流程编码
-                </span>
               </div>
             </div>
 
             <div class="form-item">
-              <Label for="flow-description" class="form-label">描述</Label>
-              <Input
+              <InputField
                 id="flow-description"
                 v-model="flowForm.description"
+                label="描述"
                 placeholder="一句话描述适用场景"
-                class="dialog-input"
               />
             </div>
 
             <div class="form-grid">
               <div class="form-item">
-                <Label for="business-type" class="form-label">适用单据</Label>
-                <Select v-model="flowForm.business_type">
-                  <SelectTrigger id="business-type" class="dialog-select">
-                    <SelectValue placeholder="请选择单据类型" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CONTRACT">合同</SelectItem>
-                    <SelectItem value="PAYMENT">回款登记</SelectItem>
-                    <SelectItem value="INVOICE">发票申请</SelectItem>
-                    <SelectItem value="LICENSE">License申请</SelectItem>
-                    <SelectItem value="OPPORTUNITY">商机</SelectItem>
-                  </SelectContent>
-                </Select>
+                <SelectField
+                  id="business-type"
+                  v-model="flowForm.business_type"
+                  label="适用单据"
+                  :options="businessTypeOptions"
+                  placeholder="请选择单据类型"
+                />
               </div>
 
               <div class="form-item">
-                <Label for="license-type" class="form-label">授权类型</Label>
-                <Select v-model="flowForm.license_type">
-                  <SelectTrigger id="license-type" class="dialog-select">
-                    <SelectValue placeholder="不限" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__NONE__">不限</SelectItem>
-                    <SelectItem value="SUBSCRIPTION">订阅</SelectItem>
-                    <SelectItem value="PERPETUAL">买断</SelectItem>
-                  </SelectContent>
-                </Select>
+                <SelectField
+                  id="license-type"
+                  v-model="flowForm.license_type"
+                  label="授权类型"
+                  :options="licenseTypeOptions"
+                  placeholder="不限"
+                />
               </div>
             </div>
 
             <div class="form-grid">
               <div class="form-item">
-                <Label for="min-amount" class="form-label">最小金额（元）</Label>
-                <Input
+                <InputField
                   id="min-amount"
                   v-model="minAmountText"
+                  label="最小金额（元）"
                   type="number"
                   min="0"
                   step="0.01"
                   placeholder="不限"
-                  class="dialog-input"
                   @blur="syncAmount('min')"
                 />
               </div>
 
               <div class="form-item">
-                <Label for="max-amount" class="form-label">最大金额（元）</Label>
-                <Input
+                <InputField
                   id="max-amount"
                   v-model="maxAmountText"
+                  label="最大金额（元）"
                   type="number"
                   min="0"
                   step="0.01"
                   placeholder="不限"
-                  class="dialog-input"
                   @blur="syncAmount('max')"
                 />
               </div>
@@ -259,52 +231,41 @@
                 <div class="node-fields">
                   <div class="node-grid">
                     <div class="form-item">
-                      <Label :for="`node-name-${index}`" class="form-label">节点名称</Label>
-                      <Input
+                      <InputField
                         :id="`node-name-${index}`"
                         v-model="node.node_name"
+                        label="节点名称"
                         placeholder="例如：销售总监审批"
-                        class="dialog-input"
                       />
                     </div>
 
                     <div class="form-item">
-                      <Label :for="`node-code-${index}`" class="form-label">节点编码</Label>
-                      <Input
+                      <InputField
                         :id="`node-code-${index}`"
                         v-model="node.node_code"
+                        label="节点编码"
                         placeholder="例如：SALES_REVIEW"
-                        class="dialog-input"
                       />
                     </div>
 
                     <div class="form-item">
-                      <Label :for="`node-role-${index}`" class="form-label">审批角色</Label>
-                      <Select v-model="node.approve_role">
-                        <SelectTrigger :id="`node-role-${index}`" class="dialog-select">
-                          <SelectValue placeholder="请选择角色" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem
-                            v-for="role in ALLOWED_APPROVAL_ROLES"
-                            :key="role"
-                            :value="role"
-                          >
-                            {{ ROLE_DISPLAY_NAMES[role] }}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <SelectField
+                        :id="`node-role-${index}`"
+                        v-model="node.approve_role"
+                        label="审批角色"
+                        :options="approvalRoleOptions"
+                        placeholder="请选择角色"
+                      />
                     </div>
                   </div>
 
                   <div class="node-bottom">
                     <div class="form-item node-description">
-                      <Label :for="`node-description-${index}`" class="form-label">描述</Label>
-                      <Input
+                      <InputField
                         :id="`node-description-${index}`"
                         :model-value="node.description ?? ''"
+                        label="描述"
                         placeholder="节点描述"
-                        class="dialog-input"
                         @update:model-value="(value) => {
                           node.description = String(value)
                         }"
@@ -408,16 +369,11 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  Input,
-  Label,
+  InputField,
   Progress,
   ScrollArea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea
+  SelectField,
+  TextareaField
 } from '@/components/crmwolf'
 import { useUserStore } from '@/stores/user'
 import {
@@ -429,6 +385,22 @@ import {
 } from '@/api/approvalAI'
 
 type BusinessType = 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' | 'OPPORTUNITY'
+const businessTypeOptions = [
+  { value: 'CONTRACT', label: '合同' },
+  { value: 'PAYMENT', label: '回款登记' },
+  { value: 'INVOICE', label: '发票申请' },
+  { value: 'LICENSE', label: 'License申请' },
+  { value: 'OPPORTUNITY', label: '商机' },
+]
+const licenseTypeOptions = [
+  { value: '__NONE__', label: '不限' },
+  { value: 'SUBSCRIPTION', label: '订阅' },
+  { value: 'PERPETUAL', label: '买断' },
+]
+const approvalRoleOptions = ALLOWED_APPROVAL_ROLES.map(role => ({
+  value: role,
+  label: ROLE_DISPLAY_NAMES[role] ?? role,
+}))
 
 const props = defineProps<{
   modelValue: boolean

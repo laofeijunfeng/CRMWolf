@@ -23,9 +23,12 @@ import type { OpportunityListResponse, OpportunityStatus } from '@/api/opportuni
 interface Props {
   customerId: number
   opportunities: OpportunityListResponse[]
+  showAdd?: boolean
 }
 
-defineProps<Props>()
+withDefaults(defineProps<Props>(), {
+  showAdd: false,
+})
 
 const emit = defineEmits<{
   'add': []
@@ -66,7 +69,7 @@ const formatDate = (dateStr: string): string => {
       @row-click="handleView"
     >
       <template #headerActions>
-        <Button size="sm" @click="handleAdd">
+        <Button v-if="showAdd" size="sm" @click="handleAdd">
           <Plus class="w-4 h-4 mr-1" />
           新建商机
         </Button>
@@ -82,6 +85,7 @@ const formatDate = (dateStr: string): string => {
           </EmptyHeader>
           <EmptyContent>
           <Button
+            v-if="showAdd"
             type="button"
             size="sm"
             data-testid="empty-create-opportunity"

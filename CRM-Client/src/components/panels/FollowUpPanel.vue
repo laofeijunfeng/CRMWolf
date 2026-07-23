@@ -39,12 +39,14 @@ interface Props {
   loading?: boolean | undefined
   currentUserId?: string | undefined
   showHeader?: boolean
+  showAdd?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   currentUserId: undefined,
-  showHeader: true
+  showHeader: true,
+  showAdd: true
 })
 
 const emit = defineEmits<{
@@ -91,7 +93,7 @@ const handleDelete = (followUp: FollowUp): void => {
           </div>
         </HoverInfo>
       </div>
-      <Button size="sm" @click="handleAdd">
+      <Button v-if="showAdd" size="sm" @click="handleAdd">
         <Plus class="w-4 h-4 mr-1" />
         添加活动
       </Button>

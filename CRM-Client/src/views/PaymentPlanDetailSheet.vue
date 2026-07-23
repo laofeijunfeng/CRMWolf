@@ -668,6 +668,7 @@ watch(
   <!-- Register payment dialog -->
   <PaymentRecordDialog
     :open="registerDialogOpen"
+    :payment-plan-id="paymentPlan?.id ?? null"
     :default-amount="registerDefaultAmount"
     :default-payer-name="registerDefaultPayerName"
     :submitting="registerSubmitting"

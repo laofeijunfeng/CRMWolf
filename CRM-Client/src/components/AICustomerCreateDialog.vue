@@ -15,13 +15,13 @@
           <Info class="hint-icon" aria-hidden="true" />
           <span>请用自然语言描述客户信息，AI 会自动识别并提取关键信息</span>
         </div>
-        <Textarea
+        <TextareaField
           v-model="inputText"
           :rows="4"
           placeholder="例如：阿里巴巴，杭州，张三 13800138000 技术总监，大概500人，互联网公司"
           :disabled="isParsing"
           aria-label="输入客户信息描述"
-          class="input-textarea"
+          control-class="input-textarea"
           @keydown.ctrl.enter="handleParse"
         />
         <div class="input-tip">按 Ctrl+Enter 快速识别</div>
@@ -87,110 +87,77 @@
         <form class="preview-form" @submit.prevent="handleCreate">
           <div class="form-grid">
             <div class="form-item">
-              <Label for="preview-customer-name" class="form-label">
-                客户名称 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-customer-name"
                 v-model="previewForm.account_name"
+                label="客户名称"
+                required
                 placeholder="请输入客户名称"
-                aria-required="true"
-                :aria-invalid="!previewForm.account_name"
-                class="dialog-input"
+                :error="!previewForm.account_name ? '请输入客户名称' : ''"
               />
-              <span v-if="!previewForm.account_name" class="error-message" role="alert">
-                请输入客户名称
-              </span>
             </div>
 
             <div class="form-item">
-              <Label for="preview-city" class="form-label">
-                所在城市 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-city"
                 v-model="previewForm.city"
+                label="所在城市"
+                required
                 placeholder="请输入城市"
-                aria-required="true"
-                :aria-invalid="!previewForm.city"
-                class="dialog-input"
+                :error="!previewForm.city ? '请输入所在城市' : ''"
               />
-              <span v-if="!previewForm.city" class="error-message" role="alert">
-                请输入所在城市
-              </span>
             </div>
           </div>
 
           <div class="form-grid">
             <div class="form-item">
-              <Label for="preview-contact-name" class="form-label">
-                联系人姓名 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-contact-name"
                 v-model="previewForm.contact_name"
+                label="联系人姓名"
+                required
                 placeholder="请输入联系人姓名"
-                aria-required="true"
-                :aria-invalid="!previewForm.contact_name"
-                class="dialog-input"
+                :error="!previewForm.contact_name ? '请输入联系人姓名' : ''"
               />
-              <span v-if="!previewForm.contact_name" class="error-message" role="alert">
-                请输入联系人姓名
-              </span>
             </div>
 
             <div class="form-item">
-              <Label for="preview-contact-phone" class="form-label">
-                联系电话 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-contact-phone"
                 v-model="previewForm.contact_phone"
+                label="联系电话"
+                required
+                type="tel"
+                autocomplete="tel"
                 placeholder="请输入联系电话"
-                aria-required="true"
-                :aria-invalid="!previewForm.contact_phone || !isValidPhone(previewForm.contact_phone)"
-                class="dialog-input"
+                :error="!previewForm.contact_phone ? '请输入联系电话' : !isValidPhone(previewForm.contact_phone) ? '请输入正确的手机号码' : ''"
               />
-              <span v-if="!previewForm.contact_phone" class="error-message" role="alert">
-                请输入联系电话
-              </span>
-              <span v-else-if="!isValidPhone(previewForm.contact_phone)" class="error-message" role="alert">
-                请输入正确的手机号码
-              </span>
             </div>
           </div>
 
           <div class="form-grid">
             <div class="form-item">
-              <Label for="preview-contact-position" class="form-label">
-                职位 <span class="required">*</span>
-              </Label>
-              <Input
+              <InputField
                 id="preview-contact-position"
                 v-model="previewForm.contact_position"
+                label="职位"
+                required
                 placeholder="请输入职位"
-                aria-required="true"
-                :aria-invalid="!previewForm.contact_position"
-                class="dialog-input"
+                :error="!previewForm.contact_position ? '请输入职位' : ''"
               />
-              <span v-if="!previewForm.contact_position" class="error-message" role="alert">
-                请输入职位
-              </span>
             </div>
 
             <div class="form-item">
-              <Label for="preview-contact-gender" class="form-label">
+              <Label id="preview-contact-gender-label" class="form-label">
                 性别 <span class="required">*</span>
               </Label>
-              <Select v-model="previewForm.contact_gender">
-                <SelectTrigger id="preview-contact-gender" class="dialog-select">
-                  <SelectValue placeholder="请选择性别" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">男</SelectItem>
-                  <SelectItem value="2">女</SelectItem>
-                </SelectContent>
-              </Select>
+              <SegmentedChoiceControl
+                v-model="previewForm.contact_gender"
+                class="dialog-choice"
+                :options="contactGenderOptions"
+                labelled-by="preview-contact-gender-label"
+                id-prefix="preview-contact-gender"
+              />
               <span v-if="!previewForm.contact_gender" class="error-message" role="alert">
                 请选择性别
               </span>
@@ -199,41 +166,23 @@
 
           <div class="form-grid">
             <div class="form-item">
-              <Label for="preview-source" class="form-label">
-                客户来源
-              </Label>
-              <Select v-model="previewForm.source">
-                <SelectTrigger id="preview-source" class="dialog-select">
-                  <SelectValue placeholder="请选择来源" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="线上注册">线上注册</SelectItem>
-                  <SelectItem value="市场活动">市场活动</SelectItem>
-                  <SelectItem value="客户推荐">客户推荐</SelectItem>
-                  <SelectItem value="电话营销">电话营销</SelectItem>
-                  <SelectItem value="网站咨询">网站咨询</SelectItem>
-                  <SelectItem value="展会">展会</SelectItem>
-                  <SelectItem value="其他">其他</SelectItem>
-                </SelectContent>
-              </Select>
+              <SelectField
+                id="preview-source"
+                v-model="previewForm.source"
+                label="客户来源"
+                :options="sourceOptions"
+                placeholder="请选择来源"
+              />
             </div>
 
             <div class="form-item">
-              <Label for="preview-company-scale" class="form-label">
-                公司规模
-              </Label>
-              <Select v-model="previewForm.company_scale">
-                <SelectTrigger id="preview-company-scale" class="dialog-select">
-                  <SelectValue placeholder="请选择规模" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1-50人">1-50人</SelectItem>
-                  <SelectItem value="51-200人">51-200人</SelectItem>
-                  <SelectItem value="201-500人">201-500人</SelectItem>
-                  <SelectItem value="501-1000人">501-1000人</SelectItem>
-                  <SelectItem value="1000人以上">1000人以上</SelectItem>
-                </SelectContent>
-              </Select>
+              <SelectField
+                id="preview-company-scale"
+                v-model="previewForm.company_scale"
+                label="公司规模"
+                :options="companyScaleOptions"
+                placeholder="请选择规模"
+              />
             </div>
           </div>
         </form>
@@ -333,14 +282,11 @@ import {
   DialogHeader,
   DialogTitle,
   Button,
-  Input,
-  Textarea,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  InputField,
+  SelectField,
+  SegmentedChoiceControl,
+  TextareaField,
   ScrollArea
 } from '@/components/crmwolf'
 import { useUserStore } from '@/stores/user'
@@ -386,6 +332,22 @@ const parseResult = ref<{
   thinking_process: string | null
 } | null>(null)
 const createdCustomerId = ref<number | null>(null)
+const sourceOptions = [
+  { value: '线上注册', label: '线上注册' },
+  { value: '市场活动', label: '市场活动' },
+  { value: '客户推荐', label: '客户推荐' },
+  { value: '电话营销', label: '电话营销' },
+  { value: '网站咨询', label: '网站咨询' },
+  { value: '展会', label: '展会' },
+  { value: '其他', label: '其他' },
+]
+const companyScaleOptions = [
+  { value: '1-50人', label: '1-50人' },
+  { value: '51-200人', label: '51-200人' },
+  { value: '201-500人', label: '201-500人' },
+  { value: '501-1000人', label: '501-1000人' },
+  { value: '1000人以上', label: '1000人以上' },
+]
 
 // 预览表单
 const previewForm = reactive({
@@ -398,6 +360,11 @@ const previewForm = reactive({
   source: '',
   company_scale: ''
 })
+
+const contactGenderOptions = [
+  { value: '1', label: '男', tone: 'primary' as const },
+  { value: '2', label: '女', tone: 'success' as const },
+]
 
 // 手机号验证
 const isValidPhone = (phone: string): boolean => /^1[3-9]\d{9}$/.test(phone)
@@ -979,6 +946,14 @@ watch(visible, (val) => {
   // Reduced Motion 支持
   @media (prefers-reduced-motion: reduce) {
     transition-duration: $wolf-reduced-motion-duration-v2;
+  }
+}
+
+.dialog-choice {
+  min-height: $wolf-input-height-v2;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    min-height: $wolf-input-height-mobile-v2;
   }
 }
 </style>

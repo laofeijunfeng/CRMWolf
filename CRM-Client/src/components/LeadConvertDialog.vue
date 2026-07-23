@@ -18,16 +18,12 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  InputField,
+  SelectField,
+} from '@/components/crmwolf'
 import { leadApi, type LeadDetail } from '@/api/lead'
 import customerApi from '@/api/customer'
 import procurementApi from '@/api/procurement'
@@ -64,12 +60,18 @@ const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
 })
+const procurementSelectOptions = computed(() =>
+  procurementMethodOptions.value.map((option) => ({
+    value: String(option.id),
+    label: option.name,
+  }))
+)
 
 // ==================== Methods ====================
 
 // 加载线索详情
-const fetchLeadDetail = async () => {
-  if (!props.leadId) return
+const fetchLeadDetail = async (): Promise<void> => {
+  if (props.leadId === undefined || props.leadId === null) return
 
   loading.value = true
   try {
@@ -77,9 +79,9 @@ const fetchLeadDetail = async () => {
     leadData.value = res
 
     // 预填充表单
-    formValues.account_name = res.lead_name || ''
-    formValues.city = res.city || ''
-  } catch (error) {
+    formValues.account_name = res.lead_name ?? ''
+    formValues.city = res.city ?? ''
+  } catch {
     toast.error('获取线索详情失败')
     visible.value = false
   } finally {
@@ -88,18 +90,18 @@ const fetchLeadDetail = async () => {
 }
 
 // 加载采购方式选项
-const fetchProcurementMethodOptions = async () => {
+const fetchProcurementMethodOptions = async (): Promise<void> => {
   try {
     const res = await procurementApi.getProcurementMethodOptions()
-    procurementMethodOptions.value = res || []
-  } catch (error) {
-    console.error('获取采购方式选项失败:', error)
+    procurementMethodOptions.value = res ?? []
+  } catch {
+    procurementMethodOptions.value = []
   }
 }
 
 // 提交转化
-const handleSubmit = async () => {
-  if (!props.leadId) return
+const handleSubmit = async (): Promise<void> => {
+  if (props.leadId === undefined || props.leadId === null) return
 
   // 简单校验
   if (!formValues.account_name.trim()) {
@@ -110,7 +112,7 @@ const handleSubmit = async () => {
     toast.error('请输入所在城市')
     return
   }
-  if (!formValues.default_procurement_method_id) {
+  if (formValues.default_procurement_method_id === null || formValues.default_procurement_method_id === undefined) {
     toast.error('请选择默认采购方式')
     return
   }
@@ -119,16 +121,16 @@ const handleSubmit = async () => {
   try {
     const data = {
       lead_id: props.leadId,
-      account_name: formValues.account_name || null,
-      address: formValues.address || null,
-      default_procurement_method_id: Number(formValues.default_procurement_method_id) || null
+      account_name: formValues.account_name.trim().length > 0 ? formValues.account_name : null,
+      address: formValues.address.trim().length > 0 ? formValues.address : null,
+      default_procurement_method_id: Number(formValues.default_procurement_method_id)
     }
     await customerApi.convertLeadToCustomer(data)
     toast.success('线索转化成功')
     visible.value = false
     emit('success')
     // 不跳转，留在线索管理页面，通过 emit('success') 触发列表刷新
-  } catch (error) {
+  } catch {
     toast.error('转化线索失败')
   } finally {
     submitting.value = false
@@ -136,7 +138,7 @@ const handleSubmit = async () => {
 }
 
 // 关闭弹窗
-const handleClose = () => {
+const handleClose = (): void => {
   visible.value = false
 }
 
@@ -144,7 +146,7 @@ const handleClose = () => {
 watch(
   () => props.open,
   (open) => {
-    if (open && props.leadId) {
+    if (open === true && props.leadId !== undefined && props.leadId !== null) {
       fetchProcurementMethodOptions()
       fetchLeadDetail()
     }
@@ -228,60 +230,45 @@ watch(visible, (val) => {
 
           <div class="space-y-4">
             <!-- 客户公司名称 -->
-            <div class="form-item">
-              <label class="form-label">
-                客户公司名称 <span class="required">*</span>
-              </label>
-              <Input
-                v-model="formValues.account_name"
-                placeholder="请输入客户公司名称（默认使用线索名称）"
-                class="form-input"
-              />
-            </div>
+            <InputField
+              id="lead-convert-account-name"
+              v-model="formValues.account_name"
+              class="form-item"
+              label="客户公司名称"
+              required
+              placeholder="请输入客户公司名称（默认使用线索名称）"
+            />
 
             <!-- 所在城市 + 默认采购方式 -->
             <div class="form-grid">
-              <div class="form-item">
-                <label class="form-label">
-                  所在城市 <span class="required">*</span>
-                </label>
-                <Input
-                  v-model="formValues.city"
-                  placeholder="请输入所在城市"
-                  class="form-input"
-                />
-              </div>
+              <InputField
+                id="lead-convert-city"
+                v-model="formValues.city"
+                class="form-item"
+                label="所在城市"
+                required
+                placeholder="请输入所在城市"
+              />
 
-              <div class="form-item">
-                <label class="form-label">
-                  默认采购方式 <span class="required">*</span>
-                </label>
-                <Select v-model="formValues.default_procurement_method_id">
-                  <SelectTrigger class="form-select">
-                    <SelectValue placeholder="请选择默认采购方式" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in procurementMethodOptions"
-                      :key="option.id"
-                      :value="option.id"
-                    >
-                      {{ option.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <SelectField
+                id="lead-convert-procurement-method"
+                v-model="formValues.default_procurement_method_id"
+                class="form-item"
+                label="默认采购方式"
+                required
+                :options="procurementSelectOptions"
+                placeholder="请选择默认采购方式"
+              />
             </div>
 
             <!-- 公司地址 -->
-            <div class="form-item">
-              <label class="form-label">公司地址</label>
-              <Input
-                v-model="formValues.address"
-                placeholder="请输入公司地址（可选）"
-                class="form-input"
-              />
-            </div>
+            <InputField
+              id="lead-convert-address"
+              v-model="formValues.address"
+              class="form-item"
+              label="公司地址"
+              placeholder="请输入公司地址（可选）"
+            />
           </div>
         </div>
       </div>
@@ -413,26 +400,6 @@ watch(visible, (val) => {
   display: flex;
   flex-direction: column;
   gap: $wolf-space-xs-v2;
-}
-
-.form-label {
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-secondary-v2;
-
-  .required {
-    color: $wolf-danger-v2;
-  }
-}
-
-.form-input,
-.form-select {
-  height: $wolf-input-height-v2;
-
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    height: $wolf-input-height-mobile-v2;
-    font-size: $wolf-font-size-body-mobile-v2;
-  }
 }
 
 // ==================== Reduced Motion ====================

@@ -486,6 +486,7 @@ watch(
 
     <PaymentRecordDialog
       :open="recordDialogOpen"
+      :payment-plan-id="currentPlan?.id ?? null"
       :default-amount="registerDefaultAmount"
       :default-payer-name="registerDefaultPayerName"
       :submitting="submittingRecord"

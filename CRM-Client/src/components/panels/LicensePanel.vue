@@ -25,12 +25,16 @@ interface Props {
   deployments: DeploymentInfoResponse[]
   showDeployments?: boolean
   showLicenseApplications?: boolean
+  showAddDeployment?: boolean
+  showApply?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   customerName: null,
   showDeployments: true,
-  showLicenseApplications: true
+  showLicenseApplications: true,
+  showAddDeployment: true,
+  showApply: true
 })
 
 const emit = defineEmits<{
@@ -143,7 +147,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       class="mb-4"
     >
       <template #headerActions>
-        <Button size="sm" variant="outline" @click="handleAddDeployment">
+        <Button v-if="showAddDeployment" size="sm" variant="outline" @click="handleAddDeployment">
           <Plus class="w-4 h-4 mr-1" />
           新增部署
         </Button>
@@ -180,7 +184,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       empty-text="暂无许可证申请"
     >
       <template #headerActions>
-        <Button size="sm" @click="handleApply">
+        <Button v-if="showApply" size="sm" @click="handleApply">
           <Plus class="w-4 h-4 mr-1" />
           新建申请
         </Button>

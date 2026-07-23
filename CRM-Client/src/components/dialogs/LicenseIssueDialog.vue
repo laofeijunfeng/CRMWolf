@@ -19,14 +19,12 @@ import {
   DialogFooter
 } from '@/components/ui/dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import { TextareaField } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import licenseApplicationApi from '@/api/licenseApplication'
 
@@ -112,20 +110,19 @@ const onSubmit = handleSubmit(async (formValues) => {
 
       <form class="grid gap-4 py-4" @submit="onSubmit">
         <!-- License 信息 -->
-        <FormField v-slot="{ componentField, value }" name="license_info">
+        <FormField v-slot="{ value, handleChange }" name="license_info">
           <FormItem>
-            <FormLabel>
-              License 信息 <span class="text-destructive">*</span>
-            </FormLabel>
-            <FormControl>
-              <Textarea
-                v-bind="componentField as any"
-                :rows="8"
-                placeholder="请输入 License 信息"
-                :disabled="submitting"
-                class="resize-none"
-              />
-            </FormControl>
+            <TextareaField
+              id="license-issue-info"
+              :model-value="String(value ?? '')"
+              label="License 信息"
+              required
+              :rows="8"
+              placeholder="请输入 License 信息"
+              :disabled="submitting"
+              control-class="resize-none"
+              @update:model-value="handleChange"
+            />
             <div class="flex justify-between items-center">
               <FormMessage />
               <span class="text-xs text-muted-foreground ml-auto">
@@ -136,18 +133,18 @@ const onSubmit = handleSubmit(async (formValues) => {
         </FormField>
 
         <!-- 备注 -->
-        <FormField v-slot="{ componentField, value }" name="comment">
+        <FormField v-slot="{ value, handleChange }" name="comment">
           <FormItem>
-            <FormLabel>备注</FormLabel>
-            <FormControl>
-              <Textarea
-                v-bind="componentField as any"
-                :rows="3"
-                placeholder="请输入备注（可选）"
-                :disabled="submitting"
-                class="resize-none"
-              />
-            </FormControl>
+            <TextareaField
+              id="license-issue-comment"
+              :model-value="String(value ?? '')"
+              label="备注"
+              :rows="3"
+              placeholder="请输入备注（可选）"
+              :disabled="submitting"
+              control-class="resize-none"
+              @update:model-value="handleChange"
+            />
             <div class="flex justify-between items-center">
               <FormMessage />
               <span class="text-xs text-muted-foreground ml-auto">

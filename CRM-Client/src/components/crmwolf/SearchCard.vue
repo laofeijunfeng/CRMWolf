@@ -6,12 +6,12 @@
  * - §4 HIGH: 简洁设计，无冗余
  * - §5 HIGH: Mobile-first
  *
- * Based on shadcn-vue Input + Button (§1.5 shadcn-vue 优先原则)
- * Note: Select 保留原生（shadcn-vue 无此组件）
+ * Based on shadcn-vue Input + Button + Select (§1.5 shadcn-vue 优先原则)
  */
 import { reactive, computed } from 'vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import SelectField from './SelectField.vue'
 
 interface SearchParams {
   keyword?: string
@@ -34,21 +34,21 @@ const emit = defineEmits<{
 }>()
 
 const form = reactive<SearchParams>({
-  keyword: props.initialValues.keyword || '',
+  keyword: props.initialValues.keyword ?? '',
   status: props.initialValues.status ?? null,
-  source: props.initialValues.source || '',
-  city: props.initialValues.city || '',
+  source: props.initialValues.source ?? '',
+  city: props.initialValues.city ?? '',
 })
 
 const statusOptions = [
-  { value: null, label: '全部状态' },
-  { value: 0, label: '新建' },
-  { value: 1, label: '跟进中' },
-  { value: 3, label: '无效' },
+  { value: '__all__', label: '全部状态' },
+  { value: '0', label: '新建' },
+  { value: '1', label: '跟进中' },
+  { value: '3', label: '无效' },
 ]
 
 const sourceOptions = [
-  { value: '', label: '全部来源' },
+  { value: '__all__', label: '全部来源' },
   { value: '线上注册', label: '线上注册' },
   { value: '市场活动', label: '市场活动' },
   { value: '客户推荐', label: '客户推荐' },
@@ -60,10 +60,10 @@ const sourceOptions = [
 
 const hasActiveFilters = computed((): boolean => {
   return !!(
-    form.keyword ||
+    (form.keyword ?? '').trim().length > 0 ||
     form.status !== null ||
-    form.source ||
-    form.city
+    (form.source ?? '').trim().length > 0 ||
+    (form.city ?? '').trim().length > 0
   )
 })
 
@@ -83,6 +83,14 @@ function handleSubmit(event: Event): void {
   event.preventDefault()
   handleSearch()
 }
+
+function handleStatusChange(value: string): void {
+  form.status = value === '__all__' ? null : Number(value)
+}
+
+function handleSourceChange(value: string): void {
+  form.source = value === '__all__' ? '' : value
+}
 </script>
 
 <template>
@@ -97,27 +105,27 @@ function handleSubmit(event: Event): void {
       class="search-input"
     />
 
-    <!-- 状态 (保留原生 select - shadcn-vue 无此组件) -->
-    <select
-      v-model="form.status"
-      class="search-select"
+    <!-- 状态 -->
+    <SelectField
+      :model-value="form.status === null || form.status === undefined ? '__all__' : String(form.status)"
+      class="search-select-field"
+      trigger-class="search-select"
+      :options="statusOptions"
+      placeholder="全部状态"
       aria-label="筛选状态"
-    >
-      <option v-for="opt in statusOptions" :key="String(opt.value)" :value="opt.value">
-        {{ opt.label }}
-      </option>
-    </select>
+      @update:model-value="handleStatusChange"
+    />
 
-    <!-- 来源 (保留原生 select - shadcn-vue 无此组件) -->
-    <select
-      v-model="form.source"
-      class="search-select"
+    <!-- 来源 -->
+    <SelectField
+      :model-value="form.source || '__all__'"
+      class="search-select-field"
+      trigger-class="search-select"
+      :options="sourceOptions"
+      placeholder="全部来源"
       aria-label="筛选来源"
-    >
-      <option v-for="opt in sourceOptions" :key="opt.value" :value="opt.value">
-        {{ opt.label }}
-      </option>
-    </select>
+      @update:model-value="handleSourceChange"
+    />
 
     <!-- 城市 -->
     <Input
@@ -168,23 +176,15 @@ function handleSubmit(event: Event): void {
   max-width: 80px;
 }
 
-// Select 样式 (保留原生)
-.search-select {
+.search-select-field {
   flex: 1;
   min-width: 100px;
-  min-height: 36px;
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-sm-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-primary-v2;
-  background: $wolf-bg-card-v2;
-  transition: border-color 150ms ease-out;
+}
 
-  &:focus {
-    outline: none;
-    border-color: $wolf-primary-v2;
-  }
+.search-select {
+  min-height: 36px;
+  border-radius: $wolf-radius-sm-v2;
+  transition: border-color 150ms ease-out;
 }
 
 // Mobile responsive: stack on small screens
@@ -195,7 +195,7 @@ function handleSubmit(event: Event): void {
   }
 
   .search-input,
-  .search-select {
+  .search-select-field {
     width: 100%;
   }
 

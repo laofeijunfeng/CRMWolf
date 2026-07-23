@@ -21,16 +21,24 @@ interface Props {
   downloadingApplicationId?: number | null
   showInvoiceTitles?: boolean
   showInvoiceApplications?: boolean
+  showAddTitle?: boolean
   showAddApplication?: boolean
   showTitleApplyAction?: boolean
+  canEditTitle?: boolean
+  canDeleteTitle?: boolean
+  canSetDefaultTitle?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
   downloadingApplicationId: null,
   showInvoiceTitles: true,
   showInvoiceApplications: true,
+  showAddTitle: true,
   showAddApplication: false,
-  showTitleApplyAction: true
+  showTitleApplyAction: true,
+  canEditTitle: true,
+  canDeleteTitle: true,
+  canSetDefaultTitle: true
 })
 
 const emit = defineEmits<{
@@ -154,7 +162,7 @@ const formatDate = (value: string | null): string => {
       empty-text="暂无发票抬头"
     >
       <template #headerActions>
-        <Button size="sm" @click="handleAdd">
+        <Button v-if="showAddTitle" size="sm" @click="handleAdd">
           <Plus class="w-4 h-4 mr-1" />
           新建抬头
         </Button>
@@ -201,7 +209,7 @@ const formatDate = (value: string | null): string => {
           申请发票
         </Button>
         <Button
-          v-if="!item.is_default"
+          v-if="canSetDefaultTitle && !item.is_default"
           variant="ghost"
           size="sm"
           :aria-label="`将 ${item.title} 设为默认发票抬头`"
@@ -210,6 +218,7 @@ const formatDate = (value: string | null): string => {
           <Star class="w-4 h-4" />
         </Button>
         <Button
+          v-if="canEditTitle"
           variant="ghost"
           size="sm"
           :aria-label="`编辑发票抬头 ${item.title}`"
@@ -218,6 +227,7 @@ const formatDate = (value: string | null): string => {
           <Pencil class="w-4 h-4" />
         </Button>
         <Button
+          v-if="canDeleteTitle"
           variant="ghost"
           size="sm"
           :aria-label="`删除发票抬头 ${item.title}`"

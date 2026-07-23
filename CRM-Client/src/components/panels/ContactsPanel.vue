@@ -15,9 +15,18 @@ import type { ContactResponse } from '@/api/customer'
 interface Props {
   customerId: number
   contacts: ContactResponse[]
+  showAdd?: boolean
+  canEdit?: boolean
+  canDelete?: boolean
+  canSetPrimary?: boolean
 }
 
-defineProps<Props>()
+withDefaults(defineProps<Props>(), {
+  showAdd: true,
+  canEdit: true,
+  canDelete: true,
+  canSetPrimary: true
+})
 
 const emit = defineEmits<{
   'add': []
@@ -50,7 +59,7 @@ const handleSetPrimary = (contactId: number): void => {
     empty-text="暂无联系人"
   >
     <template #headerActions>
-      <Button size="sm" @click="handleAdd">
+      <Button v-if="showAdd" size="sm" @click="handleAdd">
         <Plus class="w-4 h-4 mr-1" />
         新建联系人
       </Button>
@@ -78,6 +87,7 @@ const handleSetPrimary = (contactId: number): void => {
 
     <template #itemActions="{ item }">
       <Button
+        v-if="canEdit"
         variant="ghost"
         size="sm"
         :aria-label="`编辑联系人 ${item.name}`"
@@ -86,6 +96,7 @@ const handleSetPrimary = (contactId: number): void => {
         <Pencil class="w-4 h-4" />
       </Button>
       <Button
+        v-if="canDelete"
         variant="ghost"
         size="sm"
         :aria-label="`删除联系人 ${item.name}`"
@@ -94,7 +105,7 @@ const handleSetPrimary = (contactId: number): void => {
         <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
       </Button>
       <Button
-        v-if="!item.is_primary"
+        v-if="canSetPrimary && !item.is_primary"
         variant="ghost"
         size="sm"
         :aria-label="`将 ${item.name} 设为主要联系人`"

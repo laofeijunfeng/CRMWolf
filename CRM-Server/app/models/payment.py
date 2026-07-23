@@ -113,6 +113,8 @@ class PaymentRecord(Base):
     payment_date = Column(Date, nullable=False, comment="实际回款日期")
     proof_attachment = Column(String(500), comment="回款凭证附件URL")
     notes = Column(Text, comment="备注")
+    commission_member_id = Column(String(100), nullable=True, comment="提成协作成员系统用户ID")
+    commission_member_name = Column(String(100), nullable=True, comment="提成协作成员姓名")
     creator_id = Column(String(100), nullable=False, comment="创建人（登记人）系统用户ID")
     creator_name = Column(String(100), comment="创建人姓名")
     confirmation_status = Column(String(20), nullable=False, default=PaymentConfirmationStatus.PENDING, comment="确认状态：PENDING(待确认), CONFIRMED(已确认), DISPUTED(有争议)")

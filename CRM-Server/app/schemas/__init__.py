@@ -35,14 +35,6 @@ from app.schemas.chat_message import (
     ChatMessageResponse,
     ChatReplyData
 )
-from app.schemas.ai import (
-    AIRequestBase,
-    AIResponseBase,
-    AIErrorResponse,
-    ActionPlan,
-    FieldChange,
-    generate_action_id,
-)
 from app.schemas.deployment import (
     DeploymentInfoBase,
     DeploymentInfoCreate,
@@ -80,12 +72,6 @@ __all__ = [
     "ChatMessageRequest",
     "ChatMessageResponse",
     "ChatReplyData",
-    "AIRequestBase",
-    "AIResponseBase",
-    "AIErrorResponse",
-    "ActionPlan",
-    "FieldChange",
-    "generate_action_id",
     "DeploymentInfoBase",
     "DeploymentInfoCreate",
     "DeploymentInfoUpdate",

@@ -30,16 +30,16 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import {
+  InputField,
+  SegmentedChoiceControl,
+} from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import invoiceApi, {
   type InvoiceTitleResponse,
@@ -105,6 +105,11 @@ const visible = computed({
   get: () => props.open,
   set: (val) => emit('update:open', val)
 })
+
+const titleTypeOptions = [
+  { value: 'COMPANY', label: '企业', tone: 'primary' as const },
+  { value: 'PERSONAL', label: '个人', tone: 'success' as const },
+]
 
 // ==================== Watchers ====================
 watch(values, () => {
@@ -203,110 +208,101 @@ function continueEditing(): void {
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
-        <!-- Title Type (RadioGroup) -->
+        <!-- Title Type -->
         <div class="space-y-2">
-          <Label class="text-sm font-medium">类型 <span class="text-destructive">*</span></Label>
-          <RadioGroup
+          <Label id="invoice-title-type-label" class="text-sm font-medium">
+            类型 <span class="text-destructive">*</span>
+          </Label>
+          <SegmentedChoiceControl
             v-model="titleTypeValue"
-            class="flex gap-4"
-          >
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="type-company" value="COMPANY" />
-              <Label for="type-company" class="cursor-pointer">企业</Label>
-            </div>
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="type-personal" value="PERSONAL" />
-              <Label for="type-personal" class="cursor-pointer">个人</Label>
-            </div>
-          </RadioGroup>
+            :options="titleTypeOptions"
+            labelled-by="invoice-title-type-label"
+            id-prefix="invoice-title-type"
+          />
         </div>
 
         <!-- Title Name (required) -->
-        <FormField v-slot="{ componentField }" name="title">
+        <FormField v-slot="{ value, handleChange }" name="title">
           <FormItem>
-            <FormLabel>发票抬头 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入发票抬头名称"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="invoice-title-name"
+              :model-value="String(value ?? '')"
+              label="发票抬头"
+              required
+              placeholder="请输入发票抬头名称"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Taxpayer ID (required) -->
-        <FormField v-slot="{ componentField }" name="taxpayer_id">
+        <FormField v-slot="{ value, handleChange }" name="taxpayer_id">
           <FormItem>
-            <FormLabel>税号 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入纳税人识别号"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="invoice-title-taxpayer-id"
+              :model-value="String(value ?? '')"
+              label="税号"
+              required
+              placeholder="请输入纳税人识别号"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Bank Name -->
-        <FormField v-slot="{ componentField }" name="bank_name">
+        <FormField v-slot="{ value, handleChange }" name="bank_name">
           <FormItem>
-            <FormLabel>开户银行</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入开户银行名称"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="invoice-title-bank-name"
+              :model-value="String(value ?? '')"
+              label="开户银行"
+              placeholder="请输入开户银行名称"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Bank Account -->
-        <FormField v-slot="{ componentField }" name="bank_account">
+        <FormField v-slot="{ value, handleChange }" name="bank_account">
           <FormItem>
-            <FormLabel>银行账号</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入银行账号"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="invoice-title-bank-account"
+              :model-value="String(value ?? '')"
+              label="银行账号"
+              placeholder="请输入银行账号"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Address -->
-        <FormField v-slot="{ componentField }" name="address">
+        <FormField v-slot="{ value, handleChange }" name="address">
           <FormItem>
-            <FormLabel>地址</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入注册地址"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="invoice-title-address"
+              :model-value="String(value ?? '')"
+              label="地址"
+              placeholder="请输入注册地址"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
 
         <!-- Phone -->
-        <FormField v-slot="{ componentField }" name="phone">
+        <FormField v-slot="{ value, handleChange }" name="phone">
           <FormItem>
-            <FormLabel>电话</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as any"
-                placeholder="请输入电话号码"
-                class="h-11 sm:h-8"
-              />
-            </FormControl>
+            <InputField
+              id="invoice-title-phone"
+              :model-value="String(value ?? '')"
+              label="电话"
+              placeholder="请输入电话号码"
+              @update:model-value="handleChange"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
