@@ -58,6 +58,7 @@ export const CustomerListResponseSchema = PaginatedResponseSchema(
   CustomerResponseSchema.extend({
     industry_info: CustomerIndustryInfoSchema.nullable().optional(),
     owner_info: UserInfoSchema.nullable(),
+    collaborator_infos: z.array(UserInfoSchema).default([]),
     creator_info: UserInfoSchema.nullable(),
     default_procurement_method_info: ProcurementMethodInfoSchema.nullable().optional()
   })

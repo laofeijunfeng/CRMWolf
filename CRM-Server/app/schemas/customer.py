@@ -368,6 +368,7 @@ class CustomerMemberCandidate(BaseModel):
 class CustomerListResponse(CustomerResponse):
     industry_info: Optional[CustomerIndustryInfo] = Field(None, description="行业信息")
     owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")
+    collaborator_infos: List[OwnerInfo] = Field(default_factory=list, description="协作者信息")
     creator_info: Optional[OwnerInfo] = Field(None, description="创建人信息")
     default_procurement_method_info: Optional[ProcurementMethodInfo] = Field(None, description="默认采购方式信息")
 

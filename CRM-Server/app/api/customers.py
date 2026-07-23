@@ -595,6 +595,7 @@ def get_customers(
     result = []
     owner_ids = set(c.owner_id for c in customers if c.owner_id)
     creator_ids = set(c.creator_id for c in customers if c.creator_id)
+    customer_ids = [c.id for c in customers]
     procurement_method_ids = set(c.default_procurement_method_id for c in customers if c.default_procurement_method_id)
     
     users_info = {}
@@ -617,6 +618,48 @@ def get_customers(
                     'name': row[1],
                     'avatar_url': row[2]
                 }
+
+    collaborator_user_ids = set()
+    collaborator_member_rows = []
+    if customer_ids:
+        placeholders = ','.join(':customer_id_' + str(i) for i in range(len(customer_ids)))
+        collaborators_query = text(f"""
+            SELECT customer_id, user_id
+            FROM crm_customer_members cm
+            WHERE cm.team_id = :team_id
+              AND cm.customer_id IN ({placeholders})
+              AND cm.is_active = TRUE
+            ORDER BY cm.created_time ASC, cm.id ASC
+        """)
+        params = {'team_id': team_id}
+        params.update({f'customer_id_{i}': customer_id for i, customer_id in enumerate(customer_ids)})
+        collaborator_member_rows = db.execute(collaborators_query, params).fetchall()
+
+        collaborator_user_ids = {str(row[1]) for row in collaborator_member_rows if str(row[1]).isdigit()}
+
+    collaborator_users_info = {}
+    if collaborator_user_ids:
+        placeholders = ','.join(':user_id_' + str(i) for i in range(len(collaborator_user_ids)))
+        users_query = text(f"""
+            SELECT id, name, avatar_url
+            FROM users
+            WHERE id IN ({placeholders})
+        """)
+        params = {f'user_id_{i}': int(user_id) for i, user_id in enumerate(collaborator_user_ids)}
+        users_result = db.execute(users_query, params).fetchall()
+
+        for row in users_result:
+            collaborator_users_info[str(row[0])] = {
+                'id': str(row[0]),
+                'name': row[1],
+                'avatar_url': row[2]
+            }
+
+    collaborators_by_customer = {}
+    for customer_id, user_id in collaborator_member_rows:
+        user_info = collaborator_users_info.get(str(user_id))
+        if user_info:
+            collaborators_by_customer.setdefault(customer_id, []).append(user_info)
     
     procurement_methods_info = {}
     if procurement_method_ids:
@@ -685,6 +728,7 @@ def get_customers(
             'license_expiry_date': customer.license_expiry_date,
             'license_type': customer.license_type,
             'owner_info': users_info.get(customer.owner_id) if customer.owner_id else None,
+            'collaborator_infos': collaborators_by_customer.get(customer.id, []),
             'creator_info': users_info.get(customer.creator_id) if customer.creator_id else None,
             'default_procurement_method_info': procurement_methods_info.get(customer.default_procurement_method_id) if customer.default_procurement_method_id else None
         }

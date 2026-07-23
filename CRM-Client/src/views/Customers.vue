@@ -233,6 +233,7 @@ const sortFields = computed<ListSortField[]>(() =>
 const columns = [
   { key: 'account_name', title: '客户名称', width: '220px' },
   { key: 'owner', title: '负责人', width: '100px' },
+  { key: 'collaborators', title: '协作者', width: '100px' },
   { key: 'city', title: '城市', width: '100px' },
   { key: 'company_scale', title: '规模', width: '120px' },
   { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
@@ -246,6 +247,14 @@ const columns = [
   { key: 'created_time', title: '创建时间', width: '160px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
 ]
+
+const formatCollaborators = (row: CustomerTableRow): string => {
+  const names = row.collaborator_infos
+    ?.map((user) => user.name?.trim())
+    .filter((name): name is string => Boolean(name))
+
+  return names && names.length > 0 ? names.join('、') : '-'
+}
 
 // ==================== 权限 ====================
 const canCreateCustomer = computed(() => permissionStore.hasPermission('customer:create'))
@@ -741,7 +750,7 @@ watchEffect(() => {
       row-interactive
       mobile-title-key="account_name"
       mobile-status-key="status"
-      :mobile-meta-keys="['industry', 'source', 'owner']"
+      :mobile-meta-keys="['industry', 'source', 'owner', 'collaborators']"
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       :filter-fields="filterFields"
@@ -783,6 +792,7 @@ watchEffect(() => {
           <span>{{ row.city || '-' }}</span>
           <span>{{ row.company_scale || '-' }}</span>
           <span>负责人：{{ row.owner_info?.name || '-' }}</span>
+          <span>协作者：{{ formatCollaborators(row) }}</span>
         </div>
       </template>
 
@@ -930,6 +940,11 @@ watchEffect(() => {
       <!-- 负责人 -->
       <template #cell-owner="{ row }">
         {{ row.owner_info?.name || '-' }}
+      </template>
+
+      <!-- 协作者 -->
+      <template #cell-collaborators="{ row }">
+        {{ formatCollaborators(row) }}
       </template>
 
       <!-- 创建人 -->

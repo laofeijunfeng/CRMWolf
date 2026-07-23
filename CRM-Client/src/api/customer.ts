@@ -184,6 +184,7 @@ export interface CustomerResponse {
   score?: number | null
   score_updated_at?: string | null
   owner_info?: UserBasicInfo
+  collaborator_infos?: UserBasicInfo[]
   creator_info?: UserBasicInfo
 }
 
