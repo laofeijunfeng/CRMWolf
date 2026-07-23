@@ -43,6 +43,23 @@ from app.schemas.deployment import (
     DeploymentInfoListResponse,
     DeploymentInfoMessageResponse,
 )
+from app.schemas.agent import (
+    AgentSessionCreate,
+    AgentSessionUpdate,
+    AgentSessionResponse,
+    AgentSessionDetailResponse,
+    AgentMessageCreate,
+    AgentMessageResponse,
+    AgentTaskCreate,
+    AgentTaskUpdate,
+    AgentTaskResponse,
+    AgentToolCallCreate,
+    AgentToolCallUpdate,
+    AgentToolCallResponse,
+    AgentIdempotencyKeyCreate,
+    AgentIdempotencyKeyUpdate,
+    AgentIdempotencyKeyResponse,
+)
 
 __all__ = [
     "UserBase",
@@ -78,4 +95,19 @@ __all__ = [
     "DeploymentInfoResponse",
     "DeploymentInfoListResponse",
     "DeploymentInfoMessageResponse",
+    "AgentSessionCreate",
+    "AgentSessionUpdate",
+    "AgentSessionResponse",
+    "AgentSessionDetailResponse",
+    "AgentMessageCreate",
+    "AgentMessageResponse",
+    "AgentTaskCreate",
+    "AgentTaskUpdate",
+    "AgentTaskResponse",
+    "AgentToolCallCreate",
+    "AgentToolCallUpdate",
+    "AgentToolCallResponse",
+    "AgentIdempotencyKeyCreate",
+    "AgentIdempotencyKeyUpdate",
+    "AgentIdempotencyKeyResponse",
 ]

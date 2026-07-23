@@ -21,6 +21,10 @@ from app.models.system_config import SystemConfig, ConfigType
 from app.models.deployment import DeploymentInfo
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
+from app.models.agent import (
+    AgentSession, AgentMessage, AgentTask, AgentToolCall, AgentIdempotencyKey,
+    AgentSessionStatus, AgentMessageRole, AgentTaskStatus, AgentToolCallStatus, AgentIdempotencyStatus,
+)
 
 __all__ = [
     "User", "UserStatus",
@@ -46,5 +50,7 @@ __all__ = [
     "SystemConfig", "ConfigType",
     "DeploymentInfo",
     "LicenseApplication", "LicenseApplicationStatus", "LicenseType",
-    "OAuthProviderConfig", "UserOAuthAccount"
+    "OAuthProviderConfig", "UserOAuthAccount",
+    "AgentSession", "AgentMessage", "AgentTask", "AgentToolCall", "AgentIdempotencyKey",
+    "AgentSessionStatus", "AgentMessageRole", "AgentTaskStatus", "AgentToolCallStatus", "AgentIdempotencyStatus"
 ]
