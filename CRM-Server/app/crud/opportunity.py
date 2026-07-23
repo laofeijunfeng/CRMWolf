@@ -698,6 +698,7 @@ class OpportunityCRUD:
         注意：存在关联合同的商机无法删除
         """
         from app.models.contract import Contract
+        from app.models.procurement import OpportunityStageSnapshot
 
         opportunity = self.get_by_id(db, opportunity_id)
         if not opportunity:
@@ -710,6 +711,11 @@ class OpportunityCRUD:
         ).count()
         if contracts > 0:
             raise ValueError(f"该商机存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
+
+        opportunity.current_stage_snapshot_id = None
+        db.query(OpportunityStageSnapshot).filter(
+            OpportunityStageSnapshot.opportunity_id == opportunity_id
+        ).delete(synchronize_session=False)
 
         db.delete(opportunity)
         db.commit()
