@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
 from app.core.deps import get_current_active_user, get_current_user_team, security
-from app.crud.agent import agent_message_crud, agent_session_crud
-from app.models.agent import AgentMessageRole
+from app.crud.agent import agent_message_crud, agent_session_crud, agent_task_crud
+from app.models.agent import AgentMessageRole, AgentTaskStatus
 from app.models.user import User
 from app.schemas.agent import (
     AgentChatRequest,
@@ -20,9 +20,13 @@ from app.schemas.agent import (
     AgentMessageResponse,
     AgentSessionCreate,
     AgentSessionResponse,
+    AgentTaskCreate,
+    AgentTaskUpdate,
 )
 from app.schemas.common import PaginatedResponse
 from app.services.agent import crm_agent_graph_service
+from app.services.agent.tools import CRMAgentToolService
+from app.services.agent.tools.base import AgentToolContext
 from app.utils.sse_encoder import SSEJsonEncoder
 
 
@@ -72,6 +76,90 @@ def _encode_sse(event: dict) -> str:
 
 def _authorization_header(credentials: HTTPAuthorizationCredentials) -> str:
     return f"{credentials.scheme} {credentials.credentials}"
+
+
+def _new_task_key() -> str:
+    return f"task_{uuid.uuid4().hex}"
+
+
+def _is_confirmation(content: str) -> bool:
+    normalized = content.strip().lower()
+    return normalized in {"是", "确认", "可以", "执行", "好的", "好", "yes", "y", "ok"}
+
+
+def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user_id: int, session_id: int):
+    action = event.get("action")
+    payload = event.get("payload") or {}
+    task = agent_task_crud.create(
+        db,
+        AgentTaskCreate(
+            task_key=_new_task_key(),
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            intent="CUSTOMER_FOLLOW_UP" if action == "create_customer_follow_up" else None,
+            status=AgentTaskStatus.WAITING_USER,
+            target_type="customer",
+            target_id=payload.get("customer_id"),
+            summary=f"等待确认执行：{action}",
+            input_json=payload,
+            state_json={"action": action, "payload": payload, "customer": event.get("customer")},
+        ),
+    )
+    event["task_id"] = task.id
+    event["task_key"] = task.task_key
+    return task
+
+
+async def _execute_waiting_task(
+    db: Session,
+    task,
+    team_id: int,
+    user_id: int,
+    session_id: int,
+    authorization: str,
+):
+    state = task.state_json or {}
+    action = state.get("action")
+    payload = state.get("payload") or {}
+    context = AgentToolContext(
+        db=db,
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session_id,
+        task_id=task.id,
+        authorization=authorization,
+    )
+    tool_service = CRMAgentToolService()
+
+    agent_task_crud.update(db, task, AgentTaskUpdate(status=AgentTaskStatus.RUNNING))
+    if action == "create_customer_follow_up":
+        result = await tool_service.create_customer_follow_up(
+            context,
+            customer_id=payload["customer_id"],
+            content=payload["content"],
+            next_action=payload.get("next_action"),
+            next_follow_time=None,
+            idempotency_suffix=task.task_key,
+        )
+    else:
+        result = None
+
+    if result and result.success:
+        agent_task_crud.update(
+            db,
+            task,
+            AgentTaskUpdate(status=AgentTaskStatus.COMPLETED, result_json=result.data),
+        )
+        return result, "跟进记录已创建。"
+
+    error_message = result.error_message if result else f"暂不支持的执行动作：{action}"
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(status=AgentTaskStatus.FAILED, error_message=error_message),
+    )
+    return result, f"执行失败：{error_message}"
 
 
 @router.post("/sessions", response_model=AgentSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -199,17 +287,48 @@ async def stream_agent_chat(
             })
 
             assistant_content = None
-            async for event in crm_agent_graph_service.stream_events({
-                "db": db,
-                "team_id": team_id,
-                "user_id": user_id,
-                "session_id": session.id,
-                "content": request.content,
-                "authorization": _authorization_header(credentials),
-            }):
-                if event.get("event") == "final":
-                    assistant_content = event.get("content")
-                yield _encode_sse(event)
+            authorization = _authorization_header(credentials)
+            if _is_confirmation(request.content):
+                task = agent_task_crud.get_latest_waiting(
+                    db,
+                    session_id=session.id,
+                    team_id=team_id,
+                    user_id=user_id,
+                )
+                if task:
+                    result, assistant_content = await _execute_waiting_task(
+                        db,
+                        task,
+                        team_id=team_id,
+                        user_id=user_id,
+                        session_id=session.id,
+                        authorization=authorization,
+                    )
+                    if result:
+                        yield _encode_sse(result.to_event())
+                    yield _encode_sse({
+                        "event": "task_completed" if result and result.success else "task_failed",
+                        "task_id": task.id,
+                        "content": assistant_content,
+                    })
+                    yield _encode_sse({"event": "final", "content": assistant_content})
+                else:
+                    assistant_content = "当前没有等待确认的操作。"
+                    yield _encode_sse({"event": "final", "content": assistant_content})
+            else:
+                async for event in crm_agent_graph_service.stream_events({
+                    "db": db,
+                    "team_id": team_id,
+                    "user_id": user_id,
+                    "session_id": session.id,
+                    "content": request.content,
+                    "authorization": authorization,
+                }):
+                    if event.get("event") == "confirmation_required":
+                        _create_waiting_task_from_event(db, event, team_id, user_id, session.id)
+                    if event.get("event") == "final":
+                        assistant_content = event.get("content")
+                    yield _encode_sse(event)
 
             if not assistant_content:
                 assistant_content = "Agent 已完成处理。"

@@ -13,6 +13,7 @@ from app.models.agent import (
     AgentMessage,
     AgentSession,
     AgentTask,
+    AgentTaskStatus,
     AgentToolCall,
 )
 from app.schemas.agent import (
@@ -186,6 +187,20 @@ class AgentTaskCRUD:
         if user_id is not None:
             query = query.filter(AgentTask.user_id == user_id)
         return query.order_by(AgentTask.created_time.desc(), AgentTask.id.desc()).all()
+
+    def get_latest_waiting(
+        self,
+        db: Session,
+        session_id: int,
+        team_id: int,
+        user_id: int,
+    ) -> Optional[AgentTask]:
+        return db.query(AgentTask).filter(
+            AgentTask.session_id == session_id,
+            AgentTask.team_id == team_id,
+            AgentTask.user_id == user_id,
+            AgentTask.status == AgentTaskStatus.WAITING_USER,
+        ).order_by(AgentTask.created_time.desc(), AgentTask.id.desc()).first()
 
     def update(self, db: Session, db_obj: AgentTask, obj_in: AgentTaskUpdate) -> AgentTask:
         update_data = obj_in.model_dump(exclude_unset=True)

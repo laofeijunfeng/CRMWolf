@@ -75,6 +75,7 @@ class AgentTaskCreate(BaseModel):
     user_id: int = Field(..., description="系统用户ID")
     session_id: int = Field(..., description="Agent会话ID")
     intent: Optional[str] = Field(None, max_length=80, description="识别出的意图")
+    status: Optional[str] = Field(None, max_length=20, description="任务状态")
     target_type: Optional[str] = Field(None, max_length=50, description="目标业务对象类型")
     target_id: Optional[int] = Field(None, description="目标业务对象ID")
     summary: Optional[str] = Field(None, description="任务摘要")
