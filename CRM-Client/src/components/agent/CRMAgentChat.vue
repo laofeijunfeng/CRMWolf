@@ -119,6 +119,19 @@ const visibleEventLogs = computed(() => eventLogs.value.slice(-6))
 
 const nextId = (prefix: string): string => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
 
+const normalizeRole = (role: AgentChatSSEEvent["role"]): ChatMessage["role"] | null => {
+  const normalized = String(role ?? "").toLowerCase()
+  if (normalized === "user" || normalized === "assistant") return normalized
+  return null
+}
+
+const addAssistantMessage = (content: string, id?: string | number): void => {
+  if (content.length === 0) return
+  const lastMessage = messages.value[messages.value.length - 1]
+  if (lastMessage?.role === "assistant" && lastMessage.content === content) return
+  messages.value.push({ id: String(id ?? nextId("assistant")), role: "assistant", content })
+}
+
 const addEventLog = (text: string): void => {
   eventLogs.value.push({ id: nextId("evt"), text })
 }
@@ -160,6 +173,14 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充联系人信息"
     case "contact_fields_completed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "联系人信息已补齐"
+    case "invoice_title_fields_required":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充发票抬头信息"
+    case "invoice_title_fields_completed":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "发票抬头信息已补齐"
+    case "deployment_info_fields_required":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充部署信息"
+    case "deployment_info_fields_completed":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "部署信息已补齐"
     case "task_completed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "任务已完成"
     case "task_failed":
@@ -179,13 +200,19 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
   }
 
   if (event.event === "message") {
-    if (event.role === "assistant" && event.content !== undefined && event.content.length > 0) {
-      messages.value.push({ id: String(event.message_id ?? nextId("assistant")), role: "assistant", content: event.content })
+    const role = normalizeRole(event.role)
+    if (role === "assistant" && event.content !== undefined) {
+      addAssistantMessage(event.content, event.message_id)
     }
     return
   }
 
-  if (event.event === "final" || event.event === "done") {
+  if (event.event === "final") {
+    if (event.content !== undefined) addAssistantMessage(event.content)
+    return
+  }
+
+  if (event.event === "done") {
     return
   }
 
