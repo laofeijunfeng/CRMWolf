@@ -5,10 +5,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
-from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.deps import get_current_active_user, get_current_user_team, security
 from app.crud.agent import agent_message_crud, agent_session_crud
 from app.models.agent import AgentMessageRole
 from app.models.user import User
@@ -67,6 +68,10 @@ def _get_owned_session(
 
 def _encode_sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False, cls=SSEJsonEncoder)}\n\n"
+
+
+def _authorization_header(credentials: HTTPAuthorizationCredentials) -> str:
+    return f"{credentials.scheme} {credentials.credentials}"
 
 
 @router.post("/sessions", response_model=AgentSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -143,6 +148,7 @@ async def stream_agent_chat(
     request: AgentChatRequest,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     user_id = current_user.id
 
@@ -198,6 +204,7 @@ async def stream_agent_chat(
                 "user_id": user_id,
                 "session_id": session.id,
                 "content": request.content,
+                "authorization": _authorization_header(credentials),
             }):
                 if event.get("event") == "final":
                     assistant_content = event.get("content")

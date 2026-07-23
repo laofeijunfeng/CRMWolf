@@ -66,6 +66,7 @@ def test_agent_session_and_stream_api(monkeypatch):
         stream_response = client.post(
             "/v1/agent/chat/stream",
             json={"session_id": session["id"], "content": "今天和越秀金融沟通了项目进展"},
+            headers={"Authorization": "Bearer test-token"},
         )
         assert stream_response.status_code == 200, stream_response.text
         stream_text = stream_response.text

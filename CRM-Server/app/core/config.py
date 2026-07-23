@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     AGENT_TIMEOUT: int = 120           # Agent 执行超时（秒）
     AGENT_USER_RATE_LIMIT: int = 10    # 每用户每分钟请求限制
     AGENT_GLOBAL_RATE_LIMIT: int = 100 # 全局每分钟请求限制
+    AGENT_INTERNAL_API_BASE_URL: str = "http://127.0.0.1:8000/api"  # Agent Tool 调用现有后端 API 的基础地址
 
     def get_database_url(self) -> str:
         """获取数据库连接 URL，支持密码特殊字符和 Docker secrets"""

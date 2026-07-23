@@ -7,6 +7,7 @@ class AgentGraphState(TypedDict, total=False):
     user_id: int
     session_id: int
     content: str
+    authorization: Optional[str]
     intent: Optional[str]
     response: Optional[str]
     events: List[Dict[str, Any]]
