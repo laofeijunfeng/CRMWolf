@@ -11,6 +11,9 @@ export type AgentEventType =
   | "entity_parse"
   | "tool_result"
   | "customer_candidates"
+  | "business_context_loaded"
+  | "business_suggestions"
+  | "suggestion_failed"
   | "confirmation_required"
   | "customer_selection_required"
   | "customer_selected"
@@ -72,6 +75,11 @@ export interface AgentChatSSEEvent {
   customers?: Record<string, unknown>[]
   customer?: Record<string, unknown>
   parsed?: Record<string, unknown>
+  summary?: string
+  suggestions?: Record<string, unknown>[]
+  need_user_choice?: boolean
+  clarification_question?: string | null
+  suggestion_source?: string | null
   payload?: Record<string, unknown>
   data?: unknown
   error_message?: string | null

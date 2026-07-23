@@ -2,7 +2,7 @@
 import pytest
 
 from app.services.agent.graph import CRMAgentGraphService
-from app.services.agent.schemas import AgentMemorySnapshot, AgentSemanticParseResult
+from app.services.agent.schemas import AgentMemorySnapshot, AgentSemanticParseResult, AgentSuggestionResult
 from app.services.agent.tools.base import AgentToolResult
 
 
@@ -32,6 +32,7 @@ class FakeMemoryService:
 class FakeToolService:
     def __init__(self, items=None):
         self.searches = []
+        self.context_queries = []
         self.items = items or [{"id": 101, "account_name": "越秀金融"}]
 
     async def search_customers(self, context, keyword, limit=10):
@@ -42,6 +43,55 @@ class FakeToolService:
             data={"items": self.items, "total": len(self.items)},
             tool_call_id=501,
         )
+
+    async def get_customer_context(self, context, customer_id):
+        self.context_queries.append({"context": context, "customer_id": customer_id})
+        return AgentToolResult(
+            tool_name="get_customer_context",
+            success=True,
+            data={
+                "customer": {"id": customer_id, "account_name": "越秀金融"},
+                "contracts": {"items": []},
+                "payment_plans": {"items": []},
+                "follow_ups": {"items": []},
+            },
+            tool_call_id=502,
+        )
+
+
+class FakeSuggestionGenerator:
+    def __init__(self):
+        self.calls = []
+
+    async def generate_with_metadata(self, db, *, team_id, user_message, semantic_result, customer_context):
+        self.calls.append({
+            "db": db,
+            "team_id": team_id,
+            "user_message": user_message,
+            "semantic_result": semantic_result,
+            "customer_context": customer_context,
+        })
+
+        class Envelope:
+            result = AgentSuggestionResult.model_validate({
+                "summary": "客户项目已有推进信号，建议继续推进商机。",
+                "suggestions": [{
+                    "action": "CREATE_OPPORTUNITY",
+                    "title": "创建商机",
+                    "reason": "用户输入提到预算和采购计划。",
+                    "priority": "high",
+                    "requires_confirmation": True,
+                    "missing_fields": ["商机名称", "预计成交日期"],
+                    "risk_notes": [],
+                    "confidence": 0.92,
+                }],
+                "need_user_choice": True,
+                "clarification_question": None,
+            })
+            suggestion_source = "test_suggestion_generator"
+            model = "test-model"
+
+        return Envelope()
 
 
 class FakeTemporalResolver:
@@ -92,6 +142,7 @@ def build_service(result, tool_service=None):
         semantic_parser=FakeSemanticParser(result),
         memory_service=FakeMemoryService(),
         temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
     )
 
 
@@ -119,6 +170,7 @@ async def test_agent_graph_uses_ai_semantic_result_for_intent_and_entities():
         tool_service=tool_service,
         semantic_parser=parser,
         memory_service=FakeMemoryService(),
+        suggestion_generator=FakeSuggestionGenerator(),
     )
 
     result = await service.run(input_state("没有关键词也应该只相信 AI parser 的结构化结果"))
@@ -129,6 +181,43 @@ async def test_agent_graph_uses_ai_semantic_result_for_intent_and_entities():
     assert semantic_events[0]["parse_source"] == "test_parser"
     assert tool_service.searches[0]["keyword"] == "光大证券"
     assert parser.calls[0]["memory"].recent_messages[0]["content"] == "上一轮消息"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_loads_customer_context_and_generates_ai_suggestions():
+    tool_service = FakeToolService()
+    suggestion_generator = FakeSuggestionGenerator()
+    service = CRMAgentGraphService(
+        tool_service=tool_service,
+        semantic_parser=FakeSemanticParser(semantic_result(
+            follow_up={
+                "content": "客户已经立项，计划采购 100 人，总预算 30 万",
+                "method": "未指定",
+                "next_action": "下周三前提供招标参数",
+                "next_follow_time_text": "下周三",
+                "next_follow_time": {
+                    "raw_text": "下周三",
+                    "kind": "RELATIVE_WEEKDAY",
+                    "direction": "next",
+                    "weekday": 3,
+                    "confidence": 0.95,
+                },
+                "next_follow_time_iso": None,
+            },
+        )),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=suggestion_generator,
+    )
+
+    result = await service.run(input_state())
+
+    assert tool_service.context_queries[0]["customer_id"] == 101
+    assert suggestion_generator.calls[0]["customer_context"]["customer"]["id"] == 101
+    suggestion_events = [event for event in result["events"] if event["event"] == "business_suggestions"]
+    assert suggestion_events[0]["suggestion_source"] == "test_suggestion_generator"
+    assert suggestion_events[0]["suggestions"][0]["action"] == "CREATE_OPPORTUNITY"
+    assert "基于客户上下文，我建议下一步可以：1. 创建商机。" in result["response"]
 
 
 @pytest.mark.asyncio

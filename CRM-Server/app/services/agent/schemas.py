@@ -17,6 +17,18 @@ AgentIntent = Literal[
 ]
 
 AgentHITLDecisionType = Literal["approve", "edit", "reject", "respond"]
+AgentSuggestionAction = Literal[
+    "CREATE_OPPORTUNITY",
+    "CREATE_CONTACT",
+    "CREATE_PAYMENT_PLAN",
+    "CREATE_PAYMENT_RECORD",
+    "CREATE_INVOICE_TITLE",
+    "CREATE_DEPLOYMENT_INFO",
+    "CREATE_LICENSE_APPLICATION",
+    "FOLLOW_UP_REMINDER",
+    "CUSTOMER_QUERY_SUMMARY",
+    "NO_ACTION",
+]
 AgentTemporalKind = Literal["NONE", "EXPLICIT_DATE", "RELATIVE_DAY", "RELATIVE_WEEKDAY", "UNKNOWN"]
 AgentTemporalDirection = Literal["past", "current", "next", "future"]
 AgentTemporalUnit = Literal["day", "week", "month"]
@@ -75,6 +87,26 @@ class AgentSemanticParseResult(BaseModel):
     need_clarification: bool = Field(False)
     clarification_question: Optional[str] = Field(None)
     evidence: List[str] = Field(default_factory=list, description="用于解释判断的原文依据")
+
+
+class AgentBusinessSuggestion(BaseModel):
+    action: AgentSuggestionAction = Field(..., description="建议动作")
+    title: str = Field(..., description="面向用户展示的建议标题")
+    reason: str = Field(..., description="建议原因，必须基于用户输入或客户上下文")
+    priority: Literal["high", "medium", "low"] = Field("medium", description="建议优先级")
+    requires_confirmation: bool = Field(True, description="执行前是否需要用户确认")
+    missing_fields: List[str] = Field(default_factory=list, description="执行动作前仍需补充的字段")
+    related_object_type: Optional[str] = Field(None, description="依赖对象类型，例如 contract/payment_plan/deployment_info")
+    related_object_id: Optional[int] = Field(None, description="依赖对象 ID")
+    risk_notes: List[str] = Field(default_factory=list, description="不确定性或风险提示")
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+
+
+class AgentSuggestionResult(BaseModel):
+    summary: str = Field(..., description="对客户当前上下文和用户输入的简要判断")
+    suggestions: List[AgentBusinessSuggestion] = Field(default_factory=list, max_length=3)
+    need_user_choice: bool = Field(False, description="是否需要用户选择下一步动作")
+    clarification_question: Optional[str] = Field(None, description="建议生成阶段需要追问的问题")
 
 
 class AgentMemorySnapshot(BaseModel):

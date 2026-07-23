@@ -9,6 +9,11 @@ from app.services.agent.memory import AgentMemoryService, agent_memory_service
 from app.services.agent.schemas import AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.state import AgentGraphState
+from app.services.agent.suggestion import (
+    AgentSuggestionGenerator,
+    AgentSuggestionGeneratorError,
+    agent_suggestion_generator,
+)
 from app.services.agent.temporal import AgentTemporalResolver, agent_temporal_resolver
 from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_registry
 from app.services.agent.tools import CRMAgentToolService
@@ -23,10 +28,12 @@ class CRMAgentGraphService:
         memory_service: Optional[AgentMemoryService] = None,
         tool_registry: Optional[AgentToolRegistry] = None,
         temporal_resolver: Optional[AgentTemporalResolver] = None,
+        suggestion_generator: Optional[AgentSuggestionGenerator] = None,
     ) -> None:
         self.semantic_parser = semantic_parser or agent_semantic_parser
         self.memory_service = memory_service or agent_memory_service
         self.temporal_resolver = temporal_resolver or agent_temporal_resolver
+        self.suggestion_generator = suggestion_generator or agent_suggestion_generator
         if tool_registry:
             self.tool_registry = tool_registry
         elif tool_service:
@@ -40,11 +47,15 @@ class CRMAgentGraphService:
         graph.add_node("load_memory", self._load_memory)
         graph.add_node("semantic_parse", self._semantic_parse)
         graph.add_node("search_customer", self._search_customer)
+        graph.add_node("load_customer_context", self._load_customer_context)
+        graph.add_node("generate_suggestions", self._generate_suggestions)
         graph.add_node("build_response", self._build_response)
         graph.add_edge(START, "load_memory")
         graph.add_edge("load_memory", "semantic_parse")
         graph.add_edge("semantic_parse", "search_customer")
-        graph.add_edge("search_customer", "build_response")
+        graph.add_edge("search_customer", "load_customer_context")
+        graph.add_edge("load_customer_context", "generate_suggestions")
+        graph.add_edge("generate_suggestions", "build_response")
         graph.add_edge("build_response", END)
         return graph.compile()
 
@@ -130,7 +141,71 @@ class CRMAgentGraphService:
         candidates = self._extract_customer_candidates(result.data) if result.success else []
         if candidates:
             events.append({"event": "customer_candidates", "customers": candidates})
-        return {"customer_candidates": candidates, "events": events}
+        state_update: AgentGraphState = {"customer_candidates": candidates, "events": events}
+        if len(candidates) == 1:
+            state_update["selected_customer"] = candidates[0]
+        return state_update
+
+    async def _load_customer_context(self, state: AgentGraphState) -> AgentGraphState:
+        customer = state.get("selected_customer") or {}
+        customer_id = customer.get("id")
+        if (
+            not customer_id
+            or not state.get("authorization")
+            or not state.get("db")
+            or self._requires_clarification(state.get("semantic_result"))
+        ):
+            return {}
+
+        context = AgentToolContext(
+            db=state["db"],
+            team_id=state["team_id"],
+            user_id=state["user_id"],
+            session_id=state["session_id"],
+            authorization=state["authorization"],
+        )
+        result = await self.tool_registry.execute(
+            "get_customer_context",
+            context,
+            {"customer_id": customer_id},
+        )
+        events = [result.to_event()]
+        if not result.success:
+            return {"events": events}
+        events.append({
+            "event": "business_context_loaded",
+            "customer_id": customer_id,
+            "customer": customer,
+        })
+        return {"business_context": result.data or {}, "events": events}
+
+    async def _generate_suggestions(self, state: AgentGraphState) -> AgentGraphState:
+        semantic_result = state.get("semantic_result")
+        business_context = state.get("business_context") or {}
+        if not semantic_result or not business_context or self._requires_clarification(semantic_result):
+            return {}
+
+        try:
+            envelope = await self.suggestion_generator.generate_with_metadata(
+                state["db"],
+                team_id=state["team_id"],
+                user_message=state.get("content", ""),
+                semantic_result=semantic_result,
+                customer_context=business_context,
+            )
+        except AgentSuggestionGeneratorError as exc:
+            return {
+                "suggestion_error": str(exc),
+                "events": [{"event": "suggestion_failed", "message": str(exc)}],
+            }
+
+        return {
+            "suggestion_result": envelope.result,
+            "suggestion_metadata": {
+                "suggestion_source": envelope.suggestion_source,
+                "model": envelope.model,
+            },
+        }
 
     def _build_response(self, state: AgentGraphState) -> AgentGraphState:
         intent = state.get("intent") or "UNKNOWN"
@@ -149,6 +224,33 @@ class CRMAgentGraphService:
                 "model": semantic_metadata.get("model"),
                 "need_clarification": semantic_result.need_clarification,
                 "parsed": parsed,
+            })
+
+        suggestion_result = state.get("suggestion_result")
+        if state.get("business_context"):
+            events.append({
+                "event": "business_context_loaded",
+                "customer_id": (state.get("selected_customer") or {}).get("id"),
+                "customer": state.get("selected_customer"),
+            })
+        if suggestion_result:
+            suggestion_metadata = state.get("suggestion_metadata") or {}
+            events.append({
+                "event": "business_suggestions",
+                "summary": suggestion_result.summary,
+                "suggestions": [
+                    suggestion.model_dump(exclude_none=True)
+                    for suggestion in suggestion_result.suggestions
+                ],
+                "need_user_choice": suggestion_result.need_user_choice,
+                "clarification_question": suggestion_result.clarification_question,
+                "suggestion_source": suggestion_metadata.get("suggestion_source"),
+                "model": suggestion_metadata.get("model"),
+            })
+        elif state.get("suggestion_error"):
+            events.append({
+                "event": "suggestion_failed",
+                "message": state["suggestion_error"],
             })
 
         if state.get("events"):
@@ -171,6 +273,8 @@ class CRMAgentGraphService:
             return {"response": response, "events": events}
 
         response, action = self._build_business_response(intent, parsed, candidates)
+        if suggestion_result:
+            response = self._append_suggestions_to_response(response, suggestion_result.suggestions)
         if action:
             event_name = "confirmation_required"
             if action.get("action") in {
@@ -485,6 +589,21 @@ class CRMAgentGraphService:
             return "我识别到这是查询请求。下一步会接入客户上下文查询和汇总能力。", None
 
         return "我还不能可靠理解这条消息，请补充客户名称、业务内容或你希望我执行的动作。", None
+
+    @staticmethod
+    def _append_suggestions_to_response(response: str, suggestions: List[Any]) -> str:
+        actionable = [
+            suggestion
+            for suggestion in suggestions
+            if getattr(suggestion, "action", None) != "NO_ACTION" and getattr(suggestion, "confidence", 0.0) >= 0.7
+        ]
+        if not actionable:
+            return response
+        suggestion_lines = [
+            f"{index}. {suggestion.title}"
+            for index, suggestion in enumerate(actionable[:3], start=1)
+        ]
+        return response + "\n\n基于客户上下文，我建议下一步可以：" + "；".join(suggestion_lines) + "。"
 
     @staticmethod
     def missing_contact_fields(contact: Dict[str, Any]) -> List[str]:

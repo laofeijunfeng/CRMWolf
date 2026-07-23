@@ -219,6 +219,12 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return `${event.success === true ? "Tool 调用成功" : "Tool 调用失败"}：${stringifyValue(event.tool_name)}`
     case "customer_candidates":
       return `找到候选客户：${formatCustomerNames(event.customers)}`
+    case "business_context_loaded":
+      return `已加载客户上下文：${stringifyValue(event.customer?.["account_name"])}`
+    case "business_suggestions":
+      return `AI 业务建议：${formatSuggestionTitles(event.suggestions)}`
+    case "suggestion_failed":
+      return `AI 业务建议生成失败：${stringifyValue(event.message)}`
     case "customer_selection_required":
       return `需要选择客户：${formatCustomerNames(event.customers)}`
     case "customer_selected":
@@ -248,6 +254,14 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
     default:
       return null
   }
+}
+
+const formatSuggestionTitles = (suggestions?: Record<string, unknown>[]): string => {
+  if (!suggestions || suggestions.length === 0) return "暂无建议"
+  return suggestions
+    .slice(0, 3)
+    .map((suggestion, index) => `${index + 1}. ${stringifyValue(suggestion["title"])}`)
+    .join("；")
 }
 
 const handleSSEEvent = (event: AgentChatSSEEvent): void => {
