@@ -21,6 +21,7 @@ from app.schemas.agent import (
     AgentSessionResponse,
 )
 from app.schemas.common import PaginatedResponse
+from app.services.agent import crm_agent_graph_service
 from app.utils.sse_encoder import SSEJsonEncoder
 
 
@@ -191,9 +192,20 @@ async def stream_agent_chat(
                 "content": user_message.content,
             })
 
-            assistant_content = (
-                "Agent 执行服务已创建，LangGraph 编排和业务 Tool 将在下一阶段接入。"
-            )
+            assistant_content = None
+            async for event in crm_agent_graph_service.stream_events({
+                "team_id": team_id,
+                "user_id": user_id,
+                "session_id": session.id,
+                "content": request.content,
+            }):
+                if event.get("event") == "final":
+                    assistant_content = event.get("content")
+                yield _encode_sse(event)
+
+            if not assistant_content:
+                assistant_content = "Agent 已完成处理。"
+
             assistant_message = agent_message_crud.create(
                 db,
                 AgentMessageCreate(
@@ -203,7 +215,7 @@ async def stream_agent_chat(
                     role=AgentMessageRole.ASSISTANT,
                     event_type="assistant_message",
                     content=assistant_content,
-                    payload_json={"stage": "api_skeleton"},
+                    payload_json={"source": "langgraph"},
                 ),
             )
             yield _encode_sse({
