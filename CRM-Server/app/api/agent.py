@@ -29,6 +29,7 @@ from app.schemas.common import PaginatedResponse
 from app.services.agent import crm_agent_graph_service
 from app.services.agent.graph import CRMAgentGraphService
 from app.services.agent.guardrails import AgentToolExecutionPolicy
+from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
 from app.services.agent.schemas import (
     AgentHITLPolicy,
@@ -259,6 +260,11 @@ def _is_contact_fields_task(task) -> bool:
     return state.get("action") == "collect_contact_fields"
 
 
+def _is_follow_up_quality_fields_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "collect_follow_up_quality_fields"
+
+
 def _is_opportunity_fields_task(task) -> bool:
     state = task.state_json or {}
     return state.get("action") == "collect_opportunity_fields"
@@ -480,7 +486,7 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
     contracts = event.get("contracts") or []
     payment_plans = event.get("payment_plans") or []
     intent = None
-    if action in {"create_customer_follow_up", "select_customer_for_follow_up"}:
+    if action in {"create_customer_follow_up", "select_customer_for_follow_up", "collect_follow_up_quality_fields"}:
         intent = "CUSTOMER_FOLLOW_UP"
     elif action in {"create_opportunity", "select_customer_for_opportunity", "collect_opportunity_fields"}:
         intent = "CREATE_OPPORTUNITY"
@@ -660,6 +666,32 @@ def _merge_payment_fields(existing_payment: dict, semantic_result: AgentSemantic
     return merged
 
 
+def _merge_follow_up_fields(existing_payload: dict, semantic_result: AgentSemanticParseResult, supplement: str) -> dict:
+    follow_up = semantic_result.follow_up
+    next_follow_time_iso = agent_temporal_resolver.resolve_follow_up_time(follow_up.next_follow_time)
+    existing_content = str(existing_payload.get("content") or "").strip()
+    supplement_content = (follow_up.content or supplement or "").strip()
+    if existing_content and supplement_content and supplement_content not in existing_content:
+        content = f"{existing_content}\n补充：{supplement_content}"
+    else:
+        content = existing_content or supplement_content
+    return {
+        **existing_payload,
+        "content": content,
+        **_drop_empty_values({
+            "method": follow_up.method,
+            "next_action": follow_up.next_action,
+            "next_follow_time_text": follow_up.next_follow_time_text,
+            "next_follow_time_iso": next_follow_time_iso,
+        }),
+    }
+
+
+def _follow_up_content_for_create(payload: dict, quality: Any = None) -> str:
+    revision = (getattr(quality, "suggested_revision", None) or "").strip() if quality else ""
+    return revision or payload.get("content") or ""
+
+
 def _merge_opportunity_fields(existing_opportunity: dict, semantic_result: AgentSemanticParseResult) -> dict:
     opportunity = semantic_result.opportunity
     resolved_date = agent_temporal_resolver.resolve_date(opportunity.expected_closing_date)
@@ -682,6 +714,75 @@ def _merge_opportunity_fields(existing_opportunity: dict, semantic_result: Agent
 
 def _drop_empty_values(payload: dict) -> dict:
     return {key: value for key, value in (payload or {}).items() if value not in (None, "")}
+
+
+async def _apply_follow_up_quality_fields(db: Session, task, content: str):
+    state = deepcopy(task.state_json or {})
+    customer = state.get("customer") or {}
+    payload = deepcopy(state.get("payload") or {})
+    try:
+        semantic_result = await _parse_task_field_supplement(db, task, content)
+    except AgentSemanticParserError as exc:
+        return False, f"我没有可靠识别到补充的跟进信息，请换一种说法补充。原因：{str(exc)}"
+
+    payload = _merge_follow_up_fields(payload, semantic_result, content)
+    payload["customer_id"] = payload.get("customer_id") or customer.get("id")
+    state = {**state, "payload": payload}
+    try:
+        envelope = await agent_follow_up_quality_evaluator.evaluate_with_metadata(
+            db,
+            team_id=task.team_id,
+            user_message=payload.get("content") or content,
+            semantic_result=semantic_result,
+            memory=AgentMemorySnapshot(
+                pending_task={
+                    "id": task.id,
+                    "intent": task.intent,
+                    "target_type": task.target_type,
+                    "target_id": task.target_id,
+                    "summary": task.summary,
+                    "state": state,
+                },
+            ),
+            current_date=agent_temporal_resolver.now().date(),
+        )
+    except AgentFollowUpQualityEvaluatorError as exc:
+        return False, f"我没有可靠评估这条跟进记录，请再补充一下。原因：{str(exc)}"
+
+    quality = envelope.result
+    payload["quality"] = quality.model_dump(exclude_none=True)
+    state = {**state, "payload": payload}
+    if not quality.passed:
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        return False, quality.supplement_question or "还差一点关键信息，请继续补充这条跟进记录。"
+
+    next_payload = {
+        "customer_id": payload.get("customer_id"),
+        "content": _follow_up_content_for_create(payload, quality),
+        "method": payload.get("method") or "AI录入",
+        "next_action": payload.get("next_action"),
+        "next_follow_time_text": payload.get("next_follow_time_text"),
+        "next_follow_time_iso": payload.get("next_follow_time_iso"),
+    }
+    new_state = {
+        "action": "create_customer_follow_up",
+        "payload": next_payload,
+        "customer": customer,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=["create_customer_follow_up"],
+            confirmation_summary=f"为「{customer.get('account_name')}」创建跟进记录",
+        ).model_dump(exclude_none=True),
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            summary="等待确认执行：create_customer_follow_up",
+            input_json=next_payload,
+            state_json=new_state,
+        ),
+    )
+    return True, f"跟进内容已补齐。请确认是否为「{customer.get('account_name')}」创建这条跟进记录？"
 
 
 async def _apply_opportunity_fields(db: Session, task, content: str):
@@ -1436,6 +1537,15 @@ async def stream_agent_chat(
 
             if pending_interruption_handled:
                 pass
+            elif task and _is_follow_up_quality_fields_task(task):
+                ready, assistant_content = await _apply_follow_up_quality_fields(db, task, request.content)
+                _remember_pending_task(db, session, task)
+                yield emit({
+                    "event": "follow_up_quality_completed" if ready else "follow_up_quality_required",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                })
+                yield emit({"event": "final", "content": assistant_content})
             elif task and _is_contact_fields_task(task):
                 ready, assistant_content = await _apply_contact_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
@@ -1571,6 +1681,7 @@ async def stream_agent_chat(
                         "customer_member_fields_required",
                         "payment_fields_required",
                         "opportunity_fields_required",
+                        "follow_up_quality_required",
                         "business_selection_required",
                     }:
                         _create_waiting_task_from_event(db, event, team_id, user_id, session)

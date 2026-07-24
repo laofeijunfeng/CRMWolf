@@ -499,6 +499,133 @@ def test_agent_stream_collects_opportunity_fields_without_rerunning_graph(monkey
         engine.dispose()
 
 
+def test_agent_stream_collects_follow_up_quality_fields_without_rerunning_graph(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州凡亚信息科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+
+    class FakeGraphService:
+        def __init__(self):
+            self.calls = []
+
+        async def stream_events(self, input_state):
+            self.calls.append(input_state)
+            yield {
+                "event": "follow_up_quality_required",
+                "action": "collect_follow_up_quality_fields",
+                "customer": customer,
+                "payload": {
+                    "customer_id": customer["id"],
+                    "content": "凡亚信息今天反馈项目没进展",
+                    "method": "AI录入",
+                    "next_action": None,
+                    "next_follow_time_text": None,
+                    "next_follow_time_iso": None,
+                },
+                "content": "下一步计划什么时候、由谁、跟凡亚信息做什么跟进？",
+            }
+            yield {"event": "final", "content": "下一步计划什么时候、由谁、跟凡亚信息做什么跟进？"}
+
+    class FakeQualityEvaluator:
+        def __init__(self):
+            self.calls = []
+
+        async def evaluate_with_metadata(self, db, *, team_id, user_message, semantic_result, memory=None, current_date=None):
+            self.calls.append({
+                "team_id": team_id,
+                "user_message": user_message,
+                "semantic_result": semantic_result,
+                "memory": memory,
+                "current_date": current_date,
+            })
+            return SimpleNamespace(
+                result=SimpleNamespace(
+                    passed=True,
+                    score=72,
+                    suggested_revision="凡亚信息反馈项目暂无进展，计划本月底再联系客户，确认后续推动方式，并争取安排现场拜访。",
+                    model_dump=lambda exclude_none=True: {"passed": True, "score": 72},
+                )
+            )
+
+    fake_graph = FakeGraphService()
+    fake_quality = FakeQualityEvaluator()
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", fake_graph)
+    monkeypatch.setattr(agent_api, "agent_follow_up_quality_evaluator", fake_quality)
+    monkeypatch.setattr(agent_api, "agent_semantic_parser", FakeSemanticParser({
+        "intent": "CUSTOMER_FOLLOW_UP",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "广州凡亚信息科技有限公司", "confidence": 0.95, "resolution_source": "MEMORY"},
+        "follow_up": {
+            "content": "这个月底我会再联系下客户，确认下具体如何推动项目，争取能去现场拜访",
+            "method": "AI录入",
+            "next_action": "这个月底再联系客户，确认如何推动项目，争取现场拜访",
+            "next_follow_time_text": "这个月底",
+            "next_follow_time": {
+                "raw_text": "这个月底",
+                "kind": "MONTH_END",
+                "direction": "current",
+                "confidence": 0.9,
+            },
+        },
+        "payment": {},
+        "opportunity": {},
+        "contact": {},
+        "invoice_title": {},
+        "deployment_info": {},
+        "customer_member": {},
+        "business_signals": [],
+        "requested_actions": [],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["这个月底我会再联系下客户"],
+    }))
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "跟进质量会话"})
+        session = create_response.json()
+
+        first_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "凡亚信息今天反馈项目没进展"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert first_response.status_code == 200, first_response.text
+        assert '"event": "follow_up_quality_required"' in first_response.text
+        assert '"task_id": 1' in first_response.text
+
+        second_response = client.post(
+            "/v1/agent/chat/stream",
+            json={
+                "session_id": session["id"],
+                "content": "这个月底我会再联系下客户，确认下具体如何推动项目，争取能去现场拜访",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert second_response.status_code == 200, second_response.text
+        assert len(fake_graph.calls) == 1
+        assert "跟进内容已补齐" in second_response.text
+        assert "广州凡亚信息科技有限公司" in second_response.text
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.WAITING_USER
+            assert task.state_json["action"] == "create_customer_follow_up"
+            assert task.state_json["customer"] == customer
+            assert task.input_json["content"] == "凡亚信息反馈项目暂无进展，计划本月底再联系客户，确认后续推动方式，并争取安排现场拜访。"
+            assert "补充：" not in task.input_json["content"]
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
 def test_agent_stream_keeps_collected_opportunity_fields_across_turns(monkeypatch):
     customer = {
         "id": 101,

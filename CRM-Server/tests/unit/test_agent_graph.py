@@ -116,10 +116,11 @@ class FakeSuggestionGenerator:
 
 
 class FakeFollowUpQualityEvaluator:
-    def __init__(self, score=80, passed=True):
+    def __init__(self, score=80, passed=True, suggested_revision=None):
         self.calls = []
         self.score = score
         self.passed = passed
+        self.suggested_revision = suggested_revision
 
     async def evaluate_with_metadata(self, db, *, team_id, user_message, semantic_result, memory=None, current_date=None):
         self.calls.append({
@@ -132,6 +133,7 @@ class FakeFollowUpQualityEvaluator:
         })
         score = self.score
         passed = self.passed
+        suggested_revision = self.suggested_revision
 
         class Envelope:
             result = AgentFollowUpQualityResult.model_validate({
@@ -140,6 +142,7 @@ class FakeFollowUpQualityEvaluator:
                 "reason": "质量达标" if passed else "缺少明确下一步动作",
                 "missing_aspects": [] if passed else ["下一步动作"],
                 "supplement_question": None if passed else "请补充下一步由谁在什么时间做什么。",
+                "suggested_revision": suggested_revision,
                 "principle_scores": {},
             })
             quality_source = "test_quality_evaluator"
@@ -564,6 +567,27 @@ async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation
     assert confirmation_events[0]["action"] == "create_customer_follow_up"
     assert confirmation_events[0]["payload"]["customer_id"] == 101
     assert confirmation_events[0]["payload"]["content"] == "客户反馈项目还在立项评估阶段"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_uses_quality_revision_for_follow_up_confirmation_payload():
+    quality_evaluator = FakeFollowUpQualityEvaluator(
+        suggested_revision="客户反馈项目仍在立项评估阶段，计划下周三确认项目进展。",
+    )
+    service = CRMAgentGraphService(
+        tool_service=FakeToolService(),
+        semantic_parser=FakeSemanticParser(semantic_result()),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=quality_evaluator,
+    )
+
+    result = await service.run(input_state("今天和越秀金融沟通了项目进展"))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_customer_follow_up"
+    assert confirmation_events[0]["payload"]["content"] == "客户反馈项目仍在立项评估阶段，计划下周三确认项目进展。"
 
 
 @pytest.mark.asyncio

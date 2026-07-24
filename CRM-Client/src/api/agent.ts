@@ -11,6 +11,7 @@ export type AgentEventType =
   | "semantic_parsed"
   | "follow_up_quality_evaluated"
   | "follow_up_quality_required"
+  | "follow_up_quality_completed"
   | "follow_up_quality_failed"
   | "entity_parse"
   | "tool_result"

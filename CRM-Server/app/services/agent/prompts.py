@@ -323,6 +323,9 @@ CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT = """你是 CRMWolf 的客户跟进记
 - 只评估跟进记录内容是否便于销售推进和团队接力，不执行任何业务动作。
 - 只基于用户原文、语义解析结果和会话上下文评分，不要编造事实。
 - 不能为了提高分数改写出用户没有表达的信息。
+- 无论是否通过，都要尽量输出 suggested_revision，作为最终入库前的克制整理稿。
+- suggested_revision 只能整理、合并、去重、调整语序；不得新增客户未表达的金额、时间、人员、阶段、承诺或判断。
+- 如果原文包含多轮补充，不要保留“补充：”“用户补充”等过程性字样，要合并成一条自然的跟进记录。
 - 如果总分达到 60 分，passed 必须为 true，不要要求用户补充。
 - 如果总分低于 60 分，passed 必须为 false，只输出 1 个最关键的补充问题。
 - 禁止输出 Markdown，禁止输出解释文字，只输出 JSON。
@@ -358,6 +361,7 @@ CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT = """你是 CRMWolf 的客户跟进记
 - passed 必须等于 score >= 60。
 - reason 最长 60 个中文字符。
 - supplement_question 必须精准、自然、只问一个补充点。
+- suggested_revision 以销售跟进记录口吻输出，简洁、客观、忠于原意；最长 300 个中文字符。
 - missing_aspects 最多 3 个。
 """
 

@@ -12,7 +12,7 @@ from app.services.agent.quality import (
     AgentFollowUpQualityEvaluatorError,
     agent_follow_up_quality_evaluator,
 )
-from app.services.agent.schemas import AgentSemanticParseResult
+from app.services.agent.schemas import AgentFollowUpQualityResult, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.state import AgentGraphState
 from app.services.agent.suggestion import (
@@ -371,16 +371,32 @@ class CRMAgentGraphService:
             events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
             return {"response": response, "events": events}
 
-        response, action = self._build_business_response(intent, parsed, candidates, state.get("business_context") or {})
+        response, action = self._build_business_response(
+            intent,
+            self._apply_follow_up_revision(parsed, follow_up_quality_result),
+            candidates,
+            state.get("business_context") or {},
+        )
         if self._follow_up_quality_blocks(state):
             quality = state["follow_up_quality_result"]
             response = quality.supplement_question or "这条跟进还差一点关键信息，请补充后我再帮你记录。"
             events.append({
                 "event": "follow_up_quality_required",
+                "action": "collect_follow_up_quality_fields",
                 "content": response,
                 "score": quality.score,
                 "reason": quality.reason,
                 "missing_aspects": quality.missing_aspects,
+                "customer": state.get("selected_customer"),
+                "payload": {
+                    "customer_id": (state.get("selected_customer") or {}).get("id"),
+                    "content": parsed.get("follow_up_content"),
+                    "method": parsed.get("method") or "AI录入",
+                    "next_action": parsed.get("next_action"),
+                    "next_follow_time_text": parsed.get("next_follow_time_text"),
+                    "next_follow_time_iso": parsed.get("next_follow_time_iso"),
+                    "quality": quality.model_dump(exclude_none=True),
+                },
             })
             events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
             return {"response": response, "events": events}
@@ -598,6 +614,13 @@ class CRMAgentGraphService:
     def _follow_up_quality_blocks(state: AgentGraphState) -> bool:
         quality = state.get("follow_up_quality_result")
         return bool(quality and not quality.passed)
+
+    @staticmethod
+    def _apply_follow_up_revision(parsed: Dict[str, Any], quality: Optional[AgentFollowUpQualityResult]) -> Dict[str, Any]:
+        revision = (quality.suggested_revision or "").strip() if quality else ""
+        if not revision:
+            return parsed
+        return {**parsed, "follow_up_content": revision}
 
     @staticmethod
     def _has_single_customer(state: AgentGraphState) -> bool:

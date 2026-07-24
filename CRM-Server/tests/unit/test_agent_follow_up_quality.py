@@ -44,6 +44,8 @@ def test_follow_up_quality_prompt_contains_six_principles_and_threshold():
     assert "异议具象原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "信息可接力原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "如果总分达到 60 分" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "suggested_revision 只能整理、合并、去重、调整语序" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "不要保留“补充：”“用户补充”等过程性字样" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "【语义解析结果】" in messages[1]["content"]
 
 
