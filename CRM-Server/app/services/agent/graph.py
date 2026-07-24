@@ -61,9 +61,9 @@ class CRMAgentGraphService:
         graph.add_node("build_response", self._build_response)
         graph.add_edge(START, "load_memory")
         graph.add_edge("load_memory", "semantic_parse")
-        graph.add_edge("semantic_parse", "evaluate_follow_up_quality")
-        graph.add_edge("evaluate_follow_up_quality", "search_customer")
-        graph.add_edge("search_customer", "load_customer_context")
+        graph.add_edge("semantic_parse", "search_customer")
+        graph.add_edge("search_customer", "evaluate_follow_up_quality")
+        graph.add_edge("evaluate_follow_up_quality", "load_customer_context")
         graph.add_edge("load_customer_context", "generate_suggestions")
         graph.add_edge("generate_suggestions", "build_response")
         graph.add_edge("build_response", END)
@@ -144,6 +144,7 @@ class CRMAgentGraphService:
             or semantic_result.intent != "CUSTOMER_FOLLOW_UP"
             or self._requires_clarification(semantic_result, has_memory_customer=bool(self._memory_current_customer(state.get("memory"))))
             or not state.get("db")
+            or not self._has_single_customer(state)
         ):
             return {}
 
@@ -190,7 +191,6 @@ class CRMAgentGraphService:
             or not state.get("authorization")
             or not state.get("db")
             or self._requires_clarification(semantic_result)
-            or self._follow_up_quality_blocks(state)
         ):
             return {}
 
@@ -371,6 +371,7 @@ class CRMAgentGraphService:
             events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
             return {"response": response, "events": events}
 
+        response, action = self._build_business_response(intent, parsed, candidates, state.get("business_context") or {})
         if self._follow_up_quality_blocks(state):
             quality = state["follow_up_quality_result"]
             response = quality.supplement_question or "这条跟进还差一点关键信息，请补充后我再帮你记录。"
@@ -383,8 +384,6 @@ class CRMAgentGraphService:
             })
             events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
             return {"response": response, "events": events}
-
-        response, action = self._build_business_response(intent, parsed, candidates, state.get("business_context") or {})
         stage_move_action = self._stage_move_action_from_suggestions(
             suggestion_result.suggestions if suggestion_result else [],
             state.get("selected_customer") or {},
@@ -461,12 +460,14 @@ class CRMAgentGraphService:
         steps = [
             ("load_memory", "加载会话记忆", self._load_memory),
             ("semantic_parse", "AI 语义理解", self._semantic_parse),
-            ("evaluate_follow_up_quality", "AI 跟进质量评估", self._evaluate_follow_up_quality),
             ("search_customer", "搜索客户", self._search_customer),
+            ("evaluate_follow_up_quality", "AI 跟进质量评估", self._evaluate_follow_up_quality),
             ("load_customer_context", "加载客户上下文", self._load_customer_context),
             ("generate_suggestions", "AI 生成业务建议", self._generate_suggestions),
         ]
         for step_name, step_label, handler in steps:
+            if self._should_skip_stream_step(step_name, state):
+                continue
             yield {"event": "agent_step", "step": step_name, "status": "started", "content": step_label}
             update = await handler(state) if step_name != "load_memory" else handler(state)
             self._merge_stream_update(state, update)
@@ -488,6 +489,39 @@ class CRMAgentGraphService:
         state.update(final_update)
         for event in final_update.get("events", []):
             yield event
+
+    def _should_skip_stream_step(self, step_name: str, state: AgentGraphState) -> bool:
+        semantic_result = state.get("semantic_result")
+        has_memory_customer = bool(self._memory_current_customer(state.get("memory")))
+        if step_name == "evaluate_follow_up_quality":
+            return (
+                not semantic_result
+                or semantic_result.intent != "CUSTOMER_FOLLOW_UP"
+                or not self._has_single_customer(state)
+                or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
+            )
+        if step_name == "search_customer":
+            parsed = state.get("parsed") or {}
+            memory_customer = self._memory_current_customer(state.get("memory"))
+            return (
+                self._follow_up_quality_blocks(state)
+                or not parsed.get("customer_name")
+                or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
+                or self._should_use_memory_customer(semantic_result, parsed, memory_customer)
+            )
+        if step_name == "load_customer_context":
+            return (
+                self._follow_up_quality_blocks(state)
+                or not (state.get("selected_customer") or {}).get("id")
+                or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
+            )
+        if step_name == "generate_suggestions":
+            return (
+                self._follow_up_quality_blocks(state)
+                or not state.get("business_context")
+                or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
+            )
+        return False
 
     @staticmethod
     def _merge_stream_update(state: AgentGraphState, update: AgentGraphState) -> None:
@@ -564,6 +598,12 @@ class CRMAgentGraphService:
     def _follow_up_quality_blocks(state: AgentGraphState) -> bool:
         quality = state.get("follow_up_quality_result")
         return bool(quality and not quality.passed)
+
+    @staticmethod
+    def _has_single_customer(state: AgentGraphState) -> bool:
+        if (state.get("selected_customer") or {}).get("id"):
+            return True
+        return len(state.get("customer_candidates") or []) == 1
 
     @staticmethod
     def _requires_clarification(semantic_result: Optional[AgentSemanticParseResult], *, has_memory_customer: bool = False) -> bool:
@@ -781,7 +821,7 @@ class CRMAgentGraphService:
                         "next_follow_time_iso": parsed.get("next_follow_time_iso"),
                     },
                 }
-            return f"我识别到客户「{customer_name}」，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+            return CRMAgentGraphService._customer_not_found_response(customer_name), None
 
         if intent == "PAYMENT_RECORD":
             if not customer_name:
@@ -805,7 +845,7 @@ class CRMAgentGraphService:
                         "missing_fields": parsed.get("missing_payment_fields") or [],
                     },
                 }
-            return f"我识别到客户「{customer_name}」的回款信息，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+            return CRMAgentGraphService._customer_not_found_response(customer_name), None
 
         if intent == "CREATE_OPPORTUNITY":
             if not customer_name:
@@ -856,7 +896,7 @@ class CRMAgentGraphService:
                         "missing_fields": missing_fields,
                     },
                 }
-            return f"我识别到要为「{customer_name}」创建商机，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+            return CRMAgentGraphService._customer_not_found_response(customer_name), None
 
         if intent == "CREATE_CONTACT":
             if not customer_name:
@@ -905,7 +945,7 @@ class CRMAgentGraphService:
                         "missing_fields": missing_fields,
                     },
                 }
-            return f"我识别到要为「{customer_name}」创建联系人，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+            return CRMAgentGraphService._customer_not_found_response(customer_name), None
 
         if intent == "CREATE_INVOICE_TITLE":
             if not customer_name:
@@ -958,7 +998,7 @@ class CRMAgentGraphService:
                         "set_default": set_default,
                     },
                 }
-            return f"我识别到要为「{customer_name}」创建发票抬头，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+            return CRMAgentGraphService._customer_not_found_response(customer_name), None
 
         if intent == "CREATE_DEPLOYMENT_INFO":
             if not customer_name:
@@ -1008,7 +1048,7 @@ class CRMAgentGraphService:
                         "missing_fields": missing_fields,
                     },
                 }
-            return f"我识别到要为「{customer_name}」创建部署信息，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+            return CRMAgentGraphService._customer_not_found_response(customer_name), None
 
         if intent == "CREATE_CUSTOMER_MEMBER":
             if not customer_name:
@@ -1070,12 +1110,16 @@ class CRMAgentGraphService:
                         "missing_fields": missing_fields,
                     },
                 }
-            return f"我识别到要为「{customer_name}」设置客户成员，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+            return CRMAgentGraphService._customer_not_found_response(customer_name), None
 
         if intent == "CUSTOMER_QUERY":
             return "我识别到这是查询请求。下一步会接入客户上下文查询和汇总能力。", None
 
         return "我还不能可靠理解这条消息，请补充客户名称、业务内容或你希望我执行的动作。", None
+
+    @staticmethod
+    def _customer_not_found_response(customer_name: str) -> str:
+        return f"我识别到客户「{customer_name}」，但没有找到你可访问的客户。可以换成客户全称试试。"
 
     @staticmethod
     def _build_payment_record_response(customer: Dict[str, Any], parsed: Dict[str, Any], business_context: Dict[str, Any]):

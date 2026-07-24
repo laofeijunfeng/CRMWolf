@@ -45,7 +45,7 @@ class FakeToolService:
     def __init__(self, items=None, customer_context=None):
         self.searches = []
         self.context_queries = []
-        self.items = items or [{"id": 101, "account_name": "越秀金融"}]
+        self.items = [{"id": 101, "account_name": "越秀金融"}] if items is None else items
         self.customer_context = customer_context
 
     async def search_customers(self, context, keyword, limit=10):
@@ -441,7 +441,7 @@ async def test_agent_graph_loads_customer_context_and_generates_ai_suggestions()
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_blocks_low_quality_follow_up_before_customer_search():
+async def test_agent_graph_blocks_low_quality_follow_up_after_customer_search():
     tool_service = FakeToolService()
     suggestion_generator = FakeSuggestionGenerator()
     quality_evaluator = FakeFollowUpQualityEvaluator(score=45, passed=False)
@@ -465,12 +465,60 @@ async def test_agent_graph_blocks_low_quality_follow_up_before_customer_search()
     result = await service.run(input_state("今天和越秀金融聊了下，客户说再看看"))
 
     assert result["response"] == "请补充下一步由谁在什么时间做什么。"
-    assert tool_service.searches == []
+    assert tool_service.searches[0]["keyword"] == "越秀金融"
+    assert tool_service.context_queries == []
     assert suggestion_generator.calls == []
     quality_events = [event for event in result["events"] if event["event"] == "follow_up_quality_evaluated"]
     assert quality_events[0]["score"] == 45
     assert quality_events[0]["passed"] is False
     assert [event["event"] for event in result["events"] if event["event"] == "confirmation_required"] == []
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_customer_not_found_blocks_follow_up_quality():
+    tool_service = FakeToolService(items=[])
+    suggestion_generator = FakeSuggestionGenerator()
+    quality_evaluator = FakeFollowUpQualityEvaluator(score=45, passed=False)
+    service = CRMAgentGraphService(
+        tool_service=tool_service,
+        semantic_parser=FakeSemanticParser(semantic_result(
+            customer={"name_text": "电信全渠", "confidence": 0.95},
+            follow_up={
+                "content": "客户反馈还在流程中",
+                "method": "未指定",
+                "next_action": None,
+                "next_follow_time_text": None,
+                "next_follow_time": None,
+            },
+        )),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=suggestion_generator,
+        follow_up_quality_evaluator=quality_evaluator,
+    )
+
+    result = await service.run(input_state("电信全渠反馈还在流程中"))
+
+    assert tool_service.searches[0]["keyword"] == "电信全渠"
+    assert quality_evaluator.calls == []
+    assert tool_service.context_queries == []
+    assert suggestion_generator.calls == []
+    assert result["response"] == "我识别到客户「电信全渠」，但没有找到你可访问的客户。可以换成客户全称试试。"
+    assert [event["event"] for event in result["events"] if event["event"] == "follow_up_quality_required"] == []
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_stream_skips_quality_context_and_suggestion_when_customer_not_found():
+    service = build_service(semantic_result(customer={"name_text": "电信全渠", "confidence": 0.95}), FakeToolService(items=[]))
+    events = []
+
+    async for event in service.stream_events(input_state("电信全渠反馈还在流程中")):
+        events.append(event)
+
+    step_names = [event["step"] for event in events if event["event"] == "agent_step" and event["status"] == "started"]
+    assert step_names == ["load_memory", "semantic_parse", "search_customer"]
+    assert events[-1]["event"] == "final"
+    assert events[-1]["content"] == "我识别到客户「电信全渠」，但没有找到你可访问的客户。可以换成客户全称试试。"
 
 
 @pytest.mark.asyncio

@@ -547,11 +547,14 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
 .agent-chat {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  flex: 1;
+  height: calc(100dvh - $wolf-topbar-height-v2);
   min-height: 0;
+  overflow: hidden;
   background: #f7f9fd;
 }
 
@@ -754,7 +757,18 @@ onMounted(() => {
 
 @media (max-width: 767px) {
   .agent-chat {
+    height: calc(100dvh - $wolf-topbar-height-mobile-v2 - $wolf-bottom-nav-height-v2);
     min-height: 0;
+
+    @supports (height: calc(100dvh - env(safe-area-inset-bottom))) {
+      height: calc(
+        100dvh
+        - $wolf-topbar-height-mobile-v2
+        - $wolf-bottom-nav-height-v2
+        - $wolf-safe-area-top-v2
+        - $wolf-safe-area-bottom-v2
+      );
+    }
   }
 
   .agent-chat__composer {
