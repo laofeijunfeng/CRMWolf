@@ -45,14 +45,14 @@ export const OpportunityCurrentStageSnapshotSchema = z.object({
   stage_name: z.string(),
   win_probability: z.number(),
   template_sort_order: z.number(),
-  template_code: z.string(),
+  template_code: z.string().nullable().optional(),
   entered_at: z.string(),
   exited_at: NullableStringSchema,
   procurement_method: z.object({
     id: z.number().int(),
     code: z.string(),
     name: z.string()
-  }).passthrough()
+  }).passthrough().nullable().optional()
 }).passthrough()
 
 export const OpportunityApiResponseSchema = z.object({
@@ -61,7 +61,7 @@ export const OpportunityApiResponseSchema = z.object({
   customer_id: z.number().int(),
   customer_name: z.string().optional(),
   procurement_method_id: z.number().int().nullable(),
-  procurement_method_info: OpportunityProcurementMethodInfoSchema.optional(),
+  procurement_method_info: OpportunityProcurementMethodInfoSchema.nullable().optional(),
   total_amount: z.number(),
   user_count: z.number().int(),
   unit_price: z.number(),
@@ -70,19 +70,19 @@ export const OpportunityApiResponseSchema = z.object({
   purchase_type: OpportunityPurchaseTypeSchema,
   decision_maker_count: z.number().int().nullable(),
   expected_closing_date: z.string(),
-  procurement_stage_id: z.number().int(),
+  procurement_stage_id: z.number().int().nullable(),
   stage_name: z.string().optional(),
   win_probability: z.number(),
-  current_stage_snapshot: OpportunityCurrentStageSnapshotSchema.optional(),
+  current_stage_snapshot: OpportunityCurrentStageSnapshotSchema.nullable().optional(),
   owner_id: z.string(),
   owner_info: OpportunityOwnerInfoSchema.optional(),
   creator_id: z.string(),
   creator_info: OpportunityOwnerInfoSchema.optional(),
   status: OpportunityStatusSchema,
   approval_phase: OpportunityApprovalPhaseSchema,
-  actual_amount: z.number().optional(),
-  actual_closing_date: z.string().optional(),
-  loss_reason: z.string().optional(),
+  actual_amount: z.number().nullable().optional(),
+  actual_closing_date: z.string().nullable().optional(),
+  loss_reason: z.string().nullable().optional(),
   created_time: z.string(),
   updated_time: z.string(),
   version: z.number().int(),

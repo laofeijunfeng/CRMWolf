@@ -152,6 +152,25 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_deployment_info", payload, action_key, call_api)
 
+    async def create_customer_member(
+        self,
+        context: AgentToolContext,
+        customer_id: int,
+        member: JsonDict,
+    ) -> AgentToolResult:
+        payload = {"customer_id": customer_id, "member": member}
+        action_key = self._action_key("create_customer_member", context, payload, None)
+
+        async def call_api():
+            return await self.api_client.request(
+                "POST",
+                f"/v1/customers/{customer_id}/members",
+                context.authorization,
+                json=member,
+            )
+
+        return await self._run_write_tool(context, "create_customer_member", payload, action_key, call_api)
+
     async def create_opportunity(
         self,
         context: AgentToolContext,
@@ -314,6 +333,7 @@ class CRMAgentToolService:
             "invoice_titles": f"/v1/customers/{customer_id}/invoice-titles",
             "deployment_infos": f"/v1/deployment-infos/?customer_id={customer_id}",
             "follow_ups": f"/v1/customer-follow-ups/{customer_id}",
+            "member_candidates": f"/v1/customers/{customer_id}/member-candidates",
         }
         result: JsonDict = {}
         for key, path in related_paths.items():

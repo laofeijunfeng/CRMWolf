@@ -194,6 +194,7 @@ class OpportunityResponse(BaseModel):
     decision_maker_count: Optional[int] = Field(None, description="采购决策人数（影响销售策略）")
     expected_closing_date: date = Field(..., description="预计成交日期")
     stage_id: Optional[int] = Field(None, description="当前销售阶段ID（已废弃，保留用于兼容）")
+    procurement_stage_id: Optional[int] = Field(None, description="当前采购阶段ID")
     win_probability: int = Field(..., description="当前阶段赢率（0-100，继承自销售阶段配置）")
     owner_id: str = Field(..., description="负责人系统用户ID")
     status: int = Field(..., description="商机状态：0:跟进中, 1:已赢单, 2:已输单")
@@ -204,6 +205,7 @@ class OpportunityResponse(BaseModel):
     creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
+    updated_time: Optional[datetime] = Field(None, description="最后修改时间，兼容前端字段")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
     current_stage_snapshot: Optional[CurrentStageSnapshotInfo] = Field(None, description="当前阶段快照信息")
     
@@ -242,6 +244,13 @@ class OpportunityProcurementStageInfo(BaseModel):
     can_skip: bool = Field(..., description="是否可跳过")
 
 
+class OpportunityStageInfo(BaseModel):
+    id: int = Field(..., description="阶段快照ID")
+    stage_name: str = Field(..., description="阶段名称")
+    win_probability: int = Field(..., description="阶段赢率")
+    is_default: int = Field(0, description="是否默认阶段，兼容旧前端字段")
+
+
 class OpportunityDetailResponse(OpportunityResponse):
     current_stage_snapshot: Optional[CurrentStageSnapshotInfo] = Field(None, description="当前阶段快照信息")
     procurement_stages: Optional[List[OpportunityProcurementStageInfo]] = Field(None, description="该采购方式的所有阶段列表")
@@ -253,6 +262,7 @@ class OpportunityDetailResponse(OpportunityResponse):
 
 class OpportunityListResponse(OpportunityResponse):
     stage: Optional[OpportunityStageResponse] = Field(None, description="销售阶段信息")
+    stage_info: Optional[OpportunityStageInfo] = Field(None, description="当前阶段信息，兼容旧前端字段")
     customer_name: Optional[str] = Field(None, description="客户名称")
     owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")
 

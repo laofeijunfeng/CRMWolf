@@ -1,6 +1,7 @@
 """Temporal normalization for CRM AI Agent."""
 from __future__ import annotations
 
+import calendar
 from datetime import date, datetime, time, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -65,6 +66,38 @@ class AgentTemporalResolver:
                 return date.fromisoformat(expression.date_text)
             except ValueError:
                 return None
+
+        if expression.kind == "MONTH_DAY":
+            year = expression.year or base_date.year
+            if expression.month is None or expression.day is None:
+                return None
+            if expression.year is None and (expression.month, expression.day) < (base_date.month, base_date.day):
+                year += 1
+            try:
+                return date(year, expression.month, expression.day)
+            except ValueError:
+                return None
+
+        if expression.kind == "MONTH_END":
+            month = expression.month or base_date.month
+            year = expression.year or base_date.year
+            if expression.year is None and expression.month is not None and expression.month < base_date.month:
+                year += 1
+            try:
+                return date(year, month, calendar.monthrange(year, month)[1])
+            except ValueError:
+                return None
+
+        if expression.kind == "RELATIVE_MONTH_END":
+            amount = expression.amount
+            if amount is None:
+                amount = 0 if expression.direction == "current" else 1
+            if expression.direction == "past":
+                amount = -amount
+            total_month = base_date.month - 1 + amount
+            year = base_date.year + total_month // 12
+            month = total_month % 12 + 1
+            return date(year, month, calendar.monthrange(year, month)[1])
 
         if expression.kind == "RELATIVE_DAY":
             amount = expression.amount

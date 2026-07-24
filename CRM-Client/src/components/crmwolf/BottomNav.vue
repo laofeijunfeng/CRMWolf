@@ -17,7 +17,7 @@ import { computed } from 'vue'
 import {
   Banknote,
   BarChart3,
-  Bell,
+  Bot,
   Building2,
   FileText,
   Flag,
@@ -58,7 +58,7 @@ const permissionStore = usePermissionStore()
 // Primary navigation items (§9 bottom-nav-limit: max 5)
 // Only top-level screens (§9 nav-hierarchy)
 const mainNavItems: RouteNavItem[] = [
-  { kind: 'route', route: '/payments', icon: Banknote, label: '回款' },
+  { kind: 'route', route: '/agent', icon: Bot, label: 'Agent' },
   { kind: 'route', route: '/customers', icon: Building2, label: '客户' },
   { kind: 'route', route: '/opportunities', icon: TrendingUp, label: '商机' },
   { kind: 'route', route: '/contracts', icon: FileText, label: '合同' },
@@ -68,8 +68,8 @@ const mainNavItems: RouteNavItem[] = [
 const baseOverflowItems: NavItem[] = [
   { kind: 'route', route: '/sales-dashboard', icon: BarChart3, label: '看板' },
   { kind: 'route', route: '/leads', icon: Flag, label: '线索' },
+  { kind: 'route', route: '/payments', icon: Banknote, label: '回款' },
   { kind: 'route', route: '/invoices', icon: ReceiptText, label: '发票' },
-  { kind: 'route', route: '/approvals', icon: Bell, label: '审批' },
   { kind: 'route', route: '/account', icon: Settings, label: '账户设置' },
   { kind: 'action', action: 'logout', icon: LogOut, label: '退出登录' },
 ]

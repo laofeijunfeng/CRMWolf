@@ -1,7 +1,12 @@
 """CRM AI Agent LangGraph state types."""
 from typing import Any, Dict, List, Optional, TypedDict
 
-from app.services.agent.schemas import AgentMemorySnapshot, AgentSemanticParseResult, AgentSuggestionResult
+from app.services.agent.schemas import (
+    AgentFollowUpQualityResult,
+    AgentMemorySnapshot,
+    AgentSemanticParseResult,
+    AgentSuggestionResult,
+)
 
 
 class AgentGraphState(TypedDict, total=False):
@@ -18,6 +23,9 @@ class AgentGraphState(TypedDict, total=False):
     semantic_result: AgentSemanticParseResult
     semantic_metadata: Dict[str, Any]
     semantic_error: Optional[str]
+    follow_up_quality_result: AgentFollowUpQualityResult
+    follow_up_quality_metadata: Dict[str, Any]
+    follow_up_quality_error: Optional[str]
     parsed: Dict[str, Any]
     customer_candidates: List[Dict[str, Any]]
     selected_customer: Dict[str, Any]

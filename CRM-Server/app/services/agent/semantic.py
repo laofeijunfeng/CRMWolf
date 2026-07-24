@@ -60,12 +60,14 @@ class AgentSemanticParser:
         team_id: int,
         user_message: str,
         memory: Optional[AgentMemorySnapshot] = None,
+        current_date: Optional[date] = None,
     ) -> AgentSemanticParseResult:
         envelope = await self.parse_with_metadata(
             db,
             team_id=team_id,
             user_message=user_message,
             memory=memory,
+            current_date=current_date,
         )
         return envelope.result
 

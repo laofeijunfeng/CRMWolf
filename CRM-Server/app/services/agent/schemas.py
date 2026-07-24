@@ -13,6 +13,7 @@ AgentIntent = Literal[
     "CREATE_CONTACT",
     "CREATE_INVOICE_TITLE",
     "CREATE_DEPLOYMENT_INFO",
+    "CREATE_CUSTOMER_MEMBER",
     "CUSTOMER_QUERY",
     "UNKNOWN",
 ]
@@ -31,7 +32,16 @@ AgentSuggestionAction = Literal[
     "CUSTOMER_QUERY_SUMMARY",
     "NO_ACTION",
 ]
-AgentTemporalKind = Literal["NONE", "EXPLICIT_DATE", "RELATIVE_DAY", "RELATIVE_WEEKDAY", "UNKNOWN"]
+AgentTemporalKind = Literal[
+    "NONE",
+    "EXPLICIT_DATE",
+    "MONTH_DAY",
+    "MONTH_END",
+    "RELATIVE_DAY",
+    "RELATIVE_WEEKDAY",
+    "RELATIVE_MONTH_END",
+    "UNKNOWN",
+]
 AgentTemporalDirection = Literal["past", "current", "next", "future"]
 AgentTemporalUnit = Literal["day", "week", "month"]
 
@@ -80,6 +90,9 @@ class AgentTemporalExpression(BaseModel):
     amount: Optional[int] = Field(None, ge=0, description="相对数量")
     unit: Optional[AgentTemporalUnit] = Field(None, description="相对单位")
     weekday: Optional[int] = Field(None, ge=1, le=7, description="ISO 星期：1=周一，7=周日")
+    year: Optional[int] = Field(None, ge=1970, le=2100, description="年份；用户未表达则为 null")
+    month: Optional[int] = Field(None, ge=1, le=12, description="月份；用户未表达则为 null")
+    day: Optional[int] = Field(None, ge=1, le=31, description="日期；用户未表达则为 null")
     date_text: Optional[str] = Field(None, description="用户明确表达的日期，YYYY-MM-DD")
     hour: Optional[int] = Field(None, ge=0, le=23, description="小时，未指定则为 null")
     minute: Optional[int] = Field(None, ge=0, le=59, description="分钟，未指定则为 null")
@@ -90,6 +103,22 @@ class AgentBusinessSignal(BaseModel):
     type: str = Field(..., description="业务信号类型")
     summary: str = Field(..., description="业务信号摘要")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
+
+
+class AgentFollowUpPrincipleScore(BaseModel):
+    score: int = Field(0, ge=0, le=20, description="该原则得分")
+    max_score: int = Field(0, ge=0, le=20, description="该原则满分")
+    comment: str = Field("", description="一句话说明扣分或得分依据")
+
+
+class AgentFollowUpQualityResult(BaseModel):
+    score: int = Field(0, ge=0, le=100, description="跟进质量总分，满分 100")
+    passed: bool = Field(False, description="是否达到创建跟进记录前的最低质量要求")
+    reason: str = Field("", description="一句话质量结论")
+    missing_aspects: List[str] = Field(default_factory=list, description="需要用户补充的关键信息点")
+    supplement_question: Optional[str] = Field(None, description="低于阈值时，只问一个补充问题")
+    suggested_revision: Optional[str] = Field(None, description="不编造事实前提下的建议优化版本")
+    principle_scores: Dict[str, AgentFollowUpPrincipleScore] = Field(default_factory=dict)
 
 
 class AgentRequestedAction(BaseModel):
@@ -108,6 +137,7 @@ class AgentSemanticParseResult(BaseModel):
     contact: Dict[str, Any] = Field(default_factory=dict)
     invoice_title: Dict[str, Any] = Field(default_factory=dict)
     deployment_info: Dict[str, Any] = Field(default_factory=dict)
+    customer_member: Dict[str, Any] = Field(default_factory=dict)
     business_signals: List[AgentBusinessSignal] = Field(default_factory=list)
     requested_actions: List[AgentRequestedAction] = Field(default_factory=list)
     missing_fields: List[str] = Field(default_factory=list)

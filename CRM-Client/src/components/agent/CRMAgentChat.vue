@@ -1,22 +1,9 @@
 <template>
-  <section class="agent-chat" aria-label="CRM AI Agent 聊天">
-    <div class="agent-chat__header">
-      <div class="agent-chat__title">
-        <Bot class="agent-chat__title-icon" aria-hidden="true" />
-        <div>
-          <h2>CRM AI Agent</h2>
-          <p>围绕客户跟进记录，协助录入、确认和执行 CRM 操作</p>
-        </div>
-      </div>
-      <Badge variant="outline" class="agent-chat__badge">
-        {{ sessionLabel }}
-      </Badge>
-    </div>
-
+  <section class="agent-chat" aria-label="AI Agent 聊天">
     <MessageScroller class="agent-chat__messages" :items-count="messageScrollCount">
       <div v-if="messages.length === 0" class="agent-chat__empty">
         <Sparkles class="agent-chat__empty-icon" aria-hidden="true" />
-        <div class="agent-chat__empty-title">输入一段客户跟进内容开始</div>
+        <div class="agent-chat__empty-title">告诉我客户进展，我来帮你整理下一步</div>
         <div class="agent-chat__examples">
           <button type="button" @click="useExample('今天和越秀金融的王总沟通了下项目进展，客户反馈还在立项评估阶段，暂时持续跟进，下周三再确认进展。')">
             跟进记录
@@ -24,8 +11,8 @@
           <button type="button" @click="useExample('帮我给越秀金融创建联系人王总，手机号 13800138000，职位总经理。')">
             创建联系人
           </button>
-          <button type="button" @click="useExample('光大证券今天回款了')">
-            回款线索
+          <button type="button" @click="useExample('帮我给越秀金融添加售前张三，可跟进项目需求。')">
+            设置客户成员
           </button>
         </div>
       </div>
@@ -86,7 +73,7 @@
         class="agent-chat__textarea"
         rows="3"
         :disabled="isStreaming"
-        placeholder="输入客户跟进、联系人创建、回款等信息..."
+        placeholder="让我帮你记录客户跟进、补客户资料，顺手看看要不要推进商机..."
         aria-label="输入 Agent 消息"
         @keydown.enter.exact.prevent="sendMessage"
       />
@@ -109,7 +96,6 @@ import { computed, onMounted, ref, type Component } from "vue"
 import { toast } from "vue-sonner"
 import {
   AlertTriangle,
-  Bot,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -127,7 +113,6 @@ import {
 import { useUserStore } from "@/stores/user"
 import { agentApi, type AgentChatSSEEvent, type AgentEventType, type AgentMessageResponse } from "@/api/agent"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
 import { Bubble } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message } from "@/components/ui/message"
@@ -165,7 +150,6 @@ const userInitial = computed(() => {
   const name = userStore.userInfo?.name
   return name !== undefined && name.length > 0 ? name.charAt(0) : "我"
 })
-const sessionLabel = computed(() => sessionId.value !== undefined ? `会话 #${sessionId.value}` : "新会话")
 const messageScrollCount = computed(() => (
   messages.value.length
   + messages.value.reduce((total, message) => total + message.steps.length, 0)
@@ -313,6 +297,7 @@ const stepIcon = (kind?: AgentEventType): Component => {
   switch (kind) {
     case "agent_step":
     case "semantic_parsed":
+    case "follow_up_quality_evaluated":
     case "intent":
     case "entity_parse":
     case "business_suggestions":
@@ -330,6 +315,7 @@ const stepIcon = (kind?: AgentEventType): Component => {
     case "contact_fields_required":
     case "invoice_title_fields_required":
     case "deployment_info_fields_required":
+    case "customer_member_fields_required":
     case "payment_fields_required":
     case "business_selection_required":
       return HelpCircle
@@ -337,6 +323,7 @@ const stepIcon = (kind?: AgentEventType): Component => {
     case "contact_fields_completed":
     case "invoice_title_fields_completed":
     case "deployment_info_fields_completed":
+    case "customer_member_fields_completed":
     case "payment_fields_completed":
     case "business_selected":
       return UserCheck
@@ -345,6 +332,7 @@ const stepIcon = (kind?: AgentEventType): Component => {
     case "task_failed":
     case "error":
     case "suggestion_failed":
+    case "follow_up_quality_failed":
     case "customer_selection_failed":
     case "business_selection_failed":
       return AlertTriangle
@@ -394,10 +382,14 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return `${event.status === "completed" ? "完成" : "开始"}：${stringifyValue(event.content ?? event.step)}`
     case "semantic_parsed":
       return formatAITrace("AI 语义解析", event.parse_source, event.model, event.fallback_reason, event.fallback_error)
+    case "follow_up_quality_evaluated":
+      return `${formatAITrace("AI 跟进质量评估", event.quality_source, event.model, event.fallback_reason, event.fallback_error)}，评分：${stringifyValue(event.score)}`
+    case "follow_up_quality_required":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充跟进记录信息"
     case "intent":
       return `识别意图：${stringifyValue(event.intent)}`
     case "entity_parse":
-      return "已解析客户、跟进内容和下一步动作"
+      return "已解析客户、业务内容和下一步动作"
     case "tool_result":
       return `${event.success === true ? "Tool 调用成功" : "Tool 调用失败"}：${stringifyValue(event.tool_name)}`
     case "customer_candidates":
@@ -408,6 +400,8 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return `${formatAITrace("AI 业务建议", event.suggestion_source, event.model, event.fallback_reason, event.fallback_error)}，建议：${formatSuggestionTitles(event.suggestions)}`
     case "suggestion_failed":
       return `AI 业务建议生成失败：${stringifyValue(event.message)}`
+    case "follow_up_quality_failed":
+      return `AI 跟进质量评估失败：${stringifyValue(event.message)}`
     case "customer_selection_required":
       return `需要选择客户：${formatCustomerNames(event.customers)}`
     case "customer_selected":
@@ -432,6 +426,10 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充部署信息"
     case "deployment_info_fields_completed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "部署信息已补齐"
+    case "customer_member_fields_required":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充客户成员信息"
+    case "customer_member_fields_completed":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "客户成员信息已补齐"
     case "payment_fields_required":
       return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充回款信息"
     case "payment_fields_completed":
@@ -551,53 +549,10 @@ onMounted(() => {
 <style scoped lang="scss">
 .agent-chat {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  height: calc(100dvh - 64px);
-  min-height: 560px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  flex: 1;
+  min-height: 0;
   background: #f7f9fd;
-}
-
-.agent-chat__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 24px;
-  border-bottom: 1px solid #e4ecfc;
-  background: #fff;
-}
-
-.agent-chat__title {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: 12px;
-
-  h2 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 650;
-    color: #172033;
-  }
-
-  p {
-    margin: 2px 0 0;
-    font-size: 13px;
-    color: #64748b;
-  }
-}
-
-.agent-chat__title-icon {
-  width: 32px;
-  height: 32px;
-  padding: 7px;
-  border-radius: 8px;
-  color: #2563eb;
-  background: #eff6ff;
-}
-
-.agent-chat__badge {
-  flex-shrink: 0;
 }
 
 .agent-chat__messages {
@@ -799,21 +754,7 @@ onMounted(() => {
 
 @media (max-width: 767px) {
   .agent-chat {
-    height: calc(100dvh - 56px);
     min-height: 0;
-  }
-
-  .agent-chat__header {
-    align-items: flex-start;
-    padding: 12px 16px;
-  }
-
-  .agent-chat__title {
-    align-items: flex-start;
-
-    p {
-      display: none;
-    }
   }
 
   .agent-chat__composer {

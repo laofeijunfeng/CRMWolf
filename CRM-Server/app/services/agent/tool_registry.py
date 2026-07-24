@@ -50,6 +50,11 @@ class CreateDeploymentInfoInput(BaseModel):
     deployment_info: Dict[str, Any]
 
 
+class CreateCustomerMemberInput(BaseModel):
+    customer_id: int = Field(..., ge=1)
+    member: Dict[str, Any]
+
+
 class CreateOpportunityInput(BaseModel):
     opportunity: Dict[str, Any]
     idempotency_suffix: Optional[str] = None
@@ -210,6 +215,13 @@ class AgentToolRegistry:
                 deployment_info=model.deployment_info,
             )
 
+        async def create_customer_member(service, context, model):
+            return await service.create_customer_member(
+                context,
+                customer_id=model.customer_id,
+                member=model.member,
+            )
+
         async def create_opportunity(service, context, model):
             return await service.create_opportunity(
                 context,
@@ -276,6 +288,7 @@ class AgentToolRegistry:
             AgentToolSpec("create_contact", "创建客户联系人", CreateContactInput, True, True, create_contact),
             AgentToolSpec("create_invoice_title", "创建发票抬头", CreateInvoiceTitleInput, True, True, create_invoice_title),
             AgentToolSpec("create_deployment_info", "创建部署信息", CreateDeploymentInfoInput, True, True, create_deployment_info),
+            AgentToolSpec("create_customer_member", "添加客户团队成员", CreateCustomerMemberInput, True, True, create_customer_member),
             AgentToolSpec("create_opportunity", "创建客户商机", CreateOpportunityInput, True, True, create_opportunity),
             AgentToolSpec("list_customer_opportunities", "按当前用户权限查询客户商机列表", ListCustomerOpportunitiesInput, False, False, list_customer_opportunities),
             AgentToolSpec("get_opportunity_detail", "按当前用户权限获取商机详情", GetOpportunityDetailInput, False, False, get_opportunity_detail),

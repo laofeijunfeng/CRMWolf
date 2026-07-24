@@ -55,6 +55,8 @@ class FakeCRMAPIClient:
             return {"id": 6001, "customer_id": 101, "title": "越秀金融控股有限公司", "is_default": True}
         if method == "POST" and path == "/v1/deployment-infos/":
             return {"id": 6101, **json}
+        if method == "POST" and path == "/v1/customers/101/members":
+            return {"id": 6201, "customer_id": 101, **json}
         if method == "POST" and path == "/v1/opportunities/":
             return {"id": 7101, **json, "approval_phase": "pending_review"}
         if method == "GET" and (path == "/v1/opportunities/" or path.startswith("/v1/opportunities/?customer_id=")):
@@ -422,6 +424,41 @@ async def test_agent_tool_create_payment_record_calls_existing_api():
         assert fake_client.calls[0]["method"] == "POST"
         assert fake_client.calls[0]["path"] == "/v1/payments/payment-plans/301/records"
         assert fake_client.calls[0]["json"]["commission_member_id"] == "9"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_create_customer_member_calls_existing_api():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    try:
+        result = await service.create_customer_member(
+            _context(db),
+            customer_id=101,
+            member={
+                "user_id": "9",
+                "member_role": "PRESALES",
+                "access_level": "FOLLOW_UP",
+            },
+        )
+
+        assert result.success is True
+        assert result.data["id"] == 6201
+        assert fake_client.calls == [{
+            "method": "POST",
+            "path": "/v1/customers/101/members",
+            "authorization": "Bearer test-token",
+            "params": None,
+            "json": {
+                "user_id": "9",
+                "member_role": "PRESALES",
+                "access_level": "FOLLOW_UP",
+            },
+        }]
+        assert db.query(AgentToolCall).one().tool_name == "create_customer_member"
     finally:
         db.close()
         engine.dispose()

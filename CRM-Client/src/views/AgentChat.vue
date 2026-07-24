@@ -12,7 +12,7 @@ const pageTitleStore = usePageTitleStore()
 const headerStore = useHeaderStore()
 
 onMounted(() => {
-  pageTitleStore.setTitle("CRM AI Agent")
+  pageTitleStore.setTitle("AI Agent")
   headerStore.clear()
 })
 

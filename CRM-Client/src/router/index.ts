@@ -6,7 +6,7 @@ import { useTeamStore } from '@/stores/team'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/leads'
+    redirect: '/agent'
   },
   {
     path: '/login',
@@ -59,7 +59,7 @@ const routes: RouteRecordRaw[] = [
         path: 'agent',
         name: 'AgentChat',
         component: () => import('@/views/AgentChat.vue'),
-        meta: { requiresAuth: true, title: 'CRM AI Agent' }
+        meta: { requiresAuth: true, title: 'AI Agent' }
       },
       {
         path: 'leads',

@@ -9,6 +9,9 @@ export type AgentEventType =
   | "agent_step"
   | "intent"
   | "semantic_parsed"
+  | "follow_up_quality_evaluated"
+  | "follow_up_quality_required"
+  | "follow_up_quality_failed"
   | "entity_parse"
   | "tool_result"
   | "customer_candidates"
@@ -27,6 +30,8 @@ export type AgentEventType =
   | "invoice_title_fields_completed"
   | "deployment_info_fields_required"
   | "deployment_info_fields_completed"
+  | "customer_member_fields_required"
+  | "customer_member_fields_completed"
   | "payment_fields_required"
   | "payment_fields_completed"
   | "business_selection_required"
@@ -81,6 +86,10 @@ export interface AgentChatSSEEvent {
   model?: string | null
   fallback_reason?: string | null
   fallback_error?: string | null
+  score?: number
+  passed?: boolean
+  quality_source?: string | null
+  missing_aspects?: string[]
   action?: string
   tool_name?: string
   success?: boolean

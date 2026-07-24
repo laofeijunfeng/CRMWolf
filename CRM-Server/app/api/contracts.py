@@ -559,7 +559,7 @@ def get_contracts(
     )
 
 
-@router.get("/opportunity/{opportunity_id}", response_model=ContractListResponse, summary="根据商机获取合同", description="""
+@router.get("/opportunity/{opportunity_id}", response_model=Optional[ContractListResponse], summary="根据商机获取合同", description="""
 获取指定商机关联的合同信息。
 
 **功能说明：**
@@ -577,20 +577,16 @@ def get_contract_by_opportunity(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    contract = contract_crud.get_by_opportunity_id(db, opportunity_id, team_id)
-
-    if not contract:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="该商机暂无合同"
-        )
-
     opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="商机不存在"
         )
+
+    contract = contract_crud.get_by_opportunity_id(db, opportunity_id, team_id)
+    if not contract:
+        return None
     
     customer_info = None
     if contract.customer_id:

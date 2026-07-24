@@ -71,7 +71,7 @@ export interface Opportunity {
       is_default_start: boolean
       can_skip: boolean
     }[]
-  }
+  } | null
   total_amount: number
   user_count: number
   unit_price: number
@@ -80,7 +80,7 @@ export interface Opportunity {
   purchase_type: PurchaseType
   decision_maker_count: number | null
   expected_closing_date: string
-  procurement_stage_id: number
+  procurement_stage_id: number | null
   stage_name?: string
   win_probability: number
   current_stage_snapshot?: {
@@ -88,24 +88,24 @@ export interface Opportunity {
     stage_name: string
     win_probability: number
     template_sort_order: number
-    template_code: string
+    template_code?: string | null
     entered_at: string
     exited_at: string | null
-    procurement_method: {
+    procurement_method?: {
       id: number
       code: string
       name: string
-    }
-  }
+    } | null
+  } | null
   owner_id: string
   owner_info?: OwnerInfo
   creator_id: string
   creator_info?: OwnerInfo
   status: OpportunityStatus
   approval_phase: 'draft' | 'pending_review' | 'approved' | 'rejected'
-  actual_amount?: number
-  actual_closing_date?: string
-  loss_reason?: string
+  actual_amount?: number | null
+  actual_closing_date?: string | null
+  loss_reason?: string | null
   created_time: string
   updated_time: string
   version: number

@@ -422,7 +422,7 @@ class AgentSuggestionGenerator:
                 reason="用户输入体现已回款，但该客户上下文中没有商机和合同；按 CRM 业务链路应先补齐商机，再处理合同和回款。",
                 priority="high",
                 requires_confirmation=True,
-                missing_fields=["商机名称", "预计成交金额", "预计成交日期", "采购方式"],
+                missing_fields=["预计成交金额", "采购用户数", "授权模式", "采购类型", "预计成交日期"],
                 related_object_type=None,
                 related_object_id=None,
                 risk_notes=["当前 Agent 暂不支持创建合同，回款计划和回款登记都需要已有合同链路。"],

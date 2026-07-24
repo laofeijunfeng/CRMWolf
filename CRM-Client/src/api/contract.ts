@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import type { PaginatedResponse } from '@/types/pagination'
+import { z } from 'zod'
 
 export type LicenseType = 'SUBSCRIPTION' | 'PERPETUAL'
 
@@ -167,34 +168,132 @@ export interface ContractFromOpportunityParams {
   file: File
 }
 
+const NullableStringSchema = z.string().nullable().optional()
+const AmountStringSchema = z.union([z.string(), z.number()]).transform(String)
+
+const CreatorBasicInfoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  avatar_url: NullableStringSchema
+})
+
+const CustomerBasicInfoSchema = z.object({
+  id: z.number(),
+  account_name: z.string()
+})
+
+const OpportunityBasicInfoSchema = z.object({
+  id: z.number(),
+  opportunity_name: z.string()
+})
+
+const ContactBasicInfoSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  mobile: z.string().optional(),
+  position: NullableStringSchema
+})
+
+const ContractStatusSchema = z.enum(['DRAFT', 'PENDING_REVIEW', 'SIGNED', 'EFFECTIVE', 'EXPIRED', 'TERMINATED'])
+
+const ContractListItemSchema = z.object({
+  id: z.number(),
+  contract_number: z.string(),
+  contract_name: z.string(),
+  customer_id: z.number(),
+  customer_name: z.string().optional(),
+  opportunity_id: z.number(),
+  opportunity_name: z.string().optional(),
+  signing_contact_id: z.number(),
+  user_count: z.number(),
+  total_amount: AmountStringSchema,
+  license_type: z.enum(['SUBSCRIPTION', 'PERPETUAL']),
+  subscription_years: z.number().nullable(),
+  standard_unit_price: AmountStringSchema,
+  status: ContractStatusSchema,
+  signing_date: z.string().nullable(),
+  effective_date: z.string().nullable(),
+  expiry_date: z.string().nullable(),
+  owner_id: z.string(),
+  creator_id: z.string(),
+  created_time: z.string(),
+  last_modified_time: z.string(),
+  customer_info: CustomerBasicInfoSchema.optional(),
+  opportunity_info: OpportunityBasicInfoSchema.optional(),
+  signing_contact_info: ContactBasicInfoSchema.optional(),
+  owner_info: CreatorBasicInfoSchema.optional(),
+  creator_info: CreatorBasicInfoSchema.optional(),
+  contract_file_path: NullableStringSchema,
+  contract_file_name: NullableStringSchema,
+  contract_file_size: z.number().nullable().optional(),
+  contract_file_mime_type: NullableStringSchema
+})
+
+const ContractResponseSchema = ContractListItemSchema.extend({
+  contact_info: ContactBasicInfoSchema.optional(),
+  contacts: z.array(z.object({
+    id: z.number(),
+    name: z.string(),
+    mobile: z.string()
+  })).optional()
+})
+
+const PaginatedContractListResponseSchema = z.object({
+  items: z.array(ContractListItemSchema),
+  total: z.number(),
+  page: z.number(),
+  page_size: z.number(),
+  total_pages: z.number()
+})
+
+const ContractListApiResponseSchema = z.union([
+  z.array(ContractListItemSchema),
+  PaginatedContractListResponseSchema
+])
+
+const OwnerFilterOptionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  is_me: z.boolean()
+})
+
+const OwnerFilterOptionsResponseSchema = z.object({
+  data: z.array(OwnerFilterOptionSchema)
+})
+
 const contractApi = {
   createContract: async (payload: ContractCreateWithFile): Promise<ContractResponse> => {
     const formData = new FormData()
     formData.append('contract_payload', JSON.stringify(payload.data))
     formData.append('file', payload.file)
 
-    const response = await request.post<ContractResponse>('/v1/contracts/', formData)
-    return response
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.post('/v1/contracts/', formData)
+    return ContractResponseSchema.parse(response) as ContractResponse
   },
 
   getContracts: async (params?: ContractQueryParams): Promise<ContractListResponse[] | PaginatedResponse<ContractListResponse>> => {
-    const response = await request.get<ContractListResponse[] | PaginatedResponse<ContractListResponse>>('/v1/contracts/', { params })
-    return response
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/contracts/', { params })
+    return ContractListApiResponseSchema.parse(response) as ContractListResponse[] | PaginatedResponse<ContractListResponse>
   },
 
   getContract: async (contractId: number): Promise<ContractResponse> => {
-    const response = await request.get<ContractResponse>(`/v1/contracts/${contractId}`)
-    return response
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get(`/v1/contracts/${contractId}`)
+    return ContractResponseSchema.parse(response) as ContractResponse
   },
 
   updateContract: async (contractId: number, data: ContractUpdate): Promise<ContractResponse> => {
-    const response = await request.put<ContractResponse>(`/v1/contracts/${contractId}`, data)
-    return response
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.put(`/v1/contracts/${contractId}`, data)
+    return ContractResponseSchema.parse(response) as ContractResponse
   },
 
   deleteContract: async (contractId: number): Promise<{ message: string }> => {
-    const response = await request.delete<{ message: string }>(`/v1/contracts/${contractId}`)
-    return response
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.delete(`/v1/contracts/${contractId}`)
+    return z.object({ message: z.string() }).parse(response)
   },
 
   createContractFromOpportunity: async (opportunityId: number, params: ContractFromOpportunityParams): Promise<ContractResponse> => {
@@ -203,25 +302,29 @@ const contractApi = {
     formData.append('signing_contact_id', String(params.signing_contact_id))
     formData.append('file', params.file)
 
-    const response = await request.post<ContractResponse>(`/v1/contracts/from-opportunity/${opportunityId}`, formData)
-    return response
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.post(`/v1/contracts/from-opportunity/${opportunityId}`, formData)
+    return ContractResponseSchema.parse(response) as ContractResponse
   },
 
-  getContractByOpportunity: async (opportunityId: number): Promise<ContractListResponse> => {
-    const response = await request.get<ContractListResponse>(`/v1/contracts/opportunity/${opportunityId}`, {
+  getContractByOpportunity: async (opportunityId: number): Promise<ContractListResponse | null> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get(`/v1/contracts/opportunity/${opportunityId}`, {
       skipErrorNotification: true
     })
-    return response
+    return z.union([ContractListItemSchema, z.null()]).parse(response) as ContractListResponse | null
   },
 
   getCustomerContracts: async (customerId: number, params?: { skip?: number; limit?: number }): Promise<ContractListResponse[]> => {
-    const response = await request.get<ContractListResponse[]>(`/v1/customers/${customerId}/contracts`, { params })
-    return response
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get(`/v1/customers/${customerId}/contracts`, { params })
+    return z.array(ContractListItemSchema).parse(response) as ContractListResponse[]
   },
 
   getOwnerFilterOptions: async (): Promise<OwnerFilterOptionsResponse> => {
-    const response = await request.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'contract' } })
-    return response
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/filter-options/owners', { params: { resource: 'contract' } })
+    return OwnerFilterOptionsResponseSchema.parse(response) as OwnerFilterOptionsResponse
   }
 }
 

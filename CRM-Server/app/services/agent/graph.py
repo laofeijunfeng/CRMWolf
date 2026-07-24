@@ -7,6 +7,11 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from langgraph.graph import END, START, StateGraph
 
 from app.services.agent.memory import AgentMemoryService, agent_memory_service
+from app.services.agent.quality import (
+    AgentFollowUpQualityEvaluator,
+    AgentFollowUpQualityEvaluatorError,
+    agent_follow_up_quality_evaluator,
+)
 from app.services.agent.schemas import AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.state import AgentGraphState
@@ -30,11 +35,13 @@ class CRMAgentGraphService:
         tool_registry: Optional[AgentToolRegistry] = None,
         temporal_resolver: Optional[AgentTemporalResolver] = None,
         suggestion_generator: Optional[AgentSuggestionGenerator] = None,
+        follow_up_quality_evaluator: Optional[AgentFollowUpQualityEvaluator] = None,
     ) -> None:
         self.semantic_parser = semantic_parser or agent_semantic_parser
         self.memory_service = memory_service or agent_memory_service
         self.temporal_resolver = temporal_resolver or agent_temporal_resolver
         self.suggestion_generator = suggestion_generator or agent_suggestion_generator
+        self.follow_up_quality_evaluator = follow_up_quality_evaluator or agent_follow_up_quality_evaluator
         if tool_registry:
             self.tool_registry = tool_registry
         elif tool_service:
@@ -47,13 +54,15 @@ class CRMAgentGraphService:
         graph = StateGraph(AgentGraphState)
         graph.add_node("load_memory", self._load_memory)
         graph.add_node("semantic_parse", self._semantic_parse)
+        graph.add_node("evaluate_follow_up_quality", self._evaluate_follow_up_quality)
         graph.add_node("search_customer", self._search_customer)
         graph.add_node("load_customer_context", self._load_customer_context)
         graph.add_node("generate_suggestions", self._generate_suggestions)
         graph.add_node("build_response", self._build_response)
         graph.add_edge(START, "load_memory")
         graph.add_edge("load_memory", "semantic_parse")
-        graph.add_edge("semantic_parse", "search_customer")
+        graph.add_edge("semantic_parse", "evaluate_follow_up_quality")
+        graph.add_edge("evaluate_follow_up_quality", "search_customer")
         graph.add_edge("search_customer", "load_customer_context")
         graph.add_edge("load_customer_context", "generate_suggestions")
         graph.add_edge("generate_suggestions", "build_response")
@@ -128,6 +137,41 @@ class CRMAgentGraphService:
             "parsed": parsed,
         }
 
+    async def _evaluate_follow_up_quality(self, state: AgentGraphState) -> AgentGraphState:
+        semantic_result = state.get("semantic_result")
+        if (
+            not semantic_result
+            or semantic_result.intent != "CUSTOMER_FOLLOW_UP"
+            or self._requires_clarification(semantic_result, has_memory_customer=bool(self._memory_current_customer(state.get("memory"))))
+            or not state.get("db")
+        ):
+            return {}
+
+        try:
+            envelope = await self.follow_up_quality_evaluator.evaluate_with_metadata(
+                state["db"],
+                team_id=state["team_id"],
+                user_message=state.get("content", ""),
+                semantic_result=semantic_result,
+                memory=state.get("memory"),
+                current_date=self._current_date(state),
+            )
+        except AgentFollowUpQualityEvaluatorError as exc:
+            return {
+                "follow_up_quality_error": str(exc),
+                "events": [{"event": "follow_up_quality_failed", "message": str(exc)}],
+            }
+
+        return {
+            "follow_up_quality_result": envelope.result,
+            "follow_up_quality_metadata": {
+                "quality_source": envelope.quality_source,
+                "model": envelope.model,
+                "fallback_reason": envelope.fallback_reason,
+                "fallback_error": envelope.fallback_error,
+            },
+        }
+
     async def _search_customer(self, state: AgentGraphState) -> AgentGraphState:
         semantic_result = state.get("semantic_result")
         parsed = state.get("parsed") or {}
@@ -146,6 +190,7 @@ class CRMAgentGraphService:
             or not state.get("authorization")
             or not state.get("db")
             or self._requires_clarification(semantic_result)
+            or self._follow_up_quality_blocks(state)
         ):
             return {}
 
@@ -178,6 +223,7 @@ class CRMAgentGraphService:
             or not state.get("authorization")
             or not state.get("db")
             or self._requires_clarification(state.get("semantic_result"), has_memory_customer=bool(self._memory_current_customer(state.get("memory"))))
+            or self._follow_up_quality_blocks(state)
         ):
             return {}
 
@@ -207,6 +253,8 @@ class CRMAgentGraphService:
         semantic_result = state.get("semantic_result")
         business_context = state.get("business_context") or {}
         if not semantic_result or not business_context or self._requires_clarification(semantic_result, has_memory_customer=bool(self._memory_current_customer(state.get("memory")))):
+            return {}
+        if self._follow_up_quality_blocks(state):
             return {}
 
         try:
@@ -279,6 +327,25 @@ class CRMAgentGraphService:
                 "fallback_reason": suggestion_metadata.get("fallback_reason"),
                 "fallback_error": suggestion_metadata.get("fallback_error"),
             })
+        follow_up_quality_result = state.get("follow_up_quality_result")
+        if follow_up_quality_result and not suppress_trace_events:
+            follow_up_quality_metadata = state.get("follow_up_quality_metadata") or {}
+            events.append({
+                "event": "follow_up_quality_evaluated",
+                "score": follow_up_quality_result.score,
+                "passed": follow_up_quality_result.passed,
+                "reason": follow_up_quality_result.reason,
+                "missing_aspects": follow_up_quality_result.missing_aspects,
+                "quality_source": follow_up_quality_metadata.get("quality_source"),
+                "model": follow_up_quality_metadata.get("model"),
+                "fallback_reason": follow_up_quality_metadata.get("fallback_reason"),
+                "fallback_error": follow_up_quality_metadata.get("fallback_error"),
+            })
+        elif state.get("follow_up_quality_error") and not suppress_trace_events:
+            events.append({
+                "event": "follow_up_quality_failed",
+                "message": state["follow_up_quality_error"],
+            })
         elif state.get("suggestion_error") and not suppress_trace_events:
             events.append({
                 "event": "suggestion_failed",
@@ -304,6 +371,19 @@ class CRMAgentGraphService:
             events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
             return {"response": response, "events": events}
 
+        if self._follow_up_quality_blocks(state):
+            quality = state["follow_up_quality_result"]
+            response = quality.supplement_question or "这条跟进还差一点关键信息，请补充后我再帮你记录。"
+            events.append({
+                "event": "follow_up_quality_required",
+                "content": response,
+                "score": quality.score,
+                "reason": quality.reason,
+                "missing_aspects": quality.missing_aspects,
+            })
+            events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
+            return {"response": response, "events": events}
+
         response, action = self._build_business_response(intent, parsed, candidates, state.get("business_context") or {})
         stage_move_action = self._stage_move_action_from_suggestions(
             suggestion_result.suggestions if suggestion_result else [],
@@ -315,7 +395,7 @@ class CRMAgentGraphService:
             parsed,
             state.get("selected_customer") or {},
         )
-        if suggestion_result and not action:
+        if suggestion_result and not action and not self._has_deferred_next_task(action):
             response = self._append_suggestions_to_response(response, suggestion_result.suggestions)
         if stage_move_action:
             if action and action.get("action") == "create_customer_follow_up":
@@ -337,6 +417,7 @@ class CRMAgentGraphService:
                 "select_customer_for_contact",
                 "select_customer_for_invoice_title",
                 "select_customer_for_deployment_info",
+                "select_customer_for_customer_member",
                 "select_customer_for_payment_record",
                 "select_customer_for_opportunity",
             }:
@@ -349,6 +430,8 @@ class CRMAgentGraphService:
                 event_name = "invoice_title_fields_required"
             elif action.get("action") == "collect_deployment_info_fields":
                 event_name = "deployment_info_fields_required"
+            elif action.get("action") == "collect_customer_member_fields":
+                event_name = "customer_member_fields_required"
             elif action.get("action") == "collect_payment_fields":
                 event_name = "payment_fields_required"
             elif action.get("action") in {"select_contract_for_payment_plan", "select_payment_plan_for_record"}:
@@ -362,6 +445,13 @@ class CRMAgentGraphService:
         })
         return {"response": response, "events": events}
 
+    @staticmethod
+    def _has_deferred_next_task(action: Optional[Dict[str, Any]]) -> bool:
+        if not action:
+            return False
+        payload = action.get("payload")
+        return isinstance(payload, dict) and isinstance(payload.get("_next_task"), dict)
+
     async def run(self, input_state: AgentGraphState) -> AgentGraphState:
         result: Dict[str, Any] = await self._graph.ainvoke(input_state)
         return result
@@ -371,6 +461,7 @@ class CRMAgentGraphService:
         steps = [
             ("load_memory", "加载会话记忆", self._load_memory),
             ("semantic_parse", "AI 语义理解", self._semantic_parse),
+            ("evaluate_follow_up_quality", "AI 跟进质量评估", self._evaluate_follow_up_quality),
             ("search_customer", "搜索客户", self._search_customer),
             ("load_customer_context", "加载客户上下文", self._load_customer_context),
             ("generate_suggestions", "AI 生成业务建议", self._generate_suggestions),
@@ -383,6 +474,9 @@ class CRMAgentGraphService:
                 yield event
             if step_name == "semantic_parse":
                 for event in self._build_semantic_trace_events(state):
+                    yield event
+            elif step_name == "evaluate_follow_up_quality":
+                for event in self._build_follow_up_quality_trace_events(state):
                     yield event
             elif step_name == "generate_suggestions":
                 for event in self._build_suggestion_trace_events(state):
@@ -447,6 +541,31 @@ class CRMAgentGraphService:
         return []
 
     @staticmethod
+    def _build_follow_up_quality_trace_events(state: AgentGraphState) -> List[Dict[str, Any]]:
+        quality = state.get("follow_up_quality_result")
+        if quality:
+            metadata = state.get("follow_up_quality_metadata") or {}
+            return [{
+                "event": "follow_up_quality_evaluated",
+                "score": quality.score,
+                "passed": quality.passed,
+                "reason": quality.reason,
+                "missing_aspects": quality.missing_aspects,
+                "quality_source": metadata.get("quality_source"),
+                "model": metadata.get("model"),
+                "fallback_reason": metadata.get("fallback_reason"),
+                "fallback_error": metadata.get("fallback_error"),
+            }]
+        if state.get("follow_up_quality_error"):
+            return [{"event": "follow_up_quality_failed", "message": state["follow_up_quality_error"]}]
+        return []
+
+    @staticmethod
+    def _follow_up_quality_blocks(state: AgentGraphState) -> bool:
+        quality = state.get("follow_up_quality_result")
+        return bool(quality and not quality.passed)
+
+    @staticmethod
     def _requires_clarification(semantic_result: Optional[AgentSemanticParseResult], *, has_memory_customer: bool = False) -> bool:
         if semantic_result is None:
             return False
@@ -474,6 +593,7 @@ class CRMAgentGraphService:
         contact = dict(semantic_result.contact or {})
         invoice_title = dict(semantic_result.invoice_title or {})
         deployment_info = dict(semantic_result.deployment_info or {})
+        customer_member = dict(semantic_result.customer_member or {})
         payment = semantic_result.payment
         next_follow_time_iso = self.temporal_resolver.resolve_follow_up_time(
             semantic_result.follow_up.next_follow_time,
@@ -559,6 +679,14 @@ class CRMAgentGraphService:
                 if semantic_result.intent == "CREATE_DEPLOYMENT_INFO" and semantic_result.missing_fields
                 else CRMAgentGraphService.missing_deployment_info_fields(deployment_info)
                 if semantic_result.intent == "CREATE_DEPLOYMENT_INFO"
+                else []
+            ),
+            "customer_member": CRMAgentGraphService._drop_empty_values(customer_member),
+            "missing_customer_member_fields": (
+                semantic_result.missing_fields
+                if semantic_result.intent == "CREATE_CUSTOMER_MEMBER" and semantic_result.missing_fields
+                else CRMAgentGraphService.missing_customer_member_fields(customer_member)
+                if semantic_result.intent == "CREATE_CUSTOMER_MEMBER"
                 else []
             ),
             "next_action": semantic_result.follow_up.next_action,
@@ -881,6 +1009,68 @@ class CRMAgentGraphService:
                     },
                 }
             return f"我识别到要为「{customer_name}」创建部署信息，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
+
+        if intent == "CREATE_CUSTOMER_MEMBER":
+            if not customer_name:
+                return "我识别到这是设置客户成员，但还缺少明确客户名称。请补充客户名称。", None
+            member = parsed.get("customer_member") or {}
+            missing_fields = CRMAgentGraphService.missing_customer_member_fields(member)
+            if len(candidates) == 1:
+                customer = candidates[0]
+                if missing_fields:
+                    return (
+                        f"我识别到要为「{customer.get('account_name')}」设置客户成员，"
+                        f"还需要补充：{CRMAgentGraphService.format_customer_member_missing_fields(missing_fields)}。"
+                    ), {
+                        "action": "collect_customer_member_fields",
+                        "customer": customer,
+                        "payload": {
+                            "customer_id": customer.get("id"),
+                            "customer_member": member,
+                            "missing_fields": missing_fields,
+                            "member_candidates": business_context.get("member_candidates"),
+                        },
+                    }
+                resolved_member, member_error = CRMAgentGraphService.resolve_customer_member(member, business_context)
+                if member_error:
+                    return member_error, {
+                        "action": "collect_customer_member_fields",
+                        "customer": customer,
+                        "payload": {
+                            "customer_id": customer.get("id"),
+                            "customer_member": member,
+                            "missing_fields": ["user_name"],
+                            "member_candidates": business_context.get("member_candidates"),
+                        },
+                    }
+                return (
+                    f"我识别到要为「{customer.get('account_name')}」添加客户成员「{resolved_member.get('user_name') or resolved_member.get('user_id')}」。"
+                    "请确认是否添加？"
+                ), {
+                    "action": "create_customer_member",
+                    "customer": customer,
+                    "payload": {
+                        "customer_id": customer.get("id"),
+                        "member": resolved_member,
+                    },
+                }
+            if len(candidates) > 1:
+                candidate_lines = [
+                    f"{index}. {customer.get('account_name')}"
+                    for index, customer in enumerate(candidates, start=1)
+                ]
+                return (
+                    "我找到了多个可能的客户，请回复序号或客户名称确认要给哪一个客户设置成员："
+                    + "；".join(candidate_lines)
+                ), {
+                    "action": "select_customer_for_customer_member",
+                    "customers": candidates,
+                    "payload": {
+                        "customer_member": member,
+                        "missing_fields": missing_fields,
+                    },
+                }
+            return f"我识别到要为「{customer_name}」设置客户成员，但当前没有搜索到可访问的客户。请确认客户名称是否正确。", None
 
         if intent == "CUSTOMER_QUERY":
             return "我识别到这是查询请求。下一步会接入客户上下文查询和汇总能力。", None
@@ -1224,6 +1414,64 @@ class CRMAgentGraphService:
             "authorized_users": "授权人数",
         }
         return "、".join(labels.get(field, field) for field in fields)
+
+    @staticmethod
+    def missing_customer_member_fields(member: Dict[str, Any]) -> List[str]:
+        if member.get("user_id") or member.get("user_name"):
+            return []
+        return ["user_name"]
+
+    @staticmethod
+    def format_customer_member_missing_fields(fields: List[str]) -> str:
+        labels = {
+            "user_name": "成员姓名",
+            "user_id": "成员用户 ID",
+        }
+        return "、".join(labels.get(field, field) for field in fields)
+
+    @staticmethod
+    def resolve_customer_member(member: Dict[str, Any], business_context: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
+        normalized = {
+            "user_id": member.get("user_id"),
+            "member_role": member.get("member_role") or "PRESALES",
+            "access_level": member.get("access_level") or "VIEW",
+            "remark": member.get("remark"),
+        }
+        if normalized["user_id"]:
+            return CRMAgentGraphService._drop_empty_values({
+                **normalized,
+                "user_name": member.get("user_name"),
+            }), None
+
+        user_name = str(member.get("user_name") or "").strip()
+        if not user_name:
+            return member, None
+
+        candidates_value = business_context.get("member_candidates")
+        if isinstance(candidates_value, dict) and candidates_value.get("error"):
+            return member, f"我识别到要添加客户成员「{user_name}」，但读取成员候选人失败。请确认你有客户成员管理权限。"
+
+        candidates = CRMAgentGraphService._context_items(candidates_value)
+        matches = [
+            item
+            for item in candidates
+            if str(item.get("name") or "") == user_name
+            or (user_name and user_name in str(item.get("name") or ""))
+        ]
+        available_matches = [item for item in matches if not item.get("already_member")]
+        if len(available_matches) == 1:
+            candidate = available_matches[0]
+            return CRMAgentGraphService._drop_empty_values({
+                **normalized,
+                "user_id": candidate.get("id"),
+                "user_name": candidate.get("name"),
+            }), None
+        if len(matches) == 1 and matches[0].get("already_member"):
+            return member, f"「{matches[0].get('name')}」已经是这个客户的负责人或成员，不需要重复添加。"
+        if len(available_matches) > 1:
+            names = "；".join(f"{index}. {item.get('name')}" for index, item in enumerate(available_matches, start=1))
+            return member, f"我找到了多个叫「{user_name}」的候选成员，请补充更明确的成员信息：{names}"
+        return member, f"我没在客户成员候选人里找到「{user_name}」。请确认成员姓名，或先把这个人加入团队。"
 
     @staticmethod
     def missing_payment_fields(actual_amount: Any, payment_date: Any) -> List[str]:

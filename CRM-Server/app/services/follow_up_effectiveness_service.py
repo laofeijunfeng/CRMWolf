@@ -15,6 +15,7 @@ from app.models.customer_follow_up import CustomerFollowUp
 from app.models.opportunity import Opportunity
 from app.services.ai_service import ai_service
 from app.services.ai_task_limiter import ai_generation_semaphore
+from app.services.follow_up_quality_principles import get_follow_up_quality_principles
 
 
 logger = logging.getLogger(__name__)
@@ -173,38 +174,34 @@ class FollowUpEffectivenessService:
         }
 
     def _get_system_prompt(self) -> str:
-        return """你是 CRM 系统中的销售跟进记录质检助手。你的任务是判断一条客户跟进记录是否对销售推进和团队接力有价值。
+        principles = get_follow_up_quality_principles()
+        return f"""你是 CRM 系统中的销售跟进记录质检助手。你的任务是判断一条客户跟进记录是否对销售推进和团队接力有价值。
 
 请按 6 大原则评分，满分 100 分：
-1. 事实优先原则（20分）：只写客观事实、客户原话、已发生动作；不要把“感觉、应该、挺好、有戏”等主观判断当作有效信息。
-2. 动作闭环原则（20分）：必须说明下一步什么时间、谁、做什么；“保持跟进、再联系、有消息再说”不得高分。
-3. 阶段推进原则（15分）：结合当前商机和前序跟进，判断本次是否推动阶段、明确新节点或消除关键不确定性；连续原地询问不得高分。
-4. 决策穿透原则（15分）：是否识别决策人、影响人、采购/技术/财务等角色和诉求；只写“客户说”不得高分。
-5. 异议具象原则（15分）：是否具体记录价格、竞品、预算、流程、技术、安全等异议及原因；没有异议时可说明“本次未出现明确异议”，但不能编造。
-6. 信息可接力原则（15分）：团队其他人看完后是否知道客户、对接人、当前进展、风险和下一步，不需要再问记录者。
+{principles}
 
 评估要求：
 - 只基于输入内容和上下文评分，不要编造。
 - 当前记录本身最重要；客户、联系人、商机、历史跟进只用于判断上下文和阶段推进。
 - 记录很短、缺少对接人/时间/下一步/风险时，即使语气积极，也要扣分。
-- score 必须是 0-100 的整数；is_valid 必须按 score > 60 判断。
+- score 必须是 0-100 的整数；is_valid 必须按 score >= 60 判断。
 - reason 必须是一句话，优先说明扣分最多的 1-2 个原因，适合放在 tooltip 中，最长 80 个中文字符。
 - 输出严格 JSON，不要 Markdown，不要解释文字。
 
 JSON 结构：
-{
+{{
   "score": 0,
   "is_valid": false,
   "reason": "",
-  "principle_scores": {
-    "facts": {"score": 0, "max_score": 20, "comment": ""},
-    "action_closure": {"score": 0, "max_score": 20, "comment": ""},
-    "stage_progression": {"score": 0, "max_score": 15, "comment": ""},
-    "decision_chain": {"score": 0, "max_score": 15, "comment": ""},
-    "specific_objection": {"score": 0, "max_score": 15, "comment": ""},
-    "handoffability": {"score": 0, "max_score": 15, "comment": ""}
-  }
-}"""
+  "principle_scores": {{
+    "facts": {{"score": 0, "max_score": 20, "comment": ""}},
+    "action_closure": {{"score": 0, "max_score": 20, "comment": ""}},
+    "stage_progression": {{"score": 0, "max_score": 15, "comment": ""}},
+    "decision_chain": {{"score": 0, "max_score": 15, "comment": ""}},
+    "specific_objection": {{"score": 0, "max_score": 15, "comment": ""}},
+    "handoffability": {{"score": 0, "max_score": 15, "comment": ""}}
+  }}
+}}"""
 
     def _build_prompt(self, context: Dict[str, Any]) -> str:
         return "请评估以下客户跟进记录是否有效：\n" + json.dumps(context, ensure_ascii=False, default=str)
@@ -239,7 +236,7 @@ JSON 结构：
 
         return {
             "score": score,
-            "is_valid": score > 60,
+            "is_valid": score >= 60,
             "reason": reason[:120],
             "principle_scores": result.get("principle_scores") if isinstance(result.get("principle_scores"), dict) else {},
         }

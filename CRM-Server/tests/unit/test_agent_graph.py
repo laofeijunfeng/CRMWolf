@@ -4,7 +4,12 @@ from datetime import datetime
 import pytest
 
 from app.services.agent.graph import CRMAgentGraphService
-from app.services.agent.schemas import AgentMemorySnapshot, AgentSemanticParseResult, AgentSuggestionResult
+from app.services.agent.schemas import (
+    AgentFollowUpQualityResult,
+    AgentMemorySnapshot,
+    AgentSemanticParseResult,
+    AgentSuggestionResult,
+)
 from app.services.agent.semantic import AgentSemanticParseEnvelope
 from app.services.agent.tools.base import AgentToolResult
 
@@ -14,12 +19,13 @@ class FakeSemanticParser:
         self.result = result
         self.calls = []
 
-    async def parse(self, db, *, team_id, user_message, memory=None):
+    async def parse(self, db, *, team_id, user_message, memory=None, current_date=None):
         self.calls.append({
             "db": db,
             "team_id": team_id,
             "user_message": user_message,
             "memory": memory,
+            "current_date": current_date,
         })
         return self.result
 
@@ -105,6 +111,41 @@ class FakeSuggestionGenerator:
             })
             suggestion_source = "test_suggestion_generator"
             model = "test-model"
+
+        return Envelope()
+
+
+class FakeFollowUpQualityEvaluator:
+    def __init__(self, score=80, passed=True):
+        self.calls = []
+        self.score = score
+        self.passed = passed
+
+    async def evaluate_with_metadata(self, db, *, team_id, user_message, semantic_result, memory=None, current_date=None):
+        self.calls.append({
+            "db": db,
+            "team_id": team_id,
+            "user_message": user_message,
+            "semantic_result": semantic_result,
+            "memory": memory,
+            "current_date": current_date,
+        })
+        score = self.score
+        passed = self.passed
+
+        class Envelope:
+            result = AgentFollowUpQualityResult.model_validate({
+                "score": score,
+                "passed": passed,
+                "reason": "质量达标" if passed else "缺少明确下一步动作",
+                "missing_aspects": [] if passed else ["下一步动作"],
+                "supplement_question": None if passed else "请补充下一步由谁在什么时间做什么。",
+                "principle_scores": {},
+            })
+            quality_source = "test_quality_evaluator"
+            model = "test-model"
+            fallback_reason = None
+            fallback_error = None
 
         return Envelope()
 
@@ -261,6 +302,7 @@ def build_service(result, tool_service=None):
         memory_service=FakeMemoryService(),
         temporal_resolver=FakeTemporalResolver(),
         suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
     )
 
 
@@ -271,6 +313,7 @@ def build_service_with_memory(result, tool_service=None, session_context=None):
         memory_service=FakeMemoryService(session_context=session_context),
         temporal_resolver=FakeTemporalResolver(),
         suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
     )
 
 
@@ -321,6 +364,7 @@ async def test_agent_graph_uses_ai_semantic_result_for_intent_and_entities():
         semantic_parser=parser,
         memory_service=FakeMemoryService(),
         suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
     )
 
     result = await service.run(input_state("没有关键词也应该只相信 AI parser 的结构化结果"))
@@ -342,6 +386,7 @@ async def test_agent_graph_exposes_structured_output_fallback_metadata():
         memory_service=FakeMemoryService(),
         temporal_resolver=FakeTemporalResolver(),
         suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
     )
 
     result = await service.run({
@@ -381,6 +426,7 @@ async def test_agent_graph_loads_customer_context_and_generates_ai_suggestions()
         memory_service=FakeMemoryService(),
         temporal_resolver=FakeTemporalResolver(),
         suggestion_generator=suggestion_generator,
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
     )
 
     result = await service.run(input_state())
@@ -392,6 +438,39 @@ async def test_agent_graph_loads_customer_context_and_generates_ai_suggestions()
     assert suggestion_events[0]["suggestions"][0]["action"] == "CREATE_OPPORTUNITY"
     assert "请确认是否创建这条跟进记录？" in result["response"]
     assert "基于客户上下文，我建议下一步可以" not in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_blocks_low_quality_follow_up_before_customer_search():
+    tool_service = FakeToolService()
+    suggestion_generator = FakeSuggestionGenerator()
+    quality_evaluator = FakeFollowUpQualityEvaluator(score=45, passed=False)
+    service = CRMAgentGraphService(
+        tool_service=tool_service,
+        semantic_parser=FakeSemanticParser(semantic_result(
+            follow_up={
+                "content": "客户说再看看",
+                "method": "微信",
+                "next_action": None,
+                "next_follow_time_text": None,
+                "next_follow_time": None,
+            },
+        )),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=suggestion_generator,
+        follow_up_quality_evaluator=quality_evaluator,
+    )
+
+    result = await service.run(input_state("今天和越秀金融聊了下，客户说再看看"))
+
+    assert result["response"] == "请补充下一步由谁在什么时间做什么。"
+    assert tool_service.searches == []
+    assert suggestion_generator.calls == []
+    quality_events = [event for event in result["events"] if event["event"] == "follow_up_quality_evaluated"]
+    assert quality_events[0]["score"] == 45
+    assert quality_events[0]["passed"] is False
+    assert [event["event"] for event in result["events"] if event["event"] == "confirmation_required"] == []
 
 
 @pytest.mark.asyncio
@@ -472,6 +551,7 @@ async def test_agent_graph_attaches_opportunity_stage_move_as_next_task_after_fo
         memory_service=FakeMemoryService(),
         temporal_resolver=FakeTemporalResolver(),
         suggestion_generator=FakeStageMoveSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
     )
 
     result = await service.run(input_state("睿狐科技需要我们提供招标技术和商务参考材料"))
@@ -518,6 +598,7 @@ async def test_agent_graph_attaches_opportunity_collection_as_next_task_after_fo
         memory_service=FakeMemoryService(),
         temporal_resolver=FakeTemporalResolver(),
         suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
     )
 
     result = await service.run(input_state("今天微信找了汇川技术沟通续费"))
@@ -845,3 +926,47 @@ async def test_agent_graph_requires_deployment_info_fields_when_ai_fields_missin
         "server_address",
         "authorized_users",
     ]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_customer_member_confirmation_when_candidate_matches():
+    tool_service = FakeToolService(customer_context={
+        "customer": {"id": 101, "account_name": "越秀金融"},
+        "contracts": {"items": []},
+        "payment_plans": {"items": []},
+        "follow_ups": {"items": []},
+        "member_candidates": [
+            {"id": "9", "name": "张三", "already_member": False},
+        ],
+    })
+    result = await build_service(semantic_result(
+        intent="CREATE_CUSTOMER_MEMBER",
+        customer={"name_text": "越秀金融", "confidence": 0.95},
+        customer_member={
+            "user_name": "张三",
+            "member_role": "PRESALES",
+            "access_level": "FOLLOW_UP",
+        },
+    ), tool_service).run(input_state())
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_customer_member"
+    assert confirmation_events[0]["payload"]["member"] == {
+        "user_id": "9",
+        "user_name": "张三",
+        "member_role": "PRESALES",
+        "access_level": "FOLLOW_UP",
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_requires_customer_member_name_when_missing():
+    result = await build_service(semantic_result(
+        intent="CREATE_CUSTOMER_MEMBER",
+        customer={"name_text": "越秀金融", "confidence": 0.95},
+        customer_member={"member_role": "PRESALES"},
+        missing_fields=["user_name"],
+    )).run(input_state())
+
+    field_events = [event for event in result["events"] if event["event"] == "customer_member_fields_required"]
+    assert field_events[0]["payload"]["missing_fields"] == ["user_name"]

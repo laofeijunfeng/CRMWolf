@@ -19,7 +19,11 @@ const teamStore = vi.hoisted<{ currentTeam?: Ref<null>; teams?: Ref<unknown[]>; 
   fetchUserTeams: vi.fn(),
   switchTeam: vi.fn(),
 }))
-const permissionStore = vi.hoisted(() => ({ initialized: true, fetchPermissions: vi.fn() }))
+const permissionStore = vi.hoisted(() => ({
+  initialized: true,
+  fetchPermissions: vi.fn(),
+  hasAnyPermission: vi.fn(() => true),
+}))
 
 vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => router }))
 vi.mock('@/stores/user', () => ({ useUserStore: () => userStore }))

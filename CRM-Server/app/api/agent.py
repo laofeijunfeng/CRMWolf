@@ -1,4 +1,5 @@
 """CRM AI Agent API."""
+from copy import deepcopy
 import json
 import uuid
 from typing import Any, Optional
@@ -37,6 +38,7 @@ from app.services.agent.schemas import (
 )
 from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.temporal import agent_temporal_resolver
+from app.services.agent.tools.api_client import CRMAPIClientError
 from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext
@@ -247,6 +249,7 @@ def _is_customer_selection_task(task) -> bool:
         "select_customer_for_contact",
         "select_customer_for_invoice_title",
         "select_customer_for_deployment_info",
+        "select_customer_for_customer_member",
         "select_customer_for_payment_record",
     }
 
@@ -269,6 +272,11 @@ def _is_invoice_title_fields_task(task) -> bool:
 def _is_deployment_info_fields_task(task) -> bool:
     state = task.state_json or {}
     return state.get("action") == "collect_deployment_info_fields"
+
+
+def _is_customer_member_fields_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "collect_customer_member_fields"
 
 
 def _is_payment_fields_task(task) -> bool:
@@ -295,7 +303,45 @@ def _select_customer_candidate(content: str, customers: list[dict]) -> Optional[
     return None
 
 
-def _contact_task_next_state(action: str, state: dict, customer: dict):
+async def _load_member_candidates_for_customer(
+    db: Session,
+    *,
+    team_id: int,
+    user_id: int,
+    session_id: int,
+    authorization: str,
+    customer_id: int,
+):
+    context = AgentToolContext(
+        db=db,
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session_id,
+        authorization=authorization,
+        allowed_tool_names=["get_customer_context"],
+        allowed_customer_ids=[customer_id],
+    )
+    try:
+        return await CRMAgentToolService().api_client.request(
+            "GET",
+            f"/v1/customers/{customer_id}/member-candidates",
+            context.authorization,
+        )
+    except CRMAPIClientError as exc:
+        return {"error": exc.message, "status_code": exc.status_code}
+
+
+async def _contact_task_next_state(
+    action: str,
+    state: dict,
+    customer: dict,
+    *,
+    db: Optional[Session] = None,
+    team_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    authorization: Optional[str] = None,
+):
     payload = state.get("payload") or {}
     if action == "select_customer_for_opportunity":
         opportunity = payload.get("opportunity") or {}
@@ -365,6 +411,41 @@ def _contact_task_next_state(action: str, state: dict, customer: dict):
             f"已选择客户「{customer.get('account_name')}」。请确认是否创建部署信息「{deployment_info.get('deployment_name')}」？",
         )
 
+    if action == "select_customer_for_customer_member":
+        customer_member = payload.get("customer_member") or {}
+        payload["customer_id"] = customer.get("id")
+        if (
+            db is not None
+            and team_id is not None
+            and user_id is not None
+            and session_id is not None
+            and authorization
+            and customer.get("id")
+            and not payload.get("member_candidates")
+        ):
+            payload["member_candidates"] = await _load_member_candidates_for_customer(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+                authorization=authorization,
+                customer_id=customer["id"],
+            )
+        missing_fields = CRMAgentGraphService.missing_customer_member_fields(customer_member)
+        if missing_fields:
+            payload["missing_fields"] = missing_fields
+            return (
+                "collect_customer_member_fields",
+                payload,
+                f"已选择客户「{customer.get('account_name')}」，还需要补充："
+                f"{CRMAgentGraphService.format_customer_member_missing_fields(missing_fields)}。",
+            )
+        return (
+            "collect_customer_member_fields",
+            payload,
+            f"已选择客户「{customer.get('account_name')}」。请再确认一下成员姓名，我来匹配候选人。",
+        )
+
     contact = payload.get("contact") or {}
     if action == "select_customer_for_contact":
         payload["customer_id"] = customer.get("id")
@@ -411,6 +492,8 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
         intent = "CREATE_INVOICE_TITLE"
     elif action in {"create_deployment_info", "select_customer_for_deployment_info", "collect_deployment_info_fields"}:
         intent = "CREATE_DEPLOYMENT_INFO"
+    elif action in {"create_customer_member", "select_customer_for_customer_member", "collect_customer_member_fields"}:
+        intent = "CREATE_CUSTOMER_MEMBER"
     elif action in {
         "create_payment_plan",
         "create_payment_record",
@@ -454,7 +537,16 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
     return task
 
 
-def _apply_customer_selection(db: Session, task, content: str):
+async def _apply_customer_selection(
+    db: Session,
+    task,
+    content: str,
+    *,
+    team_id: int,
+    user_id: int,
+    session_id: int,
+    authorization: str,
+):
     state = task.state_json or {}
     action = state.get("action")
     customers = state.get("customers") or []
@@ -482,7 +574,16 @@ def _apply_customer_selection(db: Session, task, content: str):
             "请重新发送这条回款信息，我会基于该客户重新读取合同和回款计划后继续处理。"
         )
 
-    next_action, payload, message = _contact_task_next_state(action, state, customer)
+    next_action, payload, message = await _contact_task_next_state(
+        action,
+        state,
+        customer,
+        db=db,
+        team_id=team_id,
+        user_id=user_id,
+        session_id=session_id,
+        authorization=authorization,
+    )
     new_state = {
         "action": next_action,
         "payload": payload,
@@ -521,6 +622,7 @@ async def _parse_task_field_supplement(db: Session, task, content: str) -> Agent
         team_id=task.team_id,
         user_message=content,
         memory=memory,
+        current_date=agent_temporal_resolver.now().date(),
     )
 
 
@@ -536,6 +638,10 @@ def _merge_invoice_title_fields(existing_invoice_title: dict, semantic_result: A
 
 def _merge_deployment_info_fields(existing_deployment_info: dict, semantic_result: AgentSemanticParseResult) -> dict:
     return {**existing_deployment_info, **_drop_empty_values(semantic_result.deployment_info)}
+
+
+def _merge_customer_member_fields(existing_member: dict, semantic_result: AgentSemanticParseResult) -> dict:
+    return {**existing_member, **_drop_empty_values(semantic_result.customer_member)}
 
 
 def _merge_payment_fields(existing_payment: dict, semantic_result: AgentSemanticParseResult) -> dict:
@@ -579,9 +685,9 @@ def _drop_empty_values(payload: dict) -> dict:
 
 
 async def _apply_opportunity_fields(db: Session, task, content: str):
-    state = task.state_json or {}
+    state = deepcopy(task.state_json or {})
     customer = state.get("customer") or {}
-    payload = state.get("payload") or {}
+    payload = deepcopy(state.get("payload") or {})
     try:
         semantic_result = await _parse_task_field_supplement(db, task, content)
     except AgentSemanticParserError as exc:
@@ -591,6 +697,7 @@ async def _apply_opportunity_fields(db: Session, task, content: str):
     missing_fields = CRMAgentGraphService.missing_opportunity_fields(opportunity)
     payload["opportunity"] = opportunity
     payload["missing_fields"] = missing_fields
+    state = {**state, "payload": payload}
 
     if missing_fields:
         agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
@@ -758,6 +865,57 @@ async def _apply_deployment_info_fields(db: Session, task, content: str):
         ),
     )
     return True, f"部署信息已补齐。请确认是否为「{customer.get('account_name')}」创建部署信息「{deployment_info.get('deployment_name')}」？"
+
+
+async def _apply_customer_member_fields(db: Session, task, content: str):
+    state = task.state_json or {}
+    customer = state.get("customer") or {}
+    payload = state.get("payload") or {}
+    try:
+        semantic_result = await _parse_task_field_supplement(db, task, content)
+    except AgentSemanticParserError as exc:
+        return False, f"我没有可靠识别到补充的成员信息，请换一种说法补充。原因：{str(exc)}"
+    member = _merge_customer_member_fields(payload.get("customer_member") or {}, semantic_result)
+    missing_fields = CRMAgentGraphService.missing_customer_member_fields(member)
+    if missing_fields:
+        payload["customer_member"] = member
+        payload["missing_fields"] = missing_fields
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        return False, (
+            "还需要补充："
+            f"{CRMAgentGraphService.format_customer_member_missing_fields(missing_fields)}。"
+        )
+
+    resolved_member, member_error = CRMAgentGraphService.resolve_customer_member(
+        member,
+        {"member_candidates": payload.get("member_candidates")},
+    )
+    if member_error:
+        payload["customer_member"] = member
+        payload["missing_fields"] = ["user_name"]
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        return False, member_error
+
+    next_payload = {"customer_id": payload.get("customer_id") or customer.get("id"), "member": resolved_member}
+    new_state = {
+        "action": "create_customer_member",
+        "payload": next_payload,
+        "customer": customer,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=["create_customer_member"],
+            confirmation_summary=f"为「{customer.get('account_name')}」添加客户成员「{resolved_member.get('user_name') or resolved_member.get('user_id')}」",
+        ).model_dump(exclude_none=True),
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            summary="等待确认执行：create_customer_member",
+            input_json=next_payload,
+            state_json=new_state,
+        ),
+    )
+    return True, f"成员信息已补齐。请确认是否为「{customer.get('account_name')}」添加客户成员「{resolved_member.get('user_name') or resolved_member.get('user_id')}」？"
 
 
 async def _apply_payment_fields(db: Session, task, content: str):
@@ -976,6 +1134,8 @@ async def _execute_waiting_task(
             return result, "发票抬头已创建。"
         if action == "create_deployment_info":
             return result, "部署信息已创建。"
+        if action == "create_customer_member":
+            return result, "客户成员已添加。"
         if action == "create_opportunity":
             return result, "商机已创建，并已按系统现有流程提交审批。"
         if action == "move_opportunity_stage":
@@ -1032,6 +1192,7 @@ def _tool_name_for_action(action: Optional[str]) -> Optional[str]:
         "create_contact": "create_contact",
         "create_invoice_title": "create_invoice_title",
         "create_deployment_info": "create_deployment_info",
+        "create_customer_member": "create_customer_member",
         "create_opportunity": "create_opportunity",
         "move_opportunity_stage": "move_opportunity_stage",
         "create_payment_plan": "create_payment_plan",
@@ -1062,6 +1223,10 @@ def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dic
         deployment_info = dict(payload["deployment_info"])
         deployment_info["customer_id"] = payload.get("customer_id") or deployment_info.get("customer_id")
         return {"deployment_info": deployment_info}
+    if action == "create_customer_member":
+        member = dict(payload["member"])
+        member.pop("user_name", None)
+        return {"customer_id": payload["customer_id"], "member": member}
     if action == "create_opportunity":
         opportunity = dict(payload["opportunity"])
         opportunity.pop("opportunity_name", None)
@@ -1307,6 +1472,15 @@ async def stream_agent_chat(
                     "content": assistant_content,
                 })
                 yield emit({"event": "final", "content": assistant_content})
+            elif task and _is_customer_member_fields_task(task):
+                ready, assistant_content = await _apply_customer_member_fields(db, task, request.content)
+                _remember_pending_task(db, session, task)
+                yield emit({
+                    "event": "customer_member_fields_completed" if ready else "customer_member_fields_required",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                })
+                yield emit({"event": "final", "content": assistant_content})
             elif task and _is_payment_fields_task(task):
                 ready, assistant_content = await _apply_payment_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
@@ -1327,7 +1501,15 @@ async def stream_agent_chat(
                 })
                 yield emit({"event": "final", "content": assistant_content})
             elif task and _is_customer_selection_task(task):
-                customer, assistant_content = _apply_customer_selection(db, task, request.content)
+                customer, assistant_content = await _apply_customer_selection(
+                    db,
+                    task,
+                    request.content,
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=session.id,
+                    authorization=authorization,
+                )
                 if customer:
                     _remember_current_customer(db, session, customer)
                     if task.status == AgentTaskStatus.WAITING_USER:
@@ -1386,6 +1568,7 @@ async def stream_agent_chat(
                         "contact_fields_required",
                         "invoice_title_fields_required",
                         "deployment_info_fields_required",
+                        "customer_member_fields_required",
                         "payment_fields_required",
                         "opportunity_fields_required",
                         "business_selection_required",

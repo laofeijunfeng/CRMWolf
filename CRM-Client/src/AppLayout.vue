@@ -8,6 +8,18 @@
         <div class="nav-section">
           <div class="nav-section-title">销售流程</div>
           <a
+            class="nav-item"
+            :class="{ active: currentPath.startsWith('/agent') }"
+            role="menuitem"
+            :aria-current="currentPath.startsWith('/agent') ? 'page' : undefined"
+            :aria-label="`AI Agent${currentPath.startsWith('/agent') ? '（当前页面）' : ''}`"
+            @click="handleMenuClick('/agent')"
+            @keydown.enter="handleMenuClick('/agent')"
+          >
+            <component :is="Bot" class="nav-item-icon" aria-hidden="true" />
+            <span class="nav-item-text">AI Agent</span>
+          </a>
+          <a
             v-if="canViewSalesDashboard"
             class="nav-item"
             :class="{ active: currentPath.startsWith('/sales-dashboard') }"
@@ -19,18 +31,6 @@
           >
             <component :is="BarChart3" class="nav-item-icon" aria-hidden="true" />
             <span class="nav-item-text">销售看板</span>
-          </a>
-          <a
-            class="nav-item"
-            :class="{ active: currentPath.startsWith('/agent') }"
-            role="menuitem"
-            :aria-current="currentPath.startsWith('/agent') ? 'page' : undefined"
-            :aria-label="`CRM AI Agent${currentPath.startsWith('/agent') ? '（当前页面）' : ''}`"
-            @click="handleMenuClick('/agent')"
-            @keydown.enter="handleMenuClick('/agent')"
-          >
-            <component :is="Bot" class="nav-item-icon" aria-hidden="true" />
-            <span class="nav-item-text">CRM AI Agent</span>
           </a>
           <a
             class="nav-item"
@@ -1154,11 +1154,12 @@ $z-index-bottom-nav: 100;
 
   .main-content {
     margin-left: 0;  // No sidebar on mobile
-    padding-bottom: $wolf-bottom-nav-height-v2;  // Reserve space for BottomNav（56px）
+    height: calc(100dvh - $wolf-bottom-nav-height-v2);
+    overflow: auto;
 
     // Safe Area（iOS notch / Android gesture bar）
-    @supports (padding-bottom: env(safe-area-inset-bottom)) {
-      padding-bottom: calc($wolf-bottom-nav-height-v2 + $wolf-safe-area-bottom-v2);
+    @supports (height: calc(100dvh - env(safe-area-inset-bottom))) {
+      height: calc(100dvh - $wolf-bottom-nav-height-v2 - $wolf-safe-area-bottom-v2);
     }
   }
 

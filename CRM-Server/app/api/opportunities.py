@@ -195,6 +195,7 @@ def get_opportunities(
             WHERE id = :owner_id
         """), {"owner_id": int(opp.owner_id)}).first()
         
+        stage = None
         stage_info = None
         if opp.current_stage_snapshot_id:
             snapshot_data = db.execute(text("""
@@ -204,7 +205,7 @@ def get_opportunities(
             """), {"snapshot_id": opp.current_stage_snapshot_id}).first()
             
             if snapshot_data:
-                stage_info = {
+                stage = {
                     "id": snapshot_data[0],
                     "stage_code": "",
                     "stage_name": snapshot_data[1],
@@ -214,6 +215,12 @@ def get_opportunities(
                     "is_active": 1,
                     "created_time": opp.created_time,
                     "last_modified_time": opp.last_modified_time
+                }
+                stage_info = {
+                    "id": snapshot_data[0],
+                    "stage_name": snapshot_data[1],
+                    "win_probability": snapshot_data[2],
+                    "is_default": 0,
                 }
         
         opp_dict = {
@@ -241,7 +248,8 @@ def get_opportunities(
             "last_modified_time": opp.last_modified_time,
             "version": opp.version,
             "customer_name": customer.account_name if customer else None,
-            "stage": stage_info,
+            "stage": stage,
+            "stage_info": stage_info,
             "owner_info": {
                 "id": str(owner_info[0]),
                 "name": owner_info[1],
@@ -358,6 +366,8 @@ def get_available_opportunities_for_contract(
             "created_time": opp.created_time,
             "last_modified_time": opp.last_modified_time,
             "version": opp.version,
+            "stage": None,
+            "stage_info": None,
             "customer_info": customer_info,
             "owner_info": owner_info,
             "creator_info": creator_info
@@ -450,6 +460,7 @@ def get_opportunity(
         "decision_maker_count": opportunity.decision_maker_count,
         "expected_closing_date": opportunity.expected_closing_date,
         "stage_id": opportunity.procurement_stage_id,
+        "procurement_stage_id": opportunity.procurement_stage_id,
         "win_probability": opportunity.win_probability,
         "owner_id": opportunity.owner_id,
         "status": opportunity.status,
@@ -460,6 +471,7 @@ def get_opportunity(
         "creator_id": opportunity.creator_id,
         "created_time": opportunity.created_time,
         "last_modified_time": opportunity.last_modified_time,
+        "updated_time": opportunity.last_modified_time,
         "version": opportunity.version,
         "current_stage_snapshot": procurement_stage_info,
         "procurement_stages": None,
@@ -622,6 +634,7 @@ async def move_opportunity_stage(
         "decision_maker_count": updated_opportunity.decision_maker_count,
         "expected_closing_date": updated_opportunity.expected_closing_date,
         "stage_id": updated_opportunity.procurement_stage_id,
+        "procurement_stage_id": updated_opportunity.procurement_stage_id,
         "win_probability": updated_opportunity.win_probability,
         "owner_id": updated_opportunity.owner_id,
         "status": updated_opportunity.status,
@@ -632,6 +645,7 @@ async def move_opportunity_stage(
         "creator_id": updated_opportunity.creator_id,
         "created_time": updated_opportunity.created_time,
         "last_modified_time": updated_opportunity.last_modified_time,
+        "updated_time": updated_opportunity.last_modified_time,
         "version": updated_opportunity.version,
         "procurement_method_id": updated_opportunity.procurement_method_id,
         "procurement_method_info": None,
