@@ -19,7 +19,7 @@ from app.models.agent import (
     AgentTaskStatus,
     AgentToolCall,
 )
-from app.services.agent.schemas import AgentSemanticParseResult
+from app.services.agent.schemas import AgentPendingInterruptionDecision, AgentSemanticParseResult
 from app.services.agent.tools.base import AgentToolResult
 
 
@@ -72,9 +72,27 @@ class FakeSemanticParser:
         return AgentSemanticParseResult.model_validate(self.result)
 
 
+class FakePendingInterruptionParser:
+    def __init__(self, decision):
+        self.decision = decision
+        self.calls = []
+
+    async def assess_pending_interruption(self, db, *, team_id, user_message, pending_task, memory=None, current_date=None):
+        self.calls.append({
+            "team_id": team_id,
+            "user_message": user_message,
+            "pending_task": pending_task,
+            "memory": memory,
+            "current_date": current_date,
+        })
+        return AgentPendingInterruptionDecision.model_validate(self.decision)
+
+
 def test_agent_session_and_stream_api(monkeypatch):
     class FakeGraphService:
         async def stream_events(self, input_state):
+            yield {"event": "agent_step", "step": "semantic_parse", "status": "started", "content": "AI 语义理解"}
+            yield {"event": "tool_result", "tool_name": "get_customer_context", "success": True}
             yield {"event": "final", "content": f"已收到：{input_state['content']}"}
 
     monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
@@ -107,6 +125,10 @@ def test_agent_session_and_stream_api(monkeypatch):
         messages_body = messages_response.json()
         assert messages_body["total"] == 2
         assert [item["role"] for item in messages_body["items"]] == ["USER", "ASSISTANT"]
+        assistant_message = messages_body["items"][1]
+        trace_events = assistant_message["payload_json"]["trace_events"]
+        assert [event["event"] for event in trace_events] == ["agent_step", "tool_result"]
+        assert trace_events[1]["tool_name"] == "get_customer_context"
     finally:
         engine.dispose()
 
@@ -178,6 +200,293 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
             task = db.query(AgentTask).one()
             assert task.status == AgentTaskStatus.COMPLETED
             assert task.result_json == {"id": 9001, "customer_id": 101}
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_persists_current_customer_memory(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [{"id": 9}],
+    }
+
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "business_context_loaded",
+                "customer_id": customer["id"],
+                "customer": customer,
+            }
+            yield {"event": "final", "content": "已加载客户上下文。"}
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "记忆会话"})
+        session = create_response.json()
+
+        stream_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "睿狐科技今天回了 5 万"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert stream_response.status_code == 200, stream_response.text
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            saved_session = db.query(AgentSession).one()
+            assert saved_session.context_json["current_customer"] == customer
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_restores_current_customer_memory_on_next_turn(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+    captured_states = []
+
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            captured_states.append(input_state)
+            if len(captured_states) == 1:
+                yield {
+                    "event": "business_context_loaded",
+                    "customer_id": customer["id"],
+                    "customer": customer,
+                }
+                yield {"event": "final", "content": "已识别广州睿狐科技有限公司。"}
+            else:
+                yield {"event": "final", "content": "已继承客户上下文。"}
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "记忆会话"})
+        session = create_response.json()
+
+        first_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "睿狐科技今天回了 5 万"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert first_response.status_code == 200, first_response.text
+
+        second_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "那帮我创建一个商机，5 万 100 人使用，订阅 1 年"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert second_response.status_code == 200, second_response.text
+        assert captured_states[1]["session_context"]["current_customer"] == customer
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_collects_opportunity_fields_without_rerunning_graph(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+
+    class FakeGraphService:
+        def __init__(self):
+            self.calls = []
+
+        async def stream_events(self, input_state):
+            self.calls.append(input_state)
+            yield {
+                "event": "opportunity_fields_required",
+                "action": "collect_opportunity_fields",
+                "customer": customer,
+                "payload": {
+                    "customer_id": customer["id"],
+                    "opportunity": {
+                        "customer_id": customer["id"],
+                        "total_amount": 50000,
+                        "user_count": 100,
+                        "license_type": "SUBSCRIPTION",
+                        "subscription_years": 1,
+                    },
+                    "missing_fields": ["purchase_type", "expected_closing_date"],
+                },
+            }
+            yield {"event": "final", "content": "请补充采购类型和预计成交日期。"}
+
+    fake_graph = FakeGraphService()
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", fake_graph)
+    monkeypatch.setattr(agent_api, "agent_semantic_parser", FakeSemanticParser({
+        "intent": "CREATE_OPPORTUNITY",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "广州睿狐科技有限公司", "confidence": 0.95, "resolution_source": "MEMORY"},
+        "follow_up": {},
+        "payment": {},
+        "opportunity": {
+            "purchase_type": "NEW",
+            "expected_closing_date_text": "下个月30号",
+            "expected_closing_date": {
+                "raw_text": "下个月30号",
+                "kind": "EXPLICIT_DATE",
+                "direction": "future",
+                "date_text": "2026-08-30",
+                "confidence": 0.9,
+            },
+        },
+        "contact": {},
+        "invoice_title": {},
+        "deployment_info": {},
+        "business_signals": [],
+        "requested_actions": [],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["新购，下个月30号成交"],
+    }))
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "商机会话"})
+        session = create_response.json()
+
+        first_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "好的，帮我创建一个商机，5 万，100 人，1 年订阅"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert first_response.status_code == 200, first_response.text
+        assert '"event": "opportunity_fields_required"' in first_response.text
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            saved_session = db.query(AgentSession).one()
+            assert saved_session.context_json["current_pending_task"]["action"] == "collect_opportunity_fields"
+        finally:
+            db.close()
+
+        second_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "新购的，预计下个月 30 号成"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert second_response.status_code == 200, second_response.text
+        assert '"event": "opportunity_fields_completed"' in second_response.text
+        assert "商机信息已补齐" in second_response.text
+        assert len(fake_graph.calls) == 1
+
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.state_json["action"] == "create_opportunity"
+            saved_session = db.query(AgentSession).one()
+            assert saved_session.context_json["current_pending_task"]["action"] == "create_opportunity"
+            opportunity = task.state_json["payload"]["opportunity"]
+            assert opportunity["total_amount"] == 50000
+            assert opportunity["user_count"] == 100
+            assert opportunity["license_type"] == "SUBSCRIPTION"
+            assert opportunity["subscription_years"] == 1
+            assert opportunity["purchase_type"] == "NEW"
+            assert opportunity["expected_closing_date"] == "2026-08-30"
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_interrupts_pending_task_for_clear_new_customer_flow(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+    captured_states = []
+
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            captured_states.append(input_state)
+            if len(captured_states) == 1:
+                yield {
+                    "event": "opportunity_fields_required",
+                    "action": "collect_opportunity_fields",
+                    "customer": customer,
+                    "payload": {
+                        "customer_id": customer["id"],
+                        "opportunity": {
+                            "customer_id": customer["id"],
+                            "total_amount": 50000,
+                            "user_count": 100,
+                            "license_type": "SUBSCRIPTION",
+                            "subscription_years": 1,
+                        },
+                        "missing_fields": ["purchase_type", "expected_closing_date"],
+                    },
+                }
+                yield {"event": "final", "content": "请补充采购类型和预计成交日期。"}
+            else:
+                yield {"event": "final", "content": "已切换处理汇川技术的跟进。"}
+
+    fake_parser = FakePendingInterruptionParser({
+        "decision": "START_NEW_FLOW",
+        "confidence": 0.92,
+        "detected_customer_name": "汇川技术",
+        "detected_intent": "CUSTOMER_FOLLOW_UP",
+        "is_field_supplement": False,
+        "reason": "本轮明确提到不同客户，并描述新的跟进记录。",
+        "question": None,
+    })
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "agent_semantic_parser", fake_parser)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "切换会话"})
+        session = create_response.json()
+
+        first_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "好的，帮我创建一个商机，5 万，100 人，1 年订阅"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert first_response.status_code == 200, first_response.text
+        assert '"event": "opportunity_fields_required"' in first_response.text
+
+        second_response = client.post(
+            "/v1/agent/chat/stream",
+            json={
+                "session_id": session["id"],
+                "content": "今天微信找了汇川技术的沟通续费方面的事宜，本月底会对接采购",
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert second_response.status_code == 200, second_response.text
+        assert '"event": "pending_task_interrupted"' in second_response.text
+        assert "我先切过来处理" in second_response.text
+        assert captured_states[1]["content"] == "今天微信找了汇川技术的沟通续费方面的事宜，本月底会对接采购"
+        assert fake_parser.calls[0]["pending_task"]["state"]["action"] == "collect_opportunity_fields"
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.SUSPENDED
+            saved_session = db.query(AgentSession).one()
+            assert "current_pending_task" not in saved_session.context_json
+            assert saved_session.context_json["suspended_pending_tasks"][0]["id"] == task.id
         finally:
             db.close()
     finally:

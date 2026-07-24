@@ -44,6 +44,21 @@ class AgentTemporalResolver:
         )
         return datetime.combine(resolved_date, resolved_time).isoformat()
 
+    def resolve_date(
+        self,
+        expression: Optional[AgentTemporalExpression],
+        *,
+        base_datetime: Optional[datetime] = None,
+    ) -> Optional[str]:
+        if not expression or expression.kind in {"NONE", "UNKNOWN"}:
+            return None
+        if expression.confidence < 0.7:
+            return None
+
+        base = base_datetime or self.now()
+        resolved_date = self._resolve_date(expression, base.date())
+        return resolved_date.isoformat() if resolved_date else None
+
     def _resolve_date(self, expression: AgentTemporalExpression, base_date: date) -> Optional[date]:
         if expression.kind == "EXPLICIT_DATE" and expression.date_text:
             try:

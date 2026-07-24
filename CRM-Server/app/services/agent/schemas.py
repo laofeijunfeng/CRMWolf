@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 AgentIntent = Literal[
     "CUSTOMER_FOLLOW_UP",
     "PAYMENT_RECORD",
+    "CREATE_OPPORTUNITY",
     "CREATE_CONTACT",
     "CREATE_INVOICE_TITLE",
     "CREATE_DEPLOYMENT_INFO",
@@ -17,15 +18,16 @@ AgentIntent = Literal[
 ]
 
 AgentHITLDecisionType = Literal["approve", "edit", "reject", "respond"]
+AgentPendingInterruptionDecisionType = Literal["CONTINUE_PENDING", "START_NEW_FLOW", "ASK_USER"]
 AgentSuggestionAction = Literal[
     "CREATE_OPPORTUNITY",
+    "MOVE_OPPORTUNITY_STAGE",
     "CREATE_CONTACT",
     "CREATE_PAYMENT_PLAN",
     "CREATE_PAYMENT_RECORD",
     "CREATE_INVOICE_TITLE",
     "CREATE_DEPLOYMENT_INFO",
     "CREATE_LICENSE_APPLICATION",
-    "FOLLOW_UP_REMINDER",
     "CUSTOMER_QUERY_SUMMARY",
     "NO_ACTION",
 ]
@@ -37,6 +39,7 @@ AgentTemporalUnit = Literal["day", "week", "month"]
 class AgentCustomerEntity(BaseModel):
     name_text: Optional[str] = Field(None, description="用户原文中的客户名称或简称")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="客户名称识别置信度")
+    resolution_source: Literal["EXPLICIT", "MEMORY", "NONE"] = Field("NONE", description="客户来源：用户明示、会话记忆或无")
 
 
 class AgentFollowUpEntity(BaseModel):
@@ -46,6 +49,28 @@ class AgentFollowUpEntity(BaseModel):
     next_follow_time_text: Optional[str] = Field(None, description="用户表达中的下一步动作时间")
     next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化时间要素")
     next_follow_time_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+
+
+class AgentPaymentEntity(BaseModel):
+    actual_amount: Optional[float] = Field(None, gt=0, description="实际回款金额")
+    actual_payer_name: Optional[str] = Field(None, description="实际付款方名称")
+    payment_date_text: Optional[str] = Field(None, description="用户原文中的实际回款日期表达")
+    payment_date: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化实际回款日期")
+    payment_date_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+    notes: Optional[str] = Field(None, description="回款备注")
+
+
+class AgentOpportunityEntity(BaseModel):
+    opportunity_name: Optional[str] = Field(None, description="废弃输入字段；创建时由后端 API 自动生成")
+    total_amount: Optional[float] = Field(None, gt=0, description="预计总金额（元）")
+    user_count: Optional[int] = Field(None, gt=0, description="采购用户数")
+    license_type: Optional[Literal["SUBSCRIPTION", "PERPETUAL"]] = Field(None, description="授权模式")
+    subscription_years: Optional[int] = Field(None, gt=0, description="订阅年限")
+    purchase_type: Optional[Literal["NEW", "RENEWAL", "EXPANSION"]] = Field(None, description="采购类型")
+    decision_maker_count: Optional[int] = Field(None, ge=1, description="采购决策人数")
+    expected_closing_date_text: Optional[str] = Field(None, description="用户原文中的预计成交日期表达")
+    expected_closing_date: Optional["AgentTemporalExpression"] = Field(None, description="预计成交日期结构化时间")
+    expected_closing_date_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
 
 
 class AgentTemporalExpression(BaseModel):
@@ -78,6 +103,8 @@ class AgentSemanticParseResult(BaseModel):
     intent_confidence: float = Field(0.0, ge=0.0, le=1.0)
     customer: AgentCustomerEntity = Field(default_factory=AgentCustomerEntity)
     follow_up: AgentFollowUpEntity = Field(default_factory=AgentFollowUpEntity)
+    payment: AgentPaymentEntity = Field(default_factory=AgentPaymentEntity)
+    opportunity: AgentOpportunityEntity = Field(default_factory=AgentOpportunityEntity)
     contact: Dict[str, Any] = Field(default_factory=dict)
     invoice_title: Dict[str, Any] = Field(default_factory=dict)
     deployment_info: Dict[str, Any] = Field(default_factory=dict)
@@ -98,6 +125,7 @@ class AgentBusinessSuggestion(BaseModel):
     missing_fields: List[str] = Field(default_factory=list, description="执行动作前仍需补充的字段")
     related_object_type: Optional[str] = Field(None, description="依赖对象类型，例如 contract/payment_plan/deployment_info")
     related_object_id: Optional[int] = Field(None, description="依赖对象 ID")
+    execution_payload: Dict[str, Any] = Field(default_factory=dict, description="建议执行所需的结构化参数，仍需代码校验和用户确认")
     risk_notes: List[str] = Field(default_factory=list, description="不确定性或风险提示")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 
@@ -113,6 +141,19 @@ class AgentMemorySnapshot(BaseModel):
     recent_messages: List[Dict[str, Any]] = Field(default_factory=list)
     pending_task: Optional[Dict[str, Any]] = None
     session_context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentPendingInterruptionDecision(BaseModel):
+    decision: AgentPendingInterruptionDecisionType = Field(
+        "CONTINUE_PENDING",
+        description="用户本轮输入与当前挂起任务的关系",
+    )
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    detected_customer_name: Optional[str] = Field(None, description="本轮明确提到的新客户名称")
+    detected_intent: Optional[AgentIntent] = Field(None, description="本轮输入的业务意图")
+    is_field_supplement: bool = Field(False, description="是否明显是在补充当前挂起任务缺失字段")
+    reason: str = Field("", description="简短判断依据")
+    question: Optional[str] = Field(None, description="需要用户确认时的问题")
 
 
 class AgentHITLPolicy(BaseModel):

@@ -50,6 +50,51 @@ class CreateDeploymentInfoInput(BaseModel):
     deployment_info: Dict[str, Any]
 
 
+class CreateOpportunityInput(BaseModel):
+    opportunity: Dict[str, Any]
+    idempotency_suffix: Optional[str] = None
+
+
+class ListCustomerOpportunitiesInput(BaseModel):
+    customer_id: int = Field(..., ge=1)
+    status: Optional[str] = None
+    limit: int = Field(20, ge=1, le=100)
+
+
+class GetOpportunityDetailInput(BaseModel):
+    opportunity_id: int = Field(..., ge=1)
+
+
+class GetOpportunityProcurementStagesInput(BaseModel):
+    opportunity_id: int = Field(..., ge=1)
+
+
+class MoveOpportunityStageInput(BaseModel):
+    opportunity_id: int = Field(..., ge=1)
+    stage_template_id: int = Field(..., ge=1)
+    idempotency_suffix: Optional[str] = None
+
+
+class CreatePaymentPlanInput(BaseModel):
+    contract_id: int = Field(..., ge=1)
+    stage_name: str = Field(..., min_length=1, max_length=100)
+    planned_amount: float = Field(..., gt=0)
+    due_date: str = Field(..., min_length=10, max_length=10)
+    notes: Optional[str] = None
+    idempotency_suffix: Optional[str] = None
+
+
+class CreatePaymentRecordInput(BaseModel):
+    payment_plan_id: int = Field(..., ge=1)
+    actual_amount: float = Field(..., gt=0)
+    payment_date: str = Field(..., min_length=10, max_length=10)
+    commission_member_id: str = Field(..., min_length=1, max_length=100)
+    actual_payer_name: Optional[str] = None
+    proof_attachment: Optional[str] = None
+    notes: Optional[str] = None
+    idempotency_suffix: Optional[str] = None
+
+
 @dataclass(frozen=True)
 class AgentToolSpec:
     name: str
@@ -165,6 +210,65 @@ class AgentToolRegistry:
                 deployment_info=model.deployment_info,
             )
 
+        async def create_opportunity(service, context, model):
+            return await service.create_opportunity(
+                context,
+                opportunity=model.opportunity,
+                idempotency_suffix=model.idempotency_suffix,
+            )
+
+        async def list_customer_opportunities(service, context, model):
+            return await service.list_customer_opportunities(
+                context,
+                customer_id=model.customer_id,
+                status=model.status,
+                limit=model.limit,
+            )
+
+        async def get_opportunity_detail(service, context, model):
+            return await service.get_opportunity_detail(
+                context,
+                opportunity_id=model.opportunity_id,
+            )
+
+        async def get_opportunity_procurement_stages(service, context, model):
+            return await service.get_opportunity_procurement_stages(
+                context,
+                opportunity_id=model.opportunity_id,
+            )
+
+        async def move_opportunity_stage(service, context, model):
+            return await service.move_opportunity_stage(
+                context,
+                opportunity_id=model.opportunity_id,
+                stage_template_id=model.stage_template_id,
+                idempotency_suffix=model.idempotency_suffix,
+            )
+
+        async def create_payment_plan(service, context, model):
+            return await service.create_payment_plan(
+                context,
+                contract_id=model.contract_id,
+                stage_name=model.stage_name,
+                planned_amount=model.planned_amount,
+                due_date=model.due_date,
+                notes=model.notes,
+                idempotency_suffix=model.idempotency_suffix,
+            )
+
+        async def create_payment_record(service, context, model):
+            return await service.create_payment_record(
+                context,
+                payment_plan_id=model.payment_plan_id,
+                actual_amount=model.actual_amount,
+                payment_date=model.payment_date,
+                commission_member_id=model.commission_member_id,
+                actual_payer_name=model.actual_payer_name,
+                proof_attachment=model.proof_attachment,
+                notes=model.notes,
+                idempotency_suffix=model.idempotency_suffix,
+            )
+
         specs = [
             AgentToolSpec("search_customers", "按当前用户权限搜索可访问客户", SearchCustomersInput, False, False, search_customers),
             AgentToolSpec("get_customer_context", "获取客户业务上下文", GetCustomerContextInput, False, False, get_customer_context),
@@ -172,6 +276,13 @@ class AgentToolRegistry:
             AgentToolSpec("create_contact", "创建客户联系人", CreateContactInput, True, True, create_contact),
             AgentToolSpec("create_invoice_title", "创建发票抬头", CreateInvoiceTitleInput, True, True, create_invoice_title),
             AgentToolSpec("create_deployment_info", "创建部署信息", CreateDeploymentInfoInput, True, True, create_deployment_info),
+            AgentToolSpec("create_opportunity", "创建客户商机", CreateOpportunityInput, True, True, create_opportunity),
+            AgentToolSpec("list_customer_opportunities", "按当前用户权限查询客户商机列表", ListCustomerOpportunitiesInput, False, False, list_customer_opportunities),
+            AgentToolSpec("get_opportunity_detail", "按当前用户权限获取商机详情", GetOpportunityDetailInput, False, False, get_opportunity_detail),
+            AgentToolSpec("get_opportunity_procurement_stages", "获取商机采购方式对应的动态阶段列表", GetOpportunityProcurementStagesInput, False, False, get_opportunity_procurement_stages),
+            AgentToolSpec("move_opportunity_stage", "按用户确认推进商机到指定采购阶段", MoveOpportunityStageInput, True, True, move_opportunity_stage),
+            AgentToolSpec("create_payment_plan", "基于已确认合同创建回款计划", CreatePaymentPlanInput, True, True, create_payment_plan),
+            AgentToolSpec("create_payment_record", "基于已确认回款计划登记回款", CreatePaymentRecordInput, True, True, create_payment_record),
         ]
         return {spec.name: spec for spec in specs}
 

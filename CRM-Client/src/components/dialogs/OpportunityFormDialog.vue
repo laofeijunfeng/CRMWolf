@@ -213,16 +213,6 @@ const selectedCustomerName = computed<string>(() => {
   return ''
 })
 
-const buildOpportunityName = (formValues: typeof values): string => {
-  const customerName = selectedCustomerName.value.trim() || '未命名客户'
-  const userCount = Number(formValues.user_count) || 1
-  const suffix = formValues.license_type === LicenseType.SUBSCRIPTION
-    ? `${userCount}人-订阅${Number(formValues.subscription_years) || 1}年`
-    : `${userCount}人-买断`
-  const maxCustomerNameLength = Math.max(1, 255 - suffix.length - 1)
-  return `${customerName.slice(0, maxCustomerNameLength)}-${suffix}`
-}
-
 // Fetch procurement methods
 async function fetchProcurementMethods(): Promise<void> {
   loadingMethods.value = true
@@ -380,7 +370,6 @@ const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
   try {
     const data: OpportunityCreate | OpportunityUpdate = {
-      opportunity_name: buildOpportunityName(formValues),
       customer_id: Number(formValues['customer_id']),
       total_amount: formValues['total_amount'],
       user_count: formValues['user_count'],

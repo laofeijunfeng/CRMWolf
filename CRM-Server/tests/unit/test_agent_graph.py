@@ -1,8 +1,11 @@
 """CRM AI Agent LangGraph tests."""
+from datetime import datetime
+
 import pytest
 
 from app.services.agent.graph import CRMAgentGraphService
 from app.services.agent.schemas import AgentMemorySnapshot, AgentSemanticParseResult, AgentSuggestionResult
+from app.services.agent.semantic import AgentSemanticParseEnvelope
 from app.services.agent.tools.base import AgentToolResult
 
 
@@ -22,18 +25,22 @@ class FakeSemanticParser:
 
 
 class FakeMemoryService:
+    def __init__(self, session_context=None):
+        self.session_context = session_context or {}
+
     def load_snapshot(self, db, *, team_id, user_id, session_id, session_context=None, message_limit=12):
         return AgentMemorySnapshot(
             recent_messages=[{"role": "USER", "content": "上一轮消息"}],
-            session_context=session_context or {},
+            session_context=session_context or self.session_context,
         )
 
 
 class FakeToolService:
-    def __init__(self, items=None):
+    def __init__(self, items=None, customer_context=None):
         self.searches = []
         self.context_queries = []
         self.items = items or [{"id": 101, "account_name": "越秀金融"}]
+        self.customer_context = customer_context
 
     async def search_customers(self, context, keyword, limit=10):
         self.searches.append({"context": context, "keyword": keyword, "limit": limit})
@@ -46,6 +53,13 @@ class FakeToolService:
 
     async def get_customer_context(self, context, customer_id):
         self.context_queries.append({"context": context, "customer_id": customer_id})
+        if self.customer_context is not None:
+            return AgentToolResult(
+                tool_name="get_customer_context",
+                success=True,
+                data=self.customer_context,
+                tool_call_id=502,
+            )
         return AgentToolResult(
             tool_name="get_customer_context",
             success=True,
@@ -63,13 +77,14 @@ class FakeSuggestionGenerator:
     def __init__(self):
         self.calls = []
 
-    async def generate_with_metadata(self, db, *, team_id, user_message, semantic_result, customer_context):
+    async def generate_with_metadata(self, db, *, team_id, user_message, semantic_result, customer_context, current_date=None):
         self.calls.append({
             "db": db,
             "team_id": team_id,
             "user_message": user_message,
             "semantic_result": semantic_result,
             "customer_context": customer_context,
+            "current_date": current_date,
         })
 
         class Envelope:
@@ -81,7 +96,7 @@ class FakeSuggestionGenerator:
                     "reason": "用户输入提到预算和采购计划。",
                     "priority": "high",
                     "requires_confirmation": True,
-                    "missing_fields": ["商机名称", "预计成交日期"],
+                    "missing_fields": ["预计成交日期"],
                     "risk_notes": [],
                     "confidence": 0.92,
                 }],
@@ -94,13 +109,54 @@ class FakeSuggestionGenerator:
         return Envelope()
 
 
+class FakeStageMoveSuggestionGenerator:
+    async def generate_with_metadata(self, db, *, team_id, user_message, semantic_result, customer_context, current_date=None):
+        class Envelope:
+            result = AgentSuggestionResult.model_validate({
+                "summary": "客户反馈已经进入下一采购阶段。",
+                "suggestions": [{
+                    "action": "MOVE_OPPORTUNITY_STAGE",
+                    "title": "推进商机阶段到招标准备",
+                    "reason": "跟进内容提到客户需要招标技术和商务参考材料。",
+                    "priority": "high",
+                    "requires_confirmation": True,
+                    "related_object_type": "opportunity",
+                    "related_object_id": 301,
+                    "execution_payload": {
+                        "stage_template_id": 902,
+                        "target_stage_name": "招标准备",
+                    },
+                    "risk_notes": [],
+                    "confidence": 0.91,
+                }],
+                "need_user_choice": True,
+                "clarification_question": None,
+            })
+            suggestion_source = "test_stage_move_suggestion_generator"
+            model = "test-model"
+
+        return Envelope()
+
+
 class FakeTemporalResolver:
+    def now(self):
+        return datetime(2026, 7, 24, 15, 0, 0)
+
     def resolve_follow_up_time(self, expression, *, base_datetime=None):
+        if expression is None:
+            return None
         assert expression.raw_text == "下周三"
         assert expression.kind == "RELATIVE_WEEKDAY"
         assert expression.direction == "next"
         assert expression.weekday == 3
         return "2026-07-29T09:00:00"
+
+    def resolve_date(self, expression, *, base_datetime=None):
+        if expression is None:
+            return None
+        if expression.raw_text == "今天":
+            return "2026-07-24"
+        return None
 
 
 def semantic_result(**overrides):
@@ -136,11 +192,83 @@ def semantic_result(**overrides):
     return AgentSemanticParseResult.model_validate(payload)
 
 
+def payment_semantic_result(**overrides):
+    payload = {
+        "intent": "PAYMENT_RECORD",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "越秀金融", "confidence": 0.95},
+        "follow_up": {"content": "客户今天已回款", "method": "未指定"},
+        "payment": {
+            "actual_amount": 300000,
+            "actual_payer_name": None,
+            "payment_date_text": "今天",
+            "payment_date": {
+                "raw_text": "今天",
+                "kind": "RELATIVE_DAY",
+                "direction": "current",
+                "confidence": 0.95,
+            },
+            "payment_date_iso": None,
+            "notes": None,
+        },
+        "contact": {},
+        "invoice_title": {},
+        "deployment_info": {},
+        "business_signals": [{"type": "payment_received", "summary": "客户今天已回款", "confidence": 0.95}],
+        "requested_actions": [],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["今天已回款"],
+    }
+    payload.update(overrides)
+    return AgentSemanticParseResult.model_validate(payload)
+
+
+def opportunity_semantic_result(**overrides):
+    payload = {
+        "intent": "CREATE_OPPORTUNITY",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": None, "confidence": 0.0, "resolution_source": "MEMORY"},
+        "follow_up": {"content": "用户要求创建商机", "method": "未指定"},
+        "opportunity": {
+            "opportunity_name": "100人订阅1年商机",
+            "total_amount": 50000,
+            "user_count": 100,
+            "license_type": "SUBSCRIPTION",
+            "subscription_years": 1,
+            "purchase_type": None,
+            "expected_closing_date": None,
+        },
+        "contact": {},
+        "invoice_title": {},
+        "deployment_info": {},
+        "business_signals": [{"type": "opportunity_progress", "summary": "用户要求创建商机", "confidence": 0.95}],
+        "requested_actions": [{"action": "CREATE_OPPORTUNITY", "requires_confirmation": True}],
+        "missing_fields": ["purchase_type", "expected_closing_date"],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["帮我创建一个商机，5 万 100 人使用，订阅 1 年"],
+    }
+    payload.update(overrides)
+    return AgentSemanticParseResult.model_validate(payload)
+
+
 def build_service(result, tool_service=None):
     return CRMAgentGraphService(
         tool_service=tool_service or FakeToolService(),
         semantic_parser=FakeSemanticParser(result),
         memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
+    )
+
+
+def build_service_with_memory(result, tool_service=None, session_context=None):
+    return CRMAgentGraphService(
+        tool_service=tool_service or FakeToolService(),
+        semantic_parser=FakeSemanticParser(result),
+        memory_service=FakeMemoryService(session_context=session_context),
         temporal_resolver=FakeTemporalResolver(),
         suggestion_generator=FakeSuggestionGenerator(),
     )
@@ -155,6 +283,28 @@ def input_state(content="这句话没有任何用于规则识别的关键词"):
         "authorization": "Bearer test-token",
         "content": content,
     }
+
+
+class FakeSemanticParserWithMetadata:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    async def parse_with_metadata(self, db, *, team_id, user_message, memory=None, current_date=None):
+        self.calls.append({
+            "db": db,
+            "team_id": team_id,
+            "user_message": user_message,
+            "memory": memory,
+            "current_date": current_date,
+        })
+        return AgentSemanticParseEnvelope(
+            result=self.result,
+            parse_source="system_ai_json_object",
+            model="test-model",
+            fallback_reason="langchain_structured_output_failed",
+            fallback_error="RuntimeError",
+        )
 
 
 @pytest.mark.asyncio
@@ -181,6 +331,29 @@ async def test_agent_graph_uses_ai_semantic_result_for_intent_and_entities():
     assert semantic_events[0]["parse_source"] == "test_parser"
     assert tool_service.searches[0]["keyword"] == "光大证券"
     assert parser.calls[0]["memory"].recent_messages[0]["content"] == "上一轮消息"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_exposes_structured_output_fallback_metadata():
+    parser = FakeSemanticParserWithMetadata(semantic_result())
+    service = CRMAgentGraphService(
+        tool_service=FakeToolService(),
+        semantic_parser=parser,
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
+    )
+
+    result = await service.run({
+        **input_state("今天和越秀金融沟通了项目进展"),
+        "current_datetime": datetime(2026, 7, 24, 15, 0, 0),
+    })
+
+    semantic_events = [event for event in result["events"] if event["event"] == "semantic_parsed"]
+    assert semantic_events[0]["parse_source"] == "system_ai_json_object"
+    assert semantic_events[0]["fallback_reason"] == "langchain_structured_output_failed"
+    assert semantic_events[0]["fallback_error"] == "RuntimeError"
+    assert parser.calls[0]["current_date"].isoformat() == "2026-07-24"
 
 
 @pytest.mark.asyncio
@@ -217,7 +390,25 @@ async def test_agent_graph_loads_customer_context_and_generates_ai_suggestions()
     suggestion_events = [event for event in result["events"] if event["event"] == "business_suggestions"]
     assert suggestion_events[0]["suggestion_source"] == "test_suggestion_generator"
     assert suggestion_events[0]["suggestions"][0]["action"] == "CREATE_OPPORTUNITY"
-    assert "基于客户上下文，我建议下一步可以：1. 创建商机。" in result["response"]
+    assert "请确认是否创建这条跟进记录？" in result["response"]
+    assert "基于客户上下文，我建议下一步可以" not in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_streams_step_events_before_final_response():
+    service = build_service(semantic_result())
+    events = []
+
+    async for event in service.stream_events(input_state("今天和越秀金融沟通了项目进展")):
+        events.append(event)
+
+    event_names = [event["event"] for event in events]
+    assert event_names[0] == "agent_step"
+    assert events[0]["step"] == "load_memory"
+    assert events[0]["status"] == "started"
+    assert event_names.index("semantic_parsed") < event_names.index("final")
+    assert event_names.index("tool_result") < event_names.index("final")
+    assert event_names.index("business_suggestions") < event_names.index("final")
 
 
 @pytest.mark.asyncio
@@ -246,6 +437,285 @@ async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation
     assert confirmation_events[0]["action"] == "create_customer_follow_up"
     assert confirmation_events[0]["payload"]["customer_id"] == 101
     assert confirmation_events[0]["payload"]["content"] == "客户反馈项目还在立项评估阶段"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_attaches_opportunity_stage_move_as_next_task_after_follow_up():
+    tool_service = FakeToolService(
+        items=[{"id": 101, "account_name": "睿狐科技", "owner_info": {"id": 2}}],
+        customer_context={
+            "customer": {"id": 101, "account_name": "睿狐科技"},
+            "opportunities": {"items": [{"id": 301, "opportunity_name": "睿狐科技采购项目"}]},
+            "active_opportunity_stage_context": [{
+                "opportunity": {"id": 301, "opportunity_name": "睿狐科技采购项目"},
+                "procurement_stages": [
+                    {"id": 901, "stage_name": "立项评估", "is_current": True},
+                    {"id": 902, "stage_name": "招标准备", "is_current": False},
+                ],
+            }],
+            "contracts": {"items": []},
+            "payment_plans": {"items": []},
+        },
+    )
+    service = CRMAgentGraphService(
+        tool_service=tool_service,
+        semantic_parser=FakeSemanticParser(semantic_result(
+            customer={"name_text": "睿狐科技", "confidence": 0.95},
+            follow_up={
+                "content": "客户需要我们提供招标技术和商务参考材料",
+                "method": "未指定",
+                "next_action": "提供招标参数版本",
+                "next_follow_time_text": None,
+                "next_follow_time": None,
+            },
+        )),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeStageMoveSuggestionGenerator(),
+    )
+
+    result = await service.run(input_state("睿狐科技需要我们提供招标技术和商务参考材料"))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_customer_follow_up"
+    next_task = confirmation_events[0]["payload"]["_next_task"]
+    assert next_task["action"] == "move_opportunity_stage"
+    assert next_task["payload"]["opportunity_id"] == 301
+    assert next_task["payload"]["stage_template_id"] == 902
+    assert next_task["payload"]["target_stage_name"] == "招标准备"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_attaches_opportunity_collection_as_next_task_after_follow_up():
+    tool_service = FakeToolService(
+        items=[{"id": 101, "account_name": "汇川技术", "owner_info": {"id": 2}}],
+        customer_context={
+            "customer": {"id": 101, "account_name": "汇川技术"},
+            "opportunities": {"items": []},
+            "contracts": {"items": []},
+            "payment_plans": {"items": []},
+        },
+    )
+    service = CRMAgentGraphService(
+        tool_service=tool_service,
+        semantic_parser=FakeSemanticParser(semantic_result(
+            customer={"name_text": "汇川技术", "confidence": 0.95},
+            follow_up={
+                "content": "客户反馈续费事项本月底会对接到采购侧",
+                "method": "微信",
+                "next_action": "下周三确认采购联系时间",
+                "next_follow_time_text": "下周三",
+                "next_follow_time": {
+                    "raw_text": "下周三",
+                    "kind": "RELATIVE_WEEKDAY",
+                    "direction": "next",
+                    "weekday": 3,
+                    "confidence": 0.95,
+                },
+            },
+            opportunity={"purchase_type": "RENEWAL"},
+        )),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
+    )
+
+    result = await service.run(input_state("今天微信找了汇川技术沟通续费"))
+
+    assert "基于客户上下文，我建议下一步可以" not in result["response"]
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    next_task = confirmation_events[0]["payload"]["_next_task"]
+    assert next_task["action"] == "collect_opportunity_fields"
+    assert next_task["payload"]["opportunity"]["purchase_type"] == "RENEWAL"
+    assert "total_amount" in next_task["payload"]["missing_fields"]
+    assert "继续帮你补齐商机信息" in next_task["content"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_inherits_current_customer_from_structured_memory():
+    memory_customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+    tool_service = FakeToolService(
+        items=[{"id": 999, "account_name": "深圳市云视创科技有限公司"}],
+        customer_context={
+            "customer": {"id": 101, "account_name": "广州睿狐科技有限公司"},
+            "opportunities": {"items": []},
+            "contracts": {"items": []},
+            "payment_plans": {"items": []},
+        },
+    )
+    result = await build_service_with_memory(
+        opportunity_semantic_result(),
+        tool_service,
+        session_context={"current_customer": memory_customer},
+    ).run(input_state("那帮我创建一个商机，5 万 100 人使用，订阅 1 年"))
+
+    assert tool_service.searches == []
+    assert tool_service.context_queries[0]["customer_id"] == 101
+    assert result["selected_customer"]["account_name"] == "广州睿狐科技有限公司"
+    assert result["parsed"]["customer_name"] == "广州睿狐科技有限公司"
+    field_events = [event for event in result["events"] if event["event"] == "opportunity_fields_required"]
+    assert field_events[0]["action"] == "collect_opportunity_fields"
+    assert field_events[0]["payload"]["customer_id"] == 101
+    assert field_events[0]["payload"]["opportunity"]["total_amount"] == 50000
+    assert field_events[0]["payload"]["missing_fields"] == ["purchase_type", "expected_closing_date"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_explicit_customer_overrides_current_customer_memory():
+    memory_customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+    tool_service = FakeToolService(
+        items=[{"id": 202, "account_name": "汇川技术"}],
+        customer_context={
+            "customer": {"id": 202, "account_name": "汇川技术"},
+            "opportunities": {"items": []},
+            "contracts": {"items": []},
+            "payment_plans": {"items": []},
+        },
+    )
+    service = build_service_with_memory(
+        semantic_result(
+            customer={"name_text": "汇川技术", "confidence": 0.95, "resolution_source": "EXPLICIT"},
+            follow_up={
+                "content": "客户反馈已经找了研发侧，本月底会对接到采购侧",
+                "method": "微信",
+                "next_action": "下周三确认采购联系时间",
+                "next_follow_time_text": "下周三",
+                "next_follow_time": {
+                    "raw_text": "下周三",
+                    "kind": "RELATIVE_WEEKDAY",
+                    "direction": "next",
+                    "weekday": 3,
+                    "confidence": 0.95,
+                },
+            },
+        ),
+        tool_service,
+        session_context={"current_customer": memory_customer},
+    )
+
+    result = await service.run(input_state("今天微信找了汇川技术沟通续费方面的事宜"))
+
+    assert tool_service.searches[0]["keyword"] == "汇川技术"
+    assert result["selected_customer"]["account_name"] == "汇川技术"
+    assert result["parsed"]["customer_name"] == "汇川技术"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_payment_record_uses_customer_context_plan():
+    tool_service = FakeToolService(
+        items=[{
+            "id": 101,
+            "account_name": "越秀金融",
+            "owner_info": {"id": 2, "name": "销售A"},
+            "collaborator_infos": [{"id": 9, "name": "协作A"}],
+        }],
+        customer_context={
+            "customer": {"id": 101, "account_name": "越秀金融"},
+            "contracts": [{"id": 201, "contract_name": "越秀金融 CRM 合同", "total_amount": 300000, "status": "SIGNED"}],
+            "payment_plans": [{
+                "id": 301,
+                "contract_id": 201,
+                "contract_name": "越秀金融 CRM 合同",
+                "stage_name": "首款",
+                "remaining_amount": 300000,
+                "status": "PENDING",
+            }],
+        },
+    )
+    result = await build_service(payment_semantic_result(), tool_service).run(input_state("越秀金融今天回款 30 万"))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_payment_record"
+    assert confirmation_events[0]["payload"]["payment_plan_id"] == 301
+    assert confirmation_events[0]["payload"]["actual_amount"] == 300000
+    assert confirmation_events[0]["payload"]["payment_date"] == "2026-07-24"
+    assert confirmation_events[0]["payload"]["commission_member_id"] == "9"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_payment_record_without_plan_requires_plan_creation():
+    tool_service = FakeToolService(
+        items=[{"id": 101, "account_name": "越秀金融", "owner_info": {"id": 2}}],
+        customer_context={
+            "customer": {"id": 101, "account_name": "越秀金融"},
+            "contracts": [{"id": 201, "contract_name": "越秀金融 CRM 合同", "total_amount": 300000, "status": "SIGNED"}],
+            "payment_plans": [],
+        },
+    )
+    result = await build_service(payment_semantic_result(), tool_service).run(input_state("越秀金融今天回款 30 万"))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_payment_plan"
+    assert confirmation_events[0]["payload"]["contract_id"] == 201
+    assert confirmation_events[0]["payload"]["planned_amount"] == 300000
+    assert confirmation_events[0]["payload"]["pending_payment_record"]["commission_member_id"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_payment_record_without_opportunity_or_contract_explains_chain_gap():
+    tool_service = FakeToolService(
+        items=[{"id": 101, "account_name": "睿狐科技", "owner_info": {"id": 2}}],
+        customer_context={
+            "customer": {"id": 101, "account_name": "睿狐科技"},
+            "opportunities": {"items": []},
+            "contracts": {"items": []},
+            "payment_plans": {"items": []},
+        },
+    )
+    result = await build_service(payment_semantic_result(), tool_service).run(input_state("睿狐科技今天回了 5 万"))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events == []
+    assert "没有找到商机和可用于登记回款的合同" in result["response"]
+    assert "需要先补齐商机" in result["response"]
+    assert "创建回款计划" not in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_payment_record_missing_amount_requires_ai_field_collection():
+    tool_service = FakeToolService(
+        items=[{"id": 101, "account_name": "越秀金融", "owner_info": {"id": 2}}],
+        customer_context={
+            "customer": {"id": 101, "account_name": "越秀金融"},
+            "contracts": [{"id": 201, "contract_name": "越秀金融 CRM 合同", "total_amount": 300000, "status": "SIGNED"}],
+            "payment_plans": [{
+                "id": 301,
+                "contract_id": 201,
+                "contract_name": "越秀金融 CRM 合同",
+                "stage_name": "首款",
+                "remaining_amount": 300000,
+                "status": "PENDING",
+            }],
+        },
+    )
+    result = await build_service(payment_semantic_result(
+        payment={
+            "actual_amount": None,
+            "payment_date_text": "今天",
+            "payment_date": {
+                "raw_text": "今天",
+                "kind": "RELATIVE_DAY",
+                "direction": "current",
+                "confidence": 0.95,
+            },
+            "payment_date_iso": None,
+        },
+        missing_fields=["actual_amount"],
+    ), tool_service).run(input_state("越秀金融今天回款了"))
+
+    field_events = [event for event in result["events"] if event["event"] == "payment_fields_required"]
+    assert field_events[0]["action"] == "collect_payment_fields"
+    assert field_events[0]["payload"]["missing_fields"] == ["actual_amount"]
 
 
 @pytest.mark.asyncio

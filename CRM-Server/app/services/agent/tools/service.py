@@ -152,8 +152,162 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_deployment_info", payload, action_key, call_api)
 
+    async def create_opportunity(
+        self,
+        context: AgentToolContext,
+        opportunity: JsonDict,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        opportunity = {key: value for key, value in opportunity.items() if key != "opportunity_name"}
+        payload = {"opportunity": opportunity}
+        action_key = self._action_key("create_opportunity", context, payload, idempotency_suffix)
+
+        async def call_api():
+            return await self.api_client.request(
+                "POST",
+                "/v1/opportunities/",
+                context.authorization,
+                json=opportunity,
+            )
+
+        return await self._run_write_tool(context, "create_opportunity", payload, action_key, call_api)
+
+    async def list_customer_opportunities(
+        self,
+        context: AgentToolContext,
+        customer_id: int,
+        status: Optional[str] = None,
+        limit: int = 20,
+    ) -> AgentToolResult:
+        params: JsonDict = {"customer_id": customer_id, "limit": limit}
+        if status is not None:
+            params["status"] = status
+        payload = dict(params)
+
+        async def call_api():
+            return await self.api_client.request(
+                "GET",
+                "/v1/opportunities/",
+                context.authorization,
+                params=params,
+            )
+
+        return await self._run_read_tool(context, "list_customer_opportunities", payload, call_api)
+
+    async def get_opportunity_detail(self, context: AgentToolContext, opportunity_id: int) -> AgentToolResult:
+        payload = {"opportunity_id": opportunity_id}
+
+        async def call_api():
+            return await self.api_client.request(
+                "GET",
+                f"/v1/opportunities/{opportunity_id}",
+                context.authorization,
+            )
+
+        return await self._run_read_tool(context, "get_opportunity_detail", payload, call_api)
+
+    async def get_opportunity_procurement_stages(
+        self,
+        context: AgentToolContext,
+        opportunity_id: int,
+    ) -> AgentToolResult:
+        payload = {"opportunity_id": opportunity_id}
+
+        async def call_api():
+            return await self.api_client.request(
+                "GET",
+                f"/v1/opportunities/{opportunity_id}/procurement-stages",
+                context.authorization,
+            )
+
+        return await self._run_read_tool(context, "get_opportunity_procurement_stages", payload, call_api)
+
+    async def move_opportunity_stage(
+        self,
+        context: AgentToolContext,
+        opportunity_id: int,
+        stage_template_id: int,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        payload = {"opportunity_id": opportunity_id, "stage_template_id": stage_template_id}
+        action_key = self._action_key("move_opportunity_stage", context, payload, idempotency_suffix)
+
+        async def call_api():
+            return await self.api_client.request(
+                "POST",
+                f"/v1/opportunities/{opportunity_id}/move-stage",
+                context.authorization,
+                json={"stage_template_id": stage_template_id},
+            )
+
+        return await self._run_write_tool(context, "move_opportunity_stage", payload, action_key, call_api)
+
+    async def create_payment_plan(
+        self,
+        context: AgentToolContext,
+        contract_id: int,
+        stage_name: str,
+        planned_amount: float,
+        due_date: str,
+        notes: Optional[str] = None,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        plan = {
+            "stage_name": stage_name,
+            "planned_amount": planned_amount,
+            "due_date": due_date,
+            "notes": notes,
+        }
+        payload = {"contract_id": contract_id, "plans": [plan]}
+        action_key = self._action_key("create_payment_plan", context, payload, idempotency_suffix)
+
+        async def call_api():
+            created = await self.api_client.request(
+                "POST",
+                f"/v1/payments/contracts/{contract_id}/payment-plans",
+                context.authorization,
+                json={"plans": [plan]},
+            )
+            return {"items": created if isinstance(created, list) else [created]}
+
+        return await self._run_write_tool(context, "create_payment_plan", payload, action_key, call_api)
+
+    async def create_payment_record(
+        self,
+        context: AgentToolContext,
+        payment_plan_id: int,
+        actual_amount: float,
+        payment_date: str,
+        commission_member_id: str,
+        actual_payer_name: Optional[str] = None,
+        proof_attachment: Optional[str] = None,
+        notes: Optional[str] = None,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        record = {
+            "actual_amount": actual_amount,
+            "actual_payer_name": actual_payer_name,
+            "payment_date": payment_date,
+            "proof_attachment": proof_attachment,
+            "commission_member_id": commission_member_id,
+            "notes": notes,
+        }
+        payload = {"payment_plan_id": payment_plan_id, **record}
+        action_key = self._action_key("create_payment_record", context, payload, idempotency_suffix)
+
+        async def call_api():
+            return await self.api_client.request(
+                "POST",
+                f"/v1/payments/payment-plans/{payment_plan_id}/records",
+                context.authorization,
+                json=record,
+            )
+
+        return await self._run_write_tool(context, "create_payment_record", payload, action_key, call_api)
+
     async def _get_customer_related_context(self, context: AgentToolContext, customer_id: int) -> JsonDict:
         related_paths = {
+            "opportunities": f"/v1/opportunities/?customer_id={customer_id}",
             "contracts": f"/v1/customers/{customer_id}/contracts",
             "payment_plans": f"/v1/customers/{customer_id}/payment-plans",
             "invoices": f"/v1/customers/{customer_id}/invoices",
@@ -167,7 +321,56 @@ class CRMAgentToolService:
                 result[key] = await self.api_client.request("GET", path, context.authorization)
             except CRMAPIClientError as exc:
                 result[key] = {"error": exc.message, "status_code": exc.status_code}
+        result["active_opportunity_stage_context"] = await self._get_active_opportunity_stage_context(
+            context,
+            result.get("opportunities"),
+        )
         return result
+
+    async def _get_active_opportunity_stage_context(self, context: AgentToolContext, opportunities_value: Any) -> list[JsonDict]:
+        opportunities = self._extract_items(opportunities_value)
+        active_opportunities = [
+            opportunity
+            for opportunity in opportunities
+            if str(opportunity.get("status")) == "0"
+        ][:3]
+        stage_context: list[JsonDict] = []
+        for opportunity in active_opportunities:
+            opportunity_id = opportunity.get("id")
+            if not opportunity_id:
+                continue
+            try:
+                detail = await self.api_client.request(
+                    "GET",
+                    f"/v1/opportunities/{opportunity_id}",
+                    context.authorization,
+                )
+                stages = await self.api_client.request(
+                    "GET",
+                    f"/v1/opportunities/{opportunity_id}/procurement-stages",
+                    context.authorization,
+                )
+                stage_context.append({
+                    "opportunity": detail,
+                    "procurement_stages": stages if isinstance(stages, list) else [],
+                })
+            except CRMAPIClientError as exc:
+                stage_context.append({
+                    "opportunity_id": opportunity_id,
+                    "error": exc.message,
+                    "status_code": exc.status_code,
+                })
+        return stage_context
+
+    @staticmethod
+    def _extract_items(value: Any) -> list[JsonDict]:
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        if isinstance(value, dict):
+            items = value.get("items")
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+        return []
 
     async def _run_read_tool(
         self,

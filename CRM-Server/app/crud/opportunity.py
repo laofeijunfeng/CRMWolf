@@ -12,7 +12,8 @@ from app.schemas.opportunity import (
     OpportunityUpdate,
     OpportunityStageUpdate as OpportunityStageUpdateRequest,
     OpportunityWin,
-    OpportunityLose
+    OpportunityLose,
+    LicenseTypeEnum,
 )
 
 
@@ -262,13 +263,14 @@ class OpportunityCRUD:
         from app.models.procurement import OpportunityStageSnapshot
         from datetime import datetime
         
+        customer = db.query(Customer).filter(Customer.id == obj_in.customer_id).first()
+        if not customer:
+            raise ValueError("客户不存在")
+
         # 1. 确定采购方式
         if obj_in.procurement_method_id is not None:
             procurement_method_id = obj_in.procurement_method_id
         else:
-            customer = db.query(Customer).filter(Customer.id == obj_in.customer_id).first()
-            if not customer:
-                raise ValueError("客户不存在")
             if customer.default_procurement_method_id:
                 procurement_method_id = customer.default_procurement_method_id
             else:
@@ -288,7 +290,7 @@ class OpportunityCRUD:
         
         # 3. 创建商机基础数据
         opportunity_data = {
-            'opportunity_name': obj_in.opportunity_name,
+            'opportunity_name': self._build_opportunity_name(obj_in, customer),
             'customer_id': obj_in.customer_id,
             'procurement_method_id': procurement_method_id,
             'total_amount': obj_in.total_amount,
@@ -341,6 +343,19 @@ class OpportunityCRUD:
         db_obj.current_stage_entered_at = snapshot.entered_at
         
         return db_obj
+
+    @staticmethod
+    def _build_opportunity_name(obj_in: OpportunityCreate, customer: Customer) -> str:
+        if obj_in.opportunity_name and obj_in.opportunity_name.strip():
+            return obj_in.opportunity_name.strip()
+        customer_name = (customer.account_name or "").strip() or f"客户 #{obj_in.customer_id}"
+        user_count = obj_in.user_count or 1
+        if obj_in.license_type == LicenseTypeEnum.SUBSCRIPTION:
+            suffix = f"{user_count}人-订阅{obj_in.subscription_years or 1}年"
+        else:
+            suffix = f"{user_count}人-买断"
+        max_customer_name_length = max(1, 255 - len(suffix) - 1)
+        return f"{customer_name[:max_customer_name_length]}-{suffix}"
 
     def log_created(self, db: Session, db_obj: Opportunity, creator_id: str, team_id: int) -> None:
         from app.crud.user import user_crud

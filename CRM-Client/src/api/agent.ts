@@ -6,6 +6,7 @@ import type { PaginatedResponse } from "@/types/pagination"
 export type AgentEventType =
   | "session"
   | "message"
+  | "agent_step"
   | "intent"
   | "semantic_parsed"
   | "entity_parse"
@@ -18,12 +19,19 @@ export type AgentEventType =
   | "customer_selection_required"
   | "customer_selected"
   | "customer_selection_failed"
+  | "opportunity_fields_required"
+  | "opportunity_fields_completed"
   | "contact_fields_required"
   | "contact_fields_completed"
   | "invoice_title_fields_required"
   | "invoice_title_fields_completed"
   | "deployment_info_fields_required"
   | "deployment_info_fields_completed"
+  | "payment_fields_required"
+  | "payment_fields_completed"
+  | "business_selection_required"
+  | "business_selected"
+  | "business_selection_failed"
   | "task_completed"
   | "task_failed"
   | "final"
@@ -67,8 +75,12 @@ export interface AgentChatSSEEvent {
   task_key?: string
   intent?: string
   confidence?: number
+  step?: string
+  status?: "started" | "completed" | string
   parse_source?: string | null
   model?: string | null
+  fallback_reason?: string | null
+  fallback_error?: string | null
   action?: string
   tool_name?: string
   success?: boolean

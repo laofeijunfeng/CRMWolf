@@ -13,7 +13,7 @@
       </Badge>
     </div>
 
-    <MessageScroller class="agent-chat__messages" :items-count="messages.length + eventLogs.length">
+    <MessageScroller class="agent-chat__messages" :items-count="messageScrollCount">
       <div v-if="messages.length === 0" class="agent-chat__empty">
         <Sparkles class="agent-chat__empty-icon" aria-hidden="true" />
         <div class="agent-chat__empty-title">输入一段客户跟进内容开始</div>
@@ -36,20 +36,48 @@
             <AvatarFallback>AI</AvatarFallback>
           </Avatar>
           <Bubble :variant="message.role === 'user' ? 'sent' : 'received'" class="agent-chat__bubble">
-            <div class="agent-chat__bubble-content">{{ message.content }}</div>
+            <div class="agent-chat__bubble-content">
+              <div v-if="message.role === 'assistant' && message.steps.length > 0" class="agent-chat__stream">
+                <button
+                  type="button"
+                  class="agent-chat__stream-summary"
+                  :aria-expanded="message.stepsExpanded === true"
+                  @click="message.stepsExpanded = !message.stepsExpanded"
+                >
+                  <span class="agent-chat__step-count">{{ message.steps.length }}</span>
+                  <component
+                    :is="message.stepsExpanded === true ? ChevronDown : ChevronRight"
+                    class="agent-chat__stream-chevron"
+                    aria-hidden="true"
+                  />
+                  <component
+                    :is="stepIcon(latestStep(message)?.kind)"
+                    class="agent-chat__stream-icon"
+                    :class="stepIconClass(latestStep(message)?.kind, message.isStreaming)"
+                    aria-hidden="true"
+                  />
+                  <span class="agent-chat__stream-latest">{{ latestStep(message)?.text }}</span>
+                </button>
+                <div v-if="message.stepsExpanded === true" class="agent-chat__stream-list">
+                  <div v-for="step in message.steps" :key="step.id" class="agent-chat__stream-step">
+                    <component
+                      :is="stepIcon(step.kind)"
+                      class="agent-chat__stream-icon"
+                      :class="stepIconClass(step.kind)"
+                      aria-hidden="true"
+                    />
+                    <span>{{ step.text }}</span>
+                  </div>
+                </div>
+              </div>
+              <div>{{ message.content }}</div>
+            </div>
           </Bubble>
           <Avatar v-if="message.role === 'user'" class="agent-chat__avatar">
             <AvatarFallback>{{ userInitial }}</AvatarFallback>
           </Avatar>
         </Message>
       </template>
-
-      <div v-if="eventLogs.length > 0" class="agent-chat__events" aria-live="polite">
-        <div v-for="eventLog in visibleEventLogs" :key="eventLog.id" class="agent-chat__event">
-          <span class="agent-chat__event-dot"></span>
-          <span>{{ eventLog.text }}</span>
-        </div>
-      </div>
     </MessageScroller>
 
     <form class="agent-chat__composer" @submit.prevent="sendMessage">
@@ -77,11 +105,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, type Component } from "vue"
 import { toast } from "vue-sonner"
-import { Bot, Loader2, SendHorizontal, Sparkles } from "lucide-vue-next"
+import {
+  AlertTriangle,
+  Bot,
+  Brain,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ClipboardCheck,
+  Database,
+  HelpCircle,
+  Loader2,
+  Search,
+  SendHorizontal,
+  Sparkles,
+  UserCheck,
+  Wrench,
+} from "lucide-vue-next"
 import { useUserStore } from "@/stores/user"
-import { agentApi, type AgentChatSSEEvent, type AgentMessageResponse } from "@/api/agent"
+import { agentApi, type AgentChatSSEEvent, type AgentEventType, type AgentMessageResponse } from "@/api/agent"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Bubble } from "@/components/ui/bubble"
@@ -94,11 +138,15 @@ interface ChatMessage {
   id: string
   role: "user" | "assistant"
   content: string
+  steps: EventLog[]
+  isStreaming?: boolean
+  stepsExpanded?: boolean
 }
 
 interface EventLog {
   id: string
   text: string
+  kind: AgentEventType
 }
 
 const userStore = useUserStore()
@@ -107,8 +155,8 @@ const isStreaming = ref(false)
 const sessionId = ref<number | undefined>(undefined)
 const sessionKey = ref<string | undefined>(undefined)
 const messages = ref<ChatMessage[]>([])
-const eventLogs = ref<EventLog[]>([])
 const isLoadingHistory = ref(false)
+const activeAssistantId = ref<string | null>(null)
 
 const LAST_SESSION_STORAGE_KEY = "crm_agent_last_session_id"
 
@@ -118,7 +166,10 @@ const userInitial = computed(() => {
   return name !== undefined && name.length > 0 ? name.charAt(0) : "我"
 })
 const sessionLabel = computed(() => sessionId.value !== undefined ? `会话 #${sessionId.value}` : "新会话")
-const visibleEventLogs = computed(() => eventLogs.value.slice(-6))
+const messageScrollCount = computed(() => (
+  messages.value.length
+  + messages.value.reduce((total, message) => total + message.steps.length, 0)
+))
 
 const nextId = (prefix: string): string => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
 
@@ -132,7 +183,60 @@ const addAssistantMessage = (content: string, id?: string | number): void => {
   if (content.length === 0) return
   const lastMessage = messages.value[messages.value.length - 1]
   if (lastMessage?.role === "assistant" && lastMessage.content === content) return
-  messages.value.push({ id: String(id ?? nextId("assistant")), role: "assistant", content })
+  messages.value.push({ id: String(id ?? nextId("assistant")), role: "assistant", content, steps: [] })
+}
+
+const activeAssistantMessage = (): ChatMessage | null => {
+  const activeId = activeAssistantId.value
+  if (activeId === null) return null
+  return messages.value.find(message => message.id === activeId) ?? null
+}
+
+const startAssistantDraft = (): void => {
+  const id = nextId("assistant_stream")
+  messages.value.push({
+    id,
+    role: "assistant",
+    content: "正在理解你的 CRM 操作意图...",
+    steps: [],
+    isStreaming: true,
+  })
+  activeAssistantId.value = id
+}
+
+const updateAssistantDraft = (content: string, id?: string | number, keepActive = false): void => {
+  if (content.length === 0) return
+  const draft = activeAssistantMessage()
+  if (draft) {
+    draft.content = content
+    draft.isStreaming = false
+    if (id !== undefined) draft.id = String(id)
+    if (!keepActive) activeAssistantId.value = null
+    return
+  }
+  addAssistantMessage(content, id)
+}
+
+const payloadTraceEvents = (payload?: Record<string, unknown> | null): AgentChatSSEEvent[] => {
+  const traceEvents = payload?.["trace_events"]
+  if (!Array.isArray(traceEvents)) return []
+  return traceEvents
+    .filter((event): event is AgentChatSSEEvent => {
+      return typeof event === "object"
+        && event !== null
+        && "event" in event
+        && typeof (event as { event?: unknown }).event === "string"
+    })
+}
+
+const traceEventToStep = (event: AgentChatSSEEvent): EventLog | null => {
+  const text = eventToLogText(event)
+  if (text === null || text.length === 0) return null
+  return {
+    id: nextId("evt"),
+    text,
+    kind: event.event,
+  }
 }
 
 const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
@@ -143,8 +247,13 @@ const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
     id: String(message.id),
     role,
     content,
+    steps: role === "assistant"
+      ? payloadTraceEvents(message.payload_json).map(traceEventToStep).filter((step): step is EventLog => step !== null)
+      : [],
   }
 }
+
+const latestStep = (message: ChatMessage): EventLog | undefined => message.steps[message.steps.length - 1]
 
 const loadSessionMessages = async (targetSessionId: number): Promise<boolean> => {
   const response = await agentApi.listMessages(targetSessionId)
@@ -153,7 +262,7 @@ const loadSessionMessages = async (targetSessionId: number): Promise<boolean> =>
     .filter((message): message is ChatMessage => message !== null)
 
   messages.value = loadedMessages
-  eventLogs.value = []
+  activeAssistantId.value = null
   sessionId.value = targetSessionId
   localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(targetSessionId))
   return true
@@ -182,14 +291,77 @@ const loadInitialSession = async (): Promise<void> => {
     await loadSessionMessages(latestSession.id)
   } catch (error) {
     const message = error instanceof Error ? error.message : "加载 Agent 历史消息失败"
-    addEventLog(message)
+    addEventLog(message, "error")
   } finally {
     isLoadingHistory.value = false
   }
 }
 
-const addEventLog = (text: string): void => {
-  eventLogs.value.push({ id: nextId("evt"), text })
+const addEventLog = (text: string, kind: AgentEventType): void => {
+  const draft = activeAssistantMessage()
+  if (draft) {
+    draft.steps.push({ id: nextId("evt"), text, kind })
+    return
+  }
+  const lastAssistant = [...messages.value].reverse().find(message => message.role === "assistant")
+  if (lastAssistant) {
+    lastAssistant.steps.push({ id: nextId("evt"), text, kind })
+  }
+}
+
+const stepIcon = (kind?: AgentEventType): Component => {
+  switch (kind) {
+    case "agent_step":
+    case "semantic_parsed":
+    case "intent":
+    case "entity_parse":
+    case "business_suggestions":
+      return Brain
+    case "tool_result":
+      return Wrench
+    case "customer_candidates":
+    case "customer_selected":
+    case "customer_selection_required":
+      return Search
+    case "business_context_loaded":
+      return Database
+    case "confirmation_required":
+    case "opportunity_fields_required":
+    case "contact_fields_required":
+    case "invoice_title_fields_required":
+    case "deployment_info_fields_required":
+    case "payment_fields_required":
+    case "business_selection_required":
+      return HelpCircle
+    case "opportunity_fields_completed":
+    case "contact_fields_completed":
+    case "invoice_title_fields_completed":
+    case "deployment_info_fields_completed":
+    case "payment_fields_completed":
+    case "business_selected":
+      return UserCheck
+    case "task_completed":
+      return CheckCircle2
+    case "task_failed":
+    case "error":
+    case "suggestion_failed":
+    case "customer_selection_failed":
+    case "business_selection_failed":
+      return AlertTriangle
+    default:
+      return ClipboardCheck
+  }
+}
+
+const stepIconClass = (kind?: AgentEventType, active = false): string => {
+  const statusClass = active ? "agent-chat__stream-icon--active" : ""
+  const normalizedKind = kind ?? ""
+  if (kind === "tool_result" || kind === "task_completed") return `agent-chat__stream-icon--success ${statusClass}`
+  if (kind === "error" || kind === "task_failed" || kind === "suggestion_failed" || normalizedKind.endsWith("_failed")) {
+    return `agent-chat__stream-icon--danger ${statusClass}`
+  }
+  if (normalizedKind.includes("required") || kind === "confirmation_required") return `agent-chat__stream-icon--warning ${statusClass}`
+  return `agent-chat__stream-icon--info ${statusClass}`
 }
 
 const stringifyValue = (value: unknown): string => {
@@ -207,10 +379,21 @@ const formatCustomerNames = (customers?: Record<string, unknown>[]): string => {
     .join("；")
 }
 
+const formatAITrace = (prefix: string, source: unknown, model: unknown, fallbackReason?: unknown, fallbackError?: unknown): string => {
+  const hasFallbackReason = fallbackReason !== null && fallbackReason !== undefined && fallbackReason !== ""
+  const hasFallbackError = fallbackError !== null && fallbackError !== undefined && fallbackError !== ""
+  const fallbackText = hasFallbackReason
+    ? `，fallback：${stringifyValue(fallbackReason)}${hasFallbackError ? `/${stringifyValue(fallbackError)}` : ""}`
+    : ""
+  return `${prefix}：${stringifyValue(source)}，模型：${stringifyValue(model)}${fallbackText}`
+}
+
 const eventToLogText = (event: AgentChatSSEEvent): string | null => {
   switch (event.event) {
+    case "agent_step":
+      return `${event.status === "completed" ? "完成" : "开始"}：${stringifyValue(event.content ?? event.step)}`
     case "semantic_parsed":
-      return `AI 语义解析：${stringifyValue(event.parse_source)}，模型：${stringifyValue(event.model)}`
+      return formatAITrace("AI 语义解析", event.parse_source, event.model, event.fallback_reason, event.fallback_error)
     case "intent":
       return `识别意图：${stringifyValue(event.intent)}`
     case "entity_parse":
@@ -222,7 +405,7 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
     case "business_context_loaded":
       return `已加载客户上下文：${stringifyValue(event.customer?.["account_name"])}`
     case "business_suggestions":
-      return `AI 业务建议：${formatSuggestionTitles(event.suggestions)}`
+      return `${formatAITrace("AI 业务建议", event.suggestion_source, event.model, event.fallback_reason, event.fallback_error)}，建议：${formatSuggestionTitles(event.suggestions)}`
     case "suggestion_failed":
       return `AI 业务建议生成失败：${stringifyValue(event.message)}`
     case "customer_selection_required":
@@ -233,6 +416,10 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return event.content !== undefined && event.content.length > 0 ? event.content : "客户选择未匹配"
     case "confirmation_required":
       return `等待确认：${stringifyValue(event.action)}`
+    case "opportunity_fields_required":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充商机信息"
+    case "opportunity_fields_completed":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "商机信息已补齐"
     case "contact_fields_required":
       return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充联系人信息"
     case "contact_fields_completed":
@@ -245,6 +432,16 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充部署信息"
     case "deployment_info_fields_completed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "部署信息已补齐"
+    case "payment_fields_required":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充回款信息"
+    case "payment_fields_completed":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "回款信息已补齐"
+    case "business_selection_required":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "需要选择业务对象"
+    case "business_selected":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "业务对象已选择"
+    case "business_selection_failed":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "业务对象选择未匹配"
     case "task_completed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "任务已完成"
     case "task_failed":
@@ -277,22 +474,25 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
   if (event.event === "message") {
     const role = normalizeRole(event.role)
     if (role === "assistant" && event.content !== undefined) {
-      addAssistantMessage(event.content, event.message_id)
+      updateAssistantDraft(event.content, event.message_id)
     }
     return
   }
 
   if (event.event === "final") {
-    if (event.content !== undefined) addAssistantMessage(event.content)
+    if (event.content !== undefined) updateAssistantDraft(event.content, undefined, true)
     return
   }
 
   if (event.event === "done") {
+    const draft = activeAssistantMessage()
+    if (draft) draft.isStreaming = false
+    activeAssistantId.value = null
     return
   }
 
   const text = eventToLogText(event)
-  if (text !== null && text.length > 0) addEventLog(text)
+  if (text !== null && text.length > 0) addEventLog(text, event.event)
 }
 
 const sendMessage = async (): Promise<void> => {
@@ -305,9 +505,9 @@ const sendMessage = async (): Promise<void> => {
     return
   }
 
-  messages.value.push({ id: nextId("user"), role: "user", content })
+  messages.value.push({ id: nextId("user"), role: "user", content, steps: [] })
+  startAssistantDraft()
   input.value = ""
-  eventLogs.value = []
   isStreaming.value = true
 
   try {
@@ -324,9 +524,17 @@ const sendMessage = async (): Promise<void> => {
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent 请求失败"
-    addEventLog(message)
+    addEventLog(message, "error")
+    const draft = activeAssistantMessage()
+    if (draft) {
+      draft.content = "Agent 请求失败，请稍后重试。"
+      draft.isStreaming = false
+    }
     toast.error(message)
   } finally {
+    const draft = activeAssistantMessage()
+    if (draft) draft.isStreaming = false
+    activeAssistantId.value = null
     isStreaming.value = false
   }
 }
@@ -415,28 +623,111 @@ onMounted(() => {
   min-width: 0;
 }
 
-.agent-chat__events {
+.agent-chat__stream {
   display: grid;
   gap: 6px;
-  max-width: 760px;
-  margin: 0 auto;
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid #e4ecfc;
+  border-radius: 8px;
+  background: #f8fbff;
   color: #64748b;
   font-size: 12px;
+  line-height: 1.5;
 }
 
-.agent-chat__event {
-  display: flex;
+.agent-chat__stream-summary {
+  display: grid;
+  grid-template-columns: 28px 14px 16px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  width: 100%;
   min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.agent-chat__event-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: 999px;
-  background: #2563eb;
+.agent-chat__step-count {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 22px;
+  border: 1px solid #cbdaf1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.agent-chat__stream-chevron {
+  width: 14px;
+  height: 14px;
+  color: #94a3b8;
+}
+
+.agent-chat__stream-icon {
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  flex: 0 0 15px;
+}
+
+.agent-chat__stream-icon--active {
+  animation: agent-chat-pulse 1.2s ease-in-out infinite;
+}
+
+.agent-chat__stream-icon--info {
+  color: #2563eb;
+}
+
+.agent-chat__stream-icon--success {
+  color: #16a34a;
+}
+
+.agent-chat__stream-icon--warning {
+  color: #d97706;
+}
+
+.agent-chat__stream-icon--danger {
+  color: #dc2626;
+}
+
+.agent-chat__stream-latest {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-chat__stream-list {
+  display: grid;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e4ecfc;
+}
+
+.agent-chat__stream-step {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 8px;
+}
+
+@keyframes agent-chat-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 .agent-chat__empty {

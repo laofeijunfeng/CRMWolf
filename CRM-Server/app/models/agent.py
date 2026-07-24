@@ -31,6 +31,7 @@ class AgentTaskStatus:
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+    SUSPENDED = "SUSPENDED"
 
 
 class AgentToolCallStatus:

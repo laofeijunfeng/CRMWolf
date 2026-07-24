@@ -187,6 +187,8 @@ CRM AI Agent MVP 具备继续实施的基础条件。
 - `search_customers`
 - `get_customer_context`
 - `create_customer_follow_up`
+- `create_opportunity`
 - `create_contact`
-- `create_payment_record`
-
+- `create_invoice_title`
+- `create_deployment_info`
+- `set_customer_member`

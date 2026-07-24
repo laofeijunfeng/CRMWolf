@@ -49,6 +49,8 @@ class AgentToolGuardrails:
         customer_id = payload.get("customer_id")
         if customer_id is None and isinstance(payload.get("deployment_info"), dict):
             customer_id = payload["deployment_info"].get("customer_id")
+        if customer_id is None and isinstance(payload.get("opportunity"), dict):
+            customer_id = payload["opportunity"].get("customer_id")
         if customer_id is not None and allowed_customer_ids and int(customer_id) not in allowed_customer_ids:
             raise AgentToolGuardrailError("tool payload 中的客户 ID 不在当前确认上下文内。")
 

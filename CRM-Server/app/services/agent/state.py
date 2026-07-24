@@ -9,8 +9,10 @@ class AgentGraphState(TypedDict, total=False):
     team_id: int
     user_id: int
     session_id: int
+    session_context: Dict[str, Any]
     content: str
     authorization: Optional[str]
+    current_datetime: Any
     intent: Optional[str]
     memory: AgentMemorySnapshot
     semantic_result: AgentSemanticParseResult

@@ -96,7 +96,7 @@ class OpportunityStageResponse(BaseModel):
 
 
 class OpportunityBase(BaseModel):
-    opportunity_name: str = Field(..., min_length=1, max_length=255, description="商机名称（项目名称）")
+    opportunity_name: Optional[str] = Field(None, min_length=1, max_length=255, description="商机名称（项目名称），创建时不传则由后端自动生成")
     total_amount: float = Field(..., gt=0, description="预计总金额（元）")
     user_count: int = Field(..., gt=0, description="采购用户数（ licenses 数量）")
     license_type: LicenseTypeEnum = Field(..., description="授权模式：SUBSCRIPTION:订阅制, PERPETUAL:买断制")

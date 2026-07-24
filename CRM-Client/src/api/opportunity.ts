@@ -1,5 +1,14 @@
 import request from '@/utils/request'
 import type { PaginatedResponse } from '@/types/pagination'
+import {
+  OpportunityApiResponseSchema,
+  OpportunityListApiResponseSchema,
+  OpportunityListItemApiSchema,
+  OpportunityOwnerFilterOptionsResponseSchema,
+  SalesFunnelDataSchema,
+  StageDurationDataSchema
+} from '@/schemas/opportunity'
+import { z } from 'zod'
 
 export enum OpportunityStatus {
   FOLLOW_UP = 0,
@@ -135,7 +144,7 @@ export interface SalesStageDetail {
 }
 
 export interface OpportunityCreate {
-  opportunity_name: string
+  opportunity_name?: string
   customer_id: number
   total_amount: number
   user_count: number
@@ -145,7 +154,7 @@ export interface OpportunityCreate {
   expected_closing_date: string
   procurement_method_id?: number | null
   procurement_stage_id?: number | null
-  owner_id: string
+  owner_id?: string
   decision_maker_count?: number | null
 }
 
@@ -287,57 +296,81 @@ export interface OpportunityListResponse {
 }
 
 export const opportunityApi = {
-  getOpportunities: (params?: OpportunityListParams) => {
-    return request.get<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>>(`/v1/opportunities/`, { params })
+  getOpportunities: async (params?: OpportunityListParams): Promise<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>>(`/v1/opportunities/`, { params })
+    return OpportunityListApiResponseSchema.parse(response) as OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>
   },
 
-  getOpportunity: (opportunityId: number) => {
-    return request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
+  getOpportunity: async (opportunityId: number): Promise<Opportunity> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
+    return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
-  getOpportunityDetail: (opportunityId: number) => {
-    return request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
+  getOpportunityDetail: async (opportunityId: number): Promise<Opportunity> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
+    return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
-  createOpportunity: (data: OpportunityCreate) => {
-    return request.post<Opportunity>(`/v1/opportunities/`, data)
+  createOpportunity: async (data: OpportunityCreate): Promise<Opportunity> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.post<Opportunity>(`/v1/opportunities/`, data)
+    return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
-  updateOpportunity: (opportunityId: number, data: OpportunityUpdate) => {
-    return request.put<Opportunity>(`/v1/opportunities/${opportunityId}`, data)
+  updateOpportunity: async (opportunityId: number, data: OpportunityUpdate): Promise<Opportunity> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.put<Opportunity>(`/v1/opportunities/${opportunityId}`, data)
+    return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
-  moveOpportunityStage: (opportunityId: number, data: OpportunityMoveStageRequest) => {
-    return request.post<null>(`/v1/opportunities/${opportunityId}/move-stage`, data)
+  moveOpportunityStage: async (opportunityId: number, data: OpportunityMoveStageRequest): Promise<null> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.post<null>(`/v1/opportunities/${opportunityId}/move-stage`, data)
+    return z.null().parse(response)
   },
 
-  markAsWon: (opportunityId: number, data: OpportunityWinRequest) => {
-    return request.patch<null>(`/v1/opportunities/${opportunityId}/win`, data)
+  markAsWon: async (opportunityId: number, data: OpportunityWinRequest): Promise<null> => {
+    const response = await request.patch<null>(`/v1/opportunities/${opportunityId}/win`, data)
+    return z.null().parse(response)
   },
 
-  markAsLost: (opportunityId: number, data: OpportunityLossRequest) => {
-    return request.patch<null>(`/v1/opportunities/${opportunityId}/lose`, data)
+  markAsLost: async (opportunityId: number, data: OpportunityLossRequest): Promise<null> => {
+    const response = await request.patch<null>(`/v1/opportunities/${opportunityId}/lose`, data)
+    return z.null().parse(response)
   },
 
-  deleteOpportunity: (opportunityId: number) => {
-    return request.delete<null>(`/v1/opportunities/${opportunityId}`)
+  deleteOpportunity: async (opportunityId: number): Promise<null> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.delete<null>(`/v1/opportunities/${opportunityId}`)
+    return z.null().parse(response)
   },
 
-  getSalesFunnel: () => {
-    return request.get<SalesFunnelData[]>(`/v1/opportunities/sales-funnel`)
+  getSalesFunnel: async (): Promise<SalesFunnelData[]> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<SalesFunnelData[]>(`/v1/opportunities/sales-funnel`)
+    return z.array(SalesFunnelDataSchema).parse(response) as SalesFunnelData[]
   },
 
-  getStageDuration: () => {
-    return request.get<StageDurationData[]>(`/v1/opportunities/stage-duration`)
+  getStageDuration: async (): Promise<StageDurationData[]> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<StageDurationData[]>(`/v1/opportunities/stage-duration`)
+    return z.array(StageDurationDataSchema).parse(response) as StageDurationData[]
   },
 
-  getAvailableForContract: (customerId: number) => {
-    return request.get<OpportunityListResponse[]>(`/v1/opportunities/available-for-contract`, {
+  getAvailableForContract: async (customerId: number): Promise<OpportunityListResponse[]> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<OpportunityListResponse[]>(`/v1/opportunities/available-for-contract`, {
       params: { customer_id: customerId }
     })
+    return z.array(OpportunityListItemApiSchema).parse(response) as OpportunityListResponse[]
   },
 
-  getOwnerFilterOptions: (): Promise<OwnerFilterOptionsResponse> => {
-    return request.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'opportunity' } })
+  getOwnerFilterOptions: async (): Promise<OwnerFilterOptionsResponse> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'opportunity' } })
+    return OpportunityOwnerFilterOptionsResponseSchema.parse(response) as OwnerFilterOptionsResponse
   }
 }

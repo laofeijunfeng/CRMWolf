@@ -4,6 +4,8 @@
 
 本方案基于《围绕客户跟进记录的 CRM AI Agent 需求文档》，目标是新增一版轻量、清晰、生产可用的 LangGraph Agent 服务。
 
+当前阶段聚焦销售跟进记录智能 Agent：先做好跟进记录录入、跟进质量理解、商机创建/补充/推进建议，以及客户基础资料补充。合同、回款、发票和 License 写入闭环暂不作为当前主目标，除非后续需求重新确认 tool 范围。
+
 核心边界：
 
 - Agent 服务负责理解自然语言、管理会话状态、编排业务 tool、输出交互结果。
@@ -338,28 +340,42 @@ class AgentToolDefinition(BaseModel):
 - tool 入参必须先通过 Pydantic schema 校验；校验失败进入字段补充，不调用 API。
 - API 返回权限不足、对象不存在、状态不允许时，原样标准化反馈给用户。
 
-第一版 tool 清单：
+当前阶段 tool 清单：
 
 - `search_customers`
 - `get_customer_context`
 - `create_customer_follow_up`
 - `create_opportunity`
+- `list_customer_opportunities`
+- `get_opportunity_detail`
+- `get_opportunity_procurement_stages`
 - `move_opportunity_stage`
 - `mark_opportunity_won`
 - `mark_opportunity_lost`
-- `create_payment_plan`
-- `create_payment_record`
-- `create_invoice_application`
 - `create_invoice_title`
 - `create_contact`
 - `create_deployment_info`
 - `set_customer_member`
+
+后续阶段评估 tool：
+
+- `create_payment_plan`
+- `create_payment_record`
+- `create_invoice_application`
 - `create_license_application`
 - `submit_license_application`
 
 ## 7. API 适配策略
 
 优先复用现有 API。
+
+商机阶段推进必须通过现有商机 API 编排：
+
+- 先查询客户商机，筛选进行中商机。
+- 再获取商机详情和 `/procurement-stages` 动态阶段列表。
+- LLM 只输出建议目标阶段 ID，代码校验该 ID 来自阶段列表。
+- 用户确认后调用 `/move-stage`，不得绕过权限、审批和阶段快照逻辑。
+- 跟进记录创建与阶段推进同时出现时，先确认跟进记录；成功后再创建阶段推进确认任务。
 
 如果现有 API 过于分散，第一版先由 Agent tool 编排调用现有 API。确需新增聚合查询能力时，必须先作为标准业务 API 设计、验收权限与数据隔离，再纳入 Agent tool；Agent 不得为了聚合上下文直接查业务数据库。
 
@@ -497,20 +513,18 @@ POST /api/v1/agent/sessions/{session_id}/cancel-active-task
 - 创建商机
 - 推进商机阶段
 - 标记商机赢单/输单
-- 创建回款计划
-- 登记回款
-- 创建发票申请
-- 创建 License 申请
-- 提交 License 审批
 - 设置客户成员
 - 已有默认部署时，将新部署设为默认
 - 疑似重复联系人仍要创建
+- 后续纳入的回款、发票、License 写入动作
 
 执行前确认摘要应包含：
 
 - 客户
 - 动作类型
 - 关键业务对象
+
+Tool 对接不能只看 API 入参 schema，还必须阅读对应后端服务和 CRUD 内部逻辑，确认默认值、派生字段、权限校验、审批提交和副作用。创建商机的 `opportunity_name` 属于后端派生字段，前端和 Agent 不生成、不追问。
 - 金额、日期、发票抬头、合同、回款计划、佣金归属人等关键字段
 - 可能影响
 
@@ -588,10 +602,10 @@ shadcn-vue 组件评估：
 {"event":"suggestions","suggestions":[...]}
 {"event":"field_request","fields":[...]}
 {"event":"confirmation_required","confirmation":{...}}
-{"event":"tool_started","tool":"create_payment_record"}
-{"event":"tool_result","tool":"create_payment_record","success":true,"data":{...}}
-{"event":"final","message":"已完成回款登记。"}
-{"event":"error","message":"没有权限创建回款记录。"}
+{"event":"tool_started","tool":"create_opportunity"}
+{"event":"tool_result","tool":"create_opportunity","success":true,"data":{...}}
+{"event":"final","message":"商机已创建，审批也交给系统啦。"}
+{"event":"error","message":"没有权限创建商机。"}
 ```
 
 所有事件必须同时保存到 Agent 消息或工具调用日志中，保证可追溯。
@@ -654,30 +668,32 @@ Middleware/Guardrails 必须校验：
 - 客户上下文摘要查询。
 - 最多 3 个主动建议。
 
-### 阶段 3：高价值 tool MVP
+### 阶段 3：商机与客户资料 tool MVP
 
 建议先做：
 
+- 创建商机。
 - 创建联系人。
-- 登记回款。
+- 创建发票抬头。
+- 创建部署信息。
+- 设置客户成员。
 
 原因：
 
-- 创建联系人验证资料维护类路径。
-- 登记回款验证业务推进类路径、确认摘要、佣金归属人、合同/回款计划上下文和防重复。
+- 创建商机验证“跟进记录驱动业务推进”的主路径。
+- 客户资料维护类动作高频、字段清晰、适合自然语言补录。
+- 回款、发票和 License 先作为上下文查询和建议，不作为当前主闭环。
 
 ### 阶段 4：扩展业务动作
 
 - 创建商机。
 - 推进商机阶段。
 - 标记赢单/输单。
-- 创建回款计划。
-- 创建发票抬头。
-- 创建发票申请。
-- 创建部署信息。
-- 创建 License 申请。
-- 提交 License 审批。
-- 设置客户成员。
+- 管理者客户概览查询。
+- 商机进展总结。
+- 销售跟进摘要。
+- 团队经营数据查询。
+- 回款、发票和 License 写入能力后续评估。
 
 ## 15. 验收标准
 
@@ -700,9 +716,10 @@ Middleware/Guardrails 必须校验：
 - 客户唯一时可自动创建跟进记录。
 - 客户不唯一时必须选择客户。
 - 业务推进类动作必须先有跟进记录。
-- 回款登记能按客户协作成员优先、owner 兜底的规则设置佣金归属人。
+- 商机创建能基于跟进内容补齐必填字段并确认执行。
+- 回款类输入不跳过商机、合同和回款计划前置条件。
 - 设置客户成员始终确认。
-- License 创建后可继续确认提交审批。
+- 合同、回款、发票和 License 写入闭环未纳入时，只输出建议和系统操作引导。
 
 ## 16. 主要风险与应对
 
@@ -738,7 +755,7 @@ Middleware/Guardrails 必须校验：
 - 确认 Agent 会话表迁移命名。
 - 确认 Agent API 路由前缀。
 - 确认内部 tool 调用 API 的认证上下文实现。
-- 确认第一阶段 MVP tool 范围：创建联系人、登记回款。
+- 确认第一阶段 MVP tool 范围：跟进记录、创建商机、联系人、发票抬头、部署信息和客户成员。
 - 确认客户上下文是否先由现有 API 编排完成；确需聚合查询时，先补标准业务 API，不在 Agent 内直接查库。
 - 确认生产环境是否接入 LangSmith；未接入前也必须保留本地审计日志。
 
