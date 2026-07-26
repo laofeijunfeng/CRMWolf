@@ -133,7 +133,7 @@ const paymentContractInfo = computed<PaymentContractInfo | undefined>(() => {
     total_amount: Number.isFinite(totalAmount) ? totalAmount : 0
   }
 
-  if (contract.customer_info !== undefined) {
+  if (contract.customer_info !== undefined && contract.customer_info !== null) {
     info.customer_info = contract.customer_info
   }
 

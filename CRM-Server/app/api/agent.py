@@ -7,12 +7,15 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
 from app.core.deps import get_current_active_user, get_current_user_team, security
 from app.crud.agent import agent_message_crud, agent_session_crud, agent_task_crud
+from app.crud.procurement import procurement_method_crud
 from app.models.agent import AgentMessageRole, AgentTaskStatus
+from app.models.customer import Customer
 from app.models.user import User
 from app.schemas.agent import (
     AgentChatRequest,
@@ -94,6 +97,286 @@ def _append_trace_event(trace_events: list[dict], event: dict) -> None:
     if event.get("event") in {"session", "message", "final", "done"}:
         return
     trace_events.append(json.loads(json.dumps(event, ensure_ascii=False, cls=SSEJsonEncoder)))
+
+
+def _choice_interaction(prompt: str, choices: list[dict[str, str]]) -> dict[str, Any]:
+    return {
+        "type": "choice",
+        "prompt": prompt,
+        "choices": choices,
+        "allow_free_text": True,
+        "allow_cancel": True,
+    }
+
+
+def _form_field(
+    key: str,
+    label: str,
+    field_type: str = "text",
+    *,
+    required: bool = True,
+    options: Optional[list[dict[str, str]]] = None,
+    placeholder: Optional[str] = None,
+    default_value: Optional[Any] = None,
+) -> dict[str, Any]:
+    field = {
+        "key": key,
+        "label": label,
+        "type": field_type,
+        "required": required,
+    }
+    if options:
+        field["options"] = options
+    if placeholder:
+        field["placeholder"] = placeholder
+    if default_value is not None:
+        field["default_value"] = str(default_value)
+    return field
+
+
+def _procurement_method_options(db: Optional[Session], team_id: Optional[int]) -> list[dict[str, str]]:
+    if db is None or team_id is None:
+        return []
+    try:
+        methods, _ = procurement_method_crud.get_multi(db, team_id=team_id, skip=0, limit=100, is_active=1)
+    except SQLAlchemyError:
+        db.rollback()
+        return []
+    return [{"label": method.name, "value": str(method.id)} for method in methods]
+
+
+def _customer_requires_procurement_method(customer: dict) -> bool:
+    return "default_procurement_method_id" in customer and not customer.get("default_procurement_method_id")
+
+
+def _customer_default_procurement_method_id(customer: dict) -> Optional[int]:
+    value = customer.get("default_procurement_method_id")
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return None
+
+
+def _opportunity_interaction_fields(missing_fields: list[str], customer: dict) -> list[str]:
+    fields = list(dict.fromkeys(missing_fields))
+    if "license_type" in fields and "subscription_years" not in fields:
+        fields.insert(fields.index("license_type") + 1, "subscription_years")
+    if "procurement_method_id" not in fields:
+        fields.append("procurement_method_id")
+    return fields
+
+
+def _opportunity_missing_display_fields(missing_fields: list[str], customer: dict) -> list[str]:
+    return _opportunity_interaction_fields(missing_fields, customer)
+
+
+def _opportunity_field_defaults(
+    customer: dict,
+    *,
+    db: Optional[Session] = None,
+    team_id: Optional[int] = None,
+    customer_id: Optional[int] = None,
+) -> dict[str, Any]:
+    default_procurement_method_id = _customer_default_procurement_method_id(customer)
+    if default_procurement_method_id is None and db is not None and customer_id:
+        try:
+            row = (
+                db.query(Customer.default_procurement_method_id)
+                .filter(Customer.id == customer_id, Customer.team_id == team_id)
+                .first()
+            )
+            default_procurement_method_id = row[0] if row else None
+        except SQLAlchemyError:
+            db.rollback()
+            default_procurement_method_id = None
+    if default_procurement_method_id is None:
+        return {}
+    return {"procurement_method_id": default_procurement_method_id}
+
+
+def _fields_for_missing(
+    kind: str,
+    missing_fields: list[str],
+    *,
+    db: Optional[Session] = None,
+    team_id: Optional[int] = None,
+    default_values: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    default_values = default_values or {}
+    option_sets = {
+        "license_type": [
+            {"label": "订阅", "value": "订阅"},
+            {"label": "买断", "value": "买断"},
+        ],
+        "purchase_type": [
+            {"label": "新购", "value": "新购"},
+            {"label": "续购", "value": "续购"},
+            {"label": "增购", "value": "增购"},
+        ],
+        "gender": [
+            {"label": "男", "value": "男"},
+            {"label": "女", "value": "女"},
+            {"label": "未知", "value": "未知"},
+        ],
+        "title_type": [
+            {"label": "单位", "value": "单位"},
+            {"label": "个人", "value": "个人"},
+        ],
+        "member_role": [
+            {"label": "售前", "value": "售前"},
+            {"label": "销售", "value": "销售"},
+            {"label": "实施", "value": "实施"},
+        ],
+    }
+    procurement_options = (
+        _procurement_method_options(db, team_id)
+        if "procurement_method_id" in missing_fields
+        else []
+    )
+    if procurement_options:
+        option_sets["procurement_method_id"] = procurement_options
+    labels = {
+        "total_amount": "预计成交金额",
+        "user_count": "采购用户数",
+        "license_type": "授权模式",
+        "subscription_years": "订阅年限",
+        "purchase_type": "采购类型",
+        "procurement_method_id": "采购方式",
+        "expected_closing_date": "预计成交日期",
+        "name": "联系人姓名",
+        "mobile": "手机号",
+        "position": "职务",
+        "gender": "性别",
+        "title_type": "抬头类型",
+        "title": "开票抬头",
+        "taxpayer_id": "纳税人识别号",
+        "deployment_name": "部署名称",
+        "server_address": "服务器地址",
+        "authorized_users": "授权人数",
+        "user_name": "成员姓名",
+        "actual_amount": "实际回款金额",
+        "payment_date": "实际回款日期",
+    }
+    numeric_fields = {"total_amount", "user_count", "subscription_years", "authorized_users", "actual_amount"}
+    date_fields = {"expected_closing_date", "payment_date"}
+    fields = []
+    for key in missing_fields:
+        required = not (kind == "opportunity" and key == "subscription_years" and "license_type" in missing_fields)
+        if key in option_sets:
+            fields.append(_form_field(key, labels.get(key, key), "select", required=required, options=option_sets[key], default_value=default_values.get(key)))
+        elif key in numeric_fields:
+            fields.append(_form_field(key, labels.get(key, key), "number", required=required, default_value=default_values.get(key)))
+        elif key in date_fields:
+            fields.append(_form_field(key, labels.get(key, key), "date", required=required, default_value=default_values.get(key)))
+        else:
+            fields.append(_form_field(key, labels.get(key, key), "text", required=required, default_value=default_values.get(key)))
+    if kind == "customer_member" and not any(field["key"] == "member_role" for field in fields):
+        fields.append(_form_field("member_role", "成员角色", "select", required=False, options=option_sets["member_role"]))
+    return fields
+
+
+def _interaction_for_event(
+    event: dict,
+    *,
+    db: Optional[Session] = None,
+    team_id: Optional[int] = None,
+) -> Optional[dict[str, Any]]:
+    event_name = event.get("event")
+    content = str(event.get("content") or "")
+    if event.get("interaction"):
+        return event["interaction"]
+    if event_name == "confirmation_required":
+        return _choice_interaction(content or "请确认是否执行？", [
+            {"label": "是", "value": "是"},
+            {"label": "否", "value": "否"},
+        ])
+    if event_name == "customer_selection_required":
+        customers = event.get("customers") or []
+        choices = [
+            {"label": str(customer.get("account_name") or f"客户 {index}"), "value": str(index)}
+            for index, customer in enumerate(customers, start=1)
+        ]
+        return _choice_interaction(content or "请选择客户", choices)
+    if event_name == "business_selection_required":
+        choices = []
+        for key in ("contracts", "payment_plans"):
+            for index, item in enumerate(event.get(key) or [], start=1):
+                name = item.get("contract_name") or item.get("plan_name") or item.get("name") or f"业务对象 {index}"
+                choices.append({"label": str(name), "value": str(index)})
+        return _choice_interaction(content or "请选择业务对象", choices)
+    form_kinds = {
+        "opportunity_fields_required": "opportunity",
+        "contact_fields_required": "contact",
+        "invoice_title_fields_required": "invoice_title",
+        "deployment_info_fields_required": "deployment_info",
+        "customer_member_fields_required": "customer_member",
+        "payment_fields_required": "payment",
+    }
+    if event_name in form_kinds:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        missing_fields = payload.get("missing_fields") if isinstance(payload, dict) else None
+        if not isinstance(missing_fields, list):
+            missing_fields = []
+        interaction_fields = payload.get("interaction_fields") if isinstance(payload, dict) else None
+        if not isinstance(interaction_fields, list):
+            interaction_fields = missing_fields
+        default_values = payload.get("field_defaults") if isinstance(payload, dict) else None
+        if not isinstance(default_values, dict):
+            default_values = {}
+        if form_kinds[event_name] == "opportunity":
+            payload_customer_id = payload.get("customer_id")
+            customer_id = payload_customer_id if isinstance(payload_customer_id, int) else None
+            default_values = {
+                **_opportunity_field_defaults({}, db=db, team_id=team_id, customer_id=customer_id),
+                **default_values,
+            }
+        return {
+            "type": "form",
+            "prompt": content or "请补充信息",
+            "submit_label": "提交",
+            "fields": _fields_for_missing(
+                form_kinds[event_name],
+                [str(field) for field in interaction_fields],
+                db=db,
+                team_id=team_id,
+                default_values=default_values,
+            ),
+            "allow_free_text": True,
+            "allow_cancel": True,
+        }
+    if event_name == "follow_up_quality_required":
+        return {
+            "type": "text",
+            "prompt": content or "请补充跟进记录",
+            "placeholder": "补充跟进背景、下一步动作、时间或负责人...",
+            "submit_label": "补充",
+            "allow_free_text": True,
+            "allow_cancel": True,
+        }
+    if event_name == "pending_interruption_confirmation_required":
+        return _choice_interaction(content or "要切换到新流程吗？", [
+            {"label": "切换新流程", "value": "切换新流程"},
+            {"label": "继续刚才", "value": "继续刚才"},
+        ])
+    return None
+
+
+def _with_interaction(event: dict, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> dict:
+    interaction = _interaction_for_event(event, db=db, team_id=team_id)
+    if interaction is None:
+        return event
+    return {**event, "interaction": interaction}
+
+
+def _pending_task_confirmation_interaction(content: str) -> dict[str, Any]:
+    return _choice_interaction(content or "要继续处理下一步吗？", [
+        {"label": "继续处理", "value": "是"},
+    ])
+
+
+def _should_offer_next_pending_task(action: Optional[str]) -> bool:
+    return action in {"create_customer_follow_up", "create_payment_plan"}
 
 
 def _authorization_header(credentials: HTTPAuthorizationCredentials) -> str:
@@ -242,6 +525,11 @@ def _is_confirmation(content: str) -> bool:
     return normalized in {"是", "确认", "可以", "执行", "好的", "好", "yes", "y", "ok"}
 
 
+def _is_rejection(content: str) -> bool:
+    normalized = content.strip().lower()
+    return normalized in {"否", "不", "不用", "不要", "取消", "先不处理", "no", "n"}
+
+
 def _is_customer_selection_task(task) -> bool:
     state = task.state_json or {}
     return state.get("action") in {
@@ -354,14 +642,25 @@ async def _contact_task_next_state(
         opportunity["customer_id"] = customer.get("id")
         payload["customer_id"] = customer.get("id")
         payload["opportunity"] = opportunity
-        missing_fields = CRMAgentGraphService.missing_opportunity_fields(opportunity)
-        if missing_fields:
+        missing_fields = CRMAgentGraphService.missing_opportunity_fields(
+            opportunity,
+            require_procurement_method=_customer_requires_procurement_method(customer),
+        )
+        needs_procurement_review = not opportunity.get("procurement_method_id")
+        if missing_fields or needs_procurement_review:
             payload["missing_fields"] = missing_fields
+            payload["interaction_fields"] = _opportunity_interaction_fields(missing_fields, customer)
+            payload["field_defaults"] = _opportunity_field_defaults(customer)
+            content = (
+                f"已选择客户「{customer.get('account_name')}」，还需要补充："
+                f"{CRMAgentGraphService.format_opportunity_missing_fields(_opportunity_missing_display_fields(missing_fields, customer))}。"
+                if missing_fields
+                else f"已选择客户「{customer.get('account_name')}」，请确认采购方式。"
+            )
             return (
                 "collect_opportunity_fields",
                 payload,
-                f"已选择客户「{customer.get('account_name')}」，还需要补充："
-                f"{CRMAgentGraphService.format_opportunity_missing_fields(missing_fields)}。",
+                content,
             )
         return (
             "create_opportunity",
@@ -698,6 +997,7 @@ def _merge_opportunity_fields(existing_opportunity: dict, semantic_result: Agent
     merged = {
         **existing_opportunity,
         **_drop_empty_values({
+            "procurement_method_id": opportunity.procurement_method_id,
             "total_amount": opportunity.total_amount,
             "user_count": opportunity.user_count,
             "license_type": opportunity.license_type,
@@ -710,6 +1010,23 @@ def _merge_opportunity_fields(existing_opportunity: dict, semantic_result: Agent
     }
     merged.pop("opportunity_name", None)
     return merged
+
+
+def _extract_generated_form_int(content: str, key: str) -> Optional[int]:
+    marker = f"{key}="
+    if marker not in content:
+        return None
+    tail = content.split(marker, 1)[1]
+    digits = []
+    for char in tail:
+        if char.isdigit():
+            digits.append(char)
+            continue
+        break
+    if not digits:
+        return None
+    value = int("".join(digits))
+    return value if value > 0 else None
 
 
 def _drop_empty_values(payload: dict) -> dict:
@@ -794,17 +1111,30 @@ async def _apply_opportunity_fields(db: Session, task, content: str):
     except AgentSemanticParserError as exc:
         return False, f"我没有可靠识别到补充的商机信息，请换一种说法补充。原因：{str(exc)}"
     opportunity = _merge_opportunity_fields(payload.get("opportunity") or {}, semantic_result)
+    procurement_method_id = _extract_generated_form_int(content, "procurement_method_id")
+    if procurement_method_id is not None:
+        opportunity["procurement_method_id"] = procurement_method_id
     opportunity["customer_id"] = payload.get("customer_id") or customer.get("id") or opportunity.get("customer_id")
-    missing_fields = CRMAgentGraphService.missing_opportunity_fields(opportunity)
+    interaction_fields = payload.get("interaction_fields")
+    require_procurement_method = (
+        _customer_requires_procurement_method(customer)
+        or "procurement_method_id" in [str(field) for field in payload.get("missing_fields") or []]
+    )
+    missing_fields = CRMAgentGraphService.missing_opportunity_fields(
+        opportunity,
+        require_procurement_method=require_procurement_method,
+    )
     payload["opportunity"] = opportunity
     payload["missing_fields"] = missing_fields
+    payload["interaction_fields"] = _opportunity_interaction_fields(missing_fields, customer)
+    payload["field_defaults"] = _opportunity_field_defaults(customer)
     state = {**state, "payload": payload}
 
     if missing_fields:
         agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, (
             "还需要补充："
-            f"{CRMAgentGraphService.format_opportunity_missing_fields(missing_fields)}。"
+            f"{CRMAgentGraphService.format_opportunity_missing_fields(_opportunity_missing_display_fields(missing_fields, customer))}。"
         )
 
     payload = {
@@ -1490,6 +1820,7 @@ async def stream_agent_chat(
             trace_events: list[dict] = []
 
             def emit(event: dict) -> str:
+                event = _with_interaction(event, db=db, team_id=team_id)
                 _append_trace_event(trace_events, event)
                 return _encode_sse(event)
 
@@ -1497,7 +1828,18 @@ async def stream_agent_chat(
             task = _get_current_waiting_task(db, session, team_id, user_id)
             switch_notice = None
             pending_interruption_handled = False
-            if task and not _is_confirmation(request.content):
+            if task and _is_rejection(request.content):
+                _suspend_pending_task(db, session, task, "用户选择先不处理。")
+                _clear_pending_task(db, session, task.id)
+                assistant_content = "好的，这一步先放着。"
+                pending_interruption_handled = True
+                yield emit({
+                    "event": "task_cancelled",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                })
+                yield emit({"event": "final", "content": assistant_content})
+            elif task and not _is_confirmation(request.content):
                 interruption_decision = await _assess_pending_interruption(
                     db,
                     team_id=team_id,
@@ -1541,63 +1883,70 @@ async def stream_agent_chat(
                 ready, assistant_content = await _apply_follow_up_quality_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
                 yield emit({
-                    "event": "follow_up_quality_completed" if ready else "follow_up_quality_required",
+                    "event": "confirmation_required" if ready else "follow_up_quality_required",
                     "task_id": task.id,
                     "content": assistant_content,
+                    "payload": task.input_json or {},
                 })
                 yield emit({"event": "final", "content": assistant_content})
             elif task and _is_contact_fields_task(task):
                 ready, assistant_content = await _apply_contact_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
                 yield emit({
-                    "event": "contact_fields_completed" if ready else "contact_fields_required",
+                    "event": "confirmation_required" if ready else "contact_fields_required",
                     "task_id": task.id,
                     "content": assistant_content,
+                    "payload": task.input_json or {},
                 })
                 yield emit({"event": "final", "content": assistant_content})
             elif task and _is_opportunity_fields_task(task):
                 ready, assistant_content = await _apply_opportunity_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
                 yield emit({
-                    "event": "opportunity_fields_completed" if ready else "opportunity_fields_required",
+                    "event": "confirmation_required" if ready else "opportunity_fields_required",
                     "task_id": task.id,
                     "content": assistant_content,
+                    "payload": task.input_json or {},
                 })
                 yield emit({"event": "final", "content": assistant_content})
             elif task and _is_invoice_title_fields_task(task):
                 ready, assistant_content = await _apply_invoice_title_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
                 yield emit({
-                    "event": "invoice_title_fields_completed" if ready else "invoice_title_fields_required",
+                    "event": "confirmation_required" if ready else "invoice_title_fields_required",
                     "task_id": task.id,
                     "content": assistant_content,
+                    "payload": task.input_json or {},
                 })
                 yield emit({"event": "final", "content": assistant_content})
             elif task and _is_deployment_info_fields_task(task):
                 ready, assistant_content = await _apply_deployment_info_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
                 yield emit({
-                    "event": "deployment_info_fields_completed" if ready else "deployment_info_fields_required",
+                    "event": "confirmation_required" if ready else "deployment_info_fields_required",
                     "task_id": task.id,
                     "content": assistant_content,
+                    "payload": task.input_json or {},
                 })
                 yield emit({"event": "final", "content": assistant_content})
             elif task and _is_customer_member_fields_task(task):
                 ready, assistant_content = await _apply_customer_member_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
                 yield emit({
-                    "event": "customer_member_fields_completed" if ready else "customer_member_fields_required",
+                    "event": "confirmation_required" if ready else "customer_member_fields_required",
                     "task_id": task.id,
                     "content": assistant_content,
+                    "payload": task.input_json or {},
                 })
                 yield emit({"event": "final", "content": assistant_content})
             elif task and _is_payment_fields_task(task):
                 ready, assistant_content = await _apply_payment_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
                 yield emit({
-                    "event": "payment_fields_completed" if ready else "payment_fields_required",
+                    "event": "confirmation_required" if ready else "payment_fields_required",
                     "task_id": task.id,
                     "content": assistant_content,
+                    "payload": task.input_json or {},
                 })
                 yield emit({"event": "final", "content": assistant_content})
             elif task and _is_business_selection_task(task):
@@ -1653,11 +2002,21 @@ async def stream_agent_chat(
                         yield emit(result.to_event())
                     if result and result.success:
                         _clear_pending_task(db, session, task.id)
-                    yield emit({
+                    task_event = {
                         "event": "task_completed" if result and result.success else "task_failed",
                         "task_id": task.id,
                         "content": assistant_content,
-                    })
+                    }
+                    task_action = (task.state_json or {}).get("action")
+                    next_task = (
+                        _get_current_waiting_task(db, session, team_id, user_id)
+                        if result and result.success and _should_offer_next_pending_task(task_action)
+                        else None
+                    )
+                    if next_task and next_task.id != task.id:
+                        task_event["next_task_id"] = next_task.id
+                        task_event["interaction"] = _pending_task_confirmation_interaction(assistant_content)
+                    yield emit(task_event)
                     yield emit({"event": "final", "content": assistant_content})
                 else:
                     assistant_content = "当前没有等待确认的操作。"

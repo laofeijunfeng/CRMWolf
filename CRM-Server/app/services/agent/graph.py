@@ -629,6 +629,39 @@ class CRMAgentGraphService:
         return len(state.get("customer_candidates") or []) == 1
 
     @staticmethod
+    def _customer_requires_procurement_method(customer: Dict[str, Any]) -> bool:
+        return "default_procurement_method_id" in customer and not customer.get("default_procurement_method_id")
+
+    @staticmethod
+    def _customer_default_procurement_method_id(customer: Dict[str, Any]) -> Optional[int]:
+        value = customer.get("default_procurement_method_id")
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str) and value.isdigit() and int(value) > 0:
+            return int(value)
+        return None
+
+    @staticmethod
+    def opportunity_interaction_fields(missing_fields: List[str]) -> List[str]:
+        fields = list(dict.fromkeys(missing_fields))
+        if "license_type" in fields and "subscription_years" not in fields:
+            fields.insert(fields.index("license_type") + 1, "subscription_years")
+        if "procurement_method_id" not in fields:
+            fields.append("procurement_method_id")
+        return fields
+
+    @staticmethod
+    def opportunity_missing_display_fields(missing_fields: List[str]) -> List[str]:
+        return CRMAgentGraphService.opportunity_interaction_fields(missing_fields)
+
+    @staticmethod
+    def opportunity_field_defaults(customer: Dict[str, Any]) -> Dict[str, Any]:
+        default_procurement_method_id = CRMAgentGraphService._customer_default_procurement_method_id(customer)
+        if default_procurement_method_id is None:
+            return {}
+        return {"procurement_method_id": default_procurement_method_id}
+
+    @staticmethod
     def _requires_clarification(semantic_result: Optional[AgentSemanticParseResult], *, has_memory_customer: bool = False) -> bool:
         if semantic_result is None:
             return False
@@ -674,6 +707,7 @@ class CRMAgentGraphService:
             else None
         )
         computed_missing_opportunity_fields = CRMAgentGraphService.missing_opportunity_fields({
+            "procurement_method_id": opportunity.procurement_method_id,
             "total_amount": opportunity.total_amount,
             "user_count": opportunity.user_count,
             "license_type": opportunity.license_type,
@@ -681,10 +715,6 @@ class CRMAgentGraphService:
             "purchase_type": opportunity.purchase_type,
             "expected_closing_date": expected_closing_date_iso,
         })
-        ai_missing_opportunity_fields = [
-            field for field in semantic_result.missing_fields
-            if field not in {"opportunity_name", "商机名称"}
-        ]
         return {
             "customer_name": semantic_result.customer.name_text,
             "follow_up_content": semantic_result.follow_up.content or original_content,
@@ -697,6 +727,7 @@ class CRMAgentGraphService:
                 "notes": payment.notes,
             },
             "opportunity": {
+                "procurement_method_id": opportunity.procurement_method_id,
                 "total_amount": opportunity.total_amount,
                 "user_count": opportunity.user_count,
                 "license_type": opportunity.license_type,
@@ -706,13 +737,9 @@ class CRMAgentGraphService:
                 "expected_closing_date_text": opportunity.expected_closing_date_text,
                 "expected_closing_date": expected_closing_date_iso,
             },
-            "missing_opportunity_fields": (
-                ai_missing_opportunity_fields or computed_missing_opportunity_fields
-                if semantic_result.intent == "CREATE_OPPORTUNITY" and semantic_result.missing_fields
-                else computed_missing_opportunity_fields
-                if semantic_result.intent == "CREATE_OPPORTUNITY"
-                else []
-            ),
+            "missing_opportunity_fields": computed_missing_opportunity_fields
+            if semantic_result.intent == "CREATE_OPPORTUNITY"
+            else [],
             "missing_payment_fields": (
                 semantic_result.missing_fields
                 if semantic_result.intent == "PAYMENT_RECORD" and semantic_result.missing_fields
@@ -875,14 +902,24 @@ class CRMAgentGraphService:
                 return "我识别到这是创建商机，但还缺少明确客户名称。请补充客户名称。", None
             opportunity = parsed.get("opportunity") or {}
             opportunity.pop("opportunity_name", None)
-            missing_fields = CRMAgentGraphService.missing_opportunity_fields(opportunity)
+            missing_fields = parsed.get("missing_opportunity_fields") or []
             if len(candidates) == 1:
                 customer = candidates[0]
                 opportunity["customer_id"] = customer.get("id")
-                if missing_fields:
-                    return (
+                missing_fields = CRMAgentGraphService.missing_opportunity_fields(
+                    opportunity,
+                    require_procurement_method=CRMAgentGraphService._customer_requires_procurement_method(customer),
+                )
+                needs_procurement_review = not opportunity.get("procurement_method_id")
+                if missing_fields or needs_procurement_review:
+                    content = (
                         f"我识别到要为「{customer.get('account_name')}」创建商机，"
-                        f"还需要补充：{CRMAgentGraphService.format_opportunity_missing_fields(missing_fields)}。"
+                        f"还需要补充：{CRMAgentGraphService.format_opportunity_missing_fields(CRMAgentGraphService.opportunity_missing_display_fields(missing_fields))}。"
+                        if missing_fields
+                        else f"我识别到要为「{customer.get('account_name')}」创建商机，请确认采购方式。"
+                    )
+                    return (
+                        content
                     ), {
                         "action": "collect_opportunity_fields",
                         "customer": customer,
@@ -890,6 +927,8 @@ class CRMAgentGraphService:
                             "customer_id": customer.get("id"),
                             "opportunity": opportunity,
                             "missing_fields": missing_fields,
+                            "interaction_fields": CRMAgentGraphService.opportunity_interaction_fields(missing_fields),
+                            "field_defaults": CRMAgentGraphService.opportunity_field_defaults(customer),
                         },
                     }
                 return (
@@ -917,6 +956,7 @@ class CRMAgentGraphService:
                     "payload": {
                         "opportunity": opportunity,
                         "missing_fields": missing_fields,
+                        "interaction_fields": CRMAgentGraphService.opportunity_interaction_fields(missing_fields),
                     },
                 }
             return CRMAgentGraphService._customer_not_found_response(customer_name), None
@@ -1352,9 +1392,18 @@ class CRMAgentGraphService:
         opportunity = dict(parsed.get("opportunity") or {})
         opportunity.pop("opportunity_name", None)
         opportunity["customer_id"] = customer.get("id")
-        missing_fields = CRMAgentGraphService.missing_opportunity_fields(opportunity)
+        missing_fields = CRMAgentGraphService.missing_opportunity_fields(
+            opportunity,
+            require_procurement_method=CRMAgentGraphService._customer_requires_procurement_method(customer),
+        )
         title = getattr(suggestion, "title", None) or "创建商机"
-        if missing_fields:
+        needs_procurement_review = not opportunity.get("procurement_method_id")
+        if missing_fields or needs_procurement_review:
+            content = (
+                f"我看这条还挺像「{title}」。要不要我继续帮你补齐商机信息？"
+                if missing_fields
+                else f"我看这条还挺像「{title}」。要不要我继续确认采购方式？"
+            )
             return {
                 "action": "collect_opportunity_fields",
                 "customer": customer,
@@ -1362,8 +1411,10 @@ class CRMAgentGraphService:
                     "customer_id": customer.get("id"),
                     "opportunity": opportunity,
                     "missing_fields": missing_fields,
+                    "interaction_fields": CRMAgentGraphService.opportunity_interaction_fields(missing_fields),
+                    "field_defaults": CRMAgentGraphService.opportunity_field_defaults(customer),
                 },
-                "content": f"我看这条还挺像「{title}」。要不要我继续帮你补齐商机信息？",
+                "content": content,
             }
         return {
             "action": "create_opportunity",
@@ -1550,7 +1601,11 @@ class CRMAgentGraphService:
         return fields
 
     @staticmethod
-    def missing_opportunity_fields(opportunity: Dict[str, Any]) -> List[str]:
+    def missing_opportunity_fields(
+        opportunity: Dict[str, Any],
+        *,
+        require_procurement_method: bool = False,
+    ) -> List[str]:
         fields = []
         required_fields = [
             "total_amount",
@@ -1562,6 +1617,8 @@ class CRMAgentGraphService:
         for field in required_fields:
             if not opportunity.get(field):
                 fields.append(field)
+        if require_procurement_method and not opportunity.get("procurement_method_id"):
+            fields.append("procurement_method_id")
         if opportunity.get("license_type") == "SUBSCRIPTION" and not opportunity.get("subscription_years"):
             fields.append("subscription_years")
         return fields
@@ -1582,6 +1639,7 @@ class CRMAgentGraphService:
             "license_type": "授权模式",
             "subscription_years": "订阅年限",
             "purchase_type": "采购类型（新购/续购/增购）",
+            "procurement_method_id": "采购方式",
             "expected_closing_date": "预计成交日期",
         }
         return "、".join(labels.get(field, field) for field in fields)

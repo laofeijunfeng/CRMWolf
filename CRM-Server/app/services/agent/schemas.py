@@ -72,6 +72,7 @@ class AgentPaymentEntity(BaseModel):
 
 class AgentOpportunityEntity(BaseModel):
     opportunity_name: Optional[str] = Field(None, description="废弃输入字段；创建时由后端 API 自动生成")
+    procurement_method_id: Optional[int] = Field(None, ge=1, description="采购方式 ID；用户通过系统交互选择时提取")
     total_amount: Optional[float] = Field(None, gt=0, description="预计总金额（元）")
     user_count: Optional[int] = Field(None, gt=0, description="采购用户数")
     license_type: Optional[Literal["SUBSCRIPTION", "PERPETUAL"]] = Field(None, description="授权模式")

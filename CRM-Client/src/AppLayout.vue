@@ -725,6 +725,7 @@ $z-index-bottom-nav: 100;
 
 // ==================== Sidebar Footer（用户信息区域）====================
 .sidebar-footer {
+  min-height: $wolf-shell-footer-height-v2;
   padding: $wolf-space-lg-v2 $wolf-space-md-v2;  // 16px 12px
   border-top: 1px solid $wolf-border-default-v2;  // #E4ECFC
 

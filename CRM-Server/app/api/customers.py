@@ -33,7 +33,7 @@ from app.schemas.customer import (
     CustomerMemberCreate, CustomerMemberUpdate, CustomerMemberResponse,
     CustomerMemberCandidate, CustomerMemberUserInfo
 )
-from app.schemas.contract import ContractListResponse
+from app.schemas.contract import ContractListResponse, ContractStatusEnum
 from app.schemas.common import PaginatedResponse
 from app.schemas.payment import PaymentPlanResponse
 from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
@@ -58,6 +58,72 @@ def _get_viewable_customer(db: Session, customer_id: int, team_id: int, current_
 
 def _get_editable_customer(db: Session, customer_id: int, team_id: int, current_user):
     return check_customer_edit_permission(customer_id, team_id, current_user, db)
+
+
+def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
+    if not user_id:
+        return None
+
+    user_data = db.execute(text("""
+        SELECT id, name, email, mobile, avatar_url
+        FROM users
+        WHERE id = CAST(:user_id AS SIGNED)
+    """), {"user_id": user_id}).first()
+
+    if not user_data:
+        return None
+
+    return {
+        "id": str(user_data[0]),
+        "name": user_data[1],
+        "email": user_data[2],
+        "mobile": user_data[3],
+        "avatar_url": user_data[4],
+    }
+
+
+def _contract_response_base(contract) -> dict:
+    return {
+        "id": contract.id,
+        "contract_number": contract.contract_number,
+        "contract_name": contract.contract_name,
+        "customer_id": contract.customer_id,
+        "opportunity_id": contract.opportunity_id,
+        "signing_contact_id": contract.signing_contact_id,
+        "user_count": contract.user_count,
+        "total_amount": contract.total_amount,
+        "license_type": contract.license_type,
+        "subscription_years": contract.subscription_years,
+        "standard_unit_price": contract.standard_unit_price,
+        "status": contract.status,
+        "signing_date": contract.signing_date,
+        "effective_date": contract.effective_date,
+        "expiry_date": contract.expiry_date,
+        "owner_id": contract.owner_id,
+        "creator_id": contract.creator_id,
+        "created_time": contract.created_time,
+        "last_modified_time": contract.last_modified_time,
+        "contract_file_path": contract.contract_file_path,
+        "contract_file_name": contract.contract_file_name,
+        "contract_file_size": contract.contract_file_size,
+        "contract_file_mime_type": contract.contract_file_mime_type,
+    }
+
+
+def _contract_status_info(status_value) -> Optional[dict]:
+    if not status_value:
+        return None
+
+    raw_status = status_value.value if hasattr(status_value, "value") else status_value
+    try:
+        status_enum = ContractStatusEnum(raw_status)
+    except ValueError:
+        return None
+
+    return {
+        "code": status_enum.value,
+        "name": status_enum.description,
+    }
 
 
 @router.get("/industries", response_model=List[CustomerIndustryOption], summary="获取客户所属行业选项", description="""
@@ -172,7 +238,7 @@ def get_customer_contracts(
 ):
     from app.models.contract import ContractStatus
 
-    _get_viewable_customer(db, customer_id, team_id, current_user)
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
     contracts, total = contract_crud.get_multi(
         db=db,
@@ -182,30 +248,38 @@ def get_customer_contracts(
         customer_id=customer_id,
         status=ContractStatus[status] if status else None
     )
-    
+
+    result = []
     for contract in contracts:
-        if hasattr(contract, 'customer') and contract.customer:
-            contract.customer_name = contract.customer.account_name
-        if hasattr(contract, 'opportunity') and contract.opportunity:
-            contract.opportunity_name = contract.opportunity.opportunity_name
-        if hasattr(contract, 'creator') and contract.creator:
-            contract.creator_name = contract.creator.name
-        
-        from app.schemas.contract import ContractStatusEnum
-        status_info = None
-        if contract.status:
-            try:
-                status_enum = ContractStatusEnum(contract.status)
-                status_info = {
-                    "code": status_enum.value,
-                    "name": status_enum.description
+        opportunity_info = None
+        if contract.opportunity_id:
+            opportunity_data = db.execute(text("""
+                SELECT id, opportunity_name
+                FROM crm_opportunities
+                WHERE id = :opportunity_id
+            """), {"opportunity_id": contract.opportunity_id}).first()
+
+            if opportunity_data:
+                opportunity_info = {
+                    "id": opportunity_data[0],
+                    "opportunity_name": opportunity_data[1],
                 }
-            except ValueError:
-                pass
-        
-        contract.status_info = status_info
-    
-    return contracts
+
+        contract_dict = _contract_response_base(contract)
+        contract_dict.update({
+            "customer_info": {
+                "id": customer.id,
+                "account_name": customer.account_name,
+            },
+            "opportunity_info": opportunity_info,
+            "owner_info": _get_user_basic_info(db, contract.owner_id),
+            "creator_info": _get_user_basic_info(db, contract.creator_id),
+            "status_info": _contract_status_info(contract.status),
+        })
+
+        result.append(ContractListResponse(**contract_dict))
+
+    return result
 
 
 @router.get("/{customer_id}/payment-plans", response_model=List[PaymentPlanResponse], summary="获取客户回款计划列表", description="""

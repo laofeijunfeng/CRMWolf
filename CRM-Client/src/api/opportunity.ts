@@ -219,6 +219,14 @@ export interface SalesFunnelData {
   win_probability: number
 }
 
+export interface MessageResponse {
+  message: string
+}
+
+const MessageResponseSchema = z.object({
+  message: z.string()
+})
+
 export interface StageDurationData {
   stage_id: number
   stage_name: string
@@ -342,10 +350,10 @@ export const opportunityApi = {
     return z.null().parse(response)
   },
 
-  deleteOpportunity: async (opportunityId: number): Promise<null> => {
+  deleteOpportunity: async (opportunityId: number): Promise<MessageResponse> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
-    const response = await request.delete<null>(`/v1/opportunities/${opportunityId}`)
-    return z.null().parse(response)
+    const response = await request.delete<MessageResponse>(`/v1/opportunities/${opportunityId}`)
+    return MessageResponseSchema.parse(response)
   },
 
   getSalesFunnel: async (): Promise<SalesFunnelData[]> => {

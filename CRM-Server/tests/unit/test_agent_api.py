@@ -135,6 +135,85 @@ def test_agent_session_and_stream_api(monkeypatch):
         engine.dispose()
 
 
+def test_agent_event_interaction_protocol_for_confirmation():
+    event = agent_api._with_interaction({
+        "event": "confirmation_required",
+        "content": "请确认是否创建这条跟进记录？",
+    })
+
+    assert event["interaction"]["type"] == "choice"
+    assert event["interaction"]["prompt"] == "请确认是否创建这条跟进记录？"
+    assert event["interaction"]["choices"] == [
+        {"label": "是", "value": "是"},
+        {"label": "否", "value": "否"},
+    ]
+    assert event["interaction"]["allow_free_text"] is True
+    assert event["interaction"]["allow_cancel"] is True
+
+
+def test_agent_event_interaction_protocol_for_missing_opportunity_fields():
+    event = agent_api._with_interaction({
+        "event": "opportunity_fields_required",
+        "content": "还需要补充商机信息",
+        "payload": {
+            "missing_fields": [
+                "total_amount",
+                "user_count",
+                "license_type",
+                "expected_closing_date",
+                "purchase_type",
+            ],
+        },
+    })
+
+    interaction = event["interaction"]
+    assert interaction["type"] == "form"
+    assert interaction["prompt"] == "还需要补充商机信息"
+    assert [field["key"] for field in interaction["fields"]] == [
+        "total_amount",
+        "user_count",
+        "license_type",
+        "expected_closing_date",
+        "purchase_type",
+    ]
+    assert [field["type"] for field in interaction["fields"]] == [
+        "number",
+        "number",
+        "select",
+        "date",
+        "select",
+    ]
+
+
+def test_agent_event_interaction_protocol_for_follow_up_quality():
+    event = agent_api._with_interaction({
+        "event": "follow_up_quality_required",
+        "content": "下一步计划什么时候、由谁跟进？",
+    })
+
+    assert event["interaction"]["type"] == "text"
+    assert event["interaction"]["prompt"] == "下一步计划什么时候、由谁跟进？"
+    assert event["interaction"]["allow_free_text"] is True
+    assert event["interaction"]["allow_cancel"] is True
+
+
+def test_agent_event_interaction_protocol_for_customer_selection():
+    event = agent_api._with_interaction({
+        "event": "customer_selection_required",
+        "content": "找到多个客户，请选择",
+        "customers": [
+            {"id": 1, "account_name": "广州睿狐科技有限公司"},
+            {"id": 2, "account_name": "深圳睿狐科技有限公司"},
+        ],
+    })
+
+    assert event["interaction"]["type"] == "choice"
+    assert event["interaction"]["choices"] == [
+        {"label": "广州睿狐科技有限公司", "value": "1"},
+        {"label": "深圳睿狐科技有限公司", "value": "2"},
+    ]
+
+
 def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch):
     class FakeGraphService:
         async def stream_events(self, input_state):
@@ -285,6 +364,9 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
         assert confirm_response.status_code == 200, confirm_response.text
         assert "跟进记录已创建" in confirm_response.text
         assert "要不要我继续帮你补齐商机信息" in confirm_response.text
+        assert '"next_task_id": 2' in confirm_response.text
+        assert '"interaction":' in confirm_response.text
+        assert '"label": "继续处理", "value": "是"' in confirm_response.text
 
         yes_response = client.post(
             "/v1/agent/chat/stream",
@@ -294,6 +376,54 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
         assert yes_response.status_code == 200, yes_response.text
         assert "还需要补充" in yes_response.text
         assert "预计成交金额" in yes_response.text
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_cancels_waiting_task_when_user_rejects(monkeypatch):
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "confirmation_required",
+                "action": "create_customer_follow_up",
+                "customer": {"id": 101, "account_name": "越秀金融"},
+                "payload": {
+                    "customer_id": 101,
+                    "content": input_state["content"],
+                },
+            }
+            yield {"event": "final", "content": "请确认是否创建这条跟进记录？"}
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "跟进会话"}).json()
+        plan_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "今天和越秀金融沟通了项目进展"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert plan_response.status_code == 200, plan_response.text
+
+        reject_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "先不处理"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert reject_response.status_code == 200, reject_response.text
+        assert '"event": "task_cancelled"' in reject_response.text
+        assert "好的，这一步先放着。" in reject_response.text
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            saved_session = db.query(AgentSession).one()
+            assert task.status == AgentTaskStatus.SUSPENDED
+            assert "current_pending_task" not in (saved_session.context_json or {})
+        finally:
+            db.close()
     finally:
         engine.dispose()
 
@@ -476,7 +606,8 @@ def test_agent_stream_collects_opportunity_fields_without_rerunning_graph(monkey
             headers={"Authorization": "Bearer test-token"},
         )
         assert second_response.status_code == 200, second_response.text
-        assert '"event": "opportunity_fields_completed"' in second_response.text
+        assert '"event": "confirmation_required"' in second_response.text
+        assert '"type": "choice"' in second_response.text
         assert "商机信息已补齐" in second_response.text
         assert len(fake_graph.calls) == 1
 
@@ -495,6 +626,113 @@ def test_agent_stream_collects_opportunity_fields_without_rerunning_graph(monkey
             assert opportunity["expected_closing_date"] == "2026-08-30"
         finally:
             db.close()
+    finally:
+        engine.dispose()
+
+
+def test_opportunity_interaction_includes_subscription_years_with_license_type():
+    fields = agent_api._opportunity_interaction_fields(
+        ["total_amount", "user_count", "license_type"],
+        {"id": 101, "account_name": "测试客户"},
+    )
+
+    assert fields == [
+        "total_amount",
+        "user_count",
+        "license_type",
+        "subscription_years",
+        "procurement_method_id",
+    ]
+
+
+def test_opportunity_interaction_uses_procurement_method_default(monkeypatch):
+    monkeypatch.setattr(
+        agent_api,
+        "_procurement_method_options",
+        lambda db, team_id: [{"label": "公开招标", "value": "3"}],
+    )
+    event = {
+        "event": "opportunity_fields_required",
+        "content": "还需要补充：授权模式、采购方式。",
+        "payload": {
+            "missing_fields": ["license_type"],
+            "interaction_fields": ["license_type", "subscription_years", "procurement_method_id"],
+            "field_defaults": {"procurement_method_id": 3},
+        },
+    }
+
+    interaction = agent_api._interaction_for_event(event, db=None, team_id=1)
+
+    fields = interaction["fields"]
+    assert [field["key"] for field in fields] == ["license_type", "subscription_years", "procurement_method_id"]
+    procurement_field = next(field for field in fields if field["key"] == "procurement_method_id")
+    assert procurement_field["default_value"] == "3"
+
+
+def test_agent_stream_create_opportunity_completion_is_terminal(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "confirmation_required",
+                "action": "create_opportunity",
+                "customer": customer,
+                "payload": {
+                    "customer_id": customer["id"],
+                    "opportunity": {
+                        "customer_id": customer["id"],
+                        "total_amount": 50000,
+                        "user_count": 100,
+                        "license_type": "SUBSCRIPTION",
+                        "subscription_years": 1,
+                        "purchase_type": "NEW",
+                        "expected_closing_date": "2026-08-30",
+                    },
+                },
+            }
+            yield {"event": "final", "content": "请确认是否创建商机？"}
+
+    class FakeToolService:
+        async def create_opportunity(self, context, **kwargs):
+            assert kwargs["opportunity"]["customer_id"] == customer["id"]
+            return AgentToolResult(
+                tool_name="create_opportunity",
+                success=True,
+                data={"id": 3001, "customer_id": customer["id"]},
+                tool_call_id=7001,
+            )
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "商机会话"}).json()
+
+        plan_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮我给睿狐科技创建商机"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert plan_response.status_code == 200, plan_response.text
+        assert '"event": "confirmation_required"' in plan_response.text
+
+        confirm_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert confirm_response.status_code == 200, confirm_response.text
+        assert '"event": "task_completed"' in confirm_response.text
+        assert "商机已创建，并已按系统现有流程提交审批。" in confirm_response.text
+        assert '"interaction":' not in confirm_response.text
+        assert "继续处理" not in confirm_response.text
     finally:
         engine.dispose()
 
@@ -608,6 +846,8 @@ def test_agent_stream_collects_follow_up_quality_fields_without_rerunning_graph(
         )
         assert second_response.status_code == 200, second_response.text
         assert len(fake_graph.calls) == 1
+        assert '"event": "confirmation_required"' in second_response.text
+        assert '"type": "choice"' in second_response.text
         assert "跟进内容已补齐" in second_response.text
         assert "广州凡亚信息科技有限公司" in second_response.text
 
@@ -723,6 +963,9 @@ def test_agent_stream_keeps_collected_opportunity_fields_across_turns(monkeypatc
         assert second_response.status_code == 200, second_response.text
         assert "还需要补充" in second_response.text
         assert "预计成交日期" in second_response.text
+        assert '"event": "opportunity_fields_required"' in second_response.text
+        assert '"type": "form"' in second_response.text
+        assert '"key": "expected_closing_date"' in second_response.text
 
         third_response = client.post(
             "/v1/agent/chat/stream",
@@ -730,7 +973,8 @@ def test_agent_stream_keeps_collected_opportunity_fields_across_turns(monkeypatc
             headers={"Authorization": "Bearer test-token"},
         )
         assert third_response.status_code == 200, third_response.text
-        assert '"event": "opportunity_fields_completed"' in third_response.text
+        assert '"event": "confirmation_required"' in third_response.text
+        assert '"type": "choice"' in third_response.text
         assert "商机信息已补齐" in third_response.text
         assert "预计成交金额" not in third_response.text
         assert "采购用户数" not in third_response.text
@@ -995,7 +1239,8 @@ def test_agent_stream_collects_contact_fields_then_executes_confirmation(monkeyp
             headers={"Authorization": "Bearer test-token"},
         )
         assert fill_response.status_code == 200, fill_response.text
-        assert '"event": "contact_fields_completed"' in fill_response.text
+        assert '"event": "confirmation_required"' in fill_response.text
+        assert '"type": "choice"' in fill_response.text
         assert "请确认是否为" in fill_response.text
 
         confirm_response = client.post(
@@ -1105,7 +1350,8 @@ def test_agent_stream_collects_invoice_title_fields_then_executes_confirmation(m
             headers={"Authorization": "Bearer test-token"},
         )
         assert fill_response.status_code == 200, fill_response.text
-        assert '"event": "invoice_title_fields_completed"' in fill_response.text
+        assert '"event": "confirmation_required"' in fill_response.text
+        assert '"type": "choice"' in fill_response.text
         assert "请确认是否为" in fill_response.text
 
         confirm_response = client.post(
@@ -1287,7 +1533,8 @@ def test_agent_stream_collects_deployment_info_fields_then_executes_confirmation
             headers={"Authorization": "Bearer test-token"},
         )
         assert fill_response.status_code == 200, fill_response.text
-        assert '"event": "deployment_info_fields_completed"' in fill_response.text
+        assert '"event": "confirmation_required"' in fill_response.text
+        assert '"type": "choice"' in fill_response.text
         assert "请确认是否为" in fill_response.text
 
         confirm_response = client.post(

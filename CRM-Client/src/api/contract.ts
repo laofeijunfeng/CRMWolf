@@ -58,11 +58,11 @@ export interface ContractListResponse {
   creator_id: string
   created_time: string
   last_modified_time: string
-  customer_info?: CustomerBasicInfo
-  opportunity_info?: OpportunityBasicInfo
+  customer_info?: CustomerBasicInfo | null
+  opportunity_info?: OpportunityBasicInfo | null
   signing_contact_info?: ContactBasicInfo
-  owner_info?: CreatorBasicInfo
-  creator_info?: CreatorBasicInfo
+  owner_info?: CreatorBasicInfo | null
+  creator_info?: CreatorBasicInfo | null
   contract_file_path?: string | null
   contract_file_name?: string | null
   contract_file_size?: number | null
@@ -122,11 +122,11 @@ export interface ContractResponse {
   creator_id: string
   created_time: string
   last_modified_time: string
-  customer_info?: CustomerBasicInfo
-  opportunity_info?: OpportunityBasicInfo
+  customer_info?: CustomerBasicInfo | null
+  opportunity_info?: OpportunityBasicInfo | null
   contact_info?: ContactBasicInfo
-  owner_info?: CreatorBasicInfo
-  creator_info?: CreatorBasicInfo
+  owner_info?: CreatorBasicInfo | null
+  creator_info?: CreatorBasicInfo | null
   contract_file_path?: string | null
   contract_file_name?: string | null
   contract_file_size?: number | null
@@ -218,11 +218,11 @@ const ContractListItemSchema = z.object({
   creator_id: z.string(),
   created_time: z.string(),
   last_modified_time: z.string(),
-  customer_info: CustomerBasicInfoSchema.optional(),
-  opportunity_info: OpportunityBasicInfoSchema.optional(),
+  customer_info: CustomerBasicInfoSchema.nullable().optional(),
+  opportunity_info: OpportunityBasicInfoSchema.nullable().optional(),
   signing_contact_info: ContactBasicInfoSchema.optional(),
-  owner_info: CreatorBasicInfoSchema.optional(),
-  creator_info: CreatorBasicInfoSchema.optional(),
+  owner_info: CreatorBasicInfoSchema.nullable().optional(),
+  creator_info: CreatorBasicInfoSchema.nullable().optional(),
   contract_file_path: NullableStringSchema,
   contract_file_name: NullableStringSchema,
   contract_file_size: z.number().nullable().optional(),

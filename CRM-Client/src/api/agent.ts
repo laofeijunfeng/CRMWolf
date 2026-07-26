@@ -40,6 +40,7 @@ export type AgentEventType =
   | "business_selection_failed"
   | "task_completed"
   | "task_failed"
+  | "task_cancelled"
   | "final"
   | "done"
   | "error"
@@ -103,9 +104,36 @@ export interface AgentChatSSEEvent {
   clarification_question?: string | null
   suggestion_source?: string | null
   payload?: Record<string, unknown>
+  interaction?: AgentInteraction
   data?: unknown
   error_message?: string | null
   status_code?: number | null
+}
+
+export interface AgentInteractionChoice {
+  label: string
+  value: string
+}
+
+export interface AgentInteractionField {
+  key: string
+  label: string
+  type: "text" | "number" | "date" | "select" | string
+  required?: boolean
+  placeholder?: string
+  default_value?: string | number | null
+  options?: AgentInteractionChoice[]
+}
+
+export interface AgentInteraction {
+  type: "choice" | "form" | "text" | string
+  prompt?: string
+  placeholder?: string
+  submit_label?: string
+  choices?: AgentInteractionChoice[]
+  fields?: AgentInteractionField[]
+  allow_free_text?: boolean
+  allow_cancel?: boolean
 }
 
 export const agentApi = {
@@ -113,8 +141,8 @@ export const agentApi = {
     return request.get<PaginatedResponse<AgentSessionResponse>>("/v1/agent/sessions")
   },
 
-  listMessages: (sessionId: number): Promise<PaginatedResponse<AgentMessageResponse>> => {
-    return request.get<PaginatedResponse<AgentMessageResponse>>(`/v1/agent/sessions/${sessionId}/messages`)
+  listMessages: (sessionId: number, params?: { page?: number, page_size?: number }): Promise<PaginatedResponse<AgentMessageResponse>> => {
+    return request.get<PaginatedResponse<AgentMessageResponse>>(`/v1/agent/sessions/${sessionId}/messages`, { params })
   },
 
   chatStream: async (

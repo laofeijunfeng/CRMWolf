@@ -333,6 +333,10 @@ $wolf-bottom-nav-padding-v2: 8px;       // Bottom Nav 内边距
 $wolf-bottom-nav-item-height-v2: 44px;  // Bottom Nav 项目高度（touch target 合规）
 $wolf-bottom-nav-max-items-v2: 5;       // Bottom Nav 最多 5 个项目（UI/UX Pro Max）
 
+// Shell 底部操作区（桌面侧边栏 footer / Agent 输入区）
+// 由 sidebar footer 的实际结构收敛而来: 16px + user-info 52px + 16px + 1px border
+$wolf-shell-footer-height-v2: calc(85px + $wolf-safe-area-bottom-v2);
+
 // Top Navigation（移动端顶部栏）
 $wolf-topbar-height-mobile-v2: 56px;    // 移动端顶部栏高度
 $wolf-topbar-padding-mobile-v2: 16px;   // 移动端顶部栏边距

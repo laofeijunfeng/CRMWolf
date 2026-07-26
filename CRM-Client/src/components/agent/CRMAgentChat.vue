@@ -1,19 +1,38 @@
 <template>
   <section class="agent-chat" aria-label="AI Agent 聊天">
-    <MessageScroller class="agent-chat__messages" :items-count="messageScrollCount">
+    <MessageScroller
+      class="agent-chat__messages"
+      :content-style="messageContentStyle"
+      :items-count="messageScrollCount"
+    >
       <div v-if="messages.length === 0" class="agent-chat__empty">
         <Sparkles class="agent-chat__empty-icon" aria-hidden="true" />
         <div class="agent-chat__empty-title">告诉我客户进展，我来帮你整理下一步</div>
         <div class="agent-chat__examples">
-          <button type="button" @click="useExample('今天和越秀金融的王总沟通了下项目进展，客户反馈还在立项评估阶段，暂时持续跟进，下周三再确认进展。')">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            @click="useExample('今天和越秀金融的王总沟通了下项目进展，客户反馈还在立项评估阶段，暂时持续跟进，下周三再确认进展。')"
+          >
             跟进记录
-          </button>
-          <button type="button" @click="useExample('帮我给越秀金融创建联系人王总，手机号 13800138000，职位总经理。')">
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            @click="useExample('帮我给越秀金融创建联系人王总，手机号 13800138000，职位总经理。')"
+          >
             创建联系人
-          </button>
-          <button type="button" @click="useExample('帮我给越秀金融添加售前张三，可跟进项目需求。')">
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            @click="useExample('帮我给越秀金融添加售前张三，可跟进项目需求。')"
+          >
             设置客户成员
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -67,11 +86,19 @@
       </template>
     </MessageScroller>
 
-    <form class="agent-chat__composer" @submit.prevent="sendMessage">
+    <AgentInteractionDrawer
+      :interaction="activeInteraction"
+      :disabled="isStreaming"
+      @submit="sendInteractionMessage"
+      @cancel="cancelInteraction"
+      @height-change="interactionDrawerHeight = $event"
+    />
+
+    <form v-if="activeInteraction === null" class="agent-chat__composer" @submit.prevent="sendMessage">
       <Textarea
         v-model="input"
         class="agent-chat__textarea"
-        rows="3"
+        rows="1"
         :disabled="isStreaming"
         placeholder="让我帮你记录客户跟进、补客户资料，顺手看看要不要推进商机..."
         aria-label="输入 Agent 消息"
@@ -111,7 +138,8 @@ import {
   Wrench,
 } from "lucide-vue-next"
 import { useUserStore } from "@/stores/user"
-import { agentApi, type AgentChatSSEEvent, type AgentEventType, type AgentMessageResponse } from "@/api/agent"
+import { agentApi, type AgentChatSSEEvent, type AgentEventType, type AgentInteraction, type AgentMessageResponse } from "@/api/agent"
+import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vue"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Bubble } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -132,6 +160,7 @@ interface EventLog {
   id: string
   text: string
   kind: AgentEventType
+  interaction?: AgentInteraction
 }
 
 const userStore = useUserStore()
@@ -142,6 +171,8 @@ const sessionKey = ref<string | undefined>(undefined)
 const messages = ref<ChatMessage[]>([])
 const isLoadingHistory = ref(false)
 const activeAssistantId = ref<string | null>(null)
+const activeInteraction = ref<AgentInteraction | null>(null)
+const interactionDrawerHeight = ref(0)
 
 const LAST_SESSION_STORAGE_KEY = "crm_agent_last_session_id"
 
@@ -154,6 +185,11 @@ const messageScrollCount = computed(() => (
   messages.value.length
   + messages.value.reduce((total, message) => total + message.steps.length, 0)
 ))
+const messageContentStyle = computed(() => ({
+  paddingBottom: activeInteraction.value === null
+    ? undefined
+    : `max(calc(var(--agent-composer-height) + var(--agent-interaction-gap)), calc(${interactionDrawerHeight.value}px + var(--agent-interaction-gap)))`,
+}))
 
 const nextId = (prefix: string): string => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
 
@@ -216,11 +252,13 @@ const payloadTraceEvents = (payload?: Record<string, unknown> | null): AgentChat
 const traceEventToStep = (event: AgentChatSSEEvent): EventLog | null => {
   const text = eventToLogText(event)
   if (text === null || text.length === 0) return null
-  return {
+  const step: EventLog = {
     id: nextId("evt"),
     text,
     kind: event.event,
   }
+  if (event.interaction !== undefined) step.interaction = event.interaction
+  return step
 }
 
 const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
@@ -239,14 +277,32 @@ const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
 
 const latestStep = (message: ChatMessage): EventLog | undefined => message.steps[message.steps.length - 1]
 
+const setActiveInteraction = (interaction: AgentInteraction | null): void => {
+  activeInteraction.value = interaction
+}
+
+const restoreInteractionFromMessages = (loadedMessages: ChatMessage[]): void => {
+  const latestAssistant = [...loadedMessages].reverse().find(message => message.role === "assistant")
+  const interactions = latestAssistant?.steps
+    .map(step => step.interaction)
+    .filter((interaction): interaction is AgentInteraction => interaction !== undefined)
+  const latestInteraction = interactions?.[interactions.length - 1] ?? null
+  setActiveInteraction(latestInteraction)
+}
+
 const loadSessionMessages = async (targetSessionId: number): Promise<boolean> => {
-  const response = await agentApi.listMessages(targetSessionId)
+  const pageSize = 100
+  let response = await agentApi.listMessages(targetSessionId, { page: 1, page_size: pageSize })
+  if (response.total_pages > 1) {
+    response = await agentApi.listMessages(targetSessionId, { page: response.total_pages, page_size: pageSize })
+  }
   const loadedMessages = response.items
     .map(toChatMessage)
     .filter((message): message is ChatMessage => message !== null)
 
   messages.value = loadedMessages
   activeAssistantId.value = null
+  restoreInteractionFromMessages(loadedMessages)
   sessionId.value = targetSessionId
   localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(targetSessionId))
   return true
@@ -328,6 +384,7 @@ const stepIcon = (kind?: AgentEventType): Component => {
     case "business_selected":
       return UserCheck
     case "task_completed":
+    case "task_cancelled":
       return CheckCircle2
     case "task_failed":
     case "error":
@@ -444,6 +501,8 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return event.content !== undefined && event.content.length > 0 ? event.content : "任务已完成"
     case "task_failed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "任务执行失败"
+    case "task_cancelled":
+      return event.content !== undefined && event.content.length > 0 ? event.content : "已取消当前操作"
     case "error":
       return event.message ?? event.error_message ?? "Agent 服务异常"
     default:
@@ -491,10 +550,12 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
 
   const text = eventToLogText(event)
   if (text !== null && text.length > 0) addEventLog(text, event.event)
+  if (event.interaction !== undefined) {
+    setActiveInteraction(event.interaction)
+  }
 }
 
-const sendMessage = async (): Promise<void> => {
-  const content = input.value.trim()
+const sendMessageContent = async (content: string): Promise<void> => {
   if (content.length === 0 || isStreaming.value) return
 
   const token = userStore.token
@@ -506,6 +567,7 @@ const sendMessage = async (): Promise<void> => {
   messages.value.push({ id: nextId("user"), role: "user", content, steps: [] })
   startAssistantDraft()
   input.value = ""
+  setActiveInteraction(null)
   isStreaming.value = true
 
   try {
@@ -537,6 +599,18 @@ const sendMessage = async (): Promise<void> => {
   }
 }
 
+const sendMessage = async (): Promise<void> => {
+  await sendMessageContent(input.value.trim())
+}
+
+const sendInteractionMessage = async (content: string): Promise<void> => {
+  await sendMessageContent(content.trim())
+}
+
+const cancelInteraction = async (): Promise<void> => {
+  await sendInteractionMessage("先不处理")
+}
+
 const useExample = (example: string): void => {
   input.value = example
 }
@@ -550,12 +624,16 @@ onMounted(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 .agent-chat {
+  --agent-composer-height: #{$wolf-shell-footer-height-v2};
+  --agent-interaction-gap: #{$wolf-space-lg-v2};
+
+  position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   height: calc(100dvh - $wolf-topbar-height-v2);
   min-height: 0;
   overflow: hidden;
-  background: #f7f9fd;
+  background: $wolf-bg-page-v2;
 }
 
 .agent-chat__messages {
@@ -583,14 +661,14 @@ onMounted(() => {
 
 .agent-chat__stream {
   display: grid;
-  gap: 6px;
-  margin-bottom: 10px;
-  padding: 8px;
-  border: 1px solid #e4ecfc;
-  border-radius: 8px;
-  background: #f8fbff;
-  color: #64748b;
-  font-size: 12px;
+  gap: $wolf-space-sm-v2;
+  margin-bottom: $wolf-space-md-v2;
+  padding: $wolf-space-sm-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-lg-v2;
+  background: $wolf-bg-card-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
   line-height: 1.5;
 }
 
@@ -598,7 +676,7 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 28px 14px 16px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: $wolf-space-sm-v2;
   width: 100%;
   min-height: 24px;
   padding: 0;
@@ -615,18 +693,18 @@ onMounted(() => {
   place-items: center;
   width: 28px;
   height: 22px;
-  border: 1px solid #cbdaf1;
-  border-radius: 6px;
-  background: #fff;
-  color: #334155;
-  font-size: 12px;
-  font-weight: 650;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-bg-card-v2;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
 }
 
 .agent-chat__stream-chevron {
   width: 14px;
   height: 14px;
-  color: #94a3b8;
+  color: $wolf-text-tertiary-v2;
 }
 
 .agent-chat__stream-icon {
@@ -641,19 +719,19 @@ onMounted(() => {
 }
 
 .agent-chat__stream-icon--info {
-  color: #2563eb;
+  color: $wolf-primary-v2;
 }
 
 .agent-chat__stream-icon--success {
-  color: #16a34a;
+  color: $wolf-success-v2;
 }
 
 .agent-chat__stream-icon--warning {
-  color: #d97706;
+  color: $wolf-warning-v2;
 }
 
 .agent-chat__stream-icon--danger {
-  color: #dc2626;
+  color: $wolf-danger-v2;
 }
 
 .agent-chat__stream-latest {
@@ -665,16 +743,16 @@ onMounted(() => {
 
 .agent-chat__stream-list {
   display: grid;
-  gap: 6px;
-  padding-top: 6px;
-  border-top: 1px solid #e4ecfc;
+  gap: $wolf-space-sm-v2;
+  padding-top: $wolf-space-sm-v2;
+  border-top: 1px solid $wolf-border-default-v2;
 }
 
 .agent-chat__stream-step {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: flex-start;
-  gap: 8px;
+  gap: $wolf-space-sm-v2;
 }
 
 @keyframes agent-chat-pulse {
@@ -692,59 +770,44 @@ onMounted(() => {
   display: grid;
   place-items: center;
   align-content: center;
-  gap: 14px;
+  gap: $wolf-space-lg-v2;
   min-height: 100%;
-  color: #64748b;
+  color: $wolf-text-secondary-v2;
   text-align: center;
 }
 
 .agent-chat__empty-icon {
   width: 36px;
   height: 36px;
-  color: #2563eb;
+  color: $wolf-primary-v2;
 }
 
 .agent-chat__empty-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #172033;
+  font-size: $wolf-font-size-title-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
 }
 
 .agent-chat__examples {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
-
-  button {
-    min-height: 34px;
-    padding: 0 12px;
-    border: 1px solid #dbe5f6;
-    border-radius: 8px;
-    background: #fff;
-    color: #334155;
-    font-size: 13px;
-    cursor: pointer;
-  }
-
-  button:hover {
-    border-color: #2563eb;
-    color: #2563eb;
-  }
+  gap: $wolf-space-sm-v2;
 }
 
 .agent-chat__composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px;
-  align-items: end;
-  gap: 10px;
-  padding: 14px 24px 18px;
-  border-top: 1px solid #e4ecfc;
-  background: #fff;
+  align-items: center;
+  gap: $wolf-space-md-v2;
+  min-height: var(--agent-composer-height);
+  padding: $wolf-space-lg-v2 $wolf-page-padding-v2 $wolf-space-lg-v2;
+  border-top: 1px solid $wolf-border-default-v2;
+  background: $wolf-bg-card-v2;
 }
 
 .agent-chat__textarea {
-  min-height: 76px;
+  min-height: 44px;
   max-height: 160px;
   resize: vertical;
 }
@@ -752,7 +815,7 @@ onMounted(() => {
 .agent-chat__send {
   width: 44px;
   height: 44px;
-  border-radius: 8px;
+  border-radius: $wolf-radius-v2;
 }
 
 @media (max-width: 767px) {
@@ -772,7 +835,8 @@ onMounted(() => {
   }
 
   .agent-chat__composer {
-    padding: 10px 12px 12px;
+    padding: $wolf-space-md-v2 $wolf-page-padding-mobile-v2 $wolf-space-md-v2;
   }
+
 }
 </style>

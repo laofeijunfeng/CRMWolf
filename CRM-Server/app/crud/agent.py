@@ -109,6 +109,9 @@ class AgentMessageCRUD:
     def create(self, db: Session, obj_in: AgentMessageCreate) -> AgentMessage:
         db_obj = AgentMessage(**obj_in.model_dump())
         db.add(db_obj)
+        session = db.query(AgentSession).filter(AgentSession.id == obj_in.session_id).first()
+        if session is not None:
+            session.last_modified_time = datetime.utcnow()
         db.commit()
         db.refresh(db_obj)
         return db_obj

@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from "vue"
+import type { HTMLAttributes, StyleValue } from "vue"
 import { nextTick, ref, watch } from "vue"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 const props = withDefaults(defineProps<{
   class?: HTMLAttributes["class"]
+  contentClass?: HTMLAttributes["class"]
+  contentStyle?: StyleValue
   itemsCount?: number
 }>(), {
   itemsCount: 0,
@@ -23,11 +25,16 @@ const scrollToBottom = async (): Promise<void> => {
 }
 
 watch(() => props.itemsCount, scrollToBottom, { flush: "post" })
+watch(() => props.contentStyle, scrollToBottom, { flush: "post" })
 </script>
 
 <template>
   <ScrollArea :class="cn('h-full min-h-0', props.class)">
-    <div ref="contentRef" class="flex min-h-full flex-col gap-wolf-md p-wolf-md">
+    <div
+      ref="contentRef"
+      :class="cn('flex min-h-full flex-col gap-wolf-md p-wolf-md', props.contentClass)"
+      :style="props.contentStyle"
+    >
       <slot />
     </div>
   </ScrollArea>
