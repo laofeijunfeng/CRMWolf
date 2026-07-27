@@ -45,12 +45,19 @@ class FeishuBotService:
         header = payload.get("header") or {}
         event = payload.get("event") or {}
         app_id = header.get("app_id")
+        logger.info(
+            "收到飞书机器人事件: event_id=%s event_type=%s app_id=%s",
+            header.get("event_id"),
+            header.get("event_type"),
+            app_id,
+        )
         integration_config = encrypted_config or (oauth_provider_config_crud.get_by_app_id(db, IMBotProvider.FEISHU, app_id) if app_id else None)
         if not integration_config:
             raise FeishuBotEventError("未找到匹配的飞书第三方集成配置")
         if app_id and integration_config.app_id and app_id != integration_config.app_id:
             raise FeishuBotEventError("飞书事件 App ID 与第三方集成配置不匹配")
         if not integration_config.bot_enabled:
+            logger.info("飞书机器人未启用，跳过事件: event_id=%s team_id=%s", header.get("event_id"), integration_config.team_id)
             return {"message": "bot disabled"}
         payload_token = payload.get("token") or header.get("token")
         if integration_config.bot_verification_token and payload_token != integration_config.bot_verification_token:
@@ -100,20 +107,41 @@ class FeishuBotService:
     async def _handle_message_event(self, db: Session, integration_config: OAuthProviderConfig, event: Dict[str, Any]) -> Optional[str]:
         message = event.get("message") or {}
         message_type = message.get("message_type")
+        logger.info(
+            "处理飞书消息事件: message_id=%s chat_type=%s message_type=%s mention_count=%s",
+            message.get("message_id"),
+            message.get("chat_type"),
+            message_type,
+            len(message.get("mentions") or []),
+        )
         if message_type != "text":
             return "目前机器人先支持文本消息，请把要处理的内容用文字发给我。"
 
         chat_type = message.get("chat_type")
         if chat_type != "p2p" and not self._mentions_bot(message, integration_config):
+            logger.info(
+                "飞书群消息未识别为 @ 当前机器人，跳过: message_id=%s bot_open_id=%s app_id=%s mentions=%s",
+                message.get("message_id"),
+                integration_config.bot_open_id,
+                integration_config.app_id,
+                message.get("mentions") or [],
+            )
             return None
 
         sender_id = ((event.get("sender") or {}).get("sender_id") or {})
         open_id = sender_id.get("open_id")
         if not open_id:
+            logger.info("飞书消息缺少发送人 open_id: message_id=%s sender_id=%s", message.get("message_id"), sender_id)
             return "没有识别到飞书用户身份，暂时无法处理。"
 
         account = user_oauth_account_crud.get_by_open_id(db, integration_config.team_id, IMBotProvider.FEISHU, open_id)
         if not account:
+            logger.info(
+                "飞书发送人未绑定 CRM 账号: message_id=%s team_id=%s sender_open_id=%s",
+                message.get("message_id"),
+                integration_config.team_id,
+                open_id,
+            )
             return "你还没有绑定 CRM 账号，请先在 CRM 的个人设置中绑定飞书账号。"
 
         content = self._extract_text(message)
@@ -176,6 +204,7 @@ class FeishuBotService:
             data = response.json()
         if data.get("code") != 0:
             raise FeishuBotEventError(data.get("msg") or "飞书回复消息失败")
+        logger.info("飞书机器人回复成功: message_id=%s response_message_id=%s", message_id, ((data.get("data") or {}).get("message_id")))
         return ((data.get("data") or {}).get("message_id"))
 
     async def _get_tenant_access_token(self, app_id: str, app_secret: str) -> str:
@@ -352,6 +381,7 @@ class FeishuBotService:
                 "chat_type": message.get("chat_type"),
                 "root_id": message.get("root_id"),
                 "parent_id": message.get("parent_id"),
+                "mentions": message.get("mentions") or [],
             },
         }
 
