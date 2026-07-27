@@ -118,7 +118,7 @@ class FeishuBotService:
             return "目前机器人先支持文本消息，请把要处理的内容用文字发给我。"
 
         chat_type = message.get("chat_type")
-        if chat_type != "p2p" and not self._mentions_bot(message, integration_config):
+        if chat_type != "p2p" and not self._mentions_bot(db, message, integration_config):
             logger.info(
                 "飞书群消息未识别为 @ 当前机器人，跳过: message_id=%s bot_open_id=%s app_id=%s mentions=%s",
                 message.get("message_id"),
@@ -147,6 +147,13 @@ class FeishuBotService:
         content = self._extract_text(message)
         if not content:
             return "我没有识别到可处理的文本内容。"
+
+        message_id = message.get("message_id")
+        if message_id:
+            try:
+                await self.reply_text(db, integration_config, message_id, "get")
+            except Exception as exc:
+                logger.warning("飞书机器人收到确认回复失败，继续处理消息: message_id=%s error=%s", message_id, exc)
 
         normalized_content = await self._build_agent_content(integration_config, message, content)
         session_scope = hashlib.sha256(
@@ -344,7 +351,7 @@ class FeishuBotService:
             return f"引用消息：\n{quote_text}\n\n本次指令：\n{content}"
         return f"引用消息ID：{root_id}\n\n本次指令：\n{content}"
 
-    def _mentions_bot(self, message: Dict[str, Any], integration_config: OAuthProviderConfig) -> bool:
+    def _mentions_bot(self, db: Session, message: Dict[str, Any], integration_config: OAuthProviderConfig) -> bool:
         mentions = message.get("mentions") or []
         if not mentions:
             return False
@@ -353,6 +360,17 @@ class FeishuBotService:
             if integration_config.bot_open_id and mention_id.get("open_id") == integration_config.bot_open_id:
                 return True
             if integration_config.app_id and mention_id.get("app_id") == integration_config.app_id:
+                return True
+            if mention.get("mentioned_type") == "bot":
+                mention_open_id = mention_id.get("open_id")
+                if mention_open_id and not integration_config.bot_open_id:
+                    integration_config.bot_open_id = mention_open_id
+                    db.commit()
+                    logger.info(
+                        "已从飞书 @ 信息自动记录 Bot Open ID: config_id=%s bot_open_id=%s",
+                        integration_config.id,
+                        mention_open_id,
+                    )
                 return True
         return False
 
