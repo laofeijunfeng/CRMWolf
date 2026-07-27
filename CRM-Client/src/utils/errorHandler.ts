@@ -10,6 +10,7 @@
 
 import { toast } from 'vue-sonner'
 import type { AxiosError } from 'axios'
+import { logger } from '@/utils/logger'
 
 /**
  * 错误类型枚举
@@ -19,6 +20,7 @@ export enum ApiErrorType {
   SERVER = 'server',
   AUTH = 'auth',
   BUSINESS = 'business',
+  DATA_CONTRACT = 'data_contract',
   UNKNOWN = 'unknown',
 }
 
@@ -67,11 +69,11 @@ function analyzeError(error: unknown): ApiErrorInfo {
 
   if (isZodError) {
     // 打印详细的 Zod 错误信息以便调试
-    console.error('ZodError 详情:', error)
+    logger.error('[ErrorHandler]', '响应数据格式异常（ZodError）', { error })
     return {
-      type: ApiErrorType.UNKNOWN,
-      title: '数据格式错误',
-      description: '服务器返回的数据格式异常，请联系技术支持',
+      type: ApiErrorType.DATA_CONTRACT,
+      title: '数据格式异常',
+      description: '接口响应与前端数据定义不一致，请刷新后重试',
     }
   }
 
@@ -111,7 +113,7 @@ function analyzeError(error: unknown): ApiErrorInfo {
   }
 
   // 服务器错误 (5xx)
-  if (status && status >= 500) {
+  if (status !== undefined && status >= 500) {
     return {
       type: ApiErrorType.SERVER,
       title: '服务器错误',
@@ -130,11 +132,11 @@ function analyzeError(error: unknown): ApiErrorInfo {
 
   // 业务错误 (400/422) - 通常有具体的错误信息
   if (status === 400 || status === 422) {
-    const detail = axiosError.response?.data?.detail || axiosError.response?.data?.message
+    const detail = axiosError.response?.data?.detail ?? axiosError.response?.data?.message
     return {
       type: ApiErrorType.BUSINESS,
       title: '操作失败',
-      description: detail || errorMsg || '请检查输入后重试',
+      description: detail ?? (errorMsg !== '' ? errorMsg : '请检查输入后重试'),
     }
   }
 
@@ -194,7 +196,7 @@ export function handleApiError(
 
   // 3. 添加上下文信息
   let title = errorInfo.title
-  if (context && errorInfo.type === ApiErrorType.BUSINESS) {
+  if (context !== undefined && context !== '' && errorInfo.type === ApiErrorType.BUSINESS) {
     title = `${context}失败`
   }
 

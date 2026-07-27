@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod'
+import { OptionalNullableStringSchema } from './common'
 
 // ===== License 申请状态枚举 =====
 export const LicenseApplicationStatusSchema = z.enum([
@@ -65,9 +66,9 @@ export const LicenseApplicationSchema = z.object({
   created_time: z.string().datetime(),
   last_modified_time: z.string().datetime(),
   // 关联信息（用于前端展示）
-  customer_name: z.string().nullable(),
-  deployment_name: z.string().nullable(),
-  contract_name: z.string().nullable()
+  customer_name: OptionalNullableStringSchema,
+  deployment_name: OptionalNullableStringSchema,
+  contract_name: OptionalNullableStringSchema
 })
 
 export type LicenseApplication = z.infer<typeof LicenseApplicationSchema>
@@ -99,7 +100,7 @@ export const LicenseApplicationCreateSchema = LicenseApplicationSchema.omit({
 }).refine(
   (data) => {
     // 正式版必须关联合同
-    if (data.license_type === 'OFFICIAL' && !data.contract_id) {
+    if (data.license_type === 'OFFICIAL' && data.contract_id === null) {
       return false
     }
     return true

@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod'
-import { UserInfoSchema, PaginatedResponseSchema } from './common'
+import { UserInfoSchema, PaginatedResponseSchema, OptionalStringFromNullableSchema } from './common'
 
 // ===== 发票状态枚举 =====
 export const InvoiceStatusSchema = z.enum([
@@ -60,9 +60,9 @@ export type InvoiceResponse = z.infer<typeof InvoiceResponseSchema>
 // ===== 发票列表响应 =====
 export const InvoiceListResponseSchema = PaginatedResponseSchema(
   InvoiceResponseSchema.extend({
-    contract_number: z.string(),
-    contract_name: z.string(),
-    customer_name: z.string(),
+    contract_number: OptionalStringFromNullableSchema,
+    contract_name: OptionalStringFromNullableSchema,
+    customer_name: OptionalStringFromNullableSchema,
     approver_info: UserInfoSchema.nullable()
   })
 )

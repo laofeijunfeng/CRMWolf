@@ -5,7 +5,12 @@
  */
 
 import { z } from 'zod'
-import { UserInfoSchema, CustomerStatusSchema, PaginatedResponseSchema } from './common'
+import {
+  UserInfoSchema,
+  CustomerStatusSchema,
+  PaginatedResponseSchema,
+  OptionalStringFromNullableSchema
+} from './common'
 
 // ===== 行业信息 Schema =====
 export const CustomerIndustryInfoSchema = z.object({
@@ -258,12 +263,12 @@ export const ContractListResponseSchema = z.object({
   expiry_date: z.string().nullable(),
   created_time: z.string(),
   last_modified_time: z.string(),
-  customer_name: z.string().optional(),
-  opportunity_name: z.string().optional(),
+  customer_name: OptionalStringFromNullableSchema,
+  opportunity_name: OptionalStringFromNullableSchema,
   owner_info: z.object({
     id: z.number().int(),
     name: z.string(),
-    feishu_open_id: z.string()
+    feishu_open_id: OptionalStringFromNullableSchema
   }).optional()
 })
 
@@ -282,9 +287,9 @@ export const PaymentPlanResponseSchema = z.object({
   last_modified_time: z.string(),
   paid_amount: z.number().nonnegative().nullable(),
   remaining_amount: z.number().nonnegative().nullable(),
-  contract_name: z.string().optional(),
-  customer_name: z.string().optional(),
-  opportunity_name: z.string().optional()
+  contract_name: OptionalStringFromNullableSchema,
+  customer_name: OptionalStringFromNullableSchema,
+  opportunity_name: OptionalStringFromNullableSchema
 })
 
 export type PaymentPlanResponse = z.infer<typeof PaymentPlanResponseSchema>
@@ -307,11 +312,11 @@ export const InvoiceApplicationResponseSchema = z.object({
   applicant_id: z.string(),
   created_time: z.string(),
   last_modified_time: z.string(),
-  contract_name: z.string().optional(),
-  contract_number: z.string().optional(),
-  stage_name: z.string().optional(),
+  contract_name: OptionalStringFromNullableSchema,
+  contract_number: OptionalStringFromNullableSchema,
+  stage_name: OptionalStringFromNullableSchema,
   planned_amount: z.number().optional(),
-  applicant_name: z.string().optional()
+  applicant_name: OptionalStringFromNullableSchema
 })
 
 export type InvoiceApplicationResponse = z.infer<typeof InvoiceApplicationResponseSchema>

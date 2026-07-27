@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import type { PaginatedResponse } from '@/types/pagination'
+import { OptionalNullableStringSchema, OptionalStringFromNullableSchema } from '@/schemas/common'
 import { z } from 'zod'
 
 export type LicenseType = 'SUBSCRIPTION' | 'PERPETUAL'
@@ -168,13 +169,12 @@ export interface ContractFromOpportunityParams {
   file: File
 }
 
-const NullableStringSchema = z.string().nullable().optional()
 const AmountStringSchema = z.union([z.string(), z.number()]).transform(String)
 
 const CreatorBasicInfoSchema = z.object({
   id: z.string(),
   name: z.string(),
-  avatar_url: NullableStringSchema
+  avatar_url: OptionalNullableStringSchema
 })
 
 const CustomerBasicInfoSchema = z.object({
@@ -191,7 +191,7 @@ const ContactBasicInfoSchema = z.object({
   id: z.number(),
   name: z.string(),
   mobile: z.string().optional(),
-  position: NullableStringSchema
+  position: OptionalNullableStringSchema
 })
 
 const ContractStatusSchema = z.enum(['DRAFT', 'PENDING_REVIEW', 'SIGNED', 'EFFECTIVE', 'EXPIRED', 'TERMINATED'])
@@ -201,9 +201,9 @@ const ContractListItemSchema = z.object({
   contract_number: z.string(),
   contract_name: z.string(),
   customer_id: z.number(),
-  customer_name: z.string().optional(),
+  customer_name: OptionalStringFromNullableSchema,
   opportunity_id: z.number(),
-  opportunity_name: z.string().optional(),
+  opportunity_name: OptionalStringFromNullableSchema,
   signing_contact_id: z.number(),
   user_count: z.number(),
   total_amount: AmountStringSchema,
@@ -223,10 +223,10 @@ const ContractListItemSchema = z.object({
   signing_contact_info: ContactBasicInfoSchema.optional(),
   owner_info: CreatorBasicInfoSchema.nullable().optional(),
   creator_info: CreatorBasicInfoSchema.nullable().optional(),
-  contract_file_path: NullableStringSchema,
-  contract_file_name: NullableStringSchema,
+  contract_file_path: OptionalNullableStringSchema,
+  contract_file_name: OptionalNullableStringSchema,
   contract_file_size: z.number().nullable().optional(),
-  contract_file_mime_type: NullableStringSchema
+  contract_file_mime_type: OptionalNullableStringSchema
 })
 
 const ContractResponseSchema = ContractListItemSchema.extend({

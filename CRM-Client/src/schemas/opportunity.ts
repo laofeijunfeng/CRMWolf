@@ -5,14 +5,13 @@
  */
 
 import { z } from 'zod'
-import { UserInfoSchema, PaginatedResponseSchema } from './common'
-
-const NullableStringSchema = z.string().nullable()
-const OptionalNullableStringSchema = z.string().nullable().optional()
-const OptionalStringFromNullableSchema = z.preprocess(
-  (value) => value === null ? undefined : value,
-  z.string().optional()
-)
+import {
+  UserInfoSchema,
+  PaginatedResponseSchema,
+  NullableStringSchema,
+  OptionalNullableStringSchema,
+  OptionalStringFromNullableSchema
+} from './common'
 
 export const OpportunityStatusSchema = z.number().int().min(0).max(2)
 export const OpportunityApprovalPhaseSchema = z.enum(['draft', 'pending_review', 'approved', 'rejected'])
@@ -225,7 +224,7 @@ export type OpportunityResponse = z.infer<typeof OpportunityResponseSchema>
 export const OpportunityListResponseSchema = PaginatedResponseSchema(
   OpportunityResponseSchema.extend({
     owner_info: UserInfoSchema.nullable(),
-    customer_name: z.string()
+    customer_name: OptionalStringFromNullableSchema
   })
 )
 

@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod'
-import { UserInfoSchema, PaginatedResponseSchema } from './common'
+import { UserInfoSchema, PaginatedResponseSchema, OptionalStringFromNullableSchema } from './common'
 
 // ===== 合同状态枚举 =====
 export const ContractStatusSchema = z.enum([
@@ -54,7 +54,7 @@ export type ContractResponse = z.infer<typeof ContractResponseSchema>
 export const ContractListResponseSchema = PaginatedResponseSchema(
   ContractResponseSchema.extend({
     owner_info: UserInfoSchema.nullable(),
-    customer_name: z.string(),
+    customer_name: OptionalStringFromNullableSchema,
     approved_amount: z.number().nullable()
   })
 )

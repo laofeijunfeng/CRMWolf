@@ -27,6 +27,7 @@ import { normalizePaginatedResponse } from '@/types/pagination'
 import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
 import {
   InputField,
+  SearchableSelectField,
   SelectField,
   SelectionSummary,
 } from '@/components/crmwolf'
@@ -84,6 +85,7 @@ const loadingContracts = ref(false)
 const loadingPaymentPlans = ref(false)
 const loadingInvoiceTitles = ref(false)
 const submitting = ref(false)
+const customerSearchKeyword = ref('')
 
 const form = reactive<InvoiceApplicationForm>({
   customerId: '',
@@ -271,18 +273,30 @@ function buildUpdatePayload(): InvoiceApplicationUpdate {
   }
 }
 
-async function fetchCustomers(): Promise<void> {
-  if (hasFixedCustomer.value || form.customerId !== '' || customers.value.length > 0) return
+async function fetchCustomers(keyword?: string): Promise<void> {
+  if (hasFixedCustomer.value) return
 
   loadingCustomers.value = true
   try {
-    const response = await customerApi.getCustomers({ skip: 0, limit: 100 })
+    const params: { skip: number; limit: number; keyword?: string } = { skip: 0, limit: 50 }
+    const normalizedKeyword = keyword?.trim()
+    if (normalizedKeyword !== undefined && normalizedKeyword !== '') {
+      params.keyword = normalizedKeyword
+    }
+
+    const response = await customerApi.getCustomers(params)
     customers.value = normalizePaginatedResponse(response).items
   } catch (error: unknown) {
     handleApiError(error, '获取客户列表')
   } finally {
     loadingCustomers.value = false
   }
+}
+
+async function handleCustomerSearch(keyword: string | number): Promise<void> {
+  const normalizedKeyword = String(keyword).trim()
+  customerSearchKeyword.value = normalizedKeyword
+  await fetchCustomers(normalizedKeyword || undefined)
 }
 
 async function fetchCustomerRelatedData(customerId: number): Promise<void> {
@@ -443,11 +457,13 @@ watch(
   ([open], previousValues) => {
     if (!open) {
       clearErrors()
+      customerSearchKeyword.value = ''
       return
     }
 
+    customerSearchKeyword.value = ''
     resetForm(previousValues?.[0] === true)
-    void fetchCustomers()
+    void fetchCustomers(customerSearchKeyword.value)
 
     const customerId = Number(form.customerId)
     if (Number.isFinite(customerId) && customerId > 0) {
@@ -481,7 +497,7 @@ watch(
           disabled
         />
 
-        <SelectField
+        <SearchableSelectField
           v-else
           id="invoice-application-customer"
           :model-value="form.customerId"
@@ -489,10 +505,17 @@ watch(
           label="客户"
           required
           :options="customerOptions"
-          :placeholder="loadingCustomers ? '加载客户中...' : '请选择客户'"
-          :disabled="loadingCustomers || submitting || !isCreateMode"
+          :search-value="customerSearchKeyword"
+          placeholder="请选择客户"
+          search-placeholder="搜索客户名称"
+          :loading="loadingCustomers"
+          loading-text="加载客户中..."
+          empty-text="暂无客户"
+          :disabled="submitting || !isCreateMode"
           :error="errors.customerId"
           @update:model-value="handleCustomerChange"
+          @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
+          @update:search-value="handleCustomerSearch"
         />
 
         <div v-if="isCreateMode" class="invoice-application-dialog__grid">

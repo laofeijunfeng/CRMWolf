@@ -6,6 +6,15 @@
 
 import { z } from 'zod'
 
+// ===== API 响应兼容类型 =====
+// 后端 Pydantic Optional 字段会序列化为 null；前端展示字段统一在响应边界兼容 null。
+export const NullableStringSchema = z.string().nullable()
+export const OptionalNullableStringSchema = z.string().nullable().optional()
+export const OptionalStringFromNullableSchema = z.preprocess(
+  (value: unknown): unknown => value === null ? undefined : value,
+  z.string().optional()
+)
+
 // ===== 分页类型 =====
 export const PaginationParamsSchema = z.object({
   page: z.number().int().positive().default(1),
@@ -14,7 +23,12 @@ export const PaginationParamsSchema = z.object({
 
 export type PaginationParams = z.infer<typeof PaginationParamsSchema>
 
-export const PaginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema: T) =>
+export const PaginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema: T): z.ZodObject<{
+  data: z.ZodArray<T>
+  total: z.ZodNumber
+  page: z.ZodNumber
+  pageSize: z.ZodNumber
+}> =>
   z.object({
     data: z.array(itemSchema),
     total: z.number().int().nonnegative(),

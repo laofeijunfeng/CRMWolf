@@ -3,6 +3,10 @@ import { useUserStore } from '@/stores/user'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
 
+export interface RequestConfig extends AxiosRequestConfig {
+  skipErrorNotification?: boolean
+}
+
 const axiosInstance = axios.create({
   baseURL: apiBaseUrl === undefined || apiBaseUrl === null || apiBaseUrl.trim() === '' ? '/api' : apiBaseUrl,
   timeout: 30000, // 普通请求超时 30 秒（AI SSE 不使用 axios）
@@ -35,7 +39,7 @@ axiosInstance.interceptors.request.use(
 axiosInstance.interceptors.response.use(
   (response) => {
     const data: unknown = response.data
-    return data
+    return data as typeof response
   },
   (error: AxiosError) => {
     // 只处理 401（跳转登录）
@@ -53,11 +57,11 @@ axiosInstance.interceptors.response.use(
 )
 
 interface RequestInstance {
-  get<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T>
-  post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>
-  put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>
-  delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T>
-  patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T>
+  get<T = unknown>(url: string, config?: RequestConfig): Promise<T>
+  post<T = unknown>(url: string, data?: unknown, config?: RequestConfig): Promise<T>
+  put<T = unknown>(url: string, data?: unknown, config?: RequestConfig): Promise<T>
+  delete<T = unknown>(url: string, config?: RequestConfig): Promise<T>
+  patch<T = unknown>(url: string, data?: unknown, config?: RequestConfig): Promise<T>
 }
 
 const request: RequestInstance = {
