@@ -227,6 +227,8 @@ class FeishuBotService:
             raise FeishuBotEventError("飞书事件 App ID 与第三方集成配置不匹配")
         if integration_config is None and app_id:
             integration_config = oauth_provider_config_crud.get_by_app_id(db, IMBotProvider.FEISHU, app_id)
+        if integration_config is None and token:
+            integration_config = oauth_provider_config_crud.get_bot_enabled_by_verification_token(db, IMBotProvider.FEISHU, token)
         if not integration_config:
             raise FeishuBotEventError("未找到匹配的飞书第三方集成配置")
         if integration_config.bot_verification_token and token != integration_config.bot_verification_token:
