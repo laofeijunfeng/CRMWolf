@@ -257,9 +257,13 @@ class FeishuBotService:
     def _decrypt_with_key(self, encrypted_payload: str, encrypt_key: str) -> str:
         key = hashlib.sha256(encrypt_key.encode("utf-8")).digest()
         encrypted_bytes = base64.b64decode(encrypted_payload)
-        cipher = Cipher(algorithms.AES(key), modes.CBC(key[:16]))
+        if len(encrypted_bytes) <= 16:
+            raise ValueError("encrypted payload is too short")
+        iv = encrypted_bytes[:16]
+        encrypted_event = encrypted_bytes[16:]
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
         decryptor = cipher.decryptor()
-        decrypted = decryptor.update(encrypted_bytes) + decryptor.finalize()
+        decrypted = decryptor.update(encrypted_event) + decryptor.finalize()
         padding = decrypted[-1]
         if padding < 1 or padding > 16:
             raise ValueError("invalid padding")
