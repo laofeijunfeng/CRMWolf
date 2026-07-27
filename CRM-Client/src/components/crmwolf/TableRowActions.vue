@@ -196,7 +196,7 @@ const executeAction = (action: ActionConfig): void => {
   min-width: 160px;
   background: $wolf-bg-card-v2;
   border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-popover-v2;
   padding: $wolf-space-xs-v2;
   box-shadow: $wolf-shadow-modal-v2;
 }

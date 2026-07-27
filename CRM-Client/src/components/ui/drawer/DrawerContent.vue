@@ -27,7 +27,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     <DrawerOverlay v-if="props.showOverlay" :class="props.overlayClass" />
     <DrawerContent
       v-bind="forwarded" :class="cn(
-        'fixed inset-x-0 bottom-0 z-[201] mt-24 flex h-auto flex-col rounded-t-[10px] border bg-background',
+        'fixed inset-x-0 bottom-0 z-[201] mt-24 flex h-auto flex-col rounded-t-wolf-sheet border bg-background',
         props.class,
       )"
     >
@@ -39,7 +39,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     <DrawerOverlay v-if="props.showOverlay" :class="props.overlayClass" />
     <DrawerContent
       v-bind="forwarded" :class="cn(
-        'absolute inset-x-0 bottom-0 z-[201] mt-24 flex h-auto flex-col rounded-t-[10px] border bg-background',
+        'absolute inset-x-0 bottom-0 z-[201] mt-24 flex h-auto flex-col rounded-t-wolf-sheet border bg-background',
         props.class,
       )"
     >

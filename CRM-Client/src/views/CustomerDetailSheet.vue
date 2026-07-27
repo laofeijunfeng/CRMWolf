@@ -1580,7 +1580,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
 // Customer brief card styles
 .customer-brief-card {
   border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   background: $wolf-bg-card-v2;
 }
 
@@ -1739,7 +1739,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
 // Score card styles
 .score-card {
   border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   background: $wolf-bg-card-v2;
 }
 </style>

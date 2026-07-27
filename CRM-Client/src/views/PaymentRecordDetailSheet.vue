@@ -685,7 +685,7 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 .state-card {
   background: $wolf-bg-card-v2;
   border: $record-border-width solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   box-shadow: $wolf-shadow-card-v2;
 }
 

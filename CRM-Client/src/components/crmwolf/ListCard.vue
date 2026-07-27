@@ -130,7 +130,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   flex-direction: column;
   height: auto;
   background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   border: 1px solid $wolf-border-default-v2;
 }
 

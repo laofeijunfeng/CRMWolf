@@ -755,7 +755,7 @@ watch(visible, (val): void => {
   width: min(920px, calc(100vw - #{$wolf-space-xl-v2}));
   max-width: 920px;
   max-height: 88vh;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-overlay-v2;
   background: $wolf-bg-card-v2;
   box-shadow: $wolf-shadow-modal-v2;
   padding: $wolf-space-lg-v2;
@@ -765,7 +765,7 @@ watch(visible, (val): void => {
     max-width: 100%;
     max-height: $wolf-modal-height-mobile-v2;
     margin: 0;
-    border-radius: $wolf-radius-lg-v2 $wolf-radius-lg-v2 0 0;
+    border-radius: $wolf-radius-overlay-v2 $wolf-radius-overlay-v2 0 0;
     position: fixed;
     right: 0;
     bottom: 0;

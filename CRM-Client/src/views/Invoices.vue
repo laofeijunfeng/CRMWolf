@@ -511,7 +511,7 @@ watchEffect(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
-      height="calc(100vh - 136px)"
+      height="calc(100vh - 108px)"
       empty-title="暂无发票申请"
       row-interactive
       mobile-title-key="application_number"
@@ -754,7 +754,7 @@ watchEffect(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 .invoices-page {
-  padding: $wolf-page-padding-v2;
+  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
   background: $wolf-bg-page-v2;
   display: flex;
   flex-direction: column;
@@ -847,7 +847,7 @@ watchEffect(() => {
 
 .modal-content {
   background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-overlay-v2;
   padding: $wolf-space-lg-v2;
   min-width: 400px;
   max-width: 500px;

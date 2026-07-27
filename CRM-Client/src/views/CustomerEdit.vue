@@ -5,6 +5,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
+import { logger } from '@/utils/logger'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
@@ -93,23 +94,27 @@ function normalizeCustomerSource(value: string | null): CustomerForm['source'] |
     : undefined
 }
 
-const fetchCustomerDetail = async () => {
+function emptyToNull(value: string | null | undefined): string | null {
+  return value === undefined || value === null || value === '' ? null : value
+}
+
+const fetchCustomerDetail = async (): Promise<void> => {
   if (!isEdit.value) return
 
   loading.value = true
   try {
     const res = await customerApi.getCustomerDetail(customerId.value)
     setValues({
-      account_name: res.account_name || '',
-      city: res.city || '',
-      address: res.address || '',
+      account_name: res.account_name ?? '',
+      city: res.city ?? '',
+      address: res.address ?? '',
       company_scale: normalizeCompanyScale(res.company_scale),
       source: normalizeCustomerSource(res.source),
-      default_procurement_method_id: res.default_procurement_method_id || undefined,
-      company_background: res.company_background || '',
-      company_website: res.company_website || '',
-      main_business: res.main_business || '',
-      project_background: res.project_background || ''
+      default_procurement_method_id: res.default_procurement_method_id ?? undefined,
+      company_background: res.company_background ?? '',
+      company_website: res.company_website ?? '',
+      main_business: res.main_business ?? '',
+      project_background: res.project_background ?? ''
     } as Partial<CustomerForm>)
     profileStatus.value = res.profile_status
   } catch (error: unknown) {
@@ -120,12 +125,12 @@ const fetchCustomerDetail = async () => {
   }
 }
 
-const fetchOptions = async () => {
+const fetchOptions = async (): Promise<void> => {
   try {
     const procurementRes = await procurementApi.getProcurementMethodOptions()
-    procurementMethodOptions.value = procurementRes || []
+    procurementMethodOptions.value = procurementRes
   } catch (error) {
-    console.error('获取选项失败:', error)
+    logger.error('[CustomerEdit]', '获取选项失败', { error })
   }
 }
 
@@ -135,16 +140,16 @@ const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
   try {
     if (isEdit.value) {
       const updateData = {
-        account_name: formValues.account_name || null,
-        city: formValues.city || null,
-        address: formValues.address || null,
-        company_scale: formValues.company_scale || null,
-        source: formValues.source || null,
-        default_procurement_method_id: formValues.default_procurement_method_id || null,
-        company_background: formValues.company_background || null,
-        company_website: formValues.company_website || null,
-        main_business: formValues.main_business || null,
-        project_background: formValues.project_background || null
+        account_name: emptyToNull(formValues.account_name),
+        city: emptyToNull(formValues.city),
+        address: emptyToNull(formValues.address),
+        company_scale: formValues.company_scale ?? null,
+        source: formValues.source ?? null,
+        default_procurement_method_id: formValues.default_procurement_method_id ?? null,
+        company_background: emptyToNull(formValues.company_background),
+        company_website: emptyToNull(formValues.company_website),
+        main_business: emptyToNull(formValues.main_business),
+        project_background: emptyToNull(formValues.project_background)
       } as CustomerUpdate
       await customerApi.updateCustomer(customerId.value, updateData)
       toast.success('客户更新成功')
@@ -152,10 +157,10 @@ const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
       const createData = {
         account_name: formValues.account_name,
         city: formValues.city,
-        address: formValues.address || null,
-        company_scale: formValues.company_scale || null,
-        source: formValues.source || null,
-        default_procurement_method_id: formValues.default_procurement_method_id || null
+        address: emptyToNull(formValues.address),
+        company_scale: formValues.company_scale ?? null,
+        source: formValues.source ?? null,
+        default_procurement_method_id: formValues.default_procurement_method_id ?? null
       } as CustomerCreate
       await customerApi.createCustomer(createData)
       toast.success('客户创建成功')
@@ -168,7 +173,7 @@ const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
   }
 })
 
-const handleGoBack = () => {
+const handleGoBack = (): void => {
   if (window.history.length > 1) {
     router.back()
   } else {
@@ -419,7 +424,7 @@ onMounted(async () => {
 .customer-edit-page {
   padding: 0;
   background: $wolf-bg-page-v2;
-  min-height: calc(100vh - 56px);
+  min-height: 100%;
 }
 
 // Loading state
@@ -454,7 +459,7 @@ onMounted(async () => {
 // Form card (full width)
 .form-card {
   background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   padding: $wolf-card-padding-v2;
   margin-bottom: $wolf-space-lg-v2;
   box-shadow: $wolf-shadow-card-v2;
@@ -482,7 +487,7 @@ onMounted(async () => {
 // Form actions card
 .form-actions-card {
   background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   padding: $wolf-card-padding-v2;
   box-shadow: $wolf-shadow-card-v2;
   display: flex;

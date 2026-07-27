@@ -13,6 +13,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { readFileSync } from 'node:fs'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
@@ -209,5 +210,16 @@ describe('ApprovalIcon', () => {
 
     // 应该渲染（合同审批人能看到）
     expect(wrapper.find('[data-testid="approval-button"]').exists()).toBe(true)
+  })
+
+  it('uses a compact approval-specific icon in the top bar', () => {
+    const approvalIconSource = readFileSync('src/components/ApprovalIcon.vue', 'utf-8')
+
+    expect(approvalIconSource).toContain("import { ClipboardCheck } from 'lucide-vue-next'")
+    expect(approvalIconSource).toContain('size="icon-sm"')
+    expect(approvalIconSource).toContain('<ClipboardCheck class="approval-action-icon" aria-hidden="true" />')
+    expect(approvalIconSource).toContain('width: 16px;')
+    expect(approvalIconSource).not.toContain('import { Bell }')
+    expect(approvalIconSource).not.toContain('<Bell')
   })
 })

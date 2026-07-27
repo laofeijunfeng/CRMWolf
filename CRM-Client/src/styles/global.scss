@@ -43,6 +43,12 @@
   --wolf-radius-sm: #{$wolf-radius-sm-v2};
   --wolf-radius-md: #{$wolf-radius-v2};
   --wolf-radius-lg: #{$wolf-radius-lg-v2};
+  --wolf-radius-xl: #{$wolf-radius-xl-v2};
+  --wolf-radius-control: #{$wolf-radius-control-v2};
+  --wolf-radius-surface: #{$wolf-radius-surface-v2};
+  --wolf-radius-overlay: #{$wolf-radius-overlay-v2};
+  --wolf-radius-sheet: #{$wolf-radius-sheet-v2};
+  --wolf-radius-popover: #{$wolf-radius-popover-v2};
   --wolf-radius-full: #{$wolf-radius-full-v2};
 
   --wolf-space-xs: #{$wolf-space-xs-v2};
@@ -151,7 +157,7 @@ html, body {
 
 .card-container {
   background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   box-shadow: $wolf-shadow-card-v2;
   padding: $wolf-card-padding-v2;
   margin-bottom: $wolf-card-gap-v2;
@@ -250,11 +256,6 @@ html, body {
   overflow: hidden;
 }
 
-// 显示/隐藏
-.hidden { display: none !important; }
-.visible { display: block !important; }
-.invisible { visibility: hidden; }
-
 // 光标
 .cursor-pointer { cursor: pointer; }
 .cursor-not-allowed { cursor: not-allowed; }
@@ -263,7 +264,7 @@ html, body {
 .rounded-sm { border-radius: $wolf-radius-sm-v2; }
 .rounded-md { border-radius: $wolf-radius-v2; }
 .rounded-lg { border-radius: $wolf-radius-lg-v2; }
-.rounded-xl { border-radius: $wolf-radius-lg-v2; }
+.rounded-xl { border-radius: $wolf-radius-xl-v2; }
 .rounded-full { border-radius: $wolf-radius-full-v2; }
 
 // 阴影

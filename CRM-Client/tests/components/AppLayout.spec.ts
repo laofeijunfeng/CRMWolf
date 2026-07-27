@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { ref, type Ref } from 'vue'
+import { readFileSync } from 'node:fs'
 
 interface UserInfoMock { id: number; name: string; avatar_url?: string }
 
@@ -75,5 +76,90 @@ describe('AppLayout user menu', () => {
     const accountItem = document.body.querySelector('[role="menuitem"][aria-label="账户设置"]') as HTMLElement
     accountItem.click()
     expect(router.push).toHaveBeenCalledWith('/account')
+  })
+})
+
+describe('AppLayout sidebar visibility CSS contract', () => {
+  it('does not override Tailwind responsive hidden classes globally', () => {
+    const globalStyles = readFileSync('src/styles/global.scss', 'utf-8')
+    const sidebarSource = readFileSync('src/components/ui/sidebar/Sidebar.vue', 'utf-8')
+
+    expect(globalStyles).not.toMatch(/\.hidden\s*\{\s*display:\s*none\s*!important/)
+    expect(sidebarSource).toContain('hidden md:block')
+    expect(sidebarSource).toContain('hidden h-svh w-[var(--sidebar-width)]')
+    expect(sidebarSource).toContain('md:flex')
+  })
+
+  it('keeps route content inside the app shell scroll container', () => {
+    const appLayoutSource = readFileSync('src/AppLayout.vue', 'utf-8')
+    const agentChatSource = readFileSync('src/components/agent/CRMAgentChat.vue', 'utf-8')
+
+    expect(appLayoutSource).toContain(':class="mainContentClass"')
+    expect(appLayoutSource).toContain(':class="mainViewClass"')
+    expect(appLayoutSource).not.toContain('<BottomNav')
+    expect(appLayoutSource).not.toContain("from '@/components/crmwolf/BottomNav.vue'")
+    expect(appLayoutSource).toMatch(/\.main-content\s*\{[^}]*overflow:\s*hidden/s)
+    expect(appLayoutSource).toContain("'main-content--contained': route.name === 'AgentChat' || route.path.startsWith('/agent')")
+    expect(appLayoutSource).toMatch(/\.main-content--contained\s*\{[^}]*height:\s*calc\(100svh - 1rem\)/s)
+    expect(appLayoutSource).toMatch(/\.main-content--contained\s*\{[^}]*min-height:\s*0/s)
+    expect(appLayoutSource).toMatch(/\.main-view\s*\{[^}]*overflow:\s*auto/s)
+    expect(appLayoutSource).toContain("'main-view--contained': route.name === 'AgentChat' || route.path.startsWith('/agent')")
+    expect(appLayoutSource).toMatch(/\.main-view--contained\s*\{[^}]*height:\s*100%/s)
+    expect(appLayoutSource).toMatch(/\.main-view--contained\s*\{[^}]*max-height:\s*100%/s)
+    expect(appLayoutSource).toMatch(/\.main-view--contained\s*\{[^}]*overflow:\s*hidden/s)
+    expect(appLayoutSource).toContain(':deep(.agent-chat)')
+    expect(agentChatSource).toContain('height: 100%;\n  max-height: 100%;\n  min-height: 0;')
+    expect(agentChatSource).toContain('max-height: 100%;\n  min-height: 0;\n  overflow: hidden;')
+    expect(agentChatSource).not.toContain('height: calc(100dvh - $wolf-topbar-height-v2)')
+    expect(agentChatSource).not.toContain('height: calc(100dvh - $wolf-topbar-height-mobile-v2 - $wolf-bottom-nav-height-v2)')
+  })
+
+  it('uses the shadcn sidebar sheet instead of the old mobile bottom navigation', () => {
+    const appLayoutSource = readFileSync('src/AppLayout.vue', 'utf-8')
+    const sidebarSource = readFileSync('src/components/ui/sidebar/Sidebar.vue', 'utf-8')
+    const sidebarProviderSource = readFileSync('src/components/ui/sidebar/SidebarProvider.vue', 'utf-8')
+
+    expect(sidebarProviderSource).toContain('useMediaQuery("(max-width: 767px)")')
+    expect(sidebarSource).toContain('<Sheet v-else-if="isMobile"')
+    expect(appLayoutSource).toContain('<SidebarTrigger class="sidebar-trigger" />')
+    expect(appLayoutSource).not.toContain('sidebar-trigger-desktop')
+    expect(appLayoutSource).not.toContain('height: calc(100dvh - $wolf-bottom-nav-height-v2)')
+  })
+
+  it('keeps the top bar visually aligned with the shadcn sidebar header pattern', () => {
+    const appLayoutSource = readFileSync('src/AppLayout.vue', 'utf-8')
+
+    expect(appLayoutSource).toContain('<Separator orientation="vertical" class="sidebar-trigger-separator" />')
+    expect(appLayoutSource).toContain("import { Separator } from '@/components/ui/separator'")
+    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*background:\s*transparent/s)
+    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*box-shadow:\s*none/s)
+    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*border-bottom:\s*0/s)
+    expect(appLayoutSource).toMatch(/\.sidebar-trigger-separator\s*\{[^}]*height:\s*16px/s)
+  })
+
+  it('uses CRMWolf system colors for the shadcn sidebar tokens', () => {
+    const baseStyles = readFileSync('src/styles/base.css', 'utf-8')
+    const variablesSource = readFileSync('src/styles/variables-v2.scss', 'utf-8')
+
+    expect(variablesSource).toContain('$wolf-bg-sidebar-v2: #FFFFFF')
+    expect(baseStyles).toContain('--sidebar-background: 0 0% 100%; /* #FFFFFF */')
+    expect(baseStyles).toContain('--sidebar-primary: 217 91% 60%; /* #2563EB */')
+    expect(baseStyles).toContain('--sidebar-accent: 225 100% 97%; /* #EEF2FF */')
+    expect(baseStyles).toContain('--sidebar-border: 220 69% 94%; /* #E4ECFC */')
+    expect(baseStyles).not.toContain('--sidebar-background: 0 0% 98%;')
+    expect(baseStyles).not.toContain('--sidebar-accent: 240 4.8% 95.9%;')
+  })
+
+  it('does not keep old full-viewport page shell heights inside the sidebar layout', () => {
+    const systemConfigSource = readFileSync('src/views/SystemConfig.vue', 'utf-8')
+    const customerEditSource = readFileSync('src/views/CustomerEdit.vue', 'utf-8')
+    const salesDashboardSource = readFileSync('src/views/SalesDashboard.vue', 'utf-8')
+
+    expect(systemConfigSource).not.toContain('min-height: calc(100vh - 56px)')
+    expect(customerEditSource).not.toContain('min-height: calc(100vh - 56px)')
+    expect(salesDashboardSource).not.toContain('min-height: calc(100vh - $wolf-topbar-height-v2)')
+    expect(salesDashboardSource).not.toContain('min-height: calc($wolf-viewport-height-mobile-v2 - $wolf-topbar-height-mobile-v2)')
+    expect(salesDashboardSource).not.toContain('padding-bottom: calc($wolf-bottom-nav-height-v2 + $wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2)')
+    expect(salesDashboardSource).toMatch(/\.sales-dashboard-page\s*\{[^}]*min-height:\s*100%/s)
   })
 })

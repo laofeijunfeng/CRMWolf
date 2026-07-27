@@ -580,7 +580,7 @@ watch(() => props.data, () => {
 // ==================== 表格卡片（固定高度）====================
 .data-table-card {
   background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-v2;
+  border-radius: $wolf-radius-xl-v2;
   box-shadow: $wolf-shadow-card-v2;
   display: flex;
   flex-direction: column;
@@ -610,7 +610,7 @@ watch(() => props.data, () => {
 .data-table-mobile-card {
   background: $wolf-bg-card-v2;
   border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   padding: $wolf-space-md-v2;
   transition: background 150ms ease, border-color 150ms ease;
 

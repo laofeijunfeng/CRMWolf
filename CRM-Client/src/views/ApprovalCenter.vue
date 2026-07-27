@@ -54,7 +54,7 @@
         :page-size="pageSize"
         :loading="listLoading"
         :filter-fields="filterFields"
-        height="calc(100vh - 136px)"
+        height="calc(100vh - 108px)"
         empty-title="暂无待审批事项"
         row-interactive
         @update:page="page = $event; fetchList()"
@@ -1353,7 +1353,7 @@ watch(rows, async () => {
 @use '@/styles/variables-v2.scss' as *;
 
 .approval-center {
-  padding: $wolf-page-padding-v2;
+  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
   background: $wolf-bg-page-v2;
   display: flex;
   flex-direction: column;
@@ -1422,7 +1422,7 @@ watch(rows, async () => {
 // 信息卡片
 .info-card {
   background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   border: 1px solid $wolf-border-light-v2;
 }
 

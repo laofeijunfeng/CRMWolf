@@ -222,7 +222,7 @@ fetchUserRoles()
 
 .system-config-page {
   background: $wolf-bg-page-v2;
-  min-height: calc(100vh - 56px);
+  min-height: 100%;
   padding: $wolf-page-padding-v2;
 }
 

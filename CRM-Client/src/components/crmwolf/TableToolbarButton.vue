@@ -41,7 +41,7 @@ const props = withDefaults(defineProps<{
   padding: 0 8px;
   gap: 5px;
   border: 0;
-  border-radius: $wolf-radius-sm-v2;
+  border-radius: $wolf-radius-control-v2;
   background: transparent;
   color: $wolf-text-secondary-v2;
   font-size: $wolf-font-size-auxiliary-v2;

@@ -39,7 +39,7 @@
   }
 
   .btn-touch-md {
-    /* Desktop: 32px visual, Mobile: 44px auto */
+    /* Desktop: 36px visual, Mobile: 44px auto */
     @apply h-button-md px-wolf-lg;
   }
 

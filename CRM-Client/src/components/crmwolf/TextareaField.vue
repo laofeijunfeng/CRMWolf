@@ -63,7 +63,7 @@ const describedBy = computed(() => {
       :disabled="disabled"
       :aria-invalid="error !== ''"
       :aria-describedby="describedBy"
-      :class="cn('min-h-24 max-[767px]:min-h-[112px]', controlClass)"
+      :class="cn('min-h-[60px] max-[767px]:min-h-[88px]', controlClass)"
       @update:model-value="emit('update:modelValue', $event)"
     />
     <p v-if="error" :id="errorId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">

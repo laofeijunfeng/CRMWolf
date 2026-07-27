@@ -38,10 +38,16 @@
 
       <template v-for="message in messages" :key="message.id">
         <Message :role="message.role" class="agent-chat__message">
-          <Avatar v-if="message.role !== 'user'" class="agent-chat__avatar">
-            <AvatarFallback>AI</AvatarFallback>
+          <Avatar v-if="message.role !== 'user'" class="agent-chat__avatar agent-chat__avatar--assistant">
+            <AvatarFallback class="agent-chat__avatar-fallback">AI</AvatarFallback>
           </Avatar>
-          <Bubble :variant="message.role === 'user' ? 'sent' : 'received'" class="agent-chat__bubble">
+          <Bubble
+            :variant="message.role === 'user' ? 'sent' : 'received'"
+            :class="[
+              'agent-chat__bubble',
+              message.role === 'assistant' ? 'agent-chat__bubble--assistant' : 'agent-chat__bubble--user',
+            ]"
+          >
             <div class="agent-chat__bubble-content">
               <div v-if="message.role === 'assistant' && message.steps.length > 0" class="agent-chat__stream">
                 <button
@@ -79,8 +85,8 @@
               <div>{{ message.content }}</div>
             </div>
           </Bubble>
-          <Avatar v-if="message.role === 'user'" class="agent-chat__avatar">
-            <AvatarFallback>{{ userInitial }}</AvatarFallback>
+          <Avatar v-if="message.role === 'user'" class="agent-chat__avatar agent-chat__avatar--user">
+            <AvatarFallback class="agent-chat__avatar-fallback">{{ userInitial }}</AvatarFallback>
           </Avatar>
         </Message>
       </template>
@@ -95,25 +101,30 @@
     />
 
     <form v-if="activeInteraction === null" class="agent-chat__composer" @submit.prevent="sendMessage">
-      <Textarea
-        v-model="input"
-        class="agent-chat__textarea"
-        rows="1"
-        :disabled="isStreaming"
-        placeholder="让我帮你记录客户跟进、补客户资料，顺手看看要不要推进商机..."
-        aria-label="输入 Agent 消息"
-        @keydown.enter.exact.prevent="sendMessage"
-      />
-      <Button
-        type="submit"
-        size="icon"
-        class="agent-chat__send"
-        :disabled="!canSend"
-        aria-label="发送消息"
-      >
-        <Loader2 v-if="isStreaming" class="h-5 w-5 animate-spin" aria-hidden="true" />
-        <SendHorizontal v-else class="h-5 w-5" aria-hidden="true" />
-      </Button>
+      <InputGroup class="agent-chat__input-group">
+        <InputGroupTextarea
+          v-model="input"
+          class="agent-chat__textarea"
+          rows="1"
+          :disabled="isStreaming"
+          placeholder="让我帮你记录客户跟进、补客户资料，顺手看看要不要推进商机..."
+          aria-label="输入 Agent 消息"
+          @keydown.enter.exact.prevent="sendMessage"
+        />
+        <InputGroupAddon align="block-end" class="agent-chat__input-actions">
+          <InputGroupButton
+            type="submit"
+            size="icon-sm"
+            variant="default"
+            class="agent-chat__send"
+            :disabled="!canSend"
+            aria-label="发送消息"
+          >
+            <Loader2 v-if="isStreaming" class="h-4 w-4 animate-spin" aria-hidden="true" />
+            <SendHorizontal v-else class="h-4 w-4" aria-hidden="true" />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
     </form>
   </section>
 </template>
@@ -143,9 +154,9 @@ import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vu
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Bubble } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group"
 import { Message } from "@/components/ui/message"
 import { MessageScroller } from "@/components/ui/message-scroller"
-import { Textarea } from "@/components/ui/textarea"
 
 interface ChatMessage {
   id: string
@@ -630,14 +641,21 @@ onMounted(() => {
   position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  height: calc(100dvh - $wolf-topbar-height-v2);
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
   overflow: hidden;
-  background: $wolf-bg-page-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-surface-v2;
+  background: $wolf-bg-card-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .agent-chat__messages {
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .agent-chat__message {
@@ -650,9 +668,43 @@ onMounted(() => {
   flex: 0 0 32px;
 }
 
+.agent-chat__avatar--assistant {
+  border: 1px solid rgba($wolf-primary-v2, 0.14);
+  background: rgba($wolf-primary-v2, 0.1);
+  color: $wolf-primary-v2;
+}
+
+.agent-chat__avatar--user {
+  background: $wolf-primary-v2;
+  color: $wolf-text-inverse-v2;
+}
+
+.agent-chat__avatar-fallback {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  font-weight: $wolf-font-weight-semibold-v2;
+}
+
 .agent-chat__bubble {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  font-size: $wolf-font-size-auxiliary-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.agent-chat__bubble--assistant {
+  border-color: rgba($wolf-primary-v2, 0.16);
+  background: #F8FBFF;
+  color: $wolf-text-primary-v2;
+  box-shadow: none;
+}
+
+.agent-chat__bubble--user {
+  color: $wolf-text-inverse-v2;
 }
 
 .agent-chat__bubble-content {
@@ -661,12 +713,10 @@ onMounted(() => {
 
 .agent-chat__stream {
   display: grid;
-  gap: $wolf-space-sm-v2;
+  gap: $wolf-space-xs-v2;
   margin-bottom: $wolf-space-md-v2;
-  padding: $wolf-space-sm-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-lg-v2;
-  background: $wolf-bg-card-v2;
+  padding-bottom: $wolf-space-sm-v2;
+  border-bottom: 1px solid rgba($wolf-primary-v2, 0.12);
   color: $wolf-text-secondary-v2;
   font-size: $wolf-font-size-caption-v2;
   line-height: 1.5;
@@ -693,10 +743,9 @@ onMounted(() => {
   place-items: center;
   width: 28px;
   height: 22px;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-card-v2;
-  color: $wolf-text-primary-v2;
+  border-radius: $wolf-radius-full-v2;
+  background: rgba($wolf-primary-v2, 0.1);
+  color: $wolf-primary-v2;
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-semibold-v2;
 }
@@ -744,8 +793,10 @@ onMounted(() => {
 .agent-chat__stream-list {
   display: grid;
   gap: $wolf-space-sm-v2;
-  padding-top: $wolf-space-sm-v2;
-  border-top: 1px solid $wolf-border-default-v2;
+  margin-top: $wolf-space-xs-v2;
+  padding-top: $wolf-space-xs-v2;
+  padding-left: $wolf-space-md-v2;
+  border-left: 1px solid rgba($wolf-primary-v2, 0.12);
 }
 
 .agent-chat__stream-step {
@@ -796,42 +847,43 @@ onMounted(() => {
 }
 
 .agent-chat__composer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  display: flex;
   align-items: center;
-  gap: $wolf-space-md-v2;
   min-height: var(--agent-composer-height);
-  padding: $wolf-space-lg-v2 $wolf-page-padding-v2 $wolf-space-lg-v2;
+  padding: $wolf-space-md-v2 $wolf-page-padding-v2;
   border-top: 1px solid $wolf-border-default-v2;
   background: $wolf-bg-card-v2;
+}
+
+.agent-chat__input-group {
+  min-height: 52px;
 }
 
 .agent-chat__textarea {
   min-height: 44px;
   max-height: 160px;
-  resize: vertical;
+  overflow-y: auto;
+}
+
+.agent-chat__input-actions {
+  justify-content: flex-end;
+  padding-top: 0;
+  padding-right: $wolf-space-sm-v2;
+  padding-bottom: $wolf-space-sm-v2;
 }
 
 .agent-chat__send {
-  width: 44px;
-  height: 44px;
-  border-radius: $wolf-radius-v2;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border-radius: $wolf-radius-control-v2;
 }
 
 @media (max-width: 767px) {
   .agent-chat {
-    height: calc(100dvh - $wolf-topbar-height-mobile-v2 - $wolf-bottom-nav-height-v2);
+    height: 100%;
     min-height: 0;
-
-    @supports (height: calc(100dvh - env(safe-area-inset-bottom))) {
-      height: calc(
-        100dvh
-        - $wolf-topbar-height-mobile-v2
-        - $wolf-bottom-nav-height-v2
-        - $wolf-safe-area-top-v2
-        - $wolf-safe-area-bottom-v2
-      );
-    }
   }
 
   .agent-chat__composer {

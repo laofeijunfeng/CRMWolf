@@ -15,6 +15,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false }
   },
   {
+    path: '/signup',
+    name: 'Signup',
+    component: () => import('@/views/Signup.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
     path: '/invite/:code',
     name: 'InviteLogin',
     component: () => import('@/views/InviteLogin.vue'),

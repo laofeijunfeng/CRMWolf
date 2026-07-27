@@ -348,7 +348,7 @@ watchEffect(() => {
       :total="pagination.total"
       :filter-fields="filterFields"
       :sort-fields="sortFields"
-      height="calc(100vh - 136px)"
+      height="calc(100vh - 108px)"
       empty-title="暂无回款记录"
       row-interactive
       mobile-title-key="record_number"
@@ -486,7 +486,7 @@ watchEffect(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 .payment-records-page {
-  padding: $wolf-page-padding-v2;
+  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
   background: $wolf-bg-page-v2;
   display: flex;
   flex-direction: column;
@@ -537,7 +537,7 @@ watchEffect(() => {
   &:focus-visible {
     outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
     outline-offset: $wolf-focus-ring-offset-v2;
-    border-radius: $wolf-radius-sm-v2;
+    border-radius: $wolf-radius-control-v2;
   }
 }
 

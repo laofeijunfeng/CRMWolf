@@ -533,7 +533,7 @@ watchEffect(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
-      height="calc(100vh - 136px)"
+      height="calc(100vh - 108px)"
       empty-title="暂无线索"
       row-interactive
       mobile-title-key="lead_name"
@@ -876,7 +876,7 @@ watchEffect(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 .leads-page {
-  padding: $wolf-page-padding-v2;
+  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
   background: $wolf-bg-page-v2;
   display: flex;
   flex-direction: column;

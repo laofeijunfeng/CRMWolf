@@ -152,11 +152,11 @@ function hasBadge(badge: number | string | undefined): boolean {
   padding: $wolf-button-padding-sm-v2;  // 4px 8px（紧凑）
 
   // ========== 字体 ==========
-  font-size: $wolf-font-size-body-v2;  // 14px
-  font-weight: $wolf-font-weight-medium-v2;  // 500
+  font-size: $wolf-font-size-body-v2;  // 14px，与 SidebarMenuButton text-sm 一致
+  font-weight: $wolf-font-weight-medium-v2;  // 500，与 SidebarMenuButton font-medium 一致
 
   // ========== 颜色（default）==========
-  color: $wolf-text-tertiary-v2;  // #94A3B8（未选中）
+  color: hsl(var(--sidebar-foreground));
 
   // ========== 过渡动画 ==========
   transition: all $wolf-transition-v2;  // 150ms ease
@@ -165,14 +165,14 @@ function hasBadge(badge: number | string | undefined): boolean {
   // 鼠标 hover 时显示背景淡蓝色（非激活态）
   &:hover:not([data-state="active"]):not(:disabled) {
     background: $wolf-bg-hover-v2;  // #EEF2FF（淡蓝色背景）
-    color: $wolf-text-secondary-v2;  // #64748B
+    color: hsl(var(--sidebar-accent-foreground));
   }
 
   // ========== Active 状态（用户需求 1）==========
   // 选中时文字显示系统主题色
   &[data-state="active"] {
     // 文字主色
-    color: $wolf-primary-v2;  // #2563EB（系统主题色）
+    color: $wolf-primary-v2;
 
     // 字重加粗
     font-weight: $wolf-font-weight-semibold-v2;  // 600
@@ -209,8 +209,7 @@ function hasBadge(badge: number | string | undefined): boolean {
     min-height: 44px;
     flex-shrink: 0;
 
-    // 字号增大（避免 iOS auto-zoom）
-    font-size: $wolf-font-size-body-mobile-v2;  // 16px
+    font-size: $wolf-font-size-body-v2;  // 14px，与移动端 SidebarMenuButton 一致
 
     // 内边距增大
     padding: 8px 16px;

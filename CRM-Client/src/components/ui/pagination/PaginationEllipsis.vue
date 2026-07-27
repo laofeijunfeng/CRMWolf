@@ -16,7 +16,7 @@ const props = defineProps<Props>()
 
 <template>
   <RadixEllipsis
-    :class="cn('flex h-11 w-11 items-center justify-center text-wolf-text-tertiary', props.class)"
+    :class="cn('flex size-9 items-center justify-center text-wolf-text-tertiary', props.class)"
   >
     <MoreHorizontal class="h-4 w-4" aria-hidden="true" />
   </RadixEllipsis>

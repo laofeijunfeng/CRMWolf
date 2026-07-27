@@ -119,8 +119,8 @@ onBeforeUnmount(() => {
 
 .app-drawer {
   border-color: $wolf-border-default-v2;
-  border-top-left-radius: $wolf-radius-lg-v2;
-  border-top-right-radius: $wolf-radius-lg-v2;
+  border-top-left-radius: $wolf-radius-sheet-v2;
+  border-top-right-radius: $wolf-radius-sheet-v2;
   background: $wolf-bg-card-v2;
   box-shadow: $wolf-shadow-modal-v2;
 }

@@ -203,7 +203,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 .record-empty-card {
   background: $wolf-bg-card-v2;
   border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
 }
 
 .record-card-header {

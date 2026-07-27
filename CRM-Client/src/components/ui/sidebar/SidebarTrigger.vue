@@ -17,7 +17,7 @@ const { toggleSidebar } = useSidebar()
     data-sidebar="trigger"
     variant="ghost"
     size="icon"
-    :class="cn('size-11', props.class)"
+    :class="cn('size-7', props.class)"
     aria-label="切换侧边栏"
     @click="toggleSidebar"
   >

@@ -13,7 +13,7 @@ const props = withDefaults(defineProps<Props>(), {})
 </script>
 
 <template>
-  <div :class="cn('rounded-wolf-lg border border-wolf-border-default bg-wolf-bg-card text-wolf-text-primary shadow-wolf-card', props.class)">
+  <div :class="cn('rounded-wolf-xl border border-wolf-border-default bg-wolf-bg-card text-wolf-text-primary shadow-wolf-card', props.class)">
     <slot />
   </div>
 </template>

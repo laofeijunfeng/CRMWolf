@@ -127,7 +127,7 @@ function handleTabChange(value: string): void {
 
 .context-tab-item {
   height: 32px;
-  min-height: 44px;
+  min-height: 32px;
   padding: $wolf-button-padding-sm-v2;
   border-radius: $wolf-radius-v2;
   color: $wolf-text-tertiary-v2;

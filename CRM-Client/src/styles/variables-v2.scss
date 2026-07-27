@@ -65,14 +65,21 @@ $wolf-danger-v2: #DC2626;            // 危险色
 $wolf-danger-text-v2: #DC2626;       // 危险文字色
 $wolf-danger-bg-v2: rgba(#DC2626, 0.1);   // 危险背景色
 
-// ==================== 圆角系统（统一 6px）====================
-// 规则: 所有按钮、卡片、输入框、下拉框统一 6px
-// 禁止: 旧圆角值 4px/8px/12px/16px
+// ==================== 圆角系统（shadcn-vue 对齐）====================
+// 规则: 控件使用 md(6px)，内容表面/弹窗/抽屉/卡片使用 xl(12px)
 
-$wolf-radius-v2: 6px;        // 主要圆角（按钮、卡片、输入框）
-$wolf-radius-sm-v2: 4px;     // 小圆角（标签、小型元素）
-$wolf-radius-lg-v2: 8px;     // 大圆角（弹窗、对话框）
+$wolf-radius-v2: 6px;         // md：按钮、输入框、下拉框
+$wolf-radius-sm-v2: 4px;      // sm：标签、小型元素
+$wolf-radius-lg-v2: 8px;      // lg：保留 shadcn 阶梯，少量较大控件使用
+$wolf-radius-xl-v2: 12px;     // xl：sidebar-08 主内容面板、卡片容器
 $wolf-radius-full-v2: 9999px; // 完全圆角（头像、徽章）
+
+// 语义圆角。新组件优先使用语义 token，避免按数值散落。
+$wolf-radius-control-v2: $wolf-radius-v2;
+$wolf-radius-surface-v2: $wolf-radius-xl-v2;
+$wolf-radius-overlay-v2: $wolf-radius-xl-v2;
+$wolf-radius-sheet-v2: $wolf-radius-xl-v2;
+$wolf-radius-popover-v2: $wolf-radius-v2;
 
 // ==================== 间距系统（保留 8dp grid）====================
 
@@ -85,6 +92,7 @@ $wolf-space-2xl-v2: 32px;    // 大间距
 
 // 页面/组件间距
 $wolf-page-padding-v2: 24px;
+$wolf-list-page-padding-top-v2: 12px;
 $wolf-card-gap-v2: 16px;
 $wolf-card-padding-v2: 16px;
 $wolf-section-gap-v2: 24px;
@@ -115,21 +123,21 @@ $wolf-motion-state-duration-v2: 0.15s;      // 状态切换时长（150ms）
 
 // ========== 按钮尺寸 ==========
 
-// 桌面端尺寸（Web Dashboard）
-$wolf-button-height-sm-v2: 24px;    // 迷你型（文本按钮，仅桌面）
-$wolf-button-height-md-v2: 32px;    // 常规型（桌面端）
+// 桌面端尺寸（Web Dashboard，shadcn-vue compact）
+$wolf-button-height-sm-v2: 32px;    // sm: h-8
+$wolf-button-height-md-v2: 36px;    // default: h-9
 $wolf-button-padding-sm-v2: 4px 8px;  // 上下4px 左右8px
 $wolf-button-padding-md-v2: 8px 16px; // 上下8px 左右16px
 
 // 移动端尺寸（Touch Target合规）
 $wolf-button-height-mobile-v2: 44px;    // 移动端常规（44pt合规）
-$wolf-button-height-lg-v2: 44px;        // 大型按钮（跨平台 touch target）
+$wolf-button-height-lg-v2: 40px;        // lg: h-10
 $wolf-button-padding-mobile-v2: 12px 24px; // 移动端 padding
 
 // ========== 输入框尺寸 ==========
 
 // 桌面端
-$wolf-input-height-v2: 44px;        // 表单输入框默认高度
+$wolf-input-height-v2: 36px;        // 表单输入框默认高度（h-9）
 $wolf-input-radius-v2: $wolf-radius-v2;
 $wolf-input-padding-v2: 12px;
 
@@ -351,7 +359,7 @@ $wolf-table-cell-padding-mobile-v2: 8px 4px; // 移动端单元格 padding（更
 
 // UI/UX Pro Max: Modals/sheets animate from bottom on mobile
 $wolf-modal-height-mobile-v2: 90vh;     // 移动端 Modal 最大高度
-$wolf-modal-radius-mobile-v2: $wolf-radius-lg-v2; // 移动端 Modal 圆角（顶部圆角）
+$wolf-modal-radius-mobile-v2: $wolf-radius-overlay-v2; // 移动端 Modal 圆角（顶部圆角）
 $wolf-sheet-height-v2: auto;            // Sheet 高度（自适应内容）
 
 // ========== 横向滚动约束 ==========
@@ -394,7 +402,7 @@ $wolf-topbar-height-v2: 56px;
 $wolf-topbar-title-font-size-v2: 20px;
 
 // ContextTabs（上下文标签栏）
-$wolf-context-tabs-height-v2: 48px;
+$wolf-context-tabs-height-v2: 36px;
 
 // Header
 $wolf-header-height-v2: 56px;

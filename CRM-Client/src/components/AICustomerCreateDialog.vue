@@ -582,7 +582,7 @@ watch(visible, (val) => {
 // Dialog 内容样式
 .dialog-content {
   max-width: 600px;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-overlay-v2;
   background: $wolf-bg-card-v2;
   box-shadow: $wolf-shadow-modal-v2;
   padding: $wolf-space-lg-v2;
@@ -592,7 +592,7 @@ watch(visible, (val) => {
     max-width: 100%;
     width: 100%;
     margin: 0;
-    border-radius: $wolf-radius-lg-v2 $wolf-radius-lg-v2 0 0;
+    border-radius: $wolf-radius-overlay-v2 $wolf-radius-overlay-v2 0 0;
     position: fixed;
     bottom: 0;
     left: 0;

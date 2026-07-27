@@ -1,9 +1,16 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import DataTable from '../DataTable.vue'
+import SelectField from '../SelectField.vue'
 
 const columns = [{ key: 'name', title: '名称' }]
 const data = [{ id: 1, name: '审批单' }]
+const readView = (name: string): string => readFileSync(
+  resolve(process.cwd(), `src/views/${name}.vue`),
+  'utf8'
+)
 const mountTable = (rowInteractive: boolean): VueWrapper => mount(DataTable, {
   props: {
     columns,
@@ -93,10 +100,34 @@ describe('DataTable row interaction', () => {
       }
     })
 
-    await wrapper.get('.page-size-select').setValue('100')
+    const select = wrapper.getComponent(SelectField)
+    const selectVm = select.vm as unknown as { $emit: (event: string, value: string) => void }
+    selectVm.$emit('update:modelValue', '100')
+    await wrapper.vm.$nextTick()
 
     expect(wrapper.emitted('update:page-size')).toEqual([[100]])
     expect(wrapper.emitted('update:page')).toEqual([[1]])
     expect(wrapper.emitted('update:pageSize')).toBeUndefined()
+  })
+
+  it('keeps standard list pages aligned with the sidebar layout vertical inset', () => {
+    const listViews = [
+      'ApprovalCenter',
+      'Contracts',
+      'Customers',
+      'Invoices',
+      'Leads',
+      'Opportunities',
+      'PaymentPlans',
+      'PaymentRecords'
+    ]
+
+    for (const viewName of listViews) {
+      const source = readView(viewName)
+      expect(source).toContain('height="calc(100vh - 108px)"')
+      expect(source).not.toContain('height="calc(100vh - 104px)"')
+      expect(source).not.toContain('height="calc(100vh - 120px)"')
+      expect(source).not.toContain('height="calc(100vh - 136px)"')
+    }
   })
 })

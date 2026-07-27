@@ -411,7 +411,7 @@ watch(
       :filter-fields="filterFields"
       :sort-fields="sortFields"
       :sorts="activeSorts"
-      height="calc(100vh - 136px)"
+      height="calc(100vh - 108px)"
       empty-title="暂无回款计划"
       row-interactive
       mobile-title-key="plan_number"
@@ -568,7 +568,7 @@ watch(
 @use '@/styles/variables-v2.scss' as *;
 
 .payment-plans-page {
-  padding: $wolf-page-padding-v2;
+  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
   background: $wolf-bg-page-v2;
   display: flex;
   flex-direction: column;
@@ -619,7 +619,7 @@ watch(
   &:focus-visible {
     outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
     outline-offset: $wolf-focus-ring-offset-v2;
-    border-radius: $wolf-radius-sm-v2;
+    border-radius: $wolf-radius-control-v2;
   }
 }
 

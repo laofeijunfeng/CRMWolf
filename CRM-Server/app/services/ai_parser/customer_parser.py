@@ -17,6 +17,16 @@ from app.models.customer import CustomerSource
 from app.services.customer_profile_service import customer_profile_service
 
 
+def _resolve_customer_source(value: str | None) -> CustomerSource | None:
+    if not value:
+        return None
+
+    mapped_value = CUSTOMER_SOURCE_ENUM_MAP.get(value, value)
+    if mapped_value in CustomerSource.__members__:
+        return CustomerSource[mapped_value]
+    return CustomerSource(mapped_value)
+
+
 # 系统提示词（针对客户创建定制）
 PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息解析助手。
 
@@ -230,11 +240,6 @@ class CustomerAIParser(EntityAIParserBase):
         contact_info = parsed_data.get("contact_info", {})
 
         # 枚举值转换
-        source_str = customer_info.get("source")
-        source_enum = None
-        if source_str:
-            source_enum = CUSTOMER_SOURCE_ENUM_MAP.get(source_str)
-
         company_scale_str = customer_info.get("company_scale")
         company_scale_value = None
         if company_scale_str:
@@ -252,7 +257,7 @@ class CustomerAIParser(EntityAIParserBase):
             account_name=customer_info["account_name"],
             city=customer_info["city"],
             company_scale=company_scale_value,
-            source=CustomerSource(source_enum) if source_enum else None,
+            source=_resolve_customer_source(customer_info.get("source")),
             industry=industry_code  # AI 识别的行业编码
         )
 

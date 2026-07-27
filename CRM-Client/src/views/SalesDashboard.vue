@@ -184,7 +184,7 @@ onMounted(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 .sales-dashboard-page {
-  min-height: calc(100vh - $wolf-topbar-height-v2);
+  min-height: 100%;
   padding: $wolf-page-padding-v2;
   background: $wolf-bg-page-v2;
 }
@@ -393,9 +393,9 @@ onMounted(() => {
 
 @media (max-width: $wolf-breakpoint-sm-v2) {
   .sales-dashboard-page {
-    min-height: calc($wolf-viewport-height-mobile-v2 - $wolf-topbar-height-mobile-v2);
+    min-height: 100%;
     padding: $wolf-page-padding-mobile-v2;
-    padding-bottom: calc($wolf-bottom-nav-height-v2 + $wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
+    padding-bottom: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
   }
 
   .summary-header {

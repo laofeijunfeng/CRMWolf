@@ -588,7 +588,7 @@ watch(
   &:focus-visible {
     outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
     outline-offset: $wolf-focus-ring-offset-v2;
-    border-radius: $wolf-radius-sm-v2;
+    border-radius: $wolf-radius-control-v2;
   }
 }
 
@@ -663,7 +663,7 @@ watch(
 .state-card {
   background: $wolf-bg-card-v2;
   border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-lg-v2;
+  border-radius: $wolf-radius-surface-v2;
   box-shadow: $wolf-shadow-card-v2;
 }
 

@@ -2,7 +2,7 @@
   ApprovalIcon — Header 审批轻量入口
 
   设计规范依据:
-  - approval-center.md §2: Bell 图标 + Badge 样式
+  - approval-center.md §2: Header icon entry + Badge 样式
   - MASTER.md §5.1: Button 视觉规范
   - MASTER.md §2: Design Token 强制规范（variables-v2.scss）
   - UI/UX Pro Max §2: Touch Target ≥ 44×44pt
@@ -19,14 +19,14 @@
   <Button
     v-if="permissionStore.hasAnyPermission(ALL_APPROVAL_PERMISSIONS)"
     variant="ghost"
-    size="icon"
+    size="icon-sm"
     class="approval-icon"
     :aria-label="ariaLabel"
     data-testid="approval-button"
     @click="handleClick"
   >
-    <!-- Bell Icon（approval-center.md §2.1） -->
-    <Bell class="approval-bell-icon" aria-hidden="true" />
+    <!-- 审批中心入口图标 -->
+    <ClipboardCheck class="approval-action-icon" aria-hidden="true" />
 
     <!-- Badge（approval-center.md §2.2） -->
     <span
@@ -43,7 +43,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { Bell } from 'lucide-vue-next'
+import { ClipboardCheck } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
@@ -111,25 +111,19 @@ const handleClick = (): void => {
 @use '@/styles/variables-v2.scss' as *;
 
 // ==================== 审批按钮容器 ====================
-// approval-center.md §2.1: 40px × 40px
+// 与 shadcn sidebar trigger 的 32px icon button 对齐
 .approval-icon {
   position: relative;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
 
   // Hover 背景（使用 shadcn-vue Button 原生 ghost hover 效果）
-  // 此处仅定义 Bell icon 的颜色变化
+  // 此处仅定义入口图标的颜色变化
 }
 
-// ==================== Bell 图标 ====================
-// approval-center.md §2.1: 铃铛图标样式
-.approval-bell-icon {
-  width: 20px;
-  height: 20px;
+// ==================== 审批入口图标 ====================
+.approval-action-icon {
+  width: 16px;
+  height: 16px;
   color: $wolf-text-secondary-v2;  // #64748B（默认态）
 
   // Hover 时颜色变化（MASTER.md §7.1）
@@ -145,12 +139,12 @@ const handleClick = (): void => {
 // approval-center.md §2.2: 红色圆形 Badge
 .approval-badge {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 3px;
+  right: 3px;
 
   // 尺寸（approval-center.md §2.2）
-  min-width: 18px;
-  height: 18px;
+  min-width: 16px;
+  height: 16px;
   padding: 0 4px;
 
   // 颜色（approval-center.md §2.2）
