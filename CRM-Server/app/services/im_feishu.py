@@ -228,7 +228,7 @@ class FeishuBotService:
         if integration_config is None and app_id:
             integration_config = oauth_provider_config_crud.get_by_app_id(db, IMBotProvider.FEISHU, app_id)
         if integration_config is None and token:
-            integration_config = oauth_provider_config_crud.get_bot_enabled_by_verification_token(db, IMBotProvider.FEISHU, token)
+            integration_config = oauth_provider_config_crud.get_by_verification_token(db, IMBotProvider.FEISHU, token)
         if not integration_config:
             raise FeishuBotEventError("未找到匹配的飞书第三方集成配置")
         if integration_config.bot_verification_token and token != integration_config.bot_verification_token:
@@ -236,7 +236,7 @@ class FeishuBotService:
         return integration_config
 
     def _decrypt_event_payload(self, db: Session, encrypted_payload: str) -> tuple[Dict[str, Any], OAuthProviderConfig]:
-        configs = oauth_provider_config_crud.list_bot_enabled_with_encrypt_key(db, IMBotProvider.FEISHU)
+        configs = oauth_provider_config_crud.list_with_encrypt_key(db, IMBotProvider.FEISHU)
         decrypted_candidates: list[tuple[Dict[str, Any], OAuthProviderConfig]] = []
         for integration_config in configs:
             try:

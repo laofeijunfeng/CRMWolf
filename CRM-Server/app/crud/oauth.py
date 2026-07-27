@@ -18,6 +18,13 @@ class OAuthProviderConfigCRUD:
             OAuthProviderConfig.app_id == app_id,
         ).first()
 
+    def list_with_encrypt_key(self, db: Session, provider: str) -> list[OAuthProviderConfig]:
+        return db.query(OAuthProviderConfig).filter(
+            OAuthProviderConfig.provider == provider,
+            OAuthProviderConfig.bot_encrypt_key.isnot(None),
+            OAuthProviderConfig.bot_encrypt_key != "",
+        ).all()
+
     def list_bot_enabled_with_encrypt_key(self, db: Session, provider: str) -> list[OAuthProviderConfig]:
         return db.query(OAuthProviderConfig).filter(
             OAuthProviderConfig.provider == provider,
@@ -26,7 +33,7 @@ class OAuthProviderConfigCRUD:
             OAuthProviderConfig.bot_encrypt_key != "",
         ).all()
 
-    def get_bot_enabled_by_verification_token(
+    def get_by_verification_token(
         self,
         db: Session,
         provider: str,
@@ -34,7 +41,6 @@ class OAuthProviderConfigCRUD:
     ) -> Optional[OAuthProviderConfig]:
         return db.query(OAuthProviderConfig).filter(
             OAuthProviderConfig.provider == provider,
-            OAuthProviderConfig.bot_enabled.is_(True),
             OAuthProviderConfig.bot_verification_token == verification_token,
         ).first()
 
