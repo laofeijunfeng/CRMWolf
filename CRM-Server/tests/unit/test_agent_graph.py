@@ -298,6 +298,78 @@ def opportunity_semantic_result(**overrides):
     return AgentSemanticParseResult.model_validate(payload)
 
 
+def lead_semantic_result(**overrides):
+    payload = {
+        "intent": "CREATE_LEAD",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+        "follow_up": {"content": "用户要求创建线索", "method": "未指定"},
+        "lead": {
+            "lead_name": "广州睿狐科技",
+            "source": "其他",
+            "city": "广州",
+            "contact_name": "王总",
+            "contact_phone": "13800138000",
+            "company_scale": "51-200人",
+            "follow_up_content": "客户对 CRM 感兴趣",
+            "follow_up_method": "电话",
+            "next_action": "下周三再联系",
+            "next_follow_time_text": None,
+            "next_follow_time": None,
+            "next_follow_time_iso": None,
+        },
+        "contact": {},
+        "invoice_title": {},
+        "deployment_info": {},
+        "business_signals": [],
+        "requested_actions": [{"action": "CREATE_LEAD", "requires_confirmation": True}],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["帮我创建线索"],
+    }
+    payload.update(overrides)
+    return AgentSemanticParseResult.model_validate(payload)
+
+
+def customer_create_semantic_result(**overrides):
+    payload = {
+        "intent": "CREATE_CUSTOMER",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+        "follow_up": {"content": "用户要求创建客户", "method": "未指定"},
+        "customer_create": {
+            "account_name": "广州睿狐科技",
+            "source": "其他",
+            "city": "广州",
+            "industry": "软件",
+            "company_scale": "51-200人",
+            "contact_name": "王总",
+            "contact_phone": "13800138000",
+            "contact_position": "CTO",
+            "contact_gender": "1",
+            "contact_email": None,
+            "follow_up_content": "客户已经确认采购 CRM，后续约演示",
+            "follow_up_method": "电话",
+            "next_action": "下周安排演示",
+            "next_follow_time_text": None,
+            "next_follow_time": None,
+            "next_follow_time_iso": None,
+        },
+        "contact": {},
+        "invoice_title": {},
+        "deployment_info": {},
+        "business_signals": [],
+        "requested_actions": [{"action": "CREATE_CUSTOMER", "requires_confirmation": True}],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["帮我创建客户"],
+    }
+    payload.update(overrides)
+    return AgentSemanticParseResult.model_validate(payload)
+
+
 def build_service(result, tool_service=None):
     return CRMAgentGraphService(
         tool_service=tool_service or FakeToolService(),
@@ -567,6 +639,76 @@ async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation
     assert confirmation_events[0]["action"] == "create_customer_follow_up"
     assert confirmation_events[0]["payload"]["customer_id"] == 101
     assert confirmation_events[0]["payload"]["content"] == "客户反馈项目还在立项评估阶段"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_lead_skips_customer_search_and_requires_confirmation():
+    tool_service = FakeToolService()
+    result = await build_service(lead_semantic_result(), tool_service).run(input_state("帮我创建线索"))
+
+    assert result["intent"] == "CREATE_LEAD"
+    assert tool_service.searches == []
+    assert tool_service.context_queries == []
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_lead"
+    assert confirmation_events[0]["payload"]["lead"]["lead_name"] == "广州睿狐科技"
+    assert confirmation_events[0]["payload"]["lead_follow_up"]["content"] == "客户对 CRM 感兴趣"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_lead_requires_missing_fields_form():
+    tool_service = FakeToolService()
+    result = await build_service(lead_semantic_result(
+        lead={
+            "lead_name": "广州睿狐科技",
+            "source": "其他",
+            "city": None,
+            "contact_name": None,
+            "contact_phone": None,
+        },
+        missing_fields=["city", "contact_name", "contact_phone"],
+    ), tool_service).run(input_state("帮我创建线索"))
+
+    assert tool_service.searches == []
+    field_events = [event for event in result["events"] if event["event"] == "lead_fields_required"]
+    assert field_events[0]["action"] == "collect_lead_fields"
+    assert field_events[0]["payload"]["missing_fields"] == ["city", "contact_name", "contact_phone"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_customer_skips_customer_search_and_requires_confirmation():
+    tool_service = FakeToolService()
+    result = await build_service(customer_create_semantic_result(), tool_service).run(input_state("帮我创建客户"))
+
+    assert result["intent"] == "CREATE_CUSTOMER"
+    assert tool_service.searches == []
+    assert tool_service.context_queries == []
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "create_customer"
+    assert confirmation_events[0]["payload"]["customer"]["account_name"] == "广州睿狐科技"
+    assert confirmation_events[0]["payload"]["customer_follow_up"]["content"] == "客户已经确认采购 CRM，后续约演示"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_customer_requires_missing_fields_form():
+    tool_service = FakeToolService()
+    result = await build_service(customer_create_semantic_result(
+        customer_create={
+            "account_name": "广州睿狐科技",
+            "source": "其他",
+            "city": None,
+            "contact_name": "王总",
+            "contact_phone": None,
+            "contact_position": None,
+            "contact_gender": None,
+        },
+        missing_fields=["city", "contact_phone", "contact_position", "contact_gender"],
+    ), tool_service).run(input_state("帮我创建客户"))
+
+    assert tool_service.searches == []
+    field_events = [event for event in result["events"] if event["event"] == "customer_fields_required"]
+    assert field_events[0]["action"] == "collect_customer_fields"
+    assert field_events[0]["payload"]["missing_fields"] == ["city", "contact_phone", "contact_position", "contact_gender"]
 
 
 @pytest.mark.asyncio

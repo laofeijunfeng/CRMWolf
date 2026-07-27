@@ -64,6 +64,7 @@ class Lead(Base):
     score_updated_at = Column(DateTime, nullable=True, comment="热力值最后更新时间")
 
     __table_args__ = (
+        Index('uq_lead_team_lead_name', 'team_id', 'lead_name', unique=True),
         Index('idx_owner_id', 'owner_id'),
         Index('idx_status', 'status'),
         Index('idx_source', 'source'),

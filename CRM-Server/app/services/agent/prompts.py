@@ -22,7 +22,7 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 【硬性边界】
 - 不允许编造客户、商机、合同、回款计划、发票、License 或部署信息。
 - 不允许假设用户拥有权限；权限由后续 CRM API 校验。
-- 客户不存在时不要创建客户。
+- 客户不存在时不要自动创建客户；只有用户明确要求“创建客户/新增客户/录入客户/开户”时才使用 CREATE_CUSTOMER。
 - 客户名称模糊、字段冲突、置信度低时，必须要求澄清。
 - 如果用户使用“那、这个客户、帮我、继续”等承接表达且本轮没有新客户名称，应继承会话记忆 session_context.current_customer。
 - 继承会话客户时 customer.name_text 填 current_customer.account_name，customer.resolution_source 填 MEMORY；不要另行猜测或改选其他客户。
@@ -40,6 +40,8 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 【可选意图】
 - CUSTOMER_FOLLOW_UP：客户跟进、沟通记录、项目进展记录。
 - PAYMENT_RECORD：客户已回款、到账、打款等回款事实。
+- CREATE_LEAD：创建销售线索、新增线索、录入潜在线索。
+- CREATE_CUSTOMER：创建正式客户、新增客户、录入客户档案；不是潜在线索。
 - CREATE_OPPORTUNITY：创建商机、补商机、立项后新增机会或用户明确要求建商机。
 - CREATE_CONTACT：创建客户联系人。
 - CREATE_INVOICE_TITLE：创建发票抬头或开票抬头。
@@ -50,7 +52,7 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 
 【输出 JSON Schema】
 {
-  "intent": "CUSTOMER_FOLLOW_UP|PAYMENT_RECORD|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CUSTOMER_QUERY|UNKNOWN",
+  "intent": "CUSTOMER_FOLLOW_UP|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CUSTOMER_QUERY|UNKNOWN",
   "intent_confidence": 0.0,
   "customer": {
     "name_text": "客户名称或简称，无法识别则为 null",
@@ -100,6 +102,52 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
     },
     "payment_date_iso": null,
     "notes": "回款备注，无法识别则为 null"
+  },
+  "lead": {
+    "lead_name": "线索名称、项目名称或公司名称，无法识别则为 null",
+    "source": "线上注册|市场活动|客户推荐|电话营销|网站咨询|展会|其他|null",
+    "city": "所在城市，无法识别则为 null",
+    "contact_name": "联系人姓名，无法识别则为 null",
+    "contact_phone": "联系人手机号，无法识别则为 null",
+    "company_scale": "1-50人|51-200人|201-500人|501-1000人|1000人以上|null",
+    "follow_up_content": "创建线索后需要记录的跟进内容，无法识别则为 null",
+    "follow_up_method": "电话|微信|拜访|邮件|其他|null",
+    "next_action": "线索下一步动作，无法识别则为 null",
+    "next_follow_time_text": "用户原文中的线索下次跟进时间，无法识别则为 null",
+    "next_follow_time": {
+      "raw_text": "用户原文中的时间表达",
+      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
+      "direction": "past|current|next|future|null",
+      "amount": 0,
+      "unit": "day|week|month|null",
+      "weekday": "ISO 星期数字，1=周一，7=周日；没有星期则为 null",
+      "year": "年份数字；用户未表达则为 null",
+      "month": "月份数字；用户未表达则为 null",
+      "day": "日期数字；用户未表达则为 null",
+      "date_text": "用户明确表达的日期，YYYY-MM-DD；没有明确日期则为 null",
+      "hour": "0-23；用户未指定具体小时则为 null",
+      "minute": "0-59；用户未指定具体分钟则为 null",
+      "confidence": 0.0
+    },
+    "next_follow_time_iso": null
+  },
+  "customer_create": {
+    "account_name": "客户公司名称，无法识别则为 null",
+    "source": "线上注册|市场活动|客户推荐|电话营销|网站咨询|展会|其他|null",
+    "city": "所在城市，无法识别则为 null",
+    "industry": "所属行业，无法识别则为 null",
+    "company_scale": "1-50人|51-200人|201-500人|501-1000人|1000人以上|null",
+    "contact_name": "主联系人姓名，无法识别则为 null",
+    "contact_phone": "主联系人手机号，无法识别则为 null",
+    "contact_position": "主联系人职务，无法识别则为 null",
+    "contact_gender": "1=男,2=女,0=未知|null",
+    "contact_email": "主联系人邮箱，无法识别则为 null",
+    "follow_up_content": "创建客户后需要记录的客户跟进内容，无法识别则为 null",
+    "follow_up_method": "电话|微信|拜访|邮件|其他|null",
+    "next_action": "客户下一步动作，无法识别则为 null",
+    "next_follow_time_text": "用户原文中的客户下次跟进时间，无法识别则为 null",
+    "next_follow_time": null,
+    "next_follow_time_iso": null
   },
   "opportunity": {
     "opportunity_name": null,
@@ -185,6 +233,11 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 - 例如“今天回款了”：payment.payment_date_text 为“今天”，payment.payment_date.kind 为 RELATIVE_DAY，direction 为 current。
 - 回款金额只提取用户明确表达的金额；“回款了”“到账了”但没有金额时 actual_amount 必须为 null，并在 missing_fields 中包含 actual_amount。
 - “5 万”这类金额必须归一化为 50000，“30 万”必须归一化为 300000。
+- 创建线索必须尽量提取 lead.lead_name、lead.source、lead.city、lead.contact_name、lead.contact_phone、lead.company_scale。
+- 线索来源只能输出：线上注册、市场活动、客户推荐、电话营销、网站咨询、展会、其他。用户未明确来源时默认可输出“其他”，不要追问来源。
+- 创建线索缺少 lead_name、city、contact_name、contact_phone 时，必须在 missing_fields 中包含对应字段。
+- 如果线索创建请求中还包含拜访、电话、微信沟通内容或下一步计划，应放入 lead.follow_up_content、lead.follow_up_method、lead.next_action 和 lead.next_follow_time；不要把跟进信息混入线索基础字段。
+- 用户表达线索下次跟进时间时，只输出结构化时间要素 lead.next_follow_time，不要自己换算最终日期；lead.next_follow_time_iso 必须输出 null。
 - 商机名称由后端创建商机 API 根据客户、用户数和授权模式自动生成；不要生成 opportunity_name，也不要把商机名称放入 missing_fields。
 - 创建商机必须尽量提取 total_amount、user_count、license_type、subscription_years、purchase_type、expected_closing_date。
 - 用户明确表达“订阅 1 年”时 license_type 为 SUBSCRIPTION，subscription_years 为 1。
@@ -302,7 +355,7 @@ CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agen
   "decision": "CONTINUE_PENDING|START_NEW_FLOW|ASK_USER",
   "confidence": 0.0,
   "detected_customer_name": "本轮明确提到的新客户名称，无法识别则为 null",
-  "detected_intent": "CUSTOMER_FOLLOW_UP|PAYMENT_RECORD|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CUSTOMER_QUERY|UNKNOWN|null",
+  "detected_intent": "CUSTOMER_FOLLOW_UP|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CUSTOMER_QUERY|UNKNOWN|null",
   "is_field_supplement": false,
   "reason": "一句话说明判断依据",
   "question": "需要用户确认时的问题；无需确认则为 null"

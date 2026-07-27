@@ -27,7 +27,6 @@ import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
-import AICustomerCreateDialog from '@/components/AICustomerCreateDialog.vue'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
@@ -69,7 +68,6 @@ const industryFilterOptions = ref<{ value: string; label: string }[]>([])
 const selectedCustomer = ref<CustomerResponse | null>(null)
 const transferCustomer = ref<CustomerResponse | null>(null)
 const transferDialogOpen = ref(false)
-const showAICustomerCreate = ref(false)
 const showCustomerForm = ref(false)
 const editingCustomerId = ref<number | null>(null)
 
@@ -698,17 +696,8 @@ watchEffect(() => {
   // 注册操作按钮
   headerStore.setActions([
     {
-      id: 'ai-create-customer',
-      label: 'AI 创建客户',
-      icon: Sparkles,
-      type: 'primary',
-      handler: (): void => { showAICustomerCreate.value = true },
-      visible: canCreateCustomer.value,
-      ariaLabel: 'AI 创建客户'
-    },
-    {
       id: 'create-customer',
-      label: '手动创建',
+      label: '创建客户',
       icon: Plus,
       type: 'default',
       handler: (): void => {
@@ -716,7 +705,7 @@ watchEffect(() => {
         showCustomerForm.value = true
       },
       visible: canCreateCustomer.value,
-      ariaLabel: '手动创建客户'
+      ariaLabel: '创建客户'
     }
   ])
 })
@@ -1084,12 +1073,6 @@ watchEffect(() => {
         </div>
       </div>
     </div>
-
-    <!-- AI 创建客户弹窗 -->
-    <AICustomerCreateDialog
-      v-model="showAICustomerCreate"
-      @success="fetchCustomerList"
-    />
 
     <!-- 手动创建/编辑客户弹窗 -->
     <CustomerFormDialog

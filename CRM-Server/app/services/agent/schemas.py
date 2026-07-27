@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 AgentIntent = Literal[
     "CUSTOMER_FOLLOW_UP",
     "PAYMENT_RECORD",
+    "CREATE_LEAD",
+    "CREATE_CUSTOMER",
     "CREATE_OPPORTUNITY",
     "CREATE_CONTACT",
     "CREATE_INVOICE_TITLE",
@@ -84,6 +86,40 @@ class AgentOpportunityEntity(BaseModel):
     expected_closing_date_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
 
 
+class AgentLeadEntity(BaseModel):
+    lead_name: Optional[str] = Field(None, description="线索名称、项目名称或公司名称")
+    source: Optional[str] = Field(None, description="线索来源中文枚举值")
+    city: Optional[str] = Field(None, description="所在城市")
+    contact_name: Optional[str] = Field(None, description="联系人姓名")
+    contact_phone: Optional[str] = Field(None, description="联系人手机号")
+    company_scale: Optional[str] = Field(None, description="公司规模中文枚举值")
+    follow_up_content: Optional[str] = Field(None, description="创建线索后可沉淀的线索跟进内容")
+    follow_up_method: Optional[str] = Field(None, description="线索跟进方式")
+    next_action: Optional[str] = Field(None, description="下一步动作")
+    next_follow_time_text: Optional[str] = Field(None, description="用户表达中的线索下次跟进时间")
+    next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化线索下次跟进时间")
+    next_follow_time_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+
+
+class AgentCustomerCreateEntity(BaseModel):
+    account_name: Optional[str] = Field(None, description="客户公司名称")
+    source: Optional[str] = Field(None, description="客户来源中文枚举值")
+    city: Optional[str] = Field(None, description="所在城市")
+    industry: Optional[str] = Field(None, description="所属行业")
+    company_scale: Optional[str] = Field(None, description="公司规模中文枚举值")
+    contact_name: Optional[str] = Field(None, description="主联系人姓名")
+    contact_phone: Optional[str] = Field(None, description="主联系人手机号")
+    contact_position: Optional[str] = Field(None, description="主联系人职务")
+    contact_gender: Optional[str] = Field(None, description="主联系人性别：1=男,2=女,0=未知")
+    contact_email: Optional[str] = Field(None, description="主联系人邮箱")
+    follow_up_content: Optional[str] = Field(None, description="创建客户后可沉淀的客户跟进内容")
+    follow_up_method: Optional[str] = Field(None, description="客户跟进方式")
+    next_action: Optional[str] = Field(None, description="下一步动作")
+    next_follow_time_text: Optional[str] = Field(None, description="用户表达中的客户下次跟进时间")
+    next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化客户下次跟进时间")
+    next_follow_time_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+
+
 class AgentTemporalExpression(BaseModel):
     raw_text: Optional[str] = Field(None, description="用户原文中的时间表达")
     kind: AgentTemporalKind = Field("NONE", description="时间表达类型")
@@ -134,6 +170,8 @@ class AgentSemanticParseResult(BaseModel):
     customer: AgentCustomerEntity = Field(default_factory=AgentCustomerEntity)
     follow_up: AgentFollowUpEntity = Field(default_factory=AgentFollowUpEntity)
     payment: AgentPaymentEntity = Field(default_factory=AgentPaymentEntity)
+    lead: AgentLeadEntity = Field(default_factory=AgentLeadEntity)
+    customer_create: AgentCustomerCreateEntity = Field(default_factory=AgentCustomerCreateEntity)
     opportunity: AgentOpportunityEntity = Field(default_factory=AgentOpportunityEntity)
     contact: Dict[str, Any] = Field(default_factory=dict)
     invoice_title: Dict[str, Any] = Field(default_factory=dict)

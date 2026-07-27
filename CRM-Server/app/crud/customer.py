@@ -409,11 +409,14 @@ class CustomerCRUD:
         from app.crud.customer_follow_up import customer_follow_up_crud
         from app.services.operation_log_service import operation_log_service
 
-        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        lead = db.query(Lead).filter(
+            Lead.id == lead_id,
+            Lead.team_id == team_id,
+        ).first()
         if not lead:
             raise ValueError("线索不存在")
 
-        existing_customer = self.get_by_source_lead_id(db, lead_id)
+        existing_customer = self.get_by_source_lead_id(db, lead_id, team_id)
         if existing_customer:
             raise ValueError("该线索已被转化")
 

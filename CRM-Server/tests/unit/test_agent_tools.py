@@ -49,6 +49,12 @@ class FakeCRMAPIClient:
                 "content": json["content"],
                 "next_follow_time": "2026-07-29T00:00:00",
             }
+        if method == "POST" and path == "/v1/leads/":
+            return {"id": 8101, "status": 0, **json}
+        if method == "POST" and path == "/v1/customers/":
+            return {"id": 9101, "status": 0, **json}
+        if method == "POST" and path == "/v1/leads/8101/follow-ups":
+            return {"id": 8201, "lead_id": 8101, **json}
         if method == "POST" and path == "/v1/invoice-titles":
             return {"id": 6001, "customer_id": params["customer_id"], **json, "is_default": False}
         if method == "PATCH" and path == "/v1/invoice-titles/6001/set-default":
@@ -252,6 +258,128 @@ async def test_agent_tool_create_follow_up_is_idempotent():
         assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_create_lead_calls_existing_lead_api():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        result = await registry.execute(
+            "create_lead",
+            _confirmed_context_for(db, "create_lead"),
+            {
+                "lead": {
+                    "lead_name": "广州睿狐科技",
+                    "source": "其他",
+                    "city": "广州",
+                    "contact_name": "王总",
+                    "contact_phone": "13800138000",
+                    "company_scale": "51-200人",
+                },
+                "idempotency_suffix": "task-lead-001",
+            },
+        )
+
+        assert result.success is True
+        assert fake_client.calls == [{
+            "method": "POST",
+            "path": "/v1/leads/",
+            "authorization": "Bearer test-token",
+            "params": None,
+            "json": {
+                "lead_name": "广州睿狐科技",
+                "source": "其他",
+                "city": "广州",
+                "contact_name": "王总",
+                "contact_phone": "13800138000",
+                "company_scale": "51-200人",
+            },
+        }]
+        assert db.query(AgentToolCall).one().tool_name == "create_lead"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_create_customer_calls_existing_customer_api():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        result = await registry.execute(
+            "create_customer",
+            _confirmed_context_for(db, "create_customer"),
+            {
+                "customer": {
+                    "account_name": "广州睿狐科技",
+                    "source": "其他",
+                    "city": "广州",
+                    "primary_contact": {
+                        "name": "王总",
+                        "mobile": "13800138000",
+                        "position": "CTO",
+                        "gender": "1",
+                    },
+                },
+                "idempotency_suffix": "task-002",
+            },
+        )
+
+        assert result.success is True
+        assert fake_client.calls[0] == {
+            "method": "POST",
+            "path": "/v1/customers/",
+            "authorization": "Bearer test-token",
+            "params": None,
+            "json": {
+                "account_name": "广州睿狐科技",
+                "source": "其他",
+                "city": "广州",
+                "primary_contact": {
+                    "name": "王总",
+                    "mobile": "13800138000",
+                    "position": "CTO",
+                    "gender": "1",
+                },
+            },
+        }
+        assert db.query(AgentToolCall).one().tool_name == "create_customer"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_create_lead_follow_up_calls_existing_lead_api():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        result = await registry.execute(
+            "create_lead_follow_up",
+            _confirmed_context_for(db, "create_lead_follow_up"),
+            {
+                "lead_id": 8101,
+                "content": "客户对 CRM 感兴趣",
+                "method": "电话",
+                "next_action": "下周三再联系",
+                "next_follow_time": "2026-07-29T09:00:00",
+            },
+        )
+
+        assert result.success is True
+        assert fake_client.calls[0]["method"] == "POST"
+        assert fake_client.calls[0]["path"] == "/v1/leads/8101/follow-ups"
+        assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
     finally:
         db.close()
         engine.dispose()

@@ -64,7 +64,7 @@ class Customer(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
-    account_name = Column(String(255), nullable=False, unique=True, comment="客户公司名称")
+    account_name = Column(String(255), nullable=False, comment="客户公司名称")
     account_name_norm = Column(String(255), nullable=True, comment="归一化客户名称（去后缀/括号）")  # R-ST-02
     industry = Column(String(100), nullable=True, comment="所属行业")
     city = Column(String(100), nullable=False, comment="所在城市")
@@ -120,6 +120,7 @@ class Customer(Base):
 
     __table_args__ = (
         Index('idx_account_name', 'account_name'),
+        Index('uq_customer_team_account_name', 'team_id', 'account_name', unique=True),
         Index('idx_account_name_norm_gin', 'account_name_norm', postgresql_using='gin', postgresql_ops={'account_name_norm': 'gin_trgm_ops'}),  # R-ST-02: pg_trgm GIN 索引
         Index('idx_industry', 'industry'),
         Index('idx_city', 'city'),

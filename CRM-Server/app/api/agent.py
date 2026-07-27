@@ -257,9 +257,53 @@ def _fields_for_missing(
         "user_name": "成员姓名",
         "actual_amount": "实际回款金额",
         "payment_date": "实际回款日期",
+        "lead_name": "线索名称",
+        "account_name": "客户名称",
+        "source": "来源",
+        "city": "所在城市",
+        "contact_name": "联系人姓名",
+        "contact_phone": "联系人手机号",
+        "contact_position": "联系人职务",
+        "contact_gender": "联系人性别",
+        "company_scale": "公司规模",
     }
     numeric_fields = {"total_amount", "user_count", "subscription_years", "authorized_users", "actual_amount"}
     date_fields = {"expected_closing_date", "payment_date"}
+    if kind == "lead":
+        option_sets["source"] = [
+            {"label": "线上注册", "value": "线上注册"},
+            {"label": "市场活动", "value": "市场活动"},
+            {"label": "客户推荐", "value": "客户推荐"},
+            {"label": "电话营销", "value": "电话营销"},
+            {"label": "网站咨询", "value": "网站咨询"},
+            {"label": "展会", "value": "展会"},
+            {"label": "其他", "value": "其他"},
+        ]
+        option_sets["company_scale"] = [
+            {"label": "1-50人", "value": "1-50人"},
+            {"label": "51-200人", "value": "51-200人"},
+            {"label": "201-500人", "value": "201-500人"},
+            {"label": "501-1000人", "value": "501-1000人"},
+            {"label": "1000人以上", "value": "1000人以上"},
+        ]
+    if kind == "customer":
+        option_sets["source"] = [
+            {"label": "线上注册", "value": "线上注册"},
+            {"label": "市场活动", "value": "市场活动"},
+            {"label": "客户推荐", "value": "客户推荐"},
+            {"label": "电话营销", "value": "电话营销"},
+            {"label": "网站咨询", "value": "网站咨询"},
+            {"label": "展会", "value": "展会"},
+            {"label": "其他", "value": "其他"},
+        ]
+        option_sets["company_scale"] = [
+            {"label": "1-50人", "value": "1-50人"},
+            {"label": "51-200人", "value": "51-200人"},
+            {"label": "201-500人", "value": "201-500人"},
+            {"label": "501-1000人", "value": "501-1000人"},
+            {"label": "1000人以上", "value": "1000人以上"},
+        ]
+        option_sets["contact_gender"] = option_sets["gender"]
     fields = []
     for key in missing_fields:
         required = not (kind == "opportunity" and key == "subscription_years" and "license_type" in missing_fields)
@@ -312,6 +356,8 @@ def _interaction_for_event(
         "deployment_info_fields_required": "deployment_info",
         "customer_member_fields_required": "customer_member",
         "payment_fields_required": "payment",
+        "lead_fields_required": "lead",
+        "customer_fields_required": "customer",
     }
     if event_name in form_kinds:
         payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
@@ -376,7 +422,7 @@ def _pending_task_confirmation_interaction(content: str) -> dict[str, Any]:
 
 
 def _should_offer_next_pending_task(action: Optional[str]) -> bool:
-    return action in {"create_customer_follow_up", "create_payment_plan"}
+    return action in {"create_customer_follow_up", "create_payment_plan", "create_lead", "create_customer"}
 
 
 def _authorization_header(credentials: HTTPAuthorizationCredentials) -> str:
@@ -553,6 +599,11 @@ def _is_follow_up_quality_fields_task(task) -> bool:
     return state.get("action") == "collect_follow_up_quality_fields"
 
 
+def _is_lead_follow_up_quality_fields_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "collect_lead_follow_up_quality_fields"
+
+
 def _is_opportunity_fields_task(task) -> bool:
     state = task.state_json or {}
     return state.get("action") == "collect_opportunity_fields"
@@ -576,6 +627,16 @@ def _is_customer_member_fields_task(task) -> bool:
 def _is_payment_fields_task(task) -> bool:
     state = task.state_json or {}
     return state.get("action") == "collect_payment_fields"
+
+
+def _is_lead_fields_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "collect_lead_fields"
+
+
+def _is_customer_fields_task(task) -> bool:
+    state = task.state_json or {}
+    return state.get("action") == "collect_customer_fields"
 
 
 def _is_business_selection_task(task) -> bool:
@@ -787,6 +848,10 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
     intent = None
     if action in {"create_customer_follow_up", "select_customer_for_follow_up", "collect_follow_up_quality_fields"}:
         intent = "CUSTOMER_FOLLOW_UP"
+    elif action in {"create_lead", "collect_lead_fields", "create_lead_follow_up", "collect_lead_follow_up_quality_fields"}:
+        intent = "CREATE_LEAD"
+    elif action in {"create_customer", "collect_customer_fields"}:
+        intent = "CREATE_CUSTOMER"
     elif action in {"create_opportunity", "select_customer_for_opportunity", "collect_opportunity_fields"}:
         intent = "CREATE_OPPORTUNITY"
     elif action == "move_opportunity_stage":
@@ -821,7 +886,7 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
             session_id=session.id,
             intent=intent,
             status=AgentTaskStatus.WAITING_USER,
-            target_type="customer",
+            target_type="lead" if intent == "CREATE_LEAD" else "customer",
             target_id=payload.get("customer_id"),
             summary=f"等待确认执行：{action}",
             input_json=payload,
@@ -965,6 +1030,92 @@ def _merge_payment_fields(existing_payment: dict, semantic_result: AgentSemantic
     return merged
 
 
+def _merge_lead_fields(existing_lead: dict, semantic_result: AgentSemanticParseResult) -> dict:
+    return {
+        **existing_lead,
+        **_drop_empty_values({
+            "lead_name": semantic_result.lead.lead_name,
+            "source": semantic_result.lead.source,
+            "city": semantic_result.lead.city,
+            "contact_name": semantic_result.lead.contact_name,
+            "contact_phone": semantic_result.lead.contact_phone,
+            "company_scale": semantic_result.lead.company_scale,
+        }),
+    }
+
+
+def _merge_lead_follow_up_fields(existing_follow_up: dict, semantic_result: AgentSemanticParseResult) -> dict:
+    next_follow_time_iso = agent_temporal_resolver.resolve_follow_up_time(semantic_result.lead.next_follow_time)
+    return {
+        **existing_follow_up,
+        **_drop_empty_values({
+            "content": semantic_result.lead.follow_up_content,
+            "method": semantic_result.lead.follow_up_method,
+            "next_action": semantic_result.lead.next_action,
+            "next_follow_time_text": semantic_result.lead.next_follow_time_text,
+            "next_follow_time_iso": next_follow_time_iso,
+        }),
+    }
+
+
+def _merge_customer_fields(existing_customer: dict, semantic_result: AgentSemanticParseResult) -> dict:
+    customer = semantic_result.customer_create
+    return {
+        **existing_customer,
+        **_drop_empty_values({
+            "account_name": customer.account_name,
+            "source": customer.source,
+            "city": customer.city,
+            "industry": customer.industry,
+            "company_scale": customer.company_scale,
+            "contact_name": customer.contact_name,
+            "contact_phone": customer.contact_phone,
+            "contact_position": customer.contact_position,
+            "contact_gender": customer.contact_gender,
+            "contact_email": customer.contact_email,
+        }),
+    }
+
+
+def _merge_customer_follow_up_fields(existing_follow_up: dict, semantic_result: AgentSemanticParseResult) -> dict:
+    customer = semantic_result.customer_create
+    next_follow_time_iso = agent_temporal_resolver.resolve_follow_up_time(customer.next_follow_time)
+    return {
+        **existing_follow_up,
+        **_drop_empty_values({
+            "content": customer.follow_up_content,
+            "method": customer.follow_up_method,
+            "next_action": customer.next_action,
+            "next_follow_time_text": customer.next_follow_time_text,
+            "next_follow_time_iso": next_follow_time_iso,
+        }),
+    }
+
+
+def _normalize_gender(value: Any) -> str:
+    text = str(value or "").strip()
+    return {"男": "1", "女": "2", "未知": "0"}.get(text, text or "0")
+
+
+def _customer_create_api_payload(customer: dict) -> dict:
+    payload = {
+        key: customer.get(key)
+        for key in ("account_name", "source", "city", "industry", "company_scale")
+        if customer.get(key) not in (None, "")
+    }
+    payload.setdefault("source", "其他")
+    has_contact = any(customer.get(field) for field in ["contact_name", "contact_phone", "contact_position", "contact_gender", "contact_email"])
+    if has_contact:
+        payload["primary_contact"] = {
+            "name": customer.get("contact_name"),
+            "mobile": customer.get("contact_phone"),
+            "position": customer.get("contact_position"),
+            "gender": _normalize_gender(customer.get("contact_gender")),
+            "email": customer.get("contact_email"),
+        }
+    return payload
+
+
 def _merge_follow_up_fields(existing_payload: dict, semantic_result: AgentSemanticParseResult, supplement: str) -> dict:
     follow_up = semantic_result.follow_up
     next_follow_time_iso = agent_temporal_resolver.resolve_follow_up_time(follow_up.next_follow_time)
@@ -989,6 +1140,325 @@ def _merge_follow_up_fields(existing_payload: dict, semantic_result: AgentSemant
 def _follow_up_content_for_create(payload: dict, quality: Any = None) -> str:
     revision = (getattr(quality, "suggested_revision", None) or "").strip() if quality else ""
     return revision or payload.get("content") or ""
+
+
+def _lead_follow_up_semantic_result(follow_up: dict) -> AgentSemanticParseResult:
+    return AgentSemanticParseResult.model_validate({
+        "intent": "CREATE_LEAD",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+        "follow_up": {
+            "content": follow_up.get("content"),
+            "method": follow_up.get("method") or "其他",
+            "next_action": follow_up.get("next_action"),
+            "next_follow_time_text": follow_up.get("next_follow_time_text"),
+        },
+        "lead": {
+            "follow_up_content": follow_up.get("content"),
+            "follow_up_method": follow_up.get("method") or "其他",
+            "next_action": follow_up.get("next_action"),
+            "next_follow_time_text": follow_up.get("next_follow_time_text"),
+        },
+        "business_signals": [],
+        "requested_actions": [{"action": "CREATE_LEAD_FOLLOW_UP", "requires_confirmation": True}],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": [follow_up.get("content") or ""],
+    })
+
+
+async def _evaluate_lead_follow_up_quality(db: Session, task, follow_up: dict):
+    return await agent_follow_up_quality_evaluator.evaluate_with_metadata(
+        db,
+        team_id=task.team_id,
+        user_message=follow_up.get("content") or "",
+        semantic_result=_lead_follow_up_semantic_result(follow_up),
+        memory=AgentMemorySnapshot(
+            pending_task={
+                "id": task.id,
+                "intent": task.intent,
+                "target_type": task.target_type,
+                "target_id": task.target_id,
+                "summary": task.summary,
+                "state": task.state_json or {},
+            },
+        ),
+        current_date=agent_temporal_resolver.now().date(),
+    )
+
+
+def _lead_follow_up_create_payload(lead_id: int, follow_up: dict, quality: Any = None) -> dict:
+    return {
+        "lead_id": lead_id,
+        "content": _follow_up_content_for_create(follow_up, quality),
+        "method": follow_up.get("method") or "其他",
+        "next_action": follow_up.get("next_action"),
+        "next_follow_time": follow_up.get("next_follow_time_iso") or follow_up.get("next_follow_time"),
+    }
+
+
+def _customer_follow_up_semantic_result(customer: dict, follow_up: dict) -> AgentSemanticParseResult:
+    return AgentSemanticParseResult.model_validate({
+        "intent": "CUSTOMER_FOLLOW_UP",
+        "intent_confidence": 0.95,
+        "customer": {
+            "name_text": customer.get("account_name"),
+            "confidence": 1.0,
+            "resolution_source": "EXPLICIT",
+        },
+        "follow_up": {
+            "content": follow_up.get("content"),
+            "method": follow_up.get("method") or "AI录入",
+            "next_action": follow_up.get("next_action"),
+            "next_follow_time_text": follow_up.get("next_follow_time_text"),
+        },
+        "business_signals": [],
+        "requested_actions": [{"action": "CREATE_CUSTOMER_FOLLOW_UP", "requires_confirmation": True}],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": [follow_up.get("content") or ""],
+    })
+
+
+async def _evaluate_customer_follow_up_quality(db: Session, task, customer: dict, follow_up: dict):
+    return await agent_follow_up_quality_evaluator.evaluate_with_metadata(
+        db,
+        team_id=task.team_id,
+        user_message=follow_up.get("content") or "",
+        semantic_result=_customer_follow_up_semantic_result(customer, follow_up),
+        memory=AgentMemorySnapshot(
+            pending_task={
+                "id": task.id,
+                "intent": task.intent,
+                "target_type": task.target_type,
+                "target_id": task.target_id,
+                "summary": task.summary,
+                "state": task.state_json or {},
+            },
+        ),
+        current_date=agent_temporal_resolver.now().date(),
+    )
+
+
+def _customer_follow_up_create_payload(customer_id: int, follow_up: dict, quality: Any = None) -> dict:
+    return {
+        "customer_id": customer_id,
+        "content": _follow_up_content_for_create(follow_up, quality),
+        "method": follow_up.get("method") or "AI录入",
+        "next_action": follow_up.get("next_action"),
+        "next_follow_time_text": follow_up.get("next_follow_time_text"),
+        "next_follow_time_iso": follow_up.get("next_follow_time_iso"),
+    }
+
+
+def _create_customer_follow_up_task(
+    db: Session,
+    session,
+    *,
+    team_id: int,
+    user_id: int,
+    customer: dict,
+    follow_up: dict,
+    action: str,
+    summary: str,
+    required_tools: list[str],
+    confirmation_summary: str,
+):
+    customer_id = customer.get("id")
+    payload = dict(follow_up)
+    payload["customer_id"] = customer_id
+    next_task = agent_task_crud.create(
+        db,
+        AgentTaskCreate(
+            task_key=_new_task_key(),
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session.id,
+            intent="CUSTOMER_FOLLOW_UP",
+            status=AgentTaskStatus.WAITING_USER,
+            target_type="customer",
+            target_id=customer_id,
+            summary=summary,
+            input_json=payload,
+            state_json={
+                "action": action,
+                "payload": payload,
+                "customer": customer,
+                "hitl": AgentHITLPolicy(
+                    required_for_tools=required_tools,
+                    confirmation_summary=confirmation_summary,
+                ).model_dump(exclude_none=True),
+            },
+        ),
+    )
+    _remember_pending_task(db, session, next_task)
+    return next_task
+
+
+async def _stage_customer_follow_up_after_create(
+    db: Session,
+    session,
+    task,
+    *,
+    team_id: int,
+    user_id: int,
+    customer: dict,
+    follow_up: dict,
+) -> str:
+    try:
+        envelope = await _evaluate_customer_follow_up_quality(db, task, customer, follow_up)
+    except AgentFollowUpQualityEvaluatorError as exc:
+        _create_customer_follow_up_task(
+            db,
+            session,
+            team_id=team_id,
+            user_id=user_id,
+            customer=customer,
+            follow_up={**follow_up, "quality_error": str(exc)},
+            action="collect_follow_up_quality_fields",
+            summary="等待补充客户跟进信息",
+            required_tools=[],
+            confirmation_summary="补充客户跟进信息",
+        )
+        return f"客户已创建，但我没有可靠评估客户跟进记录。请补充一下跟进信息。原因：{str(exc)}"
+
+    quality = envelope.result
+    follow_up = {**follow_up, "quality": quality.model_dump(exclude_none=True)}
+    if not quality.passed:
+        _create_customer_follow_up_task(
+            db,
+            session,
+            team_id=team_id,
+            user_id=user_id,
+            customer=customer,
+            follow_up=follow_up,
+            action="collect_follow_up_quality_fields",
+            summary="等待补充客户跟进信息",
+            required_tools=[],
+            confirmation_summary="补充客户跟进信息",
+        )
+        question = quality.supplement_question or "这条客户跟进还差一点关键信息，请继续补充。"
+        return f"客户已创建。{question}"
+
+    next_payload = _customer_follow_up_create_payload(customer["id"], follow_up, quality)
+    _create_customer_follow_up_task(
+        db,
+        session,
+        team_id=team_id,
+        user_id=user_id,
+        customer=customer,
+        follow_up=next_payload,
+        action="create_customer_follow_up",
+        summary="等待确认执行：create_customer_follow_up",
+        required_tools=["create_customer_follow_up"],
+        confirmation_summary=f"为「{customer.get('account_name')}」创建跟进记录",
+    )
+    return "客户已创建。请确认是否同步创建客户跟进记录？"
+
+
+def _create_lead_follow_up_task(
+    db: Session,
+    session,
+    *,
+    team_id: int,
+    user_id: int,
+    lead_id: int,
+    follow_up: dict,
+    action: str,
+    summary: str,
+    required_tools: list[str],
+    confirmation_summary: str,
+):
+    payload = dict(follow_up)
+    payload["lead_id"] = lead_id
+    next_task = agent_task_crud.create(
+        db,
+        AgentTaskCreate(
+            task_key=_new_task_key(),
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session.id,
+            intent="CREATE_LEAD",
+            status=AgentTaskStatus.WAITING_USER,
+            target_type="lead",
+            target_id=lead_id,
+            summary=summary,
+            input_json=payload,
+            state_json={
+                "action": action,
+                "payload": payload,
+                "hitl": AgentHITLPolicy(
+                    required_for_tools=required_tools,
+                    confirmation_summary=confirmation_summary,
+                ).model_dump(exclude_none=True),
+            },
+        ),
+    )
+    _remember_pending_task(db, session, next_task)
+    return next_task
+
+
+async def _stage_lead_follow_up_after_create(
+    db: Session,
+    session,
+    task,
+    *,
+    team_id: int,
+    user_id: int,
+    lead_id: int,
+    follow_up: dict,
+) -> str:
+    try:
+        envelope = await _evaluate_lead_follow_up_quality(db, task, follow_up)
+    except AgentFollowUpQualityEvaluatorError as exc:
+        _create_lead_follow_up_task(
+            db,
+            session,
+            team_id=team_id,
+            user_id=user_id,
+            lead_id=lead_id,
+            follow_up={**follow_up, "quality_error": str(exc)},
+            action="collect_lead_follow_up_quality_fields",
+            summary="等待补充线索跟进信息",
+            required_tools=[],
+            confirmation_summary="补充线索跟进信息",
+        )
+        return f"线索已创建，但我没有可靠评估线索跟进记录。请补充一下跟进信息。原因：{str(exc)}"
+
+    quality = envelope.result
+    follow_up = {**follow_up, "quality": quality.model_dump(exclude_none=True)}
+    if not quality.passed:
+        _create_lead_follow_up_task(
+            db,
+            session,
+            team_id=team_id,
+            user_id=user_id,
+            lead_id=lead_id,
+            follow_up=follow_up,
+            action="collect_lead_follow_up_quality_fields",
+            summary="等待补充线索跟进信息",
+            required_tools=[],
+            confirmation_summary="补充线索跟进信息",
+        )
+        question = quality.supplement_question or "这条线索跟进还差一点关键信息，请继续补充。"
+        return f"线索已创建。{question}"
+
+    next_payload = _lead_follow_up_create_payload(lead_id, follow_up, quality)
+    _create_lead_follow_up_task(
+        db,
+        session,
+        team_id=team_id,
+        user_id=user_id,
+        lead_id=lead_id,
+        follow_up=next_payload,
+        action="create_lead_follow_up",
+        summary="等待确认执行：create_lead_follow_up",
+        required_tools=["create_lead_follow_up"],
+        confirmation_summary="创建线索跟进记录",
+    )
+    return "线索已创建。请确认是否同步创建线索跟进记录？"
 
 
 def _merge_opportunity_fields(existing_opportunity: dict, semantic_result: AgentSemanticParseResult) -> dict:
@@ -1100,6 +1570,142 @@ async def _apply_follow_up_quality_fields(db: Session, task, content: str):
         ),
     )
     return True, f"跟进内容已补齐。请确认是否为「{customer.get('account_name')}」创建这条跟进记录？"
+
+
+async def _apply_lead_follow_up_quality_fields(db: Session, task, content: str):
+    state = deepcopy(task.state_json or {})
+    payload = deepcopy(state.get("payload") or {})
+    try:
+        semantic_result = await _parse_task_field_supplement(db, task, content)
+    except AgentSemanticParserError as exc:
+        return False, f"我没有可靠识别到补充的线索跟进信息，请换一种说法补充。原因：{str(exc)}"
+
+    lead_id = payload.get("lead_id") or task.target_id
+    follow_up = _merge_lead_follow_up_fields(payload, semantic_result)
+    follow_up["lead_id"] = lead_id
+    state = {**state, "payload": follow_up}
+
+    try:
+        envelope = await _evaluate_lead_follow_up_quality(db, task, follow_up)
+    except AgentFollowUpQualityEvaluatorError as exc:
+        return False, f"我没有可靠评估这条线索跟进记录，请再补充一下。原因：{str(exc)}"
+
+    quality = envelope.result
+    follow_up["quality"] = quality.model_dump(exclude_none=True)
+    state = {**state, "payload": follow_up}
+    if not quality.passed:
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=follow_up, state_json=state))
+        return False, quality.supplement_question or "这条线索跟进还差一点关键信息，请继续补充。"
+
+    next_payload = _lead_follow_up_create_payload(lead_id, follow_up, quality)
+    new_state = {
+        "action": "create_lead_follow_up",
+        "payload": next_payload,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=["create_lead_follow_up"],
+            confirmation_summary="创建线索跟进记录",
+        ).model_dump(exclude_none=True),
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            summary="等待确认执行：create_lead_follow_up",
+            input_json=next_payload,
+            state_json=new_state,
+        ),
+    )
+    return True, "线索跟进内容已补齐。请确认是否创建这条线索跟进记录？"
+
+
+async def _apply_lead_fields(db: Session, task, content: str):
+    state = task.state_json or {}
+    payload = state.get("payload") or {}
+    try:
+        semantic_result = await _parse_task_field_supplement(db, task, content)
+    except AgentSemanticParserError as exc:
+        return False, f"我没有可靠识别到补充的线索信息，请换一种说法补充。原因：{str(exc)}"
+
+    lead = _merge_lead_fields(payload.get("lead") or {}, semantic_result)
+    lead.setdefault("source", "其他")
+    lead_follow_up = _merge_lead_follow_up_fields(payload.get("lead_follow_up") or {}, semantic_result)
+    missing_fields = CRMAgentGraphService.missing_lead_fields(lead)
+    payload["lead"] = lead
+    payload["lead_follow_up"] = lead_follow_up
+    payload["missing_fields"] = missing_fields
+    state = {**state, "payload": payload}
+
+    if missing_fields:
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        return False, (
+            "还需要补充："
+            f"{CRMAgentGraphService.format_lead_missing_fields(missing_fields)}。"
+        )
+
+    next_payload = {"lead": lead, "lead_follow_up": lead_follow_up}
+    new_state = {
+        "action": "create_lead",
+        "payload": next_payload,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=["create_lead"],
+            confirmation_summary=f"创建线索「{lead.get('lead_name')}」",
+        ).model_dump(exclude_none=True),
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            summary="等待确认执行：create_lead",
+            input_json=next_payload,
+            state_json=new_state,
+        ),
+    )
+    return True, f"线索信息已补齐。请确认是否创建线索「{lead.get('lead_name')}」？"
+
+
+async def _apply_customer_fields(db: Session, task, content: str):
+    state = task.state_json or {}
+    payload = state.get("payload") or {}
+    try:
+        semantic_result = await _parse_task_field_supplement(db, task, content)
+    except AgentSemanticParserError as exc:
+        return False, f"我没有可靠识别到补充的客户信息，请换一种说法补充。原因：{str(exc)}"
+
+    customer = _merge_customer_fields(payload.get("customer") or {}, semantic_result)
+    customer.setdefault("source", "其他")
+    customer_follow_up = _merge_customer_follow_up_fields(payload.get("customer_follow_up") or {}, semantic_result)
+    missing_fields = CRMAgentGraphService.missing_customer_fields(customer)
+    payload["customer"] = customer
+    payload["customer_follow_up"] = customer_follow_up
+    payload["missing_fields"] = missing_fields
+    state = {**state, "payload": payload}
+
+    if missing_fields:
+        agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
+        return False, (
+            "还需要补充："
+            f"{CRMAgentGraphService.format_customer_missing_fields(missing_fields)}。"
+        )
+
+    next_payload = {"customer": customer, "customer_follow_up": customer_follow_up}
+    new_state = {
+        "action": "create_customer",
+        "payload": next_payload,
+        "hitl": AgentHITLPolicy(
+            required_for_tools=["create_customer"],
+            confirmation_summary=f"创建客户「{customer.get('account_name')}」",
+        ).model_dump(exclude_none=True),
+    }
+    agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(
+            summary="等待确认执行：create_customer",
+            input_json=next_payload,
+            state_json=new_state,
+        ),
+    )
+    return True, f"客户信息已补齐。请确认是否创建客户「{customer.get('account_name')}」？"
 
 
 async def _apply_opportunity_fields(db: Session, task, content: str):
@@ -1559,6 +2165,43 @@ async def _execute_waiting_task(
             return result, "回款计划已创建。"
         if action == "create_payment_record":
             return result, "回款已登记，并已按系统现有流程提交审批。"
+        if action == "create_lead":
+            lead_id = result.data.get("id") if isinstance(result.data, dict) else None
+            follow_up = payload.get("lead_follow_up") or {}
+            if lead_id and isinstance(follow_up, dict) and follow_up.get("content"):
+                assistant_content = await _stage_lead_follow_up_after_create(
+                    db,
+                    session,
+                    task,
+                    team_id=team_id,
+                    user_id=user_id,
+                    lead_id=lead_id,
+                    follow_up=follow_up,
+                )
+                return result, assistant_content
+            return result, "线索已创建。"
+        if action == "create_customer":
+            customer_id = result.data.get("id") if isinstance(result.data, dict) else None
+            customer_name = result.data.get("account_name") if isinstance(result.data, dict) else None
+            customer = {
+                "id": customer_id,
+                "account_name": customer_name or (payload.get("customer") or {}).get("account_name"),
+            }
+            follow_up = payload.get("customer_follow_up") or {}
+            if customer_id and isinstance(follow_up, dict) and follow_up.get("content"):
+                assistant_content = await _stage_customer_follow_up_after_create(
+                    db,
+                    session,
+                    task,
+                    team_id=team_id,
+                    user_id=user_id,
+                    customer=customer,
+                    follow_up=follow_up,
+                )
+                return result, assistant_content
+            return result, "客户已创建。"
+        if action == "create_lead_follow_up":
+            return result, "线索跟进记录已创建。"
         if action == "create_contact":
             return result, "联系人已创建。"
         if action == "create_invoice_title":
@@ -1620,6 +2263,9 @@ async def _execute_waiting_task(
 def _tool_name_for_action(action: Optional[str]) -> Optional[str]:
     return {
         "create_customer_follow_up": "create_customer_follow_up",
+        "create_lead": "create_lead",
+        "create_customer": "create_customer",
+        "create_lead_follow_up": "create_lead_follow_up",
         "create_contact": "create_contact",
         "create_invoice_title": "create_invoice_title",
         "create_deployment_info": "create_deployment_info",
@@ -1640,6 +2286,24 @@ def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dic
             "method": payload.get("method") or "AI录入",
             "next_action": payload.get("next_action"),
             "next_follow_time": payload.get("next_follow_time_iso"),
+            "idempotency_suffix": task_key,
+        }
+    if action == "create_lead":
+        lead = dict(payload["lead"])
+        lead.setdefault("source", "其他")
+        return {"lead": lead, "idempotency_suffix": task_key}
+    if action == "create_customer":
+        return {
+            "customer": _customer_create_api_payload(dict(payload["customer"])),
+            "idempotency_suffix": task_key,
+        }
+    if action == "create_lead_follow_up":
+        return {
+            "lead_id": payload["lead_id"],
+            "content": payload["content"],
+            "method": payload.get("method") or "其他",
+            "next_action": payload.get("next_action"),
+            "next_follow_time": payload.get("next_follow_time"),
             "idempotency_suffix": task_key,
         }
     if action == "create_contact":
@@ -1889,6 +2553,16 @@ async def stream_agent_chat(
                     "payload": task.input_json or {},
                 })
                 yield emit({"event": "final", "content": assistant_content})
+            elif task and _is_lead_follow_up_quality_fields_task(task):
+                ready, assistant_content = await _apply_lead_follow_up_quality_fields(db, task, request.content)
+                _remember_pending_task(db, session, task)
+                yield emit({
+                    "event": "confirmation_required" if ready else "follow_up_quality_required",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                    "payload": task.input_json or {},
+                })
+                yield emit({"event": "final", "content": assistant_content})
             elif task and _is_contact_fields_task(task):
                 ready, assistant_content = await _apply_contact_fields(db, task, request.content)
                 _remember_pending_task(db, session, task)
@@ -1944,6 +2618,26 @@ async def stream_agent_chat(
                 _remember_pending_task(db, session, task)
                 yield emit({
                     "event": "confirmation_required" if ready else "payment_fields_required",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                    "payload": task.input_json or {},
+                })
+                yield emit({"event": "final", "content": assistant_content})
+            elif task and _is_lead_fields_task(task):
+                ready, assistant_content = await _apply_lead_fields(db, task, request.content)
+                _remember_pending_task(db, session, task)
+                yield emit({
+                    "event": "confirmation_required" if ready else "lead_fields_required",
+                    "task_id": task.id,
+                    "content": assistant_content,
+                    "payload": task.input_json or {},
+                })
+                yield emit({"event": "final", "content": assistant_content})
+            elif task and _is_customer_fields_task(task):
+                ready, assistant_content = await _apply_customer_fields(db, task, request.content)
+                _remember_pending_task(db, session, task)
+                yield emit({
+                    "event": "confirmation_required" if ready else "customer_fields_required",
                     "task_id": task.id,
                     "content": assistant_content,
                     "payload": task.input_json or {},
@@ -2039,6 +2733,8 @@ async def stream_agent_chat(
                         "deployment_info_fields_required",
                         "customer_member_fields_required",
                         "payment_fields_required",
+                        "lead_fields_required",
+                        "customer_fields_required",
                         "opportunity_fields_required",
                         "follow_up_quality_required",
                         "business_selection_required",

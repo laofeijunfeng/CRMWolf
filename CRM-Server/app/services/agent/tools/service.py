@@ -87,6 +87,78 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_customer_follow_up", payload, action_key, call_api)
 
+    async def create_lead(
+        self,
+        context: AgentToolContext,
+        lead: JsonDict,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        payload = {"lead": lead}
+        action_key = self._action_key("create_lead", context, payload, idempotency_suffix)
+
+        async def call_api():
+            return await self.api_client.request(
+                "POST",
+                "/v1/leads/",
+                context.authorization,
+                json=lead,
+            )
+
+        return await self._run_write_tool(context, "create_lead", payload, action_key, call_api)
+
+    async def create_customer(
+        self,
+        context: AgentToolContext,
+        customer: JsonDict,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        payload = {"customer": customer}
+        action_key = self._action_key("create_customer", context, payload, idempotency_suffix)
+
+        async def call_api():
+            return await self.api_client.request(
+                "POST",
+                "/v1/customers/",
+                context.authorization,
+                json=customer,
+            )
+
+        return await self._run_write_tool(context, "create_customer", payload, action_key, call_api)
+
+    async def create_lead_follow_up(
+        self,
+        context: AgentToolContext,
+        lead_id: int,
+        content: str,
+        method: str = "其他",
+        next_action: Optional[str] = None,
+        next_follow_time: Optional[str] = None,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        payload = {
+            "lead_id": lead_id,
+            "content": content,
+            "method": method,
+            "next_action": next_action,
+            "next_follow_time": next_follow_time,
+        }
+        action_key = self._action_key("create_lead_follow_up", context, payload, idempotency_suffix)
+
+        async def call_api():
+            return await self.api_client.request(
+                "POST",
+                f"/v1/leads/{lead_id}/follow-ups",
+                context.authorization,
+                json={
+                    "content": content,
+                    "method": method,
+                    "next_action": next_action,
+                    "next_follow_time": next_follow_time,
+                },
+            )
+
+        return await self._run_write_tool(context, "create_lead_follow_up", payload, action_key, call_api)
+
     async def create_contact(self, context: AgentToolContext, customer_id: int, contact: JsonDict) -> AgentToolResult:
         payload = {"customer_id": customer_id, "contact": contact}
         action_key = self._action_key("create_contact", context, payload, None)

@@ -35,6 +35,25 @@ class CreateCustomerFollowUpInput(BaseModel):
     idempotency_suffix: Optional[str] = None
 
 
+class CreateLeadInput(BaseModel):
+    lead: Dict[str, Any]
+    idempotency_suffix: Optional[str] = None
+
+
+class CreateCustomerInput(BaseModel):
+    customer: Dict[str, Any]
+    idempotency_suffix: Optional[str] = None
+
+
+class CreateLeadFollowUpInput(BaseModel):
+    lead_id: int = Field(..., ge=1)
+    content: str = Field(..., min_length=1)
+    method: str = "其他"
+    next_action: Optional[str] = None
+    next_follow_time: Optional[str] = None
+    idempotency_suffix: Optional[str] = None
+
+
 class CreateContactInput(BaseModel):
     customer_id: int = Field(..., ge=1)
     contact: Dict[str, Any]
@@ -194,6 +213,31 @@ class AgentToolRegistry:
                 idempotency_suffix=model.idempotency_suffix,
             )
 
+        async def create_lead(service, context, model):
+            return await service.create_lead(
+                context,
+                lead=model.lead,
+                idempotency_suffix=model.idempotency_suffix,
+            )
+
+        async def create_customer(service, context, model):
+            return await service.create_customer(
+                context,
+                customer=model.customer,
+                idempotency_suffix=model.idempotency_suffix,
+            )
+
+        async def create_lead_follow_up(service, context, model):
+            return await service.create_lead_follow_up(
+                context,
+                lead_id=model.lead_id,
+                content=model.content,
+                method=model.method,
+                next_action=model.next_action,
+                next_follow_time=model.next_follow_time,
+                idempotency_suffix=model.idempotency_suffix,
+            )
+
         async def create_contact(service, context, model):
             return await service.create_contact(
                 context,
@@ -285,6 +329,9 @@ class AgentToolRegistry:
             AgentToolSpec("search_customers", "按当前用户权限搜索可访问客户", SearchCustomersInput, False, False, search_customers),
             AgentToolSpec("get_customer_context", "获取客户业务上下文", GetCustomerContextInput, False, False, get_customer_context),
             AgentToolSpec("create_customer_follow_up", "创建客户跟进记录", CreateCustomerFollowUpInput, True, True, create_customer_follow_up),
+            AgentToolSpec("create_lead", "通过现有线索 API 创建线索", CreateLeadInput, True, True, create_lead),
+            AgentToolSpec("create_customer", "通过现有客户 API 创建客户", CreateCustomerInput, True, True, create_customer),
+            AgentToolSpec("create_lead_follow_up", "通过现有线索 API 创建线索跟进记录", CreateLeadFollowUpInput, True, True, create_lead_follow_up),
             AgentToolSpec("create_contact", "创建客户联系人", CreateContactInput, True, True, create_contact),
             AgentToolSpec("create_invoice_title", "创建发票抬头", CreateInvoiceTitleInput, True, True, create_invoice_title),
             AgentToolSpec("create_deployment_info", "创建部署信息", CreateDeploymentInfoInput, True, True, create_deployment_info),

@@ -20,6 +20,7 @@ from app.core.deps import (
     check_customer_view_permission,
 )
 from app.models.user import User
+from app.api.customers import _ensure_customer_name_available
 
 # 已有功能（MagicWand）
 from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest as CustomerFollowUpAICreateRequest
@@ -200,6 +201,8 @@ async def create_customer_from_ai(
     parser = EntityAIParserFactory.get_parser("customer")
     if not parser:
         raise HTTPException(status_code=500, detail="Parser not found")
+
+    _ensure_customer_name_available(db, request.customer_info.account_name, team_id)
     
     try:
         # 创建客户 + 主联系人

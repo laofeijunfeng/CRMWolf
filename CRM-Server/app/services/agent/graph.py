@@ -449,6 +449,10 @@ class CRMAgentGraphService:
                 event_name = "customer_member_fields_required"
             elif action.get("action") == "collect_payment_fields":
                 event_name = "payment_fields_required"
+            elif action.get("action") == "collect_lead_fields":
+                event_name = "lead_fields_required"
+            elif action.get("action") == "collect_customer_fields":
+                event_name = "customer_fields_required"
             elif action.get("action") in {"select_contract_for_payment_plan", "select_payment_plan_for_record"}:
                 event_name = "business_selection_required"
             events.append({"event": event_name, **action})
@@ -517,6 +521,8 @@ class CRMAgentGraphService:
                 or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
             )
         if step_name == "search_customer":
+            if semantic_result and semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"}:
+                return True
             parsed = state.get("parsed") or {}
             memory_customer = self._memory_current_customer(state.get("memory"))
             return (
@@ -527,12 +533,16 @@ class CRMAgentGraphService:
             )
         if step_name == "load_customer_context":
             return (
+                (semantic_result and semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"})
+                or
                 self._follow_up_quality_blocks(state)
                 or not (state.get("selected_customer") or {}).get("id")
                 or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
             )
         if step_name == "generate_suggestions":
             return (
+                (semantic_result and semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"})
+                or
                 self._follow_up_quality_blocks(state)
                 or not state.get("business_context")
                 or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
@@ -673,6 +683,7 @@ class CRMAgentGraphService:
             or (
                 semantic_result.intent != "UNKNOWN"
                 and semantic_result.intent != "CUSTOMER_QUERY"
+                and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
                 and not customer_from_memory
                 and semantic_result.customer.confidence < 0.7
             )
@@ -701,6 +712,16 @@ class CRMAgentGraphService:
             else None
         )
         opportunity = semantic_result.opportunity
+        lead = semantic_result.lead
+        customer_create = semantic_result.customer_create
+        lead_next_follow_time_iso = self.temporal_resolver.resolve_follow_up_time(
+            lead.next_follow_time,
+            base_datetime=base_datetime,
+        )
+        customer_next_follow_time_iso = self.temporal_resolver.resolve_follow_up_time(
+            customer_create.next_follow_time,
+            base_datetime=base_datetime,
+        )
         expected_closing_date_iso = (
             self.temporal_resolver.resolve_date(opportunity.expected_closing_date, base_datetime=base_datetime)
             if hasattr(self.temporal_resolver, "resolve_date")
@@ -726,6 +747,66 @@ class CRMAgentGraphService:
                 "payment_date_iso": payment_date_iso,
                 "notes": payment.notes,
             },
+            "lead": CRMAgentGraphService._drop_empty_values({
+                "lead_name": lead.lead_name,
+                "source": lead.source or "其他",
+                "city": lead.city,
+                "contact_name": lead.contact_name,
+                "contact_phone": lead.contact_phone,
+                "company_scale": lead.company_scale,
+            }),
+            "lead_follow_up": CRMAgentGraphService._drop_empty_values({
+                "content": lead.follow_up_content,
+                "method": lead.follow_up_method or "其他",
+                "next_action": lead.next_action,
+                "next_follow_time_text": lead.next_follow_time_text,
+                "next_follow_time_iso": lead_next_follow_time_iso,
+            }),
+            "customer_create": CRMAgentGraphService._drop_empty_values({
+                "account_name": customer_create.account_name,
+                "source": customer_create.source or "其他",
+                "city": customer_create.city,
+                "industry": customer_create.industry,
+                "company_scale": customer_create.company_scale,
+                "contact_name": customer_create.contact_name,
+                "contact_phone": customer_create.contact_phone,
+                "contact_position": customer_create.contact_position,
+                "contact_gender": customer_create.contact_gender,
+                "contact_email": customer_create.contact_email,
+            }),
+            "customer_follow_up": CRMAgentGraphService._drop_empty_values({
+                "content": customer_create.follow_up_content,
+                "method": customer_create.follow_up_method or "AI录入",
+                "next_action": customer_create.next_action,
+                "next_follow_time_text": customer_create.next_follow_time_text,
+                "next_follow_time_iso": customer_next_follow_time_iso,
+            }),
+            "missing_customer_fields": (
+                semantic_result.missing_fields
+                if semantic_result.intent == "CREATE_CUSTOMER" and semantic_result.missing_fields
+                else CRMAgentGraphService.missing_customer_fields({
+                    "account_name": customer_create.account_name,
+                    "city": customer_create.city,
+                    "contact_name": customer_create.contact_name,
+                    "contact_phone": customer_create.contact_phone,
+                    "contact_position": customer_create.contact_position,
+                    "contact_gender": customer_create.contact_gender,
+                })
+                if semantic_result.intent == "CREATE_CUSTOMER"
+                else []
+            ),
+            "missing_lead_fields": (
+                semantic_result.missing_fields
+                if semantic_result.intent == "CREATE_LEAD" and semantic_result.missing_fields
+                else CRMAgentGraphService.missing_lead_fields({
+                    "lead_name": lead.lead_name,
+                    "city": lead.city,
+                    "contact_name": lead.contact_name,
+                    "contact_phone": lead.contact_phone,
+                })
+                if semantic_result.intent == "CREATE_LEAD"
+                else []
+            ),
             "opportunity": {
                 "procurement_method_id": opportunity.procurement_method_id,
                 "total_amount": opportunity.total_amount,
@@ -872,6 +953,62 @@ class CRMAgentGraphService:
                     },
                 }
             return CRMAgentGraphService._customer_not_found_response(customer_name), None
+
+        if intent == "CREATE_LEAD":
+            lead = parsed.get("lead") or {}
+            missing_fields = CRMAgentGraphService.missing_lead_fields(lead)
+            if missing_fields:
+                return (
+                    "我识别到要创建线索，"
+                    f"还需要补充：{CRMAgentGraphService.format_lead_missing_fields(missing_fields)}。"
+                ), {
+                    "action": "collect_lead_fields",
+                    "payload": {
+                        "lead": lead,
+                        "lead_follow_up": parsed.get("lead_follow_up") or {},
+                        "missing_fields": missing_fields,
+                    },
+                }
+            return (
+                "我识别到要创建线索"
+                f"「{lead.get('lead_name')}」，联系人「{lead.get('contact_name')}」，电话「{lead.get('contact_phone')}」。"
+                "请确认是否创建？"
+            ), {
+                "action": "create_lead",
+                "payload": {
+                    "lead": lead,
+                    "lead_follow_up": parsed.get("lead_follow_up") or {},
+                },
+            }
+
+        if intent == "CREATE_CUSTOMER":
+            customer_create = parsed.get("customer_create") or {}
+            missing_fields = CRMAgentGraphService.missing_customer_fields(customer_create)
+            if missing_fields:
+                return (
+                    "我识别到要创建客户，"
+                    f"还需要补充：{CRMAgentGraphService.format_customer_missing_fields(missing_fields)}。"
+                ), {
+                    "action": "collect_customer_fields",
+                    "payload": {
+                        "customer": customer_create,
+                        "customer_follow_up": parsed.get("customer_follow_up") or {},
+                        "missing_fields": missing_fields,
+                    },
+                }
+            contact_name = customer_create.get("contact_name")
+            contact_text = f"，主联系人「{contact_name}」" if contact_name else ""
+            return (
+                "我识别到要创建客户"
+                f"「{customer_create.get('account_name')}」{contact_text}。"
+                "请确认是否创建？"
+            ), {
+                "action": "create_customer",
+                "payload": {
+                    "customer": customer_create,
+                    "customer_follow_up": parsed.get("customer_follow_up") or {},
+                },
+            }
 
         if intent == "PAYMENT_RECORD":
             if not customer_name:
@@ -1494,6 +1631,43 @@ class CRMAgentGraphService:
     def missing_contact_fields(contact: Dict[str, Any]) -> List[str]:
         required_fields = ["name", "mobile", "position", "gender"]
         return [field for field in required_fields if not contact.get(field)]
+
+    @staticmethod
+    def missing_lead_fields(lead: Dict[str, Any]) -> List[str]:
+        required_fields = ["lead_name", "city", "contact_name", "contact_phone"]
+        return [field for field in required_fields if not lead.get(field)]
+
+    @staticmethod
+    def missing_customer_fields(customer: Dict[str, Any]) -> List[str]:
+        missing = [field for field in ["account_name", "city"] if not customer.get(field)]
+        has_contact = any(customer.get(field) for field in ["contact_name", "contact_phone", "contact_position", "contact_gender"])
+        if has_contact:
+            missing.extend(field for field in ["contact_name", "contact_phone", "contact_position", "contact_gender"] if not customer.get(field))
+        return list(dict.fromkeys(missing))
+
+    @staticmethod
+    def format_customer_missing_fields(fields: List[str]) -> str:
+        labels = {
+            "account_name": "客户名称",
+            "city": "所在城市",
+            "contact_name": "主联系人姓名",
+            "contact_phone": "主联系人手机号",
+            "contact_position": "主联系人职务",
+            "contact_gender": "主联系人性别（男/女/未知）",
+        }
+        return "、".join(labels.get(field, field) for field in fields)
+
+    @staticmethod
+    def format_lead_missing_fields(fields: List[str]) -> str:
+        labels = {
+            "lead_name": "线索名称",
+            "city": "所在城市",
+            "contact_name": "联系人姓名",
+            "contact_phone": "联系人手机号",
+            "source": "线索来源",
+            "company_scale": "公司规模",
+        }
+        return "、".join(labels.get(field, field) for field in fields)
 
     @staticmethod
     def format_contact_missing_fields(fields: List[str]) -> str:

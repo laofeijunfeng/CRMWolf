@@ -2,7 +2,7 @@
 跟进信息解析服务
 
 可复用的跟进信息解析逻辑，用于：
-1. AI 创建线索时的额外信息识别
+1. 线索解析时的额外信息识别
 2. MagicWand 魔法棒操作
 3. 日历待办跟进
 4. 其他需要解析跟进信息的场景
@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 import httpx
 
 from app.crud.ai_config import ai_config_crud
-from app.schemas.lead_ai import LeadAIFollowUpInfo
+from app.schemas.lead_parse import LeadFollowUpParseInfo
 
 
 # 系统提示词：用于从文本中提取跟进信息
@@ -384,7 +384,7 @@ class FollowUpParserService:
                         if next_follow_time_dt:
                             next_follow_time_final = next_follow_time_dt.strftime("%Y-%m-%d")
 
-                        follow_up_info = LeadAIFollowUpInfo(
+                        follow_up_info = LeadFollowUpParseInfo(
                             content=parsed.get("content"),
                             method=parsed.get("method"),
                             next_action=parsed.get("next_action"),
@@ -408,7 +408,7 @@ class FollowUpParserService:
         db: Session,
         user_message: str,
         team_id: int = 1
-    ) -> LeadAIFollowUpInfo:
+    ) -> LeadFollowUpParseInfo:
         """
         解析跟进信息（收集完整响应）
 
@@ -423,11 +423,11 @@ class FollowUpParserService:
         # 获取 AI 配置
         config = ai_config_crud.get_config(db, team_id)
         if not config:
-            return LeadAIFollowUpInfo()
+            return LeadFollowUpParseInfo()
 
         api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
-            return LeadAIFollowUpInfo()
+            return LeadFollowUpParseInfo()
 
         # 构建带动态日期的系统提示词
         system_prompt = self._build_system_prompt()
@@ -463,14 +463,14 @@ class FollowUpParserService:
                 clean_content = self._clean_json_response(content)
                 parsed = json.loads(clean_content)
 
-                return LeadAIFollowUpInfo(
+                return LeadFollowUpParseInfo(
                     content=parsed.get("content"),
                     next_action=parsed.get("next_action"),
                     next_follow_time=parsed.get("next_follow_time")
                 )
 
         except Exception:
-            return LeadAIFollowUpInfo()
+            return LeadFollowUpParseInfo()
 
     def _clean_json_response(self, content: str) -> str:
         """清理 JSON 响应中的 markdown 代码块标记"""

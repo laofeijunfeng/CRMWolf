@@ -15,6 +15,7 @@ from app.core.deps import (
     check_customer_member_manage_permission,
 )
 from app.crud.customer import customer_crud, contact_crud
+from app.crud.lead import lead_crud
 from app.crud.customer_member import customer_member_crud
 from app.crud.user import user_crud
 from app.crud.team import team_crud
@@ -40,6 +41,46 @@ from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
 
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
+
+
+def _customer_name_conflict_error(
+    db: Session,
+    account_name: str,
+    team_id: int,
+    exclude_customer_id: Optional[int] = None,
+    allowed_source_lead_id: Optional[int] = None,
+) -> Optional[str]:
+    existing_customer = customer_crud.get_by_name(db, account_name, team_id)
+    if existing_customer and existing_customer.id != exclude_customer_id:
+        return "客户名称已存在"
+    existing_lead = lead_crud.get_by_name(db, account_name, team_id)
+    excluded_customer = customer_crud.get_by_id(db, exclude_customer_id, team_id) if exclude_customer_id else None
+    if existing_lead and existing_lead.id != allowed_source_lead_id and not (
+        excluded_customer and excluded_customer.source_lead_id == existing_lead.id
+    ):
+        return "该名称已存在线索，请先处理或转化线索"
+    return None
+
+
+def _ensure_customer_name_available(
+    db: Session,
+    account_name: str,
+    team_id: int,
+    exclude_customer_id: Optional[int] = None,
+    allowed_source_lead_id: Optional[int] = None,
+) -> None:
+    error = _customer_name_conflict_error(
+        db,
+        account_name,
+        team_id,
+        exclude_customer_id=exclude_customer_id,
+        allowed_source_lead_id=allowed_source_lead_id,
+    )
+    if error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error,
+        )
 
 
 def _get_customer_or_404(db: Session, customer_id: int, team_id: int):
@@ -157,6 +198,19 @@ async def convert_from_lead(
 ):
     from app.services.feishu import feishu_service
     from app.services.customer_profile_service import customer_profile_service
+
+    source_lead = lead_crud.get_by_id(db, data.lead_id, team_id)
+    if not source_lead:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="线索不存在",
+        )
+    _ensure_customer_name_available(
+        db,
+        data.account_name or source_lead.lead_name,
+        team_id,
+        allowed_source_lead_id=data.lead_id,
+    )
 
     try:
         customer, contact = customer_crud.convert_from_lead(
@@ -536,12 +590,7 @@ async def create_customer(
 ):
     from app.services.customer_profile_service import customer_profile_service
 
-    existing_customer = customer_crud.get_by_name(db, customer.account_name, team_id)
-    if existing_customer:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="客户名称已存在"
-        )
+    _ensure_customer_name_available(db, customer.account_name, team_id)
 
     new_customer = customer_crud.create(
         db=db,
@@ -1046,12 +1095,7 @@ def update_customer(
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     if customer_update.account_name:
-        existing_customer = customer_crud.get_by_name(db, customer_update.account_name, team_id)
-        if existing_customer and existing_customer.id != customer_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="客户名称已存在"
-            )
+        _ensure_customer_name_available(db, customer_update.account_name, team_id, exclude_customer_id=customer_id)
 
     return customer_crud.update(db, customer, customer_update)
 

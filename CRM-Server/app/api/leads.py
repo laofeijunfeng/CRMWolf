@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, check_lead_access, check_lead_owner, require_permission, get_current_user_team, check_lead_delete_permission
+from app.crud.customer import customer_crud
 from app.crud.lead import lead_crud, lead_follow_up_crud
 from app.crud.user import user_crud
 from app.schemas.lead import (
@@ -18,6 +19,23 @@ from app.schemas.common import PaginatedResponse
 from app.models.lead import LeadStatus, LeadSource
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
+
+
+def _lead_name_conflict_error(db: Session, lead_name: str, team_id: int) -> Optional[str]:
+    if lead_crud.get_by_name(db, lead_name, team_id):
+        return "线索名称已存在"
+    if customer_crud.get_by_name(db, lead_name, team_id):
+        return "该名称已存在客户，请直接在客户下跟进"
+    return None
+
+
+def _ensure_lead_name_available(db: Session, lead_name: str, team_id: int) -> None:
+    error = _lead_name_conflict_error(db, lead_name, team_id)
+    if error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error,
+        )
 
 
 def parse_filter_conditions(filters: Optional[str]):
@@ -45,12 +63,7 @@ def create_lead(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    existing_lead = lead_crud.get_by_contact_phone(db, lead.contact_phone, team_id)
-    if existing_lead:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该手机号已存在线索"
-        )
+    _ensure_lead_name_available(db, lead.lead_name, team_id)
 
     return lead_crud.create(db, lead, str(current_user.id), team_id)
 
@@ -68,13 +81,13 @@ def batch_import_leads(
 
     for lead_data in request.leads:
         try:
-            existing_lead = lead_crud.get_by_contact_phone(db, lead_data.contact_phone, team_id)
-            if existing_lead:
+            conflict_error = _lead_name_conflict_error(db, lead_data.lead_name, team_id)
+            if conflict_error:
                 failed_count += 1
                 failed_items.append({
                     "lead_name": lead_data.lead_name,
                     "contact_phone": lead_data.contact_phone,
-                    "error": "该手机号已存在线索"
+                    "error": conflict_error,
                 })
                 continue
 

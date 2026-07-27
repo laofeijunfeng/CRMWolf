@@ -1,7 +1,7 @@
 """
-线索 AI 解析器
+线索解析器
 
-从 lead_ai_parser.py 迁移，保持原有解析逻辑
+保留原有线索解析逻辑，供 Agent 或其他内部能力复用。
 """
 from typing import Dict, Any
 from sqlalchemy.orm import Session
@@ -15,7 +15,7 @@ from app.schemas.lead import LeadCreate, LeadFollowUpCreate
 from app.models.lead import LeadSource, CompanyScale, FollowUpMethod
 
 
-# 系统提示词（从 lead_ai_parser.py 复制，保持向后兼容）
+# 系统提示词：保留既有线索解析规则，供内部解析流程复用
 # 注意：next_follow_time 让 AI 返回原始表述，后端代码会用 parse_relative_time 转换
 PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解析助手。
 
@@ -284,7 +284,7 @@ class LeadAIParser(EntityAIParserBase):
                 )
 
             # 构建跟进内容
-            content = follow_up_content or "【AI 创建线索时提取的信息】"
+            content = follow_up_content or "【线索解析时提取的信息】"
 
             follow_up_create = LeadFollowUpCreate(
                 content=content,

@@ -20,7 +20,7 @@
 import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Sparkles, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
+import { Plus, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
@@ -43,7 +43,6 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
-import AILeadCreateDialog from '@/components/AILeadCreateDialog.vue'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import LeadDetailSheet from './LeadDetailSheet.vue'
@@ -69,7 +68,6 @@ const loading = ref(false)
 const tableData = ref<Lead[]>([])
 const userOptions = ref<UserResponse[]>([])
 const ownerFilterOptions = ref<LeadOwnerFilterOption[]>([])
-const showAILeadCreate = ref(false)
 
 // LeadDetailSheet 状态
 const sheetVisible = ref(false)
@@ -489,22 +487,13 @@ watchEffect(() => {
   // 注册操作按钮
   headerStore.setActions([
     {
-      id: 'ai-create-lead',
-      label: 'AI 创建线索',
-      icon: Sparkles,
-      type: 'primary',
-      handler: (): void => { showAILeadCreate.value = true },
-      visible: canCreateLead.value,
-      ariaLabel: 'AI 创建线索'
-    },
-    {
       id: 'create-lead',
-      label: '手动创建',
+      label: '创建线索',
       icon: Plus,
       type: 'default',
       handler: (): void => { showLeadCreateDialog.value = true },
       visible: canCreateLead.value,
-      ariaLabel: '手动创建线索'
+      ariaLabel: '创建线索'
     }
   ])
 })
@@ -834,12 +823,6 @@ watchEffect(() => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-
-    <!-- AI 创建线索弹窗 -->
-    <AILeadCreateDialog
-      v-model="showAILeadCreate"
-      @success="fetchLeadList"
-    />
 
     <!-- 手动创建线索弹窗 -->
     <LeadFormDialog

@@ -20,6 +20,12 @@ class LeadCRUD:
             query = query.filter(Lead.team_id == team_id)
         return query.first()
 
+    def get_by_name(self, db: Session, lead_name: str, team_id: Optional[int] = None) -> Optional[Lead]:
+        query = db.query(Lead).filter(Lead.lead_name == lead_name)
+        if team_id is not None:
+            query = query.filter(Lead.team_id == team_id)
+        return query.first()
+
     def get_multi(
         self,
         db: Session,

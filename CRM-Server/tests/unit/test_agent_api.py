@@ -19,7 +19,7 @@ from app.models.agent import (
     AgentTaskStatus,
     AgentToolCall,
 )
-from app.services.agent.schemas import AgentPendingInterruptionDecision, AgentSemanticParseResult
+from app.services.agent.schemas import AgentFollowUpQualityResult, AgentPendingInterruptionDecision, AgentSemanticParseResult
 from app.services.agent.tools.base import AgentToolResult
 
 
@@ -88,6 +88,34 @@ class FakePendingInterruptionParser:
             "current_date": current_date,
         })
         return AgentPendingInterruptionDecision.model_validate(self.decision)
+
+
+class FakeQualityEvaluator:
+    def __init__(self, results):
+        self.results = results if isinstance(results, list) else [results]
+        self.calls = []
+
+    async def evaluate_with_metadata(self, db, *, team_id, user_message, semantic_result, memory=None, current_date=None):
+        self.calls.append({
+            "team_id": team_id,
+            "user_message": user_message,
+            "semantic_result": semantic_result,
+            "memory": memory,
+            "current_date": current_date,
+        })
+        index = min(len(self.calls) - 1, len(self.results) - 1)
+        result = AgentFollowUpQualityResult.model_validate(self.results[index])
+
+        class Envelope:
+            quality_source = "test_quality_evaluator"
+            model = "test-model"
+            fallback_reason = None
+            fallback_error = None
+
+            def __init__(self, quality_result):
+                self.result = quality_result
+
+        return Envelope(result)
 
 
 def test_agent_session_and_stream_api(monkeypatch):
@@ -183,6 +211,67 @@ def test_agent_event_interaction_protocol_for_missing_opportunity_fields():
         "date",
         "select",
     ]
+
+
+def test_agent_event_interaction_protocol_for_missing_lead_fields():
+    event = agent_api._with_interaction({
+        "event": "lead_fields_required",
+        "content": "还需要补充线索信息",
+        "payload": {
+            "missing_fields": [
+                "lead_name",
+                "city",
+                "contact_name",
+                "contact_phone",
+                "company_scale",
+            ],
+        },
+    })
+
+    interaction = event["interaction"]
+    assert interaction["type"] == "form"
+    assert interaction["prompt"] == "还需要补充线索信息"
+    assert [field["key"] for field in interaction["fields"]] == [
+        "lead_name",
+        "city",
+        "contact_name",
+        "contact_phone",
+        "company_scale",
+    ]
+    assert [field["type"] for field in interaction["fields"]] == [
+        "text",
+        "text",
+        "text",
+        "text",
+        "select",
+    ]
+
+
+def test_agent_tool_payload_for_create_lead_defaults_source():
+    payload = agent_api._tool_payload_for_action(
+        "create_lead",
+        {
+            "lead": {
+                "lead_name": "广州睿狐科技",
+                "city": "广州",
+                "contact_name": "王总",
+                "contact_phone": "13800138000",
+            },
+        },
+        customer={},
+        task_key="task-lead-001",
+    )
+
+    assert payload == {
+        "lead": {
+            "lead_name": "广州睿狐科技",
+            "city": "广州",
+            "contact_name": "王总",
+            "contact_phone": "13800138000",
+            "source": "其他",
+        },
+        "idempotency_suffix": "task-lead-001",
+    }
 
 
 def test_agent_event_interaction_protocol_for_follow_up_quality():
@@ -733,6 +822,336 @@ def test_agent_stream_create_opportunity_completion_is_terminal(monkeypatch):
         assert "商机已创建，并已按系统现有流程提交审批。" in confirm_response.text
         assert '"interaction":' not in confirm_response.text
         assert "继续处理" not in confirm_response.text
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_create_lead_follow_up_runs_quality_before_confirmation(monkeypatch):
+    quality = FakeQualityEvaluator({
+        "score": 86,
+        "passed": True,
+        "reason": "质量达标",
+        "missing_aspects": [],
+        "supplement_question": None,
+        "suggested_revision": "客户对 CRM 有明确兴趣，计划下周三电话跟进需求细节。",
+        "principle_scores": {},
+    })
+    tool_calls = []
+
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "confirmation_required",
+                "action": "create_lead",
+                "payload": {
+                    "lead": {
+                        "lead_name": "广州睿狐科技",
+                        "source": "其他",
+                        "city": "广州",
+                        "contact_name": "王总",
+                        "contact_phone": "13800138000",
+                    },
+                    "lead_follow_up": {
+                        "content": "客户对 CRM 有明确兴趣",
+                        "method": "电话",
+                        "next_action": "下周三电话跟进需求细节",
+                        "next_follow_time_iso": "2026-07-29T09:00:00",
+                    },
+                },
+            }
+            yield {"event": "final", "content": "请确认是否创建线索？"}
+
+    class FakeToolService:
+        async def create_lead(self, context, **kwargs):
+            tool_calls.append(("create_lead", kwargs))
+            return AgentToolResult(
+                tool_name="create_lead",
+                success=True,
+                data={"id": 8101, **kwargs["lead"]},
+                tool_call_id=7001,
+            )
+
+        async def create_lead_follow_up(self, context, **kwargs):
+            tool_calls.append(("create_lead_follow_up", kwargs))
+            return AgentToolResult(
+                tool_name="create_lead_follow_up",
+                success=True,
+                data={"id": 8201, "lead_id": kwargs["lead_id"]},
+                tool_call_id=7002,
+            )
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+    monkeypatch.setattr(agent_api, "agent_follow_up_quality_evaluator", quality)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "线索会话"}).json()
+
+        plan_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮我创建广州睿狐科技线索，客户对 CRM 有明确兴趣"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert plan_response.status_code == 200, plan_response.text
+        assert '"event": "confirmation_required"' in plan_response.text
+
+        create_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert create_response.status_code == 200, create_response.text
+        assert "线索已创建。请确认是否同步创建线索跟进记录？" in create_response.text
+        assert '"next_task_id": 2' in create_response.text
+        assert len(quality.calls) == 1
+        assert quality.calls[0]["semantic_result"].intent == "CREATE_LEAD"
+
+        follow_up_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert follow_up_response.status_code == 200, follow_up_response.text
+        assert "线索跟进记录已创建。" in follow_up_response.text
+        assert [name for name, _ in tool_calls] == ["create_lead", "create_lead_follow_up"]
+        assert tool_calls[1][1]["content"] == "客户对 CRM 有明确兴趣，计划下周三电话跟进需求细节。"
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_create_customer_follow_up_runs_quality_before_confirmation(monkeypatch):
+    quality = FakeQualityEvaluator({
+        "score": 88,
+        "passed": True,
+        "reason": "质量达标",
+        "missing_aspects": [],
+        "supplement_question": None,
+        "suggested_revision": "客户已确认采购 CRM 的初步意向，计划下周三电话跟进需求细节和预算。",
+        "principle_scores": {},
+    })
+    tool_calls = []
+
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "confirmation_required",
+                "action": "create_customer",
+                "payload": {
+                    "customer": {
+                        "account_name": "广州睿狐科技有限公司",
+                        "source": "其他",
+                        "city": "广州",
+                        "contact_name": "王总",
+                        "contact_phone": "13800138000",
+                        "contact_position": "总经理",
+                        "contact_gender": "男",
+                    },
+                    "customer_follow_up": {
+                        "content": "客户已确认采购 CRM 的初步意向",
+                        "method": "电话",
+                        "next_action": "下周三电话跟进需求细节和预算",
+                        "next_follow_time_iso": "2026-07-29T09:00:00",
+                    },
+                },
+            }
+            yield {"event": "final", "content": "请确认是否创建客户？"}
+
+    class FakeToolService:
+        async def create_customer(self, context, **kwargs):
+            tool_calls.append(("create_customer", kwargs))
+            assert kwargs["customer"]["primary_contact"] == {
+                "name": "王总",
+                "mobile": "13800138000",
+                "position": "总经理",
+                "gender": "1",
+                "email": None,
+            }
+            return AgentToolResult(
+                tool_name="create_customer",
+                success=True,
+                data={"id": 9101, "account_name": kwargs["customer"]["account_name"]},
+                tool_call_id=7001,
+            )
+
+        async def create_customer_follow_up(self, context, **kwargs):
+            tool_calls.append(("create_customer_follow_up", kwargs))
+            return AgentToolResult(
+                tool_name="create_customer_follow_up",
+                success=True,
+                data={"id": 9201, "customer_id": kwargs["customer_id"]},
+                tool_call_id=7002,
+            )
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+    monkeypatch.setattr(agent_api, "agent_follow_up_quality_evaluator", quality)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "客户会话"}).json()
+
+        plan_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮我创建广州睿狐科技客户，客户已确认采购 CRM 的初步意向"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert plan_response.status_code == 200, plan_response.text
+        assert '"event": "confirmation_required"' in plan_response.text
+
+        create_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert create_response.status_code == 200, create_response.text
+        assert "客户已创建。请确认是否同步创建客户跟进记录？" in create_response.text
+        assert '"next_task_id": 2' in create_response.text
+        assert len(quality.calls) == 1
+        assert quality.calls[0]["semantic_result"].intent == "CUSTOMER_FOLLOW_UP"
+
+        follow_up_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert follow_up_response.status_code == 200, follow_up_response.text
+        assert "跟进记录已创建。" in follow_up_response.text
+        assert [name for name, _ in tool_calls] == ["create_customer", "create_customer_follow_up"]
+        assert tool_calls[1][1]["content"] == "客户已确认采购 CRM 的初步意向，计划下周三电话跟进需求细节和预算。"
+        assert tool_calls[1][1]["customer_id"] == 9101
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_create_lead_follow_up_requires_quality_supplement(monkeypatch):
+    quality = FakeQualityEvaluator([
+        {
+            "score": 42,
+            "passed": False,
+            "reason": "缺少下一步动作",
+            "missing_aspects": ["下一步动作"],
+            "supplement_question": "请补充下一步由谁在什么时间做什么。",
+            "suggested_revision": None,
+            "principle_scores": {},
+        },
+        {
+            "score": 82,
+            "passed": True,
+            "reason": "质量达标",
+            "missing_aspects": [],
+            "supplement_question": None,
+            "suggested_revision": "客户对 CRM 有兴趣，计划下周三由销售电话跟进需求和预算。",
+            "principle_scores": {},
+        },
+    ])
+    tool_calls = []
+
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            yield {
+                "event": "confirmation_required",
+                "action": "create_lead",
+                "payload": {
+                    "lead": {
+                        "lead_name": "广州睿狐科技",
+                        "source": "其他",
+                        "city": "广州",
+                        "contact_name": "王总",
+                        "contact_phone": "13800138000",
+                    },
+                    "lead_follow_up": {
+                        "content": "客户对 CRM 有兴趣",
+                        "method": "电话",
+                    },
+                },
+            }
+            yield {"event": "final", "content": "请确认是否创建线索？"}
+
+    class FakeToolService:
+        async def create_lead(self, context, **kwargs):
+            tool_calls.append(("create_lead", kwargs))
+            return AgentToolResult(
+                tool_name="create_lead",
+                success=True,
+                data={"id": 8101, **kwargs["lead"]},
+                tool_call_id=7001,
+            )
+
+        async def create_lead_follow_up(self, context, **kwargs):
+            tool_calls.append(("create_lead_follow_up", kwargs))
+            return AgentToolResult(
+                tool_name="create_lead_follow_up",
+                success=True,
+                data={"id": 8201, "lead_id": kwargs["lead_id"]},
+                tool_call_id=7002,
+            )
+
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeToolService())
+    monkeypatch.setattr(agent_api, "agent_follow_up_quality_evaluator", quality)
+    monkeypatch.setattr(agent_api, "agent_semantic_parser", FakeSemanticParser({
+        "intent": "CREATE_LEAD",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+        "follow_up": {},
+        "payment": {},
+        "lead": {
+            "follow_up_content": "计划下周三由销售电话跟进需求和预算",
+            "follow_up_method": "电话",
+            "next_action": "由销售电话跟进需求和预算",
+            "next_follow_time_text": "下周三",
+        },
+        "opportunity": {},
+        "contact": {},
+        "invoice_title": {},
+        "deployment_info": {},
+        "customer_member": {},
+        "business_signals": [],
+        "requested_actions": [],
+        "missing_fields": [],
+        "need_clarification": False,
+        "clarification_question": None,
+        "evidence": ["计划下周三由销售电话跟进需求和预算"],
+    }))
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "线索会话"}).json()
+        client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮我创建广州睿狐科技线索，客户对 CRM 有兴趣"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        create_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert create_response.status_code == 200, create_response.text
+        assert "线索已创建。请补充下一步由谁在什么时间做什么。" in create_response.text
+        assert '"next_task_id": 2' in create_response.text
+
+        supplement_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "计划下周三由销售电话跟进需求和预算"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert supplement_response.status_code == 200, supplement_response.text
+        assert '"event": "confirmation_required"' in supplement_response.text
+        assert "线索跟进内容已补齐" in supplement_response.text
+        assert len(quality.calls) == 2
+
+        follow_up_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "是"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert follow_up_response.status_code == 200, follow_up_response.text
+        assert "线索跟进记录已创建。" in follow_up_response.text
+        assert [name for name, _ in tool_calls] == ["create_lead", "create_lead_follow_up"]
+        assert tool_calls[1][1]["content"] == "客户对 CRM 有兴趣，计划下周三由销售电话跟进需求和预算。"
     finally:
         engine.dispose()
 
