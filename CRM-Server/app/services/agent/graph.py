@@ -24,6 +24,7 @@ from app.services.agent.temporal import AgentTemporalResolver, agent_temporal_re
 from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_registry
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext
+from app.utils.name_normalizer import normalize_corp_name
 
 
 class CRMAgentGraphService:
@@ -54,6 +55,7 @@ class CRMAgentGraphService:
         graph = StateGraph(AgentGraphState)
         graph.add_node("load_memory", self._load_memory)
         graph.add_node("semantic_parse", self._semantic_parse)
+        graph.add_node("search_creation_duplicates", self._search_creation_duplicates)
         graph.add_node("evaluate_follow_up_quality", self._evaluate_follow_up_quality)
         graph.add_node("search_customer", self._search_customer)
         graph.add_node("load_customer_context", self._load_customer_context)
@@ -61,7 +63,8 @@ class CRMAgentGraphService:
         graph.add_node("build_response", self._build_response)
         graph.add_edge(START, "load_memory")
         graph.add_edge("load_memory", "semantic_parse")
-        graph.add_edge("semantic_parse", "search_customer")
+        graph.add_edge("semantic_parse", "search_creation_duplicates")
+        graph.add_edge("search_creation_duplicates", "search_customer")
         graph.add_edge("search_customer", "evaluate_follow_up_quality")
         graph.add_edge("evaluate_follow_up_quality", "load_customer_context")
         graph.add_edge("load_customer_context", "generate_suggestions")
@@ -136,6 +139,75 @@ class CRMAgentGraphService:
             },
             "parsed": parsed,
         }
+
+    async def _search_creation_duplicates(self, state: AgentGraphState) -> AgentGraphState:
+        semantic_result = state.get("semantic_result")
+        intent = state.get("intent")
+        parsed = state.get("parsed") or {}
+        if (
+            intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
+            or not state.get("authorization")
+            or not state.get("db")
+            or self._requires_clarification(semantic_result)
+        ):
+            return {}
+
+        create_payload = (
+            parsed.get("lead") or {}
+            if intent == "CREATE_LEAD"
+            else parsed.get("customer_create") or {}
+        )
+        name = create_payload.get("lead_name") if intent == "CREATE_LEAD" else create_payload.get("account_name")
+        phone = create_payload.get("contact_phone")
+        customer_keywords = self._creation_duplicate_keywords(name)
+        lead_keywords = list(customer_keywords)
+        if not customer_keywords and not lead_keywords and not phone:
+            return {}
+
+        context = AgentToolContext(
+            db=state["db"],
+            team_id=state["team_id"],
+            user_id=state["user_id"],
+            session_id=state["session_id"],
+            authorization=state["authorization"],
+        )
+        events: List[Dict[str, Any]] = []
+        result = await self.tool_registry.execute(
+            "search_creation_duplicates",
+            context,
+            {
+                "customer_keywords": customer_keywords,
+                "lead_keywords": lead_keywords,
+                "phone": phone,
+                "limit": 5,
+            },
+        )
+        events.append(result.to_event())
+        if not result.success or not isinstance(result.data, dict):
+            return {"events": events}
+
+        duplicate_candidates = {
+            "customers": result.data.get("customers") or [],
+            "leads": result.data.get("leads") or [],
+            "hidden_customer_count": result.data.get("hidden_customer_count") or 0,
+            "hidden_lead_count": result.data.get("hidden_lead_count") or 0,
+        }
+        if (
+            not duplicate_candidates["customers"]
+            and not duplicate_candidates["leads"]
+            and not duplicate_candidates["hidden_customer_count"]
+            and not duplicate_candidates["hidden_lead_count"]
+        ):
+            return {"events": events}
+
+        events.append({
+            "event": "creation_duplicate_candidates",
+            "customers": duplicate_candidates["customers"],
+            "leads": duplicate_candidates["leads"],
+            "hidden_customer_count": duplicate_candidates["hidden_customer_count"],
+            "hidden_lead_count": duplicate_candidates["hidden_lead_count"],
+        })
+        return {"creation_duplicate_candidates": duplicate_candidates, "events": events}
 
     async def _evaluate_follow_up_quality(self, state: AgentGraphState) -> AgentGraphState:
         semantic_result = state.get("semantic_result")
@@ -371,6 +443,24 @@ class CRMAgentGraphService:
             events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
             return {"response": response, "events": events}
 
+        duplicate_candidates = state.get("creation_duplicate_candidates") or {}
+        if intent in {"CREATE_LEAD", "CREATE_CUSTOMER"} and (
+            duplicate_candidates.get("customers") or duplicate_candidates.get("leads")
+            or duplicate_candidates.get("hidden_customer_count") or duplicate_candidates.get("hidden_lead_count")
+        ):
+            response = self._build_creation_duplicate_response(duplicate_candidates)
+            events.append({
+                "event": "creation_duplicate_detected",
+                "intent": intent,
+                "customers": duplicate_candidates.get("customers") or [],
+                "leads": duplicate_candidates.get("leads") or [],
+                "hidden_customer_count": duplicate_candidates.get("hidden_customer_count") or 0,
+                "hidden_lead_count": duplicate_candidates.get("hidden_lead_count") or 0,
+                "content": response,
+            })
+            events.append({"event": "final", "intent": intent, "content": response, "tool_execution_enabled": False})
+            return {"response": response, "events": events}
+
         response, action = self._build_business_response(
             intent,
             self._apply_follow_up_revision(parsed, follow_up_quality_result),
@@ -480,6 +570,7 @@ class CRMAgentGraphService:
         steps = [
             ("load_memory", "加载会话记忆", self._load_memory),
             ("semantic_parse", "AI 语义理解", self._semantic_parse),
+            ("search_creation_duplicates", "检查创建重复", self._search_creation_duplicates),
             ("search_customer", "搜索客户", self._search_customer),
             ("evaluate_follow_up_quality", "AI 跟进质量评估", self._evaluate_follow_up_quality),
             ("load_customer_context", "加载客户上下文", self._load_customer_context),
@@ -519,6 +610,21 @@ class CRMAgentGraphService:
                 or semantic_result.intent != "CUSTOMER_FOLLOW_UP"
                 or not self._has_single_customer(state)
                 or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
+            )
+        if step_name == "search_creation_duplicates":
+            parsed = state.get("parsed") or {}
+            lead = parsed.get("lead") or {}
+            customer = parsed.get("customer_create") or {}
+            return (
+                not semantic_result
+                or semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
+                or self._requires_clarification(semantic_result, has_memory_customer=has_memory_customer)
+                or not (
+                    lead.get("lead_name")
+                    or customer.get("account_name")
+                    or lead.get("contact_phone")
+                    or customer.get("contact_phone")
+                )
             )
         if step_name == "search_customer":
             if semantic_result and semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"}:
@@ -909,6 +1015,46 @@ class CRMAgentGraphService:
                 "collaborator_infos": item.get("collaborator_infos") or [],
             })
         return candidates
+
+    @staticmethod
+    def _creation_duplicate_keywords(name: Optional[str]) -> List[str]:
+        if not name:
+            return []
+        keywords = []
+        for keyword in [name.strip(), normalize_corp_name(name)]:
+            if keyword and keyword not in keywords:
+                keywords.append(keyword)
+        return keywords
+
+    @staticmethod
+    def _build_creation_duplicate_response(duplicate_candidates: Dict[str, Any]) -> str:
+        customers = duplicate_candidates.get("customers") or []
+        leads = duplicate_candidates.get("leads") or []
+        hidden_customer_count = duplicate_candidates.get("hidden_customer_count") or 0
+        hidden_lead_count = duplicate_candidates.get("hidden_lead_count") or 0
+        parts = []
+        if customers:
+            names = "、".join(
+                f"「{customer.get('account_name')}」"
+                for customer in customers[:3]
+                if customer.get("account_name")
+            )
+            if names:
+                parts.append(f"客户 {names}")
+        if leads:
+            names = "、".join(
+                f"「{lead.get('lead_name')}」"
+                for lead in leads[:3]
+                if lead.get("lead_name")
+            )
+            if names:
+                parts.append(f"线索 {names}")
+        if hidden_customer_count:
+            parts.append("团队内客户")
+        if hidden_lead_count:
+            parts.append("团队内线索")
+        matched = "、".join(parts) if parts else "记录"
+        return f"已存在：{matched}。"
 
     @staticmethod
     def _build_business_response(intent: str, parsed: Dict[str, Any], candidates: List[Dict[str, Any]], business_context: Dict[str, Any]):

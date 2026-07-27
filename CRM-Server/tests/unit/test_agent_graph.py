@@ -42,11 +42,15 @@ class FakeMemoryService:
 
 
 class FakeToolService:
-    def __init__(self, items=None, customer_context=None):
+    def __init__(self, items=None, lead_items=None, customer_context=None, hidden_customer_count=0, hidden_lead_count=0):
         self.searches = []
+        self.duplicate_searches = []
         self.context_queries = []
         self.items = [{"id": 101, "account_name": "越秀金融"}] if items is None else items
+        self.lead_items = [] if lead_items is None else lead_items
         self.customer_context = customer_context
+        self.hidden_customer_count = hidden_customer_count
+        self.hidden_lead_count = hidden_lead_count
 
     async def search_customers(self, context, keyword, limit=10):
         self.searches.append({"context": context, "keyword": keyword, "limit": limit})
@@ -55,6 +59,26 @@ class FakeToolService:
             success=True,
             data={"items": self.items, "total": len(self.items)},
             tool_call_id=501,
+        )
+
+    async def search_creation_duplicates(self, context, customer_keywords, lead_keywords, phone=None, limit=10):
+        self.duplicate_searches.append({
+            "context": context,
+            "customer_keywords": customer_keywords,
+            "lead_keywords": lead_keywords,
+            "phone": phone,
+            "limit": limit,
+        })
+        return AgentToolResult(
+            tool_name="search_creation_duplicates",
+            success=True,
+            data={
+                "customers": self.items,
+                "leads": self.lead_items,
+                "hidden_customer_count": self.hidden_customer_count,
+                "hidden_lead_count": self.hidden_lead_count,
+            },
+            tool_call_id=503,
         )
 
     async def get_customer_context(self, context, customer_id):
@@ -642,12 +666,14 @@ async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_create_lead_skips_customer_search_and_requires_confirmation():
-    tool_service = FakeToolService()
+async def test_agent_graph_create_lead_requires_confirmation_when_no_duplicate_exists():
+    tool_service = FakeToolService(items=[])
     result = await build_service(lead_semantic_result(), tool_service).run(input_state("帮我创建线索"))
 
     assert result["intent"] == "CREATE_LEAD"
-    assert tool_service.searches == []
+    assert tool_service.duplicate_searches[0]["customer_keywords"] == ["广州睿狐科技"]
+    assert tool_service.duplicate_searches[0]["lead_keywords"] == ["广州睿狐科技"]
+    assert tool_service.duplicate_searches[0]["context"].team_id == 1
     assert tool_service.context_queries == []
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
     assert confirmation_events[0]["action"] == "create_lead"
@@ -656,8 +682,104 @@ async def test_agent_graph_create_lead_skips_customer_search_and_requires_confir
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_create_lead_warns_when_customer_duplicate_exists():
+    tool_service = FakeToolService(
+        items=[{"id": 101, "account_name": "东风康明斯发动机有限公司"}],
+    )
+    result = await build_service(lead_semantic_result(
+        lead={
+            "lead_name": "东风康明斯",
+            "source": "其他",
+            "city": "襄阳",
+            "contact_name": "赵坤",
+            "contact_phone": "18707276297",
+        },
+    ), tool_service).run(input_state("@CRMWolf 东风康明斯 赵坤 18707276297"))
+
+    assert result["intent"] == "CREATE_LEAD"
+    assert "东风康明斯发动机有限公司" in result["response"]
+    assert result["response"] == "已存在：客户 「东风康明斯发动机有限公司」。"
+    assert not [event for event in result["events"] if event["event"] == "confirmation_required"]
+    duplicate_events = [event for event in result["events"] if event["event"] == "creation_duplicate_detected"]
+    assert duplicate_events[0]["customers"][0]["account_name"] == "东风康明斯发动机有限公司"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_lead_warns_when_lead_phone_duplicate_exists():
+    tool_service = FakeToolService(
+        items=[],
+        lead_items=[{
+            "id": 201,
+            "lead_name": "湖北康明斯项目",
+            "contact_name": "赵坤",
+            "contact_phone": "18707276297",
+        }],
+    )
+    result = await build_service(lead_semantic_result(
+        lead={
+            "lead_name": "东风康明斯",
+            "source": "其他",
+            "city": "襄阳",
+            "contact_name": "赵坤",
+            "contact_phone": "18707276297",
+        },
+    ), tool_service).run(input_state("@CRMWolf 东风康明斯 赵坤 18707276297"))
+
+    assert result["intent"] == "CREATE_LEAD"
+    assert tool_service.duplicate_searches[0]["phone"] == "18707276297"
+    assert "湖北康明斯项目" in result["response"]
+    assert result["response"] == "已存在：线索 「湖北康明斯项目」。"
+    assert not [event for event in result["events"] if event["event"] == "confirmation_required"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_lead_warns_without_leaking_hidden_team_duplicate():
+    tool_service = FakeToolService(
+        items=[],
+        lead_items=[],
+        hidden_customer_count=1,
+    )
+    result = await build_service(lead_semantic_result(
+        lead={
+            "lead_name": "东风康明斯",
+            "source": "其他",
+            "city": "襄阳",
+            "contact_name": "赵坤",
+            "contact_phone": "18707276297",
+        },
+    ), tool_service).run(input_state("@CRMWolf 东风康明斯 赵坤 18707276297"))
+
+    assert result["intent"] == "CREATE_LEAD"
+    assert result["response"] == "已存在：团队内客户。"
+    assert "东风康明斯发动机有限公司" not in result["response"]
+    assert not [event for event in result["events"] if event["event"] == "confirmation_required"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_lead_checks_duplicates_before_missing_fields():
+    tool_service = FakeToolService(
+        items=[{"id": 101, "account_name": "东风康明斯发动机有限公司"}],
+    )
+    result = await build_service(lead_semantic_result(
+        lead={
+            "lead_name": "东风康明斯",
+            "source": "其他",
+            "city": None,
+            "contact_name": None,
+            "contact_phone": None,
+        },
+        missing_fields=["city", "contact_name", "contact_phone"],
+    ), tool_service).run(input_state("帮我创建线索 东风康明斯"))
+
+    assert tool_service.duplicate_searches[0]["customer_keywords"] == ["东风康明斯"]
+    assert result["response"] == "已存在：客户 「东风康明斯发动机有限公司」。"
+    assert not [event for event in result["events"] if event["event"] == "lead_fields_required"]
+    assert not [event for event in result["events"] if event["event"] == "confirmation_required"]
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_create_lead_requires_missing_fields_form():
-    tool_service = FakeToolService()
+    tool_service = FakeToolService(items=[])
     result = await build_service(lead_semantic_result(
         lead={
             "lead_name": "广州睿狐科技",
@@ -670,18 +792,21 @@ async def test_agent_graph_create_lead_requires_missing_fields_form():
     ), tool_service).run(input_state("帮我创建线索"))
 
     assert tool_service.searches == []
+    assert tool_service.duplicate_searches[0]["customer_keywords"] == ["广州睿狐科技"]
     field_events = [event for event in result["events"] if event["event"] == "lead_fields_required"]
     assert field_events[0]["action"] == "collect_lead_fields"
     assert field_events[0]["payload"]["missing_fields"] == ["city", "contact_name", "contact_phone"]
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_create_customer_skips_customer_search_and_requires_confirmation():
-    tool_service = FakeToolService()
+async def test_agent_graph_create_customer_requires_confirmation_when_no_duplicate_exists():
+    tool_service = FakeToolService(items=[])
     result = await build_service(customer_create_semantic_result(), tool_service).run(input_state("帮我创建客户"))
 
     assert result["intent"] == "CREATE_CUSTOMER"
-    assert tool_service.searches == []
+    assert tool_service.duplicate_searches[0]["customer_keywords"] == ["广州睿狐科技"]
+    assert tool_service.duplicate_searches[0]["lead_keywords"] == ["广州睿狐科技"]
+    assert tool_service.duplicate_searches[0]["context"].team_id == 1
     assert tool_service.context_queries == []
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
     assert confirmation_events[0]["action"] == "create_customer"
@@ -691,7 +816,7 @@ async def test_agent_graph_create_customer_skips_customer_search_and_requires_co
 
 @pytest.mark.asyncio
 async def test_agent_graph_create_customer_requires_missing_fields_form():
-    tool_service = FakeToolService()
+    tool_service = FakeToolService(items=[])
     result = await build_service(customer_create_semantic_result(
         customer_create={
             "account_name": "广州睿狐科技",
@@ -706,6 +831,7 @@ async def test_agent_graph_create_customer_requires_missing_fields_form():
     ), tool_service).run(input_state("帮我创建客户"))
 
     assert tool_service.searches == []
+    assert tool_service.duplicate_searches[0]["customer_keywords"] == ["广州睿狐科技"]
     field_events = [event for event in result["events"] if event["event"] == "customer_fields_required"]
     assert field_events[0]["action"] == "collect_customer_fields"
     assert field_events[0]["payload"]["missing_fields"] == ["city", "contact_phone", "contact_position", "contact_gender"]

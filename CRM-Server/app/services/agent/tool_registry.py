@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,13 @@ from app.services.agent.tools.base import AgentToolContext, AgentToolResult
 
 class SearchCustomersInput(BaseModel):
     keyword: str = Field(..., min_length=1)
+    limit: int = Field(10, ge=1, le=20)
+
+
+class SearchCreationDuplicatesInput(BaseModel):
+    customer_keywords: List[str] = Field(default_factory=list)
+    lead_keywords: List[str] = Field(default_factory=list)
+    phone: Optional[str] = None
     limit: int = Field(10, ge=1, le=20)
 
 
@@ -198,6 +205,15 @@ class AgentToolRegistry:
         async def search_customers(service, context, model):
             return await service.search_customers(context, model.keyword, limit=model.limit)
 
+        async def search_creation_duplicates(service, context, model):
+            return await service.search_creation_duplicates(
+                context,
+                customer_keywords=model.customer_keywords,
+                lead_keywords=model.lead_keywords,
+                phone=model.phone,
+                limit=model.limit,
+            )
+
         async def get_customer_context(service, context, model):
             return await service.get_customer_context(context, model.customer_id)
 
@@ -327,6 +343,7 @@ class AgentToolRegistry:
 
         specs = [
             AgentToolSpec("search_customers", "按当前用户权限搜索可访问客户", SearchCustomersInput, False, False, search_customers),
+            AgentToolSpec("search_creation_duplicates", "创建客户/线索前按团队范围检查重复", SearchCreationDuplicatesInput, False, False, search_creation_duplicates),
             AgentToolSpec("get_customer_context", "获取客户业务上下文", GetCustomerContextInput, False, False, get_customer_context),
             AgentToolSpec("create_customer_follow_up", "创建客户跟进记录", CreateCustomerFollowUpInput, True, True, create_customer_follow_up),
             AgentToolSpec("create_lead", "通过现有线索 API 创建线索", CreateLeadInput, True, True, create_lead),

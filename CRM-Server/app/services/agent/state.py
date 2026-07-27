@@ -28,6 +28,7 @@ class AgentGraphState(TypedDict, total=False):
     follow_up_quality_error: Optional[str]
     parsed: Dict[str, Any]
     customer_candidates: List[Dict[str, Any]]
+    creation_duplicate_candidates: Dict[str, Any]
     selected_customer: Dict[str, Any]
     business_context: Dict[str, Any]
     suggestion_result: AgentSuggestionResult

@@ -15,6 +15,13 @@ from app.models.agent import (
     AgentToolCall,
     AgentToolCallStatus,
 )
+from app.models.customer import Customer, CustomerMember
+from app.models.lead import Lead, LeadSource, LeadStatus
+from app.models.permission import Permission
+from app.models.role import Role
+from app.models.role_permission import RolePermission
+from app.models.user import User
+from app.models.user_role import UserRole
 from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.middleware import build_langchain_hitl_middleware
 from app.services.agent.tool_registry import AgentToolRegistry
@@ -101,7 +108,7 @@ class FakeCRMAPIClient:
         return {}
 
 
-def _db_session():
+def _db_session(extra_tables=None):
     engine = create_engine(
         "sqlite:///:memory:",
         poolclass=StaticPool,
@@ -114,6 +121,8 @@ def _db_session():
         AgentToolCall.__table__,
         AgentIdempotencyKey.__table__,
     ]
+    if extra_tables:
+        tables.extend(extra_tables)
     Base.metadata.create_all(engine, tables=tables)
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -150,6 +159,27 @@ def _confirmed_context_for(db, tool_name, customer_id=101):
     return context
 
 
+def _grant_permissions(db, user_id, team_id, permission_codes):
+    user = User(id=user_id, email=f"user{user_id}@example.com", name=f"User {user_id}")
+    role = Role(id=100 + user_id, name=f"role-{user_id}", code=f"role-{user_id}")
+    db.add_all([user, role])
+    db.flush()
+    for index, code in enumerate(permission_codes, start=1):
+        permission = Permission(
+            id=user_id * 1000 + index,
+            name=f"{code}-{user_id}",
+            code=code,
+            resource=code.split(":", 1)[0],
+            action="view",
+            scope=code.rsplit(":", 1)[-1],
+        )
+        db.add(permission)
+        db.flush()
+        db.add(RolePermission(role_id=role.id, permission_id=permission.id))
+    db.add(UserRole(user_id=user_id, role_id=role.id, team_id=team_id))
+    db.commit()
+
+
 @pytest.mark.asyncio
 async def test_agent_tool_search_customers_calls_existing_api_and_audits():
     engine, db = _db_session()
@@ -171,6 +201,144 @@ async def test_agent_tool_search_customers_calls_existing_api_and_audits():
         tool_call = db.query(AgentToolCall).one()
         assert tool_call.tool_name == "search_customers"
         assert tool_call.status == AgentToolCallStatus.SUCCESS
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_search_creation_duplicates_returns_visible_customer_name_without_api_call():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+    ])
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:own"])
+        db.add(Customer(
+            id=101,
+            team_id=1,
+            account_name="东风康明斯发动机有限公司",
+            city="襄阳",
+            owner_id="2",
+            creator_id="2",
+        ))
+        db.commit()
+
+        result = await service.search_creation_duplicates(
+            _context(db),
+            customer_keywords=["东风康明斯"],
+            lead_keywords=[],
+            limit=5,
+        )
+
+        assert result.success is True
+        assert result.data["customers"] == [{
+            "id": 101,
+            "account_name": "东风康明斯发动机有限公司",
+            "visible": True,
+        }]
+        assert result.data["hidden_customer_count"] == 0
+        assert fake_client.calls == []
+        assert db.query(AgentToolCall).one().tool_name == "search_creation_duplicates"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_search_creation_duplicates_hides_team_customer_without_view_access():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+    ])
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:own"])
+        db.add(Customer(
+            id=101,
+            team_id=1,
+            account_name="东风康明斯发动机有限公司",
+            city="襄阳",
+            owner_id="9",
+            creator_id="9",
+        ))
+        db.commit()
+
+        result = await service.search_creation_duplicates(
+            _context(db),
+            customer_keywords=["东风康明斯"],
+            lead_keywords=[],
+            limit=5,
+        )
+
+        assert result.success is True
+        assert result.data["customers"] == []
+        assert result.data["hidden_customer_count"] == 1
+        assert "东风康明斯发动机有限公司" not in str(result.data)
+        assert fake_client.calls == []
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_search_creation_duplicates_matches_visible_lead_by_keyword():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Lead.__table__,
+    ])
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["lead:view:own"])
+        db.add(Lead(
+            id=201,
+            team_id=1,
+            lead_name="湖北康明斯项目",
+            source=LeadSource.OTHER,
+            city="襄阳",
+            contact_name="赵坤",
+            contact_phone="18707276297",
+            owner_id="2",
+            creator_id="2",
+            status=LeadStatus.NEW,
+        ))
+        db.commit()
+
+        result = await service.search_creation_duplicates(
+            _context(db),
+            customer_keywords=[],
+            lead_keywords=["18707276297"],
+            limit=5,
+        )
+
+        assert result.success is True
+        assert result.data["leads"] == [{
+            "id": 201,
+            "lead_name": "湖北康明斯项目",
+            "contact_name": "赵坤",
+            "contact_phone": "18707276297",
+            "visible": True,
+        }]
+        assert result.data["hidden_lead_count"] == 0
+        assert fake_client.calls == []
     finally:
         db.close()
         engine.dispose()

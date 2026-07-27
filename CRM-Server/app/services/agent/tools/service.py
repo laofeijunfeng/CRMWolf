@@ -5,10 +5,15 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+from sqlalchemy import or_
 
 from app.crud.agent import agent_idempotency_key_crud, agent_tool_call_crud
+from app.crud.permission import permission_crud
 from app.models.agent import AgentIdempotencyStatus, AgentToolCallStatus
+from app.models.customer import Contact, Customer, CustomerMember
+from app.models.lead import Lead
 from app.schemas.agent import AgentIdempotencyKeyCreate, AgentIdempotencyKeyUpdate, AgentToolCallCreate, AgentToolCallUpdate
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult, JsonDict
@@ -17,8 +22,9 @@ from app.services.agent.tools.base import AgentToolContext, AgentToolResult, Jso
 class CRMAgentToolService:
     """Agent tool facade.
 
-    This class may persist Agent audit/idempotency state, but business data
-    reads and writes must go through the existing API client.
+    This class persists Agent audit/idempotency state. Normal user-facing reads
+    and writes go through existing APIs; Agent-only internal checks can read
+    directly when the result must follow a different disclosure policy.
     """
 
     def __init__(self, api_client: Optional[InternalCRMAPIClient] = None) -> None:
@@ -36,6 +42,167 @@ class CRMAgentToolService:
             )
 
         return await self._run_read_tool(context, "search_customers", payload, call_api)
+
+    async def search_creation_duplicates(
+        self,
+        context: AgentToolContext,
+        customer_keywords: List[str],
+        lead_keywords: List[str],
+        phone: Optional[str] = None,
+        limit: int = 10,
+    ) -> AgentToolResult:
+        payload = {
+            "customer_keywords": self._clean_keywords(customer_keywords),
+            "lead_keywords": self._clean_keywords(lead_keywords),
+            "phone": phone.strip() if isinstance(phone, str) and phone.strip() else None,
+            "limit": limit,
+        }
+
+        async def call_db():
+            return self._search_creation_duplicates_in_db(
+                context,
+                customer_keywords=payload["customer_keywords"],
+                lead_keywords=payload["lead_keywords"],
+                phone=payload["phone"],
+                limit=limit,
+            )
+
+        return await self._run_read_tool(context, "search_creation_duplicates", payload, call_db)
+
+    def _search_creation_duplicates_in_db(
+        self,
+        context: AgentToolContext,
+        customer_keywords: List[str],
+        lead_keywords: List[str],
+        phone: Optional[str],
+        limit: int,
+    ) -> JsonDict:
+        permission_codes = {
+            permission.code
+            for permission in permission_crud.get_user_permissions(context.db, context.user_id, context.team_id)
+        }
+        user_id = str(context.user_id)
+        customer_view_all = "customer:view:all" in permission_codes
+        customer_view_own = "customer:view:own" in permission_codes
+        lead_view_all = "lead:view:all" in permission_codes
+        lead_view_own = "lead:view:own" in permission_codes
+
+        customers = self._query_duplicate_customers(context, customer_keywords, phone, limit)
+        leads = self._query_duplicate_leads(context, lead_keywords, phone, limit)
+
+        visible_customers = []
+        hidden_customer_count = 0
+        for customer in customers:
+            if self._can_view_customer(context, customer, user_id, customer_view_all, customer_view_own):
+                visible_customers.append({
+                    "id": customer.id,
+                    "account_name": customer.account_name,
+                    "visible": True,
+                })
+            else:
+                hidden_customer_count += 1
+
+        visible_leads = []
+        hidden_lead_count = 0
+        for lead in leads:
+            if lead_view_all or (lead_view_own and (lead.owner_id == user_id or lead.creator_id == user_id)):
+                visible_leads.append({
+                    "id": lead.id,
+                    "lead_name": lead.lead_name,
+                    "contact_name": lead.contact_name,
+                    "contact_phone": lead.contact_phone,
+                    "visible": True,
+                })
+            else:
+                hidden_lead_count += 1
+
+        return {
+            "customers": visible_customers,
+            "leads": visible_leads,
+            "hidden_customer_count": hidden_customer_count,
+            "hidden_lead_count": hidden_lead_count,
+        }
+
+    def _query_duplicate_customers(
+        self,
+        context: AgentToolContext,
+        keywords: List[str],
+        phone: Optional[str],
+        limit: int,
+    ) -> List[Customer]:
+        conditions = []
+        for keyword in keywords:
+            conditions.append(Customer.account_name.like(f"%{keyword}%"))
+            conditions.append(Customer.account_name_norm.like(f"%{keyword}%"))
+        if phone:
+            conditions.append(
+                context.db.query(Contact.id).filter(
+                    Contact.team_id == context.team_id,
+                    Contact.customer_id == Customer.id,
+                    Contact.mobile == phone,
+                ).exists()
+            )
+        if not conditions:
+            return []
+        return (
+            context.db.query(Customer)
+            .filter(Customer.team_id == context.team_id, or_(*conditions))
+            .order_by(Customer.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def _query_duplicate_leads(
+        self,
+        context: AgentToolContext,
+        keywords: List[str],
+        phone: Optional[str],
+        limit: int,
+    ) -> List[Lead]:
+        conditions = []
+        for keyword in keywords:
+            conditions.append(Lead.lead_name.like(f"%{keyword}%"))
+            conditions.append(Lead.contact_name.like(f"%{keyword}%"))
+            conditions.append(Lead.contact_phone.like(f"%{keyword}%"))
+        if phone:
+            conditions.append(Lead.contact_phone == phone)
+        if not conditions:
+            return []
+        return (
+            context.db.query(Lead)
+            .filter(Lead.team_id == context.team_id, or_(*conditions))
+            .order_by(Lead.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def _can_view_customer(
+        context: AgentToolContext,
+        customer: Customer,
+        user_id: str,
+        customer_view_all: bool,
+        customer_view_own: bool,
+    ) -> bool:
+        if customer_view_all or (customer_view_own and customer.owner_id == user_id):
+            return True
+        return context.db.query(CustomerMember.id).filter(
+            CustomerMember.team_id == context.team_id,
+            CustomerMember.customer_id == customer.id,
+            CustomerMember.user_id == user_id,
+            CustomerMember.is_active.is_(True),
+        ).first() is not None
+
+    @staticmethod
+    def _clean_keywords(keywords: List[str]) -> List[str]:
+        cleaned = []
+        for keyword in keywords:
+            if not isinstance(keyword, str):
+                continue
+            value = keyword.strip()
+            if value and value not in cleaned:
+                cleaned.append(value)
+        return cleaned
 
     async def get_customer_context(self, context: AgentToolContext, customer_id: int) -> AgentToolResult:
         payload = {"customer_id": customer_id}
