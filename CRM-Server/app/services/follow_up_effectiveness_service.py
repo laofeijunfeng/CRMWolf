@@ -186,9 +186,9 @@ class FollowUpEffectivenessService:
 - 记录很短、缺少对接人/时间/下一步/风险时，即使语气积极，也要扣分。
 - score 必须是 0-100 的整数；is_valid 必须按 score >= 60 判断。
 - reason 必须是一句话，优先说明扣分最多的 1-2 个原因，适合放在 tooltip 中，最长 80 个中文字符。
-- 输出严格 JSON，不要 Markdown，不要解释文字。
+- 输出严格 json，不要 Markdown，不要解释文字。
 
-JSON 结构：
+json 结构：
 {{
   "score": 0,
   "is_valid": false,
@@ -204,7 +204,7 @@ JSON 结构：
 }}"""
 
     def _build_prompt(self, context: Dict[str, Any]) -> str:
-        return "请评估以下客户跟进记录是否有效：\n" + json.dumps(context, ensure_ascii=False, default=str)
+        return "请评估以下客户跟进记录是否有效，并以 json 返回：\n" + json.dumps(context, ensure_ascii=False, default=str)
 
     def _parse_response(self, content: str) -> Dict[str, Any]:
         clean_content = content.strip()

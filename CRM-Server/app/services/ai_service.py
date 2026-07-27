@@ -4,6 +4,7 @@ AI 调用服务（SSE 流式请求）
 import httpx
 import json
 import logging
+import asyncio
 from typing import Optional, AsyncGenerator, Dict, Any
 from sqlalchemy.orm import Session
 from app.crud.ai_config import ai_config_crud
@@ -51,53 +52,85 @@ class AIService:
         if response_format:
             request_body["response_format"] = response_format
 
-        full_content = ""
-
         logger.info(f"AI 调用开始: model={model}, timeout={timeout}s")
 
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            async with client.stream(
-                "POST",
-                f"{api_host}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "Accept-Encoding": "identity"  # 禁用 gzip 压缩
-                },
-                json=request_body
-            ) as response:
-                response.raise_for_status()
+        last_status_error: Optional[httpx.HTTPStatusError] = None
+        for attempt in range(3):
+            full_content = ""
 
-                # 使用 aiter_text() 正确处理流式响应
-                buffer = ""
-                async for text_chunk in response.aiter_text():
-                    buffer += text_chunk
-                    lines = buffer.split('\n')
-                    buffer = lines[-1] if lines else ""
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+                async with client.stream(
+                    "POST",
+                    f"{api_host}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "Accept-Encoding": "identity"  # 禁用 gzip 压缩
+                    },
+                    json=request_body
+                ) as response:
+                    if response.status_code >= 400:
+                        error_body = (await response.aread()).decode("utf-8", "replace")
+                        retry_after = response.headers.get("retry-after")
+                        logger.warning(
+                            "AI 调用失败: status=%s, retry_after=%s, body=%s",
+                            response.status_code,
+                            retry_after,
+                            error_body[:1000],
+                        )
+                        try:
+                            response.raise_for_status()
+                        except httpx.HTTPStatusError as exc:
+                            last_status_error = exc
+                            if response.status_code == 429 and attempt < 2:
+                                delay = self._get_retry_delay(retry_after, attempt)
+                                logger.info("AI 调用触发限流，%s 秒后重试: attempt=%s", delay, attempt + 1)
+                                await asyncio.sleep(delay)
+                                continue
+                            raise
 
-                    for line in lines[:-1]:
-                        if not line:
-                            continue
+                    # 使用 aiter_text() 正确处理流式响应
+                    buffer = ""
+                    async for text_chunk in response.aiter_text():
+                        buffer += text_chunk
+                        lines = buffer.split('\n')
+                        buffer = lines[-1] if lines else ""
 
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-
-                            if data_str == "[DONE]":
-                                break
-
-                            try:
-                                chunk = json.loads(data_str)
-                                choices = chunk.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    content_piece = delta.get("content", "")
-                                    if content_piece:
-                                        full_content += content_piece
-                            except json.JSONDecodeError:
+                        for line in lines[:-1]:
+                            if not line:
                                 continue
 
-        logger.info(f"AI 调用完成: 响应长度={len(full_content)}")
-        return full_content
+                            if line.startswith("data: "):
+                                data_str = line[6:]
+
+                                if data_str == "[DONE]":
+                                    break
+
+                                try:
+                                    chunk = json.loads(data_str)
+                                    choices = chunk.get("choices", [])
+                                    if choices:
+                                        delta = choices[0].get("delta", {})
+                                        content_piece = delta.get("content", "")
+                                        if content_piece:
+                                            full_content += content_piece
+                                except json.JSONDecodeError:
+                                    continue
+
+            logger.info(f"AI 调用完成: 响应长度={len(full_content)}")
+            return full_content
+
+        if last_status_error:
+            raise last_status_error
+        return ""
+
+    def _get_retry_delay(self, retry_after: Optional[str], attempt: int) -> float:
+        if retry_after:
+            try:
+                return max(1.0, min(float(retry_after), 10.0))
+            except ValueError:
+                pass
+        return float(2 ** attempt)
 
     async def _stream_chat_generator(
         self,

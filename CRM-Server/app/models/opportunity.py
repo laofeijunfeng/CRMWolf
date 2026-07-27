@@ -92,6 +92,10 @@ class Opportunity(Base):
     contracts = relationship("Contract", back_populates="opportunity", cascade="all, delete-orphan")
     invoice_applications = relationship("InvoiceApplication", back_populates="opportunity", cascade="all, delete-orphan")
 
+    @property
+    def updated_time(self):
+        return self.last_modified_time
+
     __table_args__ = (
         Index('idx_customer_id', 'customer_id'),
         Index('idx_procurement_stage_id', 'procurement_stage_id'),
