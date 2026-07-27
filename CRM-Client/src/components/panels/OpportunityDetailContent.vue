@@ -54,6 +54,7 @@ import PaymentsPanel from '@/components/panels/PaymentsPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
+import customerApi, { type CustomerDetailResponse, type CustomerMemberResponse } from '@/api/customer'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import paymentApi, { type PaymentPlanResponse, type PaymentRecordCreate } from '@/api/payment'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
@@ -116,6 +117,8 @@ const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceApplications = ref<InvoiceApplicationResponse[]>([])
 const licenseApplications = ref<LicenseApplicationResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
+const customerPermissionDetail = ref<CustomerDetailResponse | null>(null)
+const customerPermissionMembers = ref<CustomerMemberResponse[]>([])
 const downloadingInvoiceApplicationId = ref<number | null>(null)
 const approvalAccordionValue = ref('approval')
 const stageAccordionValue = ref('')
@@ -143,6 +146,16 @@ const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
 const isOwner = computed(() =>
   opportunity.value !== null && opportunity.value.owner_id === currentUserId.value
 )
+const currentCustomerPermissionMember = computed(() =>
+  customerPermissionMembers.value.find(member => member.user_id === currentUserId.value)
+)
+const resolvedCanEditCustomerContext = computed(() => {
+  if (props.canEditCustomerContext !== null) return props.canEditCustomerContext
+  if (permissionStore.hasPermission('customer:edit:all')) return true
+  if (currentCustomerPermissionMember.value?.access_level === 'EDIT') return true
+  return customerPermissionDetail.value?.owner_id === currentUserId.value
+    && permissionStore.hasPermission('customer:edit:own')
+})
 const canEditOpportunity = computed(() => {
   if (opportunity.value === null) return false
   if (permissionStore.hasPermission('opportunity:edit:all')) return true
@@ -211,12 +224,12 @@ const defaultLicenseApplicationType = computed<LicenseApplicationType>(() =>
 )
 const canCreateRelatedContract = computed(() =>
   canCreateContractPermission.value
-    && (props.canEditCustomerContext ?? true)
+    && resolvedCanEditCustomerContext.value
     && opportunity.value?.status === 1
     && isApprovalApproved.value
     && relatedContract.value === null
 )
-const canCreateLicenseApplication = computed(() => props.canEditCustomerContext ?? true)
+const canCreateLicenseApplication = computed(() => resolvedCanEditCustomerContext.value)
 const relatedContractTotalAmount = computed(() => Number(relatedContract.value?.total_amount ?? 0))
 const plannedPaymentAmount = computed(() =>
   paymentPlans.value.reduce((total, plan) => total + Number(plan.planned_amount ?? 0), 0)
@@ -335,6 +348,10 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
   invoiceApplications.value = []
   licenseApplications.value = []
   deployments.value = []
+  if (props.canEditCustomerContext === null) {
+    customerPermissionDetail.value = null
+    customerPermissionMembers.value = []
+  }
 
   const contract = relatedContract.value
   try {
@@ -343,7 +360,8 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
       plansData,
       invoicesData,
       licensesData,
-      deploymentsData
+      deploymentsData,
+      customerPermissionData
     ] = await Promise.all([
       hasApprovedContract ? paymentApi.getPaymentPlans(contract.id).catch(() => []) : Promise.resolve([]),
       hasApprovedContract
@@ -356,7 +374,10 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
         }).catch(() => ({ items: [], total: 0, page: 1, page_size: 100 }))
         : Promise.resolve({ items: [], total: 0, page: 1, page_size: 100 }),
       licenseApplicationApi.list(opportunityData.customer_id).catch(() => []),
-      deploymentApi.list(opportunityData.customer_id).catch(() => [])
+      deploymentApi.list(opportunityData.customer_id).catch(() => []),
+      props.canEditCustomerContext === null
+        ? fetchCustomerPermissionContext(opportunityData.customer_id)
+        : Promise.resolve(null)
     ])
 
     paymentPlans.value = plansData
@@ -365,9 +386,24 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
       ? licensesData.filter(item => item.contract_id === null || item.contract_id === contract.id)
       : licensesData.filter(item => item.contract_id === null)
     deployments.value = deploymentsData
+    if (customerPermissionData !== null) {
+      customerPermissionDetail.value = customerPermissionData.detail
+      customerPermissionMembers.value = customerPermissionData.members
+    }
   } finally {
     relationLoading.value = false
   }
+}
+
+async function fetchCustomerPermissionContext(customerId: number): Promise<{
+  detail: CustomerDetailResponse | null
+  members: CustomerMemberResponse[]
+}> {
+  const [detail, members] = await Promise.all([
+    customerApi.getCustomerDetail(customerId).catch(() => null),
+    customerApi.getCustomerMembers(customerId).catch(() => [])
+  ])
+  return { detail, members }
 }
 
 // 编辑功能

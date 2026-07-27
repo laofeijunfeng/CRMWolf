@@ -167,7 +167,7 @@ def submit_application(
     1. 验证申请存在且状态为 DRAFT
     2. 匹配审批流程（按 license_type）
     3. 创建审批实例（Approval + ApprovalRecord）
-    4. 发送通知给审批人（待实现）
+    4. 通过审批事务管理器发送待处理通知给当前节点审批人
     5. 返回申请信息
     """
     from app.crud.crud_license_application import license_application_crud
