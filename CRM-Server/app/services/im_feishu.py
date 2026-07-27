@@ -151,9 +151,9 @@ class FeishuBotService:
         message_id = message.get("message_id")
         if message_id:
             try:
-                await self.reply_text(db, integration_config, message_id, "get")
+                await self.add_message_reaction(db, integration_config, message_id, "OK")
             except Exception as exc:
-                logger.warning("飞书机器人收到确认回复失败，继续处理消息: message_id=%s error=%s", message_id, exc)
+                logger.warning("飞书机器人收到确认表情失败，继续处理消息: message_id=%s error=%s", message_id, exc)
 
         normalized_content = await self._build_agent_content(integration_config, message, content)
         session_scope = hashlib.sha256(
@@ -213,6 +213,44 @@ class FeishuBotService:
             raise FeishuBotEventError(data.get("msg") or "飞书回复消息失败")
         logger.info("飞书机器人回复成功: message_id=%s response_message_id=%s", message_id, ((data.get("data") or {}).get("message_id")))
         return ((data.get("data") or {}).get("message_id"))
+
+    async def add_message_reaction(
+        self,
+        db: Session,
+        integration_config: OAuthProviderConfig,
+        message_id: str,
+        emoji_type: str,
+    ) -> Optional[str]:
+        secret = oauth_provider_config_crud.get_secret(integration_config)
+        if not integration_config.app_id or not secret:
+            raise FeishuBotEventError("机器人 app_id 或 app_secret 未配置")
+        token = await self._get_tenant_access_token(integration_config.app_id, secret)
+        payload = {
+            "reaction_type": {
+                "emoji_type": emoji_type,
+            },
+        }
+        async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
+            response = await client.post(
+                f"{self.api_base_url}/im/v1/messages/{quote(message_id, safe='')}/reactions",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+        if data.get("code") != 0:
+            raise FeishuBotEventError(data.get("msg") or "飞书添加消息表情失败")
+        reaction_id = ((data.get("data") or {}).get("reaction_id"))
+        logger.info(
+            "飞书机器人添加消息表情成功: message_id=%s emoji_type=%s reaction_id=%s",
+            message_id,
+            emoji_type,
+            reaction_id,
+        )
+        return reaction_id
 
     async def _get_tenant_access_token(self, app_id: str, app_secret: str) -> str:
         async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
