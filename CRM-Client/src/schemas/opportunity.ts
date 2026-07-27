@@ -9,6 +9,10 @@ import { UserInfoSchema, PaginatedResponseSchema } from './common'
 
 const NullableStringSchema = z.string().nullable()
 const OptionalNullableStringSchema = z.string().nullable().optional()
+const OptionalStringFromNullableSchema = z.preprocess(
+  (value) => value === null ? undefined : value,
+  z.string().optional()
+)
 
 export const OpportunityStatusSchema = z.number().int().min(0).max(2)
 export const OpportunityApprovalPhaseSchema = z.enum(['draft', 'pending_review', 'approved', 'rejected'])
@@ -59,7 +63,7 @@ export const OpportunityApiResponseSchema = z.object({
   id: z.number().int(),
   opportunity_name: z.string(),
   customer_id: z.number().int(),
-  customer_name: z.string().optional(),
+  customer_name: OptionalStringFromNullableSchema,
   procurement_method_id: z.number().int().nullable(),
   procurement_method_info: OpportunityProcurementMethodInfoSchema.nullable().optional(),
   total_amount: z.number(),
@@ -133,7 +137,7 @@ export const OpportunityListItemApiSchema = z.object({
   approval_phase: OpportunityApprovalPhaseSchema,
   created_time: z.string(),
   last_modified_time: z.string(),
-  customer_name: z.string().optional(),
+  customer_name: OptionalStringFromNullableSchema,
   owner_info: OpportunityOwnerInfoSchema.optional()
 }).passthrough()
 

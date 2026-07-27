@@ -345,6 +345,7 @@ def get_available_opportunities_for_contract(
             "id": opp.id,
             "opportunity_name": opp.opportunity_name,
             "customer_id": opp.customer_id,
+            "customer_name": customer_info["account_name"] if customer_info else "",
             "procurement_method_id": opp.procurement_method_id,
             "total_amount": float(opp.total_amount),
             "user_count": opp.user_count,
