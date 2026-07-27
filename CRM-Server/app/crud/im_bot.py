@@ -51,6 +51,24 @@ class AgentChannelSessionCRUD:
         db.refresh(channel_session)
         return channel_session
 
+    def get_by_scope(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        provider: str,
+        chat_id: str,
+        thread_id: str = "",
+    ) -> Optional[AgentChannelSession]:
+        return db.query(AgentChannelSession).filter(
+            AgentChannelSession.provider == provider,
+            AgentChannelSession.team_id == team_id,
+            AgentChannelSession.user_id == user_id,
+            AgentChannelSession.chat_id == chat_id,
+            AgentChannelSession.thread_id == (thread_id or ""),
+        ).first()
+
     def mark_message(self, db: Session, db_obj: AgentChannelSession, message_id: str) -> AgentChannelSession:
         db_obj.last_message_id = message_id
         db.commit()
@@ -107,6 +125,22 @@ class IMInboundEventCRUD:
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def get_by_response_message_id(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        response_message_id: str,
+        team_id: Optional[int] = None,
+    ) -> Optional[IMInboundEvent]:
+        query = db.query(IMInboundEvent).filter(
+            IMInboundEvent.provider == provider,
+            IMInboundEvent.response_message_id == response_message_id,
+        )
+        if team_id is not None:
+            query = query.filter(IMInboundEvent.team_id == team_id)
+        return query.order_by(IMInboundEvent.created_time.desc(), IMInboundEvent.id.desc()).first()
 
 
 agent_channel_session_crud = AgentChannelSessionCRUD()

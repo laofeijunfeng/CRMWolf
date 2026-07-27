@@ -15,7 +15,7 @@ from app.crud.im_bot import agent_channel_session_crud, im_inbound_event_crud
 from app.models.im_bot import IMBotProvider, IMInboundEventStatus
 from app.models.oauth import OAuthProviderConfig
 from app.schemas.agent import AgentSessionCreate
-from app.services.agent.im_conversation import agent_im_conversation_service
+from app.services.im_agent_gateway import im_agent_gateway
 
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ class FeishuBotEventError(Exception):
 
 class FeishuBotService:
     api_base_url = "https://open.feishu.cn/open-apis"
+    receipt_emoji_type = "Get"
 
     async def handle_event(
         self,
@@ -63,9 +64,11 @@ class FeishuBotService:
         if integration_config.bot_verification_token and payload_token != integration_config.bot_verification_token:
             raise FeishuBotEventError("飞书事件校验 Token 不匹配")
 
+        event_type = header.get("event_type") or ""
         message = event.get("message") or {}
-        event_id = header.get("event_id") or message.get("message_id")
-        message_id = message.get("message_id")
+        reaction_message_id = event.get("message_id") or event.get("messageId")
+        event_id = header.get("event_id") or message.get("message_id") or reaction_message_id
+        message_id = message.get("message_id") or reaction_message_id
         if not event_id:
             raise FeishuBotEventError("飞书事件缺少 event_id")
 
@@ -83,10 +86,14 @@ class FeishuBotService:
 
         try:
             im_inbound_event_crud.mark_status(db, inbound_event, IMInboundEventStatus.PROCESSING)
-            reply_text = await self._handle_message_event(db, integration_config, event)
+            reply_to_message_id = message_id
+            if "reaction" in event_type:
+                reply_to_message_id, reply_text = await self._handle_reaction_event(db, integration_config, event)
+            else:
+                reply_text = await self._handle_message_event(db, integration_config, event)
             response_message_id = None
-            if reply_text and message_id:
-                response_message_id = await self.reply_text(db, integration_config, message_id, reply_text)
+            if reply_text and reply_to_message_id:
+                response_message_id = await self.reply_text(db, integration_config, reply_to_message_id, reply_text)
             im_inbound_event_crud.mark_status(
                 db,
                 inbound_event,
@@ -151,27 +158,28 @@ class FeishuBotService:
         message_id = message.get("message_id")
         if message_id:
             try:
-                await self.add_message_reaction(db, integration_config, message_id, "OK")
+                await self.add_message_reaction(db, integration_config, message_id, self.receipt_emoji_type)
             except Exception as exc:
                 logger.warning("飞书机器人收到确认表情失败，继续处理消息: message_id=%s error=%s", message_id, exc)
 
-        normalized_content = await self._build_agent_content(integration_config, message, content)
+        chat_id = message.get("chat_id") or open_id
+        thread_id = message.get("thread_id") or message.get("root_id") or ""
         session_scope = hashlib.sha256(
-            f"{integration_config.team_id}:{integration_config.provider}:{message.get('chat_id') or open_id}:{message.get('thread_id') or message.get('root_id') or ''}:{account.user_id}".encode()
+            f"{integration_config.team_id}:{integration_config.provider}:{chat_id}:{thread_id}:{account.user_id}".encode()
         ).hexdigest()[:32]
         channel_session = agent_channel_session_crud.get_or_create(
             db,
             team_id=integration_config.team_id,
             user_id=account.user_id,
             provider=IMBotProvider.FEISHU,
-            chat_id=message.get("chat_id") or open_id,
-            thread_id=message.get("thread_id") or message.get("root_id") or "",
+            chat_id=chat_id,
+            thread_id=thread_id,
             external_tenant_key=account.tenant_key,
             session_create=AgentSessionCreate(
                 session_key=f"im_feishu_{session_scope}",
                 team_id=integration_config.team_id,
                 user_id=account.user_id,
-                title=normalized_content[:50],
+                title=content[:50],
                 context_json={
                     "channel": "im",
                     "provider": IMBotProvider.FEISHU,
@@ -179,15 +187,62 @@ class FeishuBotService:
                 },
             ),
         )
-        result = await agent_im_conversation_service.handle_message(
-            content=normalized_content,
+        agent_content = await self._build_agent_content(integration_config, message, content)
+        result = await im_agent_gateway.handle_text(
+            db,
             team_id=integration_config.team_id,
             user_id=account.user_id,
+            provider=IMBotProvider.FEISHU,
             session_id=channel_session.agent_session_id,
+            user_text=content,
+            agent_content=agent_content,
         )
         if message.get("message_id"):
             agent_channel_session_crud.mark_message(db, channel_session, message["message_id"])
         return self._render_im_reply(result)
+
+    async def _handle_reaction_event(
+        self,
+        db: Session,
+        integration_config: OAuthProviderConfig,
+        event: Dict[str, Any],
+    ) -> tuple[Optional[str], Optional[str]]:
+        message_id = event.get("message_id") or event.get("messageId")
+        reaction = event.get("reaction") or event
+        operator = reaction.get("operator") or event.get("operator") or {}
+        operator_type = operator.get("operator_type")
+        emoji_type = (((reaction.get("reaction_type") or event.get("reaction_type") or {}).get("emoji_type")) or "").strip()
+        logger.info(
+            "处理飞书消息表情事件: message_id=%s emoji_type=%s operator_type=%s",
+            message_id,
+            emoji_type,
+            operator_type,
+        )
+        if operator_type == "app":
+            return None, None
+        if not im_agent_gateway.intent_from_emoji(emoji_type):
+            return None, None
+
+        operator_id = self._extract_operator_open_id(operator)
+        if not operator_id:
+            logger.info("飞书消息表情事件缺少用户 open_id: message_id=%s operator=%s", message_id, operator)
+            return None, None
+        account = user_oauth_account_crud.get_by_open_id(db, integration_config.team_id, IMBotProvider.FEISHU, operator_id)
+        if not account:
+            logger.info("飞书消息表情操作人未绑定 CRM 账号: message_id=%s operator_open_id=%s", message_id, operator_id)
+            return message_id, "你还没有绑定 CRM 账号，请先在 CRM 的个人设置中绑定飞书账号。"
+
+        result = await im_agent_gateway.handle_reaction(
+            db,
+            team_id=integration_config.team_id,
+            user_id=account.user_id,
+            provider=IMBotProvider.FEISHU,
+            response_message_id=message_id,
+            emoji_type=emoji_type,
+        )
+        if not result:
+            return None, None
+        return message_id, self._render_im_reply(result)
 
     async def reply_text(self, db: Session, integration_config: OAuthProviderConfig, message_id: str, text: str) -> Optional[str]:
         secret = oauth_provider_config_crud.get_secret(integration_config)
@@ -389,6 +444,12 @@ class FeishuBotService:
             return f"引用消息：\n{quote_text}\n\n本次指令：\n{content}"
         return f"引用消息ID：{root_id}\n\n本次指令：\n{content}"
 
+    def _extract_operator_open_id(self, operator: Dict[str, Any]) -> Optional[str]:
+        operator_id = operator.get("operator_id")
+        if isinstance(operator_id, dict):
+            return operator_id.get("open_id") or operator_id.get("user_id") or operator_id.get("union_id")
+        return operator.get("open_id") or (str(operator_id) if operator_id else None)
+
     def _mentions_bot(self, db: Session, message: Dict[str, Any], integration_config: OAuthProviderConfig) -> bool:
         mentions = message.get("mentions") or []
         if not mentions:
@@ -423,6 +484,7 @@ class FeishuBotService:
         header = payload.get("header") or {}
         event = payload.get("event") or {}
         message = event.get("message") or {}
+        reaction = event.get("reaction") or {}
         return {
             "header": {
                 "event_id": header.get("event_id"),
@@ -438,6 +500,11 @@ class FeishuBotService:
                 "root_id": message.get("root_id"),
                 "parent_id": message.get("parent_id"),
                 "mentions": message.get("mentions") or [],
+            },
+            "reaction": {
+                "message_id": event.get("message_id") or event.get("messageId"),
+                "operator": reaction.get("operator") or event.get("operator"),
+                "reaction_type": reaction.get("reaction_type") or event.get("reaction_type"),
             },
         }
 
