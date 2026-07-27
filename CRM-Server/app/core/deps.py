@@ -61,6 +61,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    setattr(user, "_token_payload", payload)
     return user
 
 
@@ -80,6 +81,24 @@ async def get_current_user_team(
     current_user = Depends(get_current_active_user)
 ) -> int:
     """获取当前用户的活跃 team_id，无团队时抛出错误"""
+    token_payload = getattr(current_user, "_token_payload", {}) or {}
+    token_team_id = token_payload.get("team_id")
+    if token_team_id is not None:
+        try:
+            team_id = int(token_team_id)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="无效的团队凭证",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if user_team_crud.get_by_user_and_team(db, current_user.id, team_id):
+            return team_id
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="用户不属于该团队",
+        )
+
     user_team = user_team_crud.get_user_current_team(db, current_user.id)
 
     if not user_team:
@@ -120,6 +139,17 @@ async def get_current_user_team_optional(
     current_user = Depends(get_current_active_user)
 ) -> int | None:
     """获取当前用户的活跃 team_id，无团队时返回 None"""
+    token_payload = getattr(current_user, "_token_payload", {}) or {}
+    token_team_id = token_payload.get("team_id")
+    if token_team_id is not None:
+        try:
+            team_id = int(token_team_id)
+        except (TypeError, ValueError):
+            return None
+        if user_team_crud.get_by_user_and_team(db, current_user.id, team_id):
+            return team_id
+        return None
+
     user_team = user_team_crud.get_user_current_team(db, current_user.id)
     return user_team.team_id if user_team else None
 

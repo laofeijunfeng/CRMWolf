@@ -1,9 +1,11 @@
 from datetime import timedelta
+import secrets
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
 from app.core.security import create_access_token, decode_access_token
@@ -39,9 +41,34 @@ def _ensure_team_admin(db: Session, user_id: int, team_id: int) -> None:
         )
 
 
-def _config_response(config, team_id: int) -> OAuthProviderConfigResponse:
+FEISHU_BOT_CALLBACK_PATH = "/api/v1/im/feishu/events"
+
+
+def _get_public_base_url(request: Request | None = None) -> str | None:
+    settings = get_settings()
+    base_url = (settings.PUBLIC_API_BASE_URL or settings.FRONTEND_URL or "").strip().rstrip("/")
+    if not base_url and request:
+        base_url = str(request.base_url).rstrip("/")
+    if base_url.endswith("/api"):
+        base_url = base_url[:-4]
+    return base_url or None
+
+
+def _build_bot_callback_url(callback_path: str, request: Request | None = None) -> str | None:
+    base_url = _get_public_base_url(request)
+    return f"{base_url}{callback_path}" if base_url else None
+
+
+def _config_response(config, team_id: int, request: Request | None = None) -> OAuthProviderConfigResponse:
     if config is None:
-        return OAuthProviderConfigResponse(team_id=team_id)
+        callback_url = _build_bot_callback_url(FEISHU_BOT_CALLBACK_PATH, request)
+        return OAuthProviderConfigResponse(
+            team_id=team_id,
+            bot_callback_path=FEISHU_BOT_CALLBACK_PATH,
+            bot_callback_url=callback_url,
+        )
+    callback_path = config.bot_callback_path or FEISHU_BOT_CALLBACK_PATH
+    callback_url = _build_bot_callback_url(callback_path, request)
     return OAuthProviderConfigResponse(
         id=config.id,
         team_id=config.team_id,
@@ -50,6 +77,12 @@ def _config_response(config, team_id: int) -> OAuthProviderConfigResponse:
         redirect_uri=config.redirect_uri,
         enabled=config.enabled,
         app_secret_configured=bool(config.app_secret_encrypted),
+        bot_enabled=bool(config.bot_enabled),
+        bot_verification_token=config.bot_verification_token,
+        bot_encrypt_key=config.bot_encrypt_key,
+        bot_open_id=config.bot_open_id,
+        bot_callback_path=callback_path,
+        bot_callback_url=callback_url,
         created_at=config.created_at,
         updated_at=config.updated_at,
     )
@@ -92,26 +125,34 @@ def get_invite_login_options(code: str, db: Session = Depends(get_db)):
 
 @router.get("/v1/oauth/configs/feishu", response_model=OAuthProviderConfigResponse)
 def get_feishu_config(
+    request: Request,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
     _ensure_team_admin(db, current_user.id, team_id)
     config = oauth_provider_config_crud.get(db, team_id, "feishu")
-    return _config_response(config, team_id)
+    return _config_response(config, team_id, request)
 
 
 @router.put("/v1/oauth/configs/feishu", response_model=OAuthProviderConfigResponse)
 def update_feishu_config(
     data: OAuthProviderConfigUpdate,
+    request: Request,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
     _ensure_team_admin(db, current_user.id, team_id)
     existing = oauth_provider_config_crud.get(db, team_id, "feishu")
-    if data.enabled and not data.app_secret and not (existing and existing.app_secret_encrypted):
+    app_secret_configured = bool(data.app_secret or (existing and existing.app_secret_encrypted))
+    if data.enabled and not app_secret_configured:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="启用飞书登录前请配置 App Secret")
+    if data.bot_enabled and not app_secret_configured:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="启用飞书AI Agent机器人前请配置 App Secret")
+    bot_encrypt_key = data.bot_encrypt_key
+    if data.bot_enabled and not bot_encrypt_key:
+        bot_encrypt_key = existing.bot_encrypt_key if existing and existing.bot_encrypt_key else secrets.token_urlsafe(32)
 
     config = oauth_provider_config_crud.upsert_feishu(
         db,
@@ -120,8 +161,13 @@ def update_feishu_config(
         app_secret=data.app_secret,
         redirect_uri=data.redirect_uri,
         enabled=data.enabled,
+        bot_enabled=data.bot_enabled,
+        bot_verification_token=data.bot_verification_token,
+        bot_encrypt_key=bot_encrypt_key,
+        bot_open_id=data.bot_open_id,
+        bot_callback_path=FEISHU_BOT_CALLBACK_PATH,
     )
-    return _config_response(config, team_id)
+    return _config_response(config, team_id, request)
 
 
 @router.get("/v1/auth/feishu/login-url", response_model=OAuthLoginUrlResponse)

@@ -17,6 +17,7 @@ from app.api.license_application import router as license_application_router  # 
 from app.api.customer_ai import router as customer_ai_router
 from app.api.ai_config import router as ai_config_router
 from app.api.agent import router as agent_router
+from app.api.im_bots import router as im_bots_router
 # Frontend Logs 路由
 from app.api.frontend_logs import router as frontend_logs_router
 from app.core.exceptions import (
@@ -101,6 +102,7 @@ api_router.include_router(license_application_router)  # 新增：License申请�
 # === AI 相关路由 ===
 api_router.include_router(ai_config_router)
 api_router.include_router(agent_router)
+api_router.include_router(im_bots_router)
 api_router.include_router(frontend_logs_router)
 api_router.include_router(score_weights_router)
 api_router.include_router(scores_router)

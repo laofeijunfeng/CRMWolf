@@ -12,6 +12,20 @@ class OAuthProviderConfigCRUD:
             OAuthProviderConfig.provider == provider,
         ).first()
 
+    def get_by_app_id(self, db: Session, provider: str, app_id: str) -> Optional[OAuthProviderConfig]:
+        return db.query(OAuthProviderConfig).filter(
+            OAuthProviderConfig.provider == provider,
+            OAuthProviderConfig.app_id == app_id,
+        ).first()
+
+    def list_bot_enabled_with_encrypt_key(self, db: Session, provider: str) -> list[OAuthProviderConfig]:
+        return db.query(OAuthProviderConfig).filter(
+            OAuthProviderConfig.provider == provider,
+            OAuthProviderConfig.bot_enabled.is_(True),
+            OAuthProviderConfig.bot_encrypt_key.isnot(None),
+            OAuthProviderConfig.bot_encrypt_key != "",
+        ).all()
+
     def upsert_feishu(
         self,
         db: Session,
@@ -20,6 +34,11 @@ class OAuthProviderConfigCRUD:
         redirect_uri: str,
         enabled: bool,
         app_secret: Optional[str] = None,
+        bot_enabled: bool = False,
+        bot_verification_token: Optional[str] = None,
+        bot_encrypt_key: Optional[str] = None,
+        bot_open_id: Optional[str] = None,
+        bot_callback_path: Optional[str] = None,
     ) -> OAuthProviderConfig:
         config = self.get(db, team_id, "feishu")
         if config is None:
@@ -35,6 +54,11 @@ class OAuthProviderConfigCRUD:
         config.app_id = app_id
         config.redirect_uri = redirect_uri
         config.enabled = enabled
+        config.bot_enabled = bot_enabled
+        config.bot_verification_token = bot_verification_token
+        config.bot_encrypt_key = bot_encrypt_key
+        config.bot_open_id = bot_open_id
+        config.bot_callback_path = bot_callback_path
         if app_secret:
             config.app_secret_encrypted = OAuthProviderConfig.encrypt_secret(app_secret)
 

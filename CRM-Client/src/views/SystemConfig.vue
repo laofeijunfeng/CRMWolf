@@ -3,7 +3,7 @@
  * SystemConfig.vue - 系统配置页面
  *
  * 功能：
- * - 展示6个配置卡片（角色管理、审批流程、采购配置、AI配置、通知配置、团队成员）
+ * - 展示配置卡片（角色管理、审批流程、采购配置、AI配置、通知配置、第三方集成、团队成员）
  * - 点击卡片打开对应的 Sheet 抽屉
  * - 权限控制：无权限的卡片不显示
  *
@@ -21,7 +21,7 @@ import { computed, ref, defineAsyncComponent } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
 import { Card, CardContent } from '@/components/ui/card'
-import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users, KeyRound } from 'lucide-vue-next'
+import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users, Plug } from 'lucide-vue-next'
 
 // 懒加载 Sheet 组件（性能优化）
 const RoleSheet = defineAsyncComponent(() =>
@@ -198,9 +198,9 @@ fetchUserRoles()
         @click="openSheet('login-integration')"
       >
         <CardContent class="p-6">
-          <KeyRound class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">登录集成</h3>
-          <p class="text-sm text-wolf-text-secondary">配置团队第三方登录</p>
+          <Plug class="w-8 h-8 mb-3 text-wolf-primary" />
+          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">第三方集成</h3>
+          <p class="text-sm text-wolf-text-secondary">配置飞书登录与 AI Agent 机器人</p>
         </CardContent>
       </Card>
 

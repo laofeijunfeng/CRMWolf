@@ -1,6 +1,4 @@
-"""
-OAuth 登录集成模型
-"""
+"""第三方集成模型。"""
 from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.sql import func
@@ -10,7 +8,7 @@ from app.models.ai_config import AIConfig
 
 
 class OAuthProviderConfig(Base):
-    """团队级第三方登录配置"""
+    """团队级第三方应用配置。"""
     __tablename__ = "oauth_provider_configs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -20,6 +18,11 @@ class OAuthProviderConfig(Base):
     app_secret_encrypted = Column(String(1000), nullable=True, comment="加密后的应用密钥")
     redirect_uri = Column(String(500), nullable=False, comment="授权回调地址")
     enabled = Column(Boolean, nullable=False, default=False, comment="是否启用")
+    bot_enabled = Column(Boolean, nullable=False, default=False, comment="是否启用AI Agent机器人")
+    bot_verification_token = Column(String(255), nullable=True, comment="机器人事件订阅校验Token")
+    bot_encrypt_key = Column(String(255), nullable=True, comment="机器人事件订阅加密Key")
+    bot_open_id = Column(String(128), nullable=True, comment="机器人Open ID")
+    bot_callback_path = Column(String(200), nullable=True, comment="机器人事件回调路径")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), comment="更新时间")
 

@@ -45,6 +45,8 @@ class Settings(BaseSettings):
 
     # 前端应用地址（用于飞书通知跳转链接）
     FRONTEND_URL: str = ""  # 例如: https://crm.example.com
+    # 后端公网入口地址（用于飞书事件回调等外部系统访问；通常与 FRONTEND_URL 同域）
+    PUBLIC_API_BASE_URL: str = ""  # 例如: https://crm.example.com
 
     # 文件上传目录。默认跟随后端项目根目录：本地为 CRM-Server/uploads，容器内为 /app/uploads。
     UPLOAD_DIR: str = str(Path(__file__).resolve().parents[2] / "uploads")

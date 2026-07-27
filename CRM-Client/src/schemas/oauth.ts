@@ -34,6 +34,12 @@ export const OAuthProviderConfigResponseSchema = z.object({
   redirect_uri: NullableStringSchema,
   enabled: z.boolean(),
   app_secret_configured: z.boolean(),
+  bot_enabled: z.boolean(),
+  bot_verification_token: NullableStringSchema,
+  bot_encrypt_key: NullableStringSchema,
+  bot_open_id: NullableStringSchema,
+  bot_callback_path: NullableStringSchema,
+  bot_callback_url: NullableStringSchema,
   created_at: NullableStringSchema,
   updated_at: NullableStringSchema,
 })
@@ -43,6 +49,10 @@ export const OAuthProviderConfigUpdateSchema = z.object({
   app_secret: NullableStringSchema,
   redirect_uri: z.string(),
   enabled: z.boolean(),
+  bot_enabled: z.boolean(),
+  bot_verification_token: NullableStringSchema,
+  bot_encrypt_key: NullableStringSchema,
+  bot_open_id: NullableStringSchema,
 })
 
 export const InviteLoginOptionsResponseSchema = z.object({

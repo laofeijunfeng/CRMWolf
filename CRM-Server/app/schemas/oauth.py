@@ -11,6 +11,10 @@ class OAuthProviderConfigUpdate(BaseModel):
     app_secret: Optional[str] = Field(None, max_length=255, description="飞书 App Secret，不填写则保留原值")
     redirect_uri: str = Field(..., min_length=1, max_length=500, description="飞书授权回调地址")
     enabled: bool = Field(False, description="是否启用飞书登录")
+    bot_enabled: bool = Field(False, description="是否启用飞书AI Agent机器人")
+    bot_verification_token: Optional[str] = Field(None, max_length=255, description="飞书事件订阅校验Token")
+    bot_encrypt_key: Optional[str] = Field(None, max_length=255, description="飞书事件订阅加密Key")
+    bot_open_id: Optional[str] = Field(None, max_length=128, description="飞书机器人Open ID")
 
     @field_validator("app_id", "redirect_uri")
     @classmethod
@@ -20,9 +24,9 @@ class OAuthProviderConfigUpdate(BaseModel):
             raise ValueError("不能为空")
         return value
 
-    @field_validator("app_secret")
+    @field_validator("app_secret", "bot_verification_token", "bot_encrypt_key", "bot_open_id")
     @classmethod
-    def normalize_secret(cls, value: Optional[str]) -> Optional[str]:
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         value = value.strip()
@@ -37,6 +41,12 @@ class OAuthProviderConfigResponse(BaseModel):
     redirect_uri: Optional[str] = None
     enabled: bool = False
     app_secret_configured: bool = False
+    bot_enabled: bool = False
+    bot_verification_token: Optional[str] = None
+    bot_encrypt_key: Optional[str] = None
+    bot_open_id: Optional[str] = None
+    bot_callback_path: Optional[str] = None
+    bot_callback_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

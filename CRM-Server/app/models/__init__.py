@@ -25,6 +25,10 @@ from app.models.agent import (
     AgentSession, AgentMessage, AgentTask, AgentToolCall, AgentIdempotencyKey,
     AgentSessionStatus, AgentMessageRole, AgentTaskStatus, AgentToolCallStatus, AgentIdempotencyStatus,
 )
+from app.models.im_bot import (
+    AgentChannelSession, IMInboundEvent,
+    IMBotProvider, IMBotStatus, IMInboundEventStatus,
+)
 
 __all__ = [
     "User", "UserStatus",
@@ -52,5 +56,7 @@ __all__ = [
     "LicenseApplication", "LicenseApplicationStatus", "LicenseType",
     "OAuthProviderConfig", "UserOAuthAccount",
     "AgentSession", "AgentMessage", "AgentTask", "AgentToolCall", "AgentIdempotencyKey",
-    "AgentSessionStatus", "AgentMessageRole", "AgentTaskStatus", "AgentToolCallStatus", "AgentIdempotencyStatus"
+    "AgentSessionStatus", "AgentMessageRole", "AgentTaskStatus", "AgentToolCallStatus", "AgentIdempotencyStatus",
+    "AgentChannelSession", "IMInboundEvent",
+    "IMBotProvider", "IMBotStatus", "IMInboundEventStatus",
 ]
