@@ -11,13 +11,13 @@
 
   交互说明:
   - 点击直接跳转 /approvals（无下拉预览）
-  - 权限门控：包含所有审批权限
+  - 权限门控：包含审批人权限与提交/查看审批相关业务权限
   - Badge 显示 pendingCount（红色圆形，右上角定位）
 -->
 <template>
   <!-- 响应式权限检查 -->
   <Button
-    v-if="permissionStore.hasAnyPermission(ALL_APPROVAL_PERMISSIONS)"
+    v-if="permissionStore.hasAnyPermission(APPROVAL_ENTRY_PERMISSIONS)"
     variant="ghost"
     size="icon-sm"
     class="approval-icon"
@@ -49,14 +49,30 @@ import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 
 /**
- * 所有审批权限（合同/发票/回款/License/商机）
+ * 审批中心入口权限。
+ * 审批中心同时承载“待我审批”和“我提交的”，所以普通销售只有提交/查看业务权限时也应看到入口。
  */
-const ALL_APPROVAL_PERMISSIONS = [
+const APPROVAL_ENTRY_PERMISSIONS = [
+  'contract:view:own',
+  'contract:view:all',
+  'contract:create',
+  'contract:submit',
+  'contract:cancel',
   'contract:approve:own',
   'contract:approve:all',
+  'invoice:view:own',
+  'invoice:view:all',
+  'invoice:create',
+  'invoice:submit',
+  'invoice:withdraw',
   'invoice:approve',
   'invoice:approve:own',
   'invoice:approve:all',
+  'payment:view:own',
+  'payment:view:all',
+  'payment:register',
+  'payment:submit',
+  'payment:withdraw',
   'payment:approve',
   'payment:approve:own',
   'payment:approve:all',

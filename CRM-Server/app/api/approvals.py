@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional
+from urllib.parse import quote
+import os
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
@@ -33,6 +35,7 @@ from app.services.approval_adapter import (
     get_approval_type_name,
 )
 from app.services.feishu_notification import feishu_notification_service
+from app.services.file_storage import file_storage_service, FileStorageError
 from datetime import date, datetime as _datetime
 
 
@@ -40,6 +43,29 @@ router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
 
 # 审批操作日志记录器
 logger = get_logger(__name__)
+
+
+def _approval_file_content_type(file_path: str, fallback: Optional[str] = None) -> str:
+    if fallback:
+        return fallback
+    ext = os.path.splitext(file_path)[1].lower()
+    return {
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".ofd": "application/octet-stream",
+    }.get(ext, "application/octet-stream")
+
+
+def _approval_file_content_disposition(filename: str) -> str:
+    encoded = quote(filename)
+    ascii_name = filename.encode("ascii", "ignore").decode("ascii") or "attachment"
+    return f'inline; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}'
 
 
 def log_approval_operation(
@@ -1185,6 +1211,44 @@ def _check_approve_permissions(
         )
 
 
+def _check_approval_detail_permissions(
+    db: Session,
+    approval: Approval,
+    current_user,
+    team_id: int,
+) -> None:
+    """审批详情只允许提交人、当前审批人、已处理人和团队管理员查看。"""
+    user_id_str = str(current_user.id)
+    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
+    role_codes = {r.code for r in user_roles}
+
+    if "TEAM_ADMIN" in role_codes:
+        return
+
+    if approval.submitter_id == user_id_str:
+        return
+
+    if (
+        approval.status == ApprovalStatus.PENDING
+        and approval.current_node
+        and approval.current_node.approve_role in role_codes
+    ):
+        return
+
+    has_processed_record = db.query(ApprovalRecord.id).filter(
+        ApprovalRecord.approval_id == approval.id,
+        ApprovalRecord.approver_id == user_id_str,
+        ApprovalRecord.action != ApprovalAction.SUBMIT,
+    ).first()
+    if has_processed_record:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="您没有权限查看该审批详情",
+    )
+
+
 def _check_next_node_has_approvers(
     db: Session,
     approval: Approval,
@@ -2038,7 +2102,95 @@ def detail_generic_approval(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="审批流程不存在",
         )
+    _check_approval_detail_permissions(db, approval, current_user, team_id)
     return _serialize_generic_approval(approval, db)
+
+
+@router.get(
+    "/{entity_type}/{entity_id}/file",
+    summary="预览或下载审批附件（通用）",
+    description="在审批上下文中读取合同附件或发票文件，权限与审批详情保持一致。",
+)
+def download_generic_approval_file(
+    entity_type: str,
+    entity_id: int,
+    db: Session = Depends(get_db),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+):
+    _validate_entity_type(entity_type)
+
+    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
+    if not approval:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="审批流程不存在",
+        )
+    _check_approval_detail_permissions(db, approval, current_user, team_id)
+
+    file_path: Optional[str] = None
+    file_name: Optional[str] = None
+    mime_type: Optional[str] = None
+
+    if entity_type == BusinessType.CONTRACT:
+        from app.models.contract import Contract
+
+        contract = db.query(Contract).filter(
+            Contract.id == entity_id,
+            Contract.team_id == team_id,
+        ).first()
+        if contract:
+            file_path = contract.contract_file_path
+            file_name = contract.contract_file_name
+            mime_type = contract.contract_file_mime_type
+    elif entity_type == BusinessType.INVOICE:
+        from app.models.invoice import InvoiceApplication
+
+        invoice = db.query(InvoiceApplication).filter(
+            InvoiceApplication.id == entity_id,
+            InvoiceApplication.team_id == team_id,
+        ).first()
+        if invoice:
+            file_path = invoice.invoice_file_path
+            extension = os.path.splitext(invoice.invoice_file_path or "")[1].lower()
+            file_name = f"{invoice.invoice_number or invoice.application_number or f'invoice_{entity_id}'}{extension}"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该审批单据暂无可预览附件",
+        )
+
+    if not file_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该审批单据暂无可预览附件",
+        )
+
+    try:
+        full_path = file_storage_service.get_full_path(file_path)
+    except FileStorageError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="文件路径非法",
+        )
+
+    if not os.path.exists(full_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="文件不存在",
+        )
+
+    with open(full_path, "rb") as f:
+        content = f.read()
+
+    filename = file_name or f"{entity_type.lower()}_{entity_id}{os.path.splitext(file_path)[1].lower()}"
+    return Response(
+        content=content,
+        media_type=_approval_file_content_type(file_path, mime_type),
+        headers={
+            "Content-Disposition": _approval_file_content_disposition(filename),
+        },
+    )
 
 
 # ============================================================================

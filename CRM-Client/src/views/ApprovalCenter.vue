@@ -43,9 +43,8 @@
     </ErrorState>
 
     <template v-else>
-      <!-- DataTable（桌面端） -->
+      <!-- DataTable（桌面 + 移动端卡片） -->
       <DataTable
-        v-if="!isMobile"
         v-model:filters="activeFilters"
         :columns="columns"
         :data="rows"
@@ -54,8 +53,10 @@
         :page-size="pageSize"
         :loading="listLoading"
         :filter-fields="filterFields"
-        height="calc(100vh - 121px)"
+        height="calc(100vh - 108px)"
         empty-title="暂无待审批事项"
+        empty-description="所有回款与发票申请都已处理完毕"
+        mobile-mode="card"
         row-interactive
         @update:page="page = $event; fetchList()"
         @update:page-size="pageSize = $event; page = 1; fetchList()"
@@ -131,6 +132,16 @@
               详情
             </Button>
             <Button
+              v-if="hasAttachment(row)"
+              variant="ghost"
+              size="sm"
+              data-testid="preview-btn"
+              :loading="attachmentPreviewPendingId === row.id"
+              @click.stop="handlePreviewAttachment(row)"
+            >
+              预览
+            </Button>
+            <Button
               v-if="activeTab === 'submitted' && row.status === 'REJECTED'"
               variant="ghost"
               size="sm"
@@ -153,184 +164,152 @@
             </Button>
           </div>
         </template>
-      </DataTable>
 
-      <!-- 移动端卡片列表 -->
-      <div v-if="isMobile" class="space-y-4">
-        <div class="approval-mobile-tools">
-          <ListFilterPopover
-            :model-value="activeFilters"
-            :fields="filterFields"
-            @update:model-value="activeFilters = $event"
-            @apply="handleFilterApply"
-            @reset="handleFilterReset"
-          />
-        </div>
-
-        <div v-if="listLoading" class="approval-mobile-loading">
-          加载中...
-        </div>
-
-        <Card
-          v-for="(row, $index) in rows"
-          :key="row.id"
-          :class="cn(
-            'relative',
-            row.overdue_hours != null && row.overdue_hours >= 48 && 'border-warning'
-          )"
-        >
-          <CardContent class="p-4">
-            <!-- 卡片头部：单号 + 状态 -->
+        <template #mobile-card="{ row }">
+          <div :class="cn('approval-mobile-card', row.overdue_hours != null && row.overdue_hours >= 48 && 'is-overdue')">
             <div class="flex justify-between items-center mb-3">
               <span
                 class="font-mono text-primary text-base cursor-pointer"
                 data-testid="copy-number-mobile"
-                @click="copyNumber(row.application_number)"
+                @click.stop="copyNumber(row.application_number)"
               >
                 {{ row.application_number }}
               </span>
               <ApprovalStatusBadge :status="row.status" size="small" />
             </div>
 
-            <!-- 卡片主体：实体 + 金额 -->
-            <div class="flex justify-between items-center mb-3">
-              <span class="text-base font-medium max-w-[60%] truncate">
+            <div class="flex justify-between items-center mb-3 gap-3">
+              <span class="text-base font-medium min-w-0 flex-1 truncate">
                 {{ row.entity_name || '-' }}
               </span>
               <AmountText :value="row.entity_amount" size="lg" tone="warning" />
             </div>
 
-            <!-- 卡片次要信息：提交人 + 时间 -->
-            <div class="flex justify-between text-sm text-muted-foreground mb-3">
-              <span class="max-w-[50%] truncate">{{ row.submitter_name }} 提交</span>
-              <span>{{ formatDateRelative(row.created_time) }}</span>
+            <div class="flex justify-between text-sm text-muted-foreground mb-3 gap-3">
+              <span class="min-w-0 flex-1 truncate">{{ row.submitter_name }} 提交</span>
+              <span class="shrink-0">{{ formatDateRelative(row.created_time) }}</span>
             </div>
 
-            <!-- 超时提示 -->
-            <div v-if="row.overdue_hours != null && row.overdue_hours >= 48" class="mb-3">
+            <div v-if="row.overdue_hours != null && row.overdue_hours >= 48">
               <Badge class="gap-1 bg-warning text-warning-foreground border-transparent">
                 <Clock class="w-3 h-3" />
                 超时 {{ row.overdue_hours }} 小时
               </Badge>
             </div>
+          </div>
+        </template>
 
-            <Separator class="my-3" />
-
-            <!-- 操作按钮（Touch Target ≥44pt） -->
-            <div class="flex gap-2" v-if="activeTab === 'pending'">
-              <Button
-                variant="default"
-                size="lg"
-                class="flex-1 min-h-[44px]"
-                data-testid="mobile-approve-btn"
-                @click="handleQuickApprove(row)"
-              >
-                同意
-              </Button>
-              <Button
-                variant="destructive"
-                size="lg"
-                class="flex-1 min-h-[44px]"
-                data-testid="mobile-reject-btn"
-                @click="handleQuickReject(row)"
-              >
-                驳回
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                class="flex-1 min-h-[44px]"
-                data-testid="mobile-detail-btn"
-                @click="openDetail(row, $index)"
-              >
-                详情
-              </Button>
-            </div>
-            <div class="flex gap-2" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED'">
-              <Button
-                variant="default"
-                size="lg"
-                class="flex-1 min-h-[44px]"
-                data-testid="mobile-resubmit-btn"
-                :loading="resubmitPendingId === row.id"
-                @click="handleResubmit(row)"
-              >
-                修改并重新提交
-              </Button>
-            </div>
-            <div class="flex gap-2" v-else-if="activeTab === 'submitted' && row.status === 'PENDING'">
-              <Button
-                variant="outline"
-                size="lg"
-                class="flex-1 min-h-[44px]"
-                data-testid="mobile-remind-btn"
-                :loading="remindPendingId === row.id"
-                @click="handleRemind(row)"
-              >
-                <BellRing class="w-4 h-4" aria-hidden="true" />
-                催办
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                class="flex-1 min-h-[44px]"
-                data-testid="mobile-detail-btn"
-                @click="openDetail(row, $index)"
-              >
-                详情
-              </Button>
-            </div>
-            <div class="flex gap-2" v-else>
-              <Button
-                variant="outline"
-                size="lg"
-                class="flex-1 min-h-[44px]"
-                data-testid="mobile-detail-btn"
-                @click="openDetail(row, $index)"
-              >
-                详情
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <!-- 移动端空态 -->
-        <Empty
-          v-if="!listLoading && rows.length === 0"
-          class="min-h-[220px] border-0"
-        >
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Clock class="h-5 w-5" aria-hidden="true" />
-            </EmptyMedia>
-            <EmptyTitle>暂无待审批事项</EmptyTitle>
-            <EmptyDescription>所有回款与发票申请都已处理完毕</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-
-        <!-- 移动端分页 -->
-        <div v-if="rows.length > 0" class="flex flex-col items-center gap-2 py-4 pb-[env(safe-area-inset-bottom)]">
-          <span class="text-sm text-muted-foreground">共 {{ total }} 条</span>
-          <Pagination
-            v-model:page="page"
-            :total="total"
-            :items-per-page="pageSize"
-            @update:page="fetchList"
-          >
-            <PaginationContent>
-              <PaginationPrevious />
-              <PaginationItem
-                v-for="item in getPageItems()"
-                :key="item"
-                :value="item"
-              >
-                {{ item }}
-              </PaginationItem>
-              <PaginationNext />
-            </PaginationContent>
-          </Pagination>
-        </div>
-      </div>
+        <template #mobile-actions="{ row, index }">
+          <div class="approval-mobile-actions" v-if="activeTab === 'pending'">
+            <Button
+              v-if="hasAttachment(row)"
+              variant="outline"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-preview-btn"
+              :loading="attachmentPreviewPendingId === row.id"
+              @click.stop="handlePreviewAttachment(row)"
+            >
+              预览
+            </Button>
+            <Button
+              variant="destructive"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-reject-btn"
+              @click.stop="handleQuickReject(row)"
+            >
+              驳回
+            </Button>
+            <Button
+              variant="default"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-approve-btn"
+              @click.stop="handleQuickApprove(row)"
+            >
+              通过
+            </Button>
+            <Button
+              v-if="!hasAttachment(row)"
+              variant="outline"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-detail-btn"
+              @click.stop="openDetail(row, index)"
+            >
+              详情
+            </Button>
+          </div>
+          <div class="approval-mobile-actions" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED'">
+            <Button
+              variant="default"
+              size="lg"
+              class="approval-mobile-action approval-mobile-action-wide"
+              data-testid="mobile-resubmit-btn"
+              :loading="resubmitPendingId === row.id"
+              @click.stop="handleResubmit(row)"
+            >
+              修改并重新提交
+            </Button>
+          </div>
+          <div class="approval-mobile-actions" v-else-if="activeTab === 'submitted' && row.status === 'PENDING'">
+            <Button
+              variant="outline"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-remind-btn"
+              :loading="remindPendingId === row.id"
+              @click.stop="handleRemind(row)"
+            >
+              <BellRing class="w-4 h-4" aria-hidden="true" />
+              催办
+            </Button>
+            <Button
+              v-if="hasAttachment(row)"
+              variant="outline"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-preview-btn"
+              :loading="attachmentPreviewPendingId === row.id"
+              @click.stop="handlePreviewAttachment(row)"
+            >
+              预览
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-detail-btn"
+              @click.stop="openDetail(row, index)"
+            >
+              详情
+            </Button>
+          </div>
+          <div class="approval-mobile-actions" v-else>
+            <Button
+              v-if="hasAttachment(row)"
+              variant="outline"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-preview-btn"
+              :loading="attachmentPreviewPendingId === row.id"
+              @click.stop="handlePreviewAttachment(row)"
+            >
+              预览
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              class="approval-mobile-action"
+              data-testid="mobile-detail-btn"
+              @click.stop="openDetail(row, index)"
+            >
+              详情
+            </Button>
+          </div>
+        </template>
+      </DataTable>
     </template>
 
     <!-- 详情 Sheet -->
@@ -459,6 +438,41 @@
       @issued="handleInvoiceFileUploaded"
     />
 
+    <Dialog :open="attachmentPreviewVisible" @update:open="handleAttachmentPreviewOpenChange">
+      <DialogContent class="max-w-[92vw] sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>{{ attachmentPreviewTitle }}</DialogTitle>
+          <DialogDescription>审批附件预览</DialogDescription>
+        </DialogHeader>
+
+        <div class="approval-attachment-preview">
+          <div v-if="attachmentPreviewPendingId != null" class="approval-attachment-preview__loading">
+            加载中...
+          </div>
+          <img
+            v-else-if="attachmentPreviewIsImage && attachmentPreviewUrl"
+            :src="attachmentPreviewUrl"
+            :alt="attachmentPreviewTitle"
+            class="approval-attachment-preview__image"
+          >
+          <iframe
+            v-else-if="attachmentPreviewIsPdf && attachmentPreviewUrl"
+            :src="attachmentPreviewUrl"
+            :title="attachmentPreviewTitle"
+            class="approval-attachment-preview__frame"
+          />
+          <div v-else class="approval-attachment-preview__fallback">
+            当前文件格式不支持直接预览，请下载后查看。
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" @click="closeAttachmentPreview">关闭</Button>
+          <Button @click="handleDownloadAttachment">下载</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- 移动端快速驳回弹窗 -->
     <Dialog v-model:open="quickRejectVisible">
       <DialogContent class="max-w-[90vw]">
@@ -513,9 +527,8 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { BellRing, Clock, Copy } from 'lucide-vue-next'
-import { AmountText, DataTable, Badge, Separator, ListFilterPopover } from '@/components/crmwolf'
+import { AmountText, DataTable, Badge } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from '@/components/ui/pagination'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
@@ -523,13 +536,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
 import { cn } from '@/lib/utils'
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
@@ -543,6 +549,8 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { formatDateRelative } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
+import { handleApiError } from '@/utils/errorHandler'
+import approvalGenericApi from '@/api/approvalGeneric'
 import contractApi from '@/api/contract'
 import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery } from '@/schemas/approvalGeneric'
 import type { ContractResponse } from '@/api/contract'
@@ -592,16 +600,15 @@ const contractEditVisible = ref<boolean>(false)
 const editingContract = ref<ContractResponse | null>(null)
 const contractLoading = ref<boolean>(false)
 
-// 移动端检测（响应式）
-const isMobile = ref<boolean>(false)
-const checkMobile = (): void => {
-  isMobile.value = typeof window !== 'undefined' && window.innerWidth < 768
-}
-
 // 快速驳回弹窗
 const quickRejectVisible = ref<boolean>(false)
 const quickRejectReason = ref<string>('')
 const quickRejectRow = ref<ApprovalListItem | null>(null)
+
+const attachmentPreviewVisible = ref<boolean>(false)
+const attachmentPreviewPendingId = ref<number | null>(null)
+const attachmentPreviewRow = ref<ApprovalListItem | null>(null)
+const attachmentPreviewUrl = ref<string>('')
 
 // ==================== 计算属性 ====================
 const activeApprovalDetail = computed<ApprovalDetail | null>(() => {
@@ -759,6 +766,66 @@ const formatDateValue = (value: string | number | null | undefined): string | nu
 const displayFieldValue = (value: string | number | null | undefined): string => {
   if (value == null || value === '') return '-'
   return String(value)
+}
+
+const getFileExtension = (fileNameOrPath?: string | null): string => {
+  if (fileNameOrPath == null || fileNameOrPath === '') return ''
+  return fileNameOrPath.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
+}
+
+const getAttachmentFileName = (row: ApprovalListItem | null): string => {
+  if (!row) return '审批附件'
+  if (row.business_type === 'CONTRACT') {
+    const configured = row.contract_file_name?.trim()
+    if (configured != null && configured.length > 0) return configured
+    const ext = getFileExtension(row.contract_file_path)
+    return ext.length > 0 ? `合同附件.${ext}` : '合同附件'
+  }
+  if (row.business_type === 'INVOICE') {
+    const ext = getFileExtension(row.invoice_file_path)
+    const normalizedInvoiceNumber = row.invoice_number?.trim() ?? ''
+    const prefix = normalizedInvoiceNumber.length > 0 ? normalizedInvoiceNumber : '发票文件'
+    return ext.length > 0 ? `${prefix}.${ext}` : prefix
+  }
+  return '审批附件'
+}
+
+const hasAttachment = (row: ApprovalListItem): boolean =>
+  row.has_attachment === true ||
+  (row.business_type === 'CONTRACT' && row.contract_file_path != null && row.contract_file_path.length > 0) ||
+  (row.business_type === 'INVOICE' && row.invoice_file_path != null && row.invoice_file_path.length > 0)
+
+const attachmentPreviewExtension = computed<string>(() =>
+  getFileExtension(getAttachmentFileName(attachmentPreviewRow.value))
+)
+
+const attachmentPreviewIsImage = computed<boolean>(() =>
+  ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(attachmentPreviewExtension.value)
+)
+
+const attachmentPreviewIsPdf = computed<boolean>(() => attachmentPreviewExtension.value === 'pdf')
+
+const attachmentPreviewTitle = computed<string>(() => getAttachmentFileName(attachmentPreviewRow.value))
+
+const revokeAttachmentPreviewUrl = (): void => {
+  if (attachmentPreviewUrl.value.length > 0) {
+    window.URL.revokeObjectURL(attachmentPreviewUrl.value)
+    attachmentPreviewUrl.value = ''
+  }
+}
+
+const closeAttachmentPreview = (): void => {
+  attachmentPreviewVisible.value = false
+  attachmentPreviewRow.value = null
+  revokeAttachmentPreviewUrl()
+}
+
+const handleAttachmentPreviewOpenChange = (open: boolean): void => {
+  if (open) {
+    attachmentPreviewVisible.value = true
+    return
+  }
+  closeAttachmentPreview()
 }
 
 const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
@@ -984,13 +1051,6 @@ const columns = [
   }
 ]
 
-onMounted(() => {
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', checkMobile)
-})
 onUnmounted(() => {
   headerStore.clear()
 })
@@ -1087,31 +1147,6 @@ const byOverdueDesc = (a: ApprovalListItem, b: ApprovalListItem): number => {
   return bh - ah
 }
 
-// 移动端分页页码计算
-const getPageItems = (): number[] => {
-  const totalPages = Math.ceil(total.value / pageSize.value)
-  const current = page.value
-  const items: number[] = []
-
-  // 显示最多 5 个页码
-  const maxItems = 5
-  const half = Math.floor(maxItems / 2)
-
-  let start = Math.max(1, current - half)
-  let end = Math.min(totalPages, start + maxItems - 1)
-
-  // 调整起点以确保显示足够的页码
-  if (end - start < maxItems - 1) {
-    start = Math.max(1, end - maxItems + 1)
-  }
-
-  for (let i = start; i <= end; i++) {
-    items.push(i)
-  }
-
-  return items
-}
-
 const reload = (): void => {
   fetchList()
 }
@@ -1150,11 +1185,12 @@ const copyNumber = async (num: string): Promise<void> => {
 }
 
 const openDetail = (row: ApprovalListItem, index?: number): void => {
-  // Find index if not provided (DataTable row-click doesn't provide index)
   const rowIndex = index ?? rows.value.findIndex(r => r.id === row.id)
   selectedApproval.value = row
   triggerRowIndex.value = rowIndex
-  focusedRowEl.value = (document.querySelectorAll('.data-table-row')[rowIndex] as HTMLElement) ?? null
+  focusedRowEl.value = (
+    document.querySelectorAll('.data-table-row, .data-table-mobile-card')[rowIndex] as HTMLElement
+  ) ?? null
   sheetVisible.value = true
 }
 
@@ -1263,10 +1299,44 @@ const handleRemind = async (row: ApprovalListItem): Promise<void> => {
   try {
     const res = await store.remindEntity(row.business_type, row.business_id)
     toast.success(res.message)
-  } catch {
-    // 错误提示由请求拦截器统一处理
+  } catch (error) {
+    handleApiError(error, '催办')
   } finally {
     remindPendingId.value = null
+  }
+}
+
+const handlePreviewAttachment = async (row: ApprovalListItem): Promise<void> => {
+  if (!hasAttachment(row)) return
+  attachmentPreviewPendingId.value = row.id
+  attachmentPreviewRow.value = row
+  attachmentPreviewVisible.value = true
+  revokeAttachmentPreviewUrl()
+  try {
+    attachmentPreviewUrl.value = await approvalGenericApi.createApprovalAttachmentObjectUrl(
+      row.business_type,
+      row.business_id
+    )
+  } catch (error) {
+    attachmentPreviewVisible.value = false
+    attachmentPreviewRow.value = null
+    handleApiError(error, '预览附件')
+  } finally {
+    attachmentPreviewPendingId.value = null
+  }
+}
+
+const handleDownloadAttachment = async (): Promise<void> => {
+  const row = attachmentPreviewRow.value
+  if (!row) return
+  try {
+    await approvalGenericApi.downloadApprovalAttachment(
+      row.business_type,
+      row.business_id,
+      getAttachmentFileName(row)
+    )
+  } catch (error) {
+    handleApiError(error, '下载附件')
   }
 }
 
@@ -1361,7 +1431,7 @@ const onKeydown = (e: KeyboardEvent): void => {
 const focusIndex = ref<number>(0)
 
 const focusCurrentRow = (): void => {
-  const els = document.querySelectorAll('.data-table-row')
+  const els = document.querySelectorAll('.data-table-row, .data-table-mobile-card')
   const el = els[focusIndex.value] as HTMLElement | undefined
   if (el && typeof el.focus === 'function') {
     el.focus()
@@ -1384,12 +1454,13 @@ onMounted((): void => {
 onBeforeUnmount((): void => {
   teardownKeyboard()
   store.clearList()
+  revokeAttachmentPreviewUrl()
 })
 
 // 行可聚焦（条9 键盘导航 + 条13 焦点回归）：每次列表刷新后给行加 tabindex=0
 watch(rows, async () => {
   await nextTick()
-  document.querySelectorAll<HTMLElement>('.data-table-row').forEach((el) => {
+  document.querySelectorAll<HTMLElement>('.data-table-row, .data-table-mobile-card').forEach((el) => {
     el.setAttribute('tabindex', '0')
   })
 }, { flush: 'post' })
@@ -1422,22 +1493,6 @@ watch(rows, async () => {
   border: none;
 }
 
-.approval-mobile-tools {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  min-height: 36px;
-}
-
-.approval-mobile-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 160px;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-}
-
 // 行级聚焦态（键盘导航 + 抽屉关闭后焦点回归）
 :deep(.data-table-row) {
   outline: none;
@@ -1450,14 +1505,68 @@ watch(rows, async () => {
   }
 }
 
+.approval-mobile-card {
+  min-width: 0;
+}
+
+.approval-mobile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-sm-v2;
+  width: 100%;
+}
+
+.approval-mobile-action {
+  flex: 1 1 30%;
+  min-width: 0;
+  min-height: $wolf-touch-target-min-v2;
+}
+
+.approval-mobile-action-wide {
+  flex-basis: 100%;
+}
+
+.approval-attachment-preview {
+  min-height: 55vh;
+  max-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  border: 1px solid $wolf-border-light-v2;
+  border-radius: $wolf-radius-surface-v2;
+  background: $wolf-bg-page-v2;
+}
+
+.approval-attachment-preview__loading,
+.approval-attachment-preview__fallback {
+  padding: $wolf-space-xl-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
+  text-align: center;
+}
+
+.approval-attachment-preview__image {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.approval-attachment-preview__frame {
+  width: 100%;
+  height: 70vh;
+  border: 0;
+  background: $wolf-bg-card-v2;
+}
+
 // 移动端卡片警告边框样式
 @media (max-width: 768px) {
   .approval-center {
     padding: $wolf-page-padding-mobile-v2;
   }
 
-  // 超时卡片边框警告样式（配合 :class="row.overdue_hours >= 48 && 'border-warning'"）
-  :deep(.border-warning) {
+  :deep(.data-table-mobile-card:has(.approval-mobile-card.is-overdue)) {
     border-color: $wolf-warning-v2;
     border-width: 1px;
   }

@@ -41,7 +41,9 @@ from app.core.database import Base
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
 from app.core import deps
+from app.api import approvals as approvals_api
 from app.api.approvals import router as approvals_router
+from app.crud.approval import approval_crud
 
 from app.models.approval import (
     Approval, ApprovalRecord, ApprovalFlow, ApprovalNode,
@@ -426,8 +428,11 @@ def test_cancel_by_submitter(
 # ---------- detail ---------------------------------------------------------
 
 def test_detail_returns_approval(
-    db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
+    db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node, monkeypatch,
 ):
+    monkeypatch.setattr(approval_crud, "_batch_entity_summaries", lambda db, approvals, team_id: {})
+    monkeypatch.setattr(approvals_api, "_build_approval_entity_detail", lambda approval, db: {})
+
     r = client.post(
         f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
         json={"comment": "请审批"},
@@ -440,6 +445,87 @@ def test_detail_returns_approval(
     body = r.json()
     assert body["id"] == approval_id
     assert body["status"] == "PENDING"
+
+
+def test_detail_forbidden_for_unrelated_user(
+    app, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
+):
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+
+    class OtherUser:
+        id = 2
+        name = "无关用户"
+        status = "active"
+
+    app.dependency_overrides[deps.get_current_active_user] = lambda: OtherUser()
+
+    r = client.get(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/detail")
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "您没有权限查看该审批详情"
+
+
+def test_file_returns_invoice_attachment_for_submitter(
+    db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node, tmp_path, monkeypatch,
+):
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+
+    file_path = tmp_path / "invoice.pdf"
+    file_path.write_bytes(b"%PDF-1.4\ncrm wolf invoice\n")
+    seed_invoice_draft.invoice_file_path = "invoices/1/1/invoice.pdf"
+    seed_invoice_draft.invoice_number = "FP-2026-001"
+    db_session.commit()
+    monkeypatch.setattr(
+        approvals_api.file_storage_service,
+        "get_full_path",
+        lambda relative_path: str(file_path),
+    )
+
+    r = client.get(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/file")
+
+    assert r.status_code == 200, r.text
+    assert r.content == b"%PDF-1.4\ncrm wolf invoice\n"
+    assert r.headers["content-type"] == "application/pdf"
+    assert "inline" in r.headers["content-disposition"]
+    assert "FP-2026-001.pdf" in r.headers["content-disposition"]
+
+
+def test_file_forbidden_for_unrelated_user(
+    app, client, seed_invoice_draft, seed_invoice_flow_with_finance_node, tmp_path, monkeypatch,
+):
+    r = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert r.status_code == 200, r.text
+
+    file_path = tmp_path / "invoice.pdf"
+    file_path.write_bytes(b"%PDF-1.4\ncrm wolf invoice\n")
+    seed_invoice_draft.invoice_file_path = "invoices/1/1/invoice.pdf"
+    monkeypatch.setattr(
+        approvals_api.file_storage_service,
+        "get_full_path",
+        lambda relative_path: str(file_path),
+    )
+
+    class OtherUser:
+        id = 2
+        name = "无关用户"
+        status = "active"
+
+    app.dependency_overrides[deps.get_current_active_user] = lambda: OtherUser()
+
+    r = client.get(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/file")
+
+    assert r.status_code == 403, r.text
+    assert r.json()["detail"] == "您没有权限查看该审批详情"
 
 
 def test_detail_not_found(client):

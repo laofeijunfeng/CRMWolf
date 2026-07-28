@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/pagination'
 import {
   Empty,
+  EmptyDescription,
   EmptyHeader,
   EmptyTitle
 } from '@/components/ui/empty'
@@ -73,6 +74,8 @@ interface Props {
   height?: string
   /** 空状态标题 */
   emptyTitle?: string
+  /** 空状态说明 */
+  emptyDescription?: string
   /** 默认固定左侧列数（默认 1，优先级低于 column.fixed） */
   fixedLeftCount?: number
   /** 默认固定右侧列数（默认 1，优先级低于 column.fixed） */
@@ -105,6 +108,7 @@ const props = withDefaults(defineProps<Props>(), {
   pageSizes: () => [10, 20, 50, 100],
   height: 'calc(100vh - 200px)',
   emptyTitle: '暂无数据',
+  emptyDescription: '',
   fixedLeftCount: 1,
   fixedRightCount: 1,
   rowInteractive: false,
@@ -123,7 +127,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:page': [value: number]
   'update:page-size': [value: number]
-  'row-click': [row: T]
+  'row-click': [row: T, index: number]
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
   'filter-reset': []
@@ -274,9 +278,9 @@ function handlePageSizeChange(value: string): void {
   emit('update:page', 1)  // 重置到第一页
 }
 
-function handleRowClick(row: T): void {
+function handleRowClick(row: T, index: number): void {
   if (!props.rowInteractive) return
-  emit('row-click', row)
+  emit('row-click', row, index)
 }
 
 function isNestedInteractiveElement(target: EventTarget | null, currentTarget: EventTarget | null): boolean {
@@ -285,24 +289,24 @@ function isNestedInteractiveElement(target: EventTarget | null, currentTarget: E
   return target.closest('button, a, input, select, textarea, [role="button"], [role="link"]') !== null
 }
 
-function handleCardClick(event: MouseEvent, row: T): void {
+function handleCardClick(event: MouseEvent, row: T, index: number): void {
   if (isNestedInteractiveElement(event.target, event.currentTarget)) return
-  handleRowClick(row)
+  handleRowClick(row, index)
 }
 
-function handleRowKeydown(event: KeyboardEvent, row: T): void {
+function handleRowKeydown(event: KeyboardEvent, row: T, index: number): void {
   if (!props.rowInteractive) return
   if (event.key === 'Enter') {
-    emit('row-click', row)
+    emit('row-click', row, index)
   } else if (event.key === ' ') {
     event.preventDefault()
-    emit('row-click', row)
+    emit('row-click', row, index)
   }
 }
 
-function handleCardKeydown(event: KeyboardEvent, row: T): void {
+function handleCardKeydown(event: KeyboardEvent, row: T, index: number): void {
   if (isNestedInteractiveElement(event.target, event.currentTarget)) return
-  handleRowKeydown(event, row)
+  handleRowKeydown(event, row, index)
 }
 
 function handleFilterUpdate(filters: ListFilterCondition[]): void {
@@ -415,8 +419,8 @@ watch(() => props.data, () => {
             :class="{ 'is-interactive': rowInteractive }"
             :role="rowInteractive ? 'button' : undefined"
             :tabindex="rowInteractive ? 0 : undefined"
-            @click="handleCardClick($event, row)"
-            @keydown="handleCardKeydown($event, row)"
+            @click="handleCardClick($event, row, index)"
+            @keydown="handleCardKeydown($event, row, index)"
           >
             <slot name="mobile-card" :row="row" :index="index">
               <div class="data-table-mobile-card-header">
@@ -449,6 +453,9 @@ watch(() => props.data, () => {
             <Empty class="border-0">
               <EmptyHeader>
                 <EmptyTitle>{{ emptyTitle ?? '暂无数据' }}</EmptyTitle>
+                <EmptyDescription v-if="emptyDescription">
+                  {{ emptyDescription }}
+                </EmptyDescription>
               </EmptyHeader>
             </Empty>
           </div>
@@ -488,8 +495,8 @@ watch(() => props.data, () => {
               :class="{ 'is-interactive': rowInteractive }"
               :role="rowInteractive ? 'button' : undefined"
               :tabindex="rowInteractive ? 0 : undefined"
-              @click="handleRowClick(row)"
-              @keydown="handleRowKeydown($event, row)"
+              @click="handleRowClick(row, index)"
+              @keydown="handleRowKeydown($event, row, index)"
             >
               <td
                 v-for="col in processedColumns"
@@ -519,6 +526,9 @@ watch(() => props.data, () => {
                 <Empty class="border-0">
                   <EmptyHeader>
                     <EmptyTitle>{{ emptyTitle ?? '暂无数据' }}</EmptyTitle>
+                    <EmptyDescription v-if="emptyDescription">
+                      {{ emptyDescription }}
+                    </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
               </td>

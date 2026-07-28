@@ -158,6 +158,41 @@ function listApprovals(query: ApprovalListQuery): Promise<ApprovalListResponse> 
   return request.get<ApprovalListResponse>('/v1/approvals', { params: query })
 }
 
+const getApprovalAttachmentPath = (entityType: EntityType, entityId: number): string =>
+  `/v1/approvals/${entityType}/${entityId}/file`
+
+async function createApprovalAttachmentObjectUrl(
+  entityType: EntityType,
+  entityId: number
+): Promise<string> {
+  const response = await request.get<Blob>(getApprovalAttachmentPath(entityType, entityId), {
+    responseType: 'blob'
+  })
+  const blob = response instanceof Blob ? response : new Blob([response])
+  return window.URL.createObjectURL(blob)
+}
+
+async function downloadApprovalAttachment(
+  entityType: EntityType,
+  entityId: number,
+  fileName?: string
+): Promise<void> {
+  const response = await request.get<Blob>(getApprovalAttachmentPath(entityType, entityId), {
+    responseType: 'blob'
+  })
+  const blob = response instanceof Blob ? response : new Blob([response])
+  const url = window.URL.createObjectURL(blob)
+  const link = window.document.createElement('a')
+
+  link.href = url
+  const normalizedFileName = fileName?.trim() ?? ''
+  link.download = normalizedFileName.length > 0 ? normalizedFileName : `${entityType.toLowerCase()}-${entityId}`
+  window.document.body.appendChild(link)
+  link.click()
+  window.document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
 const approvalGenericApi = {
   submitApproval,
   approveEntity,
@@ -165,7 +200,9 @@ const approvalGenericApi = {
   remindApproval,
   getApprovalDetail,
   bulkApprove,
-  listApprovals
+  listApprovals,
+  createApprovalAttachmentObjectUrl,
+  downloadApprovalAttachment
 }
 
 export default approvalGenericApi
@@ -176,5 +213,7 @@ export {
   remindApproval,
   getApprovalDetail,
   bulkApprove,
-  listApprovals
+  listApprovals,
+  createApprovalAttachmentObjectUrl,
+  downloadApprovalAttachment
 }

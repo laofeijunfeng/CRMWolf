@@ -16,6 +16,14 @@ from app.schemas.approval import (
 logger = logging.getLogger(__name__)
 
 
+def _serialize_optional_datetime(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
 def calculate_flow_precision_score(flow: ApprovalFlow, amount, license_type: Optional[str]) -> int:
     """
     计算审批流程的精确度评分
@@ -1111,6 +1119,8 @@ class ApprovalCRUD:
             overdue_hours: Optional[int] = None
             if ap.status == ApprovalStatus.PENDING and ap.created_time is not None:
                 overdue_hours = int((now - ap.created_time).total_seconds() // 3600)
+            contract_file_path = summary.get("contract_file_path") if summary else None
+            invoice_file_path = summary.get("invoice_file_path") if summary else None
             items.append({
                 "id": ap.id,
                 "business_type": ap.business_type,
@@ -1121,6 +1131,14 @@ class ApprovalCRUD:
                 "actual_payer_name": summary.get("actual_payer_name") if summary else None,
                 "license_status": summary.get("license_status") if summary else None,
                 "customer_info": summary["customer_info"] if summary else None,
+                "has_attachment": bool(contract_file_path or invoice_file_path),
+                "contract_file_path": contract_file_path,
+                "contract_file_name": summary.get("contract_file_name") if summary else None,
+                "contract_file_size": summary.get("contract_file_size") if summary else None,
+                "contract_file_mime_type": summary.get("contract_file_mime_type") if summary else None,
+                "invoice_file_path": invoice_file_path,
+                "invoice_number": summary.get("invoice_number") if summary else None,
+                "issued_time": _serialize_optional_datetime(summary.get("issued_time")) if summary else None,
                 "submitter_id": ap.submitter_id,
                 "submitter_name": ap.submitter_name,
                 "status": ap.status,

@@ -237,7 +237,7 @@ const routes: RouteRecordRaw[] = [
         path: 'approvals',
         name: 'ApprovalCenter',
         component: () => import('@/views/ApprovalCenter.vue'),
-        meta: { requiresAuth: true, title: '财务审批' }
+        meta: { requiresAuth: true, title: '审批中心' }
       },
       // 向后兼容旧深链：finance/invoice-approvals、finance/payment-confirmations
       // 重定向到统一审批中心。
