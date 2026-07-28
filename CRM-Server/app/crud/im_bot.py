@@ -69,6 +69,39 @@ class AgentChannelSessionCRUD:
             AgentChannelSession.thread_id == (thread_id or ""),
         ).first()
 
+    def get_by_agent_session(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        provider: str,
+        agent_session_id: int,
+    ) -> Optional[AgentChannelSession]:
+        return db.query(AgentChannelSession).filter(
+            AgentChannelSession.provider == provider,
+            AgentChannelSession.team_id == team_id,
+            AgentChannelSession.user_id == user_id,
+            AgentChannelSession.agent_session_id == agent_session_id,
+        ).first()
+
+    def list_by_chat(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        provider: str,
+        chat_id: str,
+    ) -> list[AgentChannelSession]:
+        return db.query(AgentChannelSession).filter(
+            AgentChannelSession.provider == provider,
+            AgentChannelSession.team_id == team_id,
+            AgentChannelSession.user_id == user_id,
+            AgentChannelSession.chat_id == chat_id,
+            AgentChannelSession.status == "active",
+        ).order_by(AgentChannelSession.updated_time.desc(), AgentChannelSession.id.desc()).all()
+
     def mark_message(self, db: Session, db_obj: AgentChannelSession, message_id: str) -> AgentChannelSession:
         db_obj.last_message_id = message_id
         db.commit()

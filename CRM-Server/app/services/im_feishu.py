@@ -189,6 +189,7 @@ class FeishuBotService:
             ),
         )
         agent_content = await self._build_agent_content(integration_config, message, content)
+        referenced_message_ids = self._referenced_message_ids(message)
         result = await im_agent_gateway.handle_text(
             db,
             team_id=integration_config.team_id,
@@ -197,6 +198,9 @@ class FeishuBotService:
             session_id=channel_session.agent_session_id,
             user_text=content,
             agent_content=agent_content,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            referenced_message_ids=referenced_message_ids,
         )
         if message.get("message_id"):
             agent_channel_session_crud.mark_message(db, channel_session, message["message_id"])
@@ -459,6 +463,14 @@ class FeishuBotService:
             return f"引用消息：\n{quote_text}\n\n本次指令：\n{content}"
         return f"引用消息ID：{root_id}\n\n本次指令：\n{content}"
 
+    def _referenced_message_ids(self, message: Dict[str, Any]) -> list[str]:
+        ids = []
+        for key in ("parent_id", "root_id"):
+            message_id = message.get(key)
+            if message_id and message_id not in ids:
+                ids.append(message_id)
+        return ids
+
     def _extract_operator_open_id(self, operator: Dict[str, Any]) -> Optional[str]:
         operator_id = operator.get("operator_id")
         if isinstance(operator_id, dict):
@@ -512,6 +524,7 @@ class FeishuBotService:
                 "message_type": message.get("message_type"),
                 "chat_id": message.get("chat_id"),
                 "chat_type": message.get("chat_type"),
+                "thread_id": message.get("thread_id"),
                 "root_id": message.get("root_id"),
                 "parent_id": message.get("parent_id"),
                 "mentions": message.get("mentions") or [],
