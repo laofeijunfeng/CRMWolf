@@ -4,13 +4,13 @@
 
 ## 一、CSS 变量别名
 
-| 旧变量 | 新变量 | 移除条件 |
-|--------|--------|----------|
-| `$wolf-primary` | `$wolf-primary-v2` | Phase 2 完成后删除 |
-| `$wolf-radius-sm/md/lg` | `$wolf-radius-v2` | Phase 2 完成后删除 |
-| `$wolf-shadow-card` | `$wolf-shadow-card-v2` | Phase 2 完成后删除 |
+| 兼容入口 | 推荐入口 | 移除条件 |
+|----------|----------|----------|
+| `$wolf-*-v2` | shadcn 语义类与 `hsl(var(--...))` | 全量组件迁移到 Tailwind 语义令牌后评估 |
+| `--wolf-*` | `--background`、`--foreground`、`--primary` 等 shadcn CSS variables | 无业务组件继续读取 `--wolf-*` 后评估 |
+| `$wolf-primary` 等旧变量 | `$wolf-*-v2` 兼容层或 shadcn 语义令牌 | Phase 2 完成后删除 |
 
-**规则**：新增样式必须使用 V2 变量，旧变量仅作为过渡兼容。
+**规则**：新增样式优先使用 shadcn 语义类和 CSS variables；已有 Sass 组件可继续使用 `$wolf-*-v2`，但不得新增硬编码主题色值或绕过 `base.css` 定义新主色。
 
 ---
 
@@ -47,4 +47,4 @@
 
 ---
 
-**最后更新**：2026-07-14
+**最后更新**：2026-07-28

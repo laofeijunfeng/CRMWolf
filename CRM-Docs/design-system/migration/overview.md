@@ -9,7 +9,7 @@
 | 目标 | 说明 |
 |------|------|
 | **UI 组件库** | shadcn-vue（基于 Radix Vue + Tailwind CSS） |
-| **设计令牌** | V2 Design Tokens（`$wolf-*-v2`） |
+| **设计令牌** | shadcn CSS variables 为运行时入口，`$wolf-*-v2` / `--wolf-*` 为业务兼容层 |
 | **图标库** | Lucide Icons |
 | **表单验证** | VeeValidate + Zod Schema |
 | **Toast 通知** | vue-sonner |
@@ -33,10 +33,10 @@
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
-| Phase 0 | 设计令牌已定义 | V2 变量系统已建立 |
+| Phase 0 | 设计令牌已定义 | shadcn CSS variables 与 V2 兼容层已建立 |
 | Phase 1 | 目标状态，尚未在现有组件中全面落地 | 页面渐进迁移 |
 | Phase 2 | 待规划 | 旧依赖清理 |
 
 ---
 
-**最后更新**：2026-07-14
+**最后更新**：2026-07-28

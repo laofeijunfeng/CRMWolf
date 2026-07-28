@@ -6,39 +6,39 @@
 // ==================== CSS 变量兼容层 ====================
 
 :root {
-  --wolf-primary: #{$wolf-primary-v2};
-  --wolf-primary-hover: #{$wolf-primary-hover-v2};
-  --wolf-primary-active: #{$wolf-primary-active-v2};
-  --wolf-primary-light: #{$wolf-primary-light-v2};
+  --wolf-primary: hsl(var(--primary));
+  --wolf-primary-hover: hsl(var(--primary-hover));
+  --wolf-primary-active: hsl(var(--primary-active));
+  --wolf-primary-light: hsl(var(--primary) / 0.1);
 
-  --wolf-bg-page: #{$wolf-bg-page-v2};
-  --wolf-bg-card: #{$wolf-bg-card-v2};
-  --wolf-bg-sidebar: #{$wolf-bg-sidebar-v2};
-  --wolf-bg-hover: #{$wolf-bg-hover-v2};
-  --wolf-bg-active: #{$wolf-bg-active-v2};
-  --wolf-bg-muted: #{$wolf-bg-muted-v2};
-  --wolf-bg-elevated: #{$wolf-bg-elevated-v2};
+  --wolf-bg-page: hsl(var(--muted));
+  --wolf-bg-card: hsl(var(--card));
+  --wolf-bg-sidebar: hsl(var(--sidebar-background));
+  --wolf-bg-hover: hsl(var(--accent));
+  --wolf-bg-active: hsl(var(--primary-active) / 0.12);
+  --wolf-bg-muted: hsl(var(--muted));
+  --wolf-bg-elevated: hsl(var(--popover));
 
-  --wolf-text-primary: #{$wolf-text-primary-v2};
-  --wolf-text-secondary: #{$wolf-text-secondary-v2};
-  --wolf-text-tertiary: #{$wolf-text-tertiary-v2};
-  --wolf-text-placeholder: #{$wolf-text-placeholder-v2};
+  --wolf-text-primary: hsl(var(--foreground));
+  --wolf-text-secondary: hsl(var(--muted-foreground));
+  --wolf-text-tertiary: hsl(var(--muted-foreground));
+  --wolf-text-placeholder: hsl(var(--muted-foreground));
   --wolf-text-disabled: #{$wolf-disabled-text-v2};
-  --wolf-text-link: #{$wolf-text-link-v2};
-  --wolf-text-link-hover: #{$wolf-text-link-hover-v2};
-  --wolf-text-inverse: #{$wolf-text-inverse-v2};
+  --wolf-text-link: hsl(var(--primary));
+  --wolf-text-link-hover: hsl(var(--primary-hover));
+  --wolf-text-inverse: hsl(var(--primary-foreground));
 
-  --wolf-border-default: #{$wolf-border-default-v2};
-  --wolf-border-hover: #{$wolf-border-hover-v2};
-  --wolf-border-light: #{$wolf-border-light-v2};
-  --wolf-border-divider: #{$wolf-border-divider-v2};
+  --wolf-border-default: hsl(var(--border));
+  --wolf-border-hover: hsl(var(--ring));
+  --wolf-border-light: hsl(var(--muted));
+  --wolf-border-divider: hsl(var(--border));
 
-  --wolf-success-text: #{$wolf-success-text-v2};
-  --wolf-success-bg: #{$wolf-success-bg-v2};
-  --wolf-warning-text: #{$wolf-warning-text-v2};
-  --wolf-warning-bg: #{$wolf-warning-bg-v2};
-  --wolf-danger-text: #{$wolf-danger-text-v2};
-  --wolf-danger-bg: #{$wolf-danger-bg-v2};
+  --wolf-success-text: hsl(var(--success));
+  --wolf-success-bg: hsl(var(--success) / 0.1);
+  --wolf-warning-text: hsl(var(--warning));
+  --wolf-warning-bg: hsl(var(--warning) / 0.1);
+  --wolf-danger-text: hsl(var(--destructive));
+  --wolf-danger-bg: hsl(var(--destructive) / 0.1);
 
   --wolf-radius-sm: #{$wolf-radius-sm-v2};
   --wolf-radius-md: #{$wolf-radius-v2};
@@ -71,18 +71,18 @@
   --wolf-line-height-title: #{$wolf-line-height-title-v2};
   --wolf-line-height-body: #{$wolf-line-height-body-v2};
 
-  --wolf-focus-ring-color: #{$wolf-focus-ring-color-v2};
+  --wolf-focus-ring-color: hsl(var(--ring) / 0.5);
   --wolf-transition-duration: #{$wolf-motion-state-duration-v2};
   --wolf-reduced-motion-duration: #{$wolf-reduced-motion-duration-v2};
 
-  --wolf-approval-pending-text: #{$wolf-warning-text-v2};
-  --wolf-approval-pending-bg: #{$wolf-warning-bg-v2};
-  --wolf-approval-approved-text: #{$wolf-success-text-v2};
-  --wolf-approval-approved-bg: #{$wolf-success-bg-v2};
-  --wolf-approval-rejected-text: #{$wolf-danger-text-v2};
-  --wolf-approval-rejected-bg: #{$wolf-danger-bg-v2};
-  --wolf-approval-cancelled-text: #{$wolf-text-tertiary-v2};
-  --wolf-approval-cancelled-bg: #{$wolf-bg-muted-v2};
+  --wolf-approval-pending-text: hsl(var(--warning));
+  --wolf-approval-pending-bg: hsl(var(--warning) / 0.1);
+  --wolf-approval-approved-text: hsl(var(--success));
+  --wolf-approval-approved-bg: hsl(var(--success) / 0.1);
+  --wolf-approval-rejected-text: hsl(var(--destructive));
+  --wolf-approval-rejected-bg: hsl(var(--destructive) / 0.1);
+  --wolf-approval-cancelled-text: hsl(var(--muted-foreground));
+  --wolf-approval-cancelled-bg: hsl(var(--muted));
 }
 
 // ==================== 全局基础样式 ====================
@@ -119,8 +119,8 @@
 html, body {
   font-family: $wolf-font-family-v2;
   font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-primary-v2;
-  background-color: $wolf-bg-page-v2;
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--muted));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: $wolf-line-height-body-v2;

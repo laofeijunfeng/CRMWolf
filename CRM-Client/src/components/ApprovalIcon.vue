@@ -128,7 +128,7 @@ const handleClick = (): void => {
 
   // Hover 时颜色变化（MASTER.md §7.1）
   .approval-icon:hover & {
-    color: $wolf-primary-v2;  // #2563EB（强调交互）
+    color: $wolf-primary-v2;  // #4F46E5（强调交互）
   }
 
   // 过渡动画：使用 shadcn-vue Button 原生 transition

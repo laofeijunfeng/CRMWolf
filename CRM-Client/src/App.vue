@@ -32,8 +32,8 @@ import { Toast, ConfirmDialog, TooltipProvider } from '@/components/crmwolf'
 body {
   /* 基础字体栈（功能性，不在关键位置覆盖） */
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: #f5f7fa;
-  color: #1d2129;
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
 }
 
 #app {

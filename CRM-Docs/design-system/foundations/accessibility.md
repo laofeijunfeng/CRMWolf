@@ -22,11 +22,11 @@
 | 令牌 | 解析值 | 用途 |
 | --- | --- | --- |
 | `$wolf-focus-ring-width-v2` | `2px` | 默认焦点环宽度。 |
-| `$wolf-focus-ring-color-v2` | `rgba(#2563EB, 0.5)` | 默认焦点环颜色。 |
+| `$wolf-focus-ring-color-v2` | `rgba(#4F46E5, 0.5)` | 默认焦点环颜色。 |
 | `$wolf-focus-ring-offset-v2` | `2px` | 焦点环外偏移。 |
 | `$wolf-focus-ring-width-strong-v2` | `3px` | 关键操作与输入。 |
 | `$wolf-focus-ring-width-subtle-v2` | `1px` | 次级链接。 |
-| `$wolf-focus-shadow-v2` | `0 0 0 2px rgba(#2563EB, 0.3)` | 阴影式焦点替代。 |
+| `$wolf-focus-shadow-v2` | `0 0 0 2px rgba(#4F46E5, 0.3)` | 阴影式焦点替代。 |
 
 ## 辅助技术与禁用态
 

@@ -137,17 +137,19 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     expect(appLayoutSource).toMatch(/\.sidebar-trigger-separator\s*\{[^}]*height:\s*16px/s)
   })
 
-  it('uses CRMWolf system colors for the shadcn sidebar tokens', () => {
+  it('uses the official Tailwind indigo tokens for the shadcn sidebar emphasis', () => {
     const baseStyles = readFileSync('src/styles/base.css', 'utf-8')
     const variablesSource = readFileSync('src/styles/variables-v2.scss', 'utf-8')
 
-    expect(variablesSource).toContain('$wolf-bg-sidebar-v2: #FFFFFF')
-    expect(baseStyles).toContain('--sidebar-background: 0 0% 100%; /* #FFFFFF */')
-    expect(baseStyles).toContain('--sidebar-primary: 217 91% 60%; /* #2563EB */')
-    expect(baseStyles).toContain('--sidebar-accent: 225 100% 97%; /* #EEF2FF */')
-    expect(baseStyles).toContain('--sidebar-border: 220 69% 94%; /* #E4ECFC */')
-    expect(baseStyles).not.toContain('--sidebar-background: 0 0% 98%;')
-    expect(baseStyles).not.toContain('--sidebar-accent: 240 4.8% 95.9%;')
+    expect(variablesSource).toContain('$wolf-bg-sidebar-v2: #FAFAFA')
+    expect(variablesSource).toContain('$wolf-primary-v2: #4F46E5')
+    expect(baseStyles).toContain('--sidebar-background: 0 0% 98%;')
+    expect(baseStyles).toContain('--sidebar-primary: 243.4 75.4% 58.6%;')
+    expect(baseStyles).toContain('--sidebar-accent: 225 100% 96.1%;')
+    expect(baseStyles).toContain('--sidebar-border: 226.5 100% 93.9%;')
+    expect(baseStyles).toContain('--ring: 243.4 75.4% 58.6%;')
+    expect(baseStyles).not.toContain('--primary: 222.2 47.4% 11.2%;')
+    expect(baseStyles).not.toContain('--sidebar-primary: 217 91% 60%;')
   })
 
   it('does not keep old full-viewport page shell heights inside the sidebar layout', () => {

@@ -455,7 +455,7 @@ $z-index-bottom-nav: 100;
   font-size: $wolf-font-size-title-v2;  // 16px → 20px（MASTER.md 6.2）
   font-weight: $wolf-font-weight-semibold-v2;  // 600
   letter-spacing: -0.02em;
-  color: $wolf-text-primary-v2;  // #0F172A
+  color: $wolf-text-primary-v2;  // #020817
   margin: 0;
   max-width: 100%;
   overflow: hidden;

@@ -13,10 +13,12 @@ import { Button } from '@/components/ui/button'
 import {
   DateField,
   InputField,
+  SearchableSelectField,
   SelectField,
   TextareaField,
 } from '@/components/crmwolf'
 import contractApi, { type ContractListResponse } from '@/api/contract'
+import customerApi, { type CustomerResponse } from '@/api/customer'
 import paymentApi, {
   type PaymentPlanCreate,
   type PaymentPlanResponse,
@@ -38,6 +40,7 @@ interface Emits {
 }
 
 interface PaymentPlanForm {
+  customerId: string
   contractId: string
   stageName: string
   plannedAmount: string
@@ -46,6 +49,7 @@ interface PaymentPlanForm {
 }
 
 interface PaymentPlanFormErrors {
+  customerId: string
   contractId: string
   stageName: string
   plannedAmount: string
@@ -65,11 +69,15 @@ const props = withDefaults(defineProps<Props>(), {
 })
 const emit = defineEmits<Emits>()
 
+const customers = ref<CustomerResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
+const customersLoading = ref(false)
 const contractsLoading = ref(false)
 const submitting = ref(false)
+const customerSearchKeyword = ref('')
 
 const form = reactive<PaymentPlanForm>({
+  customerId: '',
   contractId: '',
   stageName: '',
   plannedAmount: '',
@@ -78,6 +86,7 @@ const form = reactive<PaymentPlanForm>({
 })
 
 const errors = reactive<PaymentPlanFormErrors>({
+  customerId: '',
   contractId: '',
   stageName: '',
   plannedAmount: '',
@@ -98,12 +107,18 @@ const description = computed<string>(() => {
   }
 
   return isCreateMode.value
-    ? '选择合同并填写计划金额、日期等信息。'
+    ? '选择客户和合同，并填写计划金额、日期等信息。'
     : '调整当前回款计划的阶段、金额、日期或备注。'
 })
 const fixedContractLabel = computed<string>(() => {
   return props.fixedContract === null ? '' : contractOptionLabel(props.fixedContract)
 })
+const customerOptions = computed(() =>
+  customers.value.map((customer) => ({
+    value: customer.id,
+    label: customerOptionLabel(customer),
+  }))
+)
 const contractOptions = computed(() =>
   contracts.value.map((contract) => ({
     value: String(contract.id),
@@ -112,6 +127,7 @@ const contractOptions = computed(() =>
 )
 
 function clearErrors(): void {
+  errors.customerId = ''
   errors.contractId = ''
   errors.stageName = ''
   errors.plannedAmount = ''
@@ -120,6 +136,9 @@ function clearErrors(): void {
 
 function resetForm(): void {
   const plan = props.plan
+  form.customerId = props.fixedContract !== null
+    ? ''
+    : plan?.customer_id !== null && plan?.customer_id !== undefined ? String(plan.customer_id) : ''
   form.contractId = props.fixedContract !== null
     ? String(props.fixedContract.id)
     : plan?.contract_id !== undefined ? String(plan.contract_id) : ''
@@ -158,6 +177,10 @@ function handleDueDateChange(date: Date | null): void {
 function validateForm(): boolean {
   clearErrors()
 
+  if (isCreateMode.value && !hasFixedContract.value && form.customerId.trim() === '') {
+    errors.customerId = '请选择客户'
+  }
+
   if (isCreateMode.value && form.contractId.trim() === '') {
     errors.contractId = '请选择合同'
   }
@@ -175,7 +198,8 @@ function validateForm(): boolean {
     errors.dueDate = '请选择计划日期'
   }
 
-  return errors.contractId === ''
+  return errors.customerId === ''
+    && errors.contractId === ''
     && errors.stageName === ''
     && errors.plannedAmount === ''
     && errors.dueDate === ''
@@ -211,22 +235,78 @@ function buildUpdatePayload(): PaymentPlanUpdate {
   return payload
 }
 
-async function fetchContracts(): Promise<void> {
-  if (!isCreateMode.value || hasFixedContract.value || contracts.value.length > 0) return
+async function fetchCustomers(keyword?: string): Promise<void> {
+  if (!isCreateMode.value || hasFixedContract.value) return
+
+  customersLoading.value = true
+  try {
+    const params: { skip: number; limit: number; keyword?: string } = { skip: 0, limit: 50 }
+    const normalizedKeyword = keyword?.trim()
+    if (normalizedKeyword !== undefined && normalizedKeyword !== '') {
+      params.keyword = normalizedKeyword
+    }
+
+    const response = await customerApi.getCustomers(params)
+    customers.value = normalizePaginatedResponse(response).items
+  } catch (error: unknown) {
+    handleApiError(error, '获取客户列表')
+  } finally {
+    customersLoading.value = false
+  }
+}
+
+async function handleCustomerSearch(keyword: string | number): Promise<void> {
+  const normalizedKeyword = String(keyword).trim()
+  customerSearchKeyword.value = normalizedKeyword
+  await fetchCustomers(normalizedKeyword || undefined)
+}
+
+async function fetchContracts(customerId?: number): Promise<void> {
+  if (!isCreateMode.value || hasFixedContract.value) return
+
+  if (customerId === undefined || !Number.isFinite(customerId) || customerId <= 0) {
+    contracts.value = []
+    return
+  }
 
   contractsLoading.value = true
   try {
-    const response = await contractApi.getContracts({
-      limit: 100,
-      order_by: 'created_time',
-      order_dir: 'desc',
-    })
-    contracts.value = normalizePaginatedResponse(response).items
+    contracts.value = await contractApi.getCustomerContracts(customerId, { skip: 0, limit: 100 })
   } catch (error: unknown) {
     handleApiError(error, '获取合同列表')
   } finally {
     contractsLoading.value = false
   }
+}
+
+function normalizeSelectValue(value: unknown): string | null {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  return null
+}
+
+function handleCustomerChange(value: unknown): void {
+  const nextCustomerId = normalizeSelectValue(value)
+  if (nextCustomerId === null || nextCustomerId === '') return
+  if (nextCustomerId === form.customerId) return
+
+  form.customerId = nextCustomerId
+  form.contractId = ''
+  form.plannedAmount = ''
+  contracts.value = []
+
+  const customerId = Number(form.customerId)
+  if (Number.isFinite(customerId) && customerId > 0) {
+    void fetchContracts(customerId)
+  }
+}
+
+function handleContractChange(value: unknown): void {
+  const nextContractId = normalizeSelectValue(value)
+  if (nextContractId === null || nextContractId === '') return
+
+  form.contractId = nextContractId
+  form.plannedAmount = getSelectedContractAmount()
 }
 
 async function handleSubmit(): Promise<void> {
@@ -263,6 +343,10 @@ function contractOptionLabel(contract: PaymentPlanContractOption): string {
   return contract.contract_name
 }
 
+function customerOptionLabel(customer: CustomerResponse): string {
+  return customer.account_name
+}
+
 function getSelectedContractAmount(): string {
   if (!isCreateMode.value) return ''
 
@@ -278,10 +362,16 @@ watch(
   () => [props.open, props.mode, props.plan?.id, props.fixedContract?.id] as const,
   ([open]) => {
     if (open) {
+      customerSearchKeyword.value = ''
       resetForm()
-      void fetchContracts()
+      void fetchCustomers(customerSearchKeyword.value)
+      const customerId = Number(form.customerId)
+      if (Number.isFinite(customerId) && customerId > 0) {
+        void fetchContracts(customerId)
+      }
     } else {
       clearErrors()
+      customerSearchKeyword.value = ''
     }
   },
   { immediate: true }
@@ -314,18 +404,40 @@ watch(
           disabled
         />
 
-        <SelectField
-          v-else-if="isCreateMode"
-          id="payment-plan-contract"
-          v-model="form.contractId"
-          class="payment-plan-form-dialog__field"
-          label="所属合同"
-          required
-          :options="contractOptions"
-          :placeholder="contractsLoading ? '加载合同中...' : '请选择合同'"
-          :disabled="contractsLoading || submitting"
-          :error="errors.contractId"
-        />
+        <template v-else-if="isCreateMode">
+          <SearchableSelectField
+            id="payment-plan-customer"
+            :model-value="form.customerId"
+            class="payment-plan-form-dialog__field"
+            label="所属客户"
+            required
+            :options="customerOptions"
+            :search-value="customerSearchKeyword"
+            placeholder="请选择客户"
+            search-placeholder="搜索客户名称"
+            :loading="customersLoading"
+            loading-text="加载客户中..."
+            empty-text="暂无客户"
+            :disabled="submitting"
+            :error="errors.customerId"
+            @update:model-value="handleCustomerChange"
+            @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
+            @update:search-value="handleCustomerSearch"
+          />
+
+          <SelectField
+            id="payment-plan-contract"
+            :model-value="form.contractId"
+            class="payment-plan-form-dialog__field"
+            label="所属合同"
+            required
+            :options="contractOptions"
+            :placeholder="form.customerId === '' ? '请先选择客户' : contractsLoading ? '加载合同中...' : '请选择合同'"
+            :disabled="contractsLoading || submitting || form.customerId === ''"
+            :error="errors.contractId"
+            @update:model-value="handleContractChange"
+          />
+        </template>
 
         <div class="payment-plan-form-dialog__grid">
           <InputField

@@ -14,6 +14,10 @@
 
 页面特有规则 > 交互模式 > 组件规则 > 基础规范。同级主题文件不得定义冲突规则；链接到其唯一事实来源。
 
+## 全局令牌约定
+
+颜色运行时唯一入口为 `CRM-Client/src/styles/base.css` 的 shadcn CSS variables。组件基础色遵循 shadcn-vue `baseColor: "slate"` 与 `cssVariables: true`，中性色使用 slate，主强调色使用官方 Tailwind indigo 色阶。新增实现优先使用 shadcn 语义类与 CSS 变量；`$wolf-*` / `--wolf-*` 仅作为业务兼容层。详见[颜色令牌](foundations/color-tokens.md)。
+
 ## 本地检查
 
 ```bash
