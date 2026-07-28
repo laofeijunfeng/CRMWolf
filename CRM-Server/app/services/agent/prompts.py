@@ -488,6 +488,44 @@ def build_pending_interruption_messages(
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
+CRM_AGENT_CONFIRMATION_INTENT_SYSTEM_PROMPT = """
+你是 CRM Agent 的确认意图分类器。你的任务非常窄：只判断用户本轮回复是否在确认或拒绝【当前待确认动作】。
+
+输出必须是 JSON：
+{
+  "intent": "confirm|reject|unknown",
+  "confidence": 0.0,
+  "reason": "一句话说明"
+}
+
+判断规则：
+- 用户明确表示同意、继续、执行、按当前方案处理，输出 confirm。
+- 用户明确表示取消、不要、先不处理、拒绝当前动作，输出 reject。
+- 用户补充字段、修改内容、纠正客户/联系人/电话/金额/日期，输出 unknown。
+- 用户提出新需求、闲聊、感谢、情绪表达、含义不明确，输出 unknown。
+- 不能执行任务，不能生成业务回复，只能分类。
+""".strip()
+
+
+def build_confirmation_intent_messages(
+    user_message: str,
+    pending_task_json: str,
+    memory_json: str,
+    current_date: Optional[date] = None,
+) -> list[dict]:
+    prompt_date = current_date or date.today()
+    system = f"{CRM_AGENT_CONFIRMATION_INTENT_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+    user = (
+        "【当前待确认动作】\n"
+        f"{pending_task_json}\n\n"
+        "【会话记忆】\n"
+        f"{memory_json}\n\n"
+        "【用户本轮回复】\n"
+        f"{user_message}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
 def build_suggestion_messages(
     user_message: str,
     semantic_json: str,

@@ -12,12 +12,14 @@ from sqlalchemy.orm import Session
 from app.crud.ai_config import ai_config_crud
 from app.services.ai_service import ai_service
 from app.services.agent.prompts import (
+    build_confirmation_intent_messages,
     CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT,
     CRM_AGENT_SEMANTIC_SYSTEM_PROMPT,
     build_pending_interruption_messages,
     build_semantic_messages,
 )
 from app.services.agent.schemas import (
+    AgentConfirmationIntentDecision,
     AgentMemorySnapshot,
     AgentPendingInterruptionDecision,
     AgentSemanticParseResult,
@@ -128,6 +130,46 @@ class AgentSemanticParser:
             return AgentPendingInterruptionDecision.model_validate(parsed)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise AgentSemanticParserError(f"AI 挂起任务判断结果无效：{str(exc)}") from exc
+
+    async def assess_confirmation_intent(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_message: str,
+        pending_task: dict,
+        memory: Optional[AgentMemorySnapshot] = None,
+        current_date: Optional[date] = None,
+    ) -> AgentConfirmationIntentDecision:
+        config = ai_config_crud.get_config(db, team_id)
+        if not config:
+            raise AgentSemanticParserError("AI 配置未设置，无法判断确认意图。")
+
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
+        if not api_key:
+            raise AgentSemanticParserError("AI API Key 未设置，无法判断确认意图。")
+
+        memory_json = (memory or AgentMemorySnapshot()).model_dump_json(exclude_none=True)
+        pending_task_json = json.dumps(pending_task, ensure_ascii=False, default=str)
+        raw = await self.ai_client._stream_chat_collect(
+            api_host=config.api_host,
+            api_key=api_key,
+            model=config.model_name,
+            messages=build_confirmation_intent_messages(
+                user_message,
+                pending_task_json,
+                memory_json,
+                current_date=current_date,
+            ),
+            temperature=0.0,
+            max_tokens=300,
+            response_format={"type": "json_object"},
+        )
+        try:
+            parsed = json.loads(self._clean_json(raw))
+            return AgentConfirmationIntentDecision.model_validate(parsed)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise AgentSemanticParserError(f"AI 确认意图判断结果无效：{str(exc)}") from exc
 
     async def parse_with_metadata(
         self,

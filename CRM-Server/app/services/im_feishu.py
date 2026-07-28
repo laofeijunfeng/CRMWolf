@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 from typing import Any, Dict, Optional
 from urllib.parse import quote
 
@@ -414,6 +415,11 @@ class FeishuBotService:
             key = (mention.get("key") or "").strip()
             if key:
                 text = text.replace(key, "")
+            name = (mention.get("name") or "").strip()
+            if name:
+                text = re.sub(rf"@{re.escape(name)}\b", "", text)
+                text = text.replace(f"@{name}", "")
+        text = re.sub(r"<at[^>]*>.*?</at>", "", text, flags=re.IGNORECASE | re.DOTALL)
         return text.strip()
 
     def _extract_text(self, message: Dict[str, Any]) -> str:

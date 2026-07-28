@@ -22,6 +22,7 @@ AgentIntent = Literal[
 
 AgentHITLDecisionType = Literal["approve", "edit", "reject", "respond"]
 AgentPendingInterruptionDecisionType = Literal["CONTINUE_PENDING", "START_NEW_FLOW", "ASK_USER"]
+AgentConfirmationIntentType = Literal["confirm", "reject", "unknown"]
 AgentSuggestionAction = Literal[
     "CREATE_OPPORTUNITY",
     "MOVE_OPPORTUNITY_STAGE",
@@ -223,6 +224,12 @@ class AgentPendingInterruptionDecision(BaseModel):
     is_field_supplement: bool = Field(False, description="是否明显是在补充当前挂起任务缺失字段")
     reason: str = Field("", description="简短判断依据")
     question: Optional[str] = Field(None, description="需要用户确认时的问题")
+
+
+class AgentConfirmationIntentDecision(BaseModel):
+    intent: AgentConfirmationIntentType = Field("unknown", description="用户是否确认或拒绝当前待确认动作")
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    reason: str = Field("", description="简短判断依据")
 
 
 class AgentHITLPolicy(BaseModel):
