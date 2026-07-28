@@ -16,10 +16,13 @@
 | `$wolf-primary-v2` | `#2563EB` | 主操作、活动导航、链接。 |
 | `$wolf-primary-hover-v2` | `#1D4ED8` | 主操作悬停。 |
 | `$wolf-primary-light-v2` | `rgba(#2563EB, 0.1)` | 选中与浅色背景。 |
-| `$wolf-bg-page-v2` | `#F8FAFC` | 页面画布。 |
+| `$wolf-bg-page-v2` | `#FFFFFF` | 页面主工作面。 |
 | `$wolf-bg-card-v2` | `#FFFFFF` | 卡片与数据区域背景。 |
+| `$wolf-bg-sidebar-v2` | `#F8FAFC` | 侧栏背景。 |
 | `$wolf-bg-hover-v2` | `#EFF6FF` | 悬停背景。 |
 | `$wolf-bg-muted-v2` | `#F1F5F9` | 辅助背景。 |
+| `$wolf-bg-table-header-v2` | `#F8FAFC` | 表格表头背景。 |
+| `$wolf-bg-table-hover-v2` | `#F8FAFC` | 表格行悬停背景。 |
 | `$wolf-text-primary-v2` | `#020817` | 主信息。 |
 | `$wolf-text-secondary-v2` | `#64748B` | 正文与次级信息。 |
 | `$wolf-text-tertiary-v2` | `#64748B` | 辅助信息。 |

@@ -397,7 +397,7 @@ watchEffect(() => {
       :total="pagination.total"
       :filter-fields="filterFields"
       :sort-fields="sortFields"
-      height="calc(100vh - 108px)"
+      height="calc(100vh - 121px)"
       empty-title="暂无回款记录"
       row-interactive
       mobile-title-key="record_number"

@@ -411,7 +411,7 @@ watch(
       :filter-fields="filterFields"
       :sort-fields="sortFields"
       :sorts="activeSorts"
-      height="calc(100vh - 108px)"
+      height="calc(100vh - 121px)"
       empty-title="暂无回款计划"
       row-interactive
       mobile-title-key="plan_number"

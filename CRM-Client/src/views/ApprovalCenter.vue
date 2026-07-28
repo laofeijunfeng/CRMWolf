@@ -54,7 +54,7 @@
         :page-size="pageSize"
         :loading="listLoading"
         :filter-fields="filterFields"
-        height="calc(100vh - 108px)"
+        height="calc(100vh - 121px)"
         empty-title="暂无待审批事项"
         row-interactive
         @update:page="page = $event; fetchList()"

@@ -126,14 +126,14 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     expect(appLayoutSource).not.toContain('height: calc(100dvh - $wolf-bottom-nav-height-v2)')
   })
 
-  it('keeps the top bar visually aligned with the shadcn sidebar header pattern', () => {
+  it('keeps the top bar aligned with the white main workspace surface', () => {
     const appLayoutSource = readFileSync('src/AppLayout.vue', 'utf-8')
 
     expect(appLayoutSource).toContain('<Separator orientation="vertical" class="sidebar-trigger-separator" />')
     expect(appLayoutSource).toContain("import { Separator } from '@/components/ui/separator'")
-    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*background:\s*transparent/s)
+    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*background:\s*\$wolf-bg-card-v2/s)
     expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*box-shadow:\s*none/s)
-    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*border-bottom:\s*0/s)
+    expect(appLayoutSource).toMatch(/\.top-bar\s*\{[^}]*border-bottom:\s*1px solid \$wolf-border-default-v2/s)
     expect(appLayoutSource).toMatch(/\.sidebar-trigger-separator\s*\{[^}]*height:\s*16px/s)
   })
 
@@ -141,12 +141,14 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     const baseStyles = readFileSync('src/styles/base.css', 'utf-8')
     const variablesSource = readFileSync('src/styles/variables-v2.scss', 'utf-8')
 
-    expect(variablesSource).toContain('$wolf-bg-sidebar-v2: #FAFAFA')
+    expect(variablesSource).toContain('$wolf-bg-sidebar-v2: #F8FAFC')
+    expect(variablesSource).toContain('$wolf-bg-page-v2: #FFFFFF')
     expect(variablesSource).toContain('$wolf-primary-v2: #2563EB')
-    expect(baseStyles).toContain('--sidebar-background: 0 0% 98%;')
+    expect(baseStyles).toContain('--sidebar-background: 210 40% 98%;')
     expect(baseStyles).toContain('--sidebar-primary: 221.2 83.2% 53.3%;')
-    expect(baseStyles).toContain('--sidebar-accent: 214.3 100% 96.9%;')
-    expect(baseStyles).toContain('--sidebar-border: 213.3 96.9% 87.3%;')
+    expect(baseStyles).toContain('--sidebar-accent: 210 40% 96.1%;')
+    expect(baseStyles).toContain('--sidebar-active: 214.3 100% 96.9%;')
+    expect(baseStyles).toContain('--sidebar-border: 214.3 31.8% 91.4%;')
     expect(baseStyles).toContain('--ring: 221.2 83.2% 53.3%;')
     expect(baseStyles).not.toContain('--primary: 222.2 47.4% 11.2%;')
   })

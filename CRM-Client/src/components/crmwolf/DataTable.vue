@@ -580,8 +580,9 @@ watch(() => props.data, () => {
 // ==================== 表格卡片（固定高度）====================
 .data-table-card {
   background: $wolf-bg-card-v2;
+  border: 1px solid $wolf-border-default-v2;
   border-radius: $wolf-radius-xl-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -688,37 +689,37 @@ watch(() => props.data, () => {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: $wolf-bg-muted-v2;  // 表头背景（list-page.md 3.2）
+  background: $wolf-bg-table-header-v2;  // 表头背景（list-page.md 3.2）
 }
 
 .data-table-header-cell {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: $wolf-bg-muted-v2;
+  background: $wolf-bg-table-header-v2;
   font-size: 13px;  // 表头字号（list-page.md 3.2）
   font-weight: 600;  // 表头字重（list-page.md 3.2）
   color: $wolf-text-secondary-v2;   // 表头文字色（list-page.md 3.2）
   padding: 12px 16px;
   text-align: left;
   white-space: nowrap;
-  border-bottom: 1px solid $wolf-border-default-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
 
   &.text-center { text-align: center; }
   &.text-right { text-align: right; }
 
   // 固定列样式
   &.fixed-left, &.fixed-right {
-    background: $wolf-bg-page-v2;  // 固定列背景（略深，视觉分隔）
+    background: $wolf-bg-table-header-v2;
   }
 
   // 固定列阴影（滚动时显示）
   &.fixed-left.has-shadow {
-    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.08);
+    box-shadow: 1px 0 0 $wolf-border-light-v2, 8px 0 12px rgba(15, 23, 42, 0.04);
   }
 
   &.fixed-right.has-shadow {
-    box-shadow: -2px 0 4px rgba(0, 0, 0, 0.08);
+    box-shadow: -1px 0 0 $wolf-border-light-v2, -8px 0 12px rgba(15, 23, 42, 0.04);
   }
 }
 
@@ -728,7 +729,7 @@ watch(() => props.data, () => {
   gap: 8px;
   min-height: 40px;
   padding: 6px 12px;
-  border-bottom: 1px solid $wolf-border-default-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
   background: $wolf-bg-card-v2;
   flex-shrink: 0;
 }
@@ -737,10 +738,10 @@ watch(() => props.data, () => {
 .data-table-row {
   height: 44px;  // 行高（list-page.md 3.2）
   transition: background 150ms ease;
-  border-bottom: 1px solid $wolf-border-default-v2;  // 行分割线（list-page.md 3.2）
+  border-bottom: 1px solid $wolf-border-light-v2;  // 行分割线（list-page.md 3.2）
 
   &:hover {
-    background: $wolf-bg-hover-v2;  // Hover 背景（list-page.md 3.2）
+    background: $wolf-bg-table-hover-v2;  // Hover 背景（list-page.md 3.2）
   }
 
   &:last-child {
@@ -779,16 +780,16 @@ watch(() => props.data, () => {
   // hover 时固定列背景同步
   .data-table-row:hover &.fixed-left,
   .data-table-row:hover &.fixed-right {
-    background: $wolf-bg-hover-v2;
+    background: $wolf-bg-table-hover-v2;
   }
 
   // 固定列阴影（滚动时显示）
   &.fixed-left.has-shadow {
-    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.08);
+    box-shadow: 1px 0 0 $wolf-border-light-v2, 8px 0 12px rgba(15, 23, 42, 0.04);
   }
 
   &.fixed-right.has-shadow {
-    box-shadow: -2px 0 4px rgba(0, 0, 0, 0.08);
+    box-shadow: -1px 0 0 $wolf-border-light-v2, -8px 0 12px rgba(15, 23, 42, 0.04);
   }
 }
 
@@ -864,12 +865,12 @@ watch(() => props.data, () => {
   // 固定列阴影：移动端更明显（便于感知边界）
   .data-table-header-cell.fixed-left.has-shadow,
   .data-table-cell.fixed-left.has-shadow {
-    box-shadow: 4px 0 8px rgba(0, 0, 0, 0.12);
+    box-shadow: 1px 0 0 $wolf-border-light-v2, 10px 0 16px rgba(15, 23, 42, 0.06);
   }
 
   .data-table-header-cell.fixed-right.has-shadow,
   .data-table-cell.fixed-right.has-shadow {
-    box-shadow: -4px 0 8px rgba(0, 0, 0, 0.12);
+    box-shadow: -1px 0 0 $wolf-border-light-v2, -10px 0 16px rgba(15, 23, 42, 0.06);
   }
 
   // 分页区：换行布局
@@ -904,6 +905,7 @@ watch(() => props.data, () => {
   .data-table-card.has-mobile-cards {
     height: auto !important;
     min-height: 0;
+    border: 0;
     border-radius: 0;
     box-shadow: none;
     background: transparent;

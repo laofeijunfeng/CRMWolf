@@ -313,7 +313,7 @@ $z-index-bottom-nav: 100;
 .app-layout {
   display: flex;
   min-height: 100dvh;  // UI/UX Pro Max §5: Dynamic viewport height
-  background: $wolf-bg-page-v2;
+  background: $wolf-bg-sidebar-v2;
 
   @supports not (min-height: 100dvh) {
     min-height: 100vh;
@@ -327,7 +327,7 @@ $z-index-bottom-nav: 100;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  background: $wolf-bg-page-v2;  // #F8FAFC
+  background: $wolf-bg-card-v2;
 }
 
 .main-content.main-content--contained {
@@ -370,8 +370,8 @@ $z-index-bottom-nav: 100;
   flex-shrink: 0;
   height: $wolf-topbar-height-v2;  // 56px
   padding: 0 $wolf-space-lg-v2;
-  border-bottom: 0;
-  background: transparent;
+  border-bottom: 1px solid $wolf-border-default-v2;
+  background: $wolf-bg-card-v2;
   box-shadow: none;
   position: sticky;
   top: 0;

@@ -23,6 +23,7 @@
 | 令牌 | 解析值 | 用途 |
 | --- | --- | --- |
 | `$wolf-page-padding-v2` | `24px` | 桌面页面内边距。 |
+| `$wolf-list-page-padding-top-v2` | `24px` | 列表页顶部内边距，与页面左右和底部边距保持一致。 |
 | `$wolf-card-padding-v2` | `16px` | 卡片内边距。 |
 | `$wolf-card-gap-v2` | `16px` | 卡片之间间距。 |
 | `$wolf-section-gap-v2` | `24px` | 页面模块之间间距。 |

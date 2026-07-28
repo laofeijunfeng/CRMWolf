@@ -105,7 +105,7 @@ const config: Config = {
 				secondary: 'hsl(var(--info) / <alpha-value>)',
 				accent: 'hsl(var(--success) / <alpha-value>)',
 				bg: {
-					page: 'hsl(var(--muted) / <alpha-value>)',
+					page: 'hsl(var(--background) / <alpha-value>)',
 					card: 'hsl(var(--card) / <alpha-value>)',
 					sidebar: 'hsl(var(--sidebar-background) / <alpha-value>)',
 					hover: 'hsl(var(--accent) / <alpha-value>)',
@@ -159,6 +159,8 @@ const config: Config = {
 				'primary-foreground': 'hsl(var(--sidebar-primary-foreground) / <alpha-value>)',
 				accent: 'hsl(var(--sidebar-accent) / <alpha-value>)',
 				'accent-foreground': 'hsl(var(--sidebar-accent-foreground) / <alpha-value>)',
+				active: 'hsl(var(--sidebar-active) / <alpha-value>)',
+				'active-foreground': 'hsl(var(--sidebar-active-foreground) / <alpha-value>)',
 				border: 'hsl(var(--sidebar-border) / <alpha-value>)',
 				ring: 'hsl(var(--sidebar-ring) / <alpha-value>)'
 			}

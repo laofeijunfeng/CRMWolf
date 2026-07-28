@@ -443,7 +443,7 @@ watchEffect(() => {
       :page="pagination.current"
       :page-size="pagination.pageSize"
       :total="pagination.total"
-      height="calc(100vh - 108px)"
+      height="calc(100vh - 121px)"
       empty-title="暂无合同"
       row-interactive
       mobile-title-key="contract_name"

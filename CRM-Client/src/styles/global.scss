@@ -11,7 +11,7 @@
   --wolf-primary-active: hsl(var(--primary-active));
   --wolf-primary-light: hsl(var(--primary) / 0.1);
 
-  --wolf-bg-page: hsl(var(--muted));
+  --wolf-bg-page: hsl(var(--background));
   --wolf-bg-card: hsl(var(--card));
   --wolf-bg-sidebar: hsl(var(--sidebar-background));
   --wolf-bg-hover: hsl(var(--accent));
@@ -120,7 +120,7 @@ html, body {
   font-family: $wolf-font-family-v2;
   font-size: $wolf-font-size-body-v2;
   color: hsl(var(--foreground));
-  background-color: hsl(var(--muted));
+  background-color: hsl(var(--sidebar-background));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: $wolf-line-height-body-v2;
