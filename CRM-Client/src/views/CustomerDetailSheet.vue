@@ -118,6 +118,7 @@ const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string; appro
 const recordSheetVisible = ref(false)
 const recordEditDialogOpen = ref(false)
 const recordEditSubmitting = ref(false)
+const isRecordResubmitMode = ref(false)
 const selectedOpportunityId = ref<number | null>(null)
 
 interface ContractOpportunityContext {
@@ -904,23 +905,38 @@ const handleRecordSheetRefresh = async (): Promise<void> => {
 
 const handleRecordResubmit = (): void => {
   if (selectedRecord.value === null) return
+  isRecordResubmitMode.value = true
+  recordEditDialogOpen.value = true
+}
+
+const handleRecordEdit = (): void => {
+  if (selectedRecord.value === null) return
+  isRecordResubmitMode.value = false
   recordEditDialogOpen.value = true
 }
 
 const handleRecordEditDialogOpenChange = (open: boolean): void => {
   recordEditDialogOpen.value = open
+  if (!open) {
+    isRecordResubmitMode.value = false
+  }
 }
 
 const handleRecordEditSubmit = async (recordId: number, payload: PaymentRecordUpdate): Promise<void> => {
   recordEditSubmitting.value = true
   try {
     await paymentApi.updatePaymentRecord(recordId, payload)
-    const res = await approvalStore.submitEntity('PAYMENT', recordId)
-    toast.success(res.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批')
+    if (isRecordResubmitMode.value) {
+      const res = await approvalStore.submitEntity('PAYMENT', recordId)
+      toast.success(res.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批')
+    } else {
+      toast.success('回款记录更新成功')
+    }
     recordEditDialogOpen.value = false
+    isRecordResubmitMode.value = false
     await handleRecordSheetRefresh()
   } catch (error: unknown) {
-    handleApiError(error, '重新提交审批')
+    handleApiError(error, isRecordResubmitMode.value ? '重新提交审批' : '更新回款记录')
   } finally {
     recordEditSubmitting.value = false
   }
@@ -1529,6 +1545,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     :approval="selectedRecord?.approval ?? null"
     @update:visible="recordSheetVisible = $event"
     @refresh="handleRecordSheetRefresh"
+    @edit="handleRecordEdit"
     @resubmit="handleRecordResubmit"
   />
 

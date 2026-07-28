@@ -16,7 +16,6 @@ class PaymentPlanStatus:
 
 
 class PaymentConfirmationStatus:
-    DRAFT = "DRAFT"          # 草稿状态（新增）
     PENDING = "PENDING"
     CONFIRMED = "CONFIRMED"
     DISPUTED = "DISPUTED"

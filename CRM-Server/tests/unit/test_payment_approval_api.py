@@ -41,6 +41,7 @@ from app.models.payment import (
     PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus,
 )
 from app.models.user import User, UserStatus
+from app.services.approval_adapter import PaymentRecordAdapter
 
 from types import SimpleNamespace
 
@@ -231,6 +232,19 @@ def test_submit_approval_matched_flow_creates_approval(
         PaymentRecord.id == seed_payment_record.id
     ).one()
     assert rec.confirmation_status == PaymentConfirmationStatus.PENDING
+
+
+def test_payment_adapter_cancel_keeps_confirmation_pending(
+    db_session, seed_payment_record,
+):
+    seed_payment_record.confirmation_status = PaymentConfirmationStatus.PENDING
+    seed_payment_record.approval_phase = ApprovalPhase.PENDING_REVIEW
+    db_session.commit()
+
+    PaymentRecordAdapter().on_cancelled(db_session, seed_payment_record)
+    db_session.flush()
+
+    assert seed_payment_record.confirmation_status == PaymentConfirmationStatus.PENDING
 
 
 def test_update_payment_record_creator_can_edit_after_withdraw(

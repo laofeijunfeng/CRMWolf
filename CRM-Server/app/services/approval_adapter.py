@@ -121,8 +121,9 @@ class PaymentRecordAdapter:
     def on_cancelled(self, db, entity):
         if entity is None: return  # E4 守卫
         # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = DRAFT）
-        # 撤回后切回 DRAFT（允许重新提交）
-        entity.confirmation_status = PaymentConfirmationStatus.DRAFT
+        # 回款的 confirmation_status 是财务确认状态；撤回审批只影响 approval_phase，
+        # 未审批通过前仍是待确认，重新提交能力由 approval_phase=DRAFT 表达。
+        entity.confirmation_status = PaymentConfirmationStatus.PENDING
         self._refresh_payment_status(db, entity)
 
     def get_name(self, entity):

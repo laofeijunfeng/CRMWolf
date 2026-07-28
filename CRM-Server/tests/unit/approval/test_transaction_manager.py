@@ -237,11 +237,11 @@ class TestApprovalTransactionManager:
 
     def test_payment_adapter_on_cancelled(self, mock_db):
         """
-        测试：PaymentRecordAdapter.on_cancelled 切换 confirmation_status 为 DRAFT
+        测试：PaymentRecordAdapter.on_cancelled 保持 confirmation_status 为 PENDING
 
         验证点：
         - approval_phase 切换由 Approval Engine 管理
-        - confirmation_status 切换为 DRAFT（允许重新提交）
+        - confirmation_status 保持 PENDING（重新提交能力由 approval_phase=DRAFT 表达）
         """
         # TODO: 实现测试逻辑
         pass

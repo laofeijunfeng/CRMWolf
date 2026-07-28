@@ -14,7 +14,7 @@ export interface PaymentPlanBatchCreate {
 export type PaymentConfirmationStatus = 'PENDING' | 'CONFIRMED' | 'DISPUTED'
 
 // Task 8.2: Approval info types
-export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
 
 export interface ApprovalNodeInfo {
   id: number
@@ -54,6 +54,7 @@ export interface PaymentRecordInfo {
   proof_attachment?: string
   commission_member_id?: string | null
   commission_member_name?: string | null
+  creator_id?: string
   creator_name?: string
   notes?: string
   confirmation_status?: PaymentConfirmationStatus

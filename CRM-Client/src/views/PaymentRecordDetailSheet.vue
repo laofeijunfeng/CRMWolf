@@ -18,6 +18,7 @@ import {
   Calendar,
   ExternalLink,
   FileText,
+  Pencil,
   RefreshCw,
   User,
   Wallet,
@@ -96,6 +97,7 @@ const emit = defineEmits<{
   'update:visible': [value: boolean]
   close: []
   refresh: []
+  edit: []
   resubmit: []
 }>()
 
@@ -147,6 +149,15 @@ const isSubmitterGeneric = computed<boolean>(() => {
   if (approval !== null && 'submitter_id' in approval && approval.submitter_id !== undefined) {
     return approval.submitter_id === currentUserId.value
   }
+  return props.record?.creator_id === currentUserId.value
+})
+
+const canEditRecord = computed<boolean>(() => {
+  if (!hasRecord.value) return false
+  const approvalStatus = props.approval?.status ?? props.record?.approval?.status
+  if (approvalStatus === 'PENDING') return false
+  if (props.record?.confirmation_status === 'CONFIRMED') return false
+  if (permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit'])) return true
   return props.record?.creator_id === currentUserId.value
 })
 
@@ -225,6 +236,10 @@ function handleApprovalChanged(): void {
 
 function handleApprovalResubmit(): void {
   emit('resubmit')
+}
+
+function handleEditRecord(): void {
+  emit('edit')
 }
 
 // Reset state when closing
@@ -444,6 +459,15 @@ watch(
       </ScrollArea>
 
       <SheetFooter class="record-sheet-footer">
+        <Button
+          v-if="canEditRecord"
+          variant="outline"
+          type="button"
+          @click="handleEditRecord"
+        >
+          <Pencil data-icon="inline-start" aria-hidden="true" />
+          编辑回款记录
+        </Button>
         <Button variant="outline" type="button" @click="closeSheet">
           <X data-icon="inline-start" aria-hidden="true" />
           关闭

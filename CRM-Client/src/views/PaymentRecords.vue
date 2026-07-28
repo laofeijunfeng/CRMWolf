@@ -125,7 +125,7 @@ const columns = [
 
 // ==================== 权限 ====================
 const canCreateRecord = computed(() => permissionStore.hasPermission('payment:create'))
-const canEditRecord = computed(() => permissionStore.hasPermission('payment:edit'))
+const canEditRecord = computed(() => permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit']))
 const canDeleteRecord = computed(() => permissionStore.hasPermission('payment:delete'))
 
 // ==================== Methods ====================
@@ -272,6 +272,12 @@ const handleDetailApprovalChanged = async (): Promise<void> => {
 const handleDetailResubmit = (): void => {
   if (selectedRecord.value === null) return
   isResubmitMode.value = true
+  editDialogOpen.value = true
+}
+
+const handleDetailEdit = (): void => {
+  if (selectedRecord.value === null) return
+  isResubmitMode.value = false
   editDialogOpen.value = true
 }
 
@@ -504,6 +510,7 @@ watchEffect(() => {
       :approval="selectedRecord?.approval ?? null"
       @update:visible="handleDetailSheetVisibleChange"
       @refresh="handleDetailApprovalChanged"
+      @edit="handleDetailEdit"
       @resubmit="handleDetailResubmit"
     />
 
