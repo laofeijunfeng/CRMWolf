@@ -34,6 +34,7 @@ import paymentApi, {
 import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
 import { useHeaderStore } from '@/stores/header'
+import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { serializeListSorts } from '@/utils/listSorts'
@@ -45,6 +46,7 @@ const router = useRouter()
 const permissionStore = usePermissionStore()
 const approvalStore = useApprovalStore()
 const headerStore = useHeaderStore()
+const userStore = useUserStore()
 
 // ==================== State ====================
 const loading = ref(false)
@@ -125,8 +127,16 @@ const columns = [
 
 // ==================== 权限 ====================
 const canCreateRecord = computed(() => permissionStore.hasPermission('payment:create'))
-const canEditRecord = computed(() => permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit']))
+const canEditAnyRecord = computed(() => permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit']))
 const canDeleteRecord = computed(() => permissionStore.hasPermission('payment:delete'))
+
+const canEditRecordRow = (row: PaymentRecordWithDetails): boolean => {
+  if (row.approval?.status === 'PENDING') return false
+  if (row.approval_phase !== 'draft' && row.approval_phase !== 'rejected') return false
+  if (row.confirmation_status === 'CONFIRMED') return false
+  if (canEditAnyRecord.value) return true
+  return row.creator_id === String(userStore.userInfo?.id ?? '')
+}
 
 // ==================== Methods ====================
 const fetchPaymentRecords = async (): Promise<void> => {
@@ -429,7 +439,7 @@ watchEffect(() => {
             {
               label: '编辑',
               handler: handleEditAction,
-              visible: canEditRecord,
+              visible: canEditRecordRow(row as PaymentRecordWithDetails),
               icon: Pencil
             }
           ]"
@@ -485,7 +495,7 @@ watchEffect(() => {
             {
               label: '编辑',
               handler: handleEditAction,
-              visible: canEditRecord,
+              visible: canEditRecordRow(row as PaymentRecordWithDetails),
               icon: Pencil
             }
           ]"

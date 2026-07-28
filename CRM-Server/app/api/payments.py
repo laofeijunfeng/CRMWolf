@@ -866,6 +866,12 @@ def update_payment_record(
             detail="只能修改自己登记的回款记录"
         )
 
+    if record.approval is not None and record.approval.status == ApprovalStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="审批中的回款记录不能修改"
+        )
+
     if record.approval_phase not in editable_phases:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1027,6 +1033,7 @@ def list_payment_records(
                 "notes": record.notes,
                 "creator_id": record.creator_id,
                 "creator_name": record.creator_name,
+                "approval_phase": record.approval_phase.value if hasattr(record.approval_phase, 'value') else record.approval_phase,
                 "confirmation_status": record.confirmation_status,
                 "created_time": record.created_time.isoformat(),
                 "contract_id": record.contract_id,

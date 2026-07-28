@@ -58,6 +58,7 @@ export interface PaymentRecordInfo {
   creator_name?: string
   notes?: string
   confirmation_status?: PaymentConfirmationStatus
+  approval_phase?: 'draft' | 'pending_review' | 'approved' | 'rejected'
   created_time: string
   // Task 7.2: Approval info for payment record (nested structure matching backend)
   approval_id?: number
@@ -141,6 +142,7 @@ export interface PaymentRecordResponse {
   notes?: string
   creator_id?: string
   creator_name?: string
+  approval_phase?: 'draft' | 'pending_review' | 'approved' | 'rejected'
   created_time: string
   last_modified_time: string
 }

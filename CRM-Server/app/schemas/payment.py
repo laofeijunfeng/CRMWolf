@@ -156,6 +156,7 @@ class PaymentRecordResponse(PaymentRecordBase):
     record_number: Optional[str] = Field(None, description="回款记录编号")
     creator_id: str
     creator_name: Optional[str]
+    approval_phase: Optional[str] = Field(None, description="审批流程状态：draft/pending_review/approved/rejected")
     created_time: datetime
     contract_id: Optional[int] = Field(None, description="合同ID")
     contract_name: Optional[str] = Field(None, description="合同名称")

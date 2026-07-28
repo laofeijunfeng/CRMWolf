@@ -154,6 +154,13 @@ const isSubmitterGeneric = computed<boolean>(() => {
 
 const canEditRecord = computed<boolean>(() => {
   if (!hasRecord.value) return false
+  if (
+    props.record?.approval_phase !== undefined &&
+    props.record.approval_phase !== 'draft' &&
+    props.record.approval_phase !== 'rejected'
+  ) {
+    return false
+  }
   const approvalStatus = props.approval?.status ?? props.record?.approval?.status
   if (approvalStatus === 'PENDING') return false
   if (props.record?.confirmation_status === 'CONFIRMED') return false

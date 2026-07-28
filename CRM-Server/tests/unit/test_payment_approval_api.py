@@ -318,7 +318,37 @@ def test_update_payment_record_pending_review_forbidden(
     )
 
     assert r.status_code == 400, r.text
-    assert r.json()["detail"] == "只有审批撤回或被驳回的回款记录才能修改"
+    assert r.json()["detail"] == "审批中的回款记录不能修改"
+
+
+def test_update_payment_record_pending_approval_forbidden_even_if_phase_draft(
+    db_session, client, seed_payment_record, seed_payment_flow, patched_perms,
+):
+    patched_perms(["payment:view:own"])
+    flow, node = seed_payment_flow
+    approval = Approval(
+        business_type=BusinessType.PAYMENT,
+        business_id=seed_payment_record.id,
+        flow_id=flow.id,
+        current_node_id=node.id,
+        team_id=1,
+        status=ApprovalStatus.PENDING,
+        submitter_id="1",
+        submitter_name="财务张",
+    )
+    db_session.add(approval)
+    db_session.flush()
+    seed_payment_record.approval_id = approval.id
+    seed_payment_record.approval_phase = ApprovalPhase.DRAFT
+    db_session.commit()
+
+    r = client.put(
+        f"/v1/payments/payment-records/{seed_payment_record.id}",
+        json={"actual_amount": 30000, "payment_date": "2026-07-24"},
+    )
+
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "审批中的回款记录不能修改"
 
 
 # ---------- Step 2: submit-approval 未匹配流 -------------------------------
