@@ -32,6 +32,7 @@ import paymentApi, {
   type PaymentRecordUpdate
 } from '@/api/payment'
 import { usePermissionStore } from '@/stores/permissions'
+import { useApprovalStore } from '@/stores/approval'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
@@ -42,6 +43,7 @@ usePageTitle()
 
 const router = useRouter()
 const permissionStore = usePermissionStore()
+const approvalStore = useApprovalStore()
 const headerStore = useHeaderStore()
 
 // ==================== State ====================
@@ -51,6 +53,7 @@ const selectedRecord = ref<PaymentRecordWithDetails | null>(null)
 const detailSheetVisible = ref(false)
 const editDialogOpen = ref(false)
 const editSubmitting = ref(false)
+const isResubmitMode = ref(false)
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 
@@ -229,6 +232,7 @@ const handleViewDetail = (record: PaymentRecordWithDetails): void => {
 
 const handleEdit = (record: PaymentRecordWithDetails): void => {
   selectedRecord.value = record
+  isResubmitMode.value = false
   editDialogOpen.value = true
 }
 
@@ -241,6 +245,9 @@ const handleEditDialogOpenChange = (open: boolean): void => {
   if (!open && !detailSheetVisible.value) {
     selectedRecord.value = null
   }
+  if (!open) {
+    isResubmitMode.value = false
+  }
 }
 
 const handleDetailSheetVisibleChange = (visible: boolean): void => {
@@ -250,16 +257,42 @@ const handleDetailSheetVisibleChange = (visible: boolean): void => {
   }
 }
 
+const refreshRecordsAndSyncSelection = async (): Promise<void> => {
+  const selectedId = selectedRecord.value?.id
+  await fetchPaymentRecords()
+  if (selectedId !== undefined) {
+    selectedRecord.value = tableData.value.find((record) => record.id === selectedId) ?? selectedRecord.value
+  }
+}
+
+const handleDetailApprovalChanged = async (): Promise<void> => {
+  await refreshRecordsAndSyncSelection()
+}
+
+const handleDetailResubmit = (): void => {
+  if (selectedRecord.value === null) return
+  isResubmitMode.value = true
+  editDialogOpen.value = true
+}
+
 const handleEditSubmit = async (recordId: number, data: PaymentRecordUpdate): Promise<void> => {
   editSubmitting.value = true
   try {
     await paymentApi.updatePaymentRecord(recordId, data)
-    toast.success('回款记录更新成功')
+    if (isResubmitMode.value) {
+      const res = await approvalStore.submitEntity('PAYMENT', recordId)
+      toast.success(res.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批')
+    } else {
+      toast.success('回款记录更新成功')
+    }
     editDialogOpen.value = false
-    selectedRecord.value = null
-    fetchPaymentRecords()
+    isResubmitMode.value = false
+    await refreshRecordsAndSyncSelection()
+    if (!detailSheetVisible.value) {
+      selectedRecord.value = null
+    }
   } catch (error) {
-    handleApiError(error, '更新回款记录')
+    handleApiError(error, isResubmitMode.value ? '重新提交审批' : '更新回款记录')
   } finally {
     editSubmitting.value = false
   }
@@ -470,6 +503,8 @@ watchEffect(() => {
       :stage-name="selectedRecord?.stage_name ?? ''"
       :approval="selectedRecord?.approval ?? null"
       @update:visible="handleDetailSheetVisibleChange"
+      @refresh="handleDetailApprovalChanged"
+      @resubmit="handleDetailResubmit"
     />
 
     <EditRecordDialog

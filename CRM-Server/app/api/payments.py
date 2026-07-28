@@ -14,6 +14,7 @@ from app.core.deps import (
     check_payment_view_permission,
 )
 from app.crud.approval import approval_crud, approval_flow_crud
+from app.crud.permission import permission_crud
 from app.crud.payment import payment_plan_crud, payment_record_crud, query_pending_approval_me
 from app.crud.contract import contract_crud
 from app.crud.customer_member import customer_member_crud
@@ -22,6 +23,7 @@ from app.crud.user import user_crud
 from app.constants.business_types import BusinessType
 from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord, PaymentConfirmationStatus
 from app.models.approval import Approval, ApprovalStatus, ApprovalRecord, ApprovalNode
+from app.constants.approval_phase import ApprovalPhase
 from app.schemas.payment import (
     PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate, PaymentPlanResponse,
     PaymentRecordCreate, PaymentRecordUpdate, PaymentRecordResponse,
@@ -816,7 +818,7 @@ def update_payment_record(
     record_id: int,
     record_data: PaymentRecordUpdate,
     team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("payment:record:edit")),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -828,7 +830,8 @@ def update_payment_record(
     - proof_attachment（凭证附件）
     - notes（备注）
 
-    注意：只有审批被驳回的记录才能更新（Task 8.1）
+    注意：审批撤回后的草稿、审批驳回的记录可由登记人修改；具备
+    payment:record:edit 的用户也可修改。
     """
     record = payment_record_crud.get_by_id(db, record_id, team_id)
     if not record:
@@ -846,18 +849,27 @@ def update_payment_record(
             commission_member_id=record_data.commission_member_id,
         )
 
-    # Task 8.1: 检查审批状态 - 只有驳回的记录才能更新
-    # 查询该回款记录关联的审批
-    approval = db.query(Approval).filter(
-        Approval.business_type == BusinessType.PAYMENT,
-        Approval.business_id == record_id,
-        Approval.team_id == team_id
-    ).order_by(Approval.created_time.desc()).first()
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+    has_global_edit_permission = "payment:record:edit" in permission_codes
+    is_creator = record.creator_id == str(current_user.id)
+    editable_phases = {
+        ApprovalPhase.DRAFT.value,
+        ApprovalPhase.REJECTED.value,
+        ApprovalPhase.DRAFT,
+        ApprovalPhase.REJECTED,
+    }
 
-    if approval and approval.status != ApprovalStatus.REJECTED:
+    if not has_global_edit_permission and not is_creator:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能修改自己登记的回款记录"
+        )
+
+    if record.approval_phase not in editable_phases:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="只有审批被驳回的记录才能修改"
+            detail="只有审批撤回或被驳回的回款记录才能修改"
         )
 
     try:

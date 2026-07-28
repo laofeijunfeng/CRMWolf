@@ -16,10 +16,8 @@ import { computed, ref, watch } from 'vue'
 import {
   AlertCircle,
   Calendar,
-  CheckCircle2,
   ExternalLink,
   FileText,
-  Loader2,
   RefreshCw,
   User,
   Wallet,
@@ -51,17 +49,16 @@ import {
   EmptyTitle
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'
+import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import { AmountText } from '@/components/crmwolf'
 import type {
   ApprovalInfo,
   ApprovalInfoLite,
-  ApprovalStatus,
   PaymentConfirmationStatus,
   PaymentRecordInfo
 } from '@/api/payment'
-import type { ApprovalRecord } from '@/schemas/approvalGeneric'
+import { usePermissionStore } from '@/stores/permissions'
+import { useUserStore } from '@/stores/user'
 import { formatLocalDate } from '@/utils/format'
 
 /**
@@ -71,6 +68,7 @@ import { formatLocalDate } from '@/utils/format'
  */
 type PaymentRecordDetailInfo = PaymentRecordInfo & {
   record_number?: string
+  creator_id?: string
 }
 
 /**
@@ -97,14 +95,18 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   close: []
+  refresh: []
+  resubmit: []
 }>()
+
+const permissionStore = usePermissionStore()
+const userStore = useUserStore()
 
 // Local loading state for future API fetch support
 const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
 
 const hasRecord = computed<boolean>(() => props.record !== null)
-const hasApproval = computed<boolean>(() => props.approval !== null)
 const hasProofAttachment = computed<boolean>(() => {
   const attachment = props.record?.proof_attachment
   return typeof attachment === 'string' && attachment.trim().length > 0
@@ -125,10 +127,28 @@ const proofAttachmentUrl = computed<string>(() => {
   return props.record?.proof_attachment ?? ''
 })
 
-const approvalStatus = computed<ApprovalStatus | null>(() => props.approval?.status ?? null)
-const isApprovalPending = computed<boolean>(() => approvalStatus.value === 'PENDING')
-const isApprovalApproved = computed<boolean>(() => approvalStatus.value === 'APPROVED')
-const isApprovalRejected = computed<boolean>(() => approvalStatus.value === 'REJECTED')
+const recordEntityId = computed<number | null>(() => props.record?.id ?? props.recordId)
+
+const currentUserId = computed<string>(() => {
+  const id = userStore.userInfo?.id
+  return id === undefined || id === null ? '' : String(id)
+})
+
+const canApproveGeneric = computed<boolean>(() => {
+  return permissionStore.hasAnyPermission([
+    'payment:approve',
+    'payment:approve:own',
+    'payment:approve:all'
+  ])
+})
+
+const isSubmitterGeneric = computed<boolean>(() => {
+  const approval = props.approval
+  if (approval !== null && 'submitter_id' in approval && approval.submitter_id !== undefined) {
+    return approval.submitter_id === currentUserId.value
+  }
+  return props.record?.creator_id === currentUserId.value
+})
 
 const confirmationStatusLabel = computed<string>(() => {
   return getConfirmationStatusLabel(props.record?.confirmation_status)
@@ -136,89 +156,6 @@ const confirmationStatusLabel = computed<string>(() => {
 
 const confirmationStatusClass = computed<string>(() => {
   return getConfirmationStatusClass(props.record?.confirmation_status)
-})
-
-const approvalStatusLabel = computed<string>(() => {
-  if (approvalStatus.value === null) return ''
-  return getApprovalStatusLabel(approvalStatus.value)
-})
-
-const approvalStatusClass = computed<string>(() => {
-  if (approvalStatus.value === null) return ''
-  return getApprovalStatusClass(approvalStatus.value)
-})
-
-const currentApproverName = computed<string>(() => {
-  if (props.approval === null || props.approval.status !== 'PENDING') return '-'
-  const pendingNode = props.approval.nodes.find((node) => node.status === 'PENDING')
-  return pendingNode?.approver_name ?? '待分配'
-})
-
-const rejectionReason = computed<string | null>(() => {
-  const approval = props.approval
-  if (approval === null || approval.status !== 'REJECTED') return null
-  // ApprovalInfo has reject_reason, ApprovalInfoLite does not
-  if ('reject_reason' in approval && approval.reject_reason !== undefined && approval.reject_reason.trim() !== '') {
-    return approval.reject_reason
-  }
-  const rejectedNode = approval.nodes.find((node) => node.status === 'REJECT' || node.status === 'REJECTED')
-  return rejectedNode?.comment ?? '审批被驳回，请查看详情'
-})
-
-const approvalCreatedTime = computed<string | undefined>(() => {
-  const approval = props.approval
-  if (approval === null) return undefined
-  // ApprovalInfo has created_time, ApprovalInfoLite does not
-  if ('created_time' in approval) {
-    return approval.created_time
-  }
-  return undefined
-})
-
-const approvalStepperRecords = computed<ApprovalRecord[]>(() => {
-  const approval = props.approval
-  if (approval === null) return []
-
-  const createdTime = approvalCreatedTime.value ?? props.record?.created_time
-  if (createdTime === undefined || createdTime.trim() === '') return []
-
-  const records: ApprovalRecord[] = [
-    {
-      id: approval.id,
-      approval_id: approval.id,
-      node_id: null,
-      node_name: '提交申请',
-      approver_id: 'submitter_id' in approval ? approval.submitter_id : null,
-      approver_name: 'submitter_name' in approval ? approval.submitter_name : formatCreator(props.record),
-      approver_status: null,
-      approver_status_display: null,
-      action: 'SUBMIT',
-      comment: null,
-      created_time: createdTime,
-    },
-  ]
-
-  approval.nodes.forEach((node) => {
-    const isApproved = node.status === 'APPROVE' || node.status === 'APPROVED'
-    const isRejected = node.status === 'REJECT' || node.status === 'REJECTED'
-    if (!isApproved && !isRejected) return
-
-    records.push({
-      id: node.id,
-      approval_id: approval.id,
-      node_id: node.id,
-      node_name: node.node_name,
-      approver_id: node.approver_id ?? null,
-      approver_name: node.approver_name ?? node.approve_role,
-      approver_status: null,
-      approver_status_display: null,
-      action: isRejected ? 'REJECT' : 'APPROVE',
-      comment: node.comment ?? null,
-      created_time: node.approved_time ?? createdTime,
-    })
-  })
-
-  return records
 })
 
 // Helper functions
@@ -232,24 +169,6 @@ function getConfirmationStatusClass(status: PaymentConfirmationStatus | undefine
   if (status === 'CONFIRMED') return 'status-success'
   if (status === 'DISPUTED') return 'status-danger'
   return 'status-warning'
-}
-
-function getApprovalStatusLabel(status: ApprovalStatus): string {
-  const statusMap: Record<ApprovalStatus, string> = {
-    PENDING: '审批中',
-    APPROVED: '已通过',
-    REJECTED: '已驳回'
-  }
-  return statusMap[status] ?? status
-}
-
-function getApprovalStatusClass(status: ApprovalStatus): string {
-  const statusMap: Record<ApprovalStatus, string> = {
-    PENDING: 'approval-status-warning',
-    APPROVED: 'approval-status-success',
-    REJECTED: 'approval-status-danger'
-  }
-  return statusMap[status] ?? ''
 }
 
 function formatDate(dateStr: string | undefined): string {
@@ -298,6 +217,14 @@ function handleProofClick(): void {
   if (typeof attachment === 'string' && attachment.trim().length > 0) {
     window.open(attachment, '_blank', 'noopener,noreferrer')
   }
+}
+
+function handleApprovalChanged(): void {
+  emit('refresh')
+}
+
+function handleApprovalResubmit(): void {
+  emit('resubmit')
 }
 
 // Reset state when closing
@@ -476,38 +403,23 @@ watch(
               </CardContent>
             </Card>
 
-            <!-- Approval Progress Card -->
-            <Card v-if="hasApproval" class="approval-card">
-              <CardHeader class="section-heading approval-heading">
-                <div>
-                  <CardTitle class="section-title">审批进度</CardTitle>
-                  <CardDescription>回款记录的审批状态。</CardDescription>
-                </div>
-                <Badge :class="['approval-status-badge', approvalStatusClass]">
-                  {{ approvalStatusLabel }}
-                </Badge>
+            <!-- Approval Process Card -->
+            <Card v-if="recordEntityId !== null" class="approval-card">
+              <CardHeader class="section-heading">
+                <CardTitle class="section-title">审批流程</CardTitle>
+                <CardDescription>回款记录的审批历史与当前处理状态。</CardDescription>
               </CardHeader>
-              <CardContent class="section-content approval-content">
-                <Alert v-if="isApprovalRejected" variant="destructive">
-                  <AlertCircle aria-hidden="true" />
-                  <AlertTitle>审批被驳回</AlertTitle>
-                  <AlertDescription>{{ rejectionReason ?? '请查看驳回原因并修正后重新提交' }}</AlertDescription>
-                </Alert>
-
-                <div class="approval-summary-grid">
-                  <div class="attribute-item">
-                    <span class="attribute-label">当前审批人</span>
-                    <span class="attribute-value">{{ currentApproverName }}</span>
-                  </div>
-                  <div class="attribute-item">
-                    <span class="attribute-label">提交时间</span>
-                    <span class="attribute-value mono-value">{{ formatDateTime(approvalCreatedTime) }}</span>
-                  </div>
-                </div>
-
-                <ApprovalProcessStepper
-                  :records="approvalStepperRecords"
-                  :is-pending="isApprovalPending"
+              <CardContent class="section-content">
+                <ApprovalProcessGeneric
+                  entity-type="PAYMENT"
+                  :entity-id="recordEntityId"
+                  :can-approve="canApproveGeneric"
+                  :is-submitter="isSubmitterGeneric"
+                  @submitted="handleApprovalChanged"
+                  @approved="handleApprovalChanged"
+                  @rejected="handleApprovalChanged"
+                  @withdrawn="handleApprovalChanged"
+                  @resubmit="handleApprovalResubmit"
                 />
               </CardContent>
             </Card>
@@ -532,24 +444,6 @@ watch(
       </ScrollArea>
 
       <SheetFooter class="record-sheet-footer">
-        <Button
-          v-if="isApprovalPending"
-          variant="secondary"
-          type="button"
-          disabled
-        >
-          <Loader2 data-icon="inline-start" aria-hidden="true" class="animate-spin" />
-          审批中...
-        </Button>
-        <Button
-          v-else-if="isApprovalApproved"
-          variant="secondary"
-          type="button"
-          disabled
-        >
-          <CheckCircle2 data-icon="inline-start" aria-hidden="true" />
-          已通过
-        </Button>
         <Button variant="outline" type="button" @click="closeSheet">
           <X data-icon="inline-start" aria-hidden="true" />
           关闭

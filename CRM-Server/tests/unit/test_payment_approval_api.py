@@ -32,8 +32,9 @@ from app.core import deps
 from app.api.payments import router as payments_router
 
 from app.constants.business_types import BusinessType
+from app.constants.approval_phase import ApprovalPhase
 from app.models.approval import (
-    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode,
+    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalStatus,
 )
 from app.models.contract import Contract, ContractStatus
 from app.models.payment import (
@@ -150,6 +151,7 @@ def seed_contract_plan(db_session):
     plan = PaymentPlan(
         team_id=1,
         contract_id=contract.id,
+        plan_number="PP-2026-001",
         stage_name="首付款",
         planned_amount=50000,
         due_date=__import__("datetime").date(2026, 8, 1),
@@ -165,6 +167,7 @@ def seed_payment_record(db_session, seed_contract_plan):
     _contract, plan = seed_contract_plan
     record = PaymentRecord(
         team_id=1,
+        record_number="PR-2026-001",
         payment_plan_id=plan.id,
         actual_amount=50000,
         payment_date=__import__("datetime").date(2026, 7, 1),
@@ -208,7 +211,7 @@ def seed_payment_flow(db_session):
 def test_submit_approval_matched_flow_creates_approval(
     db_session, client, seed_payment_record, seed_payment_flow, patched_perms,
 ):
-    patched_perms(["payment:submit"])
+    patched_perms(["payment:submit", "payment:view:own"])
     r = client.post(f"/v1/payments/records/{seed_payment_record.id}/submit-approval")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -230,19 +233,90 @@ def test_submit_approval_matched_flow_creates_approval(
     assert rec.confirmation_status == PaymentConfirmationStatus.PENDING
 
 
-# ---------- Step 2: submit-approval 未匹配流（E5 直通财务确认）---------------
-
-def test_submit_approval_no_flow_returns_no_flow(
-    db_session, client, seed_payment_record, patched_perms,
+def test_update_payment_record_creator_can_edit_after_withdraw(
+    db_session, client, seed_payment_record, seed_payment_flow, patched_perms,
 ):
-    # 不 seed 任何 PAYMENT 流 → match_flow_generic 返 (None, None)（决策1）
-    patched_perms(["payment:submit"])
-    r = client.post(f"/v1/payments/records/{seed_payment_record.id}/submit-approval")
+    patched_perms(["payment:view:own"])
+    flow, node = seed_payment_flow
+    approval = Approval(
+        business_type=BusinessType.PAYMENT,
+        business_id=seed_payment_record.id,
+        flow_id=flow.id,
+        current_node_id=node.id,
+        team_id=1,
+        status=ApprovalStatus.CANCELLED,
+        submitter_id="1",
+        submitter_name="财务张",
+    )
+    db_session.add(approval)
+    db_session.flush()
+    seed_payment_record.approval_id = approval.id
+    seed_payment_record.approval_phase = ApprovalPhase.DRAFT
+    db_session.commit()
+
+    r = client.put(
+        f"/v1/payments/payment-records/{seed_payment_record.id}",
+        json={
+            "actual_amount": 30000,
+            "actual_payer_name": "北京智云悟飞科技有限公司",
+            "payment_date": "2026-07-24",
+            "proof_attachment": "",
+            "notes": "",
+        },
+    )
+
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["approval_id"] is None
-    assert body["status"] == "NO_FLOW"
-    assert "财务确认" in body["message"]
+    assert body["actual_amount"] == 30000
+    assert body["actual_payer_name"] == "北京智云悟飞科技有限公司"
+
+    db_session.expire_all()
+    rec = db_session.query(PaymentRecord).filter(
+        PaymentRecord.id == seed_payment_record.id
+    ).one()
+    assert float(rec.actual_amount) == 30000
+
+
+def test_update_payment_record_pending_review_forbidden(
+    db_session, client, seed_payment_record, seed_payment_flow, patched_perms,
+):
+    patched_perms(["payment:view:own"])
+    flow, node = seed_payment_flow
+    approval = Approval(
+        business_type=BusinessType.PAYMENT,
+        business_id=seed_payment_record.id,
+        flow_id=flow.id,
+        current_node_id=node.id,
+        team_id=1,
+        status=ApprovalStatus.PENDING,
+        submitter_id="1",
+        submitter_name="财务张",
+    )
+    db_session.add(approval)
+    db_session.flush()
+    seed_payment_record.approval_id = approval.id
+    seed_payment_record.approval_phase = ApprovalPhase.PENDING_REVIEW
+    db_session.commit()
+
+    r = client.put(
+        f"/v1/payments/payment-records/{seed_payment_record.id}",
+        json={"actual_amount": 30000, "payment_date": "2026-07-24"},
+    )
+
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "只有审批撤回或被驳回的回款记录才能修改"
+
+
+# ---------- Step 2: submit-approval 未匹配流 -------------------------------
+
+def test_submit_approval_no_flow_returns_configuration_error(
+    db_session, client, seed_payment_record, patched_perms,
+):
+    # 不 seed 任何 PAYMENT 流 → 要求管理员配置回款审批流。
+    patched_perms(["payment:submit", "payment:view:own"])
+    r = client.post(f"/v1/payments/records/{seed_payment_record.id}/submit-approval")
+    assert r.status_code == 400, r.text
+    assert "未找到匹配的回款审批流程" in r.json()["detail"]
 
     # 不建任何 Approval
     cnt = db_session.query(Approval).filter(
@@ -251,7 +325,7 @@ def test_submit_approval_no_flow_returns_no_flow(
     ).count()
     assert cnt == 0
 
-    # 回款保持 PENDING（免审批直通财务确认，非自动 CONFIRMED）
+    # 回款保持 PENDING
     db_session.expire_all()
     rec = db_session.query(PaymentRecord).filter(
         PaymentRecord.id == seed_payment_record.id
@@ -259,62 +333,9 @@ def test_submit_approval_no_flow_returns_no_flow(
     assert rec.confirmation_status == PaymentConfirmationStatus.PENDING
 
 
-# ---------- Step 3: confirm action=confirm 写入字段 -----------------------
-
-def test_confirm_action_confirm_writes_fields(
-    db_session, client, seed_payment_record, patched_perms, current_user_rec,
-):
-    patched_perms(["payment:confirm"])
-    r = client.post(
-        f"/v1/payments/records/{seed_payment_record.id}/confirm",
-        json={"action": "confirm", "notes": "已到账"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["confirmation_status"] == "CONFIRMED"
-
-    db_session.expire_all()
-    rec = db_session.query(PaymentRecord).filter(
-        PaymentRecord.id == seed_payment_record.id
-    ).one()
-    assert rec.confirmation_status == PaymentConfirmationStatus.CONFIRMED
-    assert rec.confirmed_by == str(current_user_rec.id)
-    assert rec.confirmed_by_name == "财务张"
-    assert rec.confirmation_notes == "已到账"
-
-
-# ---------- Step 4: 404 ---------------------------------------------------
+# ---------- Step 3: 404 ---------------------------------------------------
 
 def test_submit_approval_not_found(client, patched_perms):
     patched_perms(["payment:submit"])
     r = client.post("/v1/payments/records/999999/submit-approval")
     assert r.status_code == 404, r.text
-
-
-def test_confirm_not_found(client, patched_perms):
-    patched_perms(["payment:confirm"])
-    r = client.post(
-        "/v1/payments/records/999999/confirm",
-        json={"action": "confirm"},
-    )
-    assert r.status_code == 404, r.text
-
-
-def test_confirm_dispute_writes_disputed(
-    db_session, client, seed_payment_record, patched_perms, current_user_rec,
-):
-    patched_perms(["payment:confirm"])
-    r = client.post(
-        f"/v1/payments/records/{seed_payment_record.id}/confirm",
-        json={"action": "dispute", "notes": "金额不符"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["confirmation_status"] == "DISPUTED"
-
-    db_session.expire_all()
-    rec = db_session.query(PaymentRecord).filter(
-        PaymentRecord.id == seed_payment_record.id
-    ).one()
-    assert rec.confirmation_status == PaymentConfirmationStatus.DISPUTED
-    assert rec.confirmed_by == str(current_user_rec.id)

@@ -48,6 +48,7 @@ import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vu
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
 import DeploymentInfoFormDialog from '@/components/dialogs/DeploymentInfoFormDialog.vue'
+import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 
 // Detail Sheets (Task 6)
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
@@ -61,7 +62,7 @@ import customerApi, { type CustomerDetailResponse, type ContactResponse, type Cu
 import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
-import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite } from '@/api/payment'
+import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite, PaymentRecordUpdate } from '@/api/payment'
 import paymentApi from '@/api/payment'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
@@ -69,6 +70,7 @@ import { getCustomerScore, type ScoreResponse } from '@/api/score'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
+import { useApprovalStore } from '@/stores/approval'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { confirmDelete } from '@/utils/confirmDialog'
 
@@ -87,6 +89,7 @@ const emit = defineEmits<{
 const router = useRouter()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
+const approvalStore = useApprovalStore()
 
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
@@ -111,8 +114,10 @@ const editingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
 const selectedContractId = ref<number | null>(null)
 const selectedPlanId = ref<number | null>(null)
 const planSheetVisible = ref(false)
-const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string; approval: ApprovalInfo | ApprovalInfoLite | null } | null>(null)
+const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string; approval: ApprovalInfo | ApprovalInfoLite | null; planId: number | null } | null>(null)
 const recordSheetVisible = ref(false)
+const recordEditDialogOpen = ref(false)
+const recordEditSubmitting = ref(false)
 const selectedOpportunityId = ref<number | null>(null)
 
 interface ContractOpportunityContext {
@@ -868,9 +873,57 @@ const handleRecordClick = (record: PaymentRecordInfo): void => {
   selectedRecord.value = {
     record,
     stageName: plan?.stage_name ?? '',
-    approval
+    approval,
+    planId: plan?.id ?? null
   }
   recordSheetVisible.value = true
+}
+
+const syncSelectedPaymentRecord = (): void => {
+  const selected = selectedRecord.value
+  if (selected === null) return
+  const plan = paymentPlans.value.find((item) =>
+    item.payment_records?.some((record) => record.id === selected.record.id)
+  )
+  const updatedRecord = plan?.payment_records?.find((record) => record.id === selected.record.id)
+  if (updatedRecord === undefined) return
+  selectedRecord.value = {
+    record: updatedRecord,
+    stageName: plan?.stage_name ?? selected.stageName,
+    approval: updatedRecord.approval ?? (plan?.latest_record_id === updatedRecord.id ? plan.latest_approval : null) ?? null,
+    planId: plan?.id ?? selected.planId
+  }
+}
+
+const handleRecordSheetRefresh = async (): Promise<void> => {
+  if (props.customerId !== null) {
+    await loadAllData(props.customerId)
+    syncSelectedPaymentRecord()
+  }
+}
+
+const handleRecordResubmit = (): void => {
+  if (selectedRecord.value === null) return
+  recordEditDialogOpen.value = true
+}
+
+const handleRecordEditDialogOpenChange = (open: boolean): void => {
+  recordEditDialogOpen.value = open
+}
+
+const handleRecordEditSubmit = async (recordId: number, payload: PaymentRecordUpdate): Promise<void> => {
+  recordEditSubmitting.value = true
+  try {
+    await paymentApi.updatePaymentRecord(recordId, payload)
+    const res = await approvalStore.submitEntity('PAYMENT', recordId)
+    toast.success(res.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批')
+    recordEditDialogOpen.value = false
+    await handleRecordSheetRefresh()
+  } catch (error: unknown) {
+    handleApiError(error, '重新提交审批')
+  } finally {
+    recordEditSubmitting.value = false
+  }
 }
 
 // Contract detail approval handlers (Task 6 fix)
@@ -1475,6 +1528,16 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
     :stage-name="selectedRecord?.stageName ?? ''"
     :approval="selectedRecord?.approval ?? null"
     @update:visible="recordSheetVisible = $event"
+    @refresh="handleRecordSheetRefresh"
+    @resubmit="handleRecordResubmit"
+  />
+
+  <EditRecordDialog
+    :open="recordEditDialogOpen"
+    :record="selectedRecord?.record ?? null"
+    :submitting="recordEditSubmitting"
+    @update:open="handleRecordEditDialogOpenChange"
+    @submit="handleRecordEditSubmit"
   />
 </template>
 
