@@ -55,6 +55,8 @@ import paymentApi, {
 } from '@/api/payment'
 import type { ApprovalRecord } from '@/schemas/approvalGeneric'
 import { useApprovalStore } from '@/stores/approval'
+import { usePermissionStore } from '@/stores/permissions'
+import { useUserStore } from '@/stores/user'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
 import { AmountText } from '@/components/crmwolf'
@@ -76,6 +78,8 @@ const emit = defineEmits<{
 }>()
 
 const approvalStore = useApprovalStore()
+const permissionStore = usePermissionStore()
+const userStore = useUserStore()
 
 const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
@@ -109,6 +113,7 @@ const hasRejectedApproval = computed<boolean>(() => latestApproval.value?.status
 const hasPendingApproval = computed<boolean>(() => latestApproval.value?.status === 'PENDING')
 const hasApprovedApproval = computed<boolean>(() => latestApproval.value?.status === 'APPROVED')
 const canRegisterPayment = computed<boolean>(() => paymentPlan.value !== null && paymentPlan.value.status !== 'COMPLETED')
+const canEditAnyRecord = computed<boolean>(() => permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit']))
 const canSubmitApproval = computed<boolean>(() => {
   return paymentPlan.value !== null && canRegisterPayment.value && hasPendingRecord.value && latestApproval.value === null
 })
@@ -124,6 +129,15 @@ const rejectionReason = computed<string | null>(() => {
   const rejectedNode = approval.nodes.find((node) => node.status === 'REJECT' || node.status === 'REJECTED')
   return rejectedNode?.comment ?? '审批被驳回，请查看详情'
 })
+
+const canEditRecord = (record: PaymentRecordInfo): boolean => {
+  if (latestRecord.value?.id === record.id && latestApproval.value?.status === 'PENDING') return false
+  if (record.approval?.status === 'PENDING') return false
+  if (record.approval_phase !== 'draft' && record.approval_phase !== 'rejected') return false
+  if (record.confirmation_status === 'CONFIRMED') return false
+  if (canEditAnyRecord.value) return true
+  return record.creator_id === String(userStore.userInfo?.id ?? '')
+}
 
 const currentApproverName = computed<string>(() => {
   const approval = latestApproval.value
@@ -547,6 +561,7 @@ watch(
             <PaymentRecordList
               :records="paymentPlan.payment_records"
               :can-register="canRegisterPayment"
+              :can-edit-record="canEditRecord"
               @register="handleRegisterPayment"
               @record-click="handleRecordClick"
               @edit-record="handleEditRecord"

@@ -623,9 +623,12 @@ def get_payment_plan_detail(
                 "proof_attachment": r.proof_attachment,
                 "commission_member_id": r.commission_member_id,
                 "commission_member_name": r.commission_member_name,
+                "creator_id": r.creator_id,
                 "creator_name": r.creator_name,
                 "notes": r.notes,
                 "confirmation_status": r.confirmation_status.value if hasattr(r.confirmation_status, 'value') else r.confirmation_status,
+                "approval_phase": r.approval_phase.value if hasattr(r.approval_phase, 'value') else r.approval_phase,
+                "approval_id": r.approval_id,
                 "created_time": r.created_time.isoformat()
             }
             for r in plan.payment_records

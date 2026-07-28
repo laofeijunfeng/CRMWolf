@@ -74,7 +74,12 @@ class PaymentRecordInfo(BaseModel):
     proof_attachment: Optional[str]
     commission_member_id: Optional[str] = Field(None, description="提成协作成员用户ID")
     commission_member_name: Optional[str] = Field(None, description="提成协作成员姓名")
+    creator_id: Optional[str] = Field(None, description="登记人ID")
     creator_name: Optional[str]
+    notes: Optional[str] = Field(None, description="备注")
+    confirmation_status: Optional[str] = Field(None, description="确认状态")
+    approval_phase: Optional[str] = Field(None, description="审批流程状态：draft/pending_review/approved/rejected")
+    approval_id: Optional[int] = Field(None, description="审批ID")
     created_time: datetime
 
     class Config:

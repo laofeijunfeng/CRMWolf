@@ -24,11 +24,13 @@ interface Props {
   records: PaymentRecordInfo[]
   canRegister?: boolean
   canDelete?: boolean
+  canEditRecord?: (record: PaymentRecordInfo) => boolean
 }
 
 withDefaults(defineProps<Props>(), {
   canRegister: true,
-  canDelete: false
+  canDelete: false,
+  canEditRecord: () => true
 })
 
 const emit = defineEmits<{
@@ -165,6 +167,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 
     <template #itemActions="{ item }">
       <Button
+        v-if="canEditRecord(item)"
         variant="outline"
         size="icon"
         type="button"

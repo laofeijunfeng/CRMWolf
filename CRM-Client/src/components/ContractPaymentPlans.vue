@@ -50,6 +50,8 @@ import paymentApi, {
   type PaymentRecordResponse,
   type PaymentRecordUpdate,
 } from '@/api/payment'
+import { usePermissionStore } from '@/stores/permissions'
+import { useUserStore } from '@/stores/user'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
 import { logger } from '@/utils/logger'
@@ -73,6 +75,8 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   'plan-updated': []
 }>()
+const permissionStore = usePermissionStore()
+const userStore = useUserStore()
 
 const loading = ref<boolean>(false)
 const plans = ref<PaymentPlanResponse[]>([])
@@ -113,6 +117,16 @@ const fixedContractForPlanForm = computed(() => {
     customer_name: customerName,
   }
 })
+
+const canEditAnyRecord = computed<boolean>(() => permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit']))
+
+const canEditRecord = (record: PaymentRecordInfo): boolean => {
+  if (record.approval?.status === 'PENDING') return false
+  if (record.approval_phase !== 'draft' && record.approval_phase !== 'rejected') return false
+  if (record.confirmation_status === 'CONFIRMED') return false
+  if (canEditAnyRecord.value) return true
+  return record.creator_id === String(userStore.userInfo?.id ?? '')
+}
 
 const currentPlanDialogTitle = computed<string>(() => {
   return currentPlan.value === null ? '回款记录' : `${currentPlan.value.stage_name} - 回款记录`
@@ -474,6 +488,7 @@ watch(
           v-if="currentPlan"
           :records="currentPlan.payment_records"
           :can-register="currentPlan.status !== 'COMPLETED'"
+          :can-edit-record="canEditRecord"
           can-delete
           @register="showPaymentDialog(currentPlan)"
           @record-click="handleRecordClick"
