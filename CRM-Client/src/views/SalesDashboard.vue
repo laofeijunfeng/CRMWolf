@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AlertCircle, ArrowRight, BarChart3, RefreshCw } from 'lucide-vue-next'
+import { AlertCircle, BarChart3, RefreshCw } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { AmountText, ListFilterPopover, TableToolbarButton } from '@/components/crmwolf'
+import { AmountText, ListFilterPopover, MetricCard, TableToolbarButton } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import salesDashboardApi, { type SalesDashboardMetric, type SalesDashboardFunnelResponse } from '@/api/salesDashboard'
 import { useHeaderStore } from '@/stores/header'
@@ -43,6 +43,20 @@ const formatCount = (value: number | null | undefined): string => {
 const formatPercent = (value: number | null | undefined): string => {
   if (value === null || value === undefined) return '-'
   return `${Number(value).toFixed(Number.isInteger(value) ? 0 : 1)}%`
+}
+
+const hasText = (value: string | null | undefined): value is string => {
+  return value !== null && value !== undefined && value.trim() !== ''
+}
+
+const getMetricDescription = (metric: SalesDashboardMetric): string => {
+  if (!hasText(metric.secondary_label)) return '-'
+  return `${metric.secondary_label}：`
+}
+
+const getMetricFooter = (metric: SalesDashboardMetric): string => {
+  if (!hasText(metric.rate_label)) return '-'
+  return `${metric.rate_label}：${formatPercent(metric.rate)}`
 }
 
 const loadDashboard = async (): Promise<void> => {
@@ -129,51 +143,38 @@ onMounted(() => {
         <span>{{ errorMessage }}</span>
       </div>
 
-      <div class="flow-scroll" :class="{ loading }">
+      <div class="metric-grid" :class="{ loading }">
         <template v-if="metrics.length > 0">
-          <template
-            v-for="(metric, index) in metrics"
+          <MetricCard
+            v-for="metric in metrics"
             :key="metric.key"
+            :title="metric.label"
+            :value="formatCount(metric.count)"
+            :footer="getMetricFooter(metric)"
+            :badge="hasText(metric.rate_label) ? formatPercent(metric.rate) : ''"
+            tone="positive"
+            :aria-label="metric.label"
           >
-            <article class="flow-card" :aria-label="metric.label">
-              <div class="card-topline">
-                <span class="card-label">{{ metric.label }}</span>
-                <span class="card-count">{{ formatCount(metric.count) }}</span>
-              </div>
-              <div class="card-secondary">
-                <span>{{ metric.secondary_label || '-' }}：</span>
-                <AmountText
-                  v-if="metric.secondary_type === 'amount'"
-                  :value="metric.secondary_value"
-                  tone="success"
-                  size="sm"
-                />
-                <strong v-else>{{ formatCount(metric.secondary_value) }}</strong>
-              </div>
-              <div class="card-rate">
-                <span v-if="metric.rate_label">{{ metric.rate_label }}：{{ formatPercent(metric.rate) }}</span>
-                <span v-else>-</span>
-              </div>
-            </article>
-
-            <ArrowRight
-              v-if="index < metrics.length - 1"
-              class="flow-arrow"
-              aria-hidden="true"
-            />
-          </template>
+            <template #description>
+              <span>{{ getMetricDescription(metric) }}</span>
+              <AmountText
+                v-if="metric.secondary_type === 'amount'"
+                :value="metric.secondary_value"
+                tone="success"
+                size="sm"
+              />
+              <strong v-else class="metric-secondary-value">{{ formatCount(metric.secondary_value) }}</strong>
+            </template>
+          </MetricCard>
         </template>
 
         <template v-else>
-          <article
+          <MetricCard
             v-for="item in 6"
             :key="item"
-            class="flow-card flow-card--skeleton"
-          >
-            <div class="skeleton-line skeleton-line--top"></div>
-            <div class="skeleton-line"></div>
-            <div class="skeleton-line skeleton-line--short"></div>
-          </article>
+            title="加载中"
+            loading
+          />
         </template>
       </div>
     </section>
@@ -268,99 +269,18 @@ onMounted(() => {
   height: 16px;
 }
 
-.flow-scroll {
+.metric-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(148px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
-  gap: $wolf-space-md-v2;
-  overflow-x: auto;
-  padding-bottom: $wolf-space-xs-v2;
-  scrollbar-width: thin;
+  gap: $wolf-space-lg-v2;
 }
 
-.flow-card {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-width: 148px;
-  min-height: 112px;
-  padding: $wolf-card-padding-v2;
-  background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  box-shadow: $wolf-shadow-card-v2;
-}
-
-.card-topline {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: $wolf-space-md-v2;
-}
-
-.card-label {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-}
-
-.card-count {
-  color: $wolf-text-primary-v2;
+.metric-secondary-value {
+  color: $wolf-accent-v2;
   font-family: $wolf-font-mono-v2;
-  font-size: 24px;
   font-weight: $wolf-font-weight-semibold-v2;
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-}
-
-.card-secondary,
-.card-rate {
-  display: flex;
-  align-items: center;
-  min-height: 20px;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: 1.35;
-  white-space: nowrap;
-}
-
-.card-secondary {
-  margin-top: $wolf-space-md-v2;
-
-  strong {
-    color: $wolf-accent-v2;
-    font-family: $wolf-font-mono-v2;
-    font-weight: $wolf-font-weight-semibold-v2;
-    font-variant-numeric: tabular-nums;
-  }
-}
-
-.card-rate {
-  color: $wolf-text-tertiary-v2;
-}
-
-.flow-arrow {
-  display: none;
-}
-
-.flow-card--skeleton {
-  gap: $wolf-space-md-v2;
-}
-
-.skeleton-line {
-  height: 12px;
-  width: 80%;
-  background: $wolf-bg-muted-v2;
-  border-radius: $wolf-radius-sm-v2;
-}
-
-.skeleton-line--top {
-  height: 24px;
-  width: 100%;
-}
-
-.skeleton-line--short {
-  width: 52%;
 }
 
 @keyframes spin {
@@ -370,24 +290,9 @@ onMounted(() => {
 }
 
 @media (max-width: $wolf-breakpoint-md-v2) {
-  .flow-scroll {
-    display: flex;
-    align-items: center;
-    gap: $wolf-space-sm-v2;
-    margin-right: calc(-1 * $wolf-page-padding-mobile-v2);
-    padding-right: $wolf-page-padding-mobile-v2;
-  }
-
-  .flow-card {
-    flex: 0 0 156px;
-  }
-
-  .flow-arrow {
-    display: block;
-    width: 16px;
-    height: 16px;
-    flex: 0 0 16px;
-    color: $wolf-text-tertiary-v2;
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $wolf-space-md-v2;
   }
 }
 
@@ -408,6 +313,10 @@ onMounted(() => {
 
   .summary-icon {
     margin-top: 2px;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
   }
 }
 
