@@ -36,6 +36,7 @@ interface Props {
   loading?: boolean
   emptyText?: string
   height?: number
+  tooltipWidth?: number
   tooltipFormatter?: ((datum: AreaTrendDatum, series: AreaTrendSeries[]) => string) | undefined
   xTickFormatter?: ((datum: AreaTrendDatum, index: number) => string) | undefined
 }
@@ -47,13 +48,14 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false,
   emptyText: '暂无数据',
   height: 260,
+  tooltipWidth: 220,
   tooltipFormatter: undefined,
   xTickFormatter: undefined
 })
 
 const hasData = computed(() => props.data.length > 0)
 const normalizedSummaries = computed(() => props.summaries ?? [])
-const chartMargin = { top: 12, right: 18, bottom: 28, left: 36 }
+const chartMargin = { top: 12, right: 18, bottom: 28, left: 42 }
 const chartWrapRef = ref<HTMLElement | null>(null)
 const tooltipVisible = ref(false)
 const tooltipContent = ref('')
@@ -129,7 +131,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
     return
   }
 
-  const tooltipWidth = 220
+  const tooltipWidth = Math.min(props.tooltipWidth, Math.max(rect.width - 16, 160))
   const tooltipGap = 12
   const leftOffset = guideX + tooltipGap
   const topOffset = event.clientY - rect.top + 12
@@ -137,6 +139,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 
   tooltipContent.value = content
   tooltipStyle.value = {
+    width: `${tooltipWidth}px`,
     left: shouldFlipX ? 'auto' : `${leftOffset}px`,
     right: shouldFlipX ? `${Math.max(rect.width - guideX + tooltipGap, 8)}px` : 'auto',
     top: `${Math.min(topOffset, Math.max(rect.height - 32, 0))}px`
@@ -189,6 +192,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
           :data="data"
           :height="height"
           :margin="chartMargin"
+          :auto-margin="false"
         >
           <VisArea
             v-for="item in series"
@@ -358,7 +362,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 .area-trend-tooltip-host {
   position: absolute;
   z-index: 10;
-  width: 220px;
+  max-width: calc(100% - 16px);
   pointer-events: none;
 }
 
@@ -395,6 +399,8 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 }
 
 :global(.area-trend-tooltip) {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 184px;
   padding: 10px;
   border: 1px solid rgba(15, 23, 42, 0.1);
@@ -429,6 +435,9 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :global(.area-trend-tooltip__row i) {
@@ -439,6 +448,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 }
 
 :global(.area-trend-tooltip__row strong) {
+  flex: 0 0 auto;
   color: $wolf-text-primary-v2;
   font-family: $wolf-font-mono-v2;
   font-weight: $wolf-font-weight-semibold-v2;

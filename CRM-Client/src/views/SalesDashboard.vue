@@ -325,6 +325,7 @@ onMounted(() => {
           :summaries="followUpTrendSummaries"
           :loading="loading"
           :height="240"
+          :tooltip-width="280"
           :tooltip-formatter="formatFollowUpTooltip"
         >
           <template #actions>
@@ -445,9 +446,9 @@ onMounted(() => {
 }
 
 :global(.sales-follow-tooltip__member) {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(44px, max-content);
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   color: $wolf-text-secondary-v2;
   font-size: $wolf-font-size-caption-v2;
@@ -462,7 +463,7 @@ onMounted(() => {
 }
 
 :global(.sales-follow-tooltip__member strong) {
-  flex: 0 0 auto;
+  justify-self: end;
   color: $wolf-text-primary-v2;
   font-family: $wolf-font-mono-v2;
   font-weight: $wolf-font-weight-semibold-v2;
@@ -479,7 +480,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 220px;
+  min-width: 0;
 }
 
 :global(.sales-follow-tooltip__empty) {
