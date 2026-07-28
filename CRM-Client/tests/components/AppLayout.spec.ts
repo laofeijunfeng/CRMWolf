@@ -137,19 +137,18 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     expect(appLayoutSource).toMatch(/\.sidebar-trigger-separator\s*\{[^}]*height:\s*16px/s)
   })
 
-  it('uses the official Tailwind indigo tokens for the shadcn sidebar emphasis', () => {
+  it('uses the official Tailwind blue tokens for the shadcn sidebar emphasis', () => {
     const baseStyles = readFileSync('src/styles/base.css', 'utf-8')
     const variablesSource = readFileSync('src/styles/variables-v2.scss', 'utf-8')
 
     expect(variablesSource).toContain('$wolf-bg-sidebar-v2: #FAFAFA')
-    expect(variablesSource).toContain('$wolf-primary-v2: #4F46E5')
+    expect(variablesSource).toContain('$wolf-primary-v2: #2563EB')
     expect(baseStyles).toContain('--sidebar-background: 0 0% 98%;')
-    expect(baseStyles).toContain('--sidebar-primary: 243.4 75.4% 58.6%;')
-    expect(baseStyles).toContain('--sidebar-accent: 225 100% 96.1%;')
-    expect(baseStyles).toContain('--sidebar-border: 226.5 100% 93.9%;')
-    expect(baseStyles).toContain('--ring: 243.4 75.4% 58.6%;')
+    expect(baseStyles).toContain('--sidebar-primary: 221.2 83.2% 53.3%;')
+    expect(baseStyles).toContain('--sidebar-accent: 214.3 100% 96.9%;')
+    expect(baseStyles).toContain('--sidebar-border: 213.3 96.9% 87.3%;')
+    expect(baseStyles).toContain('--ring: 221.2 83.2% 53.3%;')
     expect(baseStyles).not.toContain('--primary: 222.2 47.4% 11.2%;')
-    expect(baseStyles).not.toContain('--sidebar-primary: 217 91% 60%;')
   })
 
   it('does not keep old full-viewport page shell heights inside the sidebar layout', () => {

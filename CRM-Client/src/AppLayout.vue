@@ -546,7 +546,7 @@ $z-index-bottom-nav: 100;
 .header-divider {
   width: 1px;
   height: 24px;
-  background: $wolf-border-default-v2;  // #E4ECFC
+  background: $wolf-border-default-v2;
   margin: 0 $wolf-space-sm-v2;  // 0 8px
 }
 

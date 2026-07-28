@@ -47,18 +47,18 @@ const props = withDefaults(defineProps<{
   font-size: $wolf-font-size-auxiliary-v2;
 
   &:hover {
-    background: #F1F5FD;
+    background: $wolf-bg-muted-v2;
     color: $wolf-text-primary-v2;
   }
 }
 
 .table-toolbar-button-active {
-  background: #EAF2FF;
-  color: #1F5FBF;
+  background: $wolf-primary-light-v2;
+  color: $wolf-primary-v2;
 
   &:hover {
-    background: #DFEAFF;
-    color: #1F5FBF;
+    background: $wolf-bg-active-v2;
+    color: $wolf-primary-v2;
   }
 }
 
@@ -67,8 +67,8 @@ const props = withDefaults(defineProps<{
   height: 16px;
   padding: 0 5px;
   border-radius: 999px;
-  background: #1F5FBF;
-  color: #FFFFFF;
+  background: $wolf-primary-v2;
+  color: $wolf-text-inverse-v2;
   font-size: 11px;
   line-height: 16px;
   text-align: center;

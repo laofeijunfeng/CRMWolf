@@ -7,18 +7,18 @@
 
 ## 使用原则
 
-使用语义令牌表达角色，不以色值表达业务含义；状态除颜色外还应有文字或其他可感知线索。组件基础色遵循 `components.json` 中的 shadcn-vue `baseColor: "slate"` 与 `cssVariables: true` 配置，中性色使用 slate，主强调色使用官方 Tailwind indigo 色阶。运行时唯一入口为 `CRM-Client/src/styles/base.css` 的 shadcn CSS variables。`$wolf-*` / `--wolf-*` 为业务兼容层，新增组件优先使用 `bg-background`、`text-foreground`、`bg-primary`、`border-border`、`text-muted-foreground` 等 shadcn 语义令牌。
+使用语义令牌表达角色，不以色值表达业务含义；状态除颜色外还应有文字或其他可感知线索。组件基础色遵循 `components.json` 中的 shadcn-vue `baseColor: "slate"` 与 `cssVariables: true` 配置，中性色使用 slate，主强调色使用官方 Tailwind blue 色阶。运行时唯一入口为 `CRM-Client/src/styles/base.css` 的 shadcn CSS variables。`$wolf-*` / `--wolf-*` 为业务兼容层，新增组件优先使用 `bg-background`、`text-foreground`、`bg-primary`、`border-border`、`text-muted-foreground` 等 shadcn 语义令牌。
 
 ## 亮色令牌
 
 | 令牌 | 解析值 | 用途 |
 | --- | --- | --- |
-| `$wolf-primary-v2` | `#4F46E5` | 主操作、活动导航、链接。 |
-| `$wolf-primary-hover-v2` | `#4338CA` | 主操作悬停。 |
-| `$wolf-primary-light-v2` | `rgba(#4F46E5, 0.1)` | 选中与浅色背景。 |
+| `$wolf-primary-v2` | `#2563EB` | 主操作、活动导航、链接。 |
+| `$wolf-primary-hover-v2` | `#1D4ED8` | 主操作悬停。 |
+| `$wolf-primary-light-v2` | `rgba(#2563EB, 0.1)` | 选中与浅色背景。 |
 | `$wolf-bg-page-v2` | `#F8FAFC` | 页面画布。 |
 | `$wolf-bg-card-v2` | `#FFFFFF` | 卡片与数据区域背景。 |
-| `$wolf-bg-hover-v2` | `#EEF2FF` | 悬停背景。 |
+| `$wolf-bg-hover-v2` | `#EFF6FF` | 悬停背景。 |
 | `$wolf-bg-muted-v2` | `#F1F5F9` | 辅助背景。 |
 | `$wolf-text-primary-v2` | `#020817` | 主信息。 |
 | `$wolf-text-secondary-v2` | `#64748B` | 正文与次级信息。 |

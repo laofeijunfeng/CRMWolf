@@ -6,7 +6,7 @@
  * - 表头固定（sticky）
  * - 底部分页固定
  * - 固定首列和尾列，中间横向滚动
- * - 统一样式（行高 44px、表头背景 #F1F5FD 等）
+ * - 统一样式（行高 44px、语义表头背景等）
  */
 import { computed, ref, watch } from 'vue'
 import {
@@ -688,28 +688,28 @@ watch(() => props.data, () => {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: #F1F5FD;  // 表头背景（list-page.md 3.2）
+  background: $wolf-bg-muted-v2;  // 表头背景（list-page.md 3.2）
 }
 
 .data-table-header-cell {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: #F1F5FD;
+  background: $wolf-bg-muted-v2;
   font-size: 13px;  // 表头字号（list-page.md 3.2）
   font-weight: 600;  // 表头字重（list-page.md 3.2）
-  color: #64748B;   // 表头文字色（list-page.md 3.2）
+  color: $wolf-text-secondary-v2;   // 表头文字色（list-page.md 3.2）
   padding: 12px 16px;
   text-align: left;
   white-space: nowrap;
-  border-bottom: 1px solid #E4ECFC;
+  border-bottom: 1px solid $wolf-border-default-v2;
 
   &.text-center { text-align: center; }
   &.text-right { text-align: right; }
 
   // 固定列样式
   &.fixed-left, &.fixed-right {
-    background: #F8FAFC;  // 固定列背景（略深，视觉分隔）
+    background: $wolf-bg-page-v2;  // 固定列背景（略深，视觉分隔）
   }
 
   // 固定列阴影（滚动时显示）
@@ -728,7 +728,7 @@ watch(() => props.data, () => {
   gap: 8px;
   min-height: 40px;
   padding: 6px 12px;
-  border-bottom: 1px solid #E4ECFC;
+  border-bottom: 1px solid $wolf-border-default-v2;
   background: $wolf-bg-card-v2;
   flex-shrink: 0;
 }
@@ -737,10 +737,10 @@ watch(() => props.data, () => {
 .data-table-row {
   height: 44px;  // 行高（list-page.md 3.2）
   transition: background 150ms ease;
-  border-bottom: 1px solid #E4ECFC;  // 行分割线（list-page.md 3.2）
+  border-bottom: 1px solid $wolf-border-default-v2;  // 行分割线（list-page.md 3.2）
 
   &:hover {
-    background: #EEF2FF;  // Hover 背景（list-page.md 3.2）
+    background: $wolf-bg-hover-v2;  // Hover 背景（list-page.md 3.2）
   }
 
   &:last-child {
@@ -779,7 +779,7 @@ watch(() => props.data, () => {
   // hover 时固定列背景同步
   .data-table-row:hover &.fixed-left,
   .data-table-row:hover &.fixed-right {
-    background: #EEF2FF;
+    background: $wolf-bg-hover-v2;
   }
 
   // 固定列阴影（滚动时显示）

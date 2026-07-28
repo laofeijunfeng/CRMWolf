@@ -8,7 +8,7 @@
  * 设计规范（Underline 模式 - 轻量扁平）：
  * - 无容器背景（扁平）
  * - Active：主色文字 + 加粗
- * - Hover：浅 indigo 背景（非激活态）
+ * - Hover：浅 blue 背景（非激活态）
  * - Touch Target：44px（移动端合规）
  * - Badge：支持显示待办数量（红色徽标）
  * - 参考 shadcn-vue 官网顶部导航样式
@@ -162,9 +162,9 @@ function hasBadge(badge: number | string | undefined): boolean {
   transition: all $wolf-transition-v2;  // 150ms ease
 
   // ========== Hover 状态（用户需求 2）==========
-  // 鼠标 hover 时显示浅 indigo 背景（非激活态）
+  // 鼠标 hover 时显示浅 blue 背景（非激活态）
   &:hover:not([data-state="active"]):not(:disabled) {
-    background: $wolf-bg-hover-v2;  // #EEF2FF（indigo-50）
+    background: $wolf-bg-hover-v2;  // #EFF6FF（blue-50）
     color: hsl(var(--sidebar-accent-foreground));
   }
 
@@ -199,7 +199,7 @@ function hasBadge(badge: number | string | undefined): boolean {
 
   // ========== Focus 状态（MASTER.md §8.2）==========
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;  // 2px rgba(#4F46E5, 0.5)
+    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;  // 2px rgba(#2563EB, 0.5)
     outline-offset: $wolf-focus-ring-offset-v2;  // 2px
   }
 
