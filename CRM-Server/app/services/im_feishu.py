@@ -89,7 +89,7 @@ class FeishuBotService:
             im_inbound_event_crud.mark_status(db, inbound_event, IMInboundEventStatus.PROCESSING)
             reply_to_message_id = message_id
             if "reaction" in event_type:
-                reply_to_message_id, reply_text = await self._handle_reaction_event(db, integration_config, event)
+                reply_to_message_id, reply_text = await self._handle_reaction_event(db, integration_config, event, event_type)
             else:
                 reply_text = await self._handle_message_event(db, integration_config, event)
             response_message_id = None
@@ -207,11 +207,15 @@ class FeishuBotService:
         db: Session,
         integration_config: OAuthProviderConfig,
         event: Dict[str, Any],
+        event_type: str,
     ) -> tuple[Optional[str], Optional[str]]:
+        if event_type != "im.message.reaction.created_v1":
+            logger.info("飞书消息表情事件不是新增表情，跳过: event_type=%s", event_type)
+            return None, None
         message_id = event.get("message_id") or event.get("messageId")
         reaction = event.get("reaction") or event
         operator = reaction.get("operator") or event.get("operator") or {}
-        operator_type = operator.get("operator_type")
+        operator_type = operator.get("operator_type") or event.get("operator_type")
         emoji_type = (((reaction.get("reaction_type") or event.get("reaction_type") or {}).get("emoji_type")) or "").strip()
         logger.info(
             "处理飞书消息表情事件: message_id=%s emoji_type=%s operator_type=%s",
@@ -224,9 +228,14 @@ class FeishuBotService:
         if not im_agent_gateway.intent_from_emoji(emoji_type):
             return None, None
 
-        operator_id = self._extract_operator_open_id(operator)
+        operator_id = self._extract_operator_open_id(operator) or self._extract_operator_open_id(event.get("user_id") or {})
         if not operator_id:
-            logger.info("飞书消息表情事件缺少用户 open_id: message_id=%s operator=%s", message_id, operator)
+            logger.info(
+                "飞书消息表情事件缺少用户 open_id: message_id=%s operator=%s user_id=%s",
+                message_id,
+                operator,
+                event.get("user_id"),
+            )
             return None, None
         account = user_oauth_account_crud.get_by_open_id(db, integration_config.team_id, IMBotProvider.FEISHU, operator_id)
         if not account:

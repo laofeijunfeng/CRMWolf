@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.services.im_agent_gateway as gateway_module
+import app.services.im_feishu as feishu_module
 from app.services.agent.input import AgentInputKind
 from app.services.im_agent_gateway import IMAgentGateway
 from app.services.im_feishu import FeishuBotService
@@ -98,3 +99,69 @@ def test_feishu_text_extraction_removes_bot_mention_name():
     )
 
     assert content == "确认"
+
+
+@pytest.mark.asyncio
+async def test_feishu_reaction_event_uses_official_top_level_user_id(monkeypatch):
+    service = FeishuBotService()
+    captured = {}
+
+    monkeypatch.setattr(
+        feishu_module.user_oauth_account_crud,
+        "get_by_open_id",
+        lambda db, team_id, provider, open_id: SimpleNamespace(user_id=7),
+    )
+
+    class FakeIMAgentGateway:
+        def intent_from_emoji(self, emoji_type):
+            return "confirm" if emoji_type == "Yes" else None
+
+        async def handle_reaction(self, db, **kwargs):
+            captured.update(kwargs)
+            return {"final_content": "已确认", "interaction": None, "events": [], "im_events": []}
+
+    monkeypatch.setattr(feishu_module, "im_agent_gateway", FakeIMAgentGateway())
+
+    reply_to_message_id, reply_text = await service._handle_reaction_event(
+        None,
+        SimpleNamespace(team_id=1),
+        {
+            "message_id": "om_reply",
+            "operator_type": "user",
+            "user_id": {"open_id": "ou_user"},
+            "reaction_type": {"emoji_type": "Yes"},
+        },
+        "im.message.reaction.created_v1",
+    )
+
+    assert reply_to_message_id == "om_reply"
+    assert reply_text == "已确认"
+    assert captured["user_id"] == 7
+    assert captured["response_message_id"] == "om_reply"
+    assert captured["emoji_type"] == "Yes"
+
+
+@pytest.mark.asyncio
+async def test_feishu_reaction_deleted_event_is_ignored(monkeypatch):
+    service = FeishuBotService()
+
+    class FakeIMAgentGateway:
+        def intent_from_emoji(self, emoji_type):
+            raise AssertionError("deleted reaction must not be mapped")
+
+    monkeypatch.setattr(feishu_module, "im_agent_gateway", FakeIMAgentGateway())
+
+    reply_to_message_id, reply_text = await service._handle_reaction_event(
+        None,
+        SimpleNamespace(team_id=1),
+        {
+            "message_id": "om_reply",
+            "operator_type": "user",
+            "user_id": {"open_id": "ou_user"},
+            "reaction_type": {"emoji_type": "Yes"},
+        },
+        "im.message.reaction.deleted_v1",
+    )
+
+    assert reply_to_message_id is None
+    assert reply_text is None
