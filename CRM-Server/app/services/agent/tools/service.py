@@ -13,7 +13,7 @@ from app.crud.agent import agent_idempotency_key_crud, agent_tool_call_crud
 from app.crud.permission import permission_crud
 from app.models.agent import AgentIdempotencyStatus, AgentToolCallStatus
 from app.models.customer import Contact, Customer, CustomerMember
-from app.models.lead import Lead
+from app.models.lead import Lead, LeadStatus
 from app.schemas.agent import AgentIdempotencyKeyCreate, AgentIdempotencyKeyUpdate, AgentToolCallCreate, AgentToolCallUpdate
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult, JsonDict
@@ -170,7 +170,11 @@ class CRMAgentToolService:
             return []
         return (
             context.db.query(Lead)
-            .filter(Lead.team_id == context.team_id, or_(*conditions))
+            .filter(
+                Lead.team_id == context.team_id,
+                Lead.status.notin_([LeadStatus.CONVERTED, LeadStatus.INVALID]),
+                or_(*conditions),
+            )
             .order_by(Lead.id.desc())
             .limit(limit)
             .all()

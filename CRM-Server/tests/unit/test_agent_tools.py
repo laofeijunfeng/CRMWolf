@@ -345,6 +345,64 @@ async def test_agent_tool_search_creation_duplicates_matches_visible_lead_by_key
 
 
 @pytest.mark.asyncio
+async def test_agent_tool_search_creation_duplicates_ignores_converted_and_invalid_leads():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Lead.__table__,
+    ])
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["lead:view:all"])
+        db.add_all([
+            Lead(
+                id=201,
+                team_id=1,
+                lead_name="东风康明斯",
+                source=LeadSource.OTHER,
+                city="襄阳",
+                contact_name="赵坤",
+                contact_phone="18707276297",
+                owner_id="2",
+                creator_id="2",
+                status=LeadStatus.CONVERTED,
+            ),
+            Lead(
+                id=202,
+                team_id=1,
+                lead_name="湖北康明斯",
+                source=LeadSource.OTHER,
+                city="襄阳",
+                contact_name="赵坤",
+                contact_phone="18707276297",
+                owner_id="2",
+                creator_id="2",
+                status=LeadStatus.INVALID,
+            ),
+        ])
+        db.commit()
+
+        result = await service.search_creation_duplicates(
+            _context(db),
+            customer_keywords=[],
+            lead_keywords=["东风康明斯", "湖北康明斯"],
+            limit=5,
+        )
+
+        assert result.success is True
+        assert result.data["leads"] == []
+        assert result.data["hidden_lead_count"] == 0
+        assert fake_client.calls == []
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_get_customer_context_fetches_opportunities_through_api():
     engine, db = _db_session()
     fake_client = FakeCRMAPIClient()
