@@ -236,6 +236,37 @@ class FeishuNotificationService:
         )
         return await self.send_to_users(db, team_id, [user_id], "interactive", content)
 
+    async def notify_approval_reminder(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        entity_type: str,
+        entity_name: str,
+        node_name: str,
+        business_id: Optional[int] = None,
+        submitter_name: Optional[str] = None,
+        approval_type_name: Optional[str] = None,
+        detail_fields: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, int]:
+        approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        fields = detail_fields or self._fallback_approval_fields(
+            approval_type_name=approval_type_name,
+            entity_name=entity_name,
+        )
+        if node_name:
+            fields = {**fields, "当前审批节点": node_name}
+
+        content = self._approval_card(
+            entity_type=entity_type,
+            title=f"{submitter_name or '提交人'}催你处理{approval_type_name}审批",
+            template="orange",
+            fields=fields,
+            button_text="去审批",
+            button_url=self._absolute_frontend_url(db, team_id, "/approvals"),
+        )
+        return await self.send_to_users(db, team_id, user_ids, "interactive", content)
+
     def _approval_card(
         self,
         entity_type: str,

@@ -21,6 +21,7 @@ const api = vi.hoisted(() => ({
   submitApproval: vi.fn(),
   approveEntity: vi.fn(),
   cancelApproval: vi.fn(),
+  remindApproval: vi.fn(),
   getApprovalDetail: vi.fn(),
   bulkApprove: vi.fn()
 }))
@@ -36,6 +37,7 @@ vi.mock('@/api/approvalGeneric', () => ({
   submitApproval: api.submitApproval,
   approveEntity: api.approveEntity,
   cancelApproval: api.cancelApproval,
+  remindApproval: api.remindApproval,
   getApprovalDetail: api.getApprovalDetail,
   bulkApprove: api.bulkApprove
 }))

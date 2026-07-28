@@ -1,10 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AlertCircle, BarChart3, RefreshCw } from 'lucide-vue-next'
+import { AlertCircle, RefreshCw } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { AmountText, ListFilterPopover, MetricCard, TableToolbarButton } from '@/components/crmwolf'
+import {
+  AmountText,
+  AreaTrendChart,
+  ListFilterPopover,
+  MetricCard,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  TableToolbarButton
+} from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import salesDashboardApi, { type SalesDashboardMetric, type SalesDashboardFunnelResponse } from '@/api/salesDashboard'
+import salesDashboardApi, {
+  type SalesDashboardFollowUpTrendPoint,
+  type SalesDashboardFollowUpTrendResponse,
+  type SalesDashboardMetric,
+  type SalesDashboardFunnelResponse
+} from '@/api/salesDashboard'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { getDateBounds, getDelimitedFilterValues } from '@/utils/listFilters'
@@ -16,8 +32,16 @@ const headerStore = useHeaderStore()
 const loading = ref(false)
 const errorMessage = ref('')
 const dashboard = ref<SalesDashboardFunnelResponse | null>(null)
+const followUpTrend = ref<SalesDashboardFollowUpTrendResponse | null>(null)
 const activeFilters = ref<ListFilterCondition[]>([])
 const ownerFilterOptions = ref<{ value: string; label: string }[]>([])
+const trendRange = ref('30')
+
+const trendRangeOptions = [
+  { value: '7', label: '近 7 天' },
+  { value: '30', label: '近 30 天' },
+  { value: '90', label: '近 90 天' }
+]
 
 const filterFields = computed<ListFilterField[]>(() => [
   {
@@ -34,6 +58,56 @@ const filterFields = computed<ListFilterField[]>(() => [
 ])
 
 const metrics = computed<SalesDashboardMetric[]>(() => dashboard.value?.metrics ?? [])
+const followUpTrendSeries = [
+  {
+    key: 'total',
+    label: '跟进总数',
+    color: '#2563eb',
+    fillColor: 'rgba(37, 99, 235, 0.14)'
+  },
+  {
+    key: 'valid',
+    label: '有效跟进',
+    color: '#60a5fa',
+    fillColor: 'rgba(96, 165, 250, 0.16)'
+  }
+]
+
+const followUpTrendData = computed(() => {
+  return (followUpTrend.value?.data ?? []).map((item) => ({
+    label: formatTrendDate(item.date),
+    date: item.date,
+    total: item.total,
+    valid: item.valid,
+    members: item.members
+  }))
+})
+
+const followUpTrendSummaries = computed(() => {
+  const totals = followUpTrendData.value.reduce(
+    (acc, item) => {
+      acc.total += item.total
+      acc.valid += item.valid
+      return acc
+    },
+    { total: 0, valid: 0 }
+  )
+
+  return [
+    {
+      key: 'total',
+      label: '跟进总数',
+      value: formatCount(totals.total),
+      color: followUpTrendSeries[0]?.color ?? '#2563eb'
+    },
+    {
+      key: 'valid',
+      label: '有效跟进',
+      value: formatCount(totals.valid),
+      color: followUpTrendSeries[1]?.color ?? '#60a5fa'
+    }
+  ]
+})
 
 const formatCount = (value: number | null | undefined): string => {
   if (value === null || value === undefined) return '-'
@@ -43,6 +117,62 @@ const formatCount = (value: number | null | undefined): string => {
 const formatPercent = (value: number | null | undefined): string => {
   if (value === null || value === undefined) return '-'
   return `${Number(value).toFixed(Number.isInteger(value) ? 0 : 1)}%`
+}
+
+const formatTrendDate = (value: string): string => {
+  const [year, month, day] = value.split('-')
+  if (year === undefined || month === undefined || day === undefined) return value
+  return `${Number(month)}/${Number(day)}`
+}
+
+const formatLocalDate = (date: Date): string => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const getTrendDateBounds = (): { start_date: string; end_date: string } => {
+  const days = Number(trendRange.value)
+  const endDate = new Date()
+  const startDate = new Date(endDate)
+  startDate.setDate(endDate.getDate() - Math.max(days - 1, 0))
+
+  return {
+    start_date: formatLocalDate(startDate),
+    end_date: formatLocalDate(endDate)
+  }
+}
+
+const escapeHtml = (value: string): string => {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+const formatFollowUpTooltip = (datum: Record<string, unknown>): string => {
+  const point = datum as unknown as SalesDashboardFollowUpTrendPoint & { label: string }
+  const members = Array.isArray(point.members) ? point.members.slice(0, 6) : []
+  const memberRows = members.map((member) => (
+    `<div class="sales-follow-tooltip__member">
+      <span>${escapeHtml(member.name)}</span>
+      <strong>${formatCount(member.total)}</strong>
+    </div>`
+  )).join('')
+  const memberSection = memberRows
+    ? `<div class="sales-follow-tooltip__members">${memberRows}</div>`
+    : '<div class="sales-follow-tooltip__empty">无成员明细</div>'
+
+  return `<div class="area-trend-tooltip sales-follow-tooltip">
+    <div class="area-trend-tooltip__title">${escapeHtml(point.date)}</div>
+    <div class="area-trend-tooltip__row"><span><i style="background:#2563eb"></i>跟进总数</span><strong>${formatCount(point.total)}</strong></div>
+    <div class="area-trend-tooltip__row"><span><i style="background:#60a5fa"></i>有效跟进</span><strong>${formatCount(point.valid)}</strong></div>
+    <div class="sales-follow-tooltip__divider"></div>
+    ${memberSection}
+  </div>`
 }
 
 const hasText = (value: string | null | undefined): value is string => {
@@ -64,11 +194,22 @@ const loadDashboard = async (): Promise<void> => {
   errorMessage.value = ''
   try {
     const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
-    dashboard.value = await salesDashboardApi.getFunnel({
+    const ownerId = getDelimitedFilterValues(activeFilters.value, 'owner_id')
+    const funnelParams = {
       start_date: createdTimeBounds.start ?? null,
       end_date: createdTimeBounds.end ?? null,
-      owner_id: getDelimitedFilterValues(activeFilters.value, 'owner_id')
-    })
+      owner_id: ownerId
+    }
+    const trendParams = {
+      ...getTrendDateBounds(),
+      owner_id: ownerId
+    }
+    const [funnelResponse, followUpTrendResponse] = await Promise.all([
+      salesDashboardApi.getFunnel(funnelParams),
+      salesDashboardApi.getFollowUpTrend(trendParams)
+    ])
+    dashboard.value = funnelResponse
+    followUpTrend.value = followUpTrendResponse
   } catch (error) {
     logger.error('[SalesDashboard]', '加载销售看板失败', { error })
     errorMessage.value = '销售看板加载失败'
@@ -101,6 +242,10 @@ const handleFilterReset = (): void => {
   void loadDashboard()
 }
 
+const handleTrendRangeChange = (): void => {
+  void loadDashboard()
+}
+
 onMounted(() => {
   headerStore.clear()
   void fetchOwnerFilterOptions()
@@ -128,56 +273,79 @@ onMounted(() => {
       </TableToolbarButton>
     </div>
 
-    <section class="dashboard-summary" aria-label="销售漏斗概览">
-      <div class="summary-header">
-        <div class="summary-title">
-          <BarChart3 class="summary-icon" aria-hidden="true" />
-          <div>
-            <h2>销售漏斗</h2>
-          </div>
+    <div class="dashboard-scroll">
+      <section class="dashboard-summary" aria-label="销售漏斗概览">
+        <div v-if="errorMessage" class="dashboard-error" role="alert">
+          <AlertCircle class="error-icon" aria-hidden="true" />
+          <span>{{ errorMessage }}</span>
         </div>
-      </div>
 
-      <div v-if="errorMessage" class="dashboard-error" role="alert">
-        <AlertCircle class="error-icon" aria-hidden="true" />
-        <span>{{ errorMessage }}</span>
-      </div>
+        <div class="metric-grid" :class="{ loading }">
+          <template v-if="metrics.length > 0">
+            <MetricCard
+              v-for="metric in metrics"
+              :key="metric.key"
+              :title="metric.label"
+              :value="formatCount(metric.count)"
+              :footer="getMetricFooter(metric)"
+              :badge="hasText(metric.rate_label) ? formatPercent(metric.rate) : ''"
+              tone="positive"
+              :aria-label="metric.label"
+            >
+              <template #description>
+                <span>{{ getMetricDescription(metric) }}</span>
+                <AmountText
+                  v-if="metric.secondary_type === 'amount'"
+                  :value="metric.secondary_value"
+                  tone="success"
+                  size="sm"
+                />
+                <strong v-else class="metric-secondary-value">{{ formatCount(metric.secondary_value) }}</strong>
+              </template>
+            </MetricCard>
+          </template>
 
-      <div class="metric-grid" :class="{ loading }">
-        <template v-if="metrics.length > 0">
-          <MetricCard
-            v-for="metric in metrics"
-            :key="metric.key"
-            :title="metric.label"
-            :value="formatCount(metric.count)"
-            :footer="getMetricFooter(metric)"
-            :badge="hasText(metric.rate_label) ? formatPercent(metric.rate) : ''"
-            tone="positive"
-            :aria-label="metric.label"
-          >
-            <template #description>
-              <span>{{ getMetricDescription(metric) }}</span>
-              <AmountText
-                v-if="metric.secondary_type === 'amount'"
-                :value="metric.secondary_value"
-                tone="success"
-                size="sm"
-              />
-              <strong v-else class="metric-secondary-value">{{ formatCount(metric.secondary_value) }}</strong>
-            </template>
-          </MetricCard>
-        </template>
+          <template v-else>
+            <MetricCard
+              v-for="item in 6"
+              :key="item"
+              title="加载中"
+              loading
+            />
+          </template>
+        </div>
+      </section>
 
-        <template v-else>
-          <MetricCard
-            v-for="item in 6"
-            :key="item"
-            title="加载中"
-            loading
-          />
-        </template>
-      </div>
-    </section>
+      <section class="dashboard-trend" aria-label="跟进记录趋势">
+        <AreaTrendChart
+          title="跟进趋势"
+          description="每日跟进记录与有效跟进"
+          :data="followUpTrendData"
+          :series="followUpTrendSeries"
+          :summaries="followUpTrendSummaries"
+          :loading="loading"
+          :height="240"
+          :tooltip-formatter="formatFollowUpTooltip"
+        >
+          <template #actions>
+            <Select v-model="trendRange" @update:model-value="handleTrendRangeChange">
+              <SelectTrigger class="trend-range-select" aria-label="选择跟进趋势范围">
+                <SelectValue placeholder="选择范围" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="option in trendRangeOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </template>
+        </AreaTrendChart>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -185,15 +353,40 @@ onMounted(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 .sales-dashboard-page {
-  min-height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   padding: $wolf-page-padding-v2;
   background: $wolf-bg-page-v2;
+}
+
+.dashboard-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: $wolf-space-sm-v2;
 }
 
 .dashboard-summary {
   display: flex;
   flex-direction: column;
   gap: $wolf-space-lg-v2;
+}
+
+.dashboard-trend {
+  margin-top: $wolf-space-lg-v2;
+}
+
+.trend-range-select {
+  width: 104px;
+  height: 32px;
+  border-color: rgba($wolf-border-default-v2, 0.95);
+  background: $wolf-bg-card-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
 }
 
 .dashboard-toolbar {
@@ -204,38 +397,6 @@ onMounted(() => {
   min-height: 32px;
   margin-bottom: $wolf-space-md-v2;
   background: transparent;
-}
-
-.summary-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $wolf-space-lg-v2;
-}
-
-.summary-title {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: $wolf-space-md-v2;
-
-  h2 {
-    margin: 0;
-    color: $wolf-text-primary-v2;
-    font-size: 18px;
-    font-weight: $wolf-font-weight-semibold-v2;
-    line-height: 1.4;
-  }
-}
-
-.summary-icon {
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
-  padding: 7px;
-  color: $wolf-primary-v2;
-  background: $wolf-primary-light-v2;
-  border-radius: $wolf-radius-v2;
 }
 
 .refresh-button {
@@ -283,6 +444,49 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
+:global(.sales-follow-tooltip__member) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 1.6;
+}
+
+:global(.sales-follow-tooltip__member span) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.sales-follow-tooltip__member strong) {
+  flex: 0 0 auto;
+  color: $wolf-text-primary-v2;
+  font-family: $wolf-font-mono-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  font-variant-numeric: tabular-nums;
+}
+
+:global(.sales-follow-tooltip__divider) {
+  height: 1px;
+  margin: 8px 0;
+  background: rgba($wolf-border-default-v2, 0.8);
+}
+
+:global(.sales-follow-tooltip__members) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+}
+
+:global(.sales-follow-tooltip__empty) {
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -298,25 +502,18 @@ onMounted(() => {
 
 @media (max-width: $wolf-breakpoint-sm-v2) {
   .sales-dashboard-page {
-    min-height: 100%;
+    height: 100%;
+    min-height: 0;
     padding: $wolf-page-padding-mobile-v2;
     padding-bottom: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
   }
 
-  .summary-header {
-    align-items: flex-start;
-  }
-
-  .summary-title {
-    align-items: flex-start;
-  }
-
-  .summary-icon {
-    margin-top: 2px;
-  }
-
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .trend-range-select {
+    width: 100%;
   }
 }
 

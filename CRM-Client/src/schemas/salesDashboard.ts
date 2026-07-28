@@ -23,6 +23,27 @@ export const SalesDashboardFunnelResponseSchema = z.object({
   metrics: z.array(SalesDashboardMetricSchema)
 })
 
+export const SalesDashboardFollowUpTrendMemberSchema = z.object({
+  user_id: z.string(),
+  name: z.string(),
+  total: z.number(),
+  valid: z.number()
+})
+
+export const SalesDashboardFollowUpTrendPointSchema = z.object({
+  date: z.string(),
+  total: z.number(),
+  valid: z.number(),
+  members: z.array(SalesDashboardFollowUpTrendMemberSchema)
+})
+
+export const SalesDashboardFollowUpTrendResponseSchema = z.object({
+  scope: SalesDashboardScopeSchema,
+  period_start: z.string(),
+  period_end: z.string(),
+  data: z.array(SalesDashboardFollowUpTrendPointSchema)
+})
+
 export const SalesDashboardOwnerFilterOptionSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -37,5 +58,8 @@ export type SalesDashboardScope = z.infer<typeof SalesDashboardScopeSchema>
 export type SalesDashboardMetricValueType = z.infer<typeof SalesDashboardMetricValueTypeSchema>
 export type SalesDashboardMetric = z.infer<typeof SalesDashboardMetricSchema>
 export type SalesDashboardFunnelResponse = z.infer<typeof SalesDashboardFunnelResponseSchema>
+export type SalesDashboardFollowUpTrendMember = z.infer<typeof SalesDashboardFollowUpTrendMemberSchema>
+export type SalesDashboardFollowUpTrendPoint = z.infer<typeof SalesDashboardFollowUpTrendPointSchema>
+export type SalesDashboardFollowUpTrendResponse = z.infer<typeof SalesDashboardFollowUpTrendResponseSchema>
 export type SalesDashboardOwnerFilterOption = z.infer<typeof SalesDashboardOwnerFilterOptionSchema>
 export type SalesDashboardOwnerFilterOptionsResponse = z.infer<typeof SalesDashboardOwnerFilterOptionsResponseSchema>

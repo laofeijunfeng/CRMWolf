@@ -5,6 +5,7 @@
  *   POST /v1/approvals/{entity_type}/{entity_id}/submit
  *   POST /v1/approvals/{entity_type}/{entity_id}/approve
  *   POST /v1/approvals/{entity_type}/{entity_id}/cancel
+ *   POST /v1/approvals/{entity_type}/{entity_id}/remind
  *   GET  /v1/approvals/{entity_type}/{entity_id}/detail
  *   POST /v1/approvals/bulk-approve
  *
@@ -93,6 +94,19 @@ function cancelApproval(
 }
 
 /**
+ * 手动催办审批（通用）。仅提交人可催办自己提交且仍在审批中的单据。
+ */
+function remindApproval(
+  entityType: EntityType,
+  entityId: number
+): Promise<MessageResponse> {
+  return request.post<MessageResponse>(
+    `/v1/approvals/${entityType}/${entityId}/remind`,
+    {}
+  )
+}
+
+/**
  * 获取审批详情（通用）。后端按 entity_type+entity_id 取最新一条审批实例。
  */
 function getApprovalDetail(
@@ -148,6 +162,7 @@ const approvalGenericApi = {
   submitApproval,
   approveEntity,
   cancelApproval,
+  remindApproval,
   getApprovalDetail,
   bulkApprove,
   listApprovals
@@ -158,6 +173,7 @@ export {
   submitApproval,
   approveEntity,
   cancelApproval,
+  remindApproval,
   getApprovalDetail,
   bulkApprove,
   listApprovals

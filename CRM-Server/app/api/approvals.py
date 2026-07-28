@@ -1919,6 +1919,103 @@ async def cancel_generic_approval(
     return MessageResponse(message="审批已撤回")
 
 
+@router.post(
+    "/{entity_type}/{entity_id}/remind",
+    response_model=MessageResponse,
+    summary="手动催办审批（通用）",
+    description="提交人可对自己提交且仍在审批中的单据手动发送催办通知给当前节点审批人。",
+)
+async def remind_generic_approval(
+    entity_type: str,
+    entity_id: int,
+    db: Session = Depends(get_db),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+):
+    _validate_entity_type(entity_type)
+
+    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
+    if not approval:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="审批流程不存在",
+        )
+    if approval.status != ApprovalStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只有审批中的单据可以催办",
+        )
+    if approval.submitter_id != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只能催办自己提交的审批",
+        )
+    if not approval.current_node:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="当前审批节点不存在",
+        )
+
+    adapter = get_adapter(entity_type)
+    entity = adapter.get_entity(db, entity_id, team_id)
+    if entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="业务单据不存在",
+        )
+
+    notify_users = get_notification_users_for_node(db, approval.current_node, team_id)
+    if not notify_users:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前审批节点没有可通知的审批人",
+        )
+
+    entity_name = adapter.get_name(entity)
+    notification_status = "skipped"
+    try:
+        result = await feishu_notification_service.notify_approval_reminder(
+            db=db,
+            team_id=team_id,
+            user_ids=[user.id for user in notify_users],
+            entity_type=entity_type,
+            entity_name=entity_name,
+            node_name=approval.current_node.node_name,
+            business_id=entity_id,
+            submitter_name=current_user.name,
+            approval_type_name=get_approval_type_name(entity_type),
+            detail_fields=get_approval_card_fields(db, entity_type, entity),
+        )
+        notification_status = _feishu_notification_status(result)
+    except Exception as notify_error:
+        notification_status = "failed"
+        logger.error(
+            f"[Approval] Manual reminder failed: entity_type={entity_type}, "
+            f"business_id={entity_id}, error={str(notify_error)}"
+        )
+
+    log_approval_operation(
+        operation="Remind",
+        approval_id=approval.id,
+        flow_name=approval.flow.flow_name if approval.flow else "",
+        node_name=approval.current_node.node_name,
+        operator=current_user.name,
+        flow_direction="manual_reminder",
+        notification_status=notification_status,
+        business_type=entity_type,
+        business_id=entity_id,
+    )
+
+    if notification_status == "failed":
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="催办通知发送失败",
+        )
+    if notification_status == "skipped":
+        return MessageResponse(message="催办已提交，但暂无可发送的飞书通知对象")
+    return MessageResponse(message="已发送催办通知")
+
+
 @router.get(
     "/{entity_type}/{entity_id}/detail",
     summary="获取审批详情（通用）",

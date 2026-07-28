@@ -140,6 +140,17 @@
             >
               修改并重新提交
             </Button>
+            <Button
+              v-if="activeTab === 'submitted' && row.status === 'PENDING'"
+              variant="ghost"
+              size="sm"
+              data-testid="remind-btn"
+              :loading="remindPendingId === row.id"
+              @click.stop="handleRemind(row)"
+            >
+              <BellRing class="w-4 h-4" aria-hidden="true" />
+              催办
+            </Button>
           </div>
         </template>
       </DataTable>
@@ -245,6 +256,28 @@
                 @click="handleResubmit(row)"
               >
                 修改并重新提交
+              </Button>
+            </div>
+            <div class="flex gap-2" v-else-if="activeTab === 'submitted' && row.status === 'PENDING'">
+              <Button
+                variant="outline"
+                size="lg"
+                class="flex-1 min-h-[44px]"
+                data-testid="mobile-remind-btn"
+                :loading="remindPendingId === row.id"
+                @click="handleRemind(row)"
+              >
+                <BellRing class="w-4 h-4" aria-hidden="true" />
+                催办
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                class="flex-1 min-h-[44px]"
+                data-testid="mobile-detail-btn"
+                @click="openDetail(row, $index)"
+              >
+                详情
               </Button>
             </div>
             <div class="flex gap-2" v-else>
@@ -479,7 +512,7 @@ import { computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, ref, watch
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Clock, Copy } from 'lucide-vue-next'
+import { BellRing, Clock, Copy } from 'lucide-vue-next'
 import { AmountText, DataTable, Badge, Separator, ListFilterPopover } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext } from '@/components/ui/pagination'
@@ -552,6 +585,7 @@ const triggerRowIndex = ref<number>(-1)
 const focusedRowEl = ref<HTMLElement | null>(null)
 
 const resubmitPendingId = ref<number | null>(null)
+const remindPendingId = ref<number | null>(null)
 
 // 合同编辑弹窗状态
 const contractEditVisible = ref<boolean>(false)
@@ -944,7 +978,7 @@ const columns = [
   {
     key: 'actions',
     title: '操作',
-    width: '200px',
+    width: '220px',
     align: 'center' as const,
     fixed: 'right' as const
   }
@@ -1222,6 +1256,18 @@ const handleContractEditSuccess = (): void => {
   editingContract.value = null
   toast.success('合同已修改，请重新提交审批')
   fetchList()
+}
+
+const handleRemind = async (row: ApprovalListItem): Promise<void> => {
+  remindPendingId.value = row.id
+  try {
+    const res = await store.remindEntity(row.business_type, row.business_id)
+    toast.success(res.message)
+  } catch {
+    // 错误提示由请求拦截器统一处理
+  } finally {
+    remindPendingId.value = null
+  }
 }
 
 // 移动端快速审批：同意（单条，无抽屉）

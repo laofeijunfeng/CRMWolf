@@ -14,6 +14,7 @@ const { api } = vi.hoisted(() => ({
     submitApproval: vi.fn(),
     approveEntity: vi.fn(),
     cancelApproval: vi.fn(),
+    remindApproval: vi.fn(),
     getApprovalDetail: vi.fn(),
     bulkApprove: vi.fn()
   }
@@ -24,6 +25,7 @@ vi.mock('@/api/approvalGeneric', () => ({
   submitApproval: api.submitApproval,
   approveEntity: api.approveEntity,
   cancelApproval: api.cancelApproval,
+  remindApproval: api.remindApproval,
   getApprovalDetail: api.getApprovalDetail,
   bulkApprove: api.bulkApprove
 }))
@@ -70,6 +72,7 @@ describe('useApprovalStore', () => {
     api.submitApproval.mockReset()
     api.approveEntity.mockReset()
     api.cancelApproval.mockReset()
+    api.remindApproval.mockReset()
     api.getApprovalDetail.mockReset()
     api.bulkApprove.mockReset()
   })
@@ -192,6 +195,25 @@ describe('useApprovalStore', () => {
       expect(api.cancelApproval).toHaveBeenCalledWith('PAYMENT', 33)
       expect(currentApprovalDetail.value).toBeNull()
       expect(res.message).toBe('审批已撤回')
+    })
+  })
+
+  describe('remindEntity', () => {
+    it('calls remindApproval and returns the message response', async () => {
+      api.remindApproval.mockResolvedValue({ message: '已发送催办通知' })
+
+      const store = useApprovalStore()
+      const res = await store.remindEntity('INVOICE', 7)
+
+      expect(api.remindApproval).toHaveBeenCalledWith('INVOICE', 7)
+      expect(res.message).toBe('已发送催办通知')
+    })
+
+    it('rejects malformed remind response via Zod', async () => {
+      api.remindApproval.mockResolvedValue({ message: '' })
+
+      const store = useApprovalStore()
+      await expect(store.remindEntity('CONTRACT', 100)).rejects.toThrow()
     })
   })
 

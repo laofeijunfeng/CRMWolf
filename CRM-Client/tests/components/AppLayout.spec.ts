@@ -163,6 +163,6 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     expect(salesDashboardSource).not.toContain('min-height: calc(100vh - $wolf-topbar-height-v2)')
     expect(salesDashboardSource).not.toContain('min-height: calc($wolf-viewport-height-mobile-v2 - $wolf-topbar-height-mobile-v2)')
     expect(salesDashboardSource).not.toContain('padding-bottom: calc($wolf-bottom-nav-height-v2 + $wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2)')
-    expect(salesDashboardSource).toMatch(/\.sales-dashboard-page\s*\{[^}]*min-height:\s*100%/s)
+    expect(salesDashboardSource).toMatch(/\.sales-dashboard-page\s*\{[^}]*min-height:\s*0/s)
   })
 })

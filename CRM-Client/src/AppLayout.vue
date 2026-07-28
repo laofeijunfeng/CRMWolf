@@ -1,5 +1,5 @@
 <template>
-  <SidebarProvider class="app-layout">
+  <SidebarProvider class="app-layout" :class="appLayoutClass">
     <AppSidebar />
 
     <!-- Main Content -->
@@ -209,11 +209,16 @@ const mobileOverflowHeaderActions = computed<HeaderAction[]>(() => {
   if (primaryAction === null) return visibleHeaderActions.value
   return visibleHeaderActions.value.filter(action => action.id !== primaryAction.id)
 })
+const appLayoutClass = computed(() => ({
+  'app-layout--fixed': route.name === 'SalesDashboard',
+}))
 const mainViewClass = computed(() => ({
   'main-view--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
+  'main-view--fixed': route.name === 'SalesDashboard',
 }))
 const mainContentClass = computed(() => ({
   'main-content--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
+  'main-content--fixed': route.name === 'SalesDashboard',
 }))
 
 /**
@@ -320,6 +325,20 @@ $z-index-bottom-nav: 100;
   }
 }
 
+:global(.app-layout.app-layout--fixed) {
+  height: 100svh;
+  min-height: 0;
+  max-height: 100svh;
+  overflow: hidden;
+}
+
+@supports not (height: 100svh) {
+  :global(.app-layout.app-layout--fixed) {
+    height: 100vh;
+    max-height: 100vh;
+  }
+}
+
 // ==================== Main Content ====================
 .main-content {
   display: flex;
@@ -335,9 +354,20 @@ $z-index-bottom-nav: 100;
   min-height: 0;
 }
 
+.main-content.main-content--fixed {
+  height: calc(100svh - 1rem);
+  min-height: 0;
+  max-height: calc(100svh - 1rem);
+}
+
 @supports not (height: 100svh) {
   .main-content.main-content--contained {
     height: calc(100vh - 1rem);
+  }
+
+  .main-content.main-content--fixed {
+    height: calc(100vh - 1rem);
+    max-height: calc(100vh - 1rem);
   }
 }
 
@@ -357,7 +387,19 @@ $z-index-bottom-nav: 100;
   overflow: hidden;
 }
 
+.main-view--fixed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .main-view--contained :deep(.agent-chat) {
+  flex: 1;
+  min-height: 0;
+}
+
+.main-view--fixed :deep(.sales-dashboard-page) {
   flex: 1;
   min-height: 0;
 }
@@ -582,6 +624,16 @@ $z-index-bottom-nav: 100;
 
     @supports not (height: 100dvh) {
       height: 100vh;
+    }
+  }
+
+  .main-content.main-content--fixed {
+    height: 100dvh;
+    max-height: 100dvh;
+
+    @supports not (height: 100dvh) {
+      height: 100vh;
+      max-height: 100vh;
     }
   }
 

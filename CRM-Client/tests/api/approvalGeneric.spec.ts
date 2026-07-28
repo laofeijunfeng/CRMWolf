@@ -27,6 +27,7 @@ import approvalGenericApi, {
   submitApproval,
   approveEntity,
   cancelApproval,
+  remindApproval,
   getApprovalDetail,
   bulkApprove
 } from '@/api/approvalGeneric'
@@ -114,6 +115,19 @@ describe('approvalGeneric API', () => {
     })
   })
 
+  describe('remindApproval', () => {
+    it('POST /v1/approvals/{type}/{id}/remind', async () => {
+      requestMock.post.mockResolvedValue({ message: '已发送催办通知' })
+
+      const res = await remindApproval('INVOICE', 7)
+
+      const [url, body] = requestMock.post.mock.calls[0] as [string, unknown]
+      expect(url).toBe('/v1/approvals/INVOICE/7/remind')
+      expect(body).toEqual({})
+      expect(res).toEqual({ message: '已发送催办通知' })
+    })
+  })
+
   describe('getApprovalDetail', () => {
     it('GET /v1/approvals/{type}/{id}/detail', async () => {
       const detail = {
@@ -195,6 +209,7 @@ describe('approvalGeneric API', () => {
     expect(approvalGenericApi.submitApproval).toBe(submitApproval)
     expect(approvalGenericApi.approveEntity).toBe(approveEntity)
     expect(approvalGenericApi.cancelApproval).toBe(cancelApproval)
+    expect(approvalGenericApi.remindApproval).toBe(remindApproval)
     expect(approvalGenericApi.getApprovalDetail).toBe(getApprovalDetail)
     expect(approvalGenericApi.bulkApprove).toBe(bulkApprove)
   })

@@ -1,6 +1,6 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -16,11 +16,20 @@ from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 from app.models.lead import Lead, LeadStatus
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.models.payment import PaymentConfirmationStatus, PaymentRecord
+from app.models.customer_follow_up import CustomerFollowUp
+from app.models.user import User
 
 
 router = APIRouter(prefix="/v1/sales-dashboard", tags=["销售看板"])
 
 DashboardScope = Literal["own", "team", "all"]
+
+
+class FollowUpTrendMemberItem(TypedDict):
+    user_id: str
+    name: str
+    total: int
+    valid: int
 
 
 class SalesDashboardMetric(BaseModel):
@@ -41,6 +50,27 @@ class SalesDashboardFunnelResponse(BaseModel):
     period_start: str
     period_end: str
     metrics: list[SalesDashboardMetric]
+
+
+class SalesDashboardFollowUpTrendMember(BaseModel):
+    user_id: str
+    name: str
+    total: int
+    valid: int
+
+
+class SalesDashboardFollowUpTrendPoint(BaseModel):
+    date: str
+    total: int
+    valid: int
+    members: list[SalesDashboardFollowUpTrendMember]
+
+
+class SalesDashboardFollowUpTrendResponse(BaseModel):
+    scope: DashboardScope
+    period_start: str
+    period_end: str
+    data: list[SalesDashboardFollowUpTrendPoint]
 
 
 def _scalar_number(value) -> float:
@@ -90,6 +120,14 @@ def _date_range(start_date: date | None, end_date: date | None) -> tuple[datetim
     start = datetime.combine(start_date, time.min) if start_date else None
     end = datetime.combine(end_date + timedelta(days=1), time.min) if end_date else None
     return start, end
+
+
+def _trend_date_range(start_date: date | None, end_date: date | None) -> tuple[date, date]:
+    trend_end = end_date or date.today()
+    trend_start = start_date or (trend_end - timedelta(days=29))
+    if trend_start > trend_end:
+        raise HTTPException(status_code=400, detail="开始日期不能晚于结束日期")
+    return trend_start, trend_end
 
 
 def _parse_owner_ids(owner_id: str | None) -> list[str]:
@@ -279,4 +317,101 @@ def get_sales_dashboard_funnel(
                 rate=_safe_rate(invoice_amount, contract_amount),
             ),
         ],
+    )
+
+
+@router.get("/follow-up-trend", response_model=SalesDashboardFollowUpTrendResponse, summary="每日跟进趋势")
+def get_sales_dashboard_follow_up_trend(
+    start_date: date | None = Query(None, description="统计开始日期"),
+    end_date: date | None = Query(None, description="统计结束日期"),
+    owner_id: str | None = Query(None, description="销售成员ID，多个用英文逗号分隔"),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    scope = _resolve_scope(db, current_user.id, team_id)
+    user_id = str(current_user.id)
+    owner_ids = _parse_owner_ids(owner_id)
+    trend_start, trend_end = _trend_date_range(start_date, end_date)
+    filter_start, filter_end = _date_range(trend_start, trend_end)
+
+    day_expr = func.date(CustomerFollowUp.created_time)
+    query = db.query(
+        day_expr.label("day"),
+        CustomerFollowUp.creator_id.label("creator_id"),
+        func.count(CustomerFollowUp.id).label("total"),
+        func.sum(case((CustomerFollowUp.effectiveness_score > 60, 1), else_=0)).label("valid"),
+    ).filter(CustomerFollowUp.team_id == team_id)
+
+    query = _apply_created_time_filter(query, CustomerFollowUp.created_time, filter_start, filter_end)
+
+    if scope == "own":
+        query = query.filter(CustomerFollowUp.creator_id == user_id)
+    else:
+        query = _apply_owner_filter(query, CustomerFollowUp.creator_id, owner_ids)
+
+    rows = query.group_by(day_expr, CustomerFollowUp.creator_id).all()
+
+    creator_ids = sorted({
+        str(row.creator_id)
+        for row in rows
+        if row.creator_id is not None and str(row.creator_id).isdigit()
+    })
+    users = db.query(User).filter(User.id.in_([int(item) for item in creator_ids])).all() if creator_ids else []
+    user_names = {str(user.id): user.name for user in users}
+
+    point_totals: dict[str, int] = {}
+    point_valids: dict[str, int] = {}
+    members_by_day: dict[str, dict[str, FollowUpTrendMemberItem]] = {}
+    current_day = trend_start
+    while current_day <= trend_end:
+        key = current_day.isoformat()
+        point_totals[key] = 0
+        point_valids[key] = 0
+        members_by_day[key] = {}
+        current_day += timedelta(days=1)
+
+    for row in rows:
+        day_value = row.day.isoformat() if hasattr(row.day, "isoformat") else str(row.day)
+        creator_id = str(row.creator_id)
+        total = int(row.total or 0)
+        valid = int(row.valid or 0)
+
+        if day_value not in point_totals:
+            continue
+
+        point_totals[day_value] += total
+        point_valids[day_value] += valid
+        members = members_by_day[day_value]
+        member = members.get(creator_id)
+        if member is None:
+            members[creator_id] = {
+                "user_id": creator_id,
+                "name": user_names.get(creator_id, creator_id),
+                "total": total,
+                "valid": valid,
+            }
+        else:
+            member["total"] += total
+            member["valid"] += valid
+
+    data = []
+    for day_key in point_totals:
+        members = sorted(
+            members_by_day[day_key].values(),
+            key=lambda item: (item["total"], item["valid"], item["name"]),
+            reverse=True,
+        )
+        data.append(SalesDashboardFollowUpTrendPoint(
+            date=day_key,
+            total=point_totals[day_key],
+            valid=point_valids[day_key],
+            members=[SalesDashboardFollowUpTrendMember(**member) for member in members],
+        ))
+
+    return SalesDashboardFollowUpTrendResponse(
+        scope=scope,
+        period_start=trend_start.isoformat(),
+        period_end=trend_end.isoformat(),
+        data=data,
     )

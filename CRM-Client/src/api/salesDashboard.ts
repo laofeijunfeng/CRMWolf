@@ -1,7 +1,9 @@
 import request from '@/utils/request'
 import {
+  SalesDashboardFollowUpTrendResponseSchema,
   SalesDashboardFunnelResponseSchema,
   SalesDashboardOwnerFilterOptionsResponseSchema,
+  type SalesDashboardFollowUpTrendResponse,
   type SalesDashboardFunnelResponse,
   type SalesDashboardOwnerFilterOptionsResponse
 } from '@/schemas/salesDashboard'
@@ -10,6 +12,9 @@ export type {
   SalesDashboardScope,
   SalesDashboardMetricValueType,
   SalesDashboardMetric,
+  SalesDashboardFollowUpTrendMember,
+  SalesDashboardFollowUpTrendPoint,
+  SalesDashboardFollowUpTrendResponse,
   SalesDashboardOwnerFilterOption,
   SalesDashboardFunnelResponse,
   SalesDashboardOwnerFilterOptionsResponse
@@ -26,6 +31,12 @@ const salesDashboardApi = {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const raw: unknown = await request.get('/v1/sales-dashboard/funnel', { params })
     return SalesDashboardFunnelResponseSchema.parse(raw)
+  },
+
+  async getFollowUpTrend(params?: SalesDashboardFunnelParams): Promise<SalesDashboardFollowUpTrendResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.get('/v1/sales-dashboard/follow-up-trend', { params })
+    return SalesDashboardFollowUpTrendResponseSchema.parse(raw)
   },
 
   async getOwnerFilterOptions(): Promise<SalesDashboardOwnerFilterOptionsResponse> {

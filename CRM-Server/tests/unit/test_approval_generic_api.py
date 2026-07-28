@@ -19,6 +19,7 @@ M-3：payment/invoice 的 :approve:own 自审校验真正生效。
 import pytest
 from datetime import datetime, timedelta, date
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.compiler import compiles
@@ -296,6 +297,7 @@ def seed_payment_record_self(db_session, current_user_rec):
     """一条 PENDING 回款登记，creator=当前用户（自审场景）。"""
     pr = PaymentRecord(
         team_id=1,
+        record_number="PAY-2026-SELF",
         payment_plan_id=1,
         actual_amount=Decimal("5000"),
         payment_date=date(2026, 7, 1),
@@ -313,6 +315,7 @@ def seed_payment_record_other(db_session):
     """一条 PENDING 回款登记，creator=他人（非自审场景）。"""
     pr = PaymentRecord(
         team_id=1,
+        record_number="PAY-2026-OTHER",
         payment_plan_id=1,
         actual_amount=Decimal("5000"),
         payment_date=date(2026, 7, 1),
@@ -442,6 +445,50 @@ def test_detail_returns_approval(
 def test_detail_not_found(client):
     r = client.get("/v1/approvals/INVOICE/999999/detail")
     assert r.status_code == 404, r.text
+
+
+# ---------- remind: 提交人手动催办当前节点审批人 ---------------------------
+
+def test_remind_pending_approval_by_submitter_sends_notification(
+    db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
+    seed_finance_role_and_link, current_user_rec, monkeypatch,
+):
+    """提交人可对自己提交的待审批单据催办当前节点审批人。"""
+    flow, node = seed_invoice_flow_with_finance_node
+    approval = Approval(
+        team_id=1,
+        business_type=BusinessType.INVOICE,
+        business_id=seed_invoice_draft.id,
+        flow_id=flow.id,
+        current_node_id=node.id,
+        status=ApprovalStatus.PENDING,
+        submitter_id=str(current_user_rec.id),
+        submitter_name=current_user_rec.name,
+    )
+    db_session.add(approval)
+    db_session.commit()
+
+    send_mock = AsyncMock(return_value={"success": 1, "failed": 0, "skipped": 0})
+    monkeypatch.setattr(
+        "app.api.approvals.feishu_notification_service.notify_approval_reminder",
+        send_mock,
+    )
+    monkeypatch.setattr(
+        "app.api.approvals.get_approval_card_fields",
+        lambda db, entity_type, entity: {"申请单号": entity.application_number},
+    )
+
+    r = client.post(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/remind")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["message"] == "已发送催办通知"
+    send_mock.assert_awaited_once()
+    kwargs = send_mock.await_args.kwargs
+    assert kwargs["user_ids"] == [current_user_rec.id]
+    assert kwargs["entity_type"] == BusinessType.INVOICE
+    assert kwargs["entity_name"] == f"发票申请#{seed_invoice_draft.id}"
+    assert kwargs["node_name"] == "财务审批"
+    assert kwargs["business_id"] == seed_invoice_draft.id
 
 
 # ---------- E6 bulk-approve: 逐条独立事务 + 部分成功汇总 -------------------

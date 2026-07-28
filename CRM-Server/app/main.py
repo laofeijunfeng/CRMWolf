@@ -122,10 +122,7 @@ async def startup_event():
     from app.tasks.score_scheduler import start_score_scheduler
     start_score_scheduler()
 
-    # 启动审批超时催办任务
-    logger.info("启动审批超时催办任务...")
-    from app.tasks.approval_reminder import start_approval_reminder_scheduler
-    start_approval_reminder_scheduler()
+    logger.info("审批超时自动催办任务已停用，催办改为审批中心手动触发")
 
 
 @app.get("/")

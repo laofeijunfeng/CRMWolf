@@ -122,6 +122,22 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
   }
 
   /**
+   * 手动催办审批。后端限制为提交人本人、且单据仍在审批中。
+   */
+  const remindEntity = async (
+    entityType: EntityType,
+    entityId: number
+  ): Promise<MessageResponse> => {
+    loading.value = true
+    try {
+      const raw = await approvalGenericApi.remindApproval(entityType, entityId)
+      return MessageResponseSchema.parse(raw)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
    * 批量审批（E6：逐条独立事务，部分成功汇总）。
    * @param updatedTimes 可选乐观锁字典 { str(id): iso8601 }
    */
@@ -185,6 +201,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
     submitEntity,
     approveEntity,
     cancelEntity,
+    remindEntity,
     bulkApprove,
     clearDetail,
     fetchList,

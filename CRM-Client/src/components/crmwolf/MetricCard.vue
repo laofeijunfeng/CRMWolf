@@ -82,9 +82,7 @@ withDefaults(defineProps<Props>(), {
   background:
     linear-gradient(0deg, rgba($wolf-primary-v2, 0.06) 0%, rgba($wolf-primary-v2, 0.025) 34%, rgba(255, 255, 255, 0) 70%),
     linear-gradient(135deg, rgba($wolf-bg-muted-v2, 0.88) 0%, $wolf-bg-card-v2 46%, $wolf-bg-card-v2 100%);
-  box-shadow:
-    0 1px 2px rgba(15, 23, 42, 0.06),
-    0 8px 24px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
 
 .metric-card::before {
@@ -146,7 +144,7 @@ withDefaults(defineProps<Props>(), {
   font-size: $wolf-font-size-caption-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   line-height: 22px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .metric-card[data-tone='positive'] .metric-card__badge {
