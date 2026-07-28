@@ -6,6 +6,7 @@ import { z } from 'zod'
 export type LicenseType = 'SUBSCRIPTION' | 'PERPETUAL'
 
 export type ContractStatus = 'DRAFT' | 'PENDING_REVIEW' | 'SIGNED' | 'EFFECTIVE' | 'EXPIRED' | 'TERMINATED'
+export type ApprovalPhase = 'draft' | 'pending_review' | 'approved' | 'rejected'
 
 export interface ContractCreate {
   contract_name: string
@@ -52,6 +53,7 @@ export interface ContractListResponse {
   subscription_years: number | null
   standard_unit_price: string
   status: ContractStatus
+  approval_phase?: ApprovalPhase | null
   signing_date: string | null
   effective_date: string | null
   expiry_date: string | null

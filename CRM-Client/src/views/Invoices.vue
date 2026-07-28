@@ -161,6 +161,12 @@ const columns = [
 const canCreateInvoice = computed(() => permissionStore.hasPermission('invoice:create'))
 const canMarkInvoiced = computed(() => permissionStore.hasPermission('invoice:mark_issued'))
 
+const canDeleteInvoiceApplicationRow = (row: InvoiceApplicationResponse): boolean => {
+  if (!canCreateInvoice.value) return false
+  if (row.approval_phase === 'pending_review' || row.approval_phase === 'approved') return false
+  return row.status === 'DRAFT' || row.status === 'REJECTED'
+}
+
 // ==================== Methods ====================
 const fetchCustomers = async (): Promise<void> => {
   try {
@@ -597,7 +603,7 @@ watchEffect(() => {
             {
               label: '删除',
               handler: deleteInvoiceRow,
-              visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
+              visible: canDeleteInvoiceApplicationRow(row),
               icon: Trash2,
               destructive: true,
               separator: true
@@ -703,7 +709,7 @@ watchEffect(() => {
             {
               label: '删除',
               handler: deleteInvoiceRow,
-              visible: (row.status === 'DRAFT' || row.status === 'REJECTED') && canCreateInvoice,
+              visible: canDeleteInvoiceApplicationRow(row),
               icon: Trash2,
               destructive: true,
               separator: true

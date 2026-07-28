@@ -27,6 +27,7 @@ class PaymentPlan(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='CASCADE'), nullable=False, comment="关联的合同ID")
+    deal_journey_id = Column(BigInteger, ForeignKey('crm_customer_deal_journeys.id', ondelete='SET NULL'), nullable=True, comment="成交旅程ID（系统自动关联）")
 
     # 新增：计划编号
     plan_number = Column(String(50), unique=True, nullable=False, comment="回款计划编号（系统自动生成）")
@@ -46,6 +47,7 @@ class PaymentPlan(Base):
     __table_args__ = (
         Index('idx_payment_plan_team_id', 'team_id'),
         Index('idx_payment_plan_number', 'plan_number'),
+        Index('idx_payment_plan_deal_journey_id', 'deal_journey_id'),
     )
 
     @property
@@ -107,6 +109,7 @@ class PaymentRecord(Base):
     record_number = Column(String(50), unique=True, nullable=False, comment="回款记录编号（系统自动生成）")
 
     payment_plan_id = Column(BigInteger, ForeignKey('crm_contract_payment_plans.id', ondelete='CASCADE'), nullable=False, comment="关联的回款计划ID")
+    deal_journey_id = Column(BigInteger, ForeignKey('crm_customer_deal_journeys.id', ondelete='SET NULL'), nullable=True, comment="成交旅程ID（系统自动关联）")
     actual_amount = Column(Numeric(12, 2), nullable=False, comment="实际回款金额")
     actual_payer_name = Column(String(200), comment="实际付款方名称")
     payment_date = Column(Date, nullable=False, comment="实际回款日期")
@@ -139,6 +142,7 @@ class PaymentRecord(Base):
     __table_args__ = (
         Index('idx_payment_record_team_id', 'team_id'),
         Index('idx_payment_record_number', 'record_number'),
+        Index('idx_payment_record_deal_journey_id', 'deal_journey_id'),
     )
 
     def __repr__(self):

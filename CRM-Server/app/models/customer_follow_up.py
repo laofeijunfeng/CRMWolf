@@ -9,6 +9,7 @@ class CustomerFollowUp(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     customer_id = Column(BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=True, comment="关联的客户ID")
+    deal_journey_id = Column(BigInteger, ForeignKey("crm_customer_deal_journeys.id", ondelete="SET NULL"), nullable=True, comment="成交旅程ID（系统自动关联）")
     original_lead_id = Column(BigInteger, ForeignKey("crm_leads.id", ondelete="SET NULL"), nullable=True, comment="原始的线索ID")
     content = Column(Text, nullable=False, comment="跟进内容")
     method = Column(String(50), nullable=False, comment="跟进方式")
@@ -26,6 +27,7 @@ class CustomerFollowUp(Base):
 
     __table_args__ = (
         Index('idx_customer_id', 'customer_id'),
+        Index('idx_customer_follow_up_deal_journey_id', 'deal_journey_id'),
         Index('idx_original_lead_id', 'original_lead_id'),
         Index('idx_creator_id', 'creator_id'),
         Index('idx_next_follow_time', 'next_follow_time'),

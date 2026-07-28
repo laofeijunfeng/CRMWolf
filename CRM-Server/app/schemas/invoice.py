@@ -112,6 +112,7 @@ class InvoiceApplicationResponse(InvoiceApplicationBase):
     contract_id: int = Field(..., description="关联合同ID")
     opportunity_id: int = Field(..., description="关联商机ID")
     status: InvoiceApplicationStatusEnum = Field(..., description="申请状态")
+    approval_phase: Optional[str] = Field(None, description="审批流程状态：draft/pending_review/approved/rejected")
     applicant_id: str = Field(..., description="申请人ID")
     reviewer_id: Optional[str] = Field(None, description="审批人ID")
     review_comment: Optional[str] = Field(None, description="审批意见")

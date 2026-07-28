@@ -891,7 +891,7 @@ def update_payment_record(
         )
 
 
-@router.delete("/payment-records/{record_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除回款记录", description="删除指定的回款记录。删除后会自动重新计算相关金额、计划状态和合同回款状态。删除后无法恢复，请谨慎操作。")
+@router.delete("/payment-records/{record_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除回款记录", description="删除指定的回款记录。审批中或审批通过后不可删除；删除后会自动重新计算相关金额、计划状态和合同回款状态。")
 def delete_payment_record(
     record_id: int,
     team_id: int = Depends(get_current_user_team),

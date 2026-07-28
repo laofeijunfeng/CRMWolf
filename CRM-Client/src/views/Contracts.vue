@@ -185,6 +185,7 @@ const canEditRow = (row: ContractListResponse): boolean => {
 }
 
 const canDeleteRow = (row: ContractListResponse): boolean => {
+  if (row.approval_phase === 'pending_review' || row.approval_phase === 'approved') return false
   if (row['status'] !== 'DRAFT') return false
   if (canDeleteAllContract.value) return true
   if (canDeleteOwnContract.value && row.owner_id === String(userStore.userInfo?.id)) return true

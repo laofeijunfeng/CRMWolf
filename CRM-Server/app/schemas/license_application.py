@@ -125,6 +125,7 @@ class LicenseApplicationResponse(BaseModel):
     # 原有字段
     license_code: Optional[str] = Field(None, description="授权码（旧字段）")
     status: str = Field(..., description="申请状态")
+    approval_phase: Optional[str] = Field(None, description="审批流程状态：draft/pending_review/approved/rejected")
     applicant_id: str = Field(..., description="申请人系统用户ID")
     approver_id: Optional[str] = Field(None, description="审批人系统用户ID")
     approved_time: Optional[datetime] = Field(None, description="审批时间")

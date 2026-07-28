@@ -137,7 +137,7 @@ def delete_application(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """删除 License 申请（仅草稿状态可删除）"""
+    """删除 License 申请（审批中或审批通过后不可删除）"""
     existing = get_license_application(db, team_id, application_id)
     if not existing:
         raise HTTPException(
@@ -147,7 +147,7 @@ def delete_application(
     if existing.status != LicenseApplicationStatus.DRAFT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="仅草稿状态的申请可以删除"
+            detail="只有草稿且未处于审批中/审批通过的申请可以删除"
         )
     check_customer_edit_permission(existing.customer_id, team_id, current_user, db)
     delete_license_application(db, team_id, application_id)

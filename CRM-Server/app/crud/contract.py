@@ -8,6 +8,8 @@ import logging
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Customer
 from app.models.opportunity import Opportunity
+from app.constants.business_types import BusinessType
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.contract import ContractCreate, ContractUpdate
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.contract import ContractPricingService
@@ -310,6 +312,8 @@ class ContractCRUD:
         ).first()
         owner_id = explicit_owner_id or (opportunity.owner_id if opportunity else None) or (customer.owner_id if customer else None) or creator_id
 
+        deal_journey_id = opportunity.deal_journey_id if opportunity else None
+
         db_obj = Contract(
             contract_number=contract_number,
             standard_unit_price=standard_unit_price,
@@ -318,6 +322,7 @@ class ContractCRUD:
             owner_id=owner_id,
             creator_id=creator_id,
             team_id=team_id,
+            deal_journey_id=deal_journey_id,
             **contract_data
         )
         
@@ -349,6 +354,23 @@ class ContractCRUD:
                 "customerName": customer.account_name if customer else None
             }
         )
+
+        from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.record_event(
+            db,
+            deal_journey_id=db_obj.deal_journey_id,
+            team_id=team_id,
+            customer_id=db_obj.customer_id,
+            event_type=DealJourneyEventType.CONTRACT_CREATED,
+            source_type=DealJourneySourceType.CONTRACT,
+            source_id=db_obj.id,
+            event_time=db_obj.created_time,
+            actor_id=creator_id,
+            summary=f"创建合同：{db_obj.contract_name}",
+        )
+        db.commit()
+        db.refresh(db_obj)
 
         # 注意：审批提交移至 API 层（异步上下文）
         # API 层调用 ApprovalService.submit_for_approval() 获取 approval 后发送通知
@@ -401,10 +423,28 @@ class ContractCRUD:
             standard_unit_price=standard_unit_price,
             status=ContractStatus.DRAFT,
             owner_id=owner_id,
-            creator_id=creator_id
+            creator_id=creator_id,
+            deal_journey_id=opportunity.deal_journey_id
         )
         
         db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+
+        from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.record_event(
+            db,
+            deal_journey_id=db_obj.deal_journey_id,
+            team_id=team_id,
+            customer_id=db_obj.customer_id,
+            event_type=DealJourneyEventType.CONTRACT_CREATED,
+            source_type=DealJourneySourceType.CONTRACT,
+            source_id=db_obj.id,
+            event_time=db_obj.created_time,
+            actor_id=creator_id,
+            summary=f"创建合同：{db_obj.contract_name}",
+        )
         db.commit()
         db.refresh(db_obj)
 
@@ -457,9 +497,9 @@ class ContractCRUD:
         删除合同（软删除）
 
         业务规则：
-        1. 只能删除草稿状态的合同
+        1. 只能删除草稿状态且未进入审批/审批未通过的合同
         2. 使用软删除（设置 deleted_at 时间戳）
-        3. 正在审批的合同删除后自动终止审批流程
+        3. 审批中或审批通过的合同不允许删除
         4. 审批记录保留，不随合同删除
 
         Args:
@@ -472,9 +512,6 @@ class ContractCRUD:
         Raises:
             ValueError: 合同状态不允许删除
         """
-        from app.models.approval import Approval, ApprovalStatus, ApprovalAction
-        from app.crud.approval import approval_crud
-
         contract = self.get_by_id(db, contract_id)
         if not contract:
             return False
@@ -482,40 +519,19 @@ class ContractCRUD:
         if contract.deleted_at is not None:
             raise ValueError("合同已被删除")
 
-        # 检查合同状态
-        if contract.status not in [ContractStatus.DRAFT, ContractStatus.PENDING_REVIEW]:
-            raise ValueError("只能删除草稿或审批中的合同")
+        assert_deletable_approval_resource(
+            db,
+            resource=contract,
+            business_type=BusinessType.CONTRACT,
+            business_id=contract_id,
+            team_id=contract.team_id,
+            resource_name="合同",
+            locked_business_statuses=(ContractStatus.PENDING_REVIEW,),
+        )
 
-        # 如果合同正在审批中，终止审批流程
-        if contract.status == ContractStatus.PENDING_REVIEW:
-            approval = approval_crud.get_by_contract_id(db, contract_id)
-            if approval and approval.status == ApprovalStatus.PENDING:
-                # 终止审批流程：状态更新为 CANCELLED
-                approval.status = ApprovalStatus.CANCELLED
-                # 置空 contract_id（软删除不会触发外键 SET NULL，需手动处理）
-                approval.contract_id = None
-                # 记录删除原因（使用原生 SQL 避免 SQLite RETURNING 问题）
-                from sqlalchemy import text
-                # 查询最大 id 并 +1（兼容 SQLite）
-                max_id_result = db.execute(text("SELECT COALESCE(MAX(id), 0) + 1 FROM crm_contract_approval_records")).scalar()
-                db.execute(
-                    text(
-                        "INSERT INTO crm_contract_approval_records "
-                        "(id, team_id, approval_id, node_id, approver_id, approver_name, action, comment, created_time) "
-                        "VALUES (:id, :team_id, :approval_id, :node_id, :approver_id, :approver_name, :action, :comment, :created_time)"
-                    ),
-                    {
-                        "id": max_id_result,
-                        "team_id": approval.team_id,
-                        "approval_id": approval.id,
-                        "node_id": approval.current_node_id,
-                        "approver_id": contract.creator_id,
-                        "approver_name": "系统",
-                        "action": "SUBMIT",
-                        "comment": "合同已删除，审批流程终止",
-                        "created_time": datetime.now()
-                    }
-                )
+        # 检查合同状态
+        if contract.status != ContractStatus.DRAFT:
+            raise ValueError("只有草稿状态的合同可以删除")
 
         # 软删除：设置 deleted_at 时间戳
         contract.deleted_at = datetime.now()

@@ -14,6 +14,8 @@ from app.models.license_application import (
 from app.models.customer import Customer
 from app.models.deployment import DeploymentInfo
 from app.models.contract import Contract
+from app.constants.business_types import BusinessType
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.license_application import (
     LicenseApplicationCreate,
     LicenseApplicationUpdate,
@@ -391,6 +393,20 @@ class LicenseApplicationCRUD:
         application = self.get(db, team_id, application_id)
         if not application:
             return False
+
+        assert_deletable_approval_resource(
+            db,
+            resource=application,
+            business_type=BusinessType.LICENSE,
+            business_id=application_id,
+            team_id=team_id,
+            resource_name="License申请",
+            locked_business_statuses=(
+                LicenseApplicationStatus.PENDING_REVIEW,
+                LicenseApplicationStatus.APPROVED,
+                LicenseApplicationStatus.ISSUED,
+            ),
+        )
 
         # 仅 DRAFT 状态可删除
         if application.status != LicenseApplicationStatus.DRAFT:

@@ -128,7 +128,9 @@ const columns = [
 // ==================== 权限 ====================
 const canCreateRecord = computed(() => permissionStore.hasPermission('payment:create'))
 const canEditAnyRecord = computed(() => permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit']))
-const canDeleteRecord = computed(() => permissionStore.hasPermission('payment:delete'))
+const canDeleteRecord = computed(() =>
+  permissionStore.hasAnyPermission(['payment:record:delete', 'payment:delete'])
+)
 
 const canEditRecordRow = (row: PaymentRecordWithDetails): boolean => {
   if (row.approval?.status === 'PENDING') return false
@@ -136,6 +138,14 @@ const canEditRecordRow = (row: PaymentRecordWithDetails): boolean => {
   if (row.confirmation_status === 'CONFIRMED') return false
   if (canEditAnyRecord.value) return true
   return row.creator_id === String(userStore.userInfo?.id ?? '')
+}
+
+const canDeleteRecordRow = (row: PaymentRecordWithDetails): boolean => {
+  if (!canDeleteRecord.value) return false
+  if (row.approval?.status === 'PENDING' || row.approval?.status === 'APPROVED') return false
+  if (row.approval_phase === 'pending_review' || row.approval_phase === 'approved') return false
+  if (row.confirmation_status === 'CONFIRMED') return false
+  return true
 }
 
 // ==================== Methods ====================
@@ -447,7 +457,7 @@ watchEffect(() => {
             {
               label: '删除',
               handler: handleDeleteAction,
-              visible: canDeleteRecord,
+              visible: canDeleteRecordRow(row as PaymentRecordWithDetails),
               icon: Trash2,
               destructive: true
             }
@@ -503,7 +513,7 @@ watchEffect(() => {
             {
               label: '删除',
               handler: handleDeleteAction,
-              visible: canDeleteRecord,
+              visible: canDeleteRecordRow(row as PaymentRecordWithDetails),
               icon: Trash2,
               destructive: true
             }

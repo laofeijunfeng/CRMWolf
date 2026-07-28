@@ -60,6 +60,7 @@ class InvoiceApplication(Base):
     contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='CASCADE'), nullable=False, comment="关联合同ID")
     opportunity_id = Column(BigInteger, ForeignKey('crm_opportunities.id', ondelete='CASCADE'), nullable=False, comment="关联商机ID")
     payment_plan_id = Column(BigInteger, ForeignKey('crm_contract_payment_plans.id', ondelete='CASCADE'), nullable=False, comment="关联回款计划ID")
+    deal_journey_id = Column(BigInteger, ForeignKey('crm_customer_deal_journeys.id', ondelete='SET NULL'), nullable=True, comment="成交旅程ID（系统自动关联）")
     payment_record_id = Column(BigInteger, ForeignKey('crm_payment_records.id', ondelete='SET NULL'), comment="关联回款记录ID")
     invoice_title_id = Column(BigInteger, ForeignKey('crm_invoice_titles.id', ondelete='SET NULL'), comment="开票抬头ID（可为空，抬头删除后发票记录仍保留抬头信息）")
     invoice_amount = Column(Numeric(12, 2), nullable=False, comment="开票金额")
@@ -101,6 +102,7 @@ class InvoiceApplication(Base):
 
     __table_args__ = (
         Index('idx_invoice_application_team_id', 'team_id'),
+        Index('idx_invoice_application_deal_journey_id', 'deal_journey_id'),
     )
 
     def __repr__(self):

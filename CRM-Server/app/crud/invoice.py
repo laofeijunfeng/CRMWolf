@@ -8,6 +8,8 @@ from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.contract import Contract
 from app.models.customer import Customer
 from app.models.opportunity import Opportunity
+from app.constants.business_types import BusinessType
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.invoice import (
     InvoiceTitleCreate, InvoiceTitleUpdate,
     InvoiceApplicationCreate, InvoiceApplicationUpdate
@@ -270,6 +272,7 @@ class InvoiceApplicationCRUD:
             team_id=team_id,
             applicant_id=applicant_id,
             payment_plan_id=obj_in.payment_plan_id,
+            deal_journey_id=payment_plan.deal_journey_id or contract.deal_journey_id,
             invoice_title_id=obj_in.invoice_title_id,
             invoice_amount=obj_in.invoice_amount,
             invoice_type=obj_in.invoice_type,
@@ -284,6 +287,22 @@ class InvoiceApplicationCRUD:
             invoice_phone=invoice_title.phone
         )
         db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.record_event(
+            db,
+            deal_journey_id=db_obj.deal_journey_id,
+            team_id=team_id,
+            customer_id=db_obj.customer_id,
+            event_type=DealJourneyEventType.INVOICE_APPLIED,
+            source_type=DealJourneySourceType.INVOICE_APPLICATION,
+            source_id=db_obj.id,
+            event_time=db_obj.created_time,
+            actor_id=applicant_id,
+            summary=f"申请开票：{db_obj.invoice_amount}",
+        )
         db.commit()
         db.refresh(db_obj)
         return db_obj
@@ -365,12 +384,42 @@ class InvoiceApplicationCRUD:
         application.issued_time = datetime.now()
         db.commit()
         db.refresh(application)
+        from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.record_event(
+            db,
+            deal_journey_id=application.deal_journey_id,
+            team_id=application.team_id,
+            customer_id=application.customer_id,
+            event_type=DealJourneyEventType.INVOICE_ISSUED,
+            source_type=DealJourneySourceType.INVOICE_APPLICATION,
+            source_id=application.id,
+            event_time=application.issued_time,
+            summary=f"完成开票：{application.invoice_amount}",
+            metadata={"invoice_number": application.invoice_number},
+        )
+        db.commit()
+        db.refresh(application)
         return application
 
     def delete(self, db: Session, application_id: int, team_id: int) -> bool:
         application = self.get_by_id(db, application_id, team_id)
         if not application:
             return False
+
+        assert_deletable_approval_resource(
+            db,
+            resource=application,
+            business_type=BusinessType.INVOICE,
+            business_id=application_id,
+            team_id=team_id,
+            resource_name="发票申请",
+            locked_business_statuses=(
+                InvoiceApplicationStatus.PENDING_REVIEW,
+                InvoiceApplicationStatus.APPROVED,
+                InvoiceApplicationStatus.ISSUED,
+            ),
+        )
 
         if application.status not in [InvoiceApplicationStatus.DRAFT, InvoiceApplicationStatus.REJECTED]:
             raise ValueError("只有草稿或已拒绝状态的发票申请可以删除")

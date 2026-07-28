@@ -67,10 +67,29 @@ class CustomerFollowUpCRUD:
         if original_lead_id:
             follow_up_data['original_lead_id'] = original_lead_id
 
+        from app.services.deal_journey_service import deal_journey_service
+        journey = deal_journey_service.infer_for_customer(db, customer_id, team_id)
+        if journey:
+            follow_up_data['deal_journey_id'] = journey.id
+
         db_obj = CustomerFollowUp(**follow_up_data)
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
+
+        from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+        deal_journey_service.record_event(
+            db,
+            deal_journey_id=db_obj.deal_journey_id,
+            team_id=team_id,
+            customer_id=customer_id,
+            event_type=DealJourneyEventType.FOLLOW_UP_ADDED,
+            source_type=DealJourneySourceType.CUSTOMER_FOLLOW_UP,
+            source_id=db_obj.id,
+            event_time=db_obj.created_time,
+            actor_id=creator_id,
+            summary="新增客户跟进记录",
+        )
         
         operation_log_service.log_customer_follow_up(
             db=db,
@@ -103,6 +122,7 @@ class CustomerFollowUpCRUD:
             new_follow_up = CustomerFollowUp(
                 customer_id=new_customer_id,
                 team_id=team_id,
+                deal_journey_id=None,
                 original_lead_id=lead_id,
                 content=lead_follow_up.content,
                 method=lead_follow_up.method.value if hasattr(lead_follow_up.method, 'value') else lead_follow_up.method,

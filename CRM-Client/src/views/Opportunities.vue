@@ -194,6 +194,7 @@ const canEditRow = (row: OpportunityListResponse): boolean => {
 }
 
 const canDeleteRow = (row: OpportunityListResponse): boolean => {
+  if (row.approval_phase === 'pending_review' || row.approval_phase === 'approved') return false
   if (canDeleteAllOpportunity.value) return true
   if (canDeleteOwnOpportunity.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false

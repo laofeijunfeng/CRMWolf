@@ -277,6 +277,7 @@ const canEditContractRow = (contract: ContractListResponse): boolean => {
 }
 
 const canDeleteContractRow = (contract: ContractListResponse): boolean => {
+  if (contract.approval_phase === 'pending_review' || contract.approval_phase === 'approved') return false
   if (contract.status !== 'DRAFT') return false
   if (canDeleteAllContract.value) return true
   return canDeleteOwnContract.value && contract.owner_id === currentUserId.value

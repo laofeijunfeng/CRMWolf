@@ -2,6 +2,7 @@ import request from '@/utils/request'
 
 export type LicenseApplicationStatus = 'DRAFT' | 'PENDING' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'ISSUED'
 export type LicenseType = 'TRIAL' | 'OFFICIAL'
+export type ApprovalPhase = 'draft' | 'pending_review' | 'approved' | 'rejected'
 
 export interface LicenseApplicationCreate {
   customer_id: number
@@ -37,6 +38,7 @@ export interface LicenseApplicationResponse {
   // 原有字段
   license_code: string | null
   status: LicenseApplicationStatus
+  approval_phase?: ApprovalPhase | null
   applicant_id: string
   approver_id: string | null
   approved_time: string | null

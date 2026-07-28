@@ -389,7 +389,7 @@ async def mark_invoice_issued(
         )
 
 
-@invoice_router.delete("/{application_id}", response_model=MessageResponse, summary="删除发票申请", description="删除指定的发票申请（仅草稿状态可删除）")
+@invoice_router.delete("/{application_id}", response_model=MessageResponse, summary="删除发票申请", description="删除指定的发票申请（审批中或审批通过后不可删除）")
 def delete_invoice_application(
     application_id: int,
     team_id: int = Depends(get_current_user_team),

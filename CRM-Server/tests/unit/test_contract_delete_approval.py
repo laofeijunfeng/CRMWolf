@@ -1,13 +1,13 @@
 """
-测试合同删除后审批记录处理功能
+测试合同删除审批状态拦截
 
 场景八：合同删除后审批记录处理
 
 测试要点：
 1. 合同删除使用软删除（deleted_at 字段）
-2. 删除合同时自动终止审批流程（状态更新为 CANCELLED）
-3. 审批记录查询不受合同删除影响
-4. 审批记录表外键不会级联删除
+2. 审批中合同不允许删除
+3. 审批通过合同不允许删除
+4. 审批记录不会因为删除尝试被自动取消或改写
 """
 import pytest
 from datetime import datetime
@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.contract import Contract, ContractStatus
 from app.models.approval import Approval, ApprovalRecord, ApprovalStatus, ApprovalAction, ApprovalFlow, ApprovalNode
 from app.crud.contract import contract_crud
-from app.crud.approval import approval_crud
+from app.constants.approval_phase import ApprovalPhase
 
 
 @pytest.fixture(scope="function")
@@ -40,6 +40,7 @@ def db_session():
         Column('contract_name', String(255), nullable=False),
         Column('customer_id', BigInteger, nullable=False),
         Column('opportunity_id', BigInteger, nullable=False),
+        Column('deal_journey_id', BigInteger, nullable=True),
         Column('signing_contact_id', BigInteger, nullable=False),
         Column('user_count', Integer, nullable=False),
         Column('total_amount', Numeric(12, 2), nullable=False),
@@ -47,11 +48,16 @@ def db_session():
         Column('subscription_years', Integer, nullable=True),
         Column('standard_unit_price', Numeric(10, 2), nullable=False),
         Column('status', String(20), nullable=False),
+        Column('approval_phase', String(20), nullable=False, default='draft'),
         Column('signing_date', Date, nullable=True),
         Column('effective_date', Date, nullable=True),
         Column('expiry_date', Date, nullable=True),
         Column('total_paid_amount', Numeric(12, 2), nullable=False, default=0),
         Column('payment_status', String(20), nullable=False, default='UNPAID'),
+        Column('contract_file_path', String(500), nullable=True),
+        Column('contract_file_name', String(255), nullable=True),
+        Column('contract_file_size', BigInteger, nullable=True),
+        Column('contract_file_mime_type', String(100), nullable=True),
         Column('created_time', DateTime, nullable=False),
         Column('owner_id', String(100), nullable=False),
         Column('creator_id', String(100), nullable=False),
@@ -88,6 +94,7 @@ def db_session():
         Column('node_order', Integer, nullable=False),
         Column('description', Text, nullable=True),
         Column('approve_role', String(50), nullable=True),
+        Column('notify_user_ids', Text, nullable=True),
         Column('is_required', Integer, nullable=False, default=1),
         Column('created_time', DateTime, nullable=False),
     )
@@ -148,7 +155,8 @@ def sample_contract(db_session):
         license_type="SUBSCRIPTION",
         subscription_years=1,
         standard_unit_price=10000,
-        status=ContractStatus.PENDING_REVIEW,
+        status=ContractStatus.DRAFT,
+        approval_phase=ApprovalPhase.DRAFT,
         owner_id="user_001",
         creator_id="user_001"
     )
@@ -230,7 +238,7 @@ def sample_approval(db_session, sample_contract, sample_approval_flow):
 
 
 class TestContractDeleteApproval:
-    """测试合同删除后审批记录处理"""
+    """测试合同删除审批状态拦截"""
 
     def test_contract_soft_delete(self, db_session, sample_contract):
         """测试合同软删除"""
@@ -245,25 +253,23 @@ class TestContractDeleteApproval:
         assert contract.deleted_at is not None
         assert contract.status == ContractStatus.DRAFT
 
-    def test_approval_cancelled_on_contract_delete(self, db_session, sample_contract, sample_approval):
-        """测试删除合同后审批流程终止"""
-        # 删除合同
-        result = contract_crud.delete(db_session, sample_contract.id)
+    def test_pending_approval_contract_delete_blocked(self, db_session, sample_contract, sample_approval):
+        """测试审批中合同不允许删除，审批流程不自动取消"""
+        sample_contract.status = ContractStatus.PENDING_REVIEW
+        sample_contract.approval_phase = ApprovalPhase.PENDING_REVIEW
+        db_session.commit()
 
-        assert result is True
+        with pytest.raises(ValueError, match="合同审批中或审批通过后不允许删除"):
+            contract_crud.delete(db_session, sample_contract.id)
 
-        # 查询审批实例，检查状态
+        contract = db_session.query(Contract).filter(Contract.id == sample_contract.id).first()
         approval = db_session.query(Approval).filter(Approval.id == sample_approval.id).first()
-        assert approval is not None
-        assert approval.status == ApprovalStatus.CANCELLED
-
-        # 查询审批记录，检查是否有终止记录
         records = db_session.query(ApprovalRecord).filter(
             ApprovalRecord.approval_id == sample_approval.id
         ).all()
-        assert len(records) >= 2  # 至少有提交记录和终止记录
-        cancel_record = records[-1]
-        assert "合同已删除" in cancel_record.comment
+        assert contract.deleted_at is None
+        assert approval.status == ApprovalStatus.PENDING
+        assert len(records) == 1
 
     def test_approval_records_preserved_after_contract_delete(
         self,
@@ -271,57 +277,76 @@ class TestContractDeleteApproval:
         sample_contract,
         sample_approval
     ):
-        """测试删除合同后审批记录保留"""
+        """测试审批通过合同不允许删除"""
         # 记录原始审批记录数量
         original_records = db_session.query(ApprovalRecord).filter(
             ApprovalRecord.approval_id == sample_approval.id
         ).all()
         original_count = len(original_records)
 
-        # 删除合同
-        contract_crud.delete(db_session, sample_contract.id)
+        sample_contract.status = ContractStatus.SIGNED
+        sample_contract.approval_phase = ApprovalPhase.APPROVED
+        sample_approval.status = ApprovalStatus.APPROVED
+        db_session.commit()
+
+        with pytest.raises(ValueError, match="合同审批中或审批通过后不允许删除"):
+            contract_crud.delete(db_session, sample_contract.id)
 
         # 查询审批记录，确认数量没有减少
+        contract = db_session.query(Contract).filter(Contract.id == sample_contract.id).first()
         records_after_delete = db_session.query(ApprovalRecord).filter(
             ApprovalRecord.approval_id == sample_approval.id
         ).all()
-        assert len(records_after_delete) >= original_count
+        assert contract.deleted_at is None
+        assert len(records_after_delete) == original_count
 
-    def test_approval_contract_id_set_null_after_contract_delete(
+    def test_approved_approval_phase_blocks_contract_delete(self, db_session, sample_contract):
+        """测试审批阶段已通过时，即使业务状态仍是草稿也不允许删除"""
+        sample_contract.status = ContractStatus.DRAFT
+        sample_contract.approval_phase = ApprovalPhase.APPROVED
+        db_session.commit()
+
+        with pytest.raises(ValueError, match="合同审批中或审批通过后不允许删除"):
+            contract_crud.delete(db_session, sample_contract.id)
+
+        contract = db_session.query(Contract).filter(Contract.id == sample_contract.id).first()
+        assert contract.deleted_at is None
+
+    def test_pending_approval_record_blocks_contract_delete(
         self,
         db_session,
         sample_contract,
         sample_approval
     ):
-        """测试删除合同后审批实例的 contract_id 置空"""
-        # 删除合同
-        contract_crud.delete(db_session, sample_contract.id)
+        """测试最新审批实例审批中时，即使单据字段未同步也不允许删除"""
+        sample_contract.status = ContractStatus.DRAFT
+        sample_contract.approval_phase = ApprovalPhase.DRAFT
+        sample_approval.status = ApprovalStatus.PENDING
+        db_session.commit()
 
-        # 查询审批实例，检查 contract_id
-        approval = db_session.query(Approval).filter(Approval.id == sample_approval.id).first()
-        # 注意：这里需要数据库迁移支持外键 SET NULL
-        # 在 SQLite 内存数据库中可能不会自动置空，需要在代码中处理
-        # 这里暂时跳过，实际环境中需要验证迁移后的行为
+        with pytest.raises(ValueError, match="合同审批中或审批通过后不允许删除"):
+            contract_crud.delete(db_session, sample_contract.id)
 
-    def test_get_approvals_for_deleted_contracts(
+        contract = db_session.query(Contract).filter(Contract.id == sample_contract.id).first()
+        assert contract.deleted_at is None
+
+    def test_rejected_contract_can_be_deleted_after_return_to_draft(
         self,
         db_session,
         sample_contract,
         sample_approval
     ):
-        """测试查询已删除合同的审批记录"""
-        # 删除合同
-        contract_crud.delete(db_session, sample_contract.id)
+        """测试审批拒绝并回到草稿后的合同仍可删除"""
+        sample_contract.status = ContractStatus.DRAFT
+        sample_contract.approval_phase = ApprovalPhase.REJECTED
+        sample_approval.status = ApprovalStatus.REJECTED
+        db_session.commit()
 
-        # 查询已删除合同的审批记录
-        approvals, total = approval_crud.get_approvals_for_deleted_contracts(
-            db_session,
-            team_id=1
-        )
+        result = contract_crud.delete(db_session, sample_contract.id)
 
-        # 确认可以查询到
-        assert total >= 1
-        assert len(approvals) >= 1
+        assert result is True
+        contract = db_session.query(Contract).filter(Contract.id == sample_contract.id).first()
+        assert contract.deleted_at is not None
 
     def test_deleted_contract_not_in_normal_list(self, db_session, sample_contract):
         """测试已删除的合同不在正常合同列表中"""

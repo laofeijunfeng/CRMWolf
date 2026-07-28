@@ -7,6 +7,8 @@ from decimal import Decimal
 
 from app.models.payment import PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus
 from app.models.contract import Contract, ContractStatus, PaymentStatus
+from app.constants.business_types import BusinessType
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.payment import (
     PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate,
     PaymentRecordCreate, PaymentRecordUpdate
@@ -187,11 +189,30 @@ class PaymentPlanCRUD:
             contract_id=contract_id,
             team_id=team_id,
             plan_number=plan_number,
+            deal_journey_id=getattr(db.query(Contract).filter(Contract.id == contract_id).first(), "deal_journey_id", None),
             **obj_in.model_dump()
         )
         db.add(db_plan)
         db.commit()
         db.refresh(db_plan)
+        from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+        from app.services.deal_journey_service import deal_journey_service
+        contract = db.query(Contract).filter(Contract.id == contract_id).first()
+        if contract:
+            deal_journey_service.record_event(
+                db,
+                deal_journey_id=db_plan.deal_journey_id,
+                team_id=team_id,
+                customer_id=contract.customer_id,
+                event_type=DealJourneyEventType.PAYMENT_PLAN_CREATED,
+                source_type=DealJourneySourceType.PAYMENT_PLAN,
+                source_id=db_plan.id,
+                event_time=db_plan.created_time,
+                summary=f"创建回款计划：{db_plan.stage_name}",
+            )
+            deal_journey_service.refresh_closure_status(db, db_plan.deal_journey_id)
+            db.commit()
+            db.refresh(db_plan)
         return db_plan
 
     def batch_create(self, db: Session, contract_id: int, plans_data: List[PaymentPlanCreate], creator_id: str, team_id: int) -> List[PaymentPlan]:
@@ -219,6 +240,7 @@ class PaymentPlanCRUD:
                 contract_id=contract_id,
                 team_id=team_id,
                 plan_number=plan_number,
+                deal_journey_id=contract.deal_journey_id,
                 **plan_data.model_dump()
             )
             db.add(db_plan)
@@ -239,6 +261,23 @@ class PaymentPlanCRUD:
         operator_name = operator.name if operator else None
 
         customer = customer_crud.get_by_id(db, contract.customer_id)
+
+        from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+        from app.services.deal_journey_service import deal_journey_service
+        for plan in plans:
+            deal_journey_service.record_event(
+                db,
+                deal_journey_id=plan.deal_journey_id,
+                team_id=team_id,
+                customer_id=contract.customer_id,
+                event_type=DealJourneyEventType.PAYMENT_PLAN_CREATED,
+                source_type=DealJourneySourceType.PAYMENT_PLAN,
+                source_id=plan.id,
+                event_time=plan.created_time,
+                actor_id=creator_id,
+                summary=f"创建回款计划：{plan.stage_name}",
+            )
+        deal_journey_service.refresh_closure_status(db, contract.deal_journey_id)
 
         operation_log_service.log(
             db=db,
@@ -267,7 +306,13 @@ class PaymentPlanCRUD:
         
         for field, value in update_data.items():
             setattr(db_obj, field, value)
-        
+
+        self.update_status(db, db_obj, commit=False)
+        from app.crud.payment import payment_record_crud
+        from app.services.deal_journey_service import deal_journey_service
+        payment_record_crud._update_contract_payment_status(db, db_obj.contract_id, commit=False)
+        deal_journey_service.refresh_closure_status(db, db_obj.deal_journey_id)
+
         db.commit()
         db.refresh(db_obj)
         return db_obj
@@ -280,7 +325,14 @@ class PaymentPlanCRUD:
         if plan.payment_records:
             raise ValueError("存在关联的回款记录，无法删除")
 
+        contract_id = plan.contract_id
+        deal_journey_id = plan.deal_journey_id
         db.delete(plan)
+        db.flush()
+        from app.crud.payment import payment_record_crud
+        from app.services.deal_journey_service import deal_journey_service
+        payment_record_crud._update_contract_payment_status(db, contract_id, commit=False)
+        deal_journey_service.refresh_closure_status(db, deal_journey_id)
         db.commit()
         return True
     
@@ -559,6 +611,7 @@ class PaymentRecordCRUD:
             payment_plan_id=plan_id,
             team_id=team_id,
             record_number=record_number,
+            deal_journey_id=plan.deal_journey_id,
             **record_data,
             commission_member_id=commission_member_id,
             commission_member_name=commission_member.name if commission_member else None,
@@ -585,6 +638,25 @@ class PaymentRecordCRUD:
         contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
         if contract:
             db_record.payment_plan.contract = contract
+
+            from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+            from app.services.deal_journey_service import deal_journey_service
+            deal_journey_service.record_event(
+                db,
+                deal_journey_id=db_record.deal_journey_id,
+                team_id=team_id,
+                customer_id=contract.customer_id,
+                event_type=DealJourneyEventType.PAYMENT_RECEIVED,
+                source_type=DealJourneySourceType.PAYMENT_RECORD,
+                source_id=db_record.id,
+                event_time=db_record.created_time,
+                actor_id=creator_id,
+                summary=f"登记回款：{db_record.actual_amount}",
+                metadata={
+                    "confirmation_status": db_record.confirmation_status,
+                    "payment_date": db_record.payment_date.isoformat() if db_record.payment_date else None,
+                },
+            )
 
             operator = user_crud.get_by_id(db, int(creator_id))
             operator_name_display = operator.name if operator else creator_name
@@ -638,6 +710,9 @@ class PaymentRecordCRUD:
         if plan:
             payment_plan_crud.update_status(db, plan)
             self._update_contract_payment_status(db, plan.contract_id)
+            from app.services.deal_journey_service import deal_journey_service
+            deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
+            db.commit()
         
         db.refresh(db_obj)
         return db_obj
@@ -646,6 +721,16 @@ class PaymentRecordCRUD:
         record = self.get_by_id(db, record_id, team_id)  # 使用 team_id 进行团队隔离验证
         if not record:
             return False
+
+        assert_deletable_approval_resource(
+            db,
+            resource=record,
+            business_type=BusinessType.PAYMENT,
+            business_id=record_id,
+            team_id=team_id,
+            resource_name="回款登记",
+            locked_business_statuses=(PaymentConfirmationStatus.CONFIRMED,),
+        )
 
         plan_id = record.payment_plan_id
         db.delete(record)
@@ -656,6 +741,8 @@ class PaymentRecordCRUD:
         if plan:
             payment_plan_crud.update_status(db, plan)
             self._update_contract_payment_status(db, plan.contract_id)
+            from app.services.deal_journey_service import deal_journey_service
+            deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
 
         db.commit()
         return True
@@ -712,6 +799,14 @@ class PaymentRecordCRUD:
 
             for inv_app in invoice_applications:
                 inv_app.payment_record_id = record_id
+
+        from app.crud.payment import payment_plan_crud
+        from app.services.deal_journey_service import deal_journey_service
+        plan = db.query(PaymentPlan).filter(PaymentPlan.id == record.payment_plan_id).first()
+        if plan:
+            payment_plan_crud.update_status(db, plan, commit=False)
+            self._update_contract_payment_status(db, plan.contract_id, commit=False)
+            deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
 
         db.commit()
         db.refresh(record)

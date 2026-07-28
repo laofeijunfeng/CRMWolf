@@ -5,6 +5,8 @@ from datetime import date, datetime
 
 from app.models.opportunity import Opportunity, OpportunityStage, OpportunityStatus
 from app.models.customer import Customer
+from app.constants.business_types import BusinessType
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.opportunity import (
     OpportunityStageCreate,
     OpportunityStageUpdate,
@@ -260,6 +262,7 @@ class OpportunityCRUD:
         from app.crud.opportunity import opportunity_stage_crud
         from app.crud.procurement import procurement_stage_template_crud
         from app.services.pricing import pricing_service
+        from app.services.deal_journey_service import deal_journey_service
         from app.models.procurement import OpportunityStageSnapshot
         from datetime import datetime
         
@@ -341,6 +344,9 @@ class OpportunityCRUD:
         db_obj.current_stage_name = snapshot.stage_name
         db_obj.current_win_probability = snapshot.win_probability
         db_obj.current_stage_entered_at = snapshot.entered_at
+
+        deal_journey_service.record_opportunity_created(db, db_obj, creator_id)
+        deal_journey_service.record_opportunity_stage_changed(db, db_obj, snapshot, creator_id)
         
         return db_obj
 
@@ -628,6 +634,8 @@ class OpportunityCRUD:
         db_obj.actual_amount = win_data.actual_amount
         db_obj.actual_closing_date = win_data.actual_closing_date
         db_obj.win_probability = 100
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.mark_won(db, db_obj, operator_id)
         db.commit()
         db.refresh(db_obj)
         
@@ -677,6 +685,8 @@ class OpportunityCRUD:
         db_obj.status = OpportunityStatus.LOST.value
         db_obj.loss_reason = lose_data.loss_reason
         db_obj.win_probability = 0
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.mark_lost(db, db_obj, operator_id)
         db.commit()
         db.refresh(db_obj)
         
@@ -718,6 +728,15 @@ class OpportunityCRUD:
         opportunity = self.get_by_id(db, opportunity_id)
         if not opportunity:
             return False
+
+        assert_deletable_approval_resource(
+            db,
+            resource=opportunity,
+            business_type=BusinessType.OPPORTUNITY,
+            business_id=opportunity_id,
+            team_id=opportunity.team_id,
+            resource_name="商机",
+        )
 
         # 检查是否存在关联合同
         contracts = db.query(Contract).filter(

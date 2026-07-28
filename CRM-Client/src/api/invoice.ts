@@ -3,6 +3,7 @@ import request from '@/utils/request'
 export type TitleType = 'COMPANY' | 'PERSONAL'
 
 export type InvoiceApplicationStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'ISSUED' | 'CANCELLED'
+export type ApprovalPhase = 'draft' | 'pending_review' | 'approved' | 'rejected'
 
 export interface InvoiceTitleCreate {
   title_type: TitleType
@@ -72,6 +73,7 @@ export interface InvoiceApplicationResponse {
   invoice_amount: string
   payment_record_id: number | null
   status: InvoiceApplicationStatus
+  approval_phase?: ApprovalPhase | null
   applicant_id: string
   reviewer_id: string | null
   review_comment: string | null

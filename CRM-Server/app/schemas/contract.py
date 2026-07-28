@@ -153,6 +153,7 @@ class ContractResponse(BaseModel):
     subscription_years: Optional[int] = Field(None, description="订阅年限")
     standard_unit_price: Decimal = Field(..., description="标准单价（系统自动计算）")
     status: str = Field(..., description="合同状态")
+    approval_phase: Optional[str] = Field(None, description="审批流程状态：draft/pending_review/approved/rejected")
     signing_date: Optional[date] = Field(None, description="签署日期")
     effective_date: Optional[date] = Field(None, description="生效日期")
     expiry_date: Optional[date] = Field(None, description="到期日期")

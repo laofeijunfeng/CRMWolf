@@ -20,14 +20,16 @@ import {
 import type { PaymentConfirmationStatus, PaymentRecordInfo } from '@/api/payment'
 import { formatLocalDate } from '@/utils/format'
 
+type PaymentRecordDeletePredicate = (record: PaymentRecordInfo) => boolean
+
 interface Props {
   records: PaymentRecordInfo[]
   canRegister?: boolean
-  canDelete?: boolean
+  canDelete?: boolean | PaymentRecordDeletePredicate
   canEditRecord?: (record: PaymentRecordInfo) => boolean
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   canRegister: true,
   canDelete: false,
   canEditRecord: () => true
@@ -69,9 +71,16 @@ const formatInvoiceCount = (record: PaymentRecordInfo): string => {
   return count > 0 ? `${count} 张发票` : '未关联发票'
 }
 
-const hasApprovalSeam = (record: PaymentRecordInfo): boolean => {
+const hasApprovalState = (record: PaymentRecordInfo): boolean => {
   return record.confirmation_status === 'PENDING' || record.approval_id !== undefined || record.approval !== undefined
 }
+
+const canDeleteRecord = (record: PaymentRecordInfo): boolean => {
+  if (typeof props.canDelete === 'function') return props.canDelete(record)
+  return props.canDelete
+}
+
+const canEditPaymentRecord = (record: PaymentRecordInfo): boolean => props.canEditRecord(record)
 
 const handleRegister = (): void => {
   emit('register')
@@ -167,7 +176,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 
     <template #itemActions="{ item }">
       <Button
-        v-if="canEditRecord(item)"
+        v-if="canEditPaymentRecord(item)"
         variant="outline"
         size="icon"
         type="button"
@@ -177,7 +186,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
         <FilePenLine aria-hidden="true" />
       </Button>
       <Button
-        v-if="canDelete"
+        v-if="canDeleteRecord(item)"
         variant="ghost"
         size="icon"
         type="button"
@@ -187,7 +196,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
         <Trash2 class="record-delete-icon" aria-hidden="true" />
       </Button>
       <Button
-        v-if="hasApprovalSeam(item)"
+        v-if="hasApprovalState(item)"
         variant="ghost"
         size="icon"
         type="button"

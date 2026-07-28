@@ -433,6 +433,7 @@ export interface ContractListResponse {
   subscription_years: number | null
   standard_unit_price: string
   status: string
+  approval_phase?: string | null
   status_info?: {
     name: string
   }
@@ -475,6 +476,7 @@ export interface InvoiceApplicationResponse {
   invoice_type: string
   payment_record_id: number | null
   status: string
+  approval_phase?: string | null
   approval_status: string
   rejection_reason: string | null
   applicant_id: string

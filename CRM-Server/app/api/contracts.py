@@ -813,10 +813,10 @@ def update_contract(
 
 
 @router.delete("/{contract_id}", response_model=MessageResponse, summary="删除合同", description="""
-删除指定合同，仅草稿状态的合同可删除。
+删除指定合同，仅草稿且未处于审批中/审批通过的合同可删除。
 
 **功能说明：**
-- 删除草稿状态的合同
+- 删除未提交审批或审批拒绝后回到草稿状态的合同
 - 删除后不可恢复，请谨慎操作
 
 **业务场景：**
@@ -824,8 +824,8 @@ def update_contract(
 - 清理无效的合同数据
 
 **业务规则：**
-- 只能删除草稿（DRAFT）状态的合同
-- 已提交审批或已生效的合同不可删除
+- 只能删除草稿（DRAFT）状态且 approval_phase 不是 pending_review/approved 的合同
+- 审批中、审批通过或已进入后续业务状态的合同不可删除
 
 **注意事项：**
 - 删除操作不可逆，请谨慎
@@ -838,7 +838,7 @@ def delete_contract(
     db: Session = Depends(get_db)
 ):
     # check_contract_delete_permission 已处理存在性和权限检查
-    # 这里只需检查状态
+    # 业务状态和审批状态由 CRUD 层统一拦截
     if not contract:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

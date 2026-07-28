@@ -32,6 +32,7 @@ class Contract(Base):
 
     customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
     opportunity_id = Column(BigInteger, ForeignKey('crm_opportunities.id', ondelete='CASCADE'), nullable=False, comment="关联商机ID")
+    deal_journey_id = Column(BigInteger, ForeignKey('crm_customer_deal_journeys.id', ondelete='SET NULL'), nullable=True, comment="成交旅程ID（系统自动关联）")
     signing_contact_id = Column(BigInteger, ForeignKey('crm_contacts.id', ondelete='SET NULL'), nullable=True, comment="客户签约人ID")
 
     user_count = Column(Integer, nullable=False, comment="采购用户数")
@@ -75,6 +76,7 @@ class Contract(Base):
     __table_args__ = (
         Index('idx_contract_customer', 'customer_id'),
         Index('idx_contract_opportunity', 'opportunity_id'),
+        Index('idx_contract_deal_journey_id', 'deal_journey_id'),
         Index('idx_contract_status', 'status'),
         Index('idx_contract_number', 'contract_number'),
         Index('idx_contract_signing_contact', 'signing_contact_id'),

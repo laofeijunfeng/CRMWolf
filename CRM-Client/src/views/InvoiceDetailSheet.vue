@@ -121,6 +121,7 @@ const canEdit = computed<boolean>(() => {
 const canDelete = computed<boolean>(() => {
   const invoice = invoiceInfo.value
   if (invoice === null) return false
+  if (invoice.approval_phase === 'pending_review' || invoice.approval_phase === 'approved') return false
   return (invoice.status === 'DRAFT' || invoice.status === 'REJECTED') &&
     invoice.applicant_id === currentUserId.value
 })

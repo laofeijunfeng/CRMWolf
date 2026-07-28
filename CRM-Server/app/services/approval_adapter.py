@@ -71,6 +71,20 @@ class ContractAdapter:
     def on_approved(self, db, entity):
         if entity is None: return  # E4 守卫
         entity.status = ContractStatus.SIGNED
+        from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.record_event(
+            db,
+            deal_journey_id=entity.deal_journey_id,
+            team_id=entity.team_id,
+            customer_id=entity.customer_id,
+            event_type=DealJourneyEventType.CONTRACT_SIGNED,
+            source_type=DealJourneySourceType.CONTRACT,
+            source_id=entity.id,
+            event_time=entity.signing_date or datetime.now(),
+            actor_id=entity.creator_id,
+            summary=f"合同签署：{entity.contract_name}",
+        )
 
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
@@ -110,7 +124,28 @@ class PaymentRecordAdapter:
         if entity is None: return  # E4 守卫
         # 审批通过即确认入账
         entity.confirmation_status = PaymentConfirmationStatus.CONFIRMED
+        if entity.confirmed_time is None:
+            entity.confirmed_time = datetime.now()
         self._refresh_payment_status(db, entity)
+        plan = db.query(PaymentPlan).filter(PaymentPlan.id == entity.payment_plan_id).first()
+        contract = plan.contract if plan else None
+        if contract:
+            from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
+            from app.services.deal_journey_service import deal_journey_service
+            deal_journey_service.record_event(
+                db,
+                deal_journey_id=entity.deal_journey_id,
+                team_id=entity.team_id,
+                customer_id=contract.customer_id,
+                event_type=DealJourneyEventType.PAYMENT_CONFIRMED,
+                source_type=DealJourneySourceType.PAYMENT_RECORD,
+                source_id=entity.id,
+                event_time=entity.confirmed_time,
+                actor_id=entity.creator_id,
+                summary=f"确认回款：{entity.actual_amount}",
+                metadata={"confirmation_status": entity.confirmation_status},
+            )
+            deal_journey_service.refresh_closure_status(db, entity.deal_journey_id)
 
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
@@ -137,6 +172,8 @@ class PaymentRecordAdapter:
             return
         payment_plan_crud.update_status(db, plan, commit=False)
         payment_record_crud._update_contract_payment_status(db, plan.contract_id, commit=False)
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
 
 
 class InvoiceApplicationAdapter:

@@ -42,10 +42,6 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { DatePicker } from '@/components/ui/date-picker'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Table, TableHeader, TableRow, TableCell } from '@/components/ui/table'
 import {
   Empty,
@@ -55,6 +51,11 @@ import {
   EmptyDescription
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  DateField,
+  SegmentedChoiceControl,
+  TextareaField,
+} from '@/components/crmwolf'
 import FollowUpList from '@/components/FollowUpList.vue'
 import { leadApi, type LeadDetail, type LeadFollowUp, type LeadFollowUpCreate } from '@/api/lead'
 import { getLeadScore, getScoreLevel, type ScoreDetail } from '@/api/score'
@@ -90,6 +91,13 @@ const followUpForm = reactive({
   next_follow_time: '',
   next_action: ''
 })
+const followUpMethodOptions: { value: string; label: string }[] = [
+  { value: '电话', label: '电话' },
+  { value: '微信', label: '微信' },
+  { value: '拜访', label: '拜访' },
+  { value: '邮件', label: '邮件' },
+  { value: '其他', label: '其他' }
+]
 
 // 编辑弹窗
 const showEditDialog = ref(false)
@@ -377,7 +385,7 @@ watch(() => props.visible, (visible): void => {
                         {{ leadScore ?? '--' }}
                       </span>
                       <span class="text-sm text-wolf-text-tertiary-v2 bg-wolf-bg-muted-v2 px-2 py-0.5 rounded">
-                        {{ getScoreLevel(leadScore) }}
+                        {{ getScoreLevel(leadScore ?? null) }}
                       </span>
                     </div>
                     <div :class="['progress-wrapper', getScoreColorClass(leadScore)]">
@@ -464,77 +472,62 @@ watch(() => props.visible, (visible): void => {
 
   <!-- 添加跟进记录弹窗 -->
   <Dialog v-model:open="followUpDialogOpen">
-    <DialogContent class="sm:max-w-[500px]">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>添加跟进记录</DialogTitle>
-        <DialogDescription>记录本次跟进的详细信息</DialogDescription>
+        <DialogDescription class="sr-only">记录本次跟进的详细信息</DialogDescription>
       </DialogHeader>
 
-      <div class="grid gap-4 py-4">
-        <div class="grid gap-2">
-          <Label>跟进方式</Label>
-          <RadioGroup v-model="followUpForm.method" class="flex flex-wrap gap-4">
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="phone" value="电话" />
-              <Label for="phone" class="font-normal">电话</Label>
-            </div>
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="wechat" value="微信" />
-              <Label for="wechat" class="font-normal">微信</Label>
-            </div>
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="visit" value="拜访" />
-              <Label for="visit" class="font-normal">拜访</Label>
-            </div>
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="email" value="邮件" />
-              <Label for="email" class="font-normal">邮件</Label>
-            </div>
-            <div class="flex items-center space-x-2">
-              <RadioGroupItem id="other" value="其他" />
-              <Label for="other" class="font-normal">其他</Label>
-            </div>
-          </RadioGroup>
-        </div>
-
-        <div class="grid gap-2">
-          <Label for="content">跟进内容</Label>
-          <Textarea
-            id="content"
-            v-model="followUpForm.content"
-            placeholder="请输入跟进内容"
-            :rows="4"
-            :maxlength="500"
+      <form class="space-y-4" @submit.prevent="handleFollowUpSubmit">
+        <div class="space-y-2">
+          <p id="lead-follow-up-method-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+            跟进方式 <span class="text-wolf-danger" aria-hidden="true">*</span>
+          </p>
+          <SegmentedChoiceControl
+            v-model="followUpForm.method"
+            :options="followUpMethodOptions"
+            labelled-by="lead-follow-up-method-label"
+            id-prefix="lead-follow-up-method"
+            style="--segmented-choice-columns: 5;"
           />
         </div>
 
-        <div class="grid gap-2">
-          <Label for="next_follow_time">下次跟进时间</Label>
-          <DatePicker
-            :model-value="followUpForm.next_follow_time ? new Date(followUpForm.next_follow_time) : null"
-            placeholder="请选择下次跟进时间"
-            @update:model-value="(date: Date | null) => followUpForm.next_follow_time = date ? formatLocalDate(date) : ''"
-          />
-        </div>
+        <TextareaField
+          id="lead-follow-up-content"
+          v-model="followUpForm.content"
+          label="跟进内容"
+          required
+          :rows="4"
+          :maxlength="500"
+          placeholder="请输入跟进内容"
+          control-class="resize-none"
+        />
 
-        <div class="grid gap-2">
-          <Label for="next_action">下一步动作</Label>
-          <Textarea
-            id="next_action"
-            v-model="followUpForm.next_action"
-            placeholder="请输入下一步动作计划"
-            :rows="2"
-            :maxlength="200"
-          />
-        </div>
-      </div>
+        <DateField
+          id="lead-follow-up-next-time"
+          :model-value="followUpForm.next_follow_time ? new Date(followUpForm.next_follow_time) : null"
+          label="下次跟进时间"
+          placeholder="请选择下次跟进时间"
+          @update:model-value="(date: Date | null) => followUpForm.next_follow_time = date ? formatLocalDate(date) : ''"
+        />
 
-      <DialogFooter>
-        <Button variant="outline" @click="followUpDialogOpen = false">取消</Button>
-        <Button :disabled="followUpSubmitting" @click="handleFollowUpSubmit">
-          {{ followUpSubmitting ? '提交中...' : '确定' }}
-        </Button>
-      </DialogFooter>
+        <TextareaField
+          id="lead-follow-up-next-action"
+          v-model="followUpForm.next_action"
+          label="下一步动作"
+          :rows="3"
+          :maxlength="200"
+          placeholder="请输入下一步动作（可选）"
+          control-class="resize-none"
+        />
+
+        <DialogFooter class="mt-6 pt-4 border-t">
+          <Button variant="outline" type="button" @click="followUpDialogOpen = false">取消</Button>
+          <Button type="submit" :loading="followUpSubmitting">
+            提交
+          </Button>
+        </DialogFooter>
+      </form>
     </DialogContent>
   </Dialog>
 
@@ -542,7 +535,7 @@ watch(() => props.visible, (visible): void => {
   <LeadFormDialog
     v-model:open="showEditDialog"
     mode="edit"
-    :lead-id="leadId"
+    :lead-id="leadId ?? undefined"
     @success="handleEditSuccess"
   />
 

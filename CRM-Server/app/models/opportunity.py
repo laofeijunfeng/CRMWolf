@@ -67,6 +67,7 @@ class Opportunity(Base):
     current_stage_name = Column(String(100), nullable=True, comment="当前阶段名称")
     current_win_probability = Column(Integer, nullable=True, comment="当前阶段赢率")
     current_stage_entered_at = Column(DateTime, nullable=True, comment="当前阶段进入时间")
+    deal_journey_id = Column(BigInteger, ForeignKey('crm_customer_deal_journeys.id', ondelete='SET NULL'), nullable=True, comment="成交旅程ID（系统自动关联）")
     total_amount = Column(Numeric(12, 2), nullable=False, comment="预计总金额")
     user_count = Column(Integer, nullable=False, comment="采购用户数")
     unit_price = Column(Numeric(10, 2), nullable=False, comment="标准单价（系统自动计算）")
@@ -106,5 +107,6 @@ class Opportunity(Base):
         Index('idx_expected_closing_date', 'expected_closing_date'),
         Index('idx_created_time', 'created_time'),
         Index('idx_team_id', 'team_id'),
+        Index('idx_opportunity_deal_journey_id', 'deal_journey_id'),
         {'comment': '商机表'}
     )

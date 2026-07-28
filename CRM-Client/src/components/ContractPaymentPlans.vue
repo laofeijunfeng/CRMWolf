@@ -119,6 +119,9 @@ const fixedContractForPlanForm = computed(() => {
 })
 
 const canEditAnyRecord = computed<boolean>(() => permissionStore.hasAnyPermission(['payment:record:edit', 'payment:edit']))
+const canDeleteAnyRecord = computed<boolean>(() =>
+  permissionStore.hasAnyPermission(['payment:record:delete', 'payment:delete'])
+)
 
 const canEditRecord = (record: PaymentRecordInfo): boolean => {
   if (record.approval?.status === 'PENDING') return false
@@ -126,6 +129,14 @@ const canEditRecord = (record: PaymentRecordInfo): boolean => {
   if (record.confirmation_status === 'CONFIRMED') return false
   if (canEditAnyRecord.value) return true
   return record.creator_id === String(userStore.userInfo?.id ?? '')
+}
+
+const canDeleteRecord = (record: PaymentRecordInfo): boolean => {
+  if (!canDeleteAnyRecord.value) return false
+  if (record.approval?.status === 'PENDING' || record.approval?.status === 'APPROVED') return false
+  if (record.approval_phase === 'pending_review' || record.approval_phase === 'approved') return false
+  if (record.confirmation_status === 'CONFIRMED') return false
+  return true
 }
 
 const currentPlanDialogTitle = computed<string>(() => {
@@ -489,7 +500,7 @@ watch(
           :records="currentPlan.payment_records"
           :can-register="currentPlan.status !== 'COMPLETED'"
           :can-edit-record="canEditRecord"
-          can-delete
+          :can-delete="canDeleteRecord"
           @register="showPaymentDialog(currentPlan)"
           @record-click="handleRecordClick"
           @edit-record="handleEditRecord"
