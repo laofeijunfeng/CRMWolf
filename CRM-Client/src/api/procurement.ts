@@ -31,7 +31,7 @@ export interface ProcurementMethodUpdate {
   description?: string
 }
 
-export interface ProcurementMethodResponse extends ProcurementMethod {}
+export type ProcurementMethodResponse = ProcurementMethod
 
 export interface ProcurementMethodWithStages extends ProcurementMethod {
   stage_templates: ProcurementStageTemplate[]
@@ -73,7 +73,7 @@ export interface ProcurementStageTemplateUpdate {
   description?: string
 }
 
-export interface ProcurementStageTemplateResponse extends ProcurementStageTemplate {}
+export type ProcurementStageTemplateResponse = ProcurementStageTemplate
 
 export interface StageTemplateBatchUpdate {
   id?: number | null
@@ -104,6 +104,22 @@ export interface ProcurementMethodListParams {
 
 export interface StageTemplateListParams {
   procurement_method_id: number
+}
+
+export interface StageTemplateChangeLog {
+  id: number
+  stage_template_id: number
+  change_type: string
+  old_values?: Record<string, unknown> | string | null
+  new_values?: Record<string, unknown> | string | null
+  operator_id?: string | null
+  created_time: string
+}
+
+export interface ActiveOpportunitiesByStageResponse {
+  stage_template_id: number
+  active_opportunities: Record<string, unknown>[]
+  count: number
 }
 
 const procurementApi = {
@@ -162,7 +178,7 @@ const procurementApi = {
   },
 
   getStageTemplateChangeLogs: (templateId: number) => {
-    return request.get<any[]>(`/v1/procurement-stage-templates/${templateId}/change-logs`)
+    return request.get<StageTemplateChangeLog[]>(`/v1/procurement-stage-templates/${templateId}/change-logs`)
   },
 
   setCustomerDefaultProcurementMethod: (customerId: number, procurementMethodId: number | null) => {
@@ -194,7 +210,7 @@ const procurementApi = {
   },
 
   getActiveOpportunities: (stageTemplateId: number) => {
-    return request.get<any[]>(`/v1/procurement-admin/active-opportunities/${stageTemplateId}`)
+    return request.get<ActiveOpportunitiesByStageResponse>(`/v1/procurement-admin/active-opportunities/${stageTemplateId}`)
   },
 
   getOpportunityCurrentStage: (opportunityId: number) => {
@@ -209,16 +225,12 @@ const procurementApi = {
     return request.get<ProcurementStageTemplate[]>(`/v1/opportunities/${opportunityId}/available-stages`)
   },
 
-  advanceStage: (opportunityId: number, data: AdvanceStageRequest) => {
-    return request.post<OpportunityStageSnapshot>(`/v1/opportunities/${opportunityId}/advance-stage`, data)
-  },
-
   getOpportunityProcurementStages: (opportunityId: number) => {
     return request.get<OpportunityProcurementStageInfo[]>(`/v1/opportunities/${opportunityId}/procurement-stages`)
   },
 
   moveOpportunityStage: (opportunityId: number, data: OpportunityMoveStageRequest) => {
-    return request.post<any>(`/v1/opportunities/${opportunityId}/move-stage`, data)
+    return request.post<Record<string, unknown>>(`/v1/opportunities/${opportunityId}/move-stage`, data)
   },
 
   getProcurementMethodOptions: () => {
@@ -236,10 +248,6 @@ export interface OpportunityStageSnapshot {
   entered_at: string
   exited_at: string | null
   created_at: string
-}
-
-export interface AdvanceStageRequest {
-  target_stage_id: number
 }
 
 export interface OpportunityProcurementStageInfo {

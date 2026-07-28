@@ -470,6 +470,9 @@ class OpportunityCRUD:
         opportunity.current_win_probability = new_snapshot.win_probability
         opportunity.current_stage_entered_at = new_snapshot.entered_at
         opportunity.win_probability = new_snapshot.win_probability
+
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.record_opportunity_stage_changed(db, opportunity, new_snapshot, operator_id)
         
         db.commit()
         db.refresh(opportunity)

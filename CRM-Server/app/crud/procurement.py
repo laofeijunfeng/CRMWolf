@@ -11,7 +11,6 @@ from app.models.procurement import (
 from app.schemas.procurement import (
     ProcurementMethodCreate, ProcurementMethodUpdate,
     ProcurementStageTemplateCreate, ProcurementStageTemplateUpdate,
-    AdvanceStageRequest
 )
 
 
@@ -418,38 +417,6 @@ class OpportunityStageSnapshotCRUD:
         db.commit()
         db.refresh(snapshot)
         return snapshot
-    
-    def advance_stage(
-        self,
-        db: Session,
-        opportunity_id: int,
-        target_stage_template: ProcurementStageTemplate,
-        updater_id: str
-    ) -> OpportunityStageSnapshot:
-        """推进商机到下一阶段"""
-        # 获取当前阶段快照
-        current = self.get_current(db, opportunity_id)
-        if not current:
-            raise ValueError("商机没有当前阶段")
-        
-        # 校验阶段顺序
-        if target_stage_template.procurement_method_id != current.procurement_stage_template.procurement_method.procurement_method_id:
-            raise ValueError("不能切换到不同采购方式的阶段")
-        
-        if target_stage_template.sort_order <= current.template_sort_order:
-            # 目标阶段不能跳过，则不允许
-            if target_stage_template.can_skip != 1:
-                raise ValueError("只能向前推进阶段，或跳过允许跳过的阶段")
-        
-        # 结束当前快照
-        current.exited_at = datetime.utcnow()
-        
-        # 创建新阶段快照
-        new_snapshot = self.create(
-            db, opportunity_id, target_stage_template
-        )
-        
-        return new_snapshot
     
     def get_available_stages(
         self,

@@ -133,11 +133,6 @@ class StageTemplateChangeLogResponse(BaseModel):
         from_attributes = True
 
 
-class AdvanceStageRequest(BaseModel):
-    """推进商机阶段请求模型"""
-    target_stage_template_id: int = Field(..., description="目标阶段模板ID（要推进到的阶段）")
-
-
 class ProcurementMethodWithStagesResponse(ProcurementMethodResponse):
     """带阶段列表的采购方式响应模型"""
     stage_templates: List[ProcurementStageTemplateResponse] = Field(default_factory=list, description="该采购方式下的所有阶段模板列表")

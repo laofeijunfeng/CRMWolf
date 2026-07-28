@@ -6,7 +6,6 @@ from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
 from app.models.user import User
 from app.schemas.procurement import (
-    AdvanceStageRequest,
     OpportunityStageSnapshotResponse,
     ProcurementStageTemplateResponse
 )
@@ -100,79 +99,6 @@ def get_available_stages(
     # 获取可用的阶段
     available = opportunity_stage_snapshot_crud.get_available_stages(db, opportunity_id)
     return available
-
-
-@router.post("/{opportunity_id}/advance-stage", response_model=OpportunityStageSnapshotResponse, summary="推进商机阶段", description="""
-将商机推进到指定的阶段。
-
-**业务规则：**
-- 目标阶段必须属于同一采购方式
-- 阶段只能向前推进
-- 如果目标阶段不允许跳过，需要按顺序推进
-- 自动结束当前阶段快照，创建新阶段快照
-- 同时更新商机的当前阶段信息
-
-**权限要求：**
-- 只有商机负责人或管理员可以推进阶段
-""")
-def advance_opportunity_stage(
-    opportunity_id: int,
-    advance_in: AdvanceStageRequest,
-    team_id: int = Depends(get_current_user_team),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    # 检查商机是否存在并验证团队归属
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"商机 {opportunity_id} 不存在或不属于当前团队"
-        )
-
-    # 权限校验：只有负责人或管理员可以推进
-    if opportunity.owner_id != str(current_user.id) and not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="只有商机负责人或管理员可以推进阶段"
-        )
-
-    # 获取目标阶段模板
-    target_stage = procurement_stage_template_crud.get(db, advance_in.target_stage_template_id)
-    if not target_stage:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"目标阶段模板 {advance_in.target_stage_template_id} 不存在"
-        )
-
-    try:
-        # 推进阶段
-        new_snapshot = opportunity_stage_snapshot_crud.advance_stage(
-            db, opportunity_id, target_stage, str(current_user.id)
-        )
-
-        # 更新商机的当前阶段信息
-        opportunity.procurement_method_id = target_stage.procurement_method_id
-        opportunity.current_stage_snapshot_id = new_snapshot.id
-        opportunity.current_stage_name = new_snapshot.stage_name
-        opportunity.current_win_probability = new_snapshot.win_probability
-        opportunity.current_stage_entered_at = new_snapshot.entered_at
-
-        from app.services.deal_journey_service import deal_journey_service
-        deal_journey_service.record_opportunity_stage_changed(
-            db, opportunity, new_snapshot, str(current_user.id)
-        )
-
-        db.commit()
-        db.refresh(new_snapshot)
-
-        return new_snapshot
-
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
 
 
 @router.post("/{opportunity_id}/set-procurement-method", response_model=OpportunityStageSnapshotResponse, summary="设置商机采购方式", description="""
