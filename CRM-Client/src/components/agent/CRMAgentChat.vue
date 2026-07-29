@@ -669,10 +669,9 @@ onMounted(() => {
   max-height: 100%;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  background: $wolf-bg-card-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .agent-chat__messages {
@@ -873,18 +872,25 @@ onMounted(() => {
 .agent-chat__composer {
   display: flex;
   align-items: center;
+  justify-content: center;
   min-height: var(--agent-composer-height);
-  padding: $wolf-space-md-v2 $wolf-page-padding-v2;
-  border-top: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  padding: $wolf-space-md-v2 $wolf-page-padding-v2 $wolf-space-lg-v2;
+  border-top: 0;
+  background: transparent;
 }
 
 .agent-chat__input-group {
-  min-height: 52px;
+  width: min(100%, 960px);
+  min-height: 60px;
+  border-color: rgba($wolf-border-default-v2, 0.72);
+  border-radius: $wolf-radius-xl-v2;
+  background: rgba($wolf-bg-card-v2, 0.98);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.03);
+  backdrop-filter: blur(12px);
 }
 
 .agent-chat__textarea {
-  min-height: 44px;
+  min-height: 48px;
   max-height: 160px;
   overflow-y: auto;
 }

@@ -78,6 +78,15 @@
             <span>账户设置</span>
           </DropdownMenuItem>
           <DropdownMenuItem
+            v-if="canAccessSystemConfig"
+            aria-label="系统配置"
+            @select="handleSystemConfig"
+          >
+            <SlidersHorizontal aria-hidden="true" />
+            <span>系统配置</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
             class="text-destructive focus:text-destructive"
             aria-label="退出登录"
             @select="requestLogout"
@@ -101,6 +110,7 @@ import {
   ChevronsUpDown,
   LogOut,
   Settings,
+  SlidersHorizontal,
 } from 'lucide-vue-next'
 import {
   DropdownMenu,
@@ -114,11 +124,14 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
+import { usePermissionStore } from '@/stores/permissions'
+import { useSystemConfigAccess } from '@/composables/useSystemConfigAccess'
 import { confirmLogout } from '@/utils/confirmDialog'
 
 const router = useRouter()
 const userStore = useUserStore()
 const teamStore = useTeamStore()
+const permissionStore = usePermissionStore()
 const open = ref(false)
 
 const userName = computed(() => userStore.userInfo?.name ?? '未登录')
@@ -128,10 +141,17 @@ const userInitial = computed(() => {
 })
 const teamName = computed(() => teamStore.currentTeam?.name ?? '未选择团队')
 const avatarUrl = computed(() => userStore.userInfo?.avatar_url ?? '')
+const userRoles = computed(() => userStore.userInfo?.roles ?? [])
+const { canAccess: canAccessSystemConfig } = useSystemConfigAccess(permissionStore, userRoles)
 
 const handleAccountSettings = (): void => {
   open.value = false
   router.push('/account')
+}
+
+const handleSystemConfig = (): void => {
+  open.value = false
+  router.push('/system-config')
 }
 
 const handleSwitchTeam = async (teamId: number): Promise<void> => {

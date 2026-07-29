@@ -17,11 +17,17 @@
  * - 响应式布局：移动优先，375px 1列，768px 2列，1024px 3列
  * - 交互状态：hover 阴影、active scale 反馈
  */
-import { computed, ref, defineAsyncComponent } from 'vue'
+import { computed, onMounted, ref, defineAsyncComponent } from 'vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { authApi, type RoleResponse } from '@/api/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { Shield, Workflow, ShoppingCart, Cpu, Bell, Users, Plug } from 'lucide-vue-next'
+import { useHeaderStore } from '@/stores/header'
+import { usePageTitle } from '@/composables/usePageTitle'
+import { canAccessSystemConfig } from '@/composables/useSystemConfigAccess'
+import ErrorState from '@/components/ErrorState.vue'
+
+usePageTitle()
 
 // 懒加载 Sheet 组件（性能优化）
 const RoleSheet = defineAsyncComponent(() =>
@@ -46,6 +52,7 @@ const LoginIntegrationSheet = defineAsyncComponent(() =>
   import('@/components/system-config/LoginIntegrationSheet.vue')
 )
 const permissionStore = usePermissionStore()
+const headerStore = useHeaderStore()
 
 // Sheet 状态
 const showRoleSheet = ref(false)
@@ -58,6 +65,7 @@ const showLoginIntegrationSheet = ref(false)
 
 // 用户角色（用于判断是否为 TEAM_ADMIN）
 const userRoles = ref<RoleResponse[]>([])
+const rolesLoaded = ref(false)
 
 // 权限判断
 const canManageRoles = computed(() => permissionStore.hasPermission('role:manage'))
@@ -65,6 +73,7 @@ const canManageApprovalFlows = computed(() => permissionStore.hasAnyPermission([
 const canManageProcurementMethods = computed(() => permissionStore.hasPermission('procurement_method:view'))
 const canManageAIConfig = computed(() => permissionStore.hasAnyPermission(['system:config', 'ai:manage']))
 const canManageTeam = computed(() => userRoles.value?.some(r => r.code === 'TEAM_ADMIN') ?? false)
+const canAccessPage = computed(() => canAccessSystemConfig(permissionStore, userRoles.value))
 
 // 获取用户角色
 const fetchUserRoles = async (): Promise<void> => {
@@ -73,6 +82,8 @@ const fetchUserRoles = async (): Promise<void> => {
     userRoles.value = response ?? []
   } catch {
     // 获取用户角色失败，静默处理
+  } finally {
+    rolesLoaded.value = true
   }
 }
 
@@ -104,16 +115,16 @@ const openSheet = (type: string): void => {
 }
 
 // 初始化
-fetchUserRoles()
+onMounted(() => {
+  headerStore.clear()
+  void fetchUserRoles()
+})
 </script>
 
 <template>
   <div class="system-config-page">
-    <!-- 页面标题 -->
-    <h1 class="wolf-page-title">系统配置</h1>
-
     <!-- 配置卡片网格 -->
-    <div class="system-config-grid">
+    <div v-if="canAccessPage" class="system-config-grid">
       <!-- 角色管理 -->
       <Card
         v-if="canManageRoles"
@@ -205,6 +216,12 @@ fetchUserRoles()
       </Card>
 
     </div>
+    <ErrorState
+      v-else-if="rolesLoaded"
+      variant="forbidden"
+      title="你没有系统配置的访问权限"
+      description="如需调整团队成员、审批流程或系统参数，请联系团队管理员。"
+    />
 
     <!-- Sheet 组件 -->
     <RoleSheet v-model:open="showRoleSheet" />
@@ -224,10 +241,6 @@ fetchUserRoles()
   background: $wolf-bg-page-v2;
   min-height: 100%;
   padding: $wolf-page-padding-v2;
-}
-
-.wolf-page-title {
-  margin-bottom: $wolf-section-gap-v2;
 }
 
 // 配置卡片网格

@@ -72,7 +72,7 @@ watch(() => props.open, async (open) => {
 
   await nextTick()
   observeContent()
-})
+}, { immediate: true })
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()

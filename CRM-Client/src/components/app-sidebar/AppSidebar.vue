@@ -34,10 +34,10 @@ import {
   BarChart3,
   Bot,
   Building2,
+  Columns3,
   FileText,
   Flag,
   Receipt,
-  Settings,
   Stamp,
   TrendingUp,
   Wallet,
@@ -85,14 +85,6 @@ const navGroups = computed<NavMainGroup[]>(() => [
         icon: Bot,
         active: currentPath.value.startsWith('/agent'),
       },
-      ...(canViewSalesDashboard.value
-        ? [{
-            label: '销售看板',
-            path: '/sales-dashboard',
-            icon: BarChart3,
-            active: currentPath.value.startsWith('/sales-dashboard'),
-          }]
-        : []),
       {
         label: '线索管理',
         path: '/leads',
@@ -142,17 +134,25 @@ const navGroups = computed<NavMainGroup[]>(() => [
       },
     ],
   },
-  {
-    label: '管理工具',
-    items: [
-      {
-        label: '系统配置',
-        path: '/system-config',
-        icon: Settings,
-        active: currentPath.value.startsWith('/system-config'),
-      },
-    ],
-  },
+  ...(canViewSalesDashboard.value
+    ? [{
+        label: '数据看板',
+        items: [
+          {
+            label: '销售看板',
+            path: '/sales-dashboard',
+            icon: BarChart3,
+            active: currentPath.value.startsWith('/sales-dashboard'),
+          },
+          {
+            label: '业务看板',
+            path: '/business-journey-board',
+            icon: Columns3,
+            active: currentPath.value.startsWith('/business-journey-board'),
+          },
+        ],
+      }]
+    : []),
 ])
 
 const handleMenuClick = (path: string): void => {

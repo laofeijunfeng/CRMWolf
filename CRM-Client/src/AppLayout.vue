@@ -209,16 +209,19 @@ const mobileOverflowHeaderActions = computed<HeaderAction[]>(() => {
   if (primaryAction === null) return visibleHeaderActions.value
   return visibleHeaderActions.value.filter(action => action.id !== primaryAction.id)
 })
+const isFixedDashboardRoute = computed(() => (
+  route.name === 'SalesDashboard' || route.name === 'BusinessJourneyBoard'
+))
 const appLayoutClass = computed(() => ({
-  'app-layout--fixed': route.name === 'SalesDashboard',
+  'app-layout--fixed': isFixedDashboardRoute.value,
 }))
 const mainViewClass = computed(() => ({
   'main-view--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
-  'main-view--fixed': route.name === 'SalesDashboard',
+  'main-view--fixed': isFixedDashboardRoute.value,
 }))
 const mainContentClass = computed(() => ({
   'main-content--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
-  'main-content--fixed': route.name === 'SalesDashboard',
+  'main-content--fixed': isFixedDashboardRoute.value,
 }))
 
 /**
@@ -400,6 +403,11 @@ $z-index-bottom-nav: 100;
 }
 
 .main-view--fixed :deep(.sales-dashboard-page) {
+  flex: 1;
+  min-height: 0;
+}
+
+.main-view--fixed :deep(.business-board-page) {
   flex: 1;
   min-height: 0;
 }
