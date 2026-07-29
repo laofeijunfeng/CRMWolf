@@ -186,6 +186,21 @@ const canDeleteOwnOpportunity = computed(() =>
   permissionStore.hasPermission('opportunity:delete:own')
 )
 
+type ApprovalPhaseLike = OpportunityListResponse['approval_phase'] | string | null | undefined
+
+const normalizeApprovalPhase = (phase: ApprovalPhaseLike): string => {
+  const normalized = String(phase ?? '').trim().toLowerCase()
+  if (!normalized.includes('.')) return normalized
+  const parts = normalized.split('.')
+  const lastPart = parts[parts.length - 1]
+  return lastPart === undefined || lastPart === '' ? normalized : lastPart
+}
+
+const isLockedApprovalPhase = (phase: ApprovalPhaseLike): boolean => {
+  const normalized = normalizeApprovalPhase(phase)
+  return normalized === 'pending_review' || normalized === 'pending' || normalized === 'approved'
+}
+
 // 行级权限检查函数
 const canEditRow = (row: OpportunityListResponse): boolean => {
   if (canEditAllOpportunity.value) return true
@@ -194,14 +209,17 @@ const canEditRow = (row: OpportunityListResponse): boolean => {
 }
 
 const canDeleteRow = (row: OpportunityListResponse): boolean => {
-  if (row.approval_phase === 'pending_review' || row.approval_phase === 'approved') return false
+  if (isLockedApprovalPhase(row.approval_phase)) return false
   if (canDeleteAllOpportunity.value) return true
   if (canDeleteOwnOpportunity.value && row.owner_id === String(userStore.userInfo?.id)) return true
   return false
 }
 
-const isApprovalApproved = (row: OpportunityListResponse): boolean => row.approval_phase === 'approved'
-const isApprovalPending = (row: OpportunityListResponse): boolean => row.approval_phase === 'pending_review'
+const isApprovalApproved = (row: OpportunityListResponse): boolean => normalizeApprovalPhase(row.approval_phase) === 'approved'
+const isApprovalPending = (row: OpportunityListResponse): boolean => {
+  const normalized = normalizeApprovalPhase(row.approval_phase)
+  return normalized === 'pending_review' || normalized === 'pending'
+}
 
 const getOpportunityStageName = (row: OpportunityListResponse): string => {
   return row.current_stage_snapshot?.stage_name
@@ -531,20 +549,24 @@ const getApprovalPhaseText = (phase: string | undefined): string => {
   const map: Record<string, string> = {
     draft: '待提交',
     pending_review: '审批中',
+    pending: '审批中',
     approved: '已通过',
     rejected: '已拒绝'
   }
-  return phase === undefined ? '-' : (map[phase] ?? phase)
+  const normalized = normalizeApprovalPhase(phase)
+  return normalized === '' ? '-' : (map[normalized] ?? String(phase))
 }
 
 const getApprovalPhaseClass = (phase: string | undefined): string => {
   const map: Record<string, string> = {
     draft: 'status-default',
     pending_review: 'status-warning',
+    pending: 'status-warning',
     approved: 'status-success',
     rejected: 'status-danger'
   }
-  return phase === undefined ? 'status-default' : (map[phase] ?? 'status-default')
+  const normalized = normalizeApprovalPhase(phase)
+  return normalized === '' ? 'status-default' : (map[normalized] ?? 'status-default')
 }
 
 // ==================== Lifecycle ====================

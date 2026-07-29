@@ -39,22 +39,63 @@ from app.schemas.common import PaginatedResponse
 from app.services.feishu import feishu_service
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
+from app.models.approval import ApprovalStatus
 from app.services.approval_transaction_manager import approval_transaction_manager
 
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机管理"])
 
 
-def _ensure_opportunity_not_pending(opportunity) -> None:
-    if getattr(opportunity, "approval_phase", None) == ApprovalPhase.PENDING_REVIEW:
+def _normalize_approval_value(value) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(getattr(value, "value", value)).strip()
+    if "." in normalized:
+        normalized = normalized.rsplit(".", 1)[-1]
+    return normalized.lower()
+
+
+def _approval_phase_value(opportunity) -> Optional[str]:
+    phase = _normalize_approval_value(getattr(opportunity, "approval_phase", None))
+    if phase in {
+        ApprovalPhase.DRAFT.value,
+        ApprovalPhase.PENDING_REVIEW.value,
+        ApprovalPhase.APPROVED.value,
+        ApprovalPhase.REJECTED.value,
+    }:
+        return phase
+    return phase
+
+
+def _resolve_opportunity_approval_phase(db: Session, opportunity, team_id: Optional[int]) -> str:
+    phase = _approval_phase_value(opportunity)
+    if phase in {ApprovalPhase.PENDING_REVIEW.value, ApprovalPhase.APPROVED.value}:
+        return phase
+
+    from app.crud.approval import approval_crud
+
+    approval = approval_crud.get_by_entity(db, BusinessType.OPPORTUNITY, opportunity.id, team_id)
+    approval_status = _normalize_approval_value(getattr(approval, "status", None)) if approval else None
+    if approval_status == ApprovalStatus.PENDING.lower():
+        return ApprovalPhase.PENDING_REVIEW.value
+    if approval_status == ApprovalStatus.APPROVED.lower():
+        return ApprovalPhase.APPROVED.value
+    if approval_status == ApprovalStatus.REJECTED.lower():
+        return ApprovalPhase.REJECTED.value
+
+    return phase or ApprovalPhase.DRAFT.value
+
+
+def _ensure_opportunity_not_pending(db: Session, opportunity, team_id: Optional[int]) -> None:
+    if _resolve_opportunity_approval_phase(db, opportunity, team_id) == ApprovalPhase.PENDING_REVIEW.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="商机审批中，暂不能进行该操作"
         )
 
 
-def _ensure_opportunity_approved(opportunity) -> None:
-    if getattr(opportunity, "approval_phase", None) != ApprovalPhase.APPROVED:
+def _ensure_opportunity_approved(db: Session, opportunity, team_id: Optional[int]) -> None:
+    if _resolve_opportunity_approval_phase(db, opportunity, team_id) != ApprovalPhase.APPROVED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="商机审批通过后才能进行该操作"
@@ -239,7 +280,7 @@ def get_opportunities(
             "win_probability": opp.win_probability,
             "owner_id": opp.owner_id,
             "status": opp.status,
-            "approval_phase": opp.approval_phase,
+            "approval_phase": _resolve_opportunity_approval_phase(db, opp, team_id),
             "loss_reason": opp.loss_reason,
             "actual_amount": float(opp.actual_amount) if opp.actual_amount else None,
             "actual_closing_date": opp.actual_closing_date,
@@ -359,7 +400,7 @@ def get_available_opportunities_for_contract(
             "win_probability": opp.win_probability,
             "owner_id": opp.owner_id,
             "status": opp.status,
-            "approval_phase": opp.approval_phase,
+            "approval_phase": _resolve_opportunity_approval_phase(db, opp, team_id),
             "loss_reason": opp.loss_reason,
             "actual_amount": float(opp.actual_amount) if opp.actual_amount else None,
             "actual_closing_date": opp.actual_closing_date,
@@ -465,7 +506,7 @@ def get_opportunity(
         "win_probability": opportunity.win_probability,
         "owner_id": opportunity.owner_id,
         "status": opportunity.status,
-        "approval_phase": opportunity.approval_phase,
+        "approval_phase": _resolve_opportunity_approval_phase(db, opportunity, team_id),
         "loss_reason": opportunity.loss_reason,
         "actual_amount": float(opportunity.actual_amount) if opportunity.actual_amount else None,
         "actual_closing_date": opportunity.actual_closing_date,
@@ -554,7 +595,7 @@ def update_opportunity(
     db_opportunity = Depends(check_opportunity_edit_permission),
     db: Session = Depends(get_db)
 ):
-    _ensure_opportunity_not_pending(db_opportunity)
+    _ensure_opportunity_not_pending(db, db_opportunity, db_opportunity.team_id)
     return opportunity_crud.update(db, db_opportunity, opportunity)
 
 
@@ -570,7 +611,7 @@ async def move_opportunity_stage(
     from app.schemas.opportunity import CurrentStageSnapshotInfo
     from datetime import datetime
 
-    _ensure_opportunity_approved(db_opportunity)
+    _ensure_opportunity_approved(db, db_opportunity, db_opportunity.team_id)
 
     updated_opportunity = opportunity_crud.move_to_stage(
         db=db,
@@ -639,7 +680,7 @@ async def move_opportunity_stage(
         "win_probability": updated_opportunity.win_probability,
         "owner_id": updated_opportunity.owner_id,
         "status": updated_opportunity.status,
-        "approval_phase": updated_opportunity.approval_phase,
+        "approval_phase": _resolve_opportunity_approval_phase(db, updated_opportunity, updated_opportunity.team_id),
         "loss_reason": updated_opportunity.loss_reason,
         "actual_amount": float(updated_opportunity.actual_amount) if updated_opportunity.actual_amount else None,
         "actual_closing_date": updated_opportunity.actual_closing_date,
@@ -670,7 +711,7 @@ async def mark_opportunity_as_won(
     db: Session = Depends(get_db)
 ):
     db_opportunity = check_opportunity_edit_permission(opportunity_id, team_id, current_user, db)
-    _ensure_opportunity_approved(db_opportunity)
+    _ensure_opportunity_approved(db, db_opportunity, team_id)
 
     updated_opportunity = opportunity_crud.mark_as_won(db, db_opportunity, win_data, str(current_user.id))
 
@@ -695,7 +736,7 @@ async def mark_opportunity_as_lost(
     db: Session = Depends(get_db)
 ):
     db_opportunity = check_opportunity_edit_permission(opportunity_id, team_id, current_user, db)
-    _ensure_opportunity_approved(db_opportunity)
+    _ensure_opportunity_approved(db, db_opportunity, team_id)
 
     updated_opportunity = opportunity_crud.mark_as_lost(db, db_opportunity, lose_data, str(current_user.id))
 
