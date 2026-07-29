@@ -93,6 +93,7 @@
     </MessageScroller>
 
     <AgentInteractionDrawer
+      v-if="activeInteraction !== null"
       :interaction="activeInteraction"
       :disabled="isStreaming"
       @submit="sendInteractionMessage"
@@ -150,6 +151,7 @@ import {
 } from "lucide-vue-next"
 import { useUserStore } from "@/stores/user"
 import { agentApi, type AgentChatSSEEvent, type AgentEventType, type AgentInteraction, type AgentMessageResponse } from "@/api/agent"
+import { loadLatestAgentMessages } from "@/components/agent/agentHistory"
 import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vue"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Bubble } from "@/components/ui/bubble"
@@ -203,6 +205,18 @@ const messageContentStyle = computed(() => ({
 }))
 
 const nextId = (prefix: string): string => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
+
+const isWaitingInteraction = (interaction: AgentInteraction | undefined | null): interaction is AgentInteraction => {
+  if (interaction === undefined || interaction === null) return false
+  if (interaction.status === undefined) return true
+  return interaction.status === "waiting_user_input" || interaction.status === "waiting_confirmation"
+}
+
+const isTerminalEvent = (event: AgentChatSSEEvent): boolean => {
+  return event.event === "task_completed"
+    || event.event === "task_cancelled"
+    || event.event === "task_failed"
+}
 
 const normalizeRole = (role: AgentChatSSEEvent["role"]): ChatMessage["role"] | null => {
   const normalized = String(role ?? "").toLowerCase()
@@ -290,24 +304,29 @@ const latestStep = (message: ChatMessage): EventLog | undefined => message.steps
 
 const setActiveInteraction = (interaction: AgentInteraction | null): void => {
   activeInteraction.value = interaction
+  if (interaction === null) interactionDrawerHeight.value = 0
 }
 
 const restoreInteractionFromMessages = (loadedMessages: ChatMessage[]): void => {
-  const latestAssistant = [...loadedMessages].reverse().find(message => message.role === "assistant")
-  const interactions = latestAssistant?.steps
-    .map(step => step.interaction)
-    .filter((interaction): interaction is AgentInteraction => interaction !== undefined)
-  const latestInteraction = interactions?.[interactions.length - 1] ?? null
-  setActiveInteraction(latestInteraction)
+  let restoredInteraction: AgentInteraction | null = null
+
+  for (const message of loadedMessages) {
+    if (message.role !== "assistant") continue
+    for (const step of message.steps) {
+      if (step.interaction !== undefined) {
+        restoredInteraction = isWaitingInteraction(step.interaction) ? step.interaction : null
+      }
+      if (isTerminalEvent({ event: step.kind })) {
+        restoredInteraction = null
+      }
+    }
+  }
+
+  setActiveInteraction(restoredInteraction)
 }
 
 const loadSessionMessages = async (targetSessionId: number): Promise<boolean> => {
-  const pageSize = 100
-  let response = await agentApi.listMessages(targetSessionId, { page: 1, page_size: pageSize })
-  if (response.total_pages > 1) {
-    response = await agentApi.listMessages(targetSessionId, { page: response.total_pages, page_size: pageSize })
-  }
-  const loadedMessages = response.items
+  const loadedMessages = (await loadLatestAgentMessages(agentApi.listMessages, targetSessionId))
     .map(toChatMessage)
     .filter((message): message is ChatMessage => message !== null)
 
@@ -562,11 +581,15 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
   const text = eventToLogText(event)
   if (text !== null && text.length > 0) addEventLog(text, event.event)
   if (event.interaction !== undefined) {
-    setActiveInteraction(event.interaction)
+    setActiveInteraction(isWaitingInteraction(event.interaction) ? event.interaction : null)
+    return
+  }
+  if (isTerminalEvent(event)) {
+    setActiveInteraction(null)
   }
 }
 
-const sendMessageContent = async (content: string): Promise<void> => {
+const sendMessageContent = async (content: string, interactionMetadata?: Record<string, unknown>): Promise<void> => {
   if (content.length === 0 || isStreaming.value) return
 
   const token = userStore.token
@@ -586,6 +609,7 @@ const sendMessageContent = async (content: string): Promise<void> => {
       content,
       ...(sessionId.value !== undefined ? { session_id: sessionId.value } : {}),
       ...(sessionKey.value !== undefined ? { session_key: sessionKey.value } : {}),
+      ...(interactionMetadata !== undefined ? { interaction_metadata: interactionMetadata } : {}),
     }
 
     await agentApi.chatStream(
@@ -614,8 +638,8 @@ const sendMessage = async (): Promise<void> => {
   await sendMessageContent(input.value.trim())
 }
 
-const sendInteractionMessage = async (content: string): Promise<void> => {
-  await sendMessageContent(content.trim())
+const sendInteractionMessage = async (content: string, metadata?: Record<string, unknown>): Promise<void> => {
+  await sendMessageContent(content.trim(), metadata)
 }
 
 const cancelInteraction = async (): Promise<void> => {

@@ -840,6 +840,27 @@ async def test_agent_tool_registry_exposes_langchain_structured_tools():
 
 
 @pytest.mark.asyncio
+async def test_agent_tool_registry_exposes_readonly_langchain_tools_only():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        tools = {
+            tool.name: tool
+            for tool in registry.to_readonly_langchain_tools(
+                _context(db),
+                allowed_tool_names=["search_customers", "create_customer_follow_up"],
+            )
+        }
+
+        assert set(tools) == {"search_customers"}
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_registry_blocks_write_without_hitl_confirmation():
     engine, db = _db_session()
     fake_client = FakeCRMAPIClient()

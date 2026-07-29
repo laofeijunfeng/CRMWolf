@@ -161,13 +161,25 @@ class AgentToolRegistry:
     def list_specs(self) -> Dict[str, AgentToolSpec]:
         return dict(self._tools)
 
-    def to_langchain_tools(self, context: AgentToolContext):
-        """Expose the allowlisted tools as LangChain StructuredTool objects."""
+    def to_langchain_tools(
+        self,
+        context: AgentToolContext,
+        *,
+        allowed_tool_names: Optional[List[str]] = None,
+        include_write_tools: bool = True,
+    ):
+        """Expose selected registry tools as LangChain StructuredTool objects."""
         if StructuredTool is None:
             return []
 
+        allowed = set(allowed_tool_names or [])
         tools = []
         for spec in self._tools.values():
+            if allowed and spec.name not in allowed:
+                continue
+            if spec.is_write and not include_write_tools:
+                continue
+
             async def _coroutine(_spec=spec, **kwargs):
                 result = await self.execute(_spec.name, context, kwargs)
                 return result.to_event()
@@ -179,6 +191,19 @@ class AgentToolRegistry:
                 args_schema=spec.input_model,
             ))
         return tools
+
+    def to_readonly_langchain_tools(
+        self,
+        context: AgentToolContext,
+        *,
+        allowed_tool_names: Optional[List[str]] = None,
+    ):
+        """Expose read-only tools for controlled LangChain sub-agents."""
+        return self.to_langchain_tools(
+            context,
+            allowed_tool_names=allowed_tool_names,
+            include_write_tools=False,
+        )
 
     async def execute(
         self,

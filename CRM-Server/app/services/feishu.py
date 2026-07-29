@@ -1,5 +1,6 @@
 import logging
 import httpx
+import inspect
 from typing import Optional, Dict, Any
 from app.constants.business_types import BusinessType
 from app.core.config import get_settings
@@ -295,6 +296,33 @@ class FeishuService:
             print(f"飞书发送消息异常: {str(e)}")
             return False
 
+    async def _send_message_card_compat(
+        self,
+        user_id: str,
+        title: str,
+        content: str,
+        button_url: Optional[str] = None,
+        *,
+        header_template: str = "blue",
+    ) -> bool:
+        """调用消息卡片发送器，并兼容历史 monkeypatch 的旧签名。"""
+        send_message_card = self.send_message_card
+        try:
+            signature = inspect.signature(send_message_card)
+        except (TypeError, ValueError):
+            signature = None
+
+        if signature is not None and "header_template" not in signature.parameters:
+            return await send_message_card(user_id, title, content, button_url)
+
+        return await send_message_card(
+            user_id,
+            title,
+            content,
+            button_url,
+            header_template=header_template,
+        )
+
     async def notify_lead_assigned(
         self,
         user_id: str,
@@ -534,7 +562,7 @@ class FeishuService:
         # 审批通知：跳转到审批中心（而非单据详情页）
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_message_card(
+        return await self._send_message_card_compat(
             user_id,
             title,
             content,
@@ -567,7 +595,7 @@ class FeishuService:
         # 审批通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_message_card(
+        return await self._send_message_card_compat(
             user_id,
             title,
             content,
@@ -602,7 +630,7 @@ class FeishuService:
         # 审批通知：跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
-        return await self.send_message_card(
+        return await self._send_message_card_compat(
             user_id,
             title,
             content,

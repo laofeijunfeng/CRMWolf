@@ -21,7 +21,6 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskUpdate,
 )
-from app.services.agent.graph import CRMAgentGraphService
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -43,8 +42,29 @@ from app.services.agent.session_state import _remember_pending_task
 from app.services.agent.task_actions import _tool_name_for_action
 
 
+WAITING_TASK_EVENT_TYPES = frozenset({
+    "confirmation_required",
+    "customer_selection_required",
+    "contact_fields_required",
+    "invoice_title_fields_required",
+    "deployment_info_fields_required",
+    "customer_member_fields_required",
+    "payment_fields_required",
+    "lead_fields_required",
+    "customer_fields_required",
+    "opportunity_fields_required",
+    "follow_up_quality_required",
+    "business_selection_required",
+})
+
+
 def _new_task_key() -> str:
     return f"task_{uuid.uuid4().hex}"
+
+
+def _is_waiting_task_event(event: dict[str, Any]) -> bool:
+    return event.get("event") in WAITING_TASK_EVENT_TYPES
+
 
 def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user_id: int, session):
     action = event.get("action")

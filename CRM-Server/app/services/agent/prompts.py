@@ -368,6 +368,49 @@ CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agen
 """
 
 
+CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 会话状态路由器。
+
+你的任务是判断用户本轮输入和当前会话中的业务状态是什么关系，供 LangGraph 做状态机路由。你只做分类，不执行任何业务动作。
+
+【业务状态】
+- active_task：当前正在等待用户补充、选择或确认的任务。
+- suspended_tasks：用户之前说“先不处理/放一下/取消当前动作”后被暂停的业务草稿。
+- session_context：最近客户、最近业务主题等会话记忆。
+
+【关系枚举】
+- CONTINUE_ACTIVE_TASK：用户在继续当前等待任务，例如回答表单字段、选择项、确认/拒绝。
+- PATCH_ACTIVE_DRAFT：用户在修改当前等待确认或等待补字段的业务草稿，例如改金额、改人数、改采购类型、补日期、纠正客户或联系人。
+- RESUME_SUSPENDED_DRAFT：用户在恢复或修改最近暂停的业务草稿，即使没有说“继续”，但语义明显承接该草稿。
+- START_NEW_FLOW：用户开启了一个新的客户或新的业务流程，和现有 active/suspended 任务不是同一件事。
+- ASK_USER：无法可靠判断，需要用户确认是继续旧任务还是开启新流程。
+- CHITCHAT：寒暄、感谢、无业务动作表达。
+
+【判断原则】
+- 必须基于整体语义、任务快照、会话记忆判断，不要按关键词或固定格式猜测。
+- 多个 suspended_tasks 并存时，必须优先比较 customer_name、action、missing_fields、summary、updated_time 与用户本轮语义是否一致。
+- 用户本轮提到客户名、项目名、金额、人数、采购类型、预计成交时间等业务字段时，应把这些显式线索用于选择 target_task_id。
+- 只有一个草稿并不代表可以自动恢复；如果用户本轮语义不足以指向该草稿，应 ASK_USER 或 START_NEW_FLOW。
+- 用户没有明确新客户，并且内容像是在修改最近业务对象时，应优先考虑 PATCH_ACTIVE_DRAFT 或 RESUME_SUSPENDED_DRAFT。
+- 用户明确提到不同客户，且输入内容足以形成新业务动作时，应考虑 START_NEW_FLOW。
+- 如果 active_task 和 suspended_tasks 都可能匹配，应选择置信度更高的 target_task_id；不确定则 ASK_USER。
+- target_task_id 只能来自输入的 active_task 或 suspended_tasks；不能编造 ID。
+- 置信度低于 0.75 且会改变任务状态时，应返回 ASK_USER。
+- 返回 ASK_USER 时 question 应尽量列出 1-2 个可选草稿摘要，问题要短，不要复述原始 JSON。
+- 禁止输出 Markdown，禁止输出解释文字，只输出 JSON。
+
+【输出 JSON Schema】
+{
+  "relation": "CONTINUE_ACTIVE_TASK|PATCH_ACTIVE_DRAFT|RESUME_SUSPENDED_DRAFT|START_NEW_FLOW|ASK_USER|CHITCHAT",
+  "confidence": 0.0,
+  "target_task_id": 123,
+  "detected_customer_name": "本轮明确提到的客户名称，无法识别则为 null",
+  "detected_intent": "CUSTOMER_FOLLOW_UP|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CUSTOMER_QUERY|UNKNOWN|null",
+  "reason": "一句话说明判断依据",
+  "question": "需要用户确认时的问题；无需确认则为 null"
+}
+"""
+
+
 CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT = """你是 CRMWolf 的客户跟进记录质检 Agent。
 
 你的任务是在正式创建跟进记录前，按系统配置的“优秀跟进记录 6 大原则”评估内容质量，并输出严格 JSON。
@@ -481,6 +524,28 @@ def build_pending_interruption_messages(
         "【当前挂起任务】\n"
         f"{pending_task_json}\n\n"
         "【会话记忆】\n"
+        f"{memory_json}\n\n"
+        "【用户本轮输入】\n"
+        f"{user_message}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def build_turn_relation_messages(
+    user_message: str,
+    active_task_json: str,
+    suspended_tasks_json: str,
+    memory_json: str,
+    current_date: Optional[date] = None,
+) -> list[dict]:
+    prompt_date = current_date or date.today()
+    system = f"{CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+    user = (
+        "【active_task】\n"
+        f"{active_task_json}\n\n"
+        "【suspended_tasks】\n"
+        f"{suspended_tasks_json}\n\n"
+        "【session_context】\n"
         f"{memory_json}\n\n"
         "【用户本轮输入】\n"
         f"{user_message}"

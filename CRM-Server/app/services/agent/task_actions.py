@@ -21,7 +21,6 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskUpdate,
 )
-from app.services.agent.graph import CRMAgentGraphService
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime

@@ -235,7 +235,7 @@ def test_scenario1_amount_below_min_unmatched(db_session):
     )
     matched, err = _assert_e1_equivalence(db_session, contract)
     assert matched is None
-    assert err == "未找到匹配的审批流程，请联系管理员配置"
+    assert err == "未找到匹配的合同审批流程，请联系管理员创建或完善审批流程"
 
 
 def test_scenario1_amount_above_max_unmatched(db_session):
@@ -250,7 +250,7 @@ def test_scenario1_amount_above_max_unmatched(db_session):
     )
     matched, err = _assert_e1_equivalence(db_session, contract)
     assert matched is None
-    assert err == "未找到匹配的审批流程，请联系管理员配置"
+    assert err == "未找到匹配的合同审批流程，请联系管理员创建或完善审批流程"
 
 
 # ---------- 场景2：license_type 匹配 ---------------------------------------
@@ -283,7 +283,7 @@ def test_scenario2_license_type_excluded(db_session):
     matched, err = _assert_e1_equivalence(db_session, contract)
     # 唯一 flow 被排除 → 未匹配，沿用 CONTRACT 报错语义
     assert matched is None
-    assert err == "未找到匹配的审批流程，请联系管理员配置"
+    assert err == "未找到匹配的合同审批流程，请联系管理员创建或完善审批流程"
 
 
 def test_scenario2_license_type_none_flow_accepts_any(db_session):

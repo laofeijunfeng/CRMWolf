@@ -198,3 +198,4 @@ class AgentChatRequest(BaseModel):
     content: str = Field(..., min_length=1, description="用户消息内容")
     session_id: Optional[int] = Field(None, description="Agent会话ID")
     session_key: Optional[str] = Field(None, max_length=64, description="Agent会话唯一标识")
+    interaction_metadata: Optional[JsonDict] = Field(None, description="前端结构化交互提交上下文")

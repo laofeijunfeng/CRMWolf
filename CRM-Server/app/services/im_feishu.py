@@ -1,5 +1,6 @@
 """Feishu bot adapter for IM Agent messages."""
 import base64
+from dataclasses import dataclass
 import hashlib
 import json
 import logging
@@ -16,10 +17,26 @@ from app.crud.im_bot import agent_channel_session_crud, im_inbound_event_crud
 from app.models.im_bot import IMBotProvider, IMInboundEventStatus
 from app.models.oauth import OAuthProviderConfig
 from app.schemas.agent import AgentSessionCreate
+from app.services.agent import agent_copy
+from app.services.agent.task_factory import WAITING_TASK_EVENT_TYPES
 from app.services.im_agent_gateway import im_agent_gateway
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class IMReplyBinding:
+    agent_session_id: Optional[int] = None
+    agent_task_id: Optional[int] = None
+    agent_interaction_type: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class IMReplyDelivery:
+    reply_to_message_id: Optional[str]
+    text: Optional[str]
+    binding: Optional[IMReplyBinding] = None
 
 
 class FeishuBotEventError(Exception):
@@ -87,19 +104,23 @@ class FeishuBotService:
 
         try:
             im_inbound_event_crud.mark_status(db, inbound_event, IMInboundEventStatus.PROCESSING)
-            reply_to_message_id = message_id
+            delivery = IMReplyDelivery(reply_to_message_id=message_id, text=None)
             if "reaction" in event_type:
-                reply_to_message_id, reply_text = await self._handle_reaction_event(db, integration_config, event, event_type)
+                delivery = await self._handle_reaction_event(db, integration_config, event, event_type)
             else:
-                reply_text = await self._handle_message_event(db, integration_config, event)
+                delivery = await self._handle_message_event(db, integration_config, event)
             response_message_id = None
-            if reply_text and reply_to_message_id:
-                response_message_id = await self.reply_text(db, integration_config, reply_to_message_id, reply_text)
+            if delivery.text and delivery.reply_to_message_id:
+                response_message_id = await self.reply_text(db, integration_config, delivery.reply_to_message_id, delivery.text)
+            binding = delivery.binding if response_message_id else None
             im_inbound_event_crud.mark_status(
                 db,
                 inbound_event,
                 IMInboundEventStatus.PROCESSED,
                 response_message_id=response_message_id,
+                agent_session_id=binding.agent_session_id if binding else None,
+                agent_task_id=binding.agent_task_id if binding else None,
+                agent_interaction_type=binding.agent_interaction_type if binding else None,
             )
             return {"message": "processed"}
         except Exception as exc:
@@ -112,8 +133,9 @@ class FeishuBotService:
             )
             raise
 
-    async def _handle_message_event(self, db: Session, integration_config: OAuthProviderConfig, event: Dict[str, Any]) -> Optional[str]:
+    async def _handle_message_event(self, db: Session, integration_config: OAuthProviderConfig, event: Dict[str, Any]) -> IMReplyDelivery:
         message = event.get("message") or {}
+        message_id = message.get("message_id")
         message_type = message.get("message_type")
         logger.info(
             "处理飞书消息事件: message_id=%s chat_type=%s message_type=%s mention_count=%s",
@@ -123,7 +145,7 @@ class FeishuBotService:
             len(message.get("mentions") or []),
         )
         if message_type != "text":
-            return "目前机器人先支持文本消息，请把要处理的内容用文字发给我。"
+            return IMReplyDelivery(message_id, agent_copy.im_text_only())
 
         chat_type = message.get("chat_type")
         if chat_type != "p2p" and not self._mentions_bot(db, message, integration_config):
@@ -134,13 +156,13 @@ class FeishuBotService:
                 integration_config.app_id,
                 message.get("mentions") or [],
             )
-            return None
+            return IMReplyDelivery(message_id, None)
 
         sender_id = ((event.get("sender") or {}).get("sender_id") or {})
         open_id = sender_id.get("open_id")
         if not open_id:
             logger.info("飞书消息缺少发送人 open_id: message_id=%s sender_id=%s", message.get("message_id"), sender_id)
-            return "没有识别到飞书用户身份，暂时无法处理。"
+            return IMReplyDelivery(message_id, agent_copy.im_identity_missing("飞书"))
 
         account = user_oauth_account_crud.get_by_open_id(db, integration_config.team_id, IMBotProvider.FEISHU, open_id)
         if not account:
@@ -150,13 +172,12 @@ class FeishuBotService:
                 integration_config.team_id,
                 open_id,
             )
-            return "你还没有绑定 CRM 账号，请先在 CRM 的个人设置中绑定飞书账号。"
+            return IMReplyDelivery(message_id, agent_copy.im_account_not_bound("飞书"))
 
         content = self._extract_text(message)
         if not content:
-            return "我没有识别到可处理的文本内容。"
+            return IMReplyDelivery(message_id, agent_copy.im_text_missing())
 
-        message_id = message.get("message_id")
         if message_id:
             try:
                 await self.add_message_reaction(db, integration_config, message_id, self.receipt_emoji_type)
@@ -204,7 +225,11 @@ class FeishuBotService:
         )
         if message.get("message_id"):
             agent_channel_session_crud.mark_message(db, channel_session, message["message_id"])
-        return self._render_im_reply(result)
+        return IMReplyDelivery(
+            message_id,
+            self._render_im_reply(result),
+            self._extract_reply_binding(result),
+        )
 
     async def _handle_reaction_event(
         self,
@@ -212,10 +237,10 @@ class FeishuBotService:
         integration_config: OAuthProviderConfig,
         event: Dict[str, Any],
         event_type: str,
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> IMReplyDelivery:
         if event_type != "im.message.reaction.created_v1":
             logger.info("飞书消息表情事件不是新增表情，跳过: event_type=%s", event_type)
-            return None, None
+            return IMReplyDelivery(None, None)
         message_id = event.get("message_id") or event.get("messageId")
         reaction = event.get("reaction") or event
         operator = reaction.get("operator") or event.get("operator") or {}
@@ -228,9 +253,9 @@ class FeishuBotService:
             operator_type,
         )
         if operator_type == "app":
-            return None, None
+            return IMReplyDelivery(None, None)
         if not im_agent_gateway.intent_from_emoji(emoji_type):
-            return None, None
+            return IMReplyDelivery(None, None)
 
         operator_id = self._extract_operator_open_id(operator) or self._extract_operator_open_id(event.get("user_id") or {})
         if not operator_id:
@@ -240,11 +265,11 @@ class FeishuBotService:
                 operator,
                 event.get("user_id"),
             )
-            return None, None
+            return IMReplyDelivery(None, None)
         account = user_oauth_account_crud.get_by_open_id(db, integration_config.team_id, IMBotProvider.FEISHU, operator_id)
         if not account:
             logger.info("飞书消息表情操作人未绑定 CRM 账号: message_id=%s operator_open_id=%s", message_id, operator_id)
-            return message_id, "你还没有绑定 CRM 账号，请先在 CRM 的个人设置中绑定飞书账号。"
+            return IMReplyDelivery(message_id, agent_copy.im_account_not_bound("飞书"))
 
         result = await im_agent_gateway.handle_reaction(
             db,
@@ -255,8 +280,8 @@ class FeishuBotService:
             emoji_type=emoji_type,
         )
         if not result:
-            return None, None
-        return message_id, self._render_im_reply(result)
+            return IMReplyDelivery(None, None)
+        return IMReplyDelivery(message_id, self._render_im_reply(result), self._extract_reply_binding(result))
 
     async def reply_text(self, db: Session, integration_config: OAuthProviderConfig, message_id: str, text: str) -> Optional[str]:
         secret = oauth_provider_config_crud.get_secret(integration_config)
@@ -500,11 +525,44 @@ class FeishuBotService:
                 return True
         return False
 
+    def _extract_reply_binding(self, result: Dict[str, Any]) -> IMReplyBinding:
+        session = result.get("session") or {}
+        agent_session_id = self._safe_int(session.get("session_id"))
+        waiting_event = None
+        for event in result.get("events") or []:
+            if event.get("event") in WAITING_TASK_EVENT_TYPES and event.get("task_id"):
+                waiting_event = event
+        if not waiting_event:
+            return IMReplyBinding(agent_session_id=agent_session_id)
+        return IMReplyBinding(
+            agent_session_id=agent_session_id,
+            agent_task_id=self._safe_int(waiting_event.get("task_id")),
+            agent_interaction_type=waiting_event.get("event"),
+        )
+
+    def _safe_int(self, value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     def _render_im_reply(self, result: Dict[str, Any]) -> str:
         content = str(result.get("final_content") or "").strip()
         interaction = result.get("interaction") or {}
         if interaction.get("type") == "choice" and "回复" not in content:
-            return f"{content}\n\n回复「是」确认，回复「否」取消。"
+            choices = interaction.get("choices") if isinstance(interaction.get("choices"), list) else []
+            labels = [
+                str(choice.get("label") or choice.get("value") or "").strip()
+                for choice in choices
+                if isinstance(choice, dict) and str(choice.get("label") or choice.get("value") or "").strip()
+            ]
+            if labels == ["是", "否"]:
+                return f"{content}\n\n回复「是」确认，回复「否」取消。"
+            if labels:
+                options = "\n".join(f"{index}. {label}" for index, label in enumerate(labels, start=1))
+                return f"{content}\n\n{options}\n\n回复序号或选项文字。"
         return content or "已处理。"
 
     def _compact_raw_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:

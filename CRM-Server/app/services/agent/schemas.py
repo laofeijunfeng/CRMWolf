@@ -22,6 +22,14 @@ AgentIntent = Literal[
 
 AgentHITLDecisionType = Literal["approve", "edit", "reject", "respond"]
 AgentPendingInterruptionDecisionType = Literal["CONTINUE_PENDING", "START_NEW_FLOW", "ASK_USER"]
+AgentTurnRelationDecisionType = Literal[
+    "CONTINUE_ACTIVE_TASK",
+    "PATCH_ACTIVE_DRAFT",
+    "RESUME_SUSPENDED_DRAFT",
+    "START_NEW_FLOW",
+    "ASK_USER",
+    "CHITCHAT",
+]
 AgentConfirmationIntentType = Literal["confirm", "reject", "unknown"]
 AgentSuggestionAction = Literal[
     "CREATE_OPPORTUNITY",
@@ -223,6 +231,19 @@ class AgentPendingInterruptionDecision(BaseModel):
     detected_intent: Optional[AgentIntent] = Field(None, description="本轮输入的业务意图")
     is_field_supplement: bool = Field(False, description="是否明显是在补充当前挂起任务缺失字段")
     reason: str = Field("", description="简短判断依据")
+    question: Optional[str] = Field(None, description="需要用户确认时的问题")
+
+
+class AgentTurnRelationDecision(BaseModel):
+    relation: AgentTurnRelationDecisionType = Field(
+        "START_NEW_FLOW",
+        description="用户本轮输入与会话业务状态的关系",
+    )
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    target_task_id: Optional[int] = Field(None, description="应继续、修改或恢复的任务 ID；无法确定则为 null")
+    detected_customer_name: Optional[str] = Field(None, description="本轮明确提到的客户名称；没有则为 null")
+    detected_intent: Optional[AgentIntent] = Field(None, description="本轮输入的业务意图；无法判断则为 null")
+    reason: str = Field("", description="一句话说明判断依据")
     question: Optional[str] = Field(None, description="需要用户确认时的问题")
 
 

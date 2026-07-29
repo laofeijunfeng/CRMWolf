@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.crud.agent import agent_task_crud
 from app.schemas.agent import AgentTaskUpdate
-from app.services.agent.graph import CRMAgentGraphService
+from app.services.agent import business_rules
 from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParserError
 from app.services.agent.temporal import agent_temporal_resolver
@@ -40,7 +40,7 @@ async def _apply_payment_fields(db: Session, task, content: str):
         return False, f"我没有可靠识别到补充的回款信息，请换一种说法补充。原因：{str(exc)}"
 
     payment = _merge_payment_fields(payload.get("payment") or {}, semantic_result)
-    missing_fields = CRMAgentGraphService.missing_payment_fields(
+    missing_fields = business_rules.missing_payment_fields(
         payment.get("actual_amount"),
         payment.get("payment_date_iso"),
     )
@@ -51,7 +51,7 @@ async def _apply_payment_fields(db: Session, task, content: str):
         agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, (
             "还需要补充："
-            f"{CRMAgentGraphService.format_payment_missing_fields(missing_fields)}。"
+            f"{business_rules.format_payment_missing_fields(missing_fields)}。"
         )
 
     commission_member_id = payload.get("commission_member_id")
@@ -59,7 +59,7 @@ async def _apply_payment_fields(db: Session, task, content: str):
     contracts = state.get("contracts") or payload.get("contracts") or []
 
     if len(payment_plans) == 1:
-        next_payload = CRMAgentGraphService._payment_record_payload(payment_plans[0], payment, commission_member_id)
+        next_payload = business_rules.payment_record_payload(payment_plans[0], payment, commission_member_id)
         new_state = {
             "action": "create_payment_record",
             "payload": next_payload,
@@ -73,7 +73,7 @@ async def _apply_payment_fields(db: Session, task, content: str):
         return True, f"回款信息已补齐。请确认是否为「{customer.get('account_name')}」登记回款 {payment.get('actual_amount')}？"
 
     if len(contracts) == 1:
-        next_payload = CRMAgentGraphService._payment_plan_payload(contracts[0], payment, commission_member_id)
+        next_payload = business_rules.payment_plan_payload(contracts[0], payment, commission_member_id)
         new_state = {
             "action": "create_payment_plan",
             "payload": next_payload,

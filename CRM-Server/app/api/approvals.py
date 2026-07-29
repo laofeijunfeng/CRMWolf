@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import List, Optional
+from sqlalchemy.exc import OperationalError
+from typing import List, Optional, Dict
 from urllib.parse import quote
 import os
 
@@ -17,7 +19,8 @@ from app.models.user import User
 from app.schemas.approval import (
     ApprovalFlowCreate, ApprovalFlowUpdate, ApprovalFlowResponse, ApprovalFlowDetailResponse,
     ApprovalSubmitRequest, ApprovalActionRequest, ApprovalDetailResponse, ApprovalListResponse,
-    ApprovalRecordResponse, MessageResponse, OverdueApprovalResponse, OverdueApprovalListResponse
+    ApprovalRecordResponse, MessageResponse, OverdueApprovalResponse, OverdueApprovalListResponse,
+    ApprovalActionEnum,
 )
 from app.schemas.approval_generic import (
     ApprovalSubmitRequest as GenericApprovalSubmitRequest,
@@ -43,6 +46,17 @@ router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
 
 # 审批操作日志记录器
 logger = get_logger(__name__)
+
+
+class BulkApproveRequest(BaseModel):
+    entity_type: str = Field(..., description="业务单据类型")
+    ids: List[int] = Field(..., description="业务单据 ID 列表")
+    action: ApprovalActionEnum = Field(..., description="审批动作")
+    comment: Optional[str] = Field(None, description="审批意见")
+    updated_times: Optional[Dict[str, _datetime]] = Field(
+        None,
+        description="按业务单据 ID 传入的审批实例更新时间，用于乐观锁",
+    )
 
 
 def _approval_file_content_type(file_path: str, fallback: Optional[str] = None) -> str:
@@ -1413,6 +1427,22 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
 
 
 def _build_approval_entity_detail(approval: Approval, db: Session) -> dict:
+    try:
+        return _build_approval_entity_detail_unsafe(approval, db)
+    except OperationalError as exc:
+        db.rollback()
+        log_with_fields(
+            logger,
+            30,
+            "[Approval] Entity detail unavailable; returning approval metadata only",
+            business_type=approval.business_type,
+            business_id=approval.business_id,
+            error=str(exc),
+        )
+        return {}
+
+
+def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dict:
     """Build business-facing detail for approval readers.
 
     The approval center should present the actual business object under review,
@@ -1584,6 +1614,76 @@ def _validate_entity_type(entity_type: str) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"无效的业务单据类型: {entity_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
         )
+
+
+@router.post("/bulk-approve", summary="批量审批")
+async def bulk_approve(
+    request: BulkApproveRequest,
+    db: Session = Depends(get_db),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+):
+    _validate_entity_type(request.entity_type)
+
+    success_count = 0
+    failed = []
+    for entity_id in request.ids:
+        try:
+            approval = approval_crud.get_by_entity(db, request.entity_type, entity_id, team_id)
+            if not approval:
+                failed.append({"id": entity_id, "reason": "审批流程不存在"})
+                continue
+            if not approval.current_node:
+                failed.append({"id": entity_id, "reason": "当前审批节点不存在"})
+                continue
+
+            _check_approve_permissions(
+                db,
+                approval,
+                current_user,
+                team_id,
+                entity_type=request.entity_type,
+                entity_id=entity_id,
+            )
+            if request.action.value == ApprovalAction.APPROVE:
+                _check_next_node_has_approvers(
+                    db,
+                    approval,
+                    team_id,
+                    detail_suffix="无成员",
+                    log_extra={"business_type": request.entity_type, "business_id": entity_id},
+                )
+
+            action_request = ApprovalActionRequest(
+                action=request.action,
+                comment=request.comment,
+                updated_time=(request.updated_times or {}).get(str(entity_id)),
+            )
+            approval_crud.approve(
+                db,
+                approval,
+                action_request,
+                str(current_user.id),
+                current_user.name,
+            )
+            success_count += 1
+        except HTTPException as exc:
+            db.rollback()
+            failed.append({"id": entity_id, "reason": exc.detail})
+        except ValueError as exc:
+            db.rollback()
+            reason = "已被他人处理" if "审批已被其他用户处理" in str(exc) else str(exc)
+            failed.append({"id": entity_id, "reason": reason})
+        except Exception as exc:
+            db.rollback()
+            logger.error("批量审批失败 entity_type=%s id=%s: %s", request.entity_type, entity_id, exc)
+            failed.append({"id": entity_id, "reason": "审批失败"})
+
+    return {
+        "success_count": success_count,
+        "failed_count": len(failed),
+        "failed": failed,
+    }
 
 
 @router.post(

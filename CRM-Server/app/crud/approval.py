@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import OperationalError
 from typing import Optional, List, Tuple, Dict, Any
 from decimal import Decimal
 from datetime import date, time
@@ -1195,6 +1196,14 @@ class ApprovalCRUD:
 
         summaries: Dict[Tuple[str, int], Dict[str, Any]] = {}
 
+        def safe_all(query):
+            try:
+                return query.all()
+            except OperationalError as exc:
+                db.rollback()
+                logger.warning("审批列表实体摘要查询失败，已降级返回基础审批信息: %s", exc)
+                return []
+
         def serialize_customer(customer: Optional[Customer]) -> Optional[Dict[str, Any]]:
             if not customer:
                 return None
@@ -1213,17 +1222,17 @@ class ApprovalCRUD:
             unique_ids = list({cid for cid in customer_ids if cid})
             if not unique_ids:
                 return {}
-            customers = db.query(Customer).filter(
+            customers = safe_all(db.query(Customer).filter(
                 Customer.id.in_(unique_ids),
                 Customer.team_id == team_id,
-            ).all()
+            ))
             return {c.id: serialize_customer(c) for c in customers}
 
         # CONTRACT
         if ids_by_type["CONTRACT"]:
-            contracts = db.query(Contract).filter(
+            contracts = safe_all(db.query(Contract).filter(
                 Contract.id.in_(ids_by_type["CONTRACT"]), Contract.team_id == team_id
-            ).all()
+            ))
             customers_by_id = fetch_customers([c.customer_id for c in contracts])
             for c in contracts:
                 summaries[(BusinessType.CONTRACT, c.id)] = {
@@ -1239,10 +1248,10 @@ class ApprovalCRUD:
 
         # INVOICE
         if ids_by_type["INVOICE"]:
-            invoices = db.query(InvoiceApplication).filter(
+            invoices = safe_all(db.query(InvoiceApplication).filter(
                 InvoiceApplication.id.in_(ids_by_type["INVOICE"]),
                 InvoiceApplication.team_id == team_id,
-            ).all()
+            ))
             customers_by_id = fetch_customers([inv.customer_id for inv in invoices])
             for inv in invoices:
                 summaries[(BusinessType.INVOICE, inv.id)] = {
@@ -1257,21 +1266,21 @@ class ApprovalCRUD:
 
         # PAYMENT（通过 payment_plan_id 批量关联获取合同名称和客户信息）
         if ids_by_type["PAYMENT"]:
-            records = db.query(PaymentRecord).filter(
+            records = safe_all(db.query(PaymentRecord).filter(
                 PaymentRecord.id.in_(ids_by_type["PAYMENT"]),
                 PaymentRecord.team_id == team_id,
-            ).all()
+            ))
             plan_ids = [pr.payment_plan_id for pr in records if pr.payment_plan_id]
-            plans = db.query(PaymentPlan).filter(
+            plans = safe_all(db.query(PaymentPlan).filter(
                 PaymentPlan.id.in_(list(set(plan_ids))),
                 PaymentPlan.team_id == team_id,
-            ).all() if plan_ids else []
+            )) if plan_ids else []
             plans_by_id = {p.id: p for p in plans}
             contract_ids = [p.contract_id for p in plans if p.contract_id]
-            contracts = db.query(Contract).filter(
+            contracts = safe_all(db.query(Contract).filter(
                 Contract.id.in_(list(set(contract_ids))),
                 Contract.team_id == team_id,
-            ).all() if contract_ids else []
+            )) if contract_ids else []
             contracts_by_id = {c.id: c for c in contracts}
             customers_by_id = fetch_customers([c.customer_id for c in contracts])
             for pr in records:
@@ -1287,10 +1296,10 @@ class ApprovalCRUD:
 
         # LICENSE
         if ids_by_type["LICENSE"]:
-            licenses = db.query(LicenseApplication).filter(
+            licenses = safe_all(db.query(LicenseApplication).filter(
                 LicenseApplication.id.in_(ids_by_type["LICENSE"]),
                 LicenseApplication.team_id == team_id,
-            ).all()
+            ))
             customers_by_id = fetch_customers([lic.customer_id for lic in licenses])
             for lic in licenses:
                 summaries[(BusinessType.LICENSE, lic.id)] = {
@@ -1303,10 +1312,10 @@ class ApprovalCRUD:
 
         # OPPORTUNITY
         if ids_by_type["OPPORTUNITY"]:
-            opportunities = db.query(Opportunity).filter(
+            opportunities = safe_all(db.query(Opportunity).filter(
                 Opportunity.id.in_(ids_by_type["OPPORTUNITY"]),
                 Opportunity.team_id == team_id,
-            ).all()
+            ))
             customers_by_id = fetch_customers([opp.customer_id for opp in opportunities])
             for opp in opportunities:
                 summaries[(BusinessType.OPPORTUNITY, opp.id)] = {

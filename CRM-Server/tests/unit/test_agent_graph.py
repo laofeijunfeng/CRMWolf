@@ -949,7 +949,7 @@ async def test_agent_graph_attaches_opportunity_collection_as_next_task_after_fo
     assert next_task["action"] == "collect_opportunity_fields"
     assert next_task["payload"]["opportunity"]["purchase_type"] == "RENEWAL"
     assert "total_amount" in next_task["payload"]["missing_fields"]
-    assert "继续帮你补齐商机信息" in next_task["content"]
+    assert "这条还像「创建商机」" in next_task["content"]
 
 
 @pytest.mark.asyncio
@@ -984,6 +984,64 @@ async def test_agent_graph_inherits_current_customer_from_structured_memory():
     assert field_events[0]["payload"]["customer_id"] == 101
     assert field_events[0]["payload"]["opportunity"]["total_amount"] == 50000
     assert field_events[0]["payload"]["missing_fields"] == ["purchase_type", "expected_closing_date"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_customer_hint_overrides_memory_customer_for_new_opportunity():
+    memory_customer = {
+        "id": 101,
+        "account_name": "东风康明斯发动机有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+    tool_service = FakeToolService(
+        items=[{"id": 202, "account_name": "中移动信息技术有限公司"}],
+        customer_context={
+            "customer": {"id": 202, "account_name": "中移动信息技术有限公司"},
+            "opportunities": {"items": []},
+            "contracts": {"items": []},
+            "payment_plans": {"items": []},
+        },
+    )
+    result = await build_service_with_memory(
+        opportunity_semantic_result(customer={
+            "name_text": "东风康明斯发动机有限公司",
+            "confidence": 0.95,
+            "resolution_source": "MEMORY",
+        }),
+        tool_service,
+        session_context={"current_customer": memory_customer},
+    ).run(input_state("创建个商机，中移动信息，采购人数是10万，授权模式是买断，采购类型是新购，采购方式是公开招投标。项目金额是5537000元"))
+
+    assert tool_service.searches[0]["keyword"] == "中移动信息"
+    assert result["selected_customer"]["account_name"] == "中移动信息技术有限公司"
+    assert result["parsed"]["customer_name"] == "中移动信息"
+    assert result["parsed"]["_customer_name_source"] == "EXPLICIT_TEXT_HINT"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_unresolved_customer_hint_does_not_fall_back_to_memory_customer():
+    memory_customer = {
+        "id": 101,
+        "account_name": "东风康明斯发动机有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+    tool_service = FakeToolService(items=[])
+    result = await build_service_with_memory(
+        opportunity_semantic_result(customer={
+            "name_text": "东风康明斯发动机有限公司",
+            "confidence": 0.95,
+            "resolution_source": "MEMORY",
+        }),
+        tool_service,
+        session_context={"current_customer": memory_customer},
+    ).run(input_state("创建个商机，中移动信息，采购人数是10万，授权模式是买断，采购类型是新购，采购方式是公开招投标。项目金额是5537000元"))
+
+    assert tool_service.searches[0]["keyword"] == "中移动信息"
+    assert result.get("selected_customer") is None
+    assert "中移动信息" in result["response"]
+    assert "东风康明斯" not in result["response"]
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from app.core.security import create_access_token
+from app.services.agent import agent_copy
 from app.services.agent.application import agent_application_service
 from app.services.agent.input import AgentTurnInput
 
@@ -62,7 +63,7 @@ class AgentIMConversationService:
 
         return {
             "session": session_payload,
-            "final_content": final_content or "Agent 已完成处理。",
+            "final_content": final_content or agent_copy.generic_completed(),
             "interaction": interaction,
             "events": events,
             "im_events": [event for event in events if event.get("event") not in self.process_events],

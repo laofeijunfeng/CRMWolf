@@ -21,7 +21,6 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskUpdate,
 )
-from app.services.agent.graph import CRMAgentGraphService
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -39,6 +38,7 @@ from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext
 from app.utils.sse_encoder import SSEJsonEncoder
 
+from app.services.agent import agent_copy
 from app.services.agent.follow_up_fields import (
     _stage_customer_follow_up_after_create,
     _stage_lead_follow_up_after_create,
@@ -218,8 +218,8 @@ async def _execute_waiting_task(
                 ),
             )
             _remember_pending_task(db, session, next_task)
-            return result, "跟进记录已创建。" + (next_action.get("content") or "请确认是否执行下一步动作？")
-        return result, "跟进记录已创建。"
+            return result, agent_copy.follow_up_created_with_next(next_action.get("content"))
+        return result, agent_copy.follow_up_created()
 
     error_message = result.error_message if result else f"暂不支持的执行动作：{action}"
     agent_task_crud.update(

@@ -93,6 +93,8 @@ describe('AppLayout sidebar visibility CSS contract', () => {
   it('keeps route content inside the app shell scroll container', () => {
     const appLayoutSource = readFileSync('src/AppLayout.vue', 'utf-8')
     const agentChatSource = readFileSync('src/components/agent/CRMAgentChat.vue', 'utf-8')
+    const messageScrollerSource = readFileSync('src/components/ui/message-scroller/MessageScroller.vue', 'utf-8')
+    const appDrawerSource = readFileSync('src/components/ui/app-drawer/AppDrawer.vue', 'utf-8')
 
     expect(appLayoutSource).toContain(':class="mainContentClass"')
     expect(appLayoutSource).toContain(':class="mainViewClass"')
@@ -110,6 +112,11 @@ describe('AppLayout sidebar visibility CSS contract', () => {
     expect(appLayoutSource).toContain(':deep(.agent-chat)')
     expect(agentChatSource).toContain('height: 100%;\n  max-height: 100%;\n  min-height: 0;')
     expect(agentChatSource).toContain('max-height: 100%;\n  min-height: 0;\n  overflow: hidden;')
+    expect(messageScrollerSource).toContain('message-scroller h-full min-h-0')
+    expect(messageScrollerSource).toMatch(/data-reka-scroll-area-viewport[\s\S]*overflow-y:\s*auto/)
+    expect(appDrawerSource).toMatch(/\.app-drawer\s*\{[^}]*max-height:\s*min\(80svh, 720px\)/s)
+    expect(appDrawerSource).toMatch(/\.app-drawer__content\s*\{[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\)/s)
+    expect(appDrawerSource).toMatch(/\.app-drawer__body\s*\{[^}]*overflow-y:\s*auto/s)
     expect(agentChatSource).not.toContain('height: calc(100dvh - $wolf-topbar-height-v2)')
     expect(agentChatSource).not.toContain('height: calc(100dvh - $wolf-topbar-height-mobile-v2 - $wolf-bottom-nav-height-v2)')
   })

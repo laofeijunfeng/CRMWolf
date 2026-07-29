@@ -15,25 +15,19 @@ from app.services.agent.prompts import (
     build_confirmation_intent_messages,
     CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT,
     CRM_AGENT_SEMANTIC_SYSTEM_PROMPT,
+    CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT,
     build_pending_interruption_messages,
     build_semantic_messages,
+    build_turn_relation_messages,
 )
+from app.services.agent.langchain_runtime import AgentLangChainRuntime, AgentLangChainStructuredOutputError
 from app.services.agent.schemas import (
     AgentConfirmationIntentDecision,
     AgentMemorySnapshot,
     AgentPendingInterruptionDecision,
     AgentSemanticParseResult,
+    AgentTurnRelationDecision,
 )
-
-try:
-    from langchain.agents import create_agent
-except Exception:  # pragma: no cover - keeps imports resilient in stripped envs
-    create_agent = None  # type: ignore[assignment]
-
-try:
-    from langchain_openai import ChatOpenAI
-except Exception:  # pragma: no cover - optional production dependency
-    ChatOpenAI = None  # type: ignore[assignment]
 
 
 class AgentSemanticParserError(Exception):
@@ -52,8 +46,10 @@ class AgentSemanticParseEnvelope:
 class AgentSemanticParser:
     def __init__(self, ai_client=ai_service, agent_factory=None, chat_model_factory=None) -> None:
         self.ai_client = ai_client
-        self.agent_factory = agent_factory or create_agent
-        self.chat_model_factory = chat_model_factory or ChatOpenAI
+        self.langchain_runtime = AgentLangChainRuntime(
+            agent_factory=agent_factory,
+            chat_model_factory=chat_model_factory,
+        )
 
     async def parse(
         self,
@@ -171,6 +167,68 @@ class AgentSemanticParser:
         except (json.JSONDecodeError, ValidationError) as exc:
             raise AgentSemanticParserError(f"AI 确认意图判断结果无效：{str(exc)}") from exc
 
+    async def assess_turn_relation(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_message: str,
+        active_task: Optional[dict] = None,
+        suspended_tasks: Optional[list[dict]] = None,
+        memory: Optional[AgentMemorySnapshot] = None,
+        current_date: Optional[date] = None,
+    ) -> AgentTurnRelationDecision:
+        config = ai_config_crud.get_config(db, team_id)
+        if not config:
+            raise AgentSemanticParserError("AI 配置未设置，无法判断本轮与业务状态的关系。")
+
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
+        if not api_key:
+            raise AgentSemanticParserError("AI API Key 未设置，无法判断本轮与业务状态的关系。")
+
+        memory_json = (memory or AgentMemorySnapshot()).model_dump_json(exclude_none=True)
+        active_task_json = json.dumps(active_task, ensure_ascii=False, default=str)
+        suspended_tasks_json = json.dumps(suspended_tasks or [], ensure_ascii=False, default=str)
+        try:
+            langchain_result = await self._assess_turn_relation_with_langchain(
+                api_host=config.api_host,
+                api_key=api_key,
+                model=config.model_name,
+                user_message=user_message,
+                active_task_json=active_task_json,
+                suspended_tasks_json=suspended_tasks_json,
+                memory_json=memory_json,
+                temperature=min(float(config.temperature or 0.1), 0.2),
+                current_date=current_date,
+            )
+        except AgentSemanticParserError:
+            raise
+        except Exception:
+            langchain_result = None
+        if langchain_result is not None:
+            return langchain_result
+
+        raw = await self.ai_client._stream_chat_collect(
+            api_host=config.api_host,
+            api_key=api_key,
+            model=config.model_name,
+            messages=build_turn_relation_messages(
+                user_message,
+                active_task_json,
+                suspended_tasks_json,
+                memory_json,
+                current_date=current_date,
+            ),
+            temperature=min(float(config.temperature or 0.1), 0.2),
+            max_tokens=700,
+            response_format={"type": "json_object"},
+        )
+        try:
+            parsed = json.loads(self._clean_json(raw))
+            return AgentTurnRelationDecision.model_validate(parsed)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise AgentSemanticParserError(f"AI 本轮关系判断结果无效：{str(exc)}") from exc
+
     async def parse_with_metadata(
         self,
         db: Session,
@@ -242,39 +300,23 @@ class AgentSemanticParser:
         temperature: float,
         current_date: Optional[date] = None,
     ) -> Optional[AgentSemanticParseResult]:
-        if self.agent_factory is None or self.chat_model_factory is None:
-            return None
-
         prompt_date = current_date or date.today()
         system_prompt = f"{CRM_AGENT_SEMANTIC_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
         user_prompt = "【会话记忆】\n" f"{memory_json}\n\n" "【用户输入】\n" f"{user_message}"
         try:
-            chat_model = self.chat_model_factory(
-                model=model,
+            return await self.langchain_runtime.ainvoke_structured(
+                api_host=api_host,
                 api_key=api_key,
-                base_url=api_host,
+                model=model,
                 temperature=temperature,
-            )
-            agent = self.agent_factory(
-                model=chat_model,
-                tools=[],
                 system_prompt=system_prompt,
-                response_format=AgentSemanticParseResult,
-                middleware=[],
+                user_prompt=user_prompt,
+                response_model=AgentSemanticParseResult,
+                error_prefix="LangChain structured output",
             )
-            response = await agent.ainvoke({"messages": [{"role": "user", "content": user_prompt}]})
-        except Exception as exc:
-            raise RuntimeError(f"LangChain structured output 调用失败：{exc.__class__.__name__}") from exc
-
-        structured_response = response.get("structured_response") if isinstance(response, dict) else None
-        if isinstance(structured_response, AgentSemanticParseResult):
-            return structured_response
-        if structured_response is not None:
-            try:
-                return AgentSemanticParseResult.model_validate(structured_response)
-            except ValidationError as exc:
-                raise AgentSemanticParserError(f"LangChain structured output 无效：{str(exc)}") from exc
-        raise AgentSemanticParserError("LangChain structured output 未返回结构化结果。")
+        except AgentLangChainStructuredOutputError as exc:
+            message = str(exc).replace("LangChain structured output 结果无效", "LangChain structured output 无效")
+            raise AgentSemanticParserError(message) from exc
 
     async def _assess_pending_interruption_with_langchain(
         self,
@@ -288,9 +330,6 @@ class AgentSemanticParser:
         temperature: float,
         current_date: Optional[date] = None,
     ) -> Optional[AgentPendingInterruptionDecision]:
-        if self.agent_factory is None or self.chat_model_factory is None:
-            return None
-
         prompt_date = current_date or date.today()
         system_prompt = f"{CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
         user_prompt = (
@@ -302,32 +341,57 @@ class AgentSemanticParser:
             f"{user_message}"
         )
         try:
-            chat_model = self.chat_model_factory(
-                model=model,
+            return await self.langchain_runtime.ainvoke_structured(
+                api_host=api_host,
                 api_key=api_key,
-                base_url=api_host,
+                model=model,
                 temperature=temperature,
-            )
-            agent = self.agent_factory(
-                model=chat_model,
-                tools=[],
                 system_prompt=system_prompt,
-                response_format=AgentPendingInterruptionDecision,
-                middleware=[],
+                user_prompt=user_prompt,
+                response_model=AgentPendingInterruptionDecision,
+                error_prefix="LangChain 挂起任务判断",
             )
-            response = await agent.ainvoke({"messages": [{"role": "user", "content": user_prompt}]})
-        except Exception as exc:
-            raise RuntimeError(f"LangChain 挂起任务判断调用失败：{exc.__class__.__name__}") from exc
+        except AgentLangChainStructuredOutputError as exc:
+            raise AgentSemanticParserError(str(exc)) from exc
 
-        structured_response = response.get("structured_response") if isinstance(response, dict) else None
-        if isinstance(structured_response, AgentPendingInterruptionDecision):
-            return structured_response
-        if structured_response is not None:
-            try:
-                return AgentPendingInterruptionDecision.model_validate(structured_response)
-            except ValidationError as exc:
-                raise AgentSemanticParserError(f"LangChain 挂起任务判断结果无效：{str(exc)}") from exc
-        raise AgentSemanticParserError("LangChain 挂起任务判断未返回结构化结果。")
+    async def _assess_turn_relation_with_langchain(
+        self,
+        *,
+        api_host: str,
+        api_key: str,
+        model: str,
+        user_message: str,
+        active_task_json: str,
+        suspended_tasks_json: str,
+        memory_json: str,
+        temperature: float,
+        current_date: Optional[date] = None,
+    ) -> Optional[AgentTurnRelationDecision]:
+        prompt_date = current_date or date.today()
+        system_prompt = f"{CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+        user_prompt = (
+            "【active_task】\n"
+            f"{active_task_json}\n\n"
+            "【suspended_tasks】\n"
+            f"{suspended_tasks_json}\n\n"
+            "【session_context】\n"
+            f"{memory_json}\n\n"
+            "【用户本轮输入】\n"
+            f"{user_message}"
+        )
+        try:
+            return await self.langchain_runtime.ainvoke_structured(
+                api_host=api_host,
+                api_key=api_key,
+                model=model,
+                temperature=temperature,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=AgentTurnRelationDecision,
+                error_prefix="LangChain 本轮关系判断",
+            )
+        except AgentLangChainStructuredOutputError as exc:
+            raise AgentSemanticParserError(str(exc)) from exc
 
     def parse_raw_response(self, raw: str) -> AgentSemanticParseResult:
         try:

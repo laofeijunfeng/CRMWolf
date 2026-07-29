@@ -19,7 +19,12 @@ from app.models.agent import (
     AgentTaskStatus,
     AgentToolCall,
 )
-from app.services.agent.schemas import AgentFollowUpQualityResult, AgentPendingInterruptionDecision, AgentSemanticParseResult
+from app.services.agent.schemas import (
+    AgentFollowUpQualityResult,
+    AgentPendingInterruptionDecision,
+    AgentSemanticParseResult,
+    AgentTurnRelationDecision,
+)
 from app.services.agent.tools.base import AgentToolResult
 
 
@@ -88,6 +93,48 @@ class FakePendingInterruptionParser:
             "current_date": current_date,
         })
         return AgentPendingInterruptionDecision.model_validate(self.decision)
+
+
+class FakeTurnRelationAndSemanticParser:
+    def __init__(self, *, relation, semantic_results):
+        self.relation = relation
+        self.semantic_results = semantic_results if isinstance(semantic_results, list) else [semantic_results]
+        self.relation_calls = []
+        self.parse_calls = []
+
+    async def assess_turn_relation(
+        self,
+        db,
+        *,
+        team_id,
+        user_message,
+        active_task=None,
+        suspended_tasks=None,
+        memory=None,
+        current_date=None,
+    ):
+        self.relation_calls.append({
+            "team_id": team_id,
+            "user_message": user_message,
+            "active_task": active_task,
+            "suspended_tasks": suspended_tasks,
+            "memory": memory,
+            "current_date": current_date,
+        })
+        relation = dict(self.relation)
+        if relation.get("target_task_id") == "__first_suspended__":
+            relation["target_task_id"] = suspended_tasks[0]["id"]
+        return AgentTurnRelationDecision.model_validate(relation)
+
+    async def parse(self, db, *, team_id, user_message, memory=None, current_date=None):
+        self.parse_calls.append({
+            "team_id": team_id,
+            "user_message": user_message,
+            "memory": memory,
+            "current_date": current_date,
+        })
+        index = min(len(self.parse_calls) - 1, len(self.semantic_results) - 1)
+        return AgentSemanticParseResult.model_validate(self.semantic_results[index])
 
 
 class FakeQualityEvaluator:
@@ -170,6 +217,10 @@ def test_agent_event_interaction_protocol_for_confirmation():
     })
 
     assert event["interaction"]["type"] == "choice"
+    assert event["interaction"]["schema_version"] == "agent.interaction.v1"
+    assert event["interaction"]["business_action"] == "confirm_action"
+    assert event["interaction"]["status"] == "waiting_confirmation"
+    assert event["interaction"]["title"] == "确认操作"
     assert event["interaction"]["prompt"] == "请确认是否创建这条跟进记录？"
     assert event["interaction"]["choices"] == [
         {"label": "是", "value": "是"},
@@ -177,6 +228,37 @@ def test_agent_event_interaction_protocol_for_confirmation():
     ]
     assert event["interaction"]["allow_free_text"] is True
     assert event["interaction"]["allow_cancel"] is True
+
+
+def test_agent_event_interaction_protocol_for_turn_relation_clarification():
+    event = agent_api._with_interaction({
+        "event": "turn_relation_clarification_required",
+        "content": "你想继续哪个草稿？",
+        "candidates": [
+            {"id": 201, "summary": "广州睿狐增购10个账号补商机信息"},
+            {"id": 202, "summary": "广州睿狐创建商机确认"},
+        ],
+    })
+
+    interaction = event["interaction"]
+    assert interaction["type"] == "choice"
+    assert interaction["schema_version"] == "agent.interaction.v1"
+    assert interaction["business_action"] == "select_suspended_task"
+    assert interaction["status"] == "waiting_user_input"
+    assert interaction["title"] == "选择草稿"
+    assert interaction["prompt"] == "你想继续哪个草稿？"
+    assert interaction["choices"] == [
+        {
+            "label": "广州睿狐增购10个账号补商机信息",
+            "value": "继续：广州睿狐增购10个账号补商机信息",
+            "metadata": {"selected_task_id": 201},
+        },
+        {
+            "label": "广州睿狐创建商机确认",
+            "value": "继续：广州睿狐创建商机确认",
+            "metadata": {"selected_task_id": 202},
+        },
+    ]
 
 
 def test_agent_event_interaction_protocol_for_missing_opportunity_fields():
@@ -196,6 +278,17 @@ def test_agent_event_interaction_protocol_for_missing_opportunity_fields():
 
     interaction = event["interaction"]
     assert interaction["type"] == "form"
+    assert interaction["schema_version"] == "agent.interaction.v1"
+    assert interaction["business_action"] == "create_opportunity"
+    assert interaction["status"] == "waiting_user_input"
+    assert interaction["title"] == "补充商机信息"
+    assert interaction["payload"]["missing_fields"] == [
+        "total_amount",
+        "user_count",
+        "license_type",
+        "expected_closing_date",
+        "purchase_type",
+    ]
     assert interaction["prompt"] == "还需要补充商机信息"
     assert [field["key"] for field in interaction["fields"]] == [
         "total_amount",
@@ -230,6 +323,9 @@ def test_agent_event_interaction_protocol_for_missing_lead_fields():
 
     interaction = event["interaction"]
     assert interaction["type"] == "form"
+    assert interaction["schema_version"] == "agent.interaction.v1"
+    assert interaction["business_action"] == "create_lead"
+    assert interaction["title"] == "补充线索信息"
     assert interaction["prompt"] == "还需要补充线索信息"
     assert [field["key"] for field in interaction["fields"]] == [
         "lead_name",
@@ -281,6 +377,9 @@ def test_agent_event_interaction_protocol_for_follow_up_quality():
     })
 
     assert event["interaction"]["type"] == "text"
+    assert event["interaction"]["schema_version"] == "agent.interaction.v1"
+    assert event["interaction"]["business_action"] == "create_follow_up"
+    assert event["interaction"]["title"] == "补充跟进记录"
     assert event["interaction"]["prompt"] == "下一步计划什么时候、由谁跟进？"
     assert event["interaction"]["allow_free_text"] is True
     assert event["interaction"]["allow_cancel"] is True
@@ -297,6 +396,9 @@ def test_agent_event_interaction_protocol_for_customer_selection():
     })
 
     assert event["interaction"]["type"] == "choice"
+    assert event["interaction"]["schema_version"] == "agent.interaction.v1"
+    assert event["interaction"]["business_action"] == "select_customer"
+    assert event["interaction"]["title"] == "选择客户"
     assert event["interaction"]["choices"] == [
         {"label": "广州睿狐科技有限公司", "value": "1"},
         {"label": "深圳睿狐科技有限公司", "value": "2"},
@@ -362,7 +464,7 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
         )
         assert confirm_response.status_code == 200, confirm_response.text
         assert '"event": "task_completed"' in confirm_response.text
-        assert "跟进记录已创建" in confirm_response.text
+        assert "跟进已记录" in confirm_response.text
 
         Session = sessionmaker(bind=engine)
         db = Session()
@@ -451,11 +553,10 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
             headers={"Authorization": "Bearer test-token"},
         )
         assert confirm_response.status_code == 200, confirm_response.text
-        assert "跟进记录已创建" in confirm_response.text
+        assert "跟进已记录" in confirm_response.text
         assert "要不要我继续帮你补齐商机信息" in confirm_response.text
         assert '"next_task_id": 2' in confirm_response.text
         assert '"interaction":' in confirm_response.text
-        assert '"label": "继续处理", "value": "是"' in confirm_response.text
 
         yes_response = client.post(
             "/v1/agent/chat/stream",
@@ -463,7 +564,7 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
             headers={"Authorization": "Bearer test-token"},
         )
         assert yes_response.status_code == 200, yes_response.text
-        assert "还需要补充" in yes_response.text
+        assert "还差商机" in yes_response.text
         assert "预计成交金额" in yes_response.text
     finally:
         engine.dispose()
@@ -502,7 +603,7 @@ def test_agent_stream_cancels_waiting_task_when_user_rejects(monkeypatch):
         )
         assert reject_response.status_code == 200, reject_response.text
         assert '"event": "task_cancelled"' in reject_response.text
-        assert "好的，这一步先放着。" in reject_response.text
+        assert "好嘞，这一步先放着。" in reject_response.text
 
         Session = sessionmaker(bind=engine)
         db = Session()
@@ -697,7 +798,7 @@ def test_agent_stream_collects_opportunity_fields_without_rerunning_graph(monkey
         assert second_response.status_code == 200, second_response.text
         assert '"event": "confirmation_required"' in second_response.text
         assert '"type": "choice"' in second_response.text
-        assert "商机信息已补齐" in second_response.text
+        assert "商机信息齐了" in second_response.text
         assert len(fake_graph.calls) == 1
 
         db = Session()
@@ -1016,7 +1117,7 @@ def test_agent_stream_create_customer_follow_up_runs_quality_before_confirmation
             headers={"Authorization": "Bearer test-token"},
         )
         assert follow_up_response.status_code == 200, follow_up_response.text
-        assert "跟进记录已创建。" in follow_up_response.text
+        assert "跟进已记录。" in follow_up_response.text
         assert [name for name, _ in tool_calls] == ["create_customer", "create_customer_follow_up"]
         assert tool_calls[1][1]["content"] == "客户已确认采购 CRM 的初步意向，计划下周三电话跟进需求细节和预算。"
         assert tool_calls[1][1]["customer_id"] == 9101
@@ -1380,7 +1481,7 @@ def test_agent_stream_keeps_collected_opportunity_fields_across_turns(monkeypatc
             headers={"Authorization": "Bearer test-token"},
         )
         assert second_response.status_code == 200, second_response.text
-        assert "还需要补充" in second_response.text
+        assert "还差商机" in second_response.text
         assert "预计成交日期" in second_response.text
         assert '"event": "opportunity_fields_required"' in second_response.text
         assert '"type": "form"' in second_response.text
@@ -1394,7 +1495,7 @@ def test_agent_stream_keeps_collected_opportunity_fields_across_turns(monkeypatc
         assert third_response.status_code == 200, third_response.text
         assert '"event": "confirmation_required"' in third_response.text
         assert '"type": "choice"' in third_response.text
-        assert "商机信息已补齐" in third_response.text
+        assert "商机信息齐了" in third_response.text
         assert "预计成交金额" not in third_response.text
         assert "采购用户数" not in third_response.text
         assert "授权模式" not in third_response.text
@@ -1483,7 +1584,8 @@ def test_agent_stream_interrupts_pending_task_for_clear_new_customer_flow(monkey
         )
         assert second_response.status_code == 200, second_response.text
         assert '"event": "pending_task_interrupted"' in second_response.text
-        assert "我先切过来处理" in second_response.text
+        assert "汇川技术" in second_response.text
+        assert "切过来处理" in second_response.text
         assert captured_states[1]["content"] == "今天微信找了汇川技术的沟通续费方面的事宜，本月底会对接采购"
         assert fake_parser.calls[0]["pending_task"]["state"]["action"] == "collect_opportunity_fields"
 
@@ -1495,6 +1597,123 @@ def test_agent_stream_interrupts_pending_task_for_clear_new_customer_flow(monkey
             saved_session = db.query(AgentSession).one()
             assert "current_pending_task" not in saved_session.context_json
             assert saved_session.context_json["suspended_pending_tasks"][0]["id"] == task.id
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_resumes_suspended_opportunity_draft_with_structured_relation(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+    graph_calls = []
+
+    class FakeGraphService:
+        async def stream_events(self, input_state):
+            graph_calls.append(input_state)
+            yield {
+                "event": "confirmation_required",
+                "action": "create_opportunity",
+                "customer": customer,
+                "payload": {
+                    "customer_id": customer["id"],
+                    "opportunity": {
+                        "customer_id": customer["id"],
+                        "total_amount": 50000,
+                        "user_count": 10,
+                        "license_type": "SUBSCRIPTION",
+                        "subscription_years": 1,
+                        "purchase_type": "NEW",
+                        "expected_closing_date": "2026-08-31",
+                    },
+                },
+            }
+            yield {"event": "final", "content": "商机信息齐了。要创建商机吗？"}
+
+    fake_parser = FakeTurnRelationAndSemanticParser(
+        relation={
+            "relation": "RESUME_SUSPENDED_DRAFT",
+            "confidence": 0.93,
+            "target_task_id": "__first_suspended__",
+            "detected_customer_name": None,
+            "detected_intent": "CREATE_OPPORTUNITY",
+            "reason": "用户在修改最近暂停的商机草稿。",
+            "question": None,
+        },
+        semantic_results={
+            "intent": "CREATE_OPPORTUNITY",
+            "intent_confidence": 0.95,
+            "customer": {"name_text": "广州睿狐科技有限公司", "confidence": 0.95, "resolution_source": "MEMORY"},
+            "follow_up": {},
+            "payment": {},
+            "opportunity": {
+                "user_count": 20,
+                "purchase_type": "EXPANSION",
+            },
+            "contact": {},
+            "invoice_title": {},
+            "deployment_info": {},
+            "business_signals": [],
+            "requested_actions": [],
+            "missing_fields": [],
+            "need_clarification": False,
+            "clarification_question": None,
+            "evidence": ["改成增购 20 个"],
+        },
+    )
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api, "agent_semantic_parser", fake_parser)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "商机草稿恢复"}).json()
+        first_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮广州睿狐科技建一个 10 个新购商机，8 月底成交"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert first_response.status_code == 200, first_response.text
+        assert '"event": "confirmation_required"' in first_response.text
+
+        second_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "先不处理"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert second_response.status_code == 200, second_response.text
+        assert '"event": "task_cancelled"' in second_response.text
+
+        third_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "张总说改成增购 20 个了"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert third_response.status_code == 200, third_response.text
+        assert '"event": "turn_relation_classified"' in third_response.text
+        assert '"event": "suspended_task_resumed"' in third_response.text
+        assert '"event": "confirmation_required"' in third_response.text
+        assert len(graph_calls) == 1
+        assert fake_parser.relation_calls[0]["suspended_tasks"][0]["state"]["customer"]["account_name"] == customer["account_name"]
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.WAITING_USER
+            assert task.state_json["action"] == "create_opportunity"
+            assert task.state_json["customer"]["account_name"] == customer["account_name"]
+            opportunity = task.state_json["payload"]["opportunity"]
+            assert opportunity["customer_id"] == customer["id"]
+            assert opportunity["total_amount"] == 50000
+            assert opportunity["user_count"] == 20
+            assert opportunity["license_type"] == "SUBSCRIPTION"
+            assert opportunity["subscription_years"] == 1
+            assert opportunity["purchase_type"] == "EXPANSION"
+            assert opportunity["expected_closing_date"] == "2026-08-31"
         finally:
             db.close()
     finally:
@@ -1571,7 +1790,7 @@ def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatc
         )
         assert confirm_response.status_code == 200, confirm_response.text
         assert '"event": "task_completed"' in confirm_response.text
-        assert "跟进记录已创建" in confirm_response.text
+        assert "跟进已记录" in confirm_response.text
 
         Session = sessionmaker(bind=engine)
         db = Session()

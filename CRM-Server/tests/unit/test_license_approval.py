@@ -2,14 +2,47 @@
 import pytest
 from datetime import date
 
+from sqlalchemy import create_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.types import BigInteger
+
+from app.core.database import Base
 from app.crud.approval import approval_flow_crud, approval_crud
 from app.crud.crud_license_application import license_application_crud
 from app.constants.business_types import BusinessType
+from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode
+from app.models.customer import Customer
 from app.models.license_application import LicenseApplicationStatus
+from app.models.license_application import LicenseApplication
 from app.models.approval import ApprovalStatus
 from app.schemas.license_application import LicenseApplicationCreate
 from app.schemas.approval import ApprovalFlowCreate, ApprovalNodeCreate
 from app.services.approval_adapter import get_adapter
+
+
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+    return "INTEGER"
+
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite:///:memory:")
+    tables = [
+        Customer.__table__,
+        LicenseApplication.__table__,
+        ApprovalFlow.__table__,
+        ApprovalNode.__table__,
+        Approval.__table__,
+        ApprovalRecord.__table__,
+    ]
+    Base.metadata.create_all(engine, tables=tables)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    yield session
+    session.close()
+    engine.dispose()
 
 
 def test_license_approval_adapter_registered():
@@ -62,51 +95,33 @@ def test_license_application_adapter_methods():
 @pytest.fixture
 def test_customer(db):
     """创建测试客户"""
-    from app.crud.customer import customer_crud
-    from app.schemas.customer import CustomerCreate
-
-    customer = customer_crud.create(
-        db,
+    customer = Customer(
         team_id=1,
-        obj_in=CustomerCreate(
-            customer_name="测试客户",
-            customer_type="ENTERPRISE",
-            contact_person="张三",
-            contact_phone="13800138000"
-        ),
-        creator_id="test_user_001"
+        account_name="测试客户",
+        city="上海",
+        creator_id="test_user_001",
+        owner_id="test_user_001",
     )
+    db.add(customer)
+    db.commit()
+    db.refresh(customer)
     return customer
 
 
 @pytest.fixture
 def test_team(db):
     """创建测试团队"""
-    from app.models.team import Team
-    team = Team(
-        id=1,
-        name="测试团队",
-        owner_id="test_user_001"
-    )
-    db.add(team)
-    db.commit()
-    db.refresh(team)
-    return team
+    return type("TestTeam", (), {"id": 1})()
 
 
 @pytest.fixture
 def test_user(db):
     """创建测试用户"""
-    from app.models.user import User
-    user = User(
-        id=1,
-        name="测试用户",
-        feishu_user_id="test_user_001"
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+    return type("TestUser", (), {
+        "id": 1,
+        "name": "测试用户",
+        "feishu_user_id": "test_user_001",
+    })()
 
 
 def test_license_application_submit_creates_approval(db, test_team, test_user, test_customer):
@@ -122,6 +137,7 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
             nodes=[
                 ApprovalNodeCreate(
                     node_name="团队所有者审批",
+                    node_code="TEAM_OWNER",
                     node_order=1,
                     approve_role="TEAM_OWNER",
                 )
@@ -181,11 +197,11 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
 
     # 6. 验证申请状态已切换为 PENDING
     db.refresh(application)
-    assert application.status == LicenseApplicationStatus.PENDING
+    assert application.status == LicenseApplicationStatus.PENDING_REVIEW
 
 
 def test_license_application_without_flow_direct_approval(db, test_team, test_user, test_customer):
-    """测试 License 申请未匹配审批流程时免审批直通"""
+    """测试 License 申请未匹配审批流程时返回配置错误"""
     # 1. 创建 License 申请（草稿）
     application = license_application_crud.create(
         db,
@@ -208,17 +224,12 @@ def test_license_application_without_flow_direct_approval(db, test_team, test_us
         **adapter.match_kwargs(application)
     )
 
-    # 3. 未匹配流程时，返回 None（决策1：免审批直通）
+    # 3. 未匹配流程时，返回明确错误；License 不再走免审批直通
     assert matched_flow is None
-    assert err is None  # LICENSE 未匹配不报错
+    assert err == "未找到匹配的License审批流程，请联系管理员创建或完善审批流程"
 
-    # 4. 免审批直通逻辑（由 API 层处理）
-    # 在实际 API 中会直接设置状态为 ISSUED
-    application.status = LicenseApplicationStatus.ISSUED
-    db.commit()
     db.refresh(application)
-
-    assert application.status == LicenseApplicationStatus.ISSUED
+    assert application.status == LicenseApplicationStatus.DRAFT
 
 
 def test_license_approval_flow_visible_in_approval_center(db, test_team, test_user, test_customer):
@@ -234,6 +245,7 @@ def test_license_approval_flow_visible_in_approval_center(db, test_team, test_us
             nodes=[
                 ApprovalNodeCreate(
                     node_name="团队所有者审批",
+                    node_code="TEAM_OWNER",
                     node_order=1,
                     approve_role="TEAM_OWNER",
                 )
@@ -249,9 +261,9 @@ def test_license_approval_flow_visible_in_approval_center(db, test_team, test_us
         str(test_user.feishu_user_id),
         LicenseApplicationCreate(
             customer_id=test_customer.id,
-            license_type="OFFICIAL",
+            license_type="TRIAL",
             expiry_date=date(2027, 12, 31),
-            remark="正式License申请"
+            remark="试用License申请"
         )
     )
 

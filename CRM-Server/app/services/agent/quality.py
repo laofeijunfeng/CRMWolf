@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
 from app.services.ai_service import ai_service
+from app.services.agent.langchain_runtime import AgentLangChainRuntime, AgentLangChainStructuredOutputError
 from app.services.agent.prompts import (
     build_follow_up_quality_system_prompt,
     build_follow_up_quality_messages,
@@ -21,16 +22,6 @@ from app.services.agent.schemas import (
     AgentSemanticParseResult,
 )
 from app.services.follow_up_quality_principles import get_follow_up_quality_principles
-
-try:
-    from langchain.agents import create_agent
-except Exception:  # pragma: no cover - keeps imports resilient in stripped envs
-    create_agent = None  # type: ignore[assignment]
-
-try:
-    from langchain_openai import ChatOpenAI
-except Exception:  # pragma: no cover - optional production dependency
-    ChatOpenAI = None  # type: ignore[assignment]
 
 
 class AgentFollowUpQualityEvaluatorError(Exception):
@@ -51,8 +42,10 @@ class AgentFollowUpQualityEvaluator:
 
     def __init__(self, ai_client=ai_service, agent_factory=None, chat_model_factory=None) -> None:
         self.ai_client = ai_client
-        self.agent_factory = agent_factory or create_agent
-        self.chat_model_factory = chat_model_factory or ChatOpenAI
+        self.langchain_runtime = AgentLangChainRuntime(
+            agent_factory=agent_factory,
+            chat_model_factory=chat_model_factory,
+        )
 
     async def evaluate_with_metadata(
         self,
@@ -138,9 +131,6 @@ class AgentFollowUpQualityEvaluator:
         temperature: float,
         current_date: Optional[date] = None,
     ) -> Optional[AgentFollowUpQualityResult]:
-        if self.agent_factory is None or self.chat_model_factory is None:
-            return None
-
         system_prompt = build_follow_up_quality_system_prompt(
             current_date=current_date,
             principles_text=principles_text,
@@ -154,32 +144,22 @@ class AgentFollowUpQualityEvaluator:
             f"{memory_json}"
         )
         try:
-            chat_model = self.chat_model_factory(
-                model=model,
+            return await self.langchain_runtime.ainvoke_structured(
+                api_host=api_host,
                 api_key=api_key,
-                base_url=api_host,
+                model=model,
                 temperature=temperature,
-            )
-            agent = self.agent_factory(
-                model=chat_model,
-                tools=[],
                 system_prompt=system_prompt,
-                response_format=AgentFollowUpQualityResult,
-                middleware=[],
+                user_prompt=user_prompt,
+                response_model=AgentFollowUpQualityResult,
+                error_prefix="LangChain 跟进质量 structured output",
             )
-            response = await agent.ainvoke({"messages": [{"role": "user", "content": user_prompt}]})
-        except Exception as exc:
-            raise RuntimeError(f"LangChain 跟进质量 structured output 调用失败：{exc.__class__.__name__}") from exc
-
-        structured_response = response.get("structured_response") if isinstance(response, dict) else None
-        if isinstance(structured_response, AgentFollowUpQualityResult):
-            return structured_response
-        if structured_response is not None:
-            try:
-                return AgentFollowUpQualityResult.model_validate(structured_response)
-            except ValidationError as exc:
-                raise AgentFollowUpQualityEvaluatorError(f"LangChain 跟进质量结果无效：{str(exc)}") from exc
-        raise AgentFollowUpQualityEvaluatorError("LangChain 跟进质量 structured output 未返回结构化结果。")
+        except AgentLangChainStructuredOutputError as exc:
+            message = str(exc).replace(
+                "LangChain 跟进质量 structured output 结果无效",
+                "LangChain 跟进质量结果无效",
+            )
+            raise AgentFollowUpQualityEvaluatorError(message) from exc
 
     def parse_raw_response(self, raw: str) -> AgentFollowUpQualityResult:
         try:

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.crud.agent import agent_task_crud
 from app.schemas.agent import AgentTaskUpdate
-from app.services.agent.graph import CRMAgentGraphService
+from app.services.agent import agent_copy, business_rules
 from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParserError
 from app.services.agent.temporal import agent_temporal_resolver
@@ -22,7 +22,7 @@ from app.services.agent.interactions import (
 
 def _is_opportunity_fields_task(task) -> bool:
     state = task.state_json or {}
-    return state.get("action") == "collect_opportunity_fields"
+    return state.get("action") in {"collect_opportunity_fields", "create_opportunity"}
 
 def _merge_opportunity_fields(existing_opportunity: dict, semantic_result: AgentSemanticParseResult) -> dict:
     opportunity = semantic_result.opportunity
@@ -62,7 +62,7 @@ async def _apply_opportunity_fields(db: Session, task, content: str):
         _customer_requires_procurement_method(customer)
         or "procurement_method_id" in [str(field) for field in payload.get("missing_fields") or []]
     )
-    missing_fields = CRMAgentGraphService.missing_opportunity_fields(
+    missing_fields = business_rules.missing_opportunity_fields(
         opportunity,
         require_procurement_method=require_procurement_method,
     )
@@ -74,10 +74,10 @@ async def _apply_opportunity_fields(db: Session, task, content: str):
 
     if missing_fields:
         agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
-        return False, (
-            "还需要补充："
-            f"{CRMAgentGraphService.format_opportunity_missing_fields(_opportunity_missing_display_fields(missing_fields, customer))}。"
+        display_fields = business_rules.format_opportunity_missing_fields(
+            _opportunity_missing_display_fields(missing_fields, customer)
         )
+        return False, agent_copy.fill_fields("商机", display_fields.split("、"))
 
     payload = {
         "customer_id": opportunity.get("customer_id"),
@@ -101,4 +101,4 @@ async def _apply_opportunity_fields(db: Session, task, content: str):
             state_json=new_state,
         ),
     )
-    return True, f"商机信息已补齐。请确认是否为「{customer.get('account_name')}」创建商机？"
+    return True, agent_copy.opportunity_ready_to_confirm(customer.get("account_name"))

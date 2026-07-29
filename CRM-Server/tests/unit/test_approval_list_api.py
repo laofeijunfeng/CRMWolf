@@ -517,6 +517,7 @@ def test_entity_summary_payment_join(
     flow, node = seed_invoice_flow
     pr = PaymentRecord(
         team_id=1,
+        record_number="",
         payment_plan_id=1,
         actual_amount=Decimal("12000"),
         payment_date=datetime.now().date(),

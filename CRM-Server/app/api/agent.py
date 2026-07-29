@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.deps import get_current_active_user, get_current_user_team, security
 from app.crud.agent import agent_message_crud, agent_session_crud
 from app.models.user import User
@@ -18,11 +18,26 @@ from app.schemas.agent import (
     AgentSessionResponse,
 )
 from app.schemas.common import PaginatedResponse
+from app.services.agent import application as agent_application_module
+from app.services.agent import confirmation_intent, field_common, follow_up_fields, selection, session_state, task_execution
+from app.services.agent import interactions as agent_interactions
 from app.services.agent.application import agent_application_service
+from app.services.agent.graph import crm_agent_graph_service
+from app.services.agent.input import AgentTurnInput
+from app.services.agent.interactions import (
+    _interaction_for_event as _service_interaction_for_event,
+    _opportunity_interaction_fields,
+    _procurement_method_options,
+    _with_interaction as _service_with_interaction,
+)
+from app.services.agent.quality import agent_follow_up_quality_evaluator
+from app.services.agent.semantic import agent_semantic_parser
 from app.services.agent.session_state import (
     _build_session_create,
     _get_owned_session,
 )
+from app.services.agent.task_actions import _tool_payload_for_action
+from app.services.agent.tools import CRMAgentToolService
 from app.utils.sse_encoder import SSEJsonEncoder
 
 
@@ -35,6 +50,29 @@ def _encode_sse(event: dict) -> str:
 
 def _authorization_header(credentials: HTTPAuthorizationCredentials) -> str:
     return f"{credentials.scheme} {credentials.credentials}"
+
+
+def _sync_legacy_agent_overrides() -> None:
+    """Keep legacy API-level monkeypatch hooks wired to service modules."""
+    agent_application_module.SessionLocal = SessionLocal
+    agent_application_module.crm_agent_graph_service = crm_agent_graph_service
+    task_execution.CRMAgentToolService = CRMAgentToolService
+    selection.CRMAgentToolService = CRMAgentToolService
+    field_common.agent_semantic_parser = agent_semantic_parser
+    session_state.agent_semantic_parser = agent_semantic_parser
+    follow_up_fields.agent_follow_up_quality_evaluator = agent_follow_up_quality_evaluator
+    if hasattr(agent_semantic_parser, "assess_confirmation_intent"):
+        confirmation_intent.agent_semantic_parser = agent_semantic_parser
+
+
+def _interaction_for_event(event: dict, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> Optional[dict]:
+    agent_interactions._procurement_method_options = _procurement_method_options
+    return _service_interaction_for_event(event, db=db, team_id=team_id)
+
+
+def _with_interaction(event: dict, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> dict:
+    agent_interactions._procurement_method_options = _procurement_method_options
+    return _service_with_interaction(event, db=db, team_id=team_id)
 
 
 @router.post("/sessions", response_model=AgentSessionResponse, status_code=status.HTTP_201_CREATED)
@@ -114,6 +152,7 @@ async def stream_agent_chat(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     user_id = current_user.id
+    _sync_legacy_agent_overrides()
 
     async def generate_sse():
         async for event in agent_application_service.stream_chat_events(
@@ -123,6 +162,10 @@ async def stream_agent_chat(
             authorization=_authorization_header(credentials),
             session_id=request.session_id,
             session_key=request.session_key,
+            turn_input=AgentTurnInput.text(
+                request.content,
+                metadata=request.interaction_metadata or {},
+            ),
         ):
             yield _encode_sse(event)
 

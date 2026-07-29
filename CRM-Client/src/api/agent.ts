@@ -19,6 +19,10 @@ export type AgentEventType =
   | "business_context_loaded"
   | "business_suggestions"
   | "suggestion_failed"
+  | "suspended_tasks_loaded"
+  | "turn_relation_classified"
+  | "turn_relation_clarification_required"
+  | "suspended_task_resumed"
   | "confirmation_required"
   | "customer_selection_required"
   | "customer_selected"
@@ -38,6 +42,8 @@ export type AgentEventType =
   | "business_selection_required"
   | "business_selected"
   | "business_selection_failed"
+  | "pending_interruption_confirmation_required"
+  | "pending_task_interrupted"
   | "task_completed"
   | "task_failed"
   | "task_cancelled"
@@ -49,6 +55,7 @@ export interface AgentChatRequest {
   content: string
   session_id?: number
   session_key?: string
+  interaction_metadata?: Record<string, unknown>
 }
 
 export interface AgentSessionResponse {
@@ -113,6 +120,7 @@ export interface AgentChatSSEEvent {
 export interface AgentInteractionChoice {
   label: string
   value: string
+  metadata?: Record<string, unknown>
 }
 
 export interface AgentInteractionField {
@@ -126,12 +134,20 @@ export interface AgentInteractionField {
 }
 
 export interface AgentInteraction {
+  schema_version?: "agent.interaction.v1" | string
+  interaction_id?: string
+  task_id?: number | string
+  task_key?: string
   type: "choice" | "form" | "text" | string
+  business_action?: string | null
+  status?: "waiting_user_input" | "waiting_confirmation" | "completed" | "cancelled" | "failed" | string
+  title?: string
   prompt?: string
   placeholder?: string
   submit_label?: string
   choices?: AgentInteractionChoice[]
   fields?: AgentInteractionField[]
+  payload?: Record<string, unknown>
   allow_free_text?: boolean
   allow_cancel?: boolean
 }

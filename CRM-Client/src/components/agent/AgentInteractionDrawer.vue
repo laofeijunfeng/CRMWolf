@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
-import type { AgentInteraction } from "@/api/agent"
+import type { AgentInteraction, AgentInteractionChoice } from "@/api/agent"
 import { AppDrawer } from "@/components/ui/app-drawer"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
@@ -20,7 +20,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  submit: [content: string]
+  submit: [content: string, metadata?: Record<string, unknown>]
   cancel: []
   "height-change": [height: number]
 }>()
@@ -30,6 +30,8 @@ const textValue = ref("")
 
 const open = computed(() => props.interaction !== null)
 const title = computed(() => {
+  const interactionTitle = props.interaction?.title?.trim()
+  if (interactionTitle !== undefined && interactionTitle.length > 0) return interactionTitle
   const prompt = props.interaction?.prompt?.trim()
   return prompt !== undefined && prompt.length > 0 ? prompt : "请补充信息"
 })
@@ -90,9 +92,9 @@ const formatLocalDate = (date: Date): string => {
   return `${year}-${month}-${day}`
 }
 
-const submitChoice = (value: string): void => {
+const submitChoice = (choice: AgentInteractionChoice): void => {
   if (props.disabled) return
-  emit("submit", value)
+  emit("submit", choice.value, choice.metadata)
 }
 
 const submitForm = (): void => {
@@ -141,7 +143,7 @@ const handleOpenChange = (nextOpen: boolean): void => {
         :key="choice.value"
         type="button"
         :disabled="disabled"
-        @click="submitChoice(choice.value)"
+        @click="submitChoice(choice)"
       >
         {{ choice.label }}
       </Button>

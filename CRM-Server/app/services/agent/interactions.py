@@ -21,7 +21,17 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskUpdate,
 )
-from app.services.agent.graph import CRMAgentGraphService
+from app.services.agent import business_rules
+from app.services.agent import agent_copy
+from app.services.agent.interaction_contract import (
+    INTERACTION_TYPE_CHOICE,
+    INTERACTION_TYPE_FORM,
+    INTERACTION_TYPE_TEXT,
+    STATUS_WAITING_CONFIRMATION,
+    STATUS_WAITING_USER_INPUT,
+    build_interaction,
+    payload_from_event,
+)
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -45,14 +55,28 @@ def _append_trace_event(trace_events: list[dict], event: dict) -> None:
         return
     trace_events.append(json.loads(json.dumps(event, ensure_ascii=False, cls=SSEJsonEncoder)))
 
-def _choice_interaction(prompt: str, choices: list[dict[str, str]]) -> dict[str, Any]:
-    return {
-        "type": "choice",
-        "prompt": prompt,
-        "choices": choices,
-        "allow_free_text": True,
-        "allow_cancel": True,
-    }
+def _choice_interaction(
+    prompt: str,
+    choices: list[dict[str, Any]],
+    *,
+    event: Optional[dict[str, Any]] = None,
+    title: Optional[str] = None,
+    business_action: Optional[str] = None,
+    status: str = STATUS_WAITING_USER_INPUT,
+) -> dict[str, Any]:
+    event = event or {}
+    return build_interaction(
+        event_name=event.get("event"),
+        interaction_type=INTERACTION_TYPE_CHOICE,
+        prompt=prompt,
+        choices=choices,
+        status=status,
+        title=title,
+        business_action=business_action,
+        payload=payload_from_event(event),
+        task_id=event.get("task_id"),
+        task_key=event.get("task_key"),
+    )
 
 def _form_field(
     key: str,
@@ -89,26 +113,16 @@ def _procurement_method_options(db: Optional[Session], team_id: Optional[int]) -
     return [{"label": method.name, "value": str(method.id)} for method in methods]
 
 def _customer_requires_procurement_method(customer: dict) -> bool:
-    return "default_procurement_method_id" in customer and not customer.get("default_procurement_method_id")
+    return business_rules.customer_requires_procurement_method(customer)
 
 def _customer_default_procurement_method_id(customer: dict) -> Optional[int]:
-    value = customer.get("default_procurement_method_id")
-    if isinstance(value, int) and value > 0:
-        return value
-    if isinstance(value, str) and value.isdigit() and int(value) > 0:
-        return int(value)
-    return None
+    return business_rules.customer_default_procurement_method_id(customer)
 
 def _opportunity_interaction_fields(missing_fields: list[str], customer: dict) -> list[str]:
-    fields = list(dict.fromkeys(missing_fields))
-    if "license_type" in fields and "subscription_years" not in fields:
-        fields.insert(fields.index("license_type") + 1, "subscription_years")
-    if "procurement_method_id" not in fields:
-        fields.append("procurement_method_id")
-    return fields
+    return business_rules.opportunity_interaction_fields(missing_fields)
 
 def _opportunity_missing_display_fields(missing_fields: list[str], customer: dict) -> list[str]:
-    return _opportunity_interaction_fields(missing_fields, customer)
+    return business_rules.opportunity_missing_display_fields(missing_fields)
 
 def _opportunity_field_defaults(
     customer: dict,
@@ -268,24 +282,24 @@ def _interaction_for_event(
     if event.get("interaction"):
         return event["interaction"]
     if event_name == "confirmation_required":
-        return _choice_interaction(content or "请确认是否执行？", [
+        return _choice_interaction(content or agent_copy.confirm_prompt(event.get("action")), [
             {"label": "是", "value": "是"},
             {"label": "否", "value": "否"},
-        ])
+        ], event=event, status=STATUS_WAITING_CONFIRMATION)
     if event_name == "customer_selection_required":
         customers = event.get("customers") or []
         choices = [
             {"label": str(customer.get("account_name") or f"客户 {index}"), "value": str(index)}
             for index, customer in enumerate(customers, start=1)
         ]
-        return _choice_interaction(content or "请选择客户", choices)
+        return _choice_interaction(content or agent_copy.choose_customer(), choices, event=event)
     if event_name == "business_selection_required":
         choices = []
         for key in ("contracts", "payment_plans"):
             for index, item in enumerate(event.get(key) or [], start=1):
                 name = item.get("contract_name") or item.get("plan_name") or item.get("name") or f"业务对象 {index}"
                 choices.append({"label": str(name), "value": str(index)})
-        return _choice_interaction(content or "请选择业务对象", choices)
+        return _choice_interaction(content or agent_copy.choose_business_object(), choices, event=event)
     form_kinds = {
         "opportunity_fields_required": "opportunity",
         "contact_fields_required": "contact",
@@ -314,34 +328,66 @@ def _interaction_for_event(
                 **_opportunity_field_defaults({}, db=db, team_id=team_id, customer_id=customer_id),
                 **default_values,
             }
-        return {
-            "type": "form",
-            "prompt": content or "请补充信息",
-            "submit_label": "提交",
-            "fields": _fields_for_missing(
+        fields = _fields_for_missing(
                 form_kinds[event_name],
                 [str(field) for field in interaction_fields],
                 db=db,
                 team_id=team_id,
                 default_values=default_values,
-            ),
-            "allow_free_text": True,
-            "allow_cancel": True,
-        }
+            )
+        return build_interaction(
+            event_name=event_name,
+            interaction_type=INTERACTION_TYPE_FORM,
+            prompt=content or agent_copy.fill_fields(str(form_kinds[event_name]), interaction_fields),
+            submit_label="提交",
+            fields=fields,
+            status=STATUS_WAITING_USER_INPUT,
+            payload=payload_from_event(event, extra={
+                "missing_fields": [str(field) for field in missing_fields],
+                "interaction_fields": [str(field) for field in interaction_fields],
+            }),
+            task_id=event.get("task_id"),
+            task_key=event.get("task_key"),
+        )
     if event_name == "follow_up_quality_required":
-        return {
-            "type": "text",
-            "prompt": content or "请补充跟进记录",
-            "placeholder": "补充跟进背景、下一步动作、时间或负责人...",
-            "submit_label": "补充",
-            "allow_free_text": True,
-            "allow_cancel": True,
-        }
+        return build_interaction(
+            event_name=event_name,
+            interaction_type=INTERACTION_TYPE_TEXT,
+            prompt=content or agent_copy.follow_up_quality_prompt(),
+            placeholder="补充跟进背景、下一步动作、时间或负责人...",
+            submit_label="补充",
+            status=STATUS_WAITING_USER_INPUT,
+            payload=payload_from_event(event),
+            task_id=event.get("task_id"),
+            task_key=event.get("task_key"),
+        )
     if event_name == "pending_interruption_confirmation_required":
-        return _choice_interaction(content or "要切换到新流程吗？", [
+        return _choice_interaction(content or agent_copy.pending_interruption_prompt(), [
             {"label": "切换新流程", "value": "切换新流程"},
             {"label": "继续刚才", "value": "继续刚才"},
-        ])
+        ], event=event, status=STATUS_WAITING_CONFIRMATION)
+    if event_name == "turn_relation_clarification_required":
+        candidates = event.get("candidates") if isinstance(event.get("candidates"), list) else []
+        choices = []
+        for index, candidate in enumerate(candidates[:2], start=1):
+            if not isinstance(candidate, dict):
+                continue
+            summary = str(candidate.get("summary") or candidate.get("intent") or f"草稿 {index}")
+            choice: dict[str, Any] = {
+                "label": summary,
+                "value": f"继续：{summary}",
+            }
+            if candidate.get("id") is not None:
+                choice["metadata"] = {"selected_task_id": candidate.get("id")}
+            choices.append(choice)
+        if not choices:
+            return None
+        return _choice_interaction(
+            content or agent_copy.turn_relation_clarification(),
+            choices,
+            event=event,
+            status=STATUS_WAITING_USER_INPUT,
+        )
     return None
 
 def _with_interaction(event: dict, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> dict:
@@ -353,7 +399,50 @@ def _with_interaction(event: dict, *, db: Optional[Session] = None, team_id: Opt
 def _pending_task_confirmation_interaction(content: str) -> dict[str, Any]:
     return _choice_interaction(content or "要继续处理下一步吗？", [
         {"label": "继续处理", "value": "是"},
-    ])
+    ], event={"event": "confirmation_required"}, status=STATUS_WAITING_CONFIRMATION)
+
+
+def _pending_task_interaction(task, content: str, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> dict[str, Any]:
+    state = task.state_json or {}
+    action = state.get("action")
+    payload = state.get("payload") if isinstance(state.get("payload"), dict) else {}
+    customer = state.get("customer")
+    event_names = {
+        "collect_opportunity_fields": "opportunity_fields_required",
+        "collect_contact_fields": "contact_fields_required",
+        "collect_invoice_title_fields": "invoice_title_fields_required",
+        "collect_deployment_info_fields": "deployment_info_fields_required",
+        "collect_customer_member_fields": "customer_member_fields_required",
+        "collect_payment_fields": "payment_fields_required",
+        "collect_lead_fields": "lead_fields_required",
+        "collect_customer_fields": "customer_fields_required",
+        "collect_follow_up_quality_fields": "follow_up_quality_required",
+        "collect_lead_follow_up_quality_fields": "follow_up_quality_required",
+        "create_opportunity": "confirmation_required",
+        "move_opportunity_stage": "confirmation_required",
+        "create_customer_follow_up": "confirmation_required",
+        "create_lead_follow_up": "confirmation_required",
+        "create_payment_record": "confirmation_required",
+        "create_payment_plan": "confirmation_required",
+        "create_lead": "confirmation_required",
+        "create_customer": "confirmation_required",
+    }
+    event_name = event_names.get(str(action))
+    if not event_name:
+        return _pending_task_confirmation_interaction(content)
+    event = {
+        "event": event_name,
+        "action": action,
+        "task_id": getattr(task, "id", None),
+        "task_key": getattr(task, "task_key", None),
+        "content": content,
+        "payload": payload,
+    }
+    if customer:
+        event["customer"] = customer
+    interaction = _interaction_for_event(event, db=db, team_id=team_id)
+    return interaction or _pending_task_confirmation_interaction(content)
+
 
 def _should_offer_next_pending_task(action: Optional[str]) -> bool:
     return action in {"create_customer_follow_up", "create_payment_plan", "create_lead", "create_customer"}

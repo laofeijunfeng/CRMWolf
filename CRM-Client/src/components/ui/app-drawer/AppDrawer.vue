@@ -118,6 +118,8 @@ onBeforeUnmount(() => {
 @use '@/styles/variables-v2.scss' as *;
 
 .app-drawer {
+  max-height: min(80svh, 720px);
+  overflow: hidden;
   border-color: $wolf-border-default-v2;
   border-top-left-radius: $wolf-radius-sheet-v2;
   border-top-right-radius: $wolf-radius-sheet-v2;
@@ -126,7 +128,11 @@ onBeforeUnmount(() => {
 }
 
 .app-drawer__content {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   width: min(100%, 720px);
+  max-height: inherit;
+  min-height: 0;
   margin: 0 auto;
   padding: 0 $wolf-page-padding-v2 $wolf-space-lg-v2;
 }
@@ -165,6 +171,9 @@ onBeforeUnmount(() => {
 
 .app-drawer__body {
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 @media (max-width: 767px) {

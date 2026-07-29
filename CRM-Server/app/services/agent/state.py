@@ -1,5 +1,6 @@
 """CRM AI Agent LangGraph state types."""
-from typing import Any, Dict, List, Optional, TypedDict
+import operator
+from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
 from app.services.agent.schemas import (
     AgentFollowUpQualityResult,
@@ -36,3 +37,30 @@ class AgentGraphState(TypedDict, total=False):
     suggestion_error: Optional[str]
     response: Optional[str]
     events: List[Dict[str, Any]]
+
+
+class PendingTaskGraphState(TypedDict, total=False):
+    db: Any
+    session: Any
+    task: Any
+    suspended_candidates: List[Dict[str, Any]]
+    turn_relation_decision: Any
+    resumed_task: Any
+    turn_input: Any
+    content: str
+    team_id: int
+    user_id: int
+    session_id: int
+    authorization: Optional[str]
+    handled: bool
+    assistant_content: Optional[str]
+    switch_notice: Optional[str]
+    suspended_task: Any
+    suspend_reason: Optional[str]
+    selected_customer: Dict[str, Any]
+    remember_pending_task: bool
+    clear_pending_task_id: Optional[int]
+    confirmation_decision: Any
+    preflight_result: Any
+    interaction_result: Any
+    events: Annotated[List[Dict[str, Any]], operator.add]

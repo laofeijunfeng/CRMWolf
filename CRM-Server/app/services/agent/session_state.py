@@ -21,7 +21,6 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskUpdate,
 )
-from app.services.agent.graph import CRMAgentGraphService
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -30,6 +29,7 @@ from app.services.agent.schemas import (
     AgentMemorySnapshot,
     AgentPendingInterruptionDecision,
     AgentSemanticParseResult,
+    AgentTurnRelationDecision,
 )
 from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.temporal import agent_temporal_resolver
@@ -149,15 +149,78 @@ def _get_current_waiting_task(db: Session, session, team_id: int, user_id: int):
         user_id=user_id,
     )
 
+def _get_latest_suspended_task(db: Session, session, team_id: int, user_id: int):
+    context = session.context_json or {}
+    suspended = context.get("suspended_pending_tasks")
+    if isinstance(suspended, list):
+        for item in suspended:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            task = agent_task_crud.get_by_id(db, item["id"], team_id=team_id, user_id=user_id)
+            if task and task.status == AgentTaskStatus.SUSPENDED and _is_resumable_task(task):
+                return task
+
+    for task in agent_task_crud.list_by_session(db, session.id, team_id=team_id, user_id=user_id):
+        if task.status == AgentTaskStatus.SUSPENDED and _is_resumable_task(task):
+            return task
+    return None
+
+def _resume_suspended_task(db: Session, session, task):
+    state = dict(task.state_json or {})
+    state.pop("suspended_reason", None)
+    task = agent_task_crud.update(
+        db,
+        task,
+        AgentTaskUpdate(status=AgentTaskStatus.WAITING_USER, state_json=state),
+    )
+    context = dict(session.context_json or {})
+    suspended = context.get("suspended_pending_tasks")
+    if isinstance(suspended, list):
+        context["suspended_pending_tasks"] = [
+            item for item in suspended if not (isinstance(item, dict) and item.get("id") == task.id)
+        ][:5]
+    context["current_pending_task"] = {
+        "id": task.id,
+        "action": state.get("action"),
+        "intent": task.intent,
+        "target_id": task.target_id,
+        "summary": task.summary,
+    }
+    agent_session_crud.update(db, session, AgentSessionUpdate(context_json=context))
+    return task
+
+def _is_resumable_task(task) -> bool:
+    action = (task.state_json or {}).get("action")
+    return action in {
+        "collect_opportunity_fields",
+        "create_opportunity",
+    }
+
 def _pending_task_snapshot(task) -> dict[str, Any]:
+    state = task.state_json or {}
+    task_input = task.input_json or {}
+    payload = task_input.get("payload") if isinstance(task_input, dict) else None
+    payload = payload if isinstance(payload, dict) else {}
+    customer = payload.get("customer") if isinstance(payload.get("customer"), dict) else {}
+    missing_fields = []
+    if isinstance(state.get("missing_fields"), list):
+        missing_fields = state["missing_fields"]
+    elif isinstance(task_input, dict) and isinstance(task_input.get("missing_fields"), list):
+        missing_fields = task_input["missing_fields"]
     return {
         "id": task.id,
         "intent": task.intent,
         "target_type": task.target_type,
         "target_id": task.target_id,
         "summary": task.summary,
-        "state": task.state_json or {},
-        "input": task.input_json or {},
+        "action": state.get("action") or (task_input.get("action") if isinstance(task_input, dict) else None),
+        "customer_name": customer.get("account_name") or customer.get("name") or state.get("customer_name"),
+        "missing_fields": missing_fields,
+        "status": getattr(task.status, "value", task.status),
+        "created_time": getattr(task, "created_time", None),
+        "updated_time": getattr(task, "updated_time", None),
+        "state": state,
+        "input": task_input,
     }
 
 def _memory_snapshot_for_session(session, task=None) -> AgentMemorySnapshot:
@@ -165,6 +228,29 @@ def _memory_snapshot_for_session(session, task=None) -> AgentMemorySnapshot:
         pending_task=_pending_task_snapshot(task) if task else None,
         session_context=session.context_json or {},
     )
+
+def _suspended_task_snapshots(db: Session, session, team_id: int, user_id: int) -> list[dict[str, Any]]:
+    snapshots: list[dict[str, Any]] = []
+    context = session.context_json or {}
+    suspended = context.get("suspended_pending_tasks")
+    seen_ids: set[int] = set()
+    if isinstance(suspended, list):
+        for item in suspended:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            task = agent_task_crud.get_by_id(db, item["id"], team_id=team_id, user_id=user_id)
+            if task and task.status == AgentTaskStatus.SUSPENDED and _is_resumable_task(task):
+                snapshots.append(_pending_task_snapshot(task))
+                seen_ids.add(task.id)
+    for task in agent_task_crud.list_by_session(db, session.id, team_id=team_id, user_id=user_id):
+        if task.id in seen_ids:
+            continue
+        if task.status == AgentTaskStatus.SUSPENDED and _is_resumable_task(task):
+            snapshots.append(_pending_task_snapshot(task))
+            seen_ids.add(task.id)
+        if len(snapshots) >= 5:
+            break
+    return snapshots[:5]
 
 def _is_high_confidence_new_flow(decision: AgentPendingInterruptionDecision) -> bool:
     if decision.decision != "START_NEW_FLOW":
@@ -195,6 +281,33 @@ async def _assess_pending_interruption(db: Session, *, team_id: int, session, ta
             confidence=0.0,
             reason="挂起任务判断不可用，保守继续当前任务。",
             is_field_supplement=True,
+        )
+
+async def _assess_turn_relation(
+    db: Session,
+    *,
+    team_id: int,
+    user_id: int,
+    session,
+    task=None,
+    user_message: str,
+) -> AgentTurnRelationDecision:
+    suspended_tasks = _suspended_task_snapshots(db, session, team_id, user_id)
+    try:
+        return await agent_semantic_parser.assess_turn_relation(
+            db,
+            team_id=team_id,
+            user_message=user_message,
+            active_task=_pending_task_snapshot(task) if task else None,
+            suspended_tasks=suspended_tasks,
+            memory=_memory_snapshot_for_session(session, task),
+            current_date=agent_temporal_resolver.now().date(),
+        )
+    except Exception:
+        return AgentTurnRelationDecision(
+            relation="START_NEW_FLOW",
+            confidence=0.0,
+            reason="本轮关系判断不可用，保守进入新流程，不自动恢复挂起草稿。",
         )
 
 def _is_confirmation(content: str) -> bool:

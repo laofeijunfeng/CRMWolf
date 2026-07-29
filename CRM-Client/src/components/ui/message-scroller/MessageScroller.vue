@@ -29,7 +29,7 @@ watch(() => props.contentStyle, scrollToBottom, { flush: "post" })
 </script>
 
 <template>
-  <ScrollArea :class="cn('h-full min-h-0', props.class)">
+  <ScrollArea :class="cn('message-scroller h-full min-h-0', props.class)">
     <div
       ref="contentRef"
       :class="cn('flex min-h-full flex-col gap-wolf-md p-wolf-md', props.contentClass)"
@@ -39,3 +39,15 @@ watch(() => props.contentStyle, scrollToBottom, { flush: "post" })
     </div>
   </ScrollArea>
 </template>
+
+<style scoped>
+.message-scroller {
+  overflow: hidden;
+}
+
+.message-scroller :deep([data-reka-scroll-area-viewport]) {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+</style>

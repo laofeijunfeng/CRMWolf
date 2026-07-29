@@ -11,18 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
 from app.services.ai_service import ai_service
+from app.services.agent import business_rules
+from app.services.agent.langchain_runtime import AgentLangChainRuntime, AgentLangChainStructuredOutputError
 from app.services.agent.prompts import CRM_AGENT_SUGGESTION_SYSTEM_PROMPT, build_suggestion_messages
 from app.services.agent.schemas import AgentBusinessSuggestion, AgentSemanticParseResult, AgentSuggestionResult
-
-try:
-    from langchain.agents import create_agent
-except Exception:  # pragma: no cover - keeps imports resilient in stripped envs
-    create_agent = None  # type: ignore[assignment]
-
-try:
-    from langchain_openai import ChatOpenAI
-except Exception:  # pragma: no cover - optional production dependency
-    ChatOpenAI = None  # type: ignore[assignment]
 
 
 class AgentSuggestionGeneratorError(Exception):
@@ -54,8 +46,10 @@ class AgentSuggestionGenerator:
 
     def __init__(self, ai_client=ai_service, agent_factory=None, chat_model_factory=None) -> None:
         self.ai_client = ai_client
-        self.agent_factory = agent_factory or create_agent
-        self.chat_model_factory = chat_model_factory or ChatOpenAI
+        self.langchain_runtime = AgentLangChainRuntime(
+            agent_factory=agent_factory,
+            chat_model_factory=chat_model_factory,
+        )
 
     async def generate_with_metadata(
         self,
@@ -132,9 +126,6 @@ class AgentSuggestionGenerator:
         temperature: float,
         current_date: Optional[date] = None,
     ) -> Optional[AgentSuggestionResult]:
-        if self.agent_factory is None or self.chat_model_factory is None:
-            return None
-
         prompt_date = current_date or date.today()
         system_prompt = f"{CRM_AGENT_SUGGESTION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
         user_prompt = (
@@ -146,32 +137,22 @@ class AgentSuggestionGenerator:
             f"{customer_context_json}"
         )
         try:
-            chat_model = self.chat_model_factory(
-                model=model,
+            return await self.langchain_runtime.ainvoke_structured(
+                api_host=api_host,
                 api_key=api_key,
-                base_url=api_host,
+                model=model,
                 temperature=temperature,
-            )
-            agent = self.agent_factory(
-                model=chat_model,
-                tools=[],
                 system_prompt=system_prompt,
-                response_format=AgentSuggestionResult,
-                middleware=[],
+                user_prompt=user_prompt,
+                response_model=AgentSuggestionResult,
+                error_prefix="LangChain suggestion structured output",
             )
-            response = await agent.ainvoke({"messages": [{"role": "user", "content": user_prompt}]})
-        except Exception as exc:
-            raise RuntimeError(f"LangChain suggestion structured output 调用失败：{exc.__class__.__name__}") from exc
-
-        structured_response = response.get("structured_response") if isinstance(response, dict) else None
-        if isinstance(structured_response, AgentSuggestionResult):
-            return structured_response
-        if structured_response is not None:
-            try:
-                return AgentSuggestionResult.model_validate(structured_response)
-            except ValidationError as exc:
-                raise AgentSuggestionGeneratorError(f"LangChain suggestion structured output 无效：{str(exc)}") from exc
-        raise AgentSuggestionGeneratorError("LangChain suggestion structured output 未返回结构化结果。")
+        except AgentLangChainStructuredOutputError as exc:
+            message = str(exc).replace(
+                "LangChain suggestion structured output 结果无效",
+                "LangChain suggestion structured output 无效",
+            )
+            raise AgentSuggestionGeneratorError(message) from exc
 
     def parse_raw_response(self, raw: str) -> AgentSuggestionResult:
         try:
@@ -449,23 +430,11 @@ class AgentSuggestionGenerator:
 
     @staticmethod
     def _context_items(value: Any) -> list[dict[str, Any]]:
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
-        if isinstance(value, dict):
-            items = value.get("items")
-            if isinstance(items, list):
-                return [item for item in items if isinstance(item, dict)]
-        return []
+        return business_rules.context_items(value)
 
     @staticmethod
     def _is_open_payment_plan(plan: dict[str, Any]) -> bool:
-        status = str(plan.get("status") or "").upper()
-        remaining_amount = plan.get("remaining_amount")
-        try:
-            has_remaining = remaining_amount is None or float(remaining_amount) > 0
-        except (TypeError, ValueError):
-            has_remaining = True
-        return status != "COMPLETED" and has_remaining
+        return business_rules.is_open_payment_plan(plan)
 
     @staticmethod
     def _is_approved_opportunity(opportunity: dict[str, Any]) -> bool:

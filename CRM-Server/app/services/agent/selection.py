@@ -21,7 +21,7 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskUpdate,
 )
-from app.services.agent.graph import CRMAgentGraphService
+from app.services.agent import business_rules
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -121,7 +121,7 @@ async def _contact_task_next_state(
         opportunity["customer_id"] = customer.get("id")
         payload["customer_id"] = customer.get("id")
         payload["opportunity"] = opportunity
-        missing_fields = CRMAgentGraphService.missing_opportunity_fields(
+        missing_fields = business_rules.missing_opportunity_fields(
             opportunity,
             require_procurement_method=_customer_requires_procurement_method(customer),
         )
@@ -132,7 +132,7 @@ async def _contact_task_next_state(
             payload["field_defaults"] = _opportunity_field_defaults(customer)
             content = (
                 f"已选择客户「{customer.get('account_name')}」，还需要补充："
-                f"{CRMAgentGraphService.format_opportunity_missing_fields(_opportunity_missing_display_fields(missing_fields, customer))}。"
+                f"{business_rules.format_opportunity_missing_fields(_opportunity_missing_display_fields(missing_fields, customer))}。"
                 if missing_fields
                 else f"已选择客户「{customer.get('account_name')}」，请确认采购方式。"
             )
@@ -153,14 +153,14 @@ async def _contact_task_next_state(
     if action == "select_customer_for_invoice_title":
         invoice_title = payload.get("invoice_title") or {}
         payload["customer_id"] = customer.get("id")
-        missing_fields = CRMAgentGraphService.missing_invoice_title_fields(invoice_title)
+        missing_fields = business_rules.missing_invoice_title_fields(invoice_title)
         if missing_fields:
             payload["missing_fields"] = missing_fields
             return (
                 "collect_invoice_title_fields",
                 payload,
                 f"已选择客户「{customer.get('account_name')}」，还需要补充："
-                f"{CRMAgentGraphService.format_invoice_title_missing_fields(missing_fields)}。",
+                f"{business_rules.format_invoice_title_missing_fields(missing_fields)}。",
             )
         return (
             "create_invoice_title",
@@ -177,14 +177,14 @@ async def _contact_task_next_state(
         deployment_info["customer_id"] = customer.get("id")
         payload["customer_id"] = customer.get("id")
         payload["deployment_info"] = deployment_info
-        missing_fields = CRMAgentGraphService.missing_deployment_info_fields(deployment_info)
+        missing_fields = business_rules.missing_deployment_info_fields(deployment_info)
         if missing_fields:
             payload["missing_fields"] = missing_fields
             return (
                 "collect_deployment_info_fields",
                 payload,
                 f"已选择客户「{customer.get('account_name')}」，还需要补充："
-                f"{CRMAgentGraphService.format_deployment_info_missing_fields(missing_fields)}。",
+                f"{business_rules.format_deployment_info_missing_fields(missing_fields)}。",
             )
         return (
             "create_deployment_info",
@@ -215,14 +215,14 @@ async def _contact_task_next_state(
                 authorization=authorization,
                 customer_id=customer["id"],
             )
-        missing_fields = CRMAgentGraphService.missing_customer_member_fields(customer_member)
+        missing_fields = business_rules.missing_customer_member_fields(customer_member)
         if missing_fields:
             payload["missing_fields"] = missing_fields
             return (
                 "collect_customer_member_fields",
                 payload,
                 f"已选择客户「{customer.get('account_name')}」，还需要补充："
-                f"{CRMAgentGraphService.format_customer_member_missing_fields(missing_fields)}。",
+                f"{business_rules.format_customer_member_missing_fields(missing_fields)}。",
             )
         return (
             "collect_customer_member_fields",
@@ -233,14 +233,14 @@ async def _contact_task_next_state(
     contact = payload.get("contact") or {}
     if action == "select_customer_for_contact":
         payload["customer_id"] = customer.get("id")
-        missing_fields = CRMAgentGraphService.missing_contact_fields(contact)
+        missing_fields = business_rules.missing_contact_fields(contact)
         if missing_fields:
             payload["missing_fields"] = missing_fields
             return (
                 "collect_contact_fields",
                 payload,
                 f"已选择客户「{customer.get('account_name')}」，还需要补充："
-                f"{CRMAgentGraphService.format_contact_missing_fields(missing_fields)}。",
+                f"{business_rules.format_contact_missing_fields(missing_fields)}。",
             )
         return (
             "create_contact",
@@ -350,7 +350,7 @@ def _apply_business_selection(db: Session, task, content: str):
         if not plan:
             names = "；".join(f"{index}. {item.get('contract_name')} / {item.get('stage_name')}" for index, item in enumerate(payment_plans, start=1))
             return None, f"没有匹配到你选择的回款计划，请回复序号或阶段名称：{names}"
-        next_payload = CRMAgentGraphService._payment_record_payload(plan, payment, commission_member_id)
+        next_payload = business_rules.payment_record_payload(plan, payment, commission_member_id)
         new_state = {
             "action": "create_payment_record",
             "payload": next_payload,
@@ -369,7 +369,7 @@ def _apply_business_selection(db: Session, task, content: str):
         if not contract:
             names = "；".join(f"{index}. {item.get('contract_name')}" for index, item in enumerate(contracts, start=1))
             return None, f"没有匹配到你选择的合同，请回复序号或合同名称：{names}"
-        next_payload = CRMAgentGraphService._payment_plan_payload(contract, payment, commission_member_id)
+        next_payload = business_rules.payment_plan_payload(contract, payment, commission_member_id)
         new_state = {
             "action": "create_payment_plan",
             "payload": next_payload,

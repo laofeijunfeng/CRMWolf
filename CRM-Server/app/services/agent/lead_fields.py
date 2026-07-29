@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.crud.agent import agent_task_crud
 from app.schemas.agent import AgentTaskUpdate
-from app.services.agent.graph import CRMAgentGraphService
+from app.services.agent import business_rules
 from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParserError
 from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
@@ -39,7 +39,7 @@ async def _apply_lead_fields(db: Session, task, content: str):
     lead = _merge_lead_fields(payload.get("lead") or {}, semantic_result)
     lead.setdefault("source", "其他")
     lead_follow_up = _merge_lead_follow_up_fields(payload.get("lead_follow_up") or {}, semantic_result)
-    missing_fields = CRMAgentGraphService.missing_lead_fields(lead)
+    missing_fields = business_rules.missing_lead_fields(lead)
     payload["lead"] = lead
     payload["lead_follow_up"] = lead_follow_up
     payload["missing_fields"] = missing_fields
@@ -49,7 +49,7 @@ async def _apply_lead_fields(db: Session, task, content: str):
         agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
         return False, (
             "还需要补充："
-            f"{CRMAgentGraphService.format_lead_missing_fields(missing_fields)}。"
+            f"{business_rules.format_lead_missing_fields(missing_fields)}。"
         )
 
     next_payload = {"lead": lead, "lead_follow_up": lead_follow_up}

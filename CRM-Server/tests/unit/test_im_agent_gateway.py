@@ -91,6 +91,169 @@ async def test_im_gateway_text_confirmation_uses_referenced_response_session(mon
 
 
 @pytest.mark.asyncio
+async def test_im_gateway_field_supplement_uses_referenced_pending_session(monkeypatch):
+    gateway = IMAgentGateway()
+    captured = {}
+
+    monkeypatch.setattr(
+        gateway_module.im_inbound_event_crud,
+        "get_by_response_message_id",
+        lambda *args, **kwargs: SimpleNamespace(raw_event={"message": {"chat_id": "chat_1", "thread_id": ""}}),
+    )
+    monkeypatch.setattr(
+        gateway_module.agent_channel_session_crud,
+        "get_by_scope",
+        lambda *args, **kwargs: SimpleNamespace(agent_session_id=9),
+    )
+    monkeypatch.setattr(
+        gateway_module.agent_task_crud,
+        "get_latest_waiting",
+        lambda *args, **kwargs: SimpleNamespace(
+            id=1,
+            status=AgentTaskStatus.WAITING_USER,
+            state_json={"action": "collect_opportunity_fields"},
+            created_time=None,
+        )
+        if kwargs.get("session_id") == 9
+        else None,
+    )
+
+    async def fake_handle_message(**kwargs):
+        captured.update(kwargs)
+        return {"final_content": "field collected", "interaction": None, "events": [], "im_events": []}
+
+    monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
+
+    result = await gateway.handle_text(
+        None,
+        team_id=1,
+        user_id=2,
+        provider="feishu",
+        session_id=10,
+        user_text="采购人数 10 万，买断，新购，公开招投标",
+        agent_content="引用消息：\n还需要补充：采购用户数、授权模式、采购类型、采购方式。\n\n本次指令：\n采购人数 10 万，买断，新购，公开招投标",
+        chat_id="chat_1",
+        thread_id="om_thread",
+        referenced_message_ids=["om_bot_reply"],
+    )
+
+    assert result["final_content"] == "field collected"
+    assert captured["session_id"] == 9
+    assert captured["content"] == "采购人数 10 万，买断，新购，公开招投标"
+    assert captured["turn_input"].kind == AgentInputKind.TEXT
+    assert captured["turn_input"].metadata["reply_to_message_ids"] == ["om_bot_reply"]
+    assert "还需要补充" not in captured["turn_input"].content
+
+
+@pytest.mark.asyncio
+async def test_im_gateway_maps_referenced_choice_number_to_interaction_metadata(monkeypatch):
+    gateway = IMAgentGateway()
+    captured = {}
+
+    monkeypatch.setattr(gateway, "_resolve_referenced_pending_session_id", lambda *args, **kwargs: 91)
+    monkeypatch.setattr(
+        gateway,
+        "_latest_waiting_interaction",
+        lambda *args, **kwargs: {
+            "interaction_id": "int_draft",
+            "type": "choice",
+            "business_action": "select_suspended_task",
+            "status": "waiting_user_input",
+            "choices": [
+                {
+                    "label": "广州睿狐增购10个账号补商机信息",
+                    "value": "继续：广州睿狐增购10个账号补商机信息",
+                    "metadata": {"selected_task_id": 201},
+                },
+                {
+                    "label": "广州睿狐创建商机确认",
+                    "value": "继续：广州睿狐创建商机确认",
+                    "metadata": {"selected_task_id": 202},
+                },
+            ],
+        },
+    )
+
+    async def fake_handle_message(**kwargs):
+        captured.update(kwargs)
+        return {"final_content": "resumed", "interaction": None, "events": [], "im_events": []}
+
+    monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
+
+    result = await gateway.handle_text(
+        None,
+        team_id=1,
+        user_id=2,
+        provider="feishu",
+        session_id=10,
+        user_text="1",
+        agent_content="引用消息：\n你想继续哪个草稿？\n\n本次指令：\n1",
+        referenced_message_ids=["om_bot_reply"],
+    )
+
+    assert result["final_content"] == "resumed"
+    assert captured["session_id"] == 91
+    assert captured["content"] == "继续：广州睿狐增购10个账号补商机信息"
+    assert captured["turn_input"].metadata["selected_task_id"] == 201
+    assert captured["turn_input"].metadata["business_action"] == "select_suspended_task"
+    assert captured["turn_input"].metadata["reply_to_message_ids"] == ["om_bot_reply"]
+
+
+@pytest.mark.asyncio
+async def test_im_gateway_uses_hidden_reply_binding_before_channel_fallback(monkeypatch):
+    gateway = IMAgentGateway()
+    captured = {}
+
+    monkeypatch.setattr(
+        gateway_module.im_inbound_event_crud,
+        "get_by_response_message_id",
+        lambda *args, **kwargs: SimpleNamespace(
+            agent_session_id=91,
+            agent_task_id=101,
+            raw_event={"message": {}},
+        ),
+    )
+    monkeypatch.setattr(
+        gateway_module.agent_task_crud,
+        "get_by_id",
+        lambda *args, **kwargs: SimpleNamespace(id=101, session_id=91, status=AgentTaskStatus.WAITING_USER),
+    )
+    monkeypatch.setattr(
+        gateway_module.agent_task_crud,
+        "get_latest_waiting",
+        lambda *args, **kwargs: SimpleNamespace(id=101, status=AgentTaskStatus.WAITING_USER)
+        if kwargs.get("session_id") == 91
+        else None,
+    )
+    monkeypatch.setattr(
+        gateway_module.agent_channel_session_crud,
+        "get_by_scope",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("hidden binding should avoid channel fallback")),
+    )
+
+    async def fake_handle_message(**kwargs):
+        captured.update(kwargs)
+        return {"final_content": "field collected", "interaction": None, "events": [], "im_events": []}
+
+    monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
+
+    result = await gateway.handle_text(
+        None,
+        team_id=1,
+        user_id=2,
+        provider="feishu",
+        session_id=10,
+        user_text="交付总监",
+        agent_content="引用消息：\n联系人是什么角色？\n\n本次指令：\n交付总监",
+        referenced_message_ids=["om_bot_reply"],
+    )
+
+    assert result["final_content"] == "field collected"
+    assert captured["session_id"] == 91
+    assert captured["content"] == "交付总监"
+
+
+@pytest.mark.asyncio
 async def test_im_gateway_text_confirmation_falls_back_to_recent_chat_task(monkeypatch):
     gateway = IMAgentGateway()
     captured = {}
@@ -134,6 +297,54 @@ async def test_im_gateway_text_confirmation_falls_back_to_recent_chat_task(monke
 
     assert result["final_content"] == "created"
     assert captured["session_id"] == 9
+    assert captured["turn_input"].kind == AgentInputKind.CONFIRM
+
+
+@pytest.mark.asyncio
+async def test_im_gateway_text_confirmation_does_not_pick_ambiguous_chat_task(monkeypatch):
+    gateway = IMAgentGateway()
+    captured = {}
+
+    def fake_latest_waiting(*args, **kwargs):
+        session_id = kwargs.get("session_id")
+        if session_id in {9, 11}:
+            return SimpleNamespace(
+                id=session_id,
+                status=AgentTaskStatus.WAITING_USER,
+                state_json={"action": "create_customer_follow_up"},
+                created_time=None,
+            )
+        return None
+
+    monkeypatch.setattr(gateway_module.agent_task_crud, "get_latest_waiting", fake_latest_waiting)
+    monkeypatch.setattr(
+        gateway_module.agent_channel_session_crud,
+        "list_by_chat",
+        lambda *args, **kwargs: [SimpleNamespace(agent_session_id=9), SimpleNamespace(agent_session_id=11)],
+    )
+    monkeypatch.setattr(gateway_module.agent_channel_session_crud, "get_by_scope", lambda *args, **kwargs: None)
+
+    async def fake_handle_message(**kwargs):
+        captured.update(kwargs)
+        return {"final_content": "need clarification", "interaction": None, "events": [], "im_events": []}
+
+    monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
+
+    result = await gateway.handle_text(
+        None,
+        team_id=1,
+        user_id=2,
+        provider="feishu",
+        session_id=10,
+        user_text="是",
+        agent_content="是",
+        chat_id="chat_1",
+        thread_id="om_thread",
+        referenced_message_ids=[],
+    )
+
+    assert result["final_content"] == "need clarification"
+    assert captured["session_id"] == 10
     assert captured["turn_input"].kind == AgentInputKind.CONFIRM
 
 
@@ -231,7 +442,7 @@ async def test_feishu_reaction_event_uses_official_top_level_user_id(monkeypatch
 
     monkeypatch.setattr(feishu_module, "im_agent_gateway", FakeIMAgentGateway())
 
-    reply_to_message_id, reply_text = await service._handle_reaction_event(
+    delivery = await service._handle_reaction_event(
         None,
         SimpleNamespace(team_id=1),
         {
@@ -243,8 +454,8 @@ async def test_feishu_reaction_event_uses_official_top_level_user_id(monkeypatch
         "im.message.reaction.created_v1",
     )
 
-    assert reply_to_message_id == "om_reply"
-    assert reply_text == "已确认"
+    assert delivery.reply_to_message_id == "om_reply"
+    assert delivery.text == "已确认"
     assert captured["user_id"] == 7
     assert captured["response_message_id"] == "om_reply"
     assert captured["emoji_type"] == "Yes"
@@ -260,7 +471,7 @@ async def test_feishu_reaction_deleted_event_is_ignored(monkeypatch):
 
     monkeypatch.setattr(feishu_module, "im_agent_gateway", FakeIMAgentGateway())
 
-    reply_to_message_id, reply_text = await service._handle_reaction_event(
+    delivery = await service._handle_reaction_event(
         None,
         SimpleNamespace(team_id=1),
         {
@@ -272,5 +483,45 @@ async def test_feishu_reaction_deleted_event_is_ignored(monkeypatch):
         "im.message.reaction.deleted_v1",
     )
 
-    assert reply_to_message_id is None
-    assert reply_text is None
+    assert delivery.reply_to_message_id is None
+    assert delivery.text is None
+
+
+def test_feishu_extracts_hidden_reply_binding_from_waiting_agent_event():
+    service = FeishuBotService()
+
+    binding = service._extract_reply_binding({
+        "session": {"event": "session", "session_id": "88"},
+        "final_content": "还需要补充联系人角色。",
+        "events": [
+            {"event": "session", "session_id": 88},
+            {"event": "message", "content": "x"},
+            {"event": "contact_fields_required", "task_id": "177"},
+            {"event": "final", "content": "还需要补充联系人角色。"},
+        ],
+    })
+
+    assert binding.agent_session_id == 88
+    assert binding.agent_task_id == 177
+    assert binding.agent_interaction_type == "contact_fields_required"
+
+
+def test_feishu_renders_non_confirmation_choice_options():
+    service = FeishuBotService()
+
+    text = service._render_im_reply({
+        "final_content": "你想继续哪个草稿？",
+        "interaction": {
+            "type": "choice",
+            "business_action": "select_suspended_task",
+            "choices": [
+                {"label": "广州睿狐增购10个账号补商机信息", "value": "继续：广州睿狐增购10个账号补商机信息"},
+                {"label": "广州睿狐创建商机确认", "value": "继续：广州睿狐创建商机确认"},
+            ],
+        },
+    })
+
+    assert "1. 广州睿狐增购10个账号补商机信息" in text
+    assert "2. 广州睿狐创建商机确认" in text
+    assert "回复序号或选项文字" in text
+    assert "回复「是」确认" not in text

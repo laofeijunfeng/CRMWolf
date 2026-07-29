@@ -149,10 +149,16 @@ class IMInboundEventCRUD:
         status: str,
         *,
         response_message_id: Optional[str] = None,
+        agent_session_id: Optional[int] = None,
+        agent_task_id: Optional[int] = None,
+        agent_interaction_type: Optional[str] = None,
         error_message: Optional[str] = None,
     ) -> IMInboundEvent:
         db_obj.status = status
         db_obj.response_message_id = response_message_id
+        db_obj.agent_session_id = agent_session_id
+        db_obj.agent_task_id = agent_task_id
+        db_obj.agent_interaction_type = agent_interaction_type
         db_obj.error_message = error_message
         db_obj.processed_time = datetime.utcnow()
         db.commit()

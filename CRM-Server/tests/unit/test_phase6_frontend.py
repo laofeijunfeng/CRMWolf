@@ -114,7 +114,7 @@ class TestDisambiguationHandling:
             "entity_type": "opportunity",
             "candidates": [
                 {"id": 1, "name": "商机A", "display_info": "商机A (10万)"},
-                {"id": 2, "name": "商机B", "display_info": "商机B (20万)}
+                {"id": 2, "name": "商机B", "display_info": "商机B (20万)"}
             ],
             "message": "该客户有多个商机，请选择"
         }

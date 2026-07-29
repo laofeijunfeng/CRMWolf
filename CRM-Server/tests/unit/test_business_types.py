@@ -8,7 +8,13 @@ def test_business_type_constants():
     assert BusinessType.INVOICE == "INVOICE"
 
 def test_all_business_types():
-    assert set(ALL_BUSINESS_TYPES) == {"CONTRACT", "PAYMENT", "INVOICE"}
+    assert set(ALL_BUSINESS_TYPES) == {
+        "CONTRACT",
+        "PAYMENT",
+        "INVOICE",
+        "LICENSE",
+        "OPPORTUNITY",
+    }
 
 def test_display_names():
     for bt in ALL_BUSINESS_TYPES:

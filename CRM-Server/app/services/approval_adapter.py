@@ -13,7 +13,8 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Protocol, Any, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, inspect
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
@@ -127,6 +128,8 @@ class PaymentRecordAdapter:
         if entity.confirmed_time is None:
             entity.confirmed_time = datetime.now()
         self._refresh_payment_status(db, entity)
+        if not self._payment_plan_table_available(db):
+            return
         plan = db.query(PaymentPlan).filter(PaymentPlan.id == entity.payment_plan_id).first()
         contract = plan.contract if plan else None
         if contract:
@@ -167,13 +170,30 @@ class PaymentRecordAdapter:
     def _refresh_payment_status(self, db, entity):
         from app.crud.payment import payment_plan_crud, payment_record_crud
 
-        plan = db.query(PaymentPlan).filter(PaymentPlan.id == entity.payment_plan_id).first()
+        if not self._payment_plan_table_available(db):
+            return
+        try:
+            plan = db.query(PaymentPlan).filter(PaymentPlan.id == entity.payment_plan_id).first()
+        except OperationalError:
+            db.rollback()
+            return
         if not plan:
             return
         payment_plan_crud.update_status(db, plan, commit=False)
         payment_record_crud._update_contract_payment_status(db, plan.contract_id, commit=False)
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
+
+    def _payment_plan_table_available(self, db) -> bool:
+        get_bind = getattr(db, "get_bind", None)
+        if not callable(get_bind):
+            return True
+        bind = get_bind()
+        if bind is None:
+            return True
+        if not hasattr(bind, "dialect"):
+            return True
+        return inspect(bind).has_table(PaymentPlan.__tablename__)
 
 
 class InvoiceApplicationAdapter:
@@ -201,6 +221,13 @@ class InvoiceApplicationAdapter:
         # 引擎终态回写快照，InvoiceDetail.vue 仍读这三字段，见决策 2(c)
         entity.status = InvoiceApplicationStatus.APPROVED
         entity.reviewed_time = func.now()
+
+    def on_approved_with_file(self, db, entity, file_path: str, invoice_number: str | None = None):
+        if entity is None: return  # E4 守卫
+        entity.status = InvoiceApplicationStatus.ISSUED
+        entity.invoice_file_path = file_path
+        entity.invoice_number = invoice_number
+        entity.issued_time = func.now()
 
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
