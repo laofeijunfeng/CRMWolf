@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 try:
     from langchain_core.tools import StructuredTool
@@ -14,6 +14,91 @@ except Exception:  # pragma: no cover - keeps imports resilient in stripped test
 from app.services.agent.guardrails import AgentToolExecutionPolicy, AgentToolGuardrails, agent_tool_guardrails
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult
+
+
+class AgentStrictPayload(BaseModel):
+    """Strict payload boundary for model-authored write objects."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class AgentLeadCreatePayload(AgentStrictPayload):
+    lead_name: str = Field(..., min_length=1, max_length=255)
+    source: str = Field("其他", min_length=1, max_length=100)
+    city: str = Field(..., min_length=1, max_length=100)
+    contact_name: str = Field(..., min_length=1, max_length=100)
+    contact_phone: str = Field(..., min_length=1, max_length=20)
+    company_scale: Optional[str] = Field(None, max_length=50)
+
+
+class AgentContactPayload(AgentStrictPayload):
+    name: str = Field(..., min_length=1, max_length=100)
+    gender: Literal["0", "1", "2"] = "0"
+    position: str = Field(..., min_length=1, max_length=100)
+    is_decision_maker: bool = False
+    mobile: str = Field(..., min_length=1, max_length=20)
+    email: Optional[str] = Field(None, max_length=100)
+    wechat_id: Optional[str] = Field(None, max_length=100)
+    remark: Optional[str] = None
+    reports_to: Optional[int] = Field(None, ge=1)
+
+
+class AgentCustomerCreatePayload(AgentStrictPayload):
+    account_name: str = Field(..., min_length=1, max_length=255)
+    industry: Optional[str] = Field(None, max_length=100)
+    city: str = Field(..., min_length=1, max_length=100)
+    address: Optional[str] = Field(None, max_length=500)
+    company_scale: Optional[str] = Field(None, max_length=50)
+    source: Optional[str] = Field(None, max_length=100)
+    default_procurement_method_id: Optional[int] = Field(None, ge=1)
+    primary_contact: Optional[AgentContactPayload] = None
+
+
+class AgentInvoiceTitlePayload(AgentStrictPayload):
+    title_type: Literal["COMPANY", "PERSONAL"]
+    title: str = Field(..., min_length=1, max_length=255)
+    taxpayer_id: str = Field(..., min_length=1, max_length=100)
+    bank_name: Optional[str] = Field(None, max_length=255)
+    bank_account: Optional[str] = Field(None, max_length=100)
+    address: Optional[str] = Field(None, max_length=500)
+    phone: Optional[str] = Field(None, max_length=50)
+
+
+class AgentDeploymentInfoPayload(AgentStrictPayload):
+    customer_id: int = Field(..., ge=1)
+    deployment_name: str = Field(..., min_length=1, max_length=100)
+    server_address: str = Field(..., min_length=1, max_length=500)
+    authorized_users: int = Field(..., gt=0)
+    is_default: bool = False
+
+
+class AgentCustomerMemberPayload(AgentStrictPayload):
+    user_id: str = Field(..., min_length=1)
+    member_role: Literal["SALES", "PRESALES", "DELIVERY", "SUPPORT", "OTHER"] = "PRESALES"
+    access_level: Literal["VIEW", "FOLLOW_UP", "EDIT"] = "VIEW"
+    remark: Optional[str] = Field(None, max_length=500)
+
+
+class AgentOpportunityPayload(AgentStrictPayload):
+    customer_id: int = Field(..., ge=1)
+    total_amount: float = Field(..., gt=0)
+    user_count: int = Field(..., gt=0)
+    license_type: Literal["SUBSCRIPTION", "PERPETUAL"]
+    subscription_years: Optional[int] = Field(None, gt=0)
+    purchase_type: Literal["NEW", "RENEWAL", "EXPANSION"]
+    decision_maker_count: Optional[int] = Field(None, ge=1)
+    expected_closing_date: str = Field(..., min_length=10, max_length=10)
+    procurement_method_id: Optional[int] = Field(None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_subscription_years(self) -> "AgentOpportunityPayload":
+        if self.license_type == "SUBSCRIPTION" and not self.subscription_years:
+            raise ValueError("订阅制商机必须提供 subscription_years")
+        return self
+
+
+def _dump_payload(payload: BaseModel) -> Dict[str, Any]:
+    return payload.model_dump(exclude_none=True)
 
 
 class SearchCustomersInput(BaseModel):
@@ -43,12 +128,12 @@ class CreateCustomerFollowUpInput(BaseModel):
 
 
 class CreateLeadInput(BaseModel):
-    lead: Dict[str, Any]
+    lead: AgentLeadCreatePayload
     idempotency_suffix: Optional[str] = None
 
 
 class CreateCustomerInput(BaseModel):
-    customer: Dict[str, Any]
+    customer: AgentCustomerCreatePayload
     idempotency_suffix: Optional[str] = None
 
 
@@ -63,26 +148,26 @@ class CreateLeadFollowUpInput(BaseModel):
 
 class CreateContactInput(BaseModel):
     customer_id: int = Field(..., ge=1)
-    contact: Dict[str, Any]
+    contact: AgentContactPayload
 
 
 class CreateInvoiceTitleInput(BaseModel):
     customer_id: int = Field(..., ge=1)
-    invoice_title: Dict[str, Any]
+    invoice_title: AgentInvoiceTitlePayload
     set_default: bool = False
 
 
 class CreateDeploymentInfoInput(BaseModel):
-    deployment_info: Dict[str, Any]
+    deployment_info: AgentDeploymentInfoPayload
 
 
 class CreateCustomerMemberInput(BaseModel):
     customer_id: int = Field(..., ge=1)
-    member: Dict[str, Any]
+    member: AgentCustomerMemberPayload
 
 
 class CreateOpportunityInput(BaseModel):
-    opportunity: Dict[str, Any]
+    opportunity: AgentOpportunityPayload
     idempotency_suffix: Optional[str] = None
 
 
@@ -257,14 +342,14 @@ class AgentToolRegistry:
         async def create_lead(service, context, model):
             return await service.create_lead(
                 context,
-                lead=model.lead,
+                lead=_dump_payload(model.lead),
                 idempotency_suffix=model.idempotency_suffix,
             )
 
         async def create_customer(service, context, model):
             return await service.create_customer(
                 context,
-                customer=model.customer,
+                customer=_dump_payload(model.customer),
                 idempotency_suffix=model.idempotency_suffix,
             )
 
@@ -283,34 +368,34 @@ class AgentToolRegistry:
             return await service.create_contact(
                 context,
                 customer_id=model.customer_id,
-                contact=model.contact,
+                contact=_dump_payload(model.contact),
             )
 
         async def create_invoice_title(service, context, model):
             return await service.create_invoice_title(
                 context,
                 customer_id=model.customer_id,
-                invoice_title=model.invoice_title,
+                invoice_title=_dump_payload(model.invoice_title),
                 set_default=model.set_default,
             )
 
         async def create_deployment_info(service, context, model):
             return await service.create_deployment_info(
                 context,
-                deployment_info=model.deployment_info,
+                deployment_info=_dump_payload(model.deployment_info),
             )
 
         async def create_customer_member(service, context, model):
             return await service.create_customer_member(
                 context,
                 customer_id=model.customer_id,
-                member=model.member,
+                member=_dump_payload(model.member),
             )
 
         async def create_opportunity(service, context, model):
             return await service.create_opportunity(
                 context,
-                opportunity=model.opportunity,
+                opportunity=_dump_payload(model.opportunity),
                 idempotency_suffix=model.idempotency_suffix,
             )
 

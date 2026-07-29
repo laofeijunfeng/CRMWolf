@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import BigInteger
 import pytest
+from pydantic import ValidationError
 
 from app.core.database import Base
 from app.models.agent import (
@@ -574,6 +575,7 @@ async def test_agent_tool_create_customer_calls_existing_customer_api():
                     "mobile": "13800138000",
                     "position": "CTO",
                     "gender": "1",
+                    "is_decision_maker": False,
                 },
             },
         }
@@ -734,7 +736,6 @@ async def test_agent_tool_create_opportunity_calls_existing_api():
             {
                 "opportunity": {
                     "customer_id": 101,
-                    "opportunity_name": "广州睿狐科技 100人订阅1年商机",
                     "total_amount": 50000,
                     "user_count": 100,
                     "license_type": "SUBSCRIPTION",
@@ -751,6 +752,66 @@ async def test_agent_tool_create_opportunity_calls_existing_api():
         assert fake_client.calls[0]["json"]["customer_id"] == 101
         assert fake_client.calls[0]["json"]["total_amount"] == 50000
         assert "opportunity_name" not in fake_client.calls[0]["json"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_registry_rejects_unknown_lead_payload_fields():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        with pytest.raises(ValidationError):
+            await registry.execute(
+                "create_lead",
+                _confirmed_context_for(db, "create_lead"),
+                {
+                    "lead": {
+                        "lead_name": "广州睿狐科技",
+                        "source": "其他",
+                        "city": "广州",
+                        "contact_name": "王总",
+                        "contact_phone": "13800138000",
+                        "owner_id": "9",
+                    },
+                },
+            )
+
+        assert fake_client.calls == []
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_registry_rejects_model_authored_opportunity_name():
+    engine, db = _db_session()
+    fake_client = FakeCRMAPIClient()
+    service = CRMAgentToolService(api_client=fake_client)
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        with pytest.raises(ValidationError):
+            await registry.execute(
+                "create_opportunity",
+                _confirmed_context_for(db, "create_opportunity"),
+                {
+                    "opportunity": {
+                        "customer_id": 101,
+                        "opportunity_name": "广州睿狐科技 100人订阅1年商机",
+                        "total_amount": 50000,
+                        "user_count": 100,
+                        "license_type": "SUBSCRIPTION",
+                        "subscription_years": 1,
+                        "purchase_type": "NEW",
+                        "expected_closing_date": "2026-08-31",
+                    },
+                },
+            )
+
+        assert fake_client.calls == []
     finally:
         db.close()
         engine.dispose()

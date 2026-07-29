@@ -22,9 +22,13 @@
 - structured output fallback 缺少更强审计和失败原因暴露。
 - LangSmith 或等价 tracing 尚未接入。
 - LangGraph checkpointer 尚未用于复杂多轮状态恢复。
+- 前端调试事件还不能完整回答模型来源、fallback、tool 调用链路和当前交互阻塞点。
+- 部分候选动作、对象选择、字段补全和业务建议仍需要更明确的执行层裁决，避免依赖 prompt 文案约束。
 
 ## 当前判断
 
 现阶段不需要推倒重来。
 
 下一步应先补 Prompt、Memory、Tool、Guardrails 和 Observability 的生产级细节，再扩展更多业务闭环。
+
+Agent 可靠性优化的主线不是扩大模型权限，而是减少模型需要猜测的决策点。自然语言理解保留给模型；确定性业务选择、权限、状态、日期、枚举、对象 ID、tool 执行和成功失败判定应继续下沉到代码和现有 CRM API。

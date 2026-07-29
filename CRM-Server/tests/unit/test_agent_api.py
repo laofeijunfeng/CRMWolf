@@ -1066,7 +1066,7 @@ def test_agent_stream_create_customer_follow_up_runs_quality_before_confirmation
                 "mobile": "13800138000",
                 "position": "总经理",
                 "gender": "1",
-                "email": None,
+                "is_decision_maker": False,
             }
             return AgentToolResult(
                 tool_name="create_customer",

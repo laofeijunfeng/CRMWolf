@@ -3,11 +3,35 @@
 导出 License 申请为 Word 文档，格式参照样例。
 """
 from docx import Document
+from docx.oxml.ns import qn
 from docx.shared import Pt
 from datetime import datetime
 import tempfile
 
 from app.models.license_application import LicenseApplication, LicenseType
+
+
+LICENSE_DOCUMENT_FONT = "黑体"
+
+
+def _set_run_font(run, font_name: str = LICENSE_DOCUMENT_FONT) -> None:
+    run.font.name = font_name
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
+
+
+def _set_style_font(style, font_name: str = LICENSE_DOCUMENT_FONT) -> None:
+    style.font.name = font_name
+    style._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
+
+
+def _set_document_font(doc: Document, font_name: str = LICENSE_DOCUMENT_FONT) -> None:
+    for style_name in ("Normal", "Title", "Heading 1", "Heading 2", "Heading 3"):
+        if style_name in doc.styles:
+            _set_style_font(doc.styles[style_name], font_name)
+
+    for paragraph in doc.paragraphs:
+        for run in paragraph.runs:
+            _set_run_font(run, font_name)
 
 
 def export_license_document(application: LicenseApplication) -> str:
@@ -23,6 +47,7 @@ def export_license_document(application: LicenseApplication) -> str:
     文件名格式：私有化部署License-{客户名称}_{当前日期}.docx
     """
     doc = Document()
+    _set_document_font(doc)
 
     # 标题
     doc.add_heading('Apifox私有化授权文件', 0)
@@ -73,6 +98,7 @@ def export_license_document(application: LicenseApplication) -> str:
     safe_customer_name = application.customer.account_name.translate(str.maketrans('', '', '\\/:*?"<>|\r\n'))
     file_name = f"私有化部署License-{safe_customer_name}_{current_date}.docx"
     file_path = tempfile.mktemp(suffix='.docx', prefix=file_name)
+    _set_document_font(doc)
     doc.save(file_path)
 
     return file_path

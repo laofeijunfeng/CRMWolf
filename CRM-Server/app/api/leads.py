@@ -17,6 +17,7 @@ from app.schemas.lead import (
 )
 from app.schemas.common import PaginatedResponse
 from app.models.lead import LeadStatus, LeadSource
+from app.models.user import User
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
 
@@ -54,6 +55,53 @@ def parse_filter_conditions(filters: Optional[str]):
             status_code=400,
             detail="筛选条件格式不正确"
         )
+
+
+def _build_user_info_map(db: Session, user_ids: set[str]) -> dict[str, dict]:
+    numeric_user_ids = [int(user_id) for user_id in user_ids if user_id and user_id.isdigit()]
+    if not numeric_user_ids:
+        return {}
+
+    users = db.query(User).filter(User.id.in_(numeric_user_ids)).all()
+    return {
+        str(user.id): {
+            "id": str(user.id),
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+        }
+        for user in users
+    }
+
+
+def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListResponse]:
+    owner_ids = {lead.owner_id for lead in leads if lead.owner_id}
+    users_info = _build_user_info_map(db, owner_ids)
+
+    result = []
+    for lead in leads:
+        lead_dict = {
+            "id": lead.id,
+            "lead_name": lead.lead_name,
+            "source": lead.source,
+            "city": lead.city,
+            "contact_name": lead.contact_name,
+            "contact_phone": lead.contact_phone,
+            "company_scale": lead.company_scale,
+            "owner_id": lead.owner_id,
+            "status": lead.status,
+            "invalid_reason": lead.invalid_reason,
+            "pool_id": lead.pool_id,
+            "creator_id": lead.creator_id,
+            "created_time": lead.created_time,
+            "last_modified_time": lead.last_modified_time,
+            "version": lead.version,
+            "score": lead.score,
+            "score_updated_at": lead.score_updated_at,
+            "owner_info": users_info.get(lead.owner_id) if lead.owner_id else None,
+        }
+        result.append(LeadListResponse(**lead_dict))
+
+    return result
 
 
 @router.post("/", response_model=LeadResponse, status_code=status.HTTP_201_CREATED, summary="创建线索", description="创建新的线索")
@@ -125,7 +173,6 @@ def get_leads(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from sqlalchemy import text
     from app.crud.permission import permission_crud
 
     # 获取用户权限码
@@ -161,48 +208,10 @@ def get_leads(
         order_by=order_by, order_dir=order_dir
     )
 
-    result = []
-    for lead in leads:
-        lead_dict = {
-            "id": lead.id,
-            "lead_name": lead.lead_name,
-            "source": lead.source,
-            "city": lead.city,
-            "contact_name": lead.contact_name,
-            "contact_phone": lead.contact_phone,
-            "company_scale": lead.company_scale,
-            "owner_id": lead.owner_id,
-            "status": lead.status,
-            "pool_id": lead.pool_id,
-            "creator_id": lead.creator_id,
-            "created_time": lead.created_time,
-            "last_modified_time": lead.last_modified_time,
-            "version": lead.version,
-            "score": lead.score,
-            "score_updated_at": lead.score_updated_at,
-            "owner_info": None
-        }
-
-        if lead.owner_id:
-            owner_info = db.execute(text("""
-                SELECT id, name, avatar_url
-                FROM users
-                WHERE id = :owner_id
-            """), {"owner_id": int(lead.owner_id)}).first()
-
-            if owner_info:
-                lead_dict["owner_info"] = {
-                    "id": str(owner_info[0]),
-                    "name": owner_info[1],
-                    "avatar_url": owner_info[2]
-                }
-
-        result.append(LeadListResponse(**lead_dict))
-
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
     return PaginatedResponse[LeadListResponse](
-        items=result,
+        items=_build_lead_list_responses(db, leads),
         total=total,
         page=page,
         page_size=limit,
@@ -554,7 +563,7 @@ def get_public_leads(
     )
 
 
-@router.get("/my/list", response_model=PaginatedResponse[LeadResponse], summary="我的线索", description="获取当前用户负责的线索列表")
+@router.get("/my/list", response_model=PaginatedResponse[LeadListResponse], summary="我的线索", description="获取当前用户负责的线索列表")
 def get_my_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
@@ -577,8 +586,8 @@ def get_my_leads(
     )
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
-    return PaginatedResponse[LeadResponse](
-        items=leads,
+    return PaginatedResponse[LeadListResponse](
+        items=_build_lead_list_responses(db, leads),
         total=total,
         page=page,
         page_size=limit,
