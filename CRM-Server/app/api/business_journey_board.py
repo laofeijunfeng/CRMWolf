@@ -118,9 +118,9 @@ class BusinessJourneyBoardResponse(BaseModel):
 
 
 BOARD_COLUMNS: list[tuple[BoardStageKey, str, str]] = [
-    ("early_communication", "初期交流", "赢率低于 50% 或尚未评估的成交旅程"),
-    ("active_progress", "持续推进", "赢率 50%-80% 的成交旅程"),
-    ("closing_soon", "即将赢单", "赢率 81%-99% 的成交旅程"),
+    ("early_communication", "初期交流", "赢率 0%-49% 或尚未评估的成交旅程"),
+    ("active_progress", "持续推进", "赢率 50%-79% 的成交旅程"),
+    ("closing_soon", "即将赢单", "赢率 80%-99% 的成交旅程"),
     ("won_pending_contract", "已赢单", "商机已赢单但尚未进入合同处理"),
     ("contract_processing", "签约中", "已创建合同，正在签约或合同履约前置处理"),
     ("payment_processing", "回款中", "已有回款计划或回款记录，合同尚未完成回款"),
@@ -203,7 +203,7 @@ def _infer_active_opportunity_stage(opportunity: Opportunity | None) -> BoardSta
         return "early_communication"
     if win_probability < 50:
         return "early_communication"
-    if win_probability <= 80:
+    if win_probability < 80:
         return "active_progress"
     if win_probability < 100:
         return "closing_soon"
