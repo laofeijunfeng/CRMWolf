@@ -54,7 +54,6 @@ def export_license_document(application: LicenseApplication) -> str:
 
     # 企业信息
     doc.add_paragraph(f"企业名称: {application.customer.account_name}")
-    doc.add_paragraph(f"企业编号: {application.enterprise_id or '未填写'}")
     doc.add_paragraph(f"到期时间: {application.expiry_date.strftime('%Y-%m-%d')}")
 
     # 授权人数和服务器地址（从部署信息获取）
