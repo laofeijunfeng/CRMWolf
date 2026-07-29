@@ -112,19 +112,17 @@
           aria-label="输入 Agent 消息"
           @keydown.enter.exact.prevent="sendMessage"
         />
-        <InputGroupAddon align="block-end" class="agent-chat__input-actions">
-          <InputGroupButton
-            type="submit"
-            size="icon-sm"
-            variant="default"
-            class="agent-chat__send"
-            :disabled="!canSend"
-            aria-label="发送消息"
-          >
-            <Loader2 v-if="isStreaming" class="h-4 w-4 animate-spin" aria-hidden="true" />
-            <SendHorizontal v-else class="h-4 w-4" aria-hidden="true" />
-          </InputGroupButton>
-        </InputGroupAddon>
+        <InputGroupButton
+          type="submit"
+          size="icon-sm"
+          variant="default"
+          class="agent-chat__send"
+          :disabled="!canSend"
+          aria-label="发送消息"
+        >
+          <Loader2 v-if="isStreaming" class="h-4 w-4 animate-spin" aria-hidden="true" />
+          <ArrowUp v-else class="h-4 w-4" aria-hidden="true" />
+        </InputGroupButton>
       </InputGroup>
     </form>
   </section>
@@ -135,6 +133,7 @@ import { computed, onMounted, ref, type Component } from "vue"
 import { toast } from "vue-sonner"
 import {
   AlertTriangle,
+  ArrowUp,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -144,7 +143,6 @@ import {
   HelpCircle,
   Loader2,
   Search,
-  SendHorizontal,
   Sparkles,
   UserCheck,
   Wrench,
@@ -156,7 +154,7 @@ import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vu
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Bubble } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group"
+import { InputGroup, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group"
 import { Message } from "@/components/ui/message"
 import { MessageScroller } from "@/components/ui/message-scroller"
 
@@ -890,24 +888,22 @@ onMounted(() => {
 }
 
 .agent-chat__textarea {
-  min-height: 48px;
+  min-height: 72px;
   max-height: 160px;
   overflow-y: auto;
-}
-
-.agent-chat__input-actions {
-  justify-content: flex-end;
-  padding-top: 0;
-  padding-right: $wolf-space-sm-v2;
-  padding-bottom: $wolf-space-sm-v2;
+  padding-right: 56px;
+  padding-bottom: 14px;
 }
 
 .agent-chat__send {
+  position: absolute;
+  right: $wolf-space-md-v2;
+  bottom: $wolf-space-md-v2;
   width: 32px;
   min-width: 32px;
   height: 32px;
   min-height: 32px;
-  border-radius: $wolf-radius-control-v2;
+  border-radius: $wolf-radius-full-v2;
 }
 
 @media (max-width: 767px) {
