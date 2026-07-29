@@ -438,10 +438,19 @@ onMounted(() => {
 
 .journey-card {
   flex-shrink: 0;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 8px;
   background: hsl(var(--card));
   box-shadow: none;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.journey-card:hover,
+.journey-card:focus-within {
+  border-color: $wolf-border-hover-v2;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
 }
 
 .journey-card-content {

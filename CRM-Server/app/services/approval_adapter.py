@@ -338,6 +338,8 @@ class OpportunityAdapter:
 
     def on_approved(self, db: Session, entity: Opportunity) -> None:
         if entity is None: return  # E4 守卫
+        from app.services.deal_journey_service import deal_journey_service
+        deal_journey_service.record_opportunity_approved(db, entity)
 
     def on_rejected(self, db: Session, entity: Opportunity) -> None:
         if entity is None: return  # E4 守卫

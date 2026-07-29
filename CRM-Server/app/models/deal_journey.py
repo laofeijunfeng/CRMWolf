@@ -13,6 +13,7 @@ class DealJourneyStatus:
 
 class DealJourneyEventType:
     OPPORTUNITY_CREATED = "opportunity_created"
+    OPPORTUNITY_APPROVED = "opportunity_approved"
     OPPORTUNITY_STAGE_CHANGED = "opportunity_stage_changed"
     OPPORTUNITY_WON = "opportunity_won"
     OPPORTUNITY_LOST = "opportunity_lost"

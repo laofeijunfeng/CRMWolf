@@ -7,12 +7,18 @@ from pydantic import BaseModel
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from app.constants.approval_phase import ApprovalPhase
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.permission import permission_crud
 from app.models.contract import Contract
 from app.models.customer import Customer
-from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyStatus
+from app.models.deal_journey import (
+    CustomerDealJourney,
+    CustomerDealJourneyEvent,
+    DealJourneyEventType,
+    DealJourneyStatus,
+)
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentRecord
@@ -233,6 +239,19 @@ def get_business_journey_board(
         .join(Customer, Customer.id == CustomerDealJourney.customer_id)
         .outerjoin(Opportunity, Opportunity.id == CustomerDealJourney.primary_opportunity_id)
         .filter(CustomerDealJourney.team_id == team_id)
+    )
+    approved_event_exists = (
+        db.query(CustomerDealJourneyEvent.id)
+        .filter(
+            CustomerDealJourneyEvent.team_id == team_id,
+            CustomerDealJourneyEvent.deal_journey_id == CustomerDealJourney.id,
+            CustomerDealJourneyEvent.event_type == DealJourneyEventType.OPPORTUNITY_APPROVED,
+        )
+        .exists()
+    )
+    query = query.filter(
+        Opportunity.approval_phase == ApprovalPhase.APPROVED.value,
+        approved_event_exists,
     )
 
     if filter_start is not None:

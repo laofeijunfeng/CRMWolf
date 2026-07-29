@@ -121,6 +121,21 @@ class DealJourneyService:
             summary=f"创建商机：{opportunity.opportunity_name}",
         )
 
+    def record_opportunity_approved(self, db: Session, opportunity, actor_id: Optional[str] = None) -> None:
+        journey = self.ensure_for_opportunity(db, opportunity, actor_id)
+        self.record_event(
+            db,
+            deal_journey_id=journey.id,
+            team_id=opportunity.team_id,
+            customer_id=opportunity.customer_id,
+            event_type=DealJourneyEventType.OPPORTUNITY_APPROVED,
+            source_type=DealJourneySourceType.OPPORTUNITY,
+            source_id=opportunity.id,
+            event_time=datetime.now(),
+            actor_id=actor_id,
+            summary=f"商机审批通过：{opportunity.opportunity_name}",
+        )
+
     def record_opportunity_stage_changed(self, db: Session, opportunity, snapshot, actor_id: Optional[str] = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
         self.record_event(

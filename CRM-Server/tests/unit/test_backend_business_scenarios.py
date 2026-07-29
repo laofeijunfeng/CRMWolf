@@ -21,6 +21,7 @@ from sqlalchemy.types import BigInteger
 
 from app.api import agent as agent_api
 from app.api import approvals as approvals_api
+from app.api import business_journey_board as business_journey_board_api
 from app.api import license_application as license_api
 from app.api import payments as payments_api
 from app.constants.approval_phase import ApprovalPhase
@@ -38,7 +39,7 @@ from app.models.agent import (
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord, ApprovalStatus
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Contact, Customer, CustomerMember
-from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent
+from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyEventType
 from app.models.deployment import DeploymentInfo
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle, InvoiceType
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
@@ -153,6 +154,7 @@ def scenario_env(monkeypatch):
         "payment:submit",
         "payment:record:edit",
         "payment:record:delete",
+        "sales_dashboard:view:all",
     }
 
     def _permission_stub(_db, user_id, team_id=None):
@@ -166,10 +168,11 @@ def scenario_env(monkeypatch):
     app = FastAPI()
     app.include_router(agent_api.router)
     app.include_router(approvals_api.router)
+    app.include_router(business_journey_board_api.router)
     app.include_router(payments_api.router)
     app.include_router(license_api.router)
 
-    for module in (database, deps, agent_api, approvals_api, payments_api, license_api):
+    for module in (database, deps, agent_api, approvals_api, business_journey_board_api, payments_api, license_api):
         if hasattr(module, "get_db"):
             app.dependency_overrides[module.get_db] = lambda: db
         if hasattr(module, "get_current_user_team"):
@@ -792,6 +795,40 @@ def run_approval_optimistic_lock_conflict(env):
     assert response.json()["failed"][0]["reason"] == "已被他人处理"
 
 
+def run_opportunity_approval_starts_business_journey_board(env):
+    seed_flow(env, BusinessType.OPPORTUNITY)
+    customer = seed_customer(env)
+    opportunity = seed_opportunity(env, customer)
+
+    submit_approval(env, "OPPORTUNITY", opportunity.id)
+
+    before_approval = env.client.get("/v1/business-journey-board/")
+    assert before_approval.status_code == 200, before_approval.text
+    assert before_approval.json()["summary"]["total_count"] == 0
+
+    approval = current_approval(env, BusinessType.OPPORTUNITY, opportunity.id)
+    approvals_api.approval_crud.approve(
+        env.db,
+        approval,
+        ApprovalActionRequest(action=ApprovalAction.APPROVE, comment="同意"),
+        approver_id="2",
+        approver_name="销售总监",
+    )
+
+    event = env.db.query(CustomerDealJourneyEvent).filter(
+        CustomerDealJourneyEvent.source_type == "opportunity",
+        CustomerDealJourneyEvent.source_id == opportunity.id,
+        CustomerDealJourneyEvent.event_type == DealJourneyEventType.OPPORTUNITY_APPROVED,
+    ).one()
+    assert event.deal_journey_id == opportunity.deal_journey_id
+
+    response = env.client.get("/v1/business-journey-board/")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["summary"]["total_count"] == 1
+    assert body["columns"][0]["cards"][0]["journey_id"] == opportunity.deal_journey_id
+
+
 def run_payment_submit_approval_creates_instance(env):
     seed_flow(env, BusinessType.PAYMENT)
     _, _, _, _, record = seed_contract_plan_record(env, creator_id="2")
@@ -914,6 +951,7 @@ APPROVAL_SCENARIOS = [
     ("approval_invoice_reject_updates_status", run_approval_invoice_reject_updates_status),
     ("approval_bulk_partial_success", run_approval_bulk_partial_success),
     ("approval_optimistic_lock_conflict", run_approval_optimistic_lock_conflict),
+    ("opportunity_approval_starts_business_journey_board", run_opportunity_approval_starts_business_journey_board),
 ]
 
 PAYMENT_LICENSE_SCENARIOS = [
