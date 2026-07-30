@@ -42,16 +42,40 @@
 
         <div class="follow-up-body">
           <div class="follow-up-content-row">
-            <HoverInfo side="top" align="start" content-class="follow-up-content-hover-card">
-              <template #trigger>
-                <p class="follow-up-content">
-                  {{ getPrimaryContent(followUp) }}
-                </p>
-              </template>
-              <div class="follow-up-hover-text follow-up-hover-text--preline">
-                {{ followUp.source_content || getPrimaryContent(followUp) }}
-              </div>
-            </HoverInfo>
+            <div
+              class="follow-up-content-cell"
+              :class="{
+                'is-expandable': hasContentOverflow(followUp.id),
+                'is-expanded': isContentExpanded(followUp.id)
+              }"
+            >
+              <HoverInfo side="top" align="start" content-class="follow-up-content-hover-card">
+                <template #trigger>
+                  <p
+                    :ref="(el) => setContentElement(followUp.id, el)"
+                    class="follow-up-content"
+                    :class="{ 'follow-up-content--expanded': isContentExpanded(followUp.id) }"
+                  >
+                    {{ getPrimaryContent(followUp) }}
+                  </p>
+                </template>
+                <div class="follow-up-hover-text follow-up-hover-text--preline">
+                  {{ followUp.source_content || getPrimaryContent(followUp) }}
+                </div>
+              </HoverInfo>
+              <Button
+                v-if="hasContentOverflow(followUp.id)"
+                variant="ghost"
+                size="icon-sm"
+                class="content-expand-btn"
+                :aria-expanded="isContentExpanded(followUp.id)"
+                :aria-label="isContentExpanded(followUp.id) ? '收起活动内容' : '展开活动内容'"
+                :title="isContentExpanded(followUp.id) ? '收起' : '展开'"
+                @click.stop="toggleContentExpanded(followUp.id)"
+              >
+                <component :is="isContentExpanded(followUp.id) ? ChevronUp : ChevronDown" class="content-expand-icon" />
+              </Button>
+            </div>
             <div
               v-if="shouldShowEffectiveness(followUp) || canProcess(followUp) || canDelete(followUp)"
               class="follow-up-actions"
@@ -173,8 +197,9 @@
 </template>
 
 <script setup lang="ts">
-import type { Component } from 'vue'
-import { CalendarClock, Loader2, Mail, MessageCircle, MessageSquare, Phone, RefreshCw, ThumbsDown, ThumbsUp, Trash2, User, Users } from 'lucide-vue-next'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { Component, ComponentPublicInstance } from 'vue'
+import { CalendarClock, ChevronDown, ChevronUp, Loader2, Mail, MessageCircle, MessageSquare, Phone, RefreshCw, ThumbsDown, ThumbsUp, Trash2, User, Users } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { HoverInfo } from '@/components/crmwolf'
@@ -239,6 +264,106 @@ const props = withDefaults(defineProps<Props>(), {
 })
 const emit = defineEmits<Emits>()
 const recordLabel = props.recordLabel
+const expandedContentIds = ref<Set<number>>(new Set())
+const overflowingContentIds = ref<Set<number>>(new Set())
+const contentElements = new Map<number, HTMLElement>()
+let resizeObserver: ResizeObserver | null = null
+let measureFrame: number | null = null
+
+const queueMeasureContentOverflow = (): void => {
+  if (typeof window === 'undefined') return
+  if (measureFrame !== null) window.cancelAnimationFrame(measureFrame)
+  measureFrame = window.requestAnimationFrame(() => {
+    measureFrame = null
+    measureContentOverflow()
+  })
+}
+
+const setContentElement = (id: number, el: Element | ComponentPublicInstance | null): void => {
+  const existing = contentElements.get(id)
+  const element = el instanceof HTMLElement ? el : null
+
+  if (existing !== undefined && existing !== element) {
+    resizeObserver?.unobserve(existing)
+    contentElements.delete(id)
+  }
+
+  if (element !== null) {
+    contentElements.set(id, element)
+    resizeObserver?.observe(element)
+  }
+
+  queueMeasureContentOverflow()
+}
+
+const measureContentOverflow = (): void => {
+  const visibleIds = new Set(props.followUps.map((followUp) => followUp.id))
+  const nextOverflowingIds = new Set<number>()
+
+  for (const id of visibleIds) {
+    const element = contentElements.get(id)
+    if (element === undefined) continue
+
+    const styles = window.getComputedStyle(element)
+    const parsedLineHeight = Number.parseFloat(styles.lineHeight)
+    const parsedFontSize = Number.parseFloat(styles.fontSize)
+    const lineHeight = Number.isFinite(parsedLineHeight)
+      ? parsedLineHeight
+      : (Number.isFinite(parsedFontSize) ? parsedFontSize * 1.5 : 20)
+    const twoLineHeight = lineHeight * 2
+
+    if (element.scrollHeight > twoLineHeight + 1) {
+      nextOverflowingIds.add(id)
+    }
+  }
+
+  overflowingContentIds.value = nextOverflowingIds
+  expandedContentIds.value = new Set([...expandedContentIds.value].filter((id) => visibleIds.has(id)))
+}
+
+const hasContentOverflow = (id: number): boolean => overflowingContentIds.value.has(id)
+
+const isContentExpanded = (id: number): boolean => expandedContentIds.value.has(id)
+
+const toggleContentExpanded = (id: number): void => {
+  const nextIds = new Set(expandedContentIds.value)
+  if (nextIds.has(id)) {
+    nextIds.delete(id)
+  } else {
+    nextIds.add(id)
+  }
+  expandedContentIds.value = nextIds
+  void nextTick(queueMeasureContentOverflow)
+}
+
+watch(
+  () => props.followUps.map((followUp) => [
+    followUp.id,
+    followUp.content,
+    followUp.summary,
+    followUp.source_content,
+    JSON.stringify(followUp.content_json ?? {})
+  ].join(':')).join('|'),
+  () => {
+    void nextTick(queueMeasureContentOverflow)
+  },
+  { flush: 'post' }
+)
+
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(queueMeasureContentOverflow)
+    for (const element of contentElements.values()) {
+      resizeObserver.observe(element)
+    }
+  }
+  queueMeasureContentOverflow()
+})
+
+onBeforeUnmount(() => {
+  if (measureFrame !== null) window.cancelAnimationFrame(measureFrame)
+  resizeObserver?.disconnect()
+})
 
 const canDelete = (followUp: FollowUp): boolean => {
   const creatorIdStr = String(followUp.creator_id ?? '')
@@ -578,6 +703,11 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   min-width: 0;
 }
 
+.follow-up-content-cell {
+  position: relative;
+  min-width: 0;
+}
+
 .follow-up-content {
   margin: 0;
   color: $wolf-text-primary-v2;
@@ -590,6 +720,50 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   -webkit-line-clamp: 2;
   line-clamp: 2;
   cursor: help;
+}
+
+.follow-up-content-cell.is-expandable .follow-up-content {
+  padding-right: 28px;
+}
+
+.follow-up-content--expanded {
+  display: block;
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+.content-expand-btn {
+  position: absolute;
+  right: 0;
+  bottom: -2px;
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  padding: 0 !important;
+  color: $wolf-text-tertiary-v2;
+  background: $wolf-bg-card-v2 !important;
+  border: 1px solid $wolf-border-light-v2;
+  opacity: 0;
+  transition: opacity 150ms ease, background 150ms ease, color 150ms ease;
+
+  &:hover {
+    color: $wolf-text-secondary-v2;
+    background: $wolf-bg-muted-v2 !important;
+  }
+}
+
+.content-expand-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.follow-up-item:hover .content-expand-btn,
+.content-expand-btn:focus-visible,
+.follow-up-content-cell.is-expanded .content-expand-btn {
+  opacity: 1;
 }
 
 :global(.follow-up-method-hover-card) {
@@ -819,6 +993,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 @media (hover: none) {
+  .content-expand-btn,
   .delete-btn,
   .process-btn {
     opacity: 1;
@@ -827,6 +1002,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 
 @media (prefers-reduced-motion: reduce) {
   .follow-up-item,
+  .content-expand-btn,
   .delete-btn,
   .effectiveness-icon-loading {
     transition-duration: $wolf-reduced-motion-duration-v2;
