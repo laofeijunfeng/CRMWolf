@@ -98,7 +98,7 @@ def test_agent_crud_manages_agent_owned_state():
                 team_id=1,
                 user_id=2,
                 session_id=session.id,
-                intent="CUSTOMER_FOLLOW_UP",
+                intent="CUSTOMER_ACTIVITY",
                 input_json={"customer_name": "越秀金融"},
             ),
         )
@@ -117,7 +117,7 @@ def test_agent_crud_manages_agent_owned_state():
                 user_id=2,
                 session_id=session.id,
                 task_id=task.id,
-                tool_name="create_customer_follow_up",
+                tool_name="create_customer_activity",
                 request_json={"content": "今天和客户沟通了项目进展"},
             ),
         )

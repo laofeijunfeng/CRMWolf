@@ -213,7 +213,7 @@ def test_agent_session_and_stream_api(monkeypatch):
 def test_agent_event_interaction_protocol_for_confirmation():
     event = agent_api._with_interaction({
         "event": "confirmation_required",
-        "content": "请确认是否创建这条跟进记录？",
+        "content": "请确认是否创建这条客户活动？",
     })
 
     assert event["interaction"]["type"] == "choice"
@@ -221,7 +221,7 @@ def test_agent_event_interaction_protocol_for_confirmation():
     assert event["interaction"]["business_action"] == "confirm_action"
     assert event["interaction"]["status"] == "waiting_confirmation"
     assert event["interaction"]["title"] == "确认操作"
-    assert event["interaction"]["prompt"] == "请确认是否创建这条跟进记录？"
+    assert event["interaction"]["prompt"] == "请确认是否创建这条客户活动？"
     assert event["interaction"]["choices"] == [
         {"label": "是", "value": "是"},
         {"label": "否", "value": "否"},
@@ -410,7 +410,7 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
         async def stream_events(self, input_state):
             yield {
                 "event": "confirmation_required",
-                "action": "create_customer_follow_up",
+                "action": "create_customer_activity",
                 "customer": {"id": 101, "account_name": "越秀金融"},
                 "payload": {
                     "customer_id": 101,
@@ -420,18 +420,18 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
                     "next_follow_time_iso": "2026-07-29T09:00:00",
                 },
             }
-            yield {"event": "final", "content": "请确认是否创建这条跟进记录？"}
+            yield {"event": "final", "content": "请确认是否创建这条客户活动？"}
 
     class FakeToolService:
-        async def create_customer_follow_up(self, context, **kwargs):
+        async def create_customer_activity(self, context, **kwargs):
             assert context.authorization == "Bearer test-token"
             assert context.task_id is not None
             assert kwargs["customer_id"] == 101
             assert kwargs["customer_name"] == "越秀金融"
-            assert kwargs["content"] == "今天和越秀金融的王总沟通了项目进展，下周三继续跟进"
+            assert kwargs["source_content"] == "今天和越秀金融的王总沟通了项目进展，下周三继续跟进"
             assert kwargs["next_follow_time"] == "2026-07-29T09:00:00"
             return AgentToolResult(
-                tool_name="create_customer_follow_up",
+                tool_name="create_customer_activity",
                 success=True,
                 data={"id": 9001, "customer_id": 101},
                 tool_call_id=7001,
@@ -464,7 +464,7 @@ def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch
         )
         assert confirm_response.status_code == 200, confirm_response.text
         assert '"event": "task_completed"' in confirm_response.text
-        assert "跟进已记录" in confirm_response.text
+        assert "客户活动已记录" in confirm_response.text
 
         Session = sessionmaker(bind=engine)
         db = Session()
@@ -485,7 +485,7 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
         async def stream_events(self, input_state):
             yield {
                 "event": "confirmation_required",
-                "action": "create_customer_follow_up",
+                "action": "create_customer_activity",
                 "customer": customer,
                 "payload": {
                     "customer_id": 101,
@@ -503,12 +503,12 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
                     },
                 },
             }
-            yield {"event": "final", "content": "请确认是否创建这条跟进记录？"}
+            yield {"event": "final", "content": "请确认是否创建这条客户活动？"}
 
     class FakeToolService:
-        async def create_customer_follow_up(self, context, **kwargs):
+        async def create_customer_activity(self, context, **kwargs):
             return AgentToolResult(
-                tool_name="create_customer_follow_up",
+                tool_name="create_customer_activity",
                 success=True,
                 data={"id": 9001, "customer_id": 101},
                 tool_call_id=7001,
@@ -544,8 +544,8 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
             headers={"Authorization": "Bearer test-token"},
         )
         assert plan_response.status_code == 200, plan_response.text
-        assert "请确认是否创建这条跟进记录" in plan_response.text
-        assert '"event": "final", "content": "请确认是否创建这条跟进记录？"' in plan_response.text
+        assert "请确认是否创建这条客户活动" in plan_response.text
+        assert '"event": "final", "content": "请确认是否创建这条客户活动？"' in plan_response.text
 
         confirm_response = client.post(
             "/v1/agent/chat/stream",
@@ -553,7 +553,7 @@ def test_agent_stream_defers_follow_up_next_task_until_after_follow_up_created(m
             headers={"Authorization": "Bearer test-token"},
         )
         assert confirm_response.status_code == 200, confirm_response.text
-        assert "跟进已记录" in confirm_response.text
+        assert "客户活动已记录" in confirm_response.text
         assert "要不要我继续帮你补齐商机信息" in confirm_response.text
         assert '"next_task_id": 2' in confirm_response.text
         assert '"interaction":' in confirm_response.text
@@ -575,14 +575,14 @@ def test_agent_stream_cancels_waiting_task_when_user_rejects(monkeypatch):
         async def stream_events(self, input_state):
             yield {
                 "event": "confirmation_required",
-                "action": "create_customer_follow_up",
+                "action": "create_customer_activity",
                 "customer": {"id": 101, "account_name": "越秀金融"},
                 "payload": {
                     "customer_id": 101,
                     "content": input_state["content"],
                 },
             }
-            yield {"event": "final", "content": "请确认是否创建这条跟进记录？"}
+            yield {"event": "final", "content": "请确认是否创建这条客户活动？"}
 
     monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
 
@@ -1021,7 +1021,7 @@ def test_agent_stream_create_lead_follow_up_runs_quality_before_confirmation(mon
         engine.dispose()
 
 
-def test_agent_stream_create_customer_follow_up_runs_quality_before_confirmation(monkeypatch):
+def test_agent_stream_create_customer_activity_runs_quality_before_confirmation(monkeypatch):
     quality = FakeQualityEvaluator({
         "score": 88,
         "passed": True,
@@ -1048,7 +1048,7 @@ def test_agent_stream_create_customer_follow_up_runs_quality_before_confirmation
                         "contact_position": "总经理",
                         "contact_gender": "男",
                     },
-                    "customer_follow_up": {
+                    "customer_activity": {
                         "content": "客户已确认采购 CRM 的初步意向",
                         "method": "电话",
                         "next_action": "下周三电话跟进需求细节和预算",
@@ -1075,10 +1075,10 @@ def test_agent_stream_create_customer_follow_up_runs_quality_before_confirmation
                 tool_call_id=7001,
             )
 
-        async def create_customer_follow_up(self, context, **kwargs):
-            tool_calls.append(("create_customer_follow_up", kwargs))
+        async def create_customer_activity(self, context, **kwargs):
+            tool_calls.append(("create_customer_activity", kwargs))
             return AgentToolResult(
-                tool_name="create_customer_follow_up",
+                tool_name="create_customer_activity",
                 success=True,
                 data={"id": 9201, "customer_id": kwargs["customer_id"]},
                 tool_call_id=7002,
@@ -1106,10 +1106,10 @@ def test_agent_stream_create_customer_follow_up_runs_quality_before_confirmation
             headers={"Authorization": "Bearer test-token"},
         )
         assert create_response.status_code == 200, create_response.text
-        assert "客户已创建。请确认是否同步创建客户跟进记录？" in create_response.text
+        assert "客户已创建。请确认是否同步创建客户活动？" in create_response.text
         assert '"next_task_id": 2' in create_response.text
         assert len(quality.calls) == 1
-        assert quality.calls[0]["semantic_result"].intent == "CUSTOMER_FOLLOW_UP"
+        assert quality.calls[0]["semantic_result"].intent == "CUSTOMER_ACTIVITY"
 
         follow_up_response = client.post(
             "/v1/agent/chat/stream",
@@ -1117,9 +1117,9 @@ def test_agent_stream_create_customer_follow_up_runs_quality_before_confirmation
             headers={"Authorization": "Bearer test-token"},
         )
         assert follow_up_response.status_code == 200, follow_up_response.text
-        assert "跟进已记录。" in follow_up_response.text
-        assert [name for name, _ in tool_calls] == ["create_customer", "create_customer_follow_up"]
-        assert tool_calls[1][1]["content"] == "客户已确认采购 CRM 的初步意向，计划下周三电话跟进需求细节和预算。"
+        assert "客户活动已记录。" in follow_up_response.text
+        assert [name for name, _ in tool_calls] == ["create_customer", "create_customer_activity"]
+        assert tool_calls[1][1]["source_content"] == "客户已确认采购 CRM 的初步意向"
         assert tool_calls[1][1]["customer_id"] == 9101
     finally:
         engine.dispose()
@@ -1313,7 +1313,7 @@ def test_agent_stream_collects_follow_up_quality_fields_without_rerunning_graph(
     monkeypatch.setattr(agent_api, "crm_agent_graph_service", fake_graph)
     monkeypatch.setattr(agent_api, "agent_follow_up_quality_evaluator", fake_quality)
     monkeypatch.setattr(agent_api, "agent_semantic_parser", FakeSemanticParser({
-        "intent": "CUSTOMER_FOLLOW_UP",
+        "intent": "CUSTOMER_ACTIVITY",
         "intent_confidence": 0.95,
         "customer": {"name_text": "广州凡亚信息科技有限公司", "confidence": 0.95, "resolution_source": "MEMORY"},
         "follow_up": {
@@ -1368,7 +1368,7 @@ def test_agent_stream_collects_follow_up_quality_fields_without_rerunning_graph(
         assert len(fake_graph.calls) == 1
         assert '"event": "confirmation_required"' in second_response.text
         assert '"type": "choice"' in second_response.text
-        assert "跟进内容已补齐" in second_response.text
+        assert "客户活动内容已补齐" in second_response.text
         assert "广州凡亚信息科技有限公司" in second_response.text
 
         Session = sessionmaker(bind=engine)
@@ -1376,10 +1376,10 @@ def test_agent_stream_collects_follow_up_quality_fields_without_rerunning_graph(
         try:
             task = db.query(AgentTask).one()
             assert task.status == AgentTaskStatus.WAITING_USER
-            assert task.state_json["action"] == "create_customer_follow_up"
+            assert task.state_json["action"] == "create_customer_activity"
             assert task.state_json["customer"] == customer
-            assert task.input_json["content"] == "凡亚信息反馈项目暂无进展，计划本月底再联系客户，确认后续推动方式，并争取安排现场拜访。"
-            assert "补充：" not in task.input_json["content"]
+            assert task.input_json["source_content"] == "这个月底我会再联系下客户，确认下具体如何推动项目，争取能去现场拜访"
+            assert "补充：" not in task.input_json["source_content"]
         finally:
             db.close()
     finally:
@@ -1553,7 +1553,7 @@ def test_agent_stream_interrupts_pending_task_for_clear_new_customer_flow(monkey
         "decision": "START_NEW_FLOW",
         "confidence": 0.92,
         "detected_customer_name": "汇川技术",
-        "detected_intent": "CUSTOMER_FOLLOW_UP",
+        "detected_intent": "CUSTOMER_ACTIVITY",
         "is_field_supplement": False,
         "reason": "本轮明确提到不同客户，并描述新的跟进记录。",
         "question": None,
@@ -1725,7 +1725,7 @@ def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatc
         async def stream_events(self, input_state):
             yield {
                 "event": "customer_selection_required",
-                "action": "select_customer_for_follow_up",
+                "action": "select_customer_for_activity",
                 "customers": [
                     {"id": 101, "account_name": "越秀金融"},
                     {"id": 102, "account_name": "越秀金融科技"},
@@ -1740,15 +1740,15 @@ def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatc
             yield {"event": "final", "content": "我找到了多个可能的客户，请回复序号或客户名称确认。"}
 
     class FakeToolService:
-        async def create_customer_follow_up(self, context, **kwargs):
+        async def create_customer_activity(self, context, **kwargs):
             assert context.authorization == "Bearer test-token"
             assert context.task_id is not None
             assert kwargs["customer_id"] == 102
             assert kwargs["customer_name"] == "越秀金融科技"
-            assert kwargs["content"] == "今天和越秀金融的王总沟通了项目进展，下周三继续跟进"
+            assert kwargs["source_content"] == "今天和越秀金融的王总沟通了项目进展，下周三继续跟进"
             assert kwargs["next_follow_time"] == "2026-07-29T09:00:00"
             return AgentToolResult(
-                tool_name="create_customer_follow_up",
+                tool_name="create_customer_activity",
                 success=True,
                 data={"id": 9002, "customer_id": 102},
                 tool_call_id=7002,
@@ -1781,7 +1781,7 @@ def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatc
         )
         assert select_response.status_code == 200, select_response.text
         assert '"event": "customer_selected"' in select_response.text
-        assert "请确认是否创建这条跟进记录" in select_response.text
+        assert "请确认是否创建这条客户活动" in select_response.text
 
         confirm_response = client.post(
             "/v1/agent/chat/stream",
@@ -1790,7 +1790,7 @@ def test_agent_stream_resolves_customer_selection_before_confirmation(monkeypatc
         )
         assert confirm_response.status_code == 200, confirm_response.text
         assert '"event": "task_completed"' in confirm_response.text
-        assert "跟进已记录" in confirm_response.text
+        assert "客户活动已记录" in confirm_response.text
 
         Session = sessionmaker(bind=engine)
         db = Session()

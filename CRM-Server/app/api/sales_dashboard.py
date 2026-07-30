@@ -16,7 +16,7 @@ from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 from app.models.lead import Lead, LeadStatus
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.models.payment import PaymentConfirmationStatus, PaymentRecord
-from app.models.customer_follow_up import CustomerFollowUp
+from app.models.customer_activity import CustomerActivity
 from app.models.user import User
 
 
@@ -335,22 +335,22 @@ def get_sales_dashboard_follow_up_trend(
     trend_start, trend_end = _trend_date_range(start_date, end_date)
     filter_start, filter_end = _date_range(trend_start, trend_end)
 
-    day_expr = func.date(CustomerFollowUp.created_time)
+    day_expr = func.date(CustomerActivity.occurred_at)
     query = db.query(
         day_expr.label("day"),
-        CustomerFollowUp.creator_id.label("creator_id"),
-        func.count(CustomerFollowUp.id).label("total"),
-        func.sum(case((CustomerFollowUp.effectiveness_score > 60, 1), else_=0)).label("valid"),
-    ).filter(CustomerFollowUp.team_id == team_id)
+        CustomerActivity.creator_id.label("creator_id"),
+        func.count(CustomerActivity.id).label("total"),
+        func.sum(case((CustomerActivity.effectiveness_is_valid.is_(True), 1), else_=0)).label("valid"),
+    ).filter(CustomerActivity.team_id == team_id)
 
-    query = _apply_created_time_filter(query, CustomerFollowUp.created_time, filter_start, filter_end)
+    query = _apply_created_time_filter(query, CustomerActivity.occurred_at, filter_start, filter_end)
 
     if scope == "own":
-        query = query.filter(CustomerFollowUp.creator_id == user_id)
+        query = query.filter(CustomerActivity.creator_id == user_id)
     else:
-        query = _apply_owner_filter(query, CustomerFollowUp.creator_id, owner_ids)
+        query = _apply_owner_filter(query, CustomerActivity.creator_id, owner_ids)
 
-    rows = query.group_by(day_expr, CustomerFollowUp.creator_id).all()
+    rows = query.group_by(day_expr, CustomerActivity.creator_id).all()
 
     creator_ids = sorted({
         str(row.creator_id)

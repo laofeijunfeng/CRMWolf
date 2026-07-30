@@ -6,7 +6,7 @@ from app.models.role_permission import RolePermission
 from app.models.team import Team, UserTeam
 from app.models.lead import Lead, LeadFollowUp, LeadSource, LeadStatus, CompanyScale, FollowUpMethod
 from app.models.customer import Customer, Contact, CustomerMember
-from app.models.customer_follow_up import CustomerFollowUp
+from app.models.customer_activity import CustomerActivity
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyStatus, DealJourneyEventType, DealJourneySourceType
 from app.models.opportunity import Opportunity, OpportunityStage, PurchaseType, OpportunityStatus
 from app.models.contract import Contract, ContractStatus, PaymentStatus
@@ -41,7 +41,7 @@ __all__ = [
     "Lead", "LeadFollowUp",
     "LeadSource", "LeadStatus", "CompanyScale", "FollowUpMethod",
     "Customer", "Contact", "CustomerMember",
-    "CustomerFollowUp",
+    "CustomerActivity",
     "CustomerDealJourney", "CustomerDealJourneyEvent", "DealJourneyStatus", "DealJourneyEventType", "DealJourneySourceType",
     "Opportunity", "OpportunityStage", "PurchaseType", "OpportunityStatus",
     "Contract", "ContractStatus", "PaymentStatus",

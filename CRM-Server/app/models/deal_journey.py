@@ -24,6 +24,7 @@ class DealJourneyEventType:
     PAYMENT_CONFIRMED = "payment_confirmed"
     INVOICE_APPLIED = "invoice_applied"
     INVOICE_ISSUED = "invoice_issued"
+    ACTIVITY_ADDED = "activity_added"
     FOLLOW_UP_ADDED = "follow_up_added"
 
 
@@ -34,6 +35,7 @@ class DealJourneySourceType:
     PAYMENT_PLAN = "payment_plan"
     PAYMENT_RECORD = "payment_record"
     INVOICE_APPLICATION = "invoice_application"
+    CUSTOMER_ACTIVITY = "customer_activity"
     CUSTOMER_FOLLOW_UP = "customer_follow_up"
 
 

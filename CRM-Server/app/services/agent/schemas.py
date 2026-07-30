@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 AgentIntent = Literal[
-    "CUSTOMER_FOLLOW_UP",
+    "CUSTOMER_ACTIVITY",
     "PAYMENT_RECORD",
     "CREATE_LEAD",
     "CREATE_CUSTOMER",
@@ -65,7 +65,7 @@ class AgentCustomerEntity(BaseModel):
 
 class AgentFollowUpEntity(BaseModel):
     content: Optional[str] = Field(None, description="可沉淀为客户跟进记录的业务事实")
-    method: Optional[str] = Field(None, description="跟进方式，例如电话、微信、拜访、邮件、未指定")
+    method: Optional[str] = Field(None, description="活动方式，例如电话、微信、拜访、邮件、线上会议、线下会议、未指定")
     next_action: Optional[str] = Field(None, description="下一步动作")
     next_follow_time_text: Optional[str] = Field(None, description="用户表达中的下一步动作时间")
     next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化时间要素")
@@ -122,7 +122,7 @@ class AgentCustomerCreateEntity(BaseModel):
     contact_gender: Optional[str] = Field(None, description="主联系人性别：1=男,2=女,0=未知")
     contact_email: Optional[str] = Field(None, description="主联系人邮箱")
     follow_up_content: Optional[str] = Field(None, description="创建客户后可沉淀的客户跟进内容")
-    follow_up_method: Optional[str] = Field(None, description="客户跟进方式")
+    follow_up_method: Optional[str] = Field(None, description="客户活动方式")
     next_action: Optional[str] = Field(None, description="下一步动作")
     next_follow_time_text: Optional[str] = Field(None, description="用户表达中的客户下次跟进时间")
     next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化客户下次跟进时间")

@@ -117,11 +117,12 @@ class GetCustomerContextInput(BaseModel):
     customer_id: int = Field(..., ge=1)
 
 
-class CreateCustomerFollowUpInput(BaseModel):
+class CreateCustomerActivityInput(BaseModel):
     customer_id: int = Field(..., ge=1)
     customer_name: Optional[str] = None
-    content: str = Field(..., min_length=1)
-    method: str = "AI录入"
+    activity_kind: str = "OTHER_FOLLOW_UP"
+    source_content: str = Field(..., min_length=1)
+    title: Optional[str] = None
     next_action: Optional[str] = None
     next_follow_time: Optional[str] = None
     idempotency_suffix: Optional[str] = None
@@ -327,13 +328,14 @@ class AgentToolRegistry:
         async def get_customer_context(service, context, model):
             return await service.get_customer_context(context, model.customer_id)
 
-        async def create_customer_follow_up(service, context, model):
-            return await service.create_customer_follow_up(
+        async def create_customer_activity(service, context, model):
+            return await service.create_customer_activity(
                 context,
                 customer_id=model.customer_id,
                 customer_name=model.customer_name,
-                content=model.content,
-                method=model.method,
+                activity_kind=model.activity_kind,
+                source_content=model.source_content,
+                title=model.title,
                 next_action=model.next_action,
                 next_follow_time=model.next_follow_time,
                 idempotency_suffix=model.idempotency_suffix,
@@ -455,7 +457,7 @@ class AgentToolRegistry:
             AgentToolSpec("search_customers", "按当前用户权限搜索可访问客户", SearchCustomersInput, False, False, search_customers),
             AgentToolSpec("search_creation_duplicates", "创建客户/线索前按团队范围检查重复", SearchCreationDuplicatesInput, False, False, search_creation_duplicates),
             AgentToolSpec("get_customer_context", "获取客户业务上下文", GetCustomerContextInput, False, False, get_customer_context),
-            AgentToolSpec("create_customer_follow_up", "创建客户跟进记录", CreateCustomerFollowUpInput, True, True, create_customer_follow_up),
+            AgentToolSpec("create_customer_activity", "创建客户活动记录", CreateCustomerActivityInput, True, True, create_customer_activity),
             AgentToolSpec("create_lead", "通过现有线索 API 创建线索", CreateLeadInput, True, True, create_lead),
             AgentToolSpec("create_customer", "通过现有客户 API 创建客户", CreateCustomerInput, True, True, create_customer),
             AgentToolSpec("create_lead_follow_up", "通过现有线索 API 创建线索跟进记录", CreateLeadFollowUpInput, True, True, create_lead_follow_up),

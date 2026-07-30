@@ -50,11 +50,12 @@ class FakeCRMAPIClient:
             return {"items": [{"id": 101, "account_name": "越秀金融"}], "total": 1}
         if method == "GET" and path == "/v1/customers/101":
             return {"id": 101, "account_name": "越秀金融"}
-        if method == "POST" and path == "/v1/customer-follow-ups/101":
+        if method == "POST" and path == "/v1/customer-activities/101":
             return {
                 "id": 9001,
                 "customer_id": 101,
-                "content": json["content"],
+                "source_content": json["source_content"],
+                "activity_kind": json["activity_kind"],
                 "next_follow_time": "2026-07-29T00:00:00",
             }
         if method == "POST" and path == "/v1/leads/":
@@ -145,7 +146,7 @@ def _confirmed_context(db):
     context.task_id = 99
     context.confirmed_by_user = True
     context.hitl_decision = "approve"
-    context.allowed_tool_names = ["create_customer_follow_up"]
+    context.allowed_tool_names = ["create_customer_activity"]
     context.allowed_customer_ids = [101]
     return context
 
@@ -452,26 +453,28 @@ async def test_agent_tool_move_opportunity_stage_calls_existing_api():
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_create_follow_up_is_idempotent():
+async def test_agent_tool_create_customer_activity_is_idempotent():
     engine, db = _db_session()
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     context = _context(db)
     try:
-        first = await service.create_customer_follow_up(
+        first = await service.create_customer_activity(
             context,
             customer_id=101,
             customer_name="越秀金融",
-            content="今天和王总沟通了项目进展",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="今天和王总沟通了项目进展",
             next_action="下周三确认进展",
             next_follow_time="2026-07-29T09:00:00",
             idempotency_suffix="msg-001",
         )
-        second = await service.create_customer_follow_up(
+        second = await service.create_customer_activity(
             context,
             customer_id=101,
             customer_name="越秀金融",
-            content="今天和王总沟通了项目进展",
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="今天和王总沟通了项目进展",
             next_action="下周三确认进展",
             next_follow_time="2026-07-29T09:00:00",
             idempotency_suffix="msg-001",
@@ -481,7 +484,7 @@ async def test_agent_tool_create_follow_up_is_idempotent():
         assert second.success is True
         assert second.idempotent_replay is True
         assert len(fake_client.calls) == 1
-        assert fake_client.calls[0]["path"] == "/v1/customer-follow-ups/101"
+        assert fake_client.calls[0]["path"] == "/v1/customer-activities/101"
         assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
@@ -911,7 +914,7 @@ async def test_agent_tool_registry_exposes_readonly_langchain_tools_only():
             tool.name: tool
             for tool in registry.to_readonly_langchain_tools(
                 _context(db),
-                allowed_tool_names=["search_customers", "create_customer_follow_up"],
+                allowed_tool_names=["search_customers", "create_customer_activity"],
             )
         }
 
@@ -930,9 +933,9 @@ async def test_agent_tool_registry_blocks_write_without_hitl_confirmation():
     try:
         with pytest.raises(Exception) as exc_info:
             await registry.execute(
-                "create_customer_follow_up",
+                "create_customer_activity",
                 _context(db),
-                {"customer_id": 101, "content": "客户项目还在评估"},
+                {"customer_id": 101, "activity_kind": "OTHER_FOLLOW_UP", "source_content": "客户项目还在评估"},
             )
 
         assert "HITL approve" in str(exc_info.value)
@@ -950,13 +953,13 @@ async def test_agent_tool_registry_allows_confirmed_write():
     registry = AgentToolRegistry(tool_service=service)
     try:
         result = await registry.execute(
-            "create_customer_follow_up",
+            "create_customer_activity",
             _confirmed_context(db),
-            {"customer_id": 101, "content": "客户项目还在评估"},
+            {"customer_id": 101, "activity_kind": "OTHER_FOLLOW_UP", "source_content": "客户项目还在评估"},
         )
 
         assert result.success is True
-        assert fake_client.calls[0]["path"] == "/v1/customer-follow-ups/101"
+        assert fake_client.calls[0]["path"] == "/v1/customer-activities/101"
     finally:
         db.close()
         engine.dispose()

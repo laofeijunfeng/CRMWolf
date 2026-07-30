@@ -57,7 +57,7 @@ export const FIELD_LABELS: Record<string, string> = {
  * 工具名称中文映射
  */
 export const TOOL_LABELS: Record<string, string> = {
-  follow_up_customer: '创建跟进记录',
+  follow_up_customer: '创建客户活动',
   follow_up_lead: '创建跟进记录',
   create_opportunity: '创建商机',
   win_opportunity: '标记赢单',
@@ -109,23 +109,23 @@ export function transformValidationError(
   // 提取 Field required 的字段名
   for (const line of errorLines) {
     const fieldRequiredMatch = line.match(/(\w+)\s+Field required/)
-    if (fieldRequiredMatch) {
+    if (fieldRequiredMatch?.[1] !== undefined) {
       const fieldName = fieldRequiredMatch[1]
-      const chineseName = FIELD_LABELS[fieldName] || fieldName
+      const chineseName = FIELD_LABELS[fieldName] ?? fieldName
       missingFields.push(chineseName)
     }
 
     // 其他错误类型
     const validationMatch = line.match(/(\w+)\s+validation error/)
-    if (validationMatch && !missingFields.includes(validationMatch[1])) {
+    if (validationMatch?.[1] !== undefined && !missingFields.includes(validationMatch[1])) {
       const fieldName = validationMatch[1]
-      const chineseName = FIELD_LABELS[fieldName] || fieldName
+      const chineseName = FIELD_LABELS[fieldName] ?? fieldName
       missingFields.push(chineseName)
     }
   }
 
   // 生成标题
-  const toolLabel = toolName ? TOOL_LABELS[toolName] || toolName : '操作'
+  const toolLabel = toolName !== undefined && toolName !== '' ? TOOL_LABELS[toolName] ?? toolName : '操作'
   const title = `${toolLabel}受阻`
 
   // 生成概要
@@ -164,7 +164,7 @@ export function transformGenericError(
   error: string,
   toolName?: string
 ): TransformedError {
-  const toolLabel = toolName ? TOOL_LABELS[toolName] || toolName : '操作'
+  const toolLabel = toolName !== undefined && toolName !== '' ? TOOL_LABELS[toolName] ?? toolName : '操作'
 
   // 检查是否是 validation error
   if (error.includes('validation error') || error.includes('Field required')) {
@@ -210,19 +210,23 @@ export function transformToolResult(result: {
   summary: string
   missingFields?: string[]
 } {
-  const toolLabel = TOOL_LABELS[result.tool] || result.tool
+  const toolLabel = TOOL_LABELS[result.tool] ?? result.tool
 
   if (result.success) {
     return {
       type: 'success',
       title: `${toolLabel}成功`,
-      summary: result.message || '操作已完成'
+      summary: result.message ?? '操作已完成'
     }
   }
 
   // 解析失败原因
-  if (result.message?.includes('validation error') || result.message?.includes('Field required')) {
-    const transformed = transformValidationError(result.message, result.tool)
+  const message = result.message
+  if (
+    message !== undefined
+    && (message.includes('validation error') || message.includes('Field required'))
+  ) {
+    const transformed = transformValidationError(message, result.tool)
     return {
       type: 'warning',
       title: transformed.title,
@@ -234,6 +238,6 @@ export function transformToolResult(result: {
   return {
     type: 'error',
     title: `${toolLabel}失败`,
-    summary: result.message || '操作未成功'
+    summary: result.message ?? '操作未成功'
   }
 }

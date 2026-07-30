@@ -2,7 +2,7 @@
 AI 解析客户信息接口
 
 包含两个功能：
-1. 客户跟进记录解析（MagicWand 魔术棒功能）- 已有
+1. 客户活动解析（MagicWand 魔术棒功能）- 已有
 2. 客户创建解析（AI 智能创建）- 新增
 """
 import json
@@ -23,27 +23,28 @@ from app.models.user import User
 from app.api.customers import _ensure_customer_name_available
 
 # 已有功能（MagicWand）
-from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest as CustomerFollowUpAICreateRequest
+from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest as CustomerActivityAICreateRequest
 from app.services.follow_up_parser import follow_up_parser_service
+from app.services.customer_activity_kinds import infer_activity_kind
 
 # 新增功能（AI 创建客户）
 from app.schemas.customer_ai_create import CustomerAICreateParseRequest, CustomerAICreateRequest as CustomerCreateAIRequest
 from app.services.ai_parser.factory import EntityAIParserFactory
 
 
-router = APIRouter(prefix="/v1/customers/ai", tags=["AI 客户跟进"])
+router = APIRouter(prefix="/v1/customers/ai", tags=["AI 客户活动"])
 logger = logging.getLogger(__name__)
 
 
 @router.post("/parse")
-async def parse_customer_follow_up(
+async def parse_customer_activity(
     request: CustomerAIParseRequest,
     current_user: User = Depends(get_current_active_user),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
 ):
     """
-    AI 解析客户跟进信息（SSE 流式响应）
+    AI 解析客户活动信息（SSE 流式响应）
 
     SSE 事件类型：
     - status: 状态更新
@@ -84,32 +85,24 @@ async def parse_customer_follow_up(
 
 
 @router.post("/create", status_code=status.HTTP_201_CREATED)
-async def create_customer_follow_up(
-    request: CustomerFollowUpAICreateRequest,
+async def create_customer_activity_from_ai(
+    request: CustomerActivityAICreateRequest,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
-    从 AI 解析结果创建客户跟进记录（用户确认后提交）
+    从 AI 解析结果创建客户活动（用户确认后提交）
 
     处理 next_action 和 next_follow_time（相对时间转换为具体日期）
     """
-    from app.crud.customer_follow_up import customer_follow_up_crud
-    from app.schemas.customer_follow_up import CustomerFollowUpCreate
+    from app.crud.customer_activity import customer_activity_crud
+    from app.schemas.customer_activity import CustomerActivityCreate
+    from app.services.customer_activity_processing_service import customer_activity_processing_service
 
     customer = check_customer_edit_permission(request.customer_id, team_id, current_user, db)
 
-    # 推断跟进方式
-    method_str = "其他"
-    method_map = {
-        "电话": "电话",
-        "微信": "微信",
-        "拜访": "拜访",
-        "邮件": "邮件"
-    }
-    if request.method and request.method in method_map:
-        method_str = method_map[request.method]
+    activity_kind = infer_activity_kind(request.method, request.content)
 
     # 解析下次跟进时间（相对时间 → 具体日期）
     next_follow_time_dt = None
@@ -119,28 +112,29 @@ async def create_customer_follow_up(
             base_date=datetime.now()
         )
 
-    # 创建跟进记录
-    follow_up_create = CustomerFollowUpCreate(
-        content=request.content,
-        method=method_str,
+    activity_create = CustomerActivityCreate(
+        activity_kind=activity_kind,
+        source_content=request.content,
         next_action=request.next_action,
-        next_follow_time=next_follow_time_dt
+        next_follow_time=next_follow_time_dt,
+        next_follow_time_source="AI_EXTRACTED" if next_follow_time_dt else None,
     )
 
-    follow_up = customer_follow_up_crud.create(
+    activity = customer_activity_crud.create(
         db=db,
-        obj_in=follow_up_create,
+        obj_in=activity_create,
         customer_id=request.customer_id,
         creator_id=str(current_user.id),
         team_id=customer.team_id,
         operator_name=current_user.name if hasattr(current_user, 'name') else None
     )
+    await customer_activity_processing_service.trigger_processing(activity.id, team_id)
 
     return {
-        "id": follow_up.id,
+        "id": activity.id,
         "customer_id": request.customer_id,
-        "content": request.content,
-        "method": request.method,
+        "source_content": request.content,
+        "activity_kind": activity.activity_kind,
         "next_action": request.next_action,
         "next_follow_time": next_follow_time_dt.isoformat() if next_follow_time_dt else None
     }
@@ -196,7 +190,7 @@ async def create_customer_from_ai(
     """
     从 AI 解析结果创建客户（用户确认后提交）
     
-    创建客户 + 主联系人 + 触发档案生成 + 创建跟进记录
+    创建客户 + 主联系人 + 触发档案生成 + 创建客户活动
     """
     parser = EntityAIParserFactory.get_parser("customer")
     if not parser:
@@ -217,7 +211,7 @@ async def create_customer_from_ai(
             team_id=team_id
         )
         
-        # 执行创建后的额外操作（触发档案生成 + 创建跟进记录）
+        # 执行创建后的额外操作（触发档案生成 + 创建客户活动）
         await parser.post_create_actions(
             db=db,
             entity=customer,

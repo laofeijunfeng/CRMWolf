@@ -51,7 +51,7 @@ from app.services.agent.task_actions import _tool_name_for_action
 def _is_customer_selection_task(task) -> bool:
     state = task.state_json or {}
     return state.get("action") in {
-        "select_customer_for_follow_up",
+        "select_customer_for_activity",
         "select_customer_for_opportunity",
         "select_customer_for_contact",
         "select_customer_for_invoice_title",
@@ -250,9 +250,9 @@ async def _contact_task_next_state(
 
     payload["customer_id"] = customer.get("id")
     return (
-        "create_customer_follow_up",
+        "create_customer_activity",
         payload,
-        f"已选择客户「{customer.get('account_name')}」。请确认是否创建这条跟进记录？",
+        f"已选择客户「{customer.get('account_name')}」。请确认是否创建这条客户活动？",
     )
 
 async def _apply_customer_selection(

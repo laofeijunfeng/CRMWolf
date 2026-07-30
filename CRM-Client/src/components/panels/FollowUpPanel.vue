@@ -17,6 +17,7 @@ interface FollowUp {
   id: number
   customer_id?: number | null
   original_lead_id?: number | null
+  processing_status?: string | null
   content: string
   method: string
   next_follow_time?: string | null
@@ -52,6 +53,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'add': []
   'delete': [followUp: FollowUp]
+  'process': [followUp: FollowUp]
 }>()
 
 // ==================== Methods ====================
@@ -61,6 +63,10 @@ const handleAdd = (): void => {
 
 const handleDelete = (followUp: FollowUp): void => {
   emit('delete', followUp)
+}
+
+const handleProcess = (followUp: FollowUp): void => {
+  emit('process', followUp)
 }
 </script>
 
@@ -105,7 +111,10 @@ const handleDelete = (followUp: FollowUp): void => {
         :follow-ups="props.followUps"
         :loading="props.loading"
         :current-user-id="props.currentUserId"
+        record-label="客户活动"
+        allow-process
         @delete="handleDelete"
+        @process="handleProcess"
       />
     </div>
   </div>

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from app.services.agent import business_rules
+from app.services.customer_activity_kinds import infer_activity_kind
 
 
 class BusinessResponseBuilder:
@@ -18,8 +19,8 @@ class BusinessResponseBuilder:
         business_context: Dict[str, Any],
     ):
         customer_name = parsed.get("customer_name")
-        if intent == "CUSTOMER_FOLLOW_UP":
-            return self._customer_follow_up(parsed, candidates, customer_name)
+        if intent == "CUSTOMER_ACTIVITY":
+            return self._customer_activity(parsed, candidates, customer_name)
         if intent == "CREATE_LEAD":
             return self._create_lead(parsed)
         if intent == "CREATE_CUSTOMER":
@@ -40,24 +41,21 @@ class BusinessResponseBuilder:
             return "我识别到这是查询请求。下一步会接入客户上下文查询和汇总能力。", None
         return "我还不能可靠理解这条消息，请补充客户名称、业务内容或你希望我执行的动作。", None
 
-    def _customer_follow_up(self, parsed: Dict[str, Any], candidates: List[Dict[str, Any]], customer_name: Any):
+    def _customer_activity(self, parsed: Dict[str, Any], candidates: List[Dict[str, Any]], customer_name: Any):
         if not customer_name:
-            return "我识别到这是客户跟进，但还缺少明确客户名称。请补充客户名称。", None
+            return "我识别到这是客户活动，但还缺少明确客户名称。请补充客户名称。", None
+        activity_payload = self._customer_activity_payload(parsed)
         if len(candidates) == 1:
             customer = candidates[0]
             return (
-                f"我识别到客户「{customer.get('account_name')}」的跟进记录。"
-                "请确认是否创建这条跟进记录？"
+                f"我识别到客户「{customer.get('account_name')}」的客户活动。"
+                "请确认是否创建这条客户活动？"
             ), {
-                "action": "create_customer_follow_up",
+                "action": "create_customer_activity",
                 "customer": customer,
                 "payload": {
                     "customer_id": customer.get("id"),
-                    "content": parsed.get("follow_up_content"),
-                    "method": parsed.get("method") or "AI录入",
-                    "next_action": parsed.get("next_action"),
-                    "next_follow_time_text": parsed.get("next_follow_time_text"),
-                    "next_follow_time_iso": parsed.get("next_follow_time_iso"),
+                    **activity_payload,
                 },
             }
         if len(candidates) > 1:
@@ -69,17 +67,28 @@ class BusinessResponseBuilder:
                 "我找到了多个可能的客户，请回复序号或客户名称确认要记录到哪一个客户："
                 + "；".join(candidate_lines)
             ), {
-                "action": "select_customer_for_follow_up",
+                "action": "select_customer_for_activity",
                 "customers": candidates,
-                "payload": {
-                    "content": parsed.get("follow_up_content"),
-                    "method": parsed.get("method") or "AI录入",
-                    "next_action": parsed.get("next_action"),
-                    "next_follow_time_text": parsed.get("next_follow_time_text"),
-                    "next_follow_time_iso": parsed.get("next_follow_time_iso"),
-                },
+                "payload": activity_payload,
             }
         return self.rules.customer_not_found_response(customer_name), None
+
+    @staticmethod
+    def _customer_activity_payload(parsed: Dict[str, Any]) -> Dict[str, Any]:
+        content = parsed.get("follow_up_content") or ""
+        method = parsed.get("method") or "AI录入"
+        original_content = parsed.get("original_content") or content
+        activity_kind = infer_activity_kind(method, original_content or content)
+        return {
+            "activity_kind": activity_kind,
+            "source_content": original_content,
+            # Compatibility for field-supplement flows and existing UI trace payloads.
+            "content": content,
+            "method": method,
+            "next_action": parsed.get("next_action"),
+            "next_follow_time_text": parsed.get("next_follow_time_text"),
+            "next_follow_time_iso": parsed.get("next_follow_time_iso"),
+        }
 
     def _create_lead(self, parsed: Dict[str, Any]):
         lead = parsed.get("lead") or {}
@@ -119,7 +128,7 @@ class BusinessResponseBuilder:
                 "action": "collect_customer_fields",
                 "payload": {
                     "customer": customer_create,
-                    "customer_follow_up": parsed.get("customer_follow_up") or {},
+                    "customer_activity": parsed.get("customer_activity") or parsed.get("customer_follow_up") or {},
                     "missing_fields": missing_fields,
                 },
             }
@@ -133,7 +142,7 @@ class BusinessResponseBuilder:
             "action": "create_customer",
             "payload": {
                 "customer": customer_create,
-                "customer_follow_up": parsed.get("customer_follow_up") or {},
+                "customer_activity": parsed.get("customer_activity") or parsed.get("customer_follow_up") or {},
             },
         }
 

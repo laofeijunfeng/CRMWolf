@@ -11,7 +11,7 @@ debug_mode = os.getenv("CRM_DEBUG", "true").lower() == "true"
 setup_logging(debug=debug_mode)
 logger = get_logger(__name__)
 
-from app.api import auth, users, roles, permissions, leads, customers, customer_follow_ups, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, teams, industry, procurement_ai, approval_ai, system_configs, sales_dashboard, business_journey_board, oauth
+from app.api import auth, users, roles, permissions, leads, customers, customer_activities, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, teams, industry, procurement_ai, approval_ai, system_configs, sales_dashboard, business_journey_board, oauth
 from app.api.deployment import router as deployment_router  # 新增
 from app.api.license_application import router as license_application_router  # 新增
 from app.api.customer_ai import router as customer_ai_router
@@ -77,7 +77,7 @@ api_router.include_router(customers.router)
 api_router.include_router(customer_ai_router)
 api_router.include_router(industry.router)
 api_router.include_router(customer_procurement.router)
-api_router.include_router(customer_follow_ups.router)
+api_router.include_router(customer_activities.router)
 api_router.include_router(opportunities.router)
 api_router.include_router(opportunities.analytics_router)
 api_router.include_router(filter_options.router)
@@ -122,6 +122,11 @@ async def startup_event():
     logger.info("启动热力值定时刷新任务...")
     from app.tasks.score_scheduler import start_score_scheduler
     start_score_scheduler()
+
+    logger.info("恢复未完成客户活动 AI workflow...")
+    from app.services.customer_activity_processing_service import customer_activity_processing_service
+    recovered_count = await customer_activity_processing_service.recover_unfinished()
+    logger.info("已重新派发 %s 个未完成客户活动 AI workflow", recovered_count)
 
     logger.info("审批超时自动催办任务已停用，催办改为审批中心手动触发")
 

@@ -16,6 +16,9 @@ from app.services.agent.temporal import agent_temporal_resolver
 from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
 from app.services.agent.session_state import _remember_pending_task
 from app.services.agent.task_factory import _new_task_key
+from app.services.customer_activity_kinds import (
+    infer_activity_kind,
+)
 
 def _is_follow_up_quality_fields_task(task) -> bool:
     state = task.state_json or {}
@@ -38,11 +41,11 @@ def _merge_lead_follow_up_fields(existing_follow_up: dict, semantic_result: Agen
         }),
     }
 
-def _merge_customer_follow_up_fields(existing_follow_up: dict, semantic_result: AgentSemanticParseResult) -> dict:
+def _merge_customer_activity_fields(existing_activity: dict, semantic_result: AgentSemanticParseResult) -> dict:
     customer = semantic_result.customer_create
     next_follow_time_iso = agent_temporal_resolver.resolve_follow_up_time(customer.next_follow_time)
     return {
-        **existing_follow_up,
+        **existing_activity,
         **_drop_empty_values({
             "content": customer.follow_up_content,
             "method": customer.follow_up_method,
@@ -129,9 +132,9 @@ def _lead_follow_up_create_payload(lead_id: int, follow_up: dict, quality: Any =
         "next_follow_time": follow_up.get("next_follow_time_iso") or follow_up.get("next_follow_time"),
     }
 
-def _customer_follow_up_semantic_result(customer: dict, follow_up: dict) -> AgentSemanticParseResult:
+def _customer_activity_semantic_result(customer: dict, activity: dict) -> AgentSemanticParseResult:
     return AgentSemanticParseResult.model_validate({
-        "intent": "CUSTOMER_FOLLOW_UP",
+        "intent": "CUSTOMER_ACTIVITY",
         "intent_confidence": 0.95,
         "customer": {
             "name_text": customer.get("account_name"),
@@ -139,25 +142,25 @@ def _customer_follow_up_semantic_result(customer: dict, follow_up: dict) -> Agen
             "resolution_source": "EXPLICIT",
         },
         "follow_up": {
-            "content": follow_up.get("content"),
-            "method": follow_up.get("method") or "AI录入",
-            "next_action": follow_up.get("next_action"),
-            "next_follow_time_text": follow_up.get("next_follow_time_text"),
+            "content": activity.get("content"),
+            "method": activity.get("method") or "AI录入",
+            "next_action": activity.get("next_action"),
+            "next_follow_time_text": activity.get("next_follow_time_text"),
         },
         "business_signals": [],
-        "requested_actions": [{"action": "CREATE_CUSTOMER_FOLLOW_UP", "requires_confirmation": True}],
+        "requested_actions": [{"action": "CREATE_CUSTOMER_ACTIVITY", "requires_confirmation": True}],
         "missing_fields": [],
         "need_clarification": False,
         "clarification_question": None,
-        "evidence": [follow_up.get("content") or ""],
+        "evidence": [activity.get("content") or ""],
     })
 
-async def _evaluate_customer_follow_up_quality(db: Session, task, customer: dict, follow_up: dict):
+async def _evaluate_customer_activity_quality(db: Session, task, customer: dict, activity: dict):
     return await agent_follow_up_quality_evaluator.evaluate_with_metadata(
         db,
         team_id=task.team_id,
-        user_message=follow_up.get("content") or "",
-        semantic_result=_customer_follow_up_semantic_result(customer, follow_up),
+        user_message=activity.get("content") or "",
+        semantic_result=_customer_activity_semantic_result(customer, activity),
         memory=AgentMemorySnapshot(
             pending_task={
                 "id": task.id,
@@ -171,31 +174,37 @@ async def _evaluate_customer_follow_up_quality(db: Session, task, customer: dict
         current_date=agent_temporal_resolver.now().date(),
     )
 
-def _customer_follow_up_create_payload(customer_id: int, follow_up: dict, quality: Any = None) -> dict:
+def _customer_activity_create_payload(customer_id: int, activity: dict, quality: Any = None) -> dict:
+    method = activity.get("method") or "AI录入"
+    content = activity.get("content") or ""
+    raw_source_content = activity.get("source_content") or activity.get("original_content") or content
+    activity_kind = infer_activity_kind(method, raw_source_content or content)
     return {
         "customer_id": customer_id,
-        "content": _follow_up_content_for_create(follow_up, quality),
-        "method": follow_up.get("method") or "AI录入",
-        "next_action": follow_up.get("next_action"),
-        "next_follow_time_text": follow_up.get("next_follow_time_text"),
-        "next_follow_time_iso": follow_up.get("next_follow_time_iso"),
+        "activity_kind": activity_kind,
+        "source_content": raw_source_content,
+        "title": None,
+        "next_action": activity.get("next_action"),
+        "next_follow_time_text": activity.get("next_follow_time_text"),
+        "next_follow_time_iso": activity.get("next_follow_time_iso"),
     }
 
-def _create_customer_follow_up_task(
+def _create_customer_activity_task(
     db: Session,
     session,
     *,
     team_id: int,
     user_id: int,
     customer: dict,
-    follow_up: dict,
+    activity: dict,
     action: str,
     summary: str,
     required_tools: list[str],
     confirmation_summary: str,
 ):
     customer_id = customer.get("id")
-    payload = dict(follow_up)
+    payload = dict(activity)
+    payload.setdefault("source_content", payload.get("content") or "")
     payload["customer_id"] = customer_id
     next_task = agent_task_crud.create(
         db,
@@ -204,7 +213,7 @@ def _create_customer_follow_up_task(
             team_id=team_id,
             user_id=user_id,
             session_id=session.id,
-            intent="CUSTOMER_FOLLOW_UP",
+            intent="CUSTOMER_ACTIVITY",
             status=AgentTaskStatus.WAITING_USER,
             target_type="customer",
             target_id=customer_id,
@@ -224,7 +233,7 @@ def _create_customer_follow_up_task(
     _remember_pending_task(db, session, next_task)
     return next_task
 
-async def _stage_customer_follow_up_after_create(
+async def _stage_customer_activity_after_create(
     db: Session,
     session,
     task,
@@ -232,57 +241,57 @@ async def _stage_customer_follow_up_after_create(
     team_id: int,
     user_id: int,
     customer: dict,
-    follow_up: dict,
+    activity: dict,
 ) -> str:
     try:
-        envelope = await _evaluate_customer_follow_up_quality(db, task, customer, follow_up)
+        envelope = await _evaluate_customer_activity_quality(db, task, customer, activity)
     except AgentFollowUpQualityEvaluatorError as exc:
-        _create_customer_follow_up_task(
+        _create_customer_activity_task(
             db,
             session,
             team_id=team_id,
             user_id=user_id,
             customer=customer,
-            follow_up={**follow_up, "quality_error": str(exc)},
+            activity={**activity, "quality_error": str(exc)},
             action="collect_follow_up_quality_fields",
-            summary="等待补充客户跟进信息",
+            summary="等待补充客户活动信息",
             required_tools=[],
-            confirmation_summary="补充客户跟进信息",
+            confirmation_summary="补充客户活动信息",
         )
-        return f"客户已创建，但我没有可靠评估客户跟进记录。请补充一下跟进信息。原因：{str(exc)}"
+        return f"客户已创建，但我没有可靠评估客户活动。请补充一下活动信息。原因：{str(exc)}"
 
     quality = envelope.result
-    follow_up = {**follow_up, "quality": quality.model_dump(exclude_none=True)}
+    activity = {**activity, "quality": quality.model_dump(exclude_none=True)}
     if not quality.passed:
-        _create_customer_follow_up_task(
+        _create_customer_activity_task(
             db,
             session,
             team_id=team_id,
             user_id=user_id,
             customer=customer,
-            follow_up=follow_up,
+            activity=activity,
             action="collect_follow_up_quality_fields",
-            summary="等待补充客户跟进信息",
+            summary="等待补充客户活动信息",
             required_tools=[],
-            confirmation_summary="补充客户跟进信息",
+            confirmation_summary="补充客户活动信息",
         )
-        question = quality.supplement_question or "这条客户跟进还差一点关键信息，请继续补充。"
+        question = quality.supplement_question or "这条客户活动还差一点关键信息，请继续补充。"
         return f"客户已创建。{question}"
 
-    next_payload = _customer_follow_up_create_payload(customer["id"], follow_up, quality)
-    _create_customer_follow_up_task(
+    next_payload = _customer_activity_create_payload(customer["id"], activity, quality)
+    _create_customer_activity_task(
         db,
         session,
         team_id=team_id,
         user_id=user_id,
         customer=customer,
-        follow_up=next_payload,
-        action="create_customer_follow_up",
-        summary="等待确认执行：create_customer_follow_up",
-        required_tools=["create_customer_follow_up"],
-        confirmation_summary=f"为「{customer.get('account_name')}」创建跟进记录",
+        activity=next_payload,
+        action="create_customer_activity",
+        summary="等待确认执行：create_customer_activity",
+        required_tools=["create_customer_activity"],
+        confirmation_summary=f"为「{customer.get('account_name')}」创建客户活动",
     )
-    return "客户已创建。请确认是否同步创建客户跟进记录？"
+    return "客户已创建。请确认是否同步创建客户活动？"
 
 def _create_lead_follow_up_task(
     db: Session,
@@ -395,6 +404,13 @@ async def _apply_follow_up_quality_fields(db: Session, task, content: str):
         return False, f"我没有可靠识别到补充的跟进信息，请换一种说法补充。原因：{str(exc)}"
 
     payload = _merge_follow_up_fields(payload, semantic_result, content)
+    if content:
+        existing_source = str(payload.get("source_content") or "").strip()
+        supplement_source = content.strip()
+        if existing_source and supplement_source and supplement_source not in existing_source:
+            payload["source_content"] = f"{existing_source}\n补充：{supplement_source}"
+        else:
+            payload["source_content"] = existing_source or supplement_source
     payload["customer_id"] = payload.get("customer_id") or customer.get("id")
     state = {**state, "payload": payload}
     try:
@@ -416,42 +432,45 @@ async def _apply_follow_up_quality_fields(db: Session, task, content: str):
             current_date=agent_temporal_resolver.now().date(),
         )
     except AgentFollowUpQualityEvaluatorError as exc:
-        return False, f"我没有可靠评估这条跟进记录，请再补充一下。原因：{str(exc)}"
+        return False, f"我没有可靠评估这条客户活动，请再补充一下。原因：{str(exc)}"
 
     quality = envelope.result
     payload["quality"] = quality.model_dump(exclude_none=True)
     state = {**state, "payload": payload}
     if not quality.passed:
         agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))
-        return False, quality.supplement_question or "还差一点关键信息，请继续补充这条跟进记录。"
+        return False, quality.supplement_question or "还差一点关键信息，请继续补充这条客户活动。"
 
+    raw_source_content = payload.get("source_content") or payload.get("content") or ""
+    activity_kind = infer_activity_kind(payload.get("method") or "AI录入", raw_source_content)
     next_payload = {
         "customer_id": payload.get("customer_id"),
-        "content": _follow_up_content_for_create(payload, quality),
-        "method": payload.get("method") or "AI录入",
+        "activity_kind": activity_kind,
+        "source_content": raw_source_content,
+        "title": None,
         "next_action": payload.get("next_action"),
         "next_follow_time_text": payload.get("next_follow_time_text"),
         "next_follow_time_iso": payload.get("next_follow_time_iso"),
     }
     new_state = {
-        "action": "create_customer_follow_up",
+        "action": "create_customer_activity",
         "payload": next_payload,
         "customer": customer,
         "hitl": AgentHITLPolicy(
-            required_for_tools=["create_customer_follow_up"],
-            confirmation_summary=f"为「{customer.get('account_name')}」创建跟进记录",
+            required_for_tools=["create_customer_activity"],
+            confirmation_summary=f"为「{customer.get('account_name')}」创建客户活动",
         ).model_dump(exclude_none=True),
     }
     agent_task_crud.update(
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_customer_follow_up",
+            summary="等待确认执行：create_customer_activity",
             input_json=next_payload,
             state_json=new_state,
         ),
     )
-    return True, f"跟进内容已补齐。请确认是否为「{customer.get('account_name')}」创建这条跟进记录？"
+    return True, f"客户活动内容已补齐。请确认是否为「{customer.get('account_name')}」创建这条客户活动？"
 
 async def _apply_lead_follow_up_quality_fields(db: Session, task, content: str):
     state = deepcopy(task.state_json or {})

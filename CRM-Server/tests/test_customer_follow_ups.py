@@ -72,31 +72,31 @@ async def test_api():
                 customer_id = convert_result['customer_id']
                 print(f"转化成功！客户ID: {customer_id}\n")
                 
-                print("测试查询客户跟进列表...")
-                response = await client.get(f"{BASE_URL}/api/v1/customer-follow-ups/{customer_id}", headers=headers)
+                print("测试查询客户活动列表...")
+                response = await client.get(f"{BASE_URL}/api/v1/customer-activities/{customer_id}", headers=headers)
                 print(f"状态码: {response.status_code}")
                 print(f"响应: {response.text[:200]}...\n")
                 
-                print("测试为客户添加跟进记录...")
-                customer_follow_up = {
-                    "content": "与客户技术负责人深入沟通，他们对我们的产品很感兴趣",
-                    "method": "电话",
-                    "nextFollowTime": "2026-02-05T10:00:00"
+                print("测试为客户添加活动...")
+                customer_activity = {
+                    "activity_kind": "PHONE_FOLLOW_UP",
+                    "source_content": "与客户技术负责人深入沟通，他们对我们的产品很感兴趣",
+                    "next_follow_time": "2026-02-05T10:00:00"
                 }
-                response = await client.post(f"{BASE_URL}/api/v1/customer-follow-ups/{customer_id}", json=customer_follow_up, headers=headers)
+                response = await client.post(f"{BASE_URL}/api/v1/customer-activities/{customer_id}", json=customer_activity, headers=headers)
                 print(f"状态码: {response.status_code}")
                 print(f"响应: {response.text[:200]}...\n")
                 
                 if response.status_code == 201:
-                    follow_up_data = response.json()
-                    follow_up_id = follow_up_data['id']
-                    print(f"跟进记录创建成功，ID: {follow_up_id}\n")
+                    activity_data = response.json()
+                    activity_id = activity_data['id']
+                    print(f"客户活动创建成功，ID: {activity_id}\n")
                     
                     print("测试更新下次跟进时间...")
                     update_data = {
-                        "nextFollowTime": "2026-02-06T10:00:00"
+                        "next_follow_time": "2026-02-06T10:00:00"
                     }
-                    response = await client.patch(f"{BASE_URL}/api/v1/customer-follow-ups/{follow_up_id}/next-time", json=update_data, headers=headers)
+                    response = await client.patch(f"{BASE_URL}/api/v1/customer-activities/{activity_id}/next-time", json=update_data, headers=headers)
                     print(f"状态码: {response.status_code}")
                     print(f"响应: {response.text[:200]}...\n")
         else:

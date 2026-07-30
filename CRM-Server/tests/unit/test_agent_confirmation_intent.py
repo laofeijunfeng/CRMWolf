@@ -11,9 +11,9 @@ from app.services.agent.schemas import AgentConfirmationIntentDecision
 def executable_task():
     return SimpleNamespace(
         id=1,
-        state_json={"action": "create_customer_follow_up"},
+        state_json={"action": "create_customer_activity"},
         summary="请确认是否创建客户跟进记录",
-        intent="CUSTOMER_FOLLOW_UP",
+        intent="CUSTOMER_ACTIVITY",
         target_type=None,
         target_id=None,
         input_json={},

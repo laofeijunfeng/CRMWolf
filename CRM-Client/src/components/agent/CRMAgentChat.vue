@@ -15,7 +15,7 @@
             size="sm"
             @click="useExample('今天和越秀金融的王总沟通了下项目进展，客户反馈还在立项评估阶段，暂时持续跟进，下周三再确认进展。')"
           >
-            跟进记录
+            客户活动
           </Button>
           <Button
             type="button"
@@ -108,7 +108,7 @@
           class="agent-chat__textarea"
           rows="1"
           :disabled="isStreaming"
-          placeholder="让我帮你记录客户跟进、补客户资料，顺手看看要不要推进商机..."
+          placeholder="让我帮你记录客户活动、补客户资料，顺手看看要不要推进商机..."
           aria-label="输入 Agent 消息"
           @keydown.enter.exact.prevent="sendMessage"
         />
@@ -470,7 +470,7 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
     case "follow_up_quality_evaluated":
       return `${formatAITrace("AI 跟进质量评估", event.quality_source, event.model, event.fallback_reason, event.fallback_error)}，评分：${stringifyValue(event.score)}`
     case "follow_up_quality_required":
-      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充跟进记录信息"
+      return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充客户活动信息"
     case "intent":
       return `识别意图：${stringifyValue(event.intent)}`
     case "entity_parse":

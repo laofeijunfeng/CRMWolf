@@ -12,7 +12,7 @@ def test_semantic_prompt_contains_business_and_boundary_rules():
         '{"recent_messages":[]}',
     )
 
-    assert "围绕客户跟进记录" in messages[0]["content"]
+    assert "围绕客户活动" in messages[0]["content"]
     assert "业务动作只能由后续 tool 调用现有 CRM API 完成" in messages[0]["content"]
     assert "禁止输出 Markdown" in messages[0]["content"]
     assert "intent_confidence 低于 0.75" in CRM_AGENT_SEMANTIC_SYSTEM_PROMPT
@@ -24,7 +24,7 @@ def test_semantic_parser_accepts_json_object_wrapped_in_code_fence():
     result = AgentSemanticParser().parse_raw_response("""
 ```json
 {
-  "intent": "CUSTOMER_FOLLOW_UP",
+  "intent": "CUSTOMER_ACTIVITY",
   "intent_confidence": 0.95,
   "customer": {"name_text": "越秀金融", "confidence": 0.95},
   "follow_up": {
@@ -54,7 +54,7 @@ def test_semantic_parser_accepts_json_object_wrapped_in_code_fence():
 ```
 """)
 
-    assert result.intent == "CUSTOMER_FOLLOW_UP"
+    assert result.intent == "CUSTOMER_ACTIVITY"
     assert result.customer.name_text == "越秀金融"
     assert result.follow_up.next_follow_time_text == "下周三"
     assert result.follow_up.next_follow_time.weekday == 3
@@ -77,7 +77,7 @@ async def test_semantic_parser_uses_langchain_structured_output_path():
             assert "messages" in payload
             return {
                 "structured_response": AgentSemanticParseResult.model_validate({
-                    "intent": "CUSTOMER_FOLLOW_UP",
+                    "intent": "CUSTOMER_ACTIVITY",
                     "intent_confidence": 0.95,
                     "customer": {"name_text": "越秀金融", "confidence": 0.95},
                     "follow_up": {"content": "客户还在立项评估阶段"},
@@ -114,4 +114,4 @@ async def test_semantic_parser_uses_langchain_structured_output_path():
 
     assert calls["response_format"] is AgentSemanticParseResult
     assert "CRM AI Agent 语义解析器" in calls["system_prompt"]
-    assert result.intent == "CUSTOMER_FOLLOW_UP"
+    assert result.intent == "CUSTOMER_ACTIVITY"

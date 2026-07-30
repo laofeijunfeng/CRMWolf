@@ -8,7 +8,7 @@
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Sheet,
   SheetHeader,
@@ -59,7 +59,7 @@ import ScoreIndicator from '@/components/ScoreIndicator.vue'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
-import customerFollowUpApi, { type CustomerFollowUpResponse } from '@/api/customerFollowUp'
+import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
 import { opportunityApi, type OpportunityListResponse } from '@/api/opportunity'
 import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
 import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite, PaymentRecordUpdate } from '@/api/payment'
@@ -86,6 +86,7 @@ const emit = defineEmits<{
   'refresh': []
 }>()
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
@@ -120,6 +121,8 @@ const recordEditDialogOpen = ref(false)
 const recordEditSubmitting = ref(false)
 const isRecordResubmitMode = ref(false)
 const selectedOpportunityId = ref<number | null>(null)
+const highlightedOpportunityId = ref<number | null>(null)
+const restoreFocusOpportunityId = ref<number | null>(null)
 
 interface ContractOpportunityContext {
   id: number
@@ -153,7 +156,7 @@ const opportunityDetailContentRef = ref<OpportunityDetailContentExpose | null>(n
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
 const score = ref<ScoreResponse | null>(null)
-const followUps = ref<CustomerFollowUpResponse[]>([])
+const followUps = ref<CustomerActivityResponse[]>([])
 const opportunities = ref<OpportunityListResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
 const paymentPlans = ref<PaymentPlanResponse[]>([])
@@ -357,7 +360,7 @@ const handleCreateInvoiceTitle = (): void => {
 }
 
 const handleCreateFollowUp = (): void => {
-  if (!canCreateFollowUp.value) {
+  if (!canCreateActivity.value) {
     toast.error('你没有在该客户下添加跟进的权限')
     return
   }
@@ -372,9 +375,77 @@ const handleEdit = (): void => {
   customerEditDialogOpen.value = true
 }
 
-// 占位方法：Sidebar 面板切换
+const getSingleQueryValue = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return typeof value[0] === 'string' ? value[0] : undefined
+  }
+  return undefined
+}
+
+const parsePositiveInteger = (value: unknown): number | null => {
+  const rawValue = getSingleQueryValue(value)
+  if (rawValue === undefined || rawValue.trim() === '') return null
+  const parsed = Number.parseInt(rawValue, 10)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+const getCustomerRouteQuery = (extra: Record<string, string | undefined> = {}): Record<string, string> => {
+  const query: Record<string, string> = {}
+  const currentCustomerId = getSingleQueryValue(route.query['customerId'])
+  if (currentCustomerId !== undefined) {
+    query['customerId'] = currentCustomerId
+  } else if (props.customerId !== null) {
+    query['customerId'] = String(props.customerId)
+  }
+
+  const currentTab = getSingleQueryValue(route.query['tab'])
+  if (currentTab !== undefined) {
+    query['tab'] = currentTab
+  }
+
+  const currentOpportunityId = getSingleQueryValue(route.query['opportunityId'])
+  if (currentOpportunityId !== undefined) {
+    query['opportunityId'] = currentOpportunityId
+  }
+
+  Object.entries(extra).forEach(([key, value]) => {
+    if (value !== undefined) {
+      query[key] = value
+    }
+  })
+
+  return Object.fromEntries(
+    Object.entries(query).filter(([key]) => (
+      !Object.prototype.hasOwnProperty.call(extra, key) || extra[key] !== undefined
+    )),
+  )
+}
+
+const restorePanelFromRoute = (): void => {
+  const routeTab = getSingleQueryValue(route.query['tab'])
+  activePanel.value = navTabs.some(tab => tab.key === routeTab) ? routeTab as string : 'customer-brief'
+
+  const routeOpportunityId = activePanel.value === 'opportunities'
+    ? parsePositiveInteger(route.query['opportunityId'])
+    : null
+  selectedOpportunityId.value = routeOpportunityId
+  highlightedOpportunityId.value = null
+  restoreFocusOpportunityId.value = null
+}
+
 const setActivePanel = (panel: string): void => {
   activePanel.value = panel
+  selectedOpportunityId.value = null
+  highlightedOpportunityId.value = null
+  restoreFocusOpportunityId.value = null
+  void router.push({
+    path: '/customers',
+    query: getCustomerRouteQuery({
+      tab: panel === 'customer-brief' ? undefined : panel,
+      opportunityId: undefined
+    })
+  })
 }
 
 // ==================== Helper Functions ====================
@@ -446,12 +517,12 @@ const canEditCurrentCustomer = computed(() => {
   return customer.value.owner_id === String(userStore.userInfo?.id) && permissionStore.hasPermission('customer:edit:own')
 })
 
-const canCreateFollowUp = computed(() => {
+const canCreateActivity = computed(() => {
   if (!customer.value) return false
   if (permissionStore.hasPermission('customer:edit:all')) return true
   if (['FOLLOW_UP', 'EDIT'].includes(currentCustomerMember.value?.access_level ?? '')) return true
   return customer.value.owner_id === String(userStore.userInfo?.id)
-    && permissionStore.hasAnyPermission(['customer:follow_up:create', 'customer:edit:own'])
+    && permissionStore.hasAnyPermission(['customer:activity:create', 'customer:follow_up:create', 'customer:edit:own'])
 })
 
 const canCreateContact = computed(() => canEditCurrentCustomer.value)
@@ -494,7 +565,7 @@ const loadAllData = async (customerId: number): Promise<void> => {
     ] = await Promise.all([
       customerApi.getCustomerDetail(customerId),
       getCustomerScore(customerId).catch(() => null),
-      customerFollowUpApi.getFollowUps(customerId).catch(() => []),
+      customerActivityApi.getActivities(customerId).catch(() => []),
       opportunityApi.getOpportunities({ customer_id: customerId }).catch(() => []),
       contractApi.getCustomerContracts(customerId).catch(() => []),
       invoiceApi.getInvoiceTitles(customerId).catch(() => ({ invoice_titles: [] })),
@@ -600,13 +671,30 @@ const handleFollowUpSuccess = (): void => {
 
 const handleFollowUpDelete = async (followUp: { id: number }): Promise<void> => {
   try {
-    await customerFollowUpApi.deleteFollowUp(followUp.id)
+    await customerActivityApi.deleteActivity(followUp.id)
     toast.success('客户活动已删除')
     if (props.customerId !== null) {
       await loadAllData(props.customerId)
     }
   } catch (error) {
     handleApiError(error, '删除客户活动')
+  }
+}
+
+const handleActivityProcess = async (followUp: { id: number }): Promise<void> => {
+  try {
+    await customerActivityApi.processActivity(followUp.id)
+    toast.success('客户活动整理中，请稍后刷新')
+    if (props.customerId !== null) {
+      await loadAllData(props.customerId)
+      window.setTimeout(() => {
+        if (props.visible && props.customerId !== null) {
+          loadAllData(props.customerId)
+        }
+      }, 3000)
+    }
+  } catch (error) {
+    handleApiError(error, '重新整理客户活动')
   }
 }
 
@@ -676,11 +764,30 @@ const handleOpportunitySuccess = (): void => {
 }
 
 const handleViewOpportunity = (opportunityId: number): void => {
+  activePanel.value = 'opportunities'
   selectedOpportunityId.value = opportunityId
+  highlightedOpportunityId.value = null
+  restoreFocusOpportunityId.value = null
+  void router.push({
+    path: '/customers',
+    query: getCustomerRouteQuery({
+      tab: 'opportunities',
+      opportunityId: String(opportunityId)
+    })
+  })
 }
 
 const handleBackFromOpportunity = (): void => {
+  const previousOpportunityId = selectedOpportunityId.value
   selectedOpportunityId.value = null
+  if (previousOpportunityId !== null) {
+    highlightedOpportunityId.value = previousOpportunityId
+    restoreFocusOpportunityId.value = previousOpportunityId
+  }
+  void router.replace({
+    path: '/customers',
+    query: getCustomerRouteQuery({ opportunityId: undefined })
+  })
 }
 
 const handleBackFromContract = (): void => {
@@ -981,6 +1088,7 @@ const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void =>
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
+    restorePanelFromRoute()
     loadAllData(props.customerId)
   } else if (!visible) {
     // 清理状态
@@ -1000,6 +1108,8 @@ watch(() => props.visible, (visible): void => {
     selectedRecord.value = null
     recordSheetVisible.value = false
     selectedOpportunityId.value = null
+    highlightedOpportunityId.value = null
+    restoreFocusOpportunityId.value = null
     fixedContractOpportunity.value = null
     customerEditDialogOpen.value = false
     deploymentDialogOpen.value = false
@@ -1008,8 +1118,7 @@ watch(() => props.visible, (visible): void => {
 
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
-  activePanel.value = 'customer-brief'
-  selectedOpportunityId.value = null
+  restorePanelFromRoute()
   selectedContractId.value = null
   loadAllData(customerId)
 })
@@ -1056,7 +1165,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
           <ContextTabs
             :tabs="navTabs"
             :active-tab="activePanel"
-            @update:active-tab="setActivePanel"
+            @update:activeTab="setActivePanel"
             class="w-full"
           />
         </SheetHeader>
@@ -1388,15 +1497,18 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               :follow-ups="followUps"
               :current-user-id="String(userStore.userInfo?.id)"
               :show-header="false"
-              :show-add="canCreateFollowUp"
+              :show-add="canCreateActivity"
               @add="handleCreateFollowUp"
               @delete="handleFollowUpDelete"
+              @process="handleActivityProcess"
             />
 
             <OpportunitiesPanel
               v-if="activePanel === 'opportunities'"
               :customer-id="customerId ?? 0"
               :opportunities="opportunities"
+              :highlighted-opportunity-id="highlightedOpportunityId ?? undefined"
+              :restore-focus-opportunity-id="restoreFocusOpportunityId ?? undefined"
               :show-add="canCreateOpportunityForCustomer"
               @add="handleCreateOpportunity"
               @view="handleViewOpportunity"
@@ -1439,10 +1551,10 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
             </Button>
           </template>
 
-          <template v-else-if="activePanel === 'followup' && canCreateFollowUp">
+          <template v-else-if="activePanel === 'followup' && canCreateActivity">
             <Button variant="default" @click="handleCreateFollowUp">
               <Plus class="w-4 h-4 mr-2" />
-              添加跟进
+              添加活动
             </Button>
           </template>
 

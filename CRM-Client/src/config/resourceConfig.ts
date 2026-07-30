@@ -78,7 +78,7 @@ export const resourceConfigs: Record<ResourceType, ResourceConfig> = {
         type: 'follow_up',
         label: '跟进客户',
         icon: 'ChatDotRound',
-        template: '帮我把【{name}（ID：{id}）】添加一条跟进记录，跟进方式【电话/微信/邮件/面谈】，跟进内容【请填写跟进内容】，下次跟进时间【请填写日期，格式：YYYY-MM-DD】，下一步动作【请填写下一步计划】'
+        template: '帮我把【{name}（ID：{id}）】添加一条客户活动，跟进方式【电话/微信/邮件/面谈】，跟进内容【请填写跟进内容】，下次跟进时间【请填写日期，格式：YYYY-MM-DD】，下一步动作【请填写下一步计划】'
       },
       {
         type: 'create_opportunity',

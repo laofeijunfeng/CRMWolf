@@ -14,7 +14,7 @@ async def test_confirmed_task_runtime_clears_completed_task_and_offers_next_task
     session = SimpleNamespace(id=3)
     task = SimpleNamespace(
         id=11,
-        state_json={"action": "create_customer_follow_up"},
+        state_json={"action": "create_customer_activity"},
     )
     next_task = SimpleNamespace(id=12, state_json={"action": "collect_opportunity_fields"})
     cleared_task_ids = []
@@ -28,7 +28,7 @@ async def test_confirmed_task_runtime_clears_completed_task_and_offers_next_task
         assert authorization == "Bearer test"
         return (
             AgentToolResult(
-                tool_name="create_customer_follow_up",
+                tool_name="create_customer_activity",
                 success=True,
                 data={"id": 101},
                 tool_call_id=501,
@@ -50,7 +50,7 @@ async def test_confirmed_task_runtime_clears_completed_task_and_offers_next_task
     )
     monkeypatch.setattr(
         "app.services.agent.confirmed_task_runtime.interactions._should_offer_next_pending_task",
-        lambda action: action == "create_customer_follow_up",
+        lambda action: action == "create_customer_activity",
     )
     monkeypatch.setattr(
         "app.services.agent.confirmed_task_runtime.interactions._pending_task_interaction",
@@ -69,7 +69,7 @@ async def test_confirmed_task_runtime_clears_completed_task_and_offers_next_task
     assert cleared_task_ids == [11]
     assert result.tool_event
     assert result.tool_event["event"] == "tool_result"
-    assert result.tool_event["tool_name"] == "create_customer_follow_up"
+    assert result.tool_event["tool_name"] == "create_customer_activity"
     assert result.tool_event["success"] is True
     assert result.tool_event["data"] == {"id": 101}
     assert result.tool_event["tool_call_id"] == 501

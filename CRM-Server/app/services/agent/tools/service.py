@@ -222,13 +222,14 @@ class CRMAgentToolService:
 
         return await self._run_read_tool(context, "get_customer_context", payload, call_api)
 
-    async def create_customer_follow_up(
+    async def create_customer_activity(
         self,
         context: AgentToolContext,
         customer_id: int,
-        content: str,
+        activity_kind: str,
+        source_content: str,
         customer_name: Optional[str] = None,
-        method: str = "AI录入",
+        title: Optional[str] = None,
         next_action: Optional[str] = None,
         next_follow_time: Optional[str] = None,
         idempotency_suffix: Optional[str] = None,
@@ -236,27 +237,30 @@ class CRMAgentToolService:
         payload = {
             "customer_id": customer_id,
             "customer_name": customer_name,
-            "content": content,
-            "method": method,
+            "activity_kind": activity_kind,
+            "source_content": source_content,
+            "title": title,
             "next_action": next_action,
             "next_follow_time": next_follow_time,
         }
-        action_key = self._action_key("create_customer_follow_up", context, payload, idempotency_suffix)
+        action_key = self._action_key("create_customer_activity", context, payload, idempotency_suffix)
 
         async def call_api():
             return await self.api_client.request(
                 "POST",
-                f"/v1/customer-follow-ups/{customer_id}",
+                f"/v1/customer-activities/{customer_id}",
                 context.authorization,
                 json={
-                    "content": content,
-                    "method": method,
+                    "activity_kind": activity_kind,
+                    "source_content": source_content,
+                    "title": title,
                     "next_action": next_action,
                     "next_follow_time": next_follow_time,
+                    "next_follow_time_source": "AGENT" if next_follow_time else None,
                 },
             )
 
-        return await self._run_write_tool(context, "create_customer_follow_up", payload, action_key, call_api)
+        return await self._run_write_tool(context, "create_customer_activity", payload, action_key, call_api)
 
     async def create_lead(
         self,
@@ -575,7 +579,7 @@ class CRMAgentToolService:
             "invoices": f"/v1/customers/{customer_id}/invoices",
             "invoice_titles": f"/v1/customers/{customer_id}/invoice-titles",
             "deployment_infos": f"/v1/deployment-infos/?customer_id={customer_id}",
-            "follow_ups": f"/v1/customer-follow-ups/{customer_id}",
+            "customer_activities": f"/v1/customer-activities/{customer_id}",
             "member_candidates": f"/v1/customers/{customer_id}/member-candidates",
         }
         result: JsonDict = {}

@@ -63,7 +63,7 @@ def _customer_create_api_payload(customer: dict) -> dict:
 
 def _tool_name_for_action(action: Optional[str]) -> Optional[str]:
     return {
-        "create_customer_follow_up": "create_customer_follow_up",
+        "create_customer_activity": "create_customer_activity",
         "create_lead": "create_lead",
         "create_customer": "create_customer",
         "create_lead_follow_up": "create_lead_follow_up",
@@ -78,12 +78,13 @@ def _tool_name_for_action(action: Optional[str]) -> Optional[str]:
     }.get(action or "")
 
 def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dict, task_key: str) -> Optional[dict]:
-    if action == "create_customer_follow_up":
+    if action == "create_customer_activity":
         return {
             "customer_id": payload["customer_id"],
             "customer_name": customer.get("account_name"),
-            "content": payload["content"],
-            "method": payload.get("method") or "AI录入",
+            "activity_kind": payload.get("activity_kind") or "OTHER_FOLLOW_UP",
+            "source_content": payload.get("source_content") or payload.get("content") or "",
+            "title": payload.get("title"),
             "next_action": payload.get("next_action"),
             "next_follow_time": payload.get("next_follow_time_iso"),
             "idempotency_suffix": task_key,

@@ -1,7 +1,7 @@
 """
 客户概况 AI 生成服务
 
-生成销售侧客户经营概况：客户档案、联系人、商机、合同、回款和跟进记录。
+生成销售侧客户经营概况：客户档案、联系人、商机、合同、回款和客户活动。
 不纳入发票、License、部署交付等财务/交付侧流程。
 """
 import asyncio
@@ -18,7 +18,7 @@ from app.crud.ai_config import ai_config_crud
 from app.crud.customer import customer_crud
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer
-from app.models.customer_follow_up import CustomerFollowUp
+from app.models.customer_activity import CustomerActivity
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.services.ai_task_limiter import ai_generation_semaphore
@@ -281,11 +281,11 @@ class CustomerBriefService:
                     payment_record_items.append(record_item)
                     payment_milestones.append(record_item)
 
-        latest_follow_ups = db.query(CustomerFollowUp).filter(
-            CustomerFollowUp.customer_id == customer.id,
-            CustomerFollowUp.team_id == team_id,
-        ).order_by(CustomerFollowUp.created_time.desc()).limit(200).all()
-        follow_ups = sorted(latest_follow_ups, key=lambda item: item.created_time or datetime.min)
+        latest_follow_ups = db.query(CustomerActivity).filter(
+            CustomerActivity.customer_id == customer.id,
+            CustomerActivity.team_id == team_id,
+        ).order_by(CustomerActivity.occurred_at.desc()).limit(200).all()
+        follow_ups = sorted(latest_follow_ups, key=lambda item: item.occurred_at or item.created_time or datetime.min)
 
         follow_up_items = []
         for follow_up in follow_ups:
@@ -294,15 +294,16 @@ class CustomerBriefService:
                 opportunities=opportunity_items,
                 payment_records=payment_milestones,
             )
-            source = add_source("follow_up", follow_up.id, f"跟进记录：{self._datetime(follow_up.created_time)}", follow_up.content)
+            content = follow_up.summary or follow_up.source_content
+            source = add_source("activity", follow_up.id, f"客户活动：{self._datetime(follow_up.occurred_at)}", content)
             follow_up_items.append({
                 "source_id": source,
                 "id": follow_up.id,
-                "content": follow_up.content,
-                "method": follow_up.method,
+                "content": content,
+                "method": follow_up.activity_kind,
                 "next_follow_time": self._datetime(follow_up.next_follow_time),
                 "next_action": follow_up.next_action,
-                "created_time": self._datetime(follow_up.created_time),
+                "created_time": self._datetime(follow_up.occurred_at),
                 "candidate_opportunity_refs": candidates,
             })
 
@@ -349,7 +350,7 @@ class CustomerBriefService:
 
     def _candidate_opportunities(
         self,
-        follow_up: CustomerFollowUp,
+        follow_up: CustomerActivity,
         opportunities: List[Dict[str, Any]],
         payment_records: List[Dict[str, Any]],
     ) -> List[Dict[str, str]]:
@@ -357,7 +358,7 @@ class CustomerBriefService:
             return []
 
         active_opps = [opp for opp in opportunities if opp.get("status") == 0]
-        created_at = follow_up.created_time
+        created_at = follow_up.occurred_at or follow_up.created_time
 
         if len(active_opps) == 1 and not payment_records:
             return [{
@@ -415,13 +416,13 @@ class CustomerBriefService:
     def _get_system_prompt(self) -> str:
         return """你是 CRM 系统中的销售客户概况助手，目标是帮助销售人员和销售管理者快速理解客户销售进展。
 
-只总结销售侧经营信息：客户档案、联系人、商机、合同、回款节点、跟进记录。不需要总结发票、License、部署交付等财务或售后流程。
+只总结销售侧经营信息：客户档案、联系人、商机、合同、回款节点、客户活动。不需要总结发票、License、部署交付等财务或售后流程。
 
 输出要求：
 1. 必须输出严格 JSON，不要输出 Markdown 或解释文字。
-2. 只能使用输入事实，不要编造；没有明确内容时用空字符串或空数组，但不要因为客户档案缺失而忽略商机、联系人、跟进记录中的事实。
+2. 只能使用输入事实，不要编造；没有明确内容时用空字符串或空数组，但不要因为客户档案缺失而忽略商机、联系人、客户活动中的事实。
 3. 所有判断、总结、风险和下一步建议都必须尽量附 citations，引用输入中的 source_id。
-4. 跟进记录没有显式绑定商机。输入可能提供 candidate_opportunity_refs，你可以结合时间线、回款节点、商机状态、金额、人数、授权类型、订阅/买断、增购/续购关键词进行弱分析。
+4. 客户活动没有显式绑定商机。输入可能提供 candidate_opportunity_refs，你可以结合时间线、回款节点、商机状态、金额、人数、授权类型、订阅/买断、增购/续购关键词进行弱分析。
 5. 弱归因不能表述为确定事实；置信度不足时归入客户级跟进。
 6. 多商机场景必须区分客户级概况和每个商机的进展，不要混成一段。
 7. 客户档案状态不是 COMPLETED 时，企业背景、主营业务、项目背景等档案来源章节留空。
@@ -431,12 +432,12 @@ class CustomerBriefService:
    - industry：行业归类和同行客户线索，不要重复企业背景。
    - organization：联系人和组织关系。即使只有 1 个联系人，也要说明“当前已记录 1 位联系人”，并标出职位、主联系人、决策人等已知信息。
    - project_need_background：客户为什么需要采购/替换/增购，提炼需求背景，不要写采购时间表。
-   - procurement_progress：采购所处阶段和关键节点。跟进记录出现“立项、招标、挂网、投标、合同、回款、首付款、预算”等词时，要提炼成阶段判断，例如“正在准备立项材料”“预计挂网投标”“目标签约/回款时间”。
+   - procurement_progress：采购所处阶段和关键节点。客户活动出现“立项、招标、挂网、投标、合同、回款、首付款、预算”等词时，要提炼成阶段判断，例如“正在准备立项材料”“预计挂网投标”“目标签约/回款时间”。
    - follow_up_progress：最近跟进动作和已达成共识，避免重复 procurement_progress 的完整时间表。
    - risks：只输出对成交有影响的风险；没有明确风险可为空，不要凑字。
    - next_steps：输出可执行动作，最多 3 条，按优先级排序。
-9. 客户级概况只放跨商机或当前主要商机的结论；商机概况补充该商机自己的阶段、金额、授权、下一步。不要把同一句跟进记录在客户级和商机级完整重复。
-10. 单个商机时，可以把跟进记录归到该商机，但客户级章节要提炼结论，商机级章节要补充交易信息。
+9. 客户级概况只放跨商机或当前主要商机的结论；商机概况补充该商机自己的阶段、金额、授权、下一步。不要把同一句客户活动在客户级和商机级完整重复。
+10. 单个商机时，可以把客户活动归到该商机，但客户级章节要提炼结论，商机级章节要补充交易信息。
 
 JSON 结构：
 {
@@ -670,7 +671,7 @@ JSON 结构：
             "",
             f"### 项目采购进度\n{content('procurement_progress')}",
             "",
-            f"### 客户跟进进展\n{content('follow_up_progress')}",
+            f"### 客户活动进展\n{content('follow_up_progress')}",
         ])
 
         for section_key, title in [("risks", "风险"), ("next_steps", "下一步")]:

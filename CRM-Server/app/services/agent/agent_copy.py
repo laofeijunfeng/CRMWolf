@@ -22,6 +22,16 @@ def follow_up_created_with_next(next_prompt: Optional[str] = None) -> str:
     return f"{follow_up_created()}{next_prompt.strip()}"
 
 
+def customer_activity_created() -> str:
+    return "好嘞，客户活动已记录。"
+
+
+def customer_activity_created_with_next(next_prompt: Optional[str] = None) -> str:
+    if not next_prompt:
+        return customer_activity_created()
+    return f"{customer_activity_created()}{next_prompt.strip()}"
+
+
 def no_pending_confirmation() -> str:
     return "好嘞，目前没有等待确认的操作。"
 

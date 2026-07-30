@@ -2,7 +2,7 @@ import { toast } from 'vue-sonner'
 
 function extractHttpStatus(message: string): number | null {
   const statusMatch = message.match(/HTTP error: (\d+)/)
-  return statusMatch === null ? null : Number.parseInt(statusMatch[1], 10)
+  return statusMatch?.[1] === undefined ? null : Number.parseInt(statusMatch[1], 10)
 }
 
 export function getErrorMessage(error: unknown, context: string): string {
@@ -60,7 +60,7 @@ export function getEmptyStateMessage(context: string): { title: string; descript
     商机列表: { title: '创建商机', description: '点击新建商机，跟进销售机会' },
     合同列表: { title: '创建合同', description: '点击新建合同，管理合同签署' },
     待办事项: { title: '添加待办', description: '点击创建待办，规划日常工作' },
-    跟进记录: { title: '记录跟进', description: '点击添加跟进，维护客户关系' },
+    客户活动: { title: '记录客户活动', description: '点击添加活动，维护客户关系' },
   }
 
   return emptyStateMap[context] ?? {

@@ -18,7 +18,7 @@ def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
 
 from app.api import sales_dashboard
 from app.core.database import Base
-from app.models.customer_follow_up import CustomerFollowUp
+from app.models.customer_activity import CustomerActivity
 from app.models.user import User, UserStatus
 
 
@@ -33,7 +33,7 @@ def db_session():
         engine,
         tables=[
             User.__table__,
-            CustomerFollowUp.__table__,
+            CustomerActivity.__table__,
         ],
     )
     Session = sessionmaker(bind=engine)
@@ -87,41 +87,45 @@ def seed_follow_up_trend_data(db_session):
         User(id=3, email="other@example.com", name="Other Team", status=UserStatus.ACTIVE),
     ])
     db_session.add_all([
-        CustomerFollowUp(
+        CustomerActivity(
             id=1,
             team_id=1,
-            content="alex valid",
-            method="电话",
+            source_content="alex valid",
+            activity_kind="PHONE_FOLLOW_UP",
             creator_id="1",
-            created_time=datetime(2026, 7, 1, 9, 0, 0),
+            occurred_at=datetime(2026, 7, 1, 9, 0, 0),
             effectiveness_score=80,
+            effectiveness_is_valid=True,
         ),
-        CustomerFollowUp(
+        CustomerActivity(
             id=2,
             team_id=1,
-            content="alex invalid",
-            method="微信",
+            source_content="alex invalid",
+            activity_kind="WECHAT_FOLLOW_UP",
             creator_id="1",
-            created_time=datetime(2026, 7, 1, 10, 0, 0),
+            occurred_at=datetime(2026, 7, 1, 10, 0, 0),
             effectiveness_score=40,
+            effectiveness_is_valid=False,
         ),
-        CustomerFollowUp(
+        CustomerActivity(
             id=3,
             team_id=1,
-            content="eddie valid",
-            method="拜访",
+            source_content="eddie valid",
+            activity_kind="VISIT_FOLLOW_UP",
             creator_id="2",
-            created_time=datetime(2026, 7, 1, 11, 0, 0),
+            occurred_at=datetime(2026, 7, 1, 11, 0, 0),
             effectiveness_score=90,
+            effectiveness_is_valid=True,
         ),
-        CustomerFollowUp(
+        CustomerActivity(
             id=4,
             team_id=2,
-            content="other team",
-            method="电话",
+            source_content="other team",
+            activity_kind="PHONE_FOLLOW_UP",
             creator_id="3",
-            created_time=datetime(2026, 7, 1, 12, 0, 0),
+            occurred_at=datetime(2026, 7, 1, 12, 0, 0),
             effectiveness_score=100,
+            effectiveness_is_valid=True,
         ),
     ])
     db_session.commit()

@@ -16,9 +16,9 @@
           <EmptyMedia variant="icon">
             <MessageSquare class="empty-icon" />
           </EmptyMedia>
-          <EmptyTitle>暂无跟进记录</EmptyTitle>
+          <EmptyTitle>暂无{{ recordLabel }}</EmptyTitle>
           <EmptyDescription>
-            点击上方按钮添加新的跟进记录
+            点击上方按钮添加新的{{ recordLabel }}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -34,7 +34,7 @@
         <HoverInfo side="top" align="center" content-class="follow-up-method-hover-card">
           <template #trigger>
             <div class="follow-up-method" aria-hidden="true">
-              <component :is="getMethodIcon(followUp.method)" class="method-icon" />
+              <component :is="getMethodIcon(followUp)" class="method-icon" />
             </div>
           </template>
           <div class="follow-up-hover-text">{{ followUp.method }}</div>
@@ -45,15 +45,15 @@
             <HoverInfo side="top" align="start" content-class="follow-up-content-hover-card">
               <template #trigger>
                 <p class="follow-up-content">
-                  {{ followUp.content }}
+                  {{ getPrimaryContent(followUp) }}
                 </p>
               </template>
               <div class="follow-up-hover-text follow-up-hover-text--preline">
-                {{ followUp.content }}
+                {{ followUp.source_content || getPrimaryContent(followUp) }}
               </div>
             </HoverInfo>
             <div
-              v-if="shouldShowEffectiveness(followUp) || canDelete(followUp)"
+              v-if="shouldShowEffectiveness(followUp) || canProcess(followUp) || canDelete(followUp)"
               class="follow-up-actions"
             >
               <HoverInfo
@@ -100,17 +100,39 @@
                 </div>
               </HoverInfo>
               <Button
+                v-if="canProcess(followUp)"
+                variant="ghost"
+                size="icon-sm"
+                class="process-btn"
+                :aria-label="`重新整理 ${formatTime(followUp.created_time)} 的${recordLabel}`"
+                title="重新整理"
+                @click.stop="handleProcess(followUp)"
+              >
+                <RefreshCw class="process-icon" />
+              </Button>
+              <Button
                 v-if="canDelete(followUp)"
                 variant="ghost"
                 size="icon-sm"
                 class="delete-btn"
-                :aria-label="`删除 ${formatTime(followUp.created_time)} 的跟进记录`"
+                :aria-label="`删除 ${formatTime(followUp.created_time)} 的${recordLabel}`"
                 title="删除"
                 @click.stop="handleDelete(followUp)"
               >
                 <Trash2 class="delete-icon" />
               </Button>
             </div>
+          </div>
+
+          <div v-if="followUp.activity_category === 'MEETING'" class="meeting-detail">
+            <div v-for="section in getMeetingSections(followUp)" :key="section.label" class="meeting-section">
+              <span class="meeting-section-label">{{ section.label }}</span>
+              <span class="meeting-section-value">{{ section.value }}</span>
+            </div>
+          </div>
+
+          <div v-if="followUp.processing_status === 'FAILED'" class="processing-error">
+            整理失败，已保留原文
           </div>
 
           <HoverInfo side="bottom" align="start" content-class="follow-up-meta-hover-card">
@@ -152,7 +174,7 @@
 
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { CalendarClock, Loader2, Mail, MessageCircle, MessageSquare, Phone, ThumbsDown, ThumbsUp, Trash2, User, Users } from 'lucide-vue-next'
+import { CalendarClock, Loader2, Mail, MessageCircle, MessageSquare, Phone, RefreshCw, ThumbsDown, ThumbsUp, Trash2, User, Users } from 'lucide-vue-next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { HoverInfo } from '@/components/crmwolf'
@@ -170,6 +192,16 @@ interface FollowUp {
   lead_id?: number
   customer_id?: number | null
   original_lead_id?: number | null
+  activity_kind?: string
+  activity_category?: string
+  activity_label?: string
+  title?: string | null
+  source_content?: string
+  content_json?: Record<string, unknown> | null
+  summary?: string | null
+  processing_status?: string | null
+  processing_error?: string | null
+  processed_at?: string | null
   content: string
   method: string
   next_follow_time?: string | null
@@ -190,13 +222,23 @@ interface FollowUp {
 interface Props {
   followUps: FollowUp[]
   loading: boolean
-  currentUserId?: string | undefined
+  currentUserId?: string
+  recordLabel?: string
+  allowProcess?: boolean
 }
 
-type Emits = (e: 'delete', followUp: FollowUp) => void
+interface Emits {
+  delete: [followUp: FollowUp]
+  process: [followUp: FollowUp]
+}
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  currentUserId: '',
+  recordLabel: '跟进记录',
+  allowProcess: false
+})
 const emit = defineEmits<Emits>()
+const recordLabel = props.recordLabel
 
 const canDelete = (followUp: FollowUp): boolean => {
   const creatorIdStr = String(followUp.creator_id ?? '')
@@ -205,24 +247,151 @@ const canDelete = (followUp: FollowUp): boolean => {
   return props.currentUserId !== undefined && props.currentUserId !== '' && creatorIdStr === currentUserIdStr
 }
 
+const canProcess = (followUp: FollowUp): boolean => {
+  return props.allowProcess === true &&
+    followUp.customer_id !== undefined &&
+    followUp.customer_id !== null &&
+    (followUp.processing_status === 'FAILED' || followUp.processing_status === 'PENDING')
+}
+
 const handleDelete = async (followUp: FollowUp): Promise<void> => {
-  const confirmed = await confirmDelete('这条跟进记录')
+  const confirmed = await confirmDelete(`这条${recordLabel}`)
   if (confirmed) {
     emit('delete', followUp)
   }
 }
 
-const getMethodIcon = (method: string): Component => {
+const handleProcess = (followUp: FollowUp): void => {
+  emit('process', followUp)
+}
+
+const getMethodIcon = (followUp: FollowUp): Component => {
+  const iconKey = getText(followUp.activity_kind) ||
+    getText(followUp.activity_label) ||
+    getText(followUp.method)
   const methodMap: Record<string, Component> = {
+    PHONE_FOLLOW_UP: Phone,
+    WECHAT_FOLLOW_UP: MessageCircle,
+    EMAIL_FOLLOW_UP: Mail,
+    VISIT_FOLLOW_UP: Users,
+    ONLINE_MEETING: Users,
+    OFFLINE_MEETING: Users,
+    OTHER_FOLLOW_UP: MessageSquare,
     电话: Phone,
+    电话跟进: Phone,
     微信: MessageCircle,
+    微信跟进: MessageCircle,
     邮件: Mail,
+    邮件跟进: Mail,
     拜访: Users,
+    拜访跟进: Users,
     面谈: Users,
-    会议: Users
+    会议: Users,
+    线上会议: Users,
+    线下会议: Users
   }
 
-  return methodMap[method] ?? MessageSquare
+  return methodMap[iconKey] ?? MessageSquare
+}
+
+const getText = (value: unknown): string => {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+const isGenericActivityTitle = (followUp: FollowUp, value: string): boolean => {
+  return value === followUp.method ||
+    value === followUp.activity_label ||
+    value === followUp.activity_kind
+}
+
+const getStructuredPrimaryContent = (followUp: FollowUp): string => {
+  const content = followUp.content_json
+  if (content === undefined || content === null) return ''
+
+  if (followUp.activity_category === 'MEETING') {
+    const subject = getText(content['meeting_subject'])
+    const minutes = asStringList(content['key_minutes'])
+    const firstMinute = minutes[0] ?? ''
+    if (subject !== '' && firstMinute !== '') return `${subject}：${firstMinute}`
+    if (firstMinute !== '') return firstMinute
+    return subject
+  }
+
+  const primaryContent = getText(content['content'])
+  if (primaryContent !== '') return primaryContent
+
+  return uniqueTextParts([
+    getText(content['customer_feedback']),
+    getText(content['current_progress']),
+    ...asStringList(content['risks'])
+  ]).join('；')
+}
+
+const getPrimaryContent = (followUp: FollowUp): string => {
+  const structuredContent = getStructuredPrimaryContent(followUp)
+  if (structuredContent !== '') return structuredContent
+
+  const summary = getText(followUp.summary)
+  if (summary !== '') return summary
+
+  const sourceContent = getText(followUp.source_content)
+  if (sourceContent !== '') return sourceContent
+
+  const legacyContent = getText(followUp.content)
+  if (legacyContent !== '' && !isGenericActivityTitle(followUp, legacyContent)) return legacyContent
+
+  const title = getText(followUp.title)
+  if (title !== '' && !isGenericActivityTitle(followUp, title)) return title
+
+  return legacyContent !== '' ? legacyContent : title
+}
+
+const asStringList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return item
+      if (item !== null && typeof item === 'object') {
+        return Object.values(item as Record<string, unknown>)
+          .map((part) => getText(part))
+          .filter((part) => part !== '')
+          .join('：')
+      }
+      return ''
+    })
+    .filter((item) => item.trim() !== '')
+}
+
+const uniqueTextParts = (parts: string[]): string[] => {
+  const result: string[] = []
+  for (const part of parts.map((item) => item.trim()).filter(Boolean)) {
+    if (result.some((existing) => existing.includes(part) || part.includes(existing))) continue
+    result.push(part)
+  }
+  return result
+}
+
+const getMeetingSections = (followUp: FollowUp): { label: string; value: string }[] => {
+  const content = followUp.content_json ?? {}
+  const sections: { label: string; value: string }[] = []
+  const participants = content['participants']
+  if (participants !== null && participants !== undefined && typeof participants === 'object') {
+    const p = participants as Record<string, unknown>
+    const internal = asStringList(p['internal']).join('、')
+    const customer = asStringList(p['customer']).join('、')
+    const value = [
+      internal !== '' ? `我方：${internal}` : '',
+      customer !== '' ? `客户方：${customer}` : ''
+    ].filter((item) => item !== '').join('；')
+    if (value !== '') sections.push({ label: '参会', value })
+  }
+  const minutes = asStringList(content['key_minutes']).slice(0, 3).join('；')
+  if (minutes !== '') sections.push({ label: '纪要', value: minutes })
+  const risks = asStringList(content['risks']).slice(0, 2).join('；')
+  if (risks !== '') sections.push({ label: '风险', value: risks })
+  const actions = asStringList(content['action_items']).slice(0, 2).join('；')
+  if (actions !== '') sections.push({ label: '行动', value: actions })
+  return sections
 }
 
 const hasText = (value: string | null | undefined): value is string => {
@@ -240,24 +409,24 @@ const getEffectivenessClass = (followUp: FollowUp): string => {
 }
 
 const getEffectivenessLabel = (followUp: FollowUp): string => {
-  if (followUp.effectiveness_status === 'GENERATING') return '正在评估跟进有效性'
-  return followUp.effectiveness_is_valid === true ? '有效跟进记录' : '无效跟进记录'
+  if (followUp.effectiveness_status === 'GENERATING') return `正在评估${recordLabel}有效性`
+  return followUp.effectiveness_is_valid === true ? `有效${recordLabel}` : `无效${recordLabel}`
 }
 
 const getEffectivenessTooltip = (followUp: FollowUp): string => {
-  if (followUp.effectiveness_status === 'GENERATING') return '正在评估跟进有效性'
+  if (followUp.effectiveness_status === 'GENERATING') return `正在评估${recordLabel}有效性`
 
   const scoreText = typeof followUp.effectiveness_score === 'number'
     ? `${followUp.effectiveness_score} 分`
     : '未评分'
 
   if (followUp.effectiveness_is_valid === true) {
-    return `有效跟进：${scoreText}`
+    return `有效${recordLabel}：${scoreText}`
   }
 
   return hasText(followUp.effectiveness_reason)
     ? followUp.effectiveness_reason
-    : `无效跟进：${scoreText}`
+    : `无效${recordLabel}：${scoreText}`
 }
 
 const getCreatorName = (followUp: FollowUp): string => {
@@ -291,7 +460,7 @@ const formatShortDate = (dateStr: string): string => {
 const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => {
   const meta = [
     { label: '跟进人', value: getCreatorName(followUp) },
-    { label: '方式', value: followUp.method },
+    { label: '类型', value: followUp.method },
     { label: '时间', value: formatTime(followUp.created_time) }
   ]
 
@@ -471,6 +640,40 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   }
 }
 
+.meeting-detail {
+  display: grid;
+  gap: $wolf-space-xs-v2;
+  padding: $wolf-space-xs-v2 0;
+}
+
+.meeting-section {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: $wolf-space-xs-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 18px;
+}
+
+.meeting-section-label {
+  color: $wolf-text-tertiary-v2;
+}
+
+.meeting-section-value {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.processing-error {
+  color: $wolf-danger-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 18px;
+}
+
 .follow-up-actions {
   display: inline-flex;
   align-items: center;
@@ -578,7 +781,8 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   text-overflow: ellipsis;
 }
 
-.delete-btn {
+.delete-btn,
+.process-btn {
   width: 24px !important;
   height: 24px !important;
   padding: 0 !important;
@@ -591,19 +795,32 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   background: $wolf-danger-bg-v2 !important;
 }
 
+.process-btn:hover {
+  background: $wolf-bg-muted-v2 !important;
+}
+
 .delete-icon {
   width: 14px;
   height: 14px;
   color: $wolf-danger-v2;
 }
 
+.process-icon {
+  width: 14px;
+  height: 14px;
+  color: $wolf-text-tertiary-v2;
+}
+
 .follow-up-item:hover .delete-btn,
-.delete-btn:focus-visible {
+.follow-up-item:hover .process-btn,
+.delete-btn:focus-visible,
+.process-btn:focus-visible {
   opacity: 1;
 }
 
 @media (hover: none) {
-  .delete-btn {
+  .delete-btn,
+  .process-btn {
     opacity: 1;
   }
 }

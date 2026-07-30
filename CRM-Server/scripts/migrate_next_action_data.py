@@ -12,7 +12,7 @@ import re
 from sqlalchemy.orm.attributes import flag_modified
 from app.core.database import SessionLocal
 from app.models.lead import LeadFollowUp
-from app.models.customer_follow_up import CustomerFollowUp
+from app.models.customer_activity import CustomerActivity
 from app.models.operation_log import OperationLog
 
 
@@ -64,20 +64,20 @@ def migrate():
                 follow_up.next_action = next_action
                 print(f"  LeadFollowUp ID={follow_up.id}: 提取 next_action='{next_action[:50]}...'")
 
-        # 2. 迁移客户跟进记录
-        customer_follow_ups = db.query(CustomerFollowUp).filter(
-            CustomerFollowUp.next_action.is_(None),
-            CustomerFollowUp.content.like('%下一步动作%')
+        # 2. 迁移客户活动
+        customer_activities = db.query(CustomerActivity).filter(
+            CustomerActivity.next_action.is_(None),
+            CustomerActivity.source_content.like('%下一步动作%')
         ).all()
 
-        print(f"找到 {len(customer_follow_ups)} 条客户跟进记录需要迁移")
+        print(f"找到 {len(customer_activities)} 条客户活动需要迁移")
 
-        for follow_up in customer_follow_ups:
-            cleaned_content, next_action = extract_next_action(follow_up.content)
+        for activity in customer_activities:
+            cleaned_content, next_action = extract_next_action(activity.source_content)
             if next_action:
-                follow_up.content = cleaned_content
-                follow_up.next_action = next_action
-                print(f"  CustomerFollowUp ID={follow_up.id}: 提取 next_action='{next_action[:50]}...'")
+                activity.source_content = cleaned_content
+                activity.next_action = next_action
+                print(f"  CustomerActivity ID={activity.id}: 提取 next_action='{next_action[:50]}...'")
 
         # 3. 迁移操作日志（跟进记录类型）
         operation_logs = db.query(OperationLog).filter(

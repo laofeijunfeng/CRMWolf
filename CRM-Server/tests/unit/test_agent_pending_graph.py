@@ -9,6 +9,7 @@ from app.services.agent.input import AgentTurnInput
 from app.models.agent import AgentTaskStatus
 from app.services.agent.schemas import AgentTurnRelationDecision
 from app.services.agent import pending_graph as pending_graph_module
+from app.services.agent import session_state
 from app.services.agent.pending_graph import PendingTaskGraphService
 
 
@@ -97,6 +98,36 @@ def _state_without_task():
         "authorization": "Bearer test",
         "events": [],
     }
+
+
+def test_pending_task_snapshot_builds_readable_opportunity_draft_summary():
+    task = SimpleNamespace(
+        id=201,
+        intent="CREATE_OPPORTUNITY",
+        target_type="customer",
+        target_id=17,
+        summary="等待确认执行：collect_opportunity_fields",
+        status=AgentTaskStatus.SUSPENDED,
+        created_time=None,
+        updated_time=None,
+        input_json={
+            "customer_id": 17,
+            "opportunity": {
+                "total_amount": 300000,
+                "user_count": 50,
+                "license_type": "SUBSCRIPTION",
+            },
+            "missing_fields": ["expected_closing_date"],
+        },
+        state_json={
+            "action": "collect_opportunity_fields",
+            "customer": {"id": 17, "account_name": "广州睿狐科技有限公司"},
+        },
+    )
+
+    snapshot = session_state._pending_task_snapshot(task)
+
+    assert snapshot["display_summary"] == "补商机信息｜广州睿狐科技有限公司｜缺：预计成交日期、采购方式"
 
 
 @pytest.mark.asyncio

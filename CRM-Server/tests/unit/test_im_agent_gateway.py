@@ -58,7 +58,7 @@ async def test_im_gateway_text_confirmation_uses_referenced_response_session(mon
         lambda *args, **kwargs: SimpleNamespace(
             id=1,
             status=AgentTaskStatus.WAITING_USER,
-            state_json={"action": "create_customer_follow_up"},
+            state_json={"action": "create_customer_activity"},
             created_time=None,
         )
         if kwargs.get("session_id") == 9
@@ -264,7 +264,7 @@ async def test_im_gateway_text_confirmation_falls_back_to_recent_chat_task(monke
         lambda *args, **kwargs: SimpleNamespace(
             id=1,
             status=AgentTaskStatus.WAITING_USER,
-            state_json={"action": "create_customer_follow_up"},
+            state_json={"action": "create_customer_activity"},
             created_time=None,
         )
         if kwargs.get("session_id") == 9
@@ -311,7 +311,7 @@ async def test_im_gateway_text_confirmation_does_not_pick_ambiguous_chat_task(mo
             return SimpleNamespace(
                 id=session_id,
                 status=AgentTaskStatus.WAITING_USER,
-                state_json={"action": "create_customer_follow_up"},
+                state_json={"action": "create_customer_activity"},
                 created_time=None,
             )
         return None

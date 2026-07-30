@@ -40,7 +40,7 @@ from app.utils.sse_encoder import SSEJsonEncoder
 
 from app.services.agent import agent_copy
 from app.services.agent.follow_up_fields import (
-    _stage_customer_follow_up_after_create,
+    _stage_customer_activity_after_create,
     _stage_lead_follow_up_after_create,
 )
 from app.services.agent.session_state import _remember_pending_task
@@ -157,16 +157,16 @@ async def _execute_waiting_task(
                 "id": customer_id,
                 "account_name": customer_name or (payload.get("customer") or {}).get("account_name"),
             }
-            follow_up = payload.get("customer_follow_up") or {}
-            if customer_id and isinstance(follow_up, dict) and follow_up.get("content"):
-                assistant_content = await _stage_customer_follow_up_after_create(
+            activity = payload.get("customer_activity") or payload.get("customer_follow_up") or {}
+            if customer_id and isinstance(activity, dict) and activity.get("content"):
+                assistant_content = await _stage_customer_activity_after_create(
                     db,
                     session,
                     task,
                     team_id=team_id,
                     user_id=user_id,
                     customer=customer,
-                    follow_up=follow_up,
+                    activity=activity,
                 )
                 return result, assistant_content
             return result, "客户已创建。"
@@ -188,7 +188,7 @@ async def _execute_waiting_task(
                 current_stage = result.data.get("current_stage_snapshot") or {}
                 stage_name = current_stage.get("stage_name")
             return result, f"商机阶段已推进{f'到「{stage_name}」' if stage_name else ''}。"
-        if action == "create_customer_follow_up" and isinstance(payload.get("_next_task"), dict):
+        if action == "create_customer_activity" and isinstance(payload.get("_next_task"), dict):
             next_action = payload["_next_task"]
             next_payload = next_action.get("payload") or {}
             next_task = agent_task_crud.create(
@@ -198,7 +198,7 @@ async def _execute_waiting_task(
                     team_id=team_id,
                     user_id=user_id,
                     session_id=session.id,
-                    intent="CUSTOMER_FOLLOW_UP",
+                    intent="CUSTOMER_ACTIVITY",
                     status=AgentTaskStatus.WAITING_USER,
                     target_type="customer",
                     target_id=next_payload.get("customer_id") or customer.get("id"),
@@ -218,8 +218,10 @@ async def _execute_waiting_task(
                 ),
             )
             _remember_pending_task(db, session, next_task)
-            return result, agent_copy.follow_up_created_with_next(next_action.get("content"))
-        return result, agent_copy.follow_up_created()
+            return result, agent_copy.customer_activity_created_with_next(next_action.get("content"))
+        if action == "create_customer_activity":
+            return result, agent_copy.customer_activity_created()
+        return result, agent_copy.generic_completed()
 
     error_message = result.error_message if result else f"暂不支持的执行动作：{action}"
     agent_task_crud.update(

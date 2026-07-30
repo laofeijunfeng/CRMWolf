@@ -13,7 +13,7 @@ class FakeGraphService:
         }
         yield {
             "event": "confirmation_required",
-            "action": "create_customer_follow_up",
+            "action": "create_customer_activity",
             "payload": {"customer_id": 101, "content": "已沟通项目进展"},
             "content": "请确认是否创建这条跟进记录？",
         }

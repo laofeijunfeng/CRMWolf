@@ -8,7 +8,7 @@ from app.services.agent.suggestion import AgentSuggestionGenerator, AgentSuggest
 
 def semantic_result():
     return AgentSemanticParseResult.model_validate({
-        "intent": "CUSTOMER_FOLLOW_UP",
+        "intent": "CUSTOMER_ACTIVITY",
         "intent_confidence": 0.95,
         "customer": {"name_text": "睿狐科技", "confidence": 0.95},
         "follow_up": {"content": "客户已立项，预算 30 万，计划采购 100 人"},

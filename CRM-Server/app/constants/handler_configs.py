@@ -23,7 +23,7 @@ from typing import Dict, Any, Optional, List
 # ============================================================================
 from app.crud.lead import lead_crud, lead_follow_up_crud
 from app.crud.customer import customer_crud
-from app.crud.customer_follow_up import customer_follow_up_crud
+from app.crud.customer_activity import customer_activity_crud
 from app.crud.opportunity import opportunity_crud
 from app.crud.contract import contract_crud
 from app.crud.payment import payment_plan_crud, payment_record_crud
@@ -37,7 +37,7 @@ from app.crud.role import role_crud
 # ============================================================================
 from app.models.lead import Lead, LeadFollowUp
 from app.models.customer import Customer
-from app.models.customer_follow_up import CustomerFollowUp
+from app.models.customer_activity import CustomerActivity
 from app.models.opportunity import Opportunity
 from app.models.contract import Contract
 from app.models.payment import PaymentPlan, PaymentRecord
@@ -52,7 +52,7 @@ from app.models.role import Role
 from app.schemas.lead import LeadCreate, LeadUpdate
 from app.schemas.lead_follow_up import LeadFollowUpCreate
 from app.schemas.customer import CustomerCreate, CustomerUpdate
-from app.schemas.customer_follow_up import CustomerFollowUpCreate
+from app.schemas.customer_activity import CustomerActivityCreate
 from app.schemas.opportunity import OpportunityCreate, OpportunityUpdate
 from app.schemas.contract import ContractCreate, ContractUpdate
 from app.schemas.payment import PaymentPlanCreate, PaymentPlanUpdate, PaymentRecordCreate
@@ -101,10 +101,10 @@ CRUD_MAPPINGS: Dict[str, Dict[str, Any]] = {
         "status_field": "status",
         "name_field": "account_name",
     },
-    "customer_follow_up": {
-        "crud": customer_follow_up_crud,
-        "model": CustomerFollowUp,
-        "schema_create": CustomerFollowUpCreate,
+    "customer_activity": {
+        "crud": customer_activity_crud,
+        "model": CustomerActivity,
+        "schema_create": CustomerActivityCreate,
         "schema_update": None,
         "owner_field": "creator_id",
         "status_field": None,

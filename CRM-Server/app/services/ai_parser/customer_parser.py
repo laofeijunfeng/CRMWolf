@@ -326,7 +326,7 @@ class CustomerAIParser(EntityAIParserBase):
         """
         创建客户后的额外操作：
         1. 触发档案生成（异步）
-        2. 创建跟进记录（如果有）
+        2. 创建客户活动（如果有）
         """
         customer = entity
 
@@ -337,11 +337,13 @@ class CustomerAIParser(EntityAIParserBase):
             team_id=team_id
         )
 
-        # 2. 创建跟进记录（如果有）
+        # 2. 创建客户活动（如果有）
         follow_up_info = parsed_data.get("follow_up_info")
         if follow_up_info and (follow_up_info.get("content") or follow_up_info.get("next_action")):
-            from app.crud.customer_follow_up import customer_follow_up_crud
-            from app.schemas.customer_follow_up import CustomerFollowUpCreate
+            from app.crud.customer_activity import customer_activity_crud
+            from app.schemas.customer_activity import CustomerActivityCreate
+            from app.services.customer_activity_kinds import CustomerActivityKind
+            from app.services.customer_activity_processing_service import customer_activity_processing_service
 
             # 解析下次跟进时间
             next_follow_time_dt = None
@@ -352,17 +354,25 @@ class CustomerAIParser(EntityAIParserBase):
                     base_date=datetime.now()
                 )
 
-            follow_up_create = CustomerFollowUpCreate(
-                content=follow_up_info.get("content") or "【AI 创建客户时提取的信息】",
-                method="其他",
+            source_content_parts = []
+            if follow_up_info.get("content"):
+                source_content_parts.append(str(follow_up_info["content"]))
+            if follow_up_info.get("next_action"):
+                source_content_parts.append(f"下一步：{follow_up_info['next_action']}")
+
+            activity_create = CustomerActivityCreate(
+                activity_kind=CustomerActivityKind.OTHER_FOLLOW_UP,
+                source_content="\n".join(source_content_parts) or "AI 创建客户时提取的信息",
                 next_action=follow_up_info.get("next_action"),
-                next_follow_time=next_follow_time_dt
+                next_follow_time=next_follow_time_dt,
+                next_follow_time_source="AI_EXTRACTED" if next_follow_time_dt else None,
             )
 
-            customer_follow_up_crud.create(
+            created_activity = customer_activity_crud.create(
                 db=db,
-                obj_in=follow_up_create,
+                obj_in=activity_create,
                 customer_id=customer.id,
                 creator_id=user_id,
                 team_id=team_id
             )
+            await customer_activity_processing_service.trigger_processing(created_activity.id, team_id)

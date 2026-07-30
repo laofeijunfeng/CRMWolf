@@ -5,9 +5,8 @@
 权限初始化由 app.services.init_service.init_roles_permissions() 统一处理。
 """
 from app.core.database import engine, Base, SessionLocal
-from app.models import User, Role, Permission, UserRole, RolePermission, Lead, LeadFollowUp
+from app.models import User, Role, Permission, UserRole, RolePermission, Lead, LeadFollowUp, CustomerActivity
 from app.models.customer import Customer, Contact
-from app.models.customer_follow_up import CustomerFollowUp
 from app.constants.permissions import ROLES_DATA
 from app.schemas.role import RoleCreate
 from app.crud.role import role_crud

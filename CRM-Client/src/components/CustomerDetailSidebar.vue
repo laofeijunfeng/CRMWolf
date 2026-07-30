@@ -43,7 +43,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { key: 'followup', label: '跟进记录', icon: MessageSquare },
+  { key: 'followup', label: '客户活动', icon: MessageSquare },
   { key: 'contacts', label: '联系人', icon: Users },
   { key: 'opportunities', label: '商机', icon: TrendingUp },
   { key: 'contracts', label: '合同', icon: FileText },

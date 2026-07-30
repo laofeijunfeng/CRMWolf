@@ -19,9 +19,9 @@ ALL_PERMISSIONS = [
     {"name": "创建客户联系人", "code": "customer:contact:create", "resource": "customer_contact", "action": "create"},
     {"name": "编辑客户联系人", "code": "customer:contact:edit", "resource": "customer_contact", "action": "edit"},
     {"name": "删除客户联系人", "code": "customer:contact:delete", "resource": "customer_contact", "action": "delete"},
-    {"name": "创建客户跟进", "code": "customer:follow_up:create", "resource": "customer_follow_up", "action": "create"},
-    {"name": "编辑客户跟进", "code": "customer:follow_up:edit", "resource": "customer_follow_up", "action": "edit"},
-    {"name": "删除客户跟进", "code": "customer:follow_up:delete", "resource": "customer_follow_up", "action": "delete"},
+    {"name": "创建客户活动", "code": "customer:activity:create", "resource": "customer_activity", "action": "create"},
+    {"name": "编辑客户活动", "code": "customer:activity:edit", "resource": "customer_activity", "action": "edit"},
+    {"name": "删除客户活动", "code": "customer:activity:delete", "resource": "customer_activity", "action": "delete"},
 
     # 线索相关权限
     {"name": "查看所有线索", "code": "lead:view:all", "resource": "lead", "action": "view", "scope": "all"},
@@ -179,7 +179,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "customer:edit:own", "customer:edit:all", "customer:delete:own", "customer:delete:all",
         "customer:return", "customer:claim", "customer:assign",
         "customer:contact:create", "customer:contact:edit", "customer:contact:delete",
-        "customer:follow_up:create", "customer:follow_up:edit", "customer:follow_up:delete",
+        "customer:activity:create", "customer:activity:edit", "customer:activity:delete",
         "opportunity:view:all", "opportunity:view:own", "opportunity:create",
         "opportunity:edit:own", "opportunity:edit:all", "opportunity:delete:own", "opportunity:delete:all",
         "opportunity:stage", "opportunity:win", "opportunity:lose", "opportunity:assign",
@@ -206,7 +206,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "customer:delete:own",  # ← 补充删除权限
         "customer:return", "customer:claim",
         "customer:contact:create", "customer:contact:edit", "customer:contact:delete",
-        "customer:follow_up:create", "customer:follow_up:edit", "customer:follow_up:delete",
+        "customer:activity:create", "customer:activity:edit", "customer:activity:delete",
         "opportunity:view:own", "opportunity:create", "opportunity:edit:own",
         "opportunity:delete:own",  # ← 补充删除权限
         "opportunity:stage", "opportunity:win", "opportunity:lose",

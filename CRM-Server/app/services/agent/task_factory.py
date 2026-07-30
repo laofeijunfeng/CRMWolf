@@ -74,8 +74,8 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
     contracts = event.get("contracts") or []
     payment_plans = event.get("payment_plans") or []
     intent = None
-    if action in {"create_customer_follow_up", "select_customer_for_follow_up", "collect_follow_up_quality_fields"}:
-        intent = "CUSTOMER_FOLLOW_UP"
+    if action in {"create_customer_activity", "select_customer_for_activity", "collect_follow_up_quality_fields"}:
+        intent = "CUSTOMER_ACTIVITY"
     elif action in {"create_lead", "collect_lead_fields", "create_lead_follow_up", "collect_lead_follow_up_quality_fields"}:
         intent = "CREATE_LEAD"
     elif action in {"create_customer", "collect_customer_fields"}:
@@ -83,7 +83,7 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
     elif action in {"create_opportunity", "select_customer_for_opportunity", "collect_opportunity_fields"}:
         intent = "CREATE_OPPORTUNITY"
     elif action == "move_opportunity_stage":
-        intent = "CUSTOMER_FOLLOW_UP"
+        intent = "CUSTOMER_ACTIVITY"
     elif action in {"create_contact", "select_customer_for_contact", "collect_contact_fields"}:
         intent = "CREATE_CONTACT"
     elif action in {"create_invoice_title", "select_customer_for_invoice_title", "collect_invoice_title_fields"}:

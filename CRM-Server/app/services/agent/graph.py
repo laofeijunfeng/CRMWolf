@@ -29,6 +29,7 @@ from app.services.agent.temporal import AgentTemporalResolver, agent_temporal_re
 from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_registry
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext
+from app.services.customer_activity_kinds import get_activity_category, infer_activity_kind
 
 
 class CRMAgentGraphService:
@@ -290,7 +291,7 @@ class CRMAgentGraphService:
         semantic_result = state.get("semantic_result")
         if (
             not semantic_result
-            or semantic_result.intent != "CUSTOMER_FOLLOW_UP"
+            or semantic_result.intent != "CUSTOMER_ACTIVITY"
             or self._requires_clarification(semantic_result, has_memory_customer=bool(self._memory_current_customer(state.get("memory"))))
             or not state.get("db")
             or not self._has_single_customer(state)
@@ -554,7 +555,7 @@ class CRMAgentGraphService:
         semantic_result = state.get("semantic_result")
         return (
             bool(semantic_result)
-            and semantic_result.intent == "CUSTOMER_FOLLOW_UP"
+            and semantic_result.intent == "CUSTOMER_ACTIVITY"
             and bool(state.get("db"))
             and self._has_single_customer(state)
             and not self._requires_clarification(
@@ -618,6 +619,12 @@ class CRMAgentGraphService:
     def _apply_follow_up_revision(parsed: Dict[str, Any], quality: Optional[AgentFollowUpQualityResult]) -> Dict[str, Any]:
         revision = (quality.suggested_revision or "").strip() if quality else ""
         if not revision:
+            return parsed
+        activity_kind = infer_activity_kind(
+            parsed.get("method") or "AI录入",
+            parsed.get("original_content") or parsed.get("follow_up_content") or "",
+        )
+        if get_activity_category(activity_kind) == "MEETING":
             return parsed
         return {**parsed, "follow_up_content": revision}
 

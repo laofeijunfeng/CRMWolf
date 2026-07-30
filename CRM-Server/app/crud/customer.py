@@ -406,7 +406,7 @@ class CustomerCRUD:
         default_procurement_method_id: Optional[int] = None,
         operator_name: Optional[str] = None
     ) -> Tuple[Customer, Contact]:
-        from app.crud.customer_follow_up import customer_follow_up_crud
+        from app.crud.customer_activity import customer_activity_crud
         from app.services.operation_log_service import operation_log_service
 
         lead = db.query(Lead).filter(
@@ -450,7 +450,7 @@ class CustomerCRUD:
         db.add(contact)
         db.flush()
         
-        customer_follow_up_crud.migrate_from_lead(db, lead_id, customer.id, team_id)
+        customer_activity_crud.migrate_from_lead(db, lead_id, customer.id, team_id)
         
         lead.status = LeadStatus.CONVERTED
         lead.version += 1

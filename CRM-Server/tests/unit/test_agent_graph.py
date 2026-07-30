@@ -12,6 +12,7 @@ from app.services.agent.schemas import (
 )
 from app.services.agent.semantic import AgentSemanticParseEnvelope
 from app.services.agent.tools.base import AgentToolResult
+from app.services.customer_activity_kinds import CustomerActivityKind
 
 
 class FakeSemanticParser:
@@ -229,7 +230,7 @@ class FakeTemporalResolver:
 
 def semantic_result(**overrides):
     payload = {
-        "intent": "CUSTOMER_FOLLOW_UP",
+        "intent": "CUSTOMER_ACTIVITY",
         "intent_confidence": 0.95,
         "customer": {"name_text": "越秀金融", "confidence": 0.95},
         "follow_up": {
@@ -535,7 +536,7 @@ async def test_agent_graph_loads_customer_context_and_generates_ai_suggestions()
     suggestion_events = [event for event in result["events"] if event["event"] == "business_suggestions"]
     assert suggestion_events[0]["suggestion_source"] == "test_suggestion_generator"
     assert suggestion_events[0]["suggestions"][0]["action"] == "CREATE_OPPORTUNITY"
-    assert "请确认是否创建这条跟进记录？" in result["response"]
+    assert "请确认是否创建这条客户活动？" in result["response"]
     assert "基于客户上下文，我建议下一步可以" not in result["response"]
 
 
@@ -640,7 +641,7 @@ async def test_agent_graph_streams_step_events_before_final_response():
 @pytest.mark.asyncio
 async def test_agent_graph_requires_clarification_when_ai_confidence_is_low():
     result = await build_service(semantic_result(
-        intent="CUSTOMER_FOLLOW_UP",
+        intent="CUSTOMER_ACTIVITY",
         intent_confidence=0.62,
         customer={"name_text": "越秀", "confidence": 0.5},
         need_clarification=True,
@@ -660,7 +661,7 @@ async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation
     assert tool_service.searches[0]["keyword"] == "越秀金融"
     assert result["customer_candidates"] == [{"id": 101, "account_name": "越秀金融", "owner_info": None, "collaborator_infos": []}]
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
-    assert confirmation_events[0]["action"] == "create_customer_follow_up"
+    assert confirmation_events[0]["action"] == "create_customer_activity"
     assert confirmation_events[0]["payload"]["customer_id"] == 101
     assert confirmation_events[0]["payload"]["content"] == "客户反馈项目还在立项评估阶段"
 
@@ -801,7 +802,8 @@ async def test_agent_graph_create_lead_requires_missing_fields_form():
 @pytest.mark.asyncio
 async def test_agent_graph_create_customer_requires_confirmation_when_no_duplicate_exists():
     tool_service = FakeToolService(items=[])
-    result = await build_service(customer_create_semantic_result(), tool_service).run(input_state("帮我创建客户"))
+    raw_content = "帮我创建客户，广州睿狐科技，客户已经确认采购 CRM，后续约演示"
+    result = await build_service(customer_create_semantic_result(), tool_service).run(input_state(raw_content))
 
     assert result["intent"] == "CREATE_CUSTOMER"
     assert tool_service.duplicate_searches[0]["customer_keywords"] == ["广州睿狐科技"]
@@ -811,7 +813,8 @@ async def test_agent_graph_create_customer_requires_confirmation_when_no_duplica
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
     assert confirmation_events[0]["action"] == "create_customer"
     assert confirmation_events[0]["payload"]["customer"]["account_name"] == "广州睿狐科技"
-    assert confirmation_events[0]["payload"]["customer_follow_up"]["content"] == "客户已经确认采购 CRM，后续约演示"
+    assert confirmation_events[0]["payload"]["customer_activity"]["content"] == "客户已经确认采购 CRM，后续约演示"
+    assert confirmation_events[0]["payload"]["customer_activity"]["source_content"] == raw_content
 
 
 @pytest.mark.asyncio
@@ -839,6 +842,7 @@ async def test_agent_graph_create_customer_requires_missing_fields_form():
 
 @pytest.mark.asyncio
 async def test_agent_graph_uses_quality_revision_for_follow_up_confirmation_payload():
+    raw_content = "今天和越秀金融沟通了项目进展，客户反馈项目还在立项评估阶段，下周三确认进展"
     quality_evaluator = FakeFollowUpQualityEvaluator(
         suggested_revision="客户反馈项目仍在立项评估阶段，计划下周三确认项目进展。",
     )
@@ -851,11 +855,51 @@ async def test_agent_graph_uses_quality_revision_for_follow_up_confirmation_payl
         follow_up_quality_evaluator=quality_evaluator,
     )
 
-    result = await service.run(input_state("今天和越秀金融沟通了项目进展"))
+    result = await service.run(input_state(raw_content))
 
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
-    assert confirmation_events[0]["action"] == "create_customer_follow_up"
+    assert confirmation_events[0]["action"] == "create_customer_activity"
     assert confirmation_events[0]["payload"]["content"] == "客户反馈项目仍在立项评估阶段，计划下周三确认项目进展。"
+    assert confirmation_events[0]["payload"]["source_content"] == raw_content
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_preserves_meeting_source_content_and_activity_kind():
+    meeting_content = """今天线下拜访另外睿狐科技
+我方：Harry、Rayson
+对接方：12号人
+会议内容：
+1、系统化介绍公司的基本信息；
+2、演示讲解产品功能；
+下一步计划：
+跟进内部积极试用，推动上级汇报，把项目扩大；"""
+    quality_evaluator = FakeFollowUpQualityEvaluator(
+        suggested_revision="压缩后的会议整理稿",
+    )
+    service = CRMAgentGraphService(
+        tool_service=FakeToolService(items=[{"id": 101, "account_name": "广州睿狐科技有限公司"}]),
+        semantic_parser=FakeSemanticParser(semantic_result(
+            customer={"name_text": "睿狐科技", "confidence": 0.95},
+            follow_up={
+                "content": "线下拜访睿狐科技，介绍公司和产品，推动后续试用。",
+                "method": "线下拜访",
+                "next_action": "推动试用和 CTO 汇报",
+            },
+            evidence=[meeting_content],
+        )),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=quality_evaluator,
+    )
+
+    result = await service.run(input_state(meeting_content))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    payload = confirmation_events[0]["payload"]
+    assert payload["activity_kind"] == CustomerActivityKind.OFFLINE_MEETING
+    assert payload["source_content"] == meeting_content
+    assert payload["content"] == "线下拜访睿狐科技，介绍公司和产品，推动后续试用。"
 
 
 @pytest.mark.asyncio
@@ -897,7 +941,7 @@ async def test_agent_graph_attaches_opportunity_stage_move_as_next_task_after_fo
     result = await service.run(input_state("睿狐科技需要我们提供招标技术和商务参考材料"))
 
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
-    assert confirmation_events[0]["action"] == "create_customer_follow_up"
+    assert confirmation_events[0]["action"] == "create_customer_activity"
     next_task = confirmation_events[0]["payload"]["_next_task"]
     assert next_task["action"] == "move_opportunity_stage"
     assert next_task["payload"]["opportunity_id"] == 301
@@ -1206,7 +1250,7 @@ async def test_agent_graph_requires_customer_selection_when_multiple_candidates(
     result = await build_service(semantic_result(), tool_service).run(input_state())
 
     selection_events = [event for event in result["events"] if event["event"] == "customer_selection_required"]
-    assert selection_events[0]["action"] == "select_customer_for_follow_up"
+    assert selection_events[0]["action"] == "select_customer_for_activity"
     assert selection_events[0]["customers"][1]["id"] == 102
     assert "请回复序号或客户名称" in result["response"]
 

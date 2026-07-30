@@ -431,7 +431,7 @@ def run_agent_requires_follow_up_confirmation(env):
         async def stream_events(self, input_state):
             yield {
                 "event": "confirmation_required",
-                "action": "create_customer_follow_up",
+                "action": "create_customer_activity",
                 "customer": {"id": 101, "account_name": "越秀金融"},
                 "payload": {"customer_id": 101, "content": input_state["content"]},
             }
@@ -450,29 +450,29 @@ def run_agent_confirm_executes_follow_up(env):
         async def stream_events(self, input_state):
             yield {
                 "event": "confirmation_required",
-                "action": "create_customer_follow_up",
+                "action": "create_customer_activity",
                 "customer": {"id": 101, "account_name": "越秀金融"},
                 "payload": {"customer_id": 101, "content": input_state["content"]},
             }
             yield {"event": "final", "content": "请确认是否创建跟进记录？"}
 
     class FakeTools:
-        async def create_customer_follow_up(self, context, **kwargs):
-            return AgentToolResult("create_customer_follow_up", True, {"id": 9001, "customer_id": kwargs["customer_id"]}, 7001)
+        async def create_customer_activity(self, context, **kwargs):
+            return AgentToolResult("create_customer_activity", True, {"id": 9001, "customer_id": kwargs["customer_id"]}, 7001)
 
     env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
     env.monkeypatch.setattr(agent_api, "CRMAgentToolService", lambda: FakeTools())
     session = agent_session(env)
     post_agent(env, session["id"], "今天和越秀金融沟通预算")
     response = post_agent(env, session["id"], "是")
-    assert_sse_contains(response, "task_completed", "跟进已记录")
+    assert_sse_contains(response, "task_completed", "客户活动已记录")
     assert env.db.query(AgentTask).one().status == AgentTaskStatus.COMPLETED
 
 
 def run_agent_reject_cancels_waiting_task(env):
     class FakeGraph:
         async def stream_events(self, input_state):
-            yield {"event": "confirmation_required", "action": "create_customer_follow_up", "payload": {"content": input_state["content"]}}
+            yield {"event": "confirmation_required", "action": "create_customer_activity", "payload": {"content": input_state["content"]}}
             yield {"event": "final", "content": "请确认是否创建跟进记录？"}
 
     env.monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraph())
@@ -624,7 +624,17 @@ def run_agent_opportunity_completion_terminal(env):
                 "event": "confirmation_required",
                 "action": "create_opportunity",
                 "customer": {"id": 101, "account_name": "广州睿狐科技有限公司"},
-                "payload": {"opportunity": {"customer_id": 101, "total_amount": 50000}},
+                "payload": {
+                    "opportunity": {
+                        "customer_id": 101,
+                        "total_amount": 50000,
+                        "user_count": 20,
+                        "license_type": "SUBSCRIPTION",
+                        "subscription_years": 1,
+                        "purchase_type": "NEW",
+                        "expected_closing_date": "2026-08-31",
+                    },
+                },
             }
             yield {"event": "final", "content": "请确认是否创建商机？"}
 

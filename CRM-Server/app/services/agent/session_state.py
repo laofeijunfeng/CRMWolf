@@ -21,6 +21,7 @@ from app.schemas.agent import (
     AgentTaskCreate,
     AgentTaskUpdate,
 )
+from app.services.agent import business_rules
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -196,23 +197,65 @@ def _is_resumable_task(task) -> bool:
         "create_opportunity",
     }
 
+def _task_input_payload(task_input: dict[str, Any]) -> dict[str, Any]:
+    nested_payload = task_input.get("payload")
+    if isinstance(nested_payload, dict):
+        return nested_payload
+    return task_input
+
+def _pending_task_display_summary(
+    task,
+    *,
+    state: dict[str, Any],
+    task_input: dict[str, Any],
+    payload: dict[str, Any],
+    customer: dict[str, Any],
+    missing_fields: list[str],
+) -> str:
+    action = state.get("action") or task_input.get("action")
+    customer_name = customer.get("account_name") or customer.get("name") or state.get("customer_name")
+    opportunity = payload.get("opportunity") if isinstance(payload.get("opportunity"), dict) else {}
+    customer_part = str(customer_name or "未选客户")
+    if action == "collect_opportunity_fields":
+        display_fields = business_rules.format_opportunity_missing_fields(
+            business_rules.opportunity_missing_display_fields(missing_fields)
+        )
+        if display_fields:
+            return f"补商机信息｜{customer_part}｜缺：{display_fields}"
+        return f"确认采购方式｜{customer_part}"
+    if action == "create_opportunity":
+        opportunity_summary = business_rules.format_opportunity_summary(opportunity)
+        return f"确认创建商机｜{customer_part}｜{opportunity_summary}"
+    return task.summary or str(task.intent or "业务草稿")
+
 def _pending_task_snapshot(task) -> dict[str, Any]:
     state = task.state_json or {}
     task_input = task.input_json or {}
-    payload = task_input.get("payload") if isinstance(task_input, dict) else None
-    payload = payload if isinstance(payload, dict) else {}
+    payload = _task_input_payload(task_input) if isinstance(task_input, dict) else {}
     customer = payload.get("customer") if isinstance(payload.get("customer"), dict) else {}
+    if not customer and isinstance(state.get("customer"), dict):
+        customer = state["customer"]
     missing_fields = []
     if isinstance(state.get("missing_fields"), list):
         missing_fields = state["missing_fields"]
     elif isinstance(task_input, dict) and isinstance(task_input.get("missing_fields"), list):
         missing_fields = task_input["missing_fields"]
+    elif isinstance(payload.get("missing_fields"), list):
+        missing_fields = payload["missing_fields"]
     return {
         "id": task.id,
         "intent": task.intent,
         "target_type": task.target_type,
         "target_id": task.target_id,
         "summary": task.summary,
+        "display_summary": _pending_task_display_summary(
+            task,
+            state=state,
+            task_input=task_input,
+            payload=payload,
+            customer=customer,
+            missing_fields=missing_fields,
+        ),
         "action": state.get("action") or (task_input.get("action") if isinstance(task_input, dict) else None),
         "customer_name": customer.get("account_name") or customer.get("name") or state.get("customer_name"),
         "missing_fields": missing_fields,

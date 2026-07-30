@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, type PropType } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 import type { CustomerDetailResponse } from '@/api/customer'
 import type { OpportunityListResponse } from '@/api/opportunity'
+import { usePermissionStore } from '@/stores/permissions'
+import { useUserStore } from '@/stores/user'
 
 const routeState = vi.hoisted(() => ({
   path: '/customers',
@@ -13,13 +16,13 @@ const routerPush = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const routerReplace = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const customerApi = vi.hoisted(() => ({
   getCustomerDetail: vi.fn(),
+  getCustomerMembers: vi.fn(),
   regenerateProfile: vi.fn(),
 }))
-const customerFollowUpApi = vi.hoisted(() => ({ getFollowUps: vi.fn() }))
+const customerActivityApi = vi.hoisted(() => ({ getActivities: vi.fn() }))
 const opportunityApi = vi.hoisted(() => ({ getOpportunities: vi.fn() }))
 const contractApi = vi.hoisted(() => ({ getCustomerContracts: vi.fn() }))
 const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn() }))
-const licenseApplicationApi = vi.hoisted(() => ({ list: vi.fn() }))
 const deploymentApi = vi.hoisted(() => ({ list: vi.fn() }))
 const getCustomerScore = vi.hoisted(() => vi.fn())
 const handleApiError = vi.hoisted(() => vi.fn())
@@ -51,11 +54,10 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: routerPush, replace: routerReplace }),
 }))
 vi.mock('@/api/customer', () => ({ default: customerApi }))
-vi.mock('@/api/customerFollowUp', () => ({ default: customerFollowUpApi }))
+vi.mock('@/api/customerActivity', () => ({ default: customerActivityApi }))
 vi.mock('@/api/opportunity', () => ({ opportunityApi }))
 vi.mock('@/api/contract', () => ({ default: contractApi }))
 vi.mock('@/api/invoice', () => ({ default: invoiceApi }))
-vi.mock('@/api/licenseApplication', () => ({ default: licenseApplicationApi }))
 vi.mock('@/api/deployment', () => ({ default: deploymentApi }))
 vi.mock('@/api/score', () => ({ getCustomerScore }))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
@@ -65,12 +67,12 @@ vi.mock('@/components/crmwolf', () => ({
   ContextTabs: defineComponent({
     name: 'ContextTabs',
     props: { tabs: Array, activeTab: String },
-    emits: ['update:active-tab'],
+    emits: ['update:activeTab'],
     setup: (props, { emit }) => () => h('nav', (props.tabs as { key: string; label: string }[]).map(tab => h('button', {
       type: 'button',
       'data-testid': `tab-${tab.key}`,
       'data-active': String(props.activeTab === tab.key),
-      onClick: () => emit('update:active-tab', tab.key),
+      onClick: () => emit('update:activeTab', tab.key),
     }, tab.label))),
   }),
 }))
@@ -125,13 +127,13 @@ vi.mock('@/components/panels/OpportunitiesPanel.vue', () => ({
       highlightedOpportunityId: Number,
       restoreFocusOpportunityId: Number,
     },
-    emits: ['view-opportunity', 'open-full-page', 'add'],
+    emits: ['view', 'open-full-page', 'add'],
     setup: (props, { emit }) => () => h('div', {
       'data-testid': 'opportunities-panel',
       'data-highlighted-opportunity-id': props.highlightedOpportunityId === undefined ? '' : String(props.highlightedOpportunityId),
       'data-restore-focus-opportunity-id': props.restoreFocusOpportunityId === undefined ? '' : String(props.restoreFocusOpportunityId),
     }, [
-      h('button', { type: 'button', 'data-testid': 'view-opportunity', onClick: () => emit('view-opportunity', 88) }, 'view opportunity'),
+      h('button', { type: 'button', 'data-testid': 'view-opportunity', onClick: () => emit('view', 88) }, 'view opportunity'),
       h('button', { type: 'button', 'data-testid': 'open-full-page', onClick: () => emit('open-full-page', 88) }, 'open full page'),
     ]),
   }),
@@ -219,17 +221,26 @@ const opportunityFixture = (): OpportunityListResponse => ({
 
 describe('CustomerDetailSheet opportunity drilldown', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
+    const userStore = useUserStore()
+    const permissionStore = usePermissionStore()
+    userStore.userInfo = { id: 9, name: '测试用户', email: 'test@example.com' } as typeof userStore.userInfo
+    permissionStore.permissions = [
+      { code: 'customer:edit:own' },
+      { code: 'customer:activity:create' },
+      { code: 'opportunity:create' },
+    ] as typeof permissionStore.permissions
     vi.clearAllMocks()
     routeState.path = '/customers'
     routeState.query = {}
     customerApi.getCustomerDetail.mockResolvedValue(customerFixture())
     getCustomerScore.mockResolvedValue(null)
-    customerFollowUpApi.getFollowUps.mockResolvedValue([])
+    customerActivityApi.getActivities.mockResolvedValue([])
     opportunityApi.getOpportunities.mockResolvedValue([opportunityFixture()])
     contractApi.getCustomerContracts.mockResolvedValue([])
     invoiceApi.getInvoiceTitles.mockResolvedValue({ invoice_titles: [] })
-    licenseApplicationApi.list.mockResolvedValue([])
     deploymentApi.list.mockResolvedValue([])
+    customerApi.getCustomerMembers.mockResolvedValue([])
   })
 
   it('renders opportunity detail content inside the current customer sheet when an opportunity is selected', async () => {
@@ -314,24 +325,24 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     customerApi.getCustomerDetail.mockClear()
     getCustomerScore.mockClear()
-    customerFollowUpApi.getFollowUps.mockClear()
+    customerActivityApi.getActivities.mockClear()
     opportunityApi.getOpportunities.mockClear()
     contractApi.getCustomerContracts.mockClear()
     invoiceApi.getInvoiceTitles.mockClear()
-    licenseApplicationApi.list.mockClear()
     deploymentApi.list.mockClear()
+    customerApi.getCustomerMembers.mockClear()
 
     await wrapper.setProps({ customerId: 42 })
     await flushPromises()
 
     expect(customerApi.getCustomerDetail).toHaveBeenCalledWith(42)
     expect(getCustomerScore).toHaveBeenCalledWith(42)
-    expect(customerFollowUpApi.getFollowUps).toHaveBeenCalledWith(42)
+    expect(customerActivityApi.getActivities).toHaveBeenCalledWith(42)
     expect(opportunityApi.getOpportunities).toHaveBeenCalledWith({ customer_id: 42 })
     expect(contractApi.getCustomerContracts).toHaveBeenCalledWith(42)
     expect(invoiceApi.getInvoiceTitles).toHaveBeenCalledWith(42)
-    expect(licenseApplicationApi.list).toHaveBeenCalledWith(42)
     expect(deploymentApi.list).toHaveBeenCalledWith(42)
+    expect(customerApi.getCustomerMembers).toHaveBeenCalledWith(42)
   })
 
   it('keeps the latest customer detail data when an older load resolves after a customerId change', async () => {

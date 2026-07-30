@@ -14,7 +14,7 @@ from datetime import datetime
 from app.core.database import SessionLocal
 from app.models.customer import Customer
 from app.crud.customer import customer_crud
-from app.crud.customer_follow_up import customer_follow_up_crud
+from app.crud.customer_activity import customer_activity_crud
 from app.crud.industry import industry_crud
 from app.crud.ai_config import ai_config_crud
 from app.services.ai_task_limiter import ai_generation_semaphore
@@ -79,8 +79,8 @@ class CustomerProfileService:
 
                     lead_follow_ups = None
                     if source_lead_id:
-                        lead_follow_ups = customer_follow_up_crud.get_by_original_lead_id(db, source_lead_id)
-                        logger.info(f"跟进记录数量: {len(lead_follow_ups) if lead_follow_ups else 0}")
+                        lead_follow_ups = customer_activity_crud.get_by_original_lead_id(db, source_lead_id, effective_team_id)
+                        logger.info(f"客户活动数量: {len(lead_follow_ups) if lead_follow_ups else 0}")
 
                     prompt = self._build_prompt_for_industry(account_name, industry_hierarchy, lead_follow_ups)
                 finally:
@@ -239,7 +239,7 @@ class CustomerProfileService:
   "company_website": "公司官网URL（如果无法确定，填写 null）",
   "main_business": "主营业务描述（100字左右，中文）",
   "similar_customers": ["从提供的候选客户中选择1-5个最相近的客户名称"],
-  "project_background": "项目需求背景分析（如果有跟进记录，基于记录分析客户可能的需求；否则填写 null）"
+  "project_background": "项目需求背景分析（如果有客户活动，基于记录分析客户可能的需求；否则填写 null）"
 }
 ```
 
@@ -249,7 +249,7 @@ class CustomerProfileService:
 2. 选择最相近的 1-5 个客户（业务相似、规模相近等）
 3. 如果候选列表为空，similar_customers 填写空数组 []
 4. company_website 如果不确定，填写 null
-5. project_background 需要分析跟进记录中的客户痛点、需求等
+5. project_background 需要分析客户活动中的客户痛点、需求等
 6. 所有描述使用中文"""
 
     def _build_prompt_for_industry(
@@ -280,10 +280,10 @@ class CustomerProfileService:
 
 请输出 JSON 格式的行业编码。"""
 
-        # 如果有跟进记录，加入分析上下文
+        # 如果有客户活动，加入分析上下文
         if lead_follow_ups and len(lead_follow_ups) > 0:
             follow_up_summary = self._summarize_follow_ups(lead_follow_ups)
-            prompt += f"\n\n以下是该企业的跟进记录（可用于辅助判断行业）：\n{follow_up_summary}"
+            prompt += f"\n\n以下是该企业的客户活动（可用于辅助判断行业）：\n{follow_up_summary}"
 
         return prompt
 
@@ -312,10 +312,10 @@ class CustomerProfileService:
         else:
             prompt += "\n\n系统中暂无同行业客户候选。"
 
-        # 跟进记录分析
+        # 客户活动分析
         if lead_follow_ups and len(lead_follow_ups) > 0:
             follow_up_summary = self._summarize_follow_ups(lead_follow_ups)
-            prompt += f"\n\n以下是该企业的跟进记录（请分析其中的客户需求和痛点）：\n{follow_up_summary}"
+            prompt += f"\n\n以下是该企业的客户活动（请分析其中的客户需求和痛点）：\n{follow_up_summary}"
 
         return prompt
 
@@ -330,12 +330,24 @@ class CustomerProfileService:
         return "其他"
 
     def _summarize_follow_ups(self, follow_ups: List[Any]) -> str:
-        """将跟进记录转换为文本摘要"""
+        """将客户活动转换为文本摘要"""
         lines = []
         for i, fu in enumerate(follow_ups, 1):
-            content = fu.content if hasattr(fu, 'content') else fu.get('content', '')
-            method = fu.method if hasattr(fu, 'method') else fu.get('method', '')
-            created_time = fu.created_time if hasattr(fu, 'created_time') else fu.get('created_time', '')
+            content = (
+                fu.source_content if hasattr(fu, 'source_content')
+                else fu.content if hasattr(fu, 'content')
+                else fu.get('source_content') or fu.get('content', '')
+            )
+            method = (
+                fu.activity_kind if hasattr(fu, 'activity_kind')
+                else fu.method if hasattr(fu, 'method')
+                else fu.get('activity_kind') or fu.get('method', '')
+            )
+            created_time = (
+                fu.occurred_at if hasattr(fu, 'occurred_at')
+                else fu.created_time if hasattr(fu, 'created_time')
+                else fu.get('occurred_at') or fu.get('created_time', '')
+            )
 
             if isinstance(created_time, datetime):
                 date_str = created_time.strftime("%Y-%m-%d")

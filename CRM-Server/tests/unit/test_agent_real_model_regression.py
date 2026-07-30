@@ -33,7 +33,7 @@ RUN_DATE = date(2026, 7, 29)
 
 
 SEMANTIC_SCENARIOS = [
-    ("今天微信跟进了东风康明斯，张总说本月底让采购拉会", "CUSTOMER_FOLLOW_UP", "东风康明斯"),
+    ("今天微信跟进了东风康明斯，张总说本月底让采购拉会", "CUSTOMER_ACTIVITY", "东风康明斯"),
     ("中移动信息那边已经到账 30 万，备注首款", "PAYMENT_RECORD", "中移动信息"),
     ("给汇川技术建一个 200 人订阅 1 年的新购商机，预计 9 月底成交", "CREATE_OPPORTUNITY", "汇川技术"),
     ("新增线索：深圳云图，联系人李雷 13800138000，展会来的", "CREATE_LEAD", None),
@@ -42,11 +42,11 @@ SEMANTIC_SCENARIOS = [
     ("给蓝海科技新增部署信息，生产环境，服务器 10.0.0.8，授权 50 人", "CREATE_DEPLOYMENT_INFO", "蓝海科技"),
     ("把陈工加到东风康明斯的售前协作成员，可跟进", "CREATE_CUSTOMER_MEMBER", "东风康明斯"),
     ("查一下广州睿狐最近有哪些商机和合同", "CUSTOMER_QUERY", "广州睿狐"),
-    ("今天拜访了海信，客户担心安全审计，下周三我带售前再沟通", "CUSTOMER_FOLLOW_UP", "海信"),
-    ("中铁建今天说预算批了，先买断 100 人，预计 10 月 15 号走完采购", "CUSTOMER_FOLLOW_UP", "中铁建"),
+    ("今天拜访了海信，客户担心安全审计，下周三我带售前再沟通", "CUSTOMER_ACTIVITY", "海信"),
+    ("中铁建今天说预算批了，先买断 100 人，预计 10 月 15 号走完采购", "CUSTOMER_ACTIVITY", "中铁建"),
     ("创建客户：杭州启明科技，杭州，制造业，联系人赵总 13700137000", "CREATE_CUSTOMER", None),
     ("南方电网回款了，但是金额财务还没给我", "PAYMENT_RECORD", "南方电网"),
-    ("给白云机场申请试用 license，他们已有部署环境", "CUSTOMER_FOLLOW_UP", "白云机场"),
+    ("给白云机场申请试用 license，他们已有部署环境", "CUSTOMER_ACTIVITY", "白云机场"),
 ]
 
 

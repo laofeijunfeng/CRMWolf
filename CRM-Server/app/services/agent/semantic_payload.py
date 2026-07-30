@@ -58,6 +58,7 @@ def parsed_from_semantic(
 
     return {
         "customer_name": semantic_result.customer.name_text,
+        "original_content": original_content,
         "follow_up_content": semantic_result.follow_up.content or original_content,
         "method": semantic_result.follow_up.method or "AI录入",
         "payment": {
@@ -94,8 +95,9 @@ def parsed_from_semantic(
             "contact_gender": customer_create.contact_gender,
             "contact_email": customer_create.contact_email,
         }),
-        "customer_follow_up": business_rules.drop_empty_values({
+        "customer_activity": business_rules.drop_empty_values({
             "content": customer_create.follow_up_content,
+            "source_content": original_content if customer_create.follow_up_content else None,
             "method": customer_create.follow_up_method or "AI录入",
             "next_action": customer_create.next_action,
             "next_follow_time_text": customer_create.next_follow_time_text,

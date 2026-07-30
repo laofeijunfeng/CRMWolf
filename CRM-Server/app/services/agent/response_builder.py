@@ -120,6 +120,7 @@ class AgentResponseBuilder:
                 "payload": {
                     "customer_id": (state.get("selected_customer") or {}).get("id"),
                     "content": parsed.get("follow_up_content"),
+                    "source_content": parsed.get("original_content") or parsed.get("follow_up_content"),
                     "method": parsed.get("method") or "AI录入",
                     "next_action": parsed.get("next_action"),
                     "next_follow_time_text": parsed.get("next_follow_time_text"),
@@ -144,7 +145,7 @@ class AgentResponseBuilder:
         if suggestion_result and not action and not self._has_deferred_next_task(action):
             response = self._append_suggestions_to_response(response, suggestions)
         if stage_move_action:
-            if action and action.get("action") == "create_customer_follow_up":
+            if action and action.get("action") == "create_customer_activity":
                 action.setdefault("payload", {})["_next_task"] = stage_move_action
             elif not action:
                 action = stage_move_action
@@ -154,7 +155,7 @@ class AgentResponseBuilder:
                     f"{f'到「{target_stage_name}」' if target_stage_name else ''}。"
                     "请确认是否推进？"
                 )
-        elif opportunity_next_task and action and action.get("action") == "create_customer_follow_up":
+        elif opportunity_next_task and action and action.get("action") == "create_customer_activity":
             action.setdefault("payload", {})["_next_task"] = opportunity_next_task
         if action:
             events.append({"event": self.interaction_event_name(action), **action})
@@ -234,7 +235,7 @@ class AgentResponseBuilder:
     def interaction_event_name(action: Dict[str, Any]) -> str:
         action_name = action.get("action")
         if action_name in {
-            "select_customer_for_follow_up",
+            "select_customer_for_activity",
             "select_customer_for_contact",
             "select_customer_for_invoice_title",
             "select_customer_for_deployment_info",

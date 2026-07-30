@@ -316,10 +316,10 @@ onMounted(() => {
         </div>
       </section>
 
-      <section class="dashboard-trend" aria-label="跟进记录趋势">
+      <section class="dashboard-trend" aria-label="客户活动趋势">
         <AreaTrendChart
           title="跟进趋势"
-          description="每日跟进记录与有效跟进"
+          description="每日客户活动与有效跟进"
           :data="followUpTrendData"
           :series="followUpTrendSeries"
           :summaries="followUpTrendSummaries"

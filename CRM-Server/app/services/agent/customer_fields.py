@@ -9,7 +9,7 @@ from app.services.agent import business_rules
 from app.services.agent.schemas import AgentHITLPolicy, AgentSemanticParseResult
 from app.services.agent.semantic import AgentSemanticParserError
 from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
-from app.services.agent.follow_up_fields import _merge_customer_follow_up_fields
+from app.services.agent.follow_up_fields import _merge_customer_activity_fields
 
 def _is_customer_fields_task(task) -> bool:
     state = task.state_json or {}
@@ -43,10 +43,21 @@ async def _apply_customer_fields(db: Session, task, content: str):
 
     customer = _merge_customer_fields(payload.get("customer") or {}, semantic_result)
     customer.setdefault("source", "其他")
-    customer_follow_up = _merge_customer_follow_up_fields(payload.get("customer_follow_up") or {}, semantic_result)
+    customer_activity = _merge_customer_activity_fields(
+        payload.get("customer_activity") or payload.get("customer_follow_up") or {},
+        semantic_result,
+    )
+    if customer_activity.get("content") and content:
+        existing_source = str(customer_activity.get("source_content") or "").strip()
+        supplement_source = content.strip()
+        if existing_source and supplement_source and supplement_source not in existing_source:
+            customer_activity["source_content"] = f"{existing_source}\n补充：{supplement_source}"
+        else:
+            customer_activity["source_content"] = existing_source or supplement_source
     missing_fields = business_rules.missing_customer_fields(customer)
     payload["customer"] = customer
-    payload["customer_follow_up"] = customer_follow_up
+    payload.pop("customer_follow_up", None)
+    payload["customer_activity"] = customer_activity
     payload["missing_fields"] = missing_fields
     state = {**state, "payload": payload}
 
@@ -57,7 +68,7 @@ async def _apply_customer_fields(db: Session, task, content: str):
             f"{business_rules.format_customer_missing_fields(missing_fields)}。"
         )
 
-    next_payload = {"customer": customer, "customer_follow_up": customer_follow_up}
+    next_payload = {"customer": customer, "customer_activity": customer_activity}
     new_state = {
         "action": "create_customer",
         "payload": next_payload,

@@ -1,7 +1,8 @@
 /**
- * AI 客户跟进解析 API
+ * AI 客户活动解析 API
  */
 import request from '@/utils/request'
+import { z } from 'zod'
 
 export interface CustomerAIParseRequest {
   content: string
@@ -9,7 +10,7 @@ export interface CustomerAIParseRequest {
   customer_name: string
 }
 
-export interface CustomerAIFollowUpInfo {
+export interface CustomerAIActivityInfo {
   content: string | null
   method: string | null
   next_action: string | null
@@ -22,7 +23,7 @@ export interface CustomerAIParseSSEEvent {
   content?: string
   customer_id?: number
   customer_name?: string
-  follow_up_info?: CustomerAIFollowUpInfo
+  follow_up_info?: CustomerAIActivityInfo
 }
 
 export interface CustomerAICreateRequest {
@@ -34,9 +35,18 @@ export interface CustomerAICreateRequest {
   next_follow_time?: string | undefined
 }
 
+const CustomerAICreateResponseSchema = z.object({
+  id: z.number(),
+  customer_id: z.number(),
+  source_content: z.string(),
+  activity_kind: z.string()
+})
+
+type CustomerAICreateResponse = z.infer<typeof CustomerAICreateResponseSchema>
+
 export const customerAiApi = {
   /**
-   * AI 解析客户跟进信息（SSE 流式响应）
+   * AI 解析客户活动信息（SSE 流式响应）
    */
   parseSSE: async (
     data: CustomerAIParseRequest,
@@ -72,7 +82,7 @@ export const customerAiApi = {
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
+      buffer = lines.pop() ?? ''
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -92,12 +102,11 @@ export const customerAiApi = {
   },
 
   /**
-   * 从 AI 解析结果创建客户跟进记录
+   * 从 AI 解析结果创建客户活动
    */
-  create: (data: CustomerAICreateRequest) => {
-    return request.post<{ id: number; customer_id: number; content: string }>(
-      '/v1/customers/ai/create',
-      data
-    )
+  create: async (data: CustomerAICreateRequest): Promise<CustomerAICreateResponse> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.post('/v1/customers/ai/create', data)
+    return CustomerAICreateResponseSchema.parse(raw)
   }
 }

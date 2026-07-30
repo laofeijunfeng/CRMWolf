@@ -746,7 +746,7 @@ def check_customer_view_permission(
     )
 
 
-def check_customer_follow_up_permission(
+def check_customer_activity_permission(
     customer_id: int,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -771,16 +771,16 @@ def check_customer_follow_up_permission(
         return customer
 
     if customer.owner_id == str(current_user.id) and (
-        "customer:follow_up:create" in permission_codes
+        "customer:activity:create" in permission_codes
+        or "customer:follow_up:create" in permission_codes
         or "customer:edit:own" in permission_codes
     ):
         return customer
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="缺少客户跟进权限"
+        detail="缺少客户活动权限"
     )
-
 
 def check_customer_member_manage_permission(
     customer_id: int,

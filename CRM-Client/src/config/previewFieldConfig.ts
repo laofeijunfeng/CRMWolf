@@ -59,15 +59,15 @@ export const ACTION_CONFIGS: Record<string, ActionConfig> = {
     ]
   },
 
-  // 创建跟进记录
+  // 创建客户活动
   create_follow_up: {
     actionType: 'create_follow_up',
-    titleTemplate: '创建跟进记录',
+    titleTemplate: '创建客户活动',
     riskLevel: 'low',
     fields: [
       { key: 'customer_name', label: '客户名称', type: 'entity', entityType: 'customer', required: true },
-      { key: 'content', label: '跟进内容', type: 'text', required: true },
-      { key: 'method', label: '跟进方式', type: 'select', options: {
+      { key: 'content', label: '活动内容', type: 'text', required: true },
+      { key: 'method', label: '活动方式', type: 'select', options: {
         phone: '电话',
         email: '邮件',
         wechat: '微信',
@@ -141,12 +141,12 @@ export function formatFieldValue(
   value: unknown
 ): string {
   if (value === null || value === undefined || value === '') {
-    return field.placeholder || '-'
+    return field.placeholder ?? '-'
   }
 
   // 选择类型：映射选项文本
-  if (field.type === 'select' && field.options) {
-    return field.options[String(value)] || String(value)
+  if (field.type === 'select' && field.options !== undefined) {
+    return field.options[String(value)] ?? String(value)
   }
 
   // 日期类型：格式化显示

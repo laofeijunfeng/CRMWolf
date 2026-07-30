@@ -15,7 +15,7 @@ def _task(*, action: str, status: str = AgentTaskStatus.WAITING_USER):
     return SimpleNamespace(
         id=101,
         status=status,
-        intent="CUSTOMER_FOLLOW_UP",
+        intent="CUSTOMER_ACTIVITY",
         target_type="customer",
         target_id=201,
         summary="创建客户跟进",
@@ -91,7 +91,7 @@ async def test_pending_task_planner_reports_business_selection(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pending_task_planner_returns_customer_memory_instruction(monkeypatch):
-    task = _task(action="select_customer_for_follow_up", status=AgentTaskStatus.COMPLETED)
+    task = _task(action="select_customer_for_activity", status=AgentTaskStatus.COMPLETED)
     selected_customer = {"id": 201, "account_name": "越秀金融"}
 
     async def fake_apply(db, task_arg, content, *, team_id, user_id, session_id, authorization):
@@ -138,7 +138,7 @@ async def test_pending_task_preflight_routes_high_confidence_new_flow(monkeypatc
             decision="START_NEW_FLOW",
             confidence=0.92,
             detected_customer_name="汇川技术",
-            detected_intent="CUSTOMER_FOLLOW_UP",
+            detected_intent="CUSTOMER_ACTIVITY",
             is_field_supplement=False,
             reason="明确提到另一个客户的新跟进。",
         )
@@ -168,7 +168,7 @@ async def test_pending_task_preflight_routes_high_confidence_new_flow(monkeypatc
 
 @pytest.mark.asyncio
 async def test_pending_task_preflight_keeps_unknown_executable_reply_in_confirmation(monkeypatch):
-    task = _task(action="create_customer_follow_up")
+    task = _task(action="create_customer_activity")
     session = SimpleNamespace(context_json={})
 
     monkeypatch.setattr(
@@ -212,7 +212,7 @@ async def test_pending_task_preflight_keeps_unknown_executable_reply_in_confirma
 
 @pytest.mark.asyncio
 async def test_pending_task_preflight_allows_confirmed_executable_task(monkeypatch):
-    task = _task(action="create_customer_follow_up")
+    task = _task(action="create_customer_activity")
     session = SimpleNamespace(context_json={})
 
     monkeypatch.setattr(

@@ -4,11 +4,12 @@ import pytest
 from app.services.agent.prompts import CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT, build_follow_up_quality_messages
 from app.services.agent.quality import AgentFollowUpQualityEvaluator
 from app.services.agent.schemas import AgentFollowUpQualityResult, AgentSemanticParseResult
+from app.services.customer_activity_ai.rules import get_follow_up_quality_principles
 
 
 def semantic_result():
     return AgentSemanticParseResult.model_validate({
-        "intent": "CUSTOMER_FOLLOW_UP",
+        "intent": "CUSTOMER_ACTIVITY",
         "intent_confidence": 0.95,
         "customer": {"name_text": "睿狐科技", "confidence": 0.95},
         "follow_up": {
@@ -36,12 +37,12 @@ def test_follow_up_quality_prompt_contains_six_principles_and_threshold():
         "{}",
     )
 
-    assert "客户跟进记录质检 Agent" in messages[0]["content"]
-    assert "事实优先原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
-    assert "动作闭环原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
-    assert "阶段推进原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
-    assert "决策穿透原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
-    assert "异议具象原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "客户活动质检 Agent" in messages[0]["content"]
+    assert get_follow_up_quality_principles() in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "事实清晰原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "客户反馈原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "推进动作原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
+    assert "下一步闭环原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "信息可接力原则" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "如果总分达到 60 分" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
     assert "suggested_revision 只能整理、合并、去重、调整语序" in CRM_AGENT_FOLLOW_UP_QUALITY_SYSTEM_PROMPT
@@ -118,6 +119,6 @@ async def test_follow_up_quality_uses_langchain_structured_output_path():
     )
 
     assert calls["response_format"] is AgentFollowUpQualityResult
-    assert "客户跟进记录质检 Agent" in calls["system_prompt"]
+    assert "客户活动质检 Agent" in calls["system_prompt"]
     assert "测试原则" in calls["system_prompt"]
     assert result.score == 72

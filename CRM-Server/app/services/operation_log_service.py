@@ -139,37 +139,39 @@ class OperationLogService:
             }
         )
     
-    def log_customer_follow_up(
+    def log_customer_activity(
         self,
         db: Session,
         customer_id: int,
-        follow_up_content: str,
-        method: str,
+        activity_content: str,
+        activity_kind: str,
         operator_id: str,
         operator_name: Optional[str] = None,
         next_follow_time: Optional[str] = None,
         next_action: Optional[str] = None,
         team_id: Optional[int] = None,
-        follow_up_id: Optional[int] = None
+        activity_id: Optional[int] = None
     ):
-        """记录客户跟进"""
+        """记录客户活动"""
         content_data = {
-            "content": follow_up_content,
-            "method": method
+            "content": activity_content,
+            "activity_kind": activity_kind
         }
         if next_follow_time:
             content_data["next_follow_up_date"] = next_follow_time
         if next_action:
             content_data["next_action"] = next_action
-        if follow_up_id:
-            content_data["follow_up_id"] = follow_up_id
+        if activity_id:
+            content_data["activity_id"] = activity_id
 
         return self.log(
             db=db,
-            event_type="MANUAL_FOLLOW_UP",
+            event_type="CUSTOMER_ACTIVITY",
             event_action="CREATE",
-            resource_type="CUSTOMER",
-            resource_id=customer_id,
+            resource_type="CUSTOMER_ACTIVITY",
+            resource_id=activity_id or customer_id,
+            secondary_resource_type="CUSTOMER",
+            secondary_resource_id=customer_id,
             operator_id=operator_id,
             operator_name=operator_name,
             content=content_data,

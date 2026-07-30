@@ -372,7 +372,7 @@ def _interaction_for_event(
         for index, candidate in enumerate(candidates[:2], start=1):
             if not isinstance(candidate, dict):
                 continue
-            summary = str(candidate.get("summary") or candidate.get("intent") or f"草稿 {index}")
+            summary = str(candidate.get("display_summary") or candidate.get("summary") or candidate.get("intent") or f"草稿 {index}")
             choice: dict[str, Any] = {
                 "label": summary,
                 "value": f"继续：{summary}",
@@ -420,7 +420,7 @@ def _pending_task_interaction(task, content: str, *, db: Optional[Session] = Non
         "collect_lead_follow_up_quality_fields": "follow_up_quality_required",
         "create_opportunity": "confirmation_required",
         "move_opportunity_stage": "confirmation_required",
-        "create_customer_follow_up": "confirmation_required",
+        "create_customer_activity": "confirmation_required",
         "create_lead_follow_up": "confirmation_required",
         "create_payment_record": "confirmation_required",
         "create_payment_plan": "confirmation_required",
@@ -445,4 +445,4 @@ def _pending_task_interaction(task, content: str, *, db: Optional[Session] = Non
 
 
 def _should_offer_next_pending_task(action: Optional[str]) -> bool:
-    return action in {"create_customer_follow_up", "create_payment_plan", "create_lead", "create_customer"}
+    return action in {"create_customer_activity", "create_payment_plan", "create_lead", "create_customer"}
