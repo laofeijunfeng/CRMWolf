@@ -2,9 +2,19 @@
 import { computed, reactive, ref, watch } from 'vue'
 import type { PaymentRecordCreate } from '@/api/payment'
 import paymentApi from '@/api/payment'
-import customerApi, { type CustomerMemberResponse } from '@/api/customer'
+import customerApi, {
+  type CustomerMemberAccessLevel,
+  type CustomerMemberCandidate,
+  type CustomerMemberRole,
+} from '@/api/customer'
 import { useUserStore } from '@/stores/user'
 import { handleApiError } from '@/utils/errorHandler'
+import {
+  customerMemberAccessOptions,
+  customerMemberRoleOptions,
+  defaultCustomerMemberAccessLevel,
+  defaultCustomerMemberRole,
+} from '@/constants/customerMembers'
 import {
   Dialog,
   DialogContent,
@@ -14,10 +24,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   DateField,
   InputField,
-  SelectField,
   TextareaField,
 } from '@/components/crmwolf'
 
@@ -64,7 +81,13 @@ const userStore = useUserStore()
 interface CommissionMemberOption {
   id: string
   name: string
-  source: 'self' | 'customer_member'
+  source: 'self' | 'team_member'
+  alreadyMember: boolean
+}
+
+interface AddCustomerMemberForm {
+  memberRole: CustomerMemberRole
+  accessLevel: CustomerMemberAccessLevel
 }
 
 const form = reactive<PaymentRecordForm>({
@@ -85,6 +108,7 @@ const errors = reactive<PaymentRecordErrors>({
 })
 
 const loadingCommissionMembers = ref(false)
+const paymentCustomerId = ref<number | null>(null)
 const commissionMemberOptions = ref<CommissionMemberOption[]>([])
 const commissionMemberSelectOptions = computed(() =>
   commissionMemberOptions.value.map((member) => ({
@@ -92,6 +116,15 @@ const commissionMemberSelectOptions = computed(() =>
     label: `${member.name}${member.source === 'self' ? '（我）' : ''}`,
   }))
 )
+const addMemberDialogOpen = ref(false)
+const addingCustomerMember = ref(false)
+const pendingCustomerMember = ref<CommissionMemberOption | null>(null)
+const addMemberForm = reactive<AddCustomerMemberForm>({
+  memberRole: defaultCustomerMemberRole,
+  accessLevel: defaultCustomerMemberAccessLevel,
+})
+const roleOptions = customerMemberRoleOptions
+const accessOptions = customerMemberAccessOptions
 
 const visible = computed({
   get: (): boolean => props.open,
@@ -146,7 +179,14 @@ function resetForm(): void {
   form.proofAttachment = ''
   form.commissionMemberId = String(userStore.userInfo?.id ?? '')
   form.notes = ''
+  resetPendingCustomerMember()
   clearErrors()
+}
+
+function resetPendingCustomerMember(): void {
+  pendingCustomerMember.value = null
+  addMemberForm.memberRole = defaultCustomerMemberRole
+  addMemberForm.accessLevel = defaultCustomerMemberAccessLevel
 }
 
 function trimmedOptional(value: string): string | undefined {
@@ -180,7 +220,7 @@ function validateForm(): boolean {
   }
 
   if (form.commissionMemberId.trim().length === 0) {
-    errors.commissionMemberId = '请选择提成协作成员'
+    errors.commissionMemberId = '请选择团队成员'
   }
 
   if (form.notes.length > 200) {
@@ -195,7 +235,13 @@ function validateForm(): boolean {
 }
 
 function handleSubmit(): void {
-  if (isSubmitting.value || loadingCommissionMembers.value || !validateForm()) {
+  if (
+    isSubmitting.value
+    || loadingCommissionMembers.value
+    || addMemberDialogOpen.value
+    || addingCustomerMember.value
+    || !validateForm()
+  ) {
     return
   }
 
@@ -225,7 +271,7 @@ function closeDialog(): void {
   }
 }
 
-function mergeCommissionMemberOptions(members: CustomerMemberResponse[]): CommissionMemberOption[] {
+function mergeCommissionMemberOptions(candidates: CustomerMemberCandidate[]): CommissionMemberOption[] {
   const options = new Map<string, CommissionMemberOption>()
   const currentUserId = String(userStore.userInfo?.id ?? '')
   if (currentUserId.length > 0) {
@@ -233,22 +279,94 @@ function mergeCommissionMemberOptions(members: CustomerMemberResponse[]): Commis
       id: currentUserId,
       name: userStore.userInfo?.name ?? '我',
       source: 'self',
+      alreadyMember: true,
     })
   }
 
-  for (const member of members) {
-    const memberName = member.user_info?.name?.trim()
-    options.set(member.user_id, {
-      id: member.user_id,
-      name: memberName !== undefined && memberName.length > 0 ? memberName : `用户 ${member.user_id}`,
-      source: 'customer_member',
+  for (const candidate of candidates) {
+    const memberName = candidate.name.trim()
+    const isCurrentUser = candidate.id === currentUserId
+    options.set(candidate.id, {
+      id: candidate.id,
+      name: memberName.length > 0 ? memberName : `用户 ${candidate.id}`,
+      source: isCurrentUser ? 'self' : 'team_member',
+      alreadyMember: candidate.already_member || isCurrentUser,
     })
   }
   return Array.from(options.values())
 }
 
+function findCommissionMemberOption(memberId: string): CommissionMemberOption | undefined {
+  return commissionMemberOptions.value.find(member => member.id === memberId)
+}
+
+function handleCommissionMemberSelect(value: unknown): void {
+  if (typeof value !== 'string') return
+
+  form.commissionMemberId = value
+  errors.commissionMemberId = ''
+
+  const member = findCommissionMemberOption(value)
+  if (member === undefined || member.alreadyMember) {
+    return
+  }
+
+  pendingCustomerMember.value = member
+  addMemberForm.memberRole = defaultCustomerMemberRole
+  addMemberForm.accessLevel = defaultCustomerMemberAccessLevel
+  addMemberDialogOpen.value = true
+}
+
+function resetCommissionMemberToCurrentUser(): void {
+  form.commissionMemberId = String(userStore.userInfo?.id ?? '')
+}
+
+function handleAddMemberDialogOpenChange(open: boolean): void {
+  if (!open && addingCustomerMember.value) {
+    return
+  }
+
+  addMemberDialogOpen.value = open
+  if (!open && !addingCustomerMember.value && pendingCustomerMember.value !== null) {
+    resetCommissionMemberToCurrentUser()
+    resetPendingCustomerMember()
+  }
+}
+
+function cancelAddCustomerMember(): void {
+  addMemberDialogOpen.value = false
+  resetCommissionMemberToCurrentUser()
+  resetPendingCustomerMember()
+}
+
+async function confirmAddCustomerMember(): Promise<void> {
+  if (addingCustomerMember.value || pendingCustomerMember.value === null || paymentCustomerId.value === null) return
+
+  const member = pendingCustomerMember.value
+  addingCustomerMember.value = true
+  try {
+    await customerApi.addCustomerMember(paymentCustomerId.value, {
+      user_id: member.id,
+      member_role: addMemberForm.memberRole,
+      access_level: addMemberForm.accessLevel,
+      remark: null,
+    })
+    commissionMemberOptions.value = commissionMemberOptions.value.map(option =>
+      option.id === member.id ? { ...option, alreadyMember: true } : option
+    )
+    form.commissionMemberId = member.id
+    resetPendingCustomerMember()
+    addMemberDialogOpen.value = false
+  } catch (error) {
+    handleApiError(error, '添加客户团队成员')
+  } finally {
+    addingCustomerMember.value = false
+  }
+}
+
 async function loadCommissionMembers(): Promise<void> {
   if (!props.open || props.paymentPlanId === null) {
+    paymentCustomerId.value = null
     commissionMemberOptions.value = mergeCommissionMemberOptions([])
     return
   }
@@ -257,14 +375,17 @@ async function loadCommissionMembers(): Promise<void> {
   try {
     const plan = await paymentApi.getPaymentPlanDetail(props.paymentPlanId)
     if (plan.customer_id === undefined || plan.customer_id === null) {
+      paymentCustomerId.value = null
       commissionMemberOptions.value = mergeCommissionMemberOptions([])
       return
     }
-    const members = await customerApi.getCustomerMembers(plan.customer_id)
-    commissionMemberOptions.value = mergeCommissionMemberOptions(members)
+    paymentCustomerId.value = plan.customer_id
+    const candidates = await customerApi.getCustomerMemberCandidates(plan.customer_id)
+    commissionMemberOptions.value = mergeCommissionMemberOptions(candidates)
   } catch (error) {
+    paymentCustomerId.value = null
     commissionMemberOptions.value = mergeCommissionMemberOptions([])
-    handleApiError(error, '加载提成协作成员')
+    handleApiError(error, '加载团队成员')
   } finally {
     loadingCommissionMembers.value = false
   }
@@ -277,6 +398,9 @@ watch(
       resetForm()
       void loadCommissionMembers()
     } else {
+      paymentCustomerId.value = null
+      addMemberDialogOpen.value = false
+      resetPendingCustomerMember()
       clearErrors()
     }
   },
@@ -340,18 +464,32 @@ watch(
           @update:model-value="handlePaymentDateChange"
         />
 
-        <SelectField
-          id="payment-record-commission-member"
-          v-model="form.commissionMemberId"
-          class="payment-record-dialog__field"
-          label="提成协作成员"
-          required
-          :options="commissionMemberSelectOptions"
-          :placeholder="loadingCommissionMembers ? '加载成员中...' : '请选择提成协作成员'"
-          :disabled="isSubmitting || loadingCommissionMembers"
-          helper-text="可选择你自己，或当前客户团队成员中的一人。"
-          :error="errors.commissionMemberId"
-        />
+        <div class="payment-record-dialog__field">
+          <Label for="payment-record-commission-member" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+            团队成员
+            <span class="text-wolf-danger" aria-hidden="true">*</span>
+          </Label>
+          <Select
+            :model-value="form.commissionMemberId"
+            :disabled="isSubmitting || loadingCommissionMembers"
+            @update:model-value="handleCommissionMemberSelect"
+          >
+            <SelectTrigger id="payment-record-commission-member">
+              <SelectValue :placeholder="loadingCommissionMembers ? '加载成员中...' : '请选择团队成员'" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="member in commissionMemberSelectOptions" :key="member.value" :value="member.value">
+                {{ member.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p v-if="errors.commissionMemberId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">
+            {{ errors.commissionMemberId }}
+          </p>
+          <p v-else class="m-0 text-wolf-caption text-wolf-text-secondary">
+            可选择团队成员；未在客户团队中的成员需要先添加。
+          </p>
+        </div>
 
         <InputField
           id="payment-record-proof"
@@ -391,12 +529,68 @@ watch(
           <Button
             type="submit"
             class="payment-record-dialog__button min-h-11"
-            :disabled="isSubmitting || loadingCommissionMembers"
+            :disabled="isSubmitting || loadingCommissionMembers || addMemberDialogOpen || addingCustomerMember"
           >
             {{ isSubmitting ? '提交中...' : '确定' }}
           </Button>
         </DialogFooter>
       </form>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog :open="addMemberDialogOpen" @update:open="handleAddMemberDialogOpenChange">
+    <DialogContent class="payment-record-add-member-dialog">
+      <DialogHeader>
+        <DialogTitle>添加团队成员</DialogTitle>
+        <DialogDescription>
+          {{ pendingCustomerMember?.name ?? '该成员' }}目前没有在团队成员中，是否添加
+        </DialogDescription>
+      </DialogHeader>
+
+      <div class="payment-record-add-member-dialog__form">
+        <InputField
+          id="payment-record-add-member-user"
+          :model-value="pendingCustomerMember?.name ?? ''"
+          label="成员"
+          disabled
+          aria-readonly="true"
+        />
+
+        <div class="payment-record-dialog__field">
+          <Label for="payment-record-add-member-role">角色</Label>
+          <Select v-model="addMemberForm.memberRole" :disabled="addingCustomerMember">
+            <SelectTrigger id="payment-record-add-member-role">
+              <SelectValue placeholder="请选择角色" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="option in roleOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div class="payment-record-dialog__field">
+          <Label for="payment-record-add-member-access">权限</Label>
+          <Select v-model="addMemberForm.accessLevel" :disabled="addingCustomerMember">
+            <SelectTrigger id="payment-record-add-member-access">
+              <SelectValue placeholder="请选择权限" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="option in accessOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" :disabled="addingCustomerMember" @click="cancelAddCustomerMember">否</Button>
+        <Button :disabled="addingCustomerMember" @click="confirmAddCustomerMember">
+          {{ addingCustomerMember ? '添加中...' : '是' }}
+        </Button>
+      </DialogFooter>
     </DialogContent>
   </Dialog>
 </template>
@@ -429,6 +623,11 @@ watch(
   gap: $wolf-space-sm-v2;
   padding-top: $wolf-space-lg-v2;
   border-top: 1px solid $wolf-border-divider-v2;
+}
+
+.payment-record-add-member-dialog__form {
+  display: grid;
+  gap: $wolf-form-item-gap-v2;
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2) {

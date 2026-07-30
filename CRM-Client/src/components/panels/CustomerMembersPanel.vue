@@ -27,6 +27,12 @@ import customerApi, {
   type CustomerMemberResponse,
   type CustomerMemberRole,
 } from '@/api/customer'
+import {
+  customerMemberAccessOptions,
+  customerMemberRoleOptions,
+  defaultCustomerMemberAccessLevel,
+  defaultCustomerMemberRole,
+} from '@/constants/customerMembers'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog } from '@/utils/confirmDialog'
 
@@ -41,19 +47,8 @@ const emit = defineEmits<{
   refresh: []
 }>()
 
-const roleOptions: { value: CustomerMemberRole; label: string }[] = [
-  { value: 'SALES', label: '销售' },
-  { value: 'PRESALES', label: '售前' },
-  { value: 'DELIVERY', label: '交付' },
-  { value: 'SUPPORT', label: '支持' },
-  { value: 'OTHER', label: '其他' },
-]
-
-const accessOptions: { value: CustomerMemberAccessLevel; label: string }[] = [
-  { value: 'VIEW', label: '仅查看' },
-  { value: 'FOLLOW_UP', label: '可跟进' },
-  { value: 'EDIT', label: '可编辑客户' },
-]
+const roleOptions = customerMemberRoleOptions
+const accessOptions = customerMemberAccessOptions
 
 const dialogOpen = ref(false)
 const submitting = ref(false)
@@ -63,8 +58,8 @@ const candidates = ref<CustomerMemberCandidate[]>([])
 
 const form = reactive({
   userId: '',
-  memberRole: 'PRESALES' as CustomerMemberRole,
-  accessLevel: 'VIEW' as CustomerMemberAccessLevel,
+  memberRole: defaultCustomerMemberRole as CustomerMemberRole,
+  accessLevel: defaultCustomerMemberAccessLevel as CustomerMemberAccessLevel,
   remark: '',
 })
 
@@ -76,8 +71,8 @@ const getAccessLabel = (value: string): string => accessOptions.find(item => ite
 
 const resetForm = (): void => {
   form.userId = ''
-  form.memberRole = 'PRESALES'
-  form.accessLevel = 'VIEW'
+  form.memberRole = defaultCustomerMemberRole
+  form.accessLevel = defaultCustomerMemberAccessLevel
   form.remark = ''
   editingMember.value = null
 }
