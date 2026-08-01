@@ -22,6 +22,7 @@ import { Plus, Eye, Pencil, Trash2, Send, RotateCcw, Stamp, Download } from 'luc
 import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -114,6 +115,7 @@ const filterFields: ListFilterField[] = [
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
+const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 
 const sortFields: ListSortField[] = [
   { key: 'application_number', type: 'text', label: '申请单号' },
@@ -242,10 +244,18 @@ const customFilterViews = useCustomFilterViews({
   activeTab,
   activeFilters,
   activeSorts,
+  activeColumns,
   refresh: fetchInvoiceApplications,
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
+  version: 1,
+  columns: activeColumns.value,
+}))
+const columnPreferenceMode = computed<'default' | 'custom'>(() =>
+  isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default'
+)
 
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
@@ -281,6 +291,22 @@ const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<voi
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.saveAsCustomView(filters)
+}
+
+const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
+  activeColumns.value = config.columns
+  void customFilterViews.saveActiveCustomViewColumns(config.columns)
+}
+
+const handleColumnConfigReset = (): void => {
+  activeColumns.value = []
+  void customFilterViews.saveActiveCustomViewColumns([])
+}
+
+const handleColumnConfigCurrentChange = (config: ViewPreferenceConfig): void => {
+  if (!isCustomFilterViewTab(activeTab.value)) {
+    activeColumns.value = config.columns
+  }
 }
 
 const handlePageChange = (page: number): void => {
@@ -520,8 +546,10 @@ watchEffect(() => {
     if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
       return
     }
-    customFilterViews.applyBuiltInTab(headerStore.activeTab)
-    activeSorts.value = []
+    const restoredBuiltInState = customFilterViews.applyBuiltInTab(headerStore.activeTab)
+    if (!restoredBuiltInState) {
+      activeSorts.value = []
+    }
     fetchInvoiceApplications()
   }
 })
@@ -553,6 +581,8 @@ watchEffect(() => {
       :sort-fields="sortFields"
       view-key="invoices.list"
       column-config-enabled
+      :column-preference-config="activeColumnPreferenceConfig"
+      :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
@@ -562,6 +592,9 @@ watchEffect(() => {
       @filter-save-view="handleSaveFilterView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
+      @column-config-current-change="handleColumnConfigCurrentChange"
+      @column-config-save="handleColumnConfigSave"
+      @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

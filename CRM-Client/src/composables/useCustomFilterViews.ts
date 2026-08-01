@@ -14,6 +14,7 @@ interface UseCustomFilterViewsOptions {
   activeTab: Ref<string>
   activeFilters: Ref<ListFilterCondition[]>
   activeSorts: Ref<ListSortCondition[]>
+  activeColumns: Ref<ViewPreferenceConfig['columns']>
   refresh: () => void | Promise<void>
 }
 
@@ -28,16 +29,21 @@ interface UseCustomFilterViewsReturn {
   applyCustomViewTab: (tabKey: string) => boolean
   applyBuiltInTab: (tabKey: string) => boolean
   updateActiveCustomViewConfig: () => Promise<void>
+  saveActiveCustomViewColumns: (columns: ViewPreferenceConfig['columns']) => Promise<void>
 }
 
 function buildTabKey(viewId: number): string {
   return `${CUSTOM_VIEW_TAB_PREFIX}${viewId}`
 }
 
-function buildViewConfig(filters: ListFilterCondition[], sorts: ListSortCondition[]): ViewPreferenceConfig {
+function buildViewConfig(
+  filters: ListFilterCondition[],
+  sorts: ListSortCondition[],
+  columns: ViewPreferenceConfig['columns']
+): ViewPreferenceConfig {
   return {
     version: 1,
-    columns: [],
+    columns,
     filters: filters as unknown as Record<string, unknown>[],
     sorts: sorts as unknown as Record<string, unknown>[]
   }
@@ -54,6 +60,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
   const builtInViewSnapshot = ref<{
     filters: ListFilterCondition[]
     sorts: ListSortCondition[]
+    columns: ViewPreferenceConfig['columns']
   } | null>(null)
 
   function buildCustomViewTab(view: ViewPreferenceItem): TabItem {
@@ -107,11 +114,12 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     saving.value = true
     try {
       const view = await viewPreferenceApi.createCustomView(options.viewKey, {
-        config: buildViewConfig(filters, options.activeSorts.value)
+        config: buildViewConfig(filters, options.activeSorts.value, options.activeColumns.value)
       })
       customViews.value = [...customViews.value, view]
       options.activeFilters.value = (view.config.filters ?? []) as unknown as ListFilterCondition[]
       options.activeSorts.value = (view.config.sorts ?? []) as unknown as ListSortCondition[]
+      options.activeColumns.value = view.config.columns ?? []
       options.activeTab.value = buildTabKey(view.id)
       await options.refresh()
       toast.success('已另存为视图')
@@ -139,7 +147,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
 
     try {
       const updated = await viewPreferenceApi.updateCustomView(options.viewKey, view.id, {
-        config: buildViewConfig(options.activeFilters.value, options.activeSorts.value)
+        config: buildViewConfig(options.activeFilters.value, options.activeSorts.value, options.activeColumns.value)
       })
       customViews.value = customViews.value.map((item) => item.id === updated.id ? updated : item)
     } catch {
@@ -155,11 +163,13 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       builtInViewSnapshot.value = {
         filters: [...options.activeFilters.value],
         sorts: [...options.activeSorts.value],
+        columns: [...options.activeColumns.value],
       }
     }
     options.activeTab.value = tabKey
     options.activeFilters.value = (view.config.filters ?? []) as unknown as ListFilterCondition[]
     options.activeSorts.value = (view.config.sorts ?? []) as unknown as ListSortCondition[]
+    options.activeColumns.value = view.config.columns ?? []
     void options.refresh()
     return true
   }
@@ -172,9 +182,26 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     if (wasCustomViewTab) {
       options.activeFilters.value = builtInViewSnapshot.value?.filters ?? []
       options.activeSorts.value = builtInViewSnapshot.value?.sorts ?? []
+      options.activeColumns.value = builtInViewSnapshot.value?.columns ?? []
       builtInViewSnapshot.value = null
     }
     return wasCustomViewTab
+  }
+
+  async function saveActiveCustomViewColumns(columns: ViewPreferenceConfig['columns']): Promise<void> {
+    const view = findViewByTabKey(options.activeTab.value)
+    if (!view) return
+
+    options.activeColumns.value = columns
+    try {
+      const updated = await viewPreferenceApi.updateCustomView(options.viewKey, view.id, {
+        config: buildViewConfig(options.activeFilters.value, options.activeSorts.value, columns)
+      })
+      customViews.value = customViews.value.map((item) => item.id === updated.id ? updated : item)
+      toast.success('视图字段配置已保存')
+    } catch {
+      toast.error('视图字段配置保存失败')
+    }
   }
 
   async function moveCustomViewToFirst(view: ViewPreferenceItem): Promise<void> {
@@ -233,6 +260,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
         options.activeTab.value = 'all'
         options.activeFilters.value = []
         options.activeSorts.value = []
+        options.activeColumns.value = []
         await options.refresh()
       }
       toast.success('视图已删除')
@@ -252,5 +280,6 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     applyCustomViewTab,
     applyBuiltInTab,
     updateActiveCustomViewConfig,
+    saveActiveCustomViewColumns,
   }
 }

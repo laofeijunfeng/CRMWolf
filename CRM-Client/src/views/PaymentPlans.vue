@@ -22,6 +22,7 @@ import { Plus, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
@@ -60,6 +61,7 @@ const planFormMode = ref<'create' | 'edit'>('create')
 const editingPlan = ref<PaymentPlanWithDetails | null>(null)
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
+const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 
 const pagination = reactive({
   current: 1,
@@ -207,10 +209,18 @@ const customFilterViews = useCustomFilterViews({
   activeTab,
   activeFilters,
   activeSorts,
+  activeColumns,
   refresh: fetchPaymentPlans,
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
+  version: 1,
+  columns: activeColumns.value,
+}))
+const columnPreferenceMode = computed<'default' | 'custom'>(() =>
+  isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default'
+)
 
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
@@ -247,6 +257,22 @@ const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<voi
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.saveAsCustomView(filters)
+}
+
+const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
+  activeColumns.value = config.columns
+  void customFilterViews.saveActiveCustomViewColumns(config.columns)
+}
+
+const handleColumnConfigReset = (): void => {
+  activeColumns.value = []
+  void customFilterViews.saveActiveCustomViewColumns([])
+}
+
+const handleColumnConfigCurrentChange = (config: ViewPreferenceConfig): void => {
+  if (!isCustomFilterViewTab(activeTab.value)) {
+    activeColumns.value = config.columns
+  }
 }
 
 const handlePageChange = (page: number): void => {
@@ -425,6 +451,8 @@ watch(
       :sorts="activeSorts"
       view-key="payment-plans.list"
       column-config-enabled
+      :column-preference-config="activeColumnPreferenceConfig"
+      :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
       height="calc(100vh - 121px)"
@@ -442,6 +470,9 @@ watch(
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
+      @column-config-current-change="handleColumnConfigCurrentChange"
+      @column-config-save="handleColumnConfigSave"
+      @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

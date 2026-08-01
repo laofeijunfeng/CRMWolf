@@ -124,6 +124,10 @@ interface Props {
   viewKey?: string
   /** 是否启用字段配置 */
   columnConfigEnabled?: boolean
+  /** 外部字段配置，用于自定义视图覆盖默认字段偏好 */
+  columnPreferenceConfig?: ViewPreferenceConfig | null
+  /** 字段配置保存模式：默认偏好或外部视图 */
+  columnPreferenceMode?: 'default' | 'custom'
   /** 是否允许把当前筛选另存为视图 */
   filterViewSaveEnabled?: boolean
   /** 筛选视图保存中 */
@@ -151,6 +155,8 @@ const props = withDefaults(defineProps<Props>(), {
   mobileMetaKeys: () => [],
   viewKey: '',
   columnConfigEnabled: false,
+  columnPreferenceConfig: null,
+  columnPreferenceMode: 'default',
   filterViewSaveEnabled: false,
   filterViewSaveLoading: false,
 })
@@ -167,6 +173,9 @@ const emit = defineEmits<{
   'update:sorts': [value: ListSortCondition[]]
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
+  'column-config-current-change': [value: ViewPreferenceConfig]
+  'column-config-save': [value: ViewPreferenceConfig]
+  'column-config-reset': []
 }>()
 
 // ==================== Computed ====================
@@ -232,7 +241,7 @@ type ProcessedColumn = Column & {
   sourceIndex: number
 }
 
-const columnPreferenceConfig = ref<ViewPreferenceConfig | null>(null)
+const defaultColumnPreferenceConfig = ref<ViewPreferenceConfig | null>(null)
 const draftColumnPreferenceConfig = ref<ViewPreferenceConfig | null>(null)
 const activeColumnConfigScope = ref<ViewPreferenceScope>('personal')
 const columnConfigLoading = ref(false)
@@ -311,7 +320,8 @@ function buildColumnPreferenceConfig(columns: ColumnConfigOption[]): ViewPrefere
 }
 
 const effectiveColumnPreferenceConfig = computed(() =>
-  draftColumnPreferenceConfig.value ?? columnPreferenceConfig.value
+  draftColumnPreferenceConfig.value ??
+  (props.columnPreferenceMode === 'custom' ? props.columnPreferenceConfig : defaultColumnPreferenceConfig.value)
 )
 
 const preferredColumns = computed<ProcessedColumn[]>(() =>
@@ -488,8 +498,14 @@ function handleColumnConfigChange(columns: ColumnConfigOption[]): void {
 
 async function loadColumnPreference(): Promise<void> {
   const loadSeq = ++columnPreferenceLoadSeq.value
+  if (props.columnPreferenceMode === 'custom') {
+    columnConfigLoading.value = false
+    activeColumnConfigScope.value = 'personal'
+    return
+  }
+
   if (!isColumnConfigAvailable.value) {
-    columnPreferenceConfig.value = null
+    defaultColumnPreferenceConfig.value = null
     draftColumnPreferenceConfig.value = null
     activeColumnConfigScope.value = 'personal'
     return
@@ -499,7 +515,7 @@ async function loadColumnPreference(): Promise<void> {
   try {
     const response = await viewPreferenceApi.get(props.viewKey, { skipErrorNotification: true })
     if (loadSeq !== columnPreferenceLoadSeq.value) return
-    columnPreferenceConfig.value = response.effective_config
+    defaultColumnPreferenceConfig.value = response.effective_config
     draftColumnPreferenceConfig.value = null
     activeColumnConfigScope.value = response.effective_scope ?? 'personal'
   } catch {
@@ -515,16 +531,22 @@ async function loadColumnPreference(): Promise<void> {
 async function handleColumnConfigSave(scope: ViewPreferenceScope): Promise<void> {
   if (!isColumnConfigAvailable.value) return
 
+  const config = draftColumnPreferenceConfig.value ?? buildColumnPreferenceConfig(columnConfigOptions.value)
+  if (props.columnPreferenceMode === 'custom') {
+    emit('column-config-save', config)
+    draftColumnPreferenceConfig.value = null
+    return
+  }
+
   columnConfigSaving.value = true
   try {
-    const config = draftColumnPreferenceConfig.value ?? buildColumnPreferenceConfig(columnConfigOptions.value)
     const response = await viewPreferenceApi.save(props.viewKey, {
       scope,
       config,
       name: scope === 'team' ? '团队默认字段配置' : '我的字段配置',
       is_default: true
     })
-    columnPreferenceConfig.value = response.effective_config
+    defaultColumnPreferenceConfig.value = response.effective_config
     draftColumnPreferenceConfig.value = null
     activeColumnConfigScope.value = response.effective_scope ?? scope
     toast.success(scope === 'team' ? '团队字段配置已同步' : '字段配置已保存')
@@ -538,10 +560,16 @@ async function handleColumnConfigSave(scope: ViewPreferenceScope): Promise<void>
 async function handleColumnConfigReset(scope: ViewPreferenceScope): Promise<void> {
   if (!isColumnConfigAvailable.value) return
 
+  if (props.columnPreferenceMode === 'custom') {
+    draftColumnPreferenceConfig.value = null
+    emit('column-config-reset')
+    return
+  }
+
   columnConfigSaving.value = true
   try {
     const response = await viewPreferenceApi.reset(props.viewKey, scope)
-    columnPreferenceConfig.value = response.effective_config
+    defaultColumnPreferenceConfig.value = response.effective_config
     draftColumnPreferenceConfig.value = null
     activeColumnConfigScope.value = response.effective_scope ?? 'personal'
     toast.success(scope === 'team' ? '团队字段配置已恢复默认' : '字段配置已恢复默认')
@@ -587,9 +615,26 @@ watch(() => props.data, () => {
 })
 
 watch(
-  () => [props.viewKey, props.columnConfigEnabled] as const,
+  () => [props.viewKey, props.columnConfigEnabled, props.columnPreferenceMode] as const,
   () => {
     void loadColumnPreference()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.columnPreferenceConfig,
+  () => {
+    if (props.columnPreferenceMode === 'custom') {
+      draftColumnPreferenceConfig.value = null
+    }
+  }
+)
+
+watch(
+  effectiveColumnPreferenceConfig,
+  (config) => {
+    emit('column-config-current-change', config ?? { version: 1, columns: [] })
   },
   { immediate: true }
 )
@@ -638,6 +683,7 @@ watch(
           :active="columnConfigActive"
           :active-count="columnConfigActiveCount"
           :scope="activeColumnConfigScope"
+          :scope-editable="columnPreferenceMode === 'default'"
           :loading="columnConfigLoading"
           :saving="columnConfigSaving"
           @change="handleColumnConfigChange"

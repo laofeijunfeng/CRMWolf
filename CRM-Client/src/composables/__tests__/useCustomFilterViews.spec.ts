@@ -42,7 +42,7 @@ const customView = {
   sort_order: null,
   config: {
     version: 1,
-    columns: [],
+    columns: [{ key: 'account_name', order: 0, visible: true }],
     filters: [{ field: 'account_name', operator: 'contains', value: '测试客户' }],
     sorts: [{ field: 'created_time', order: 'desc' }],
   },
@@ -57,12 +57,14 @@ describe('useCustomFilterViews', () => {
     const activeTab = ref('all')
     const activeFilters = ref<ListFilterCondition[]>([])
     const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
     const refresh = vi.fn()
     const customFilterViews = useCustomFilterViews({
       viewKey: 'customers.list',
       activeTab,
       activeFilters,
       activeSorts,
+      activeColumns,
       refresh,
     })
     vi.mocked(viewPreferenceApi.listCustomViews).mockResolvedValue({
@@ -78,6 +80,7 @@ describe('useCustomFilterViews', () => {
     expect(activeTab.value).toBe('custom-view:2')
     expect(activeFilters.value).toEqual(customView.config.filters)
     expect(activeSorts.value).toEqual(customView.config.sorts)
+    expect(activeColumns.value).toEqual(customView.config.columns)
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
@@ -85,8 +88,10 @@ describe('useCustomFilterViews', () => {
     const activeTab = ref('all')
     const builtInFilters: ListFilterCondition[] = [{ field: 'owner_id', op: 'eq', value: 1 }]
     const builtInSorts: ListSortCondition[] = [{ field: 'updated_time', direction: 'desc' }]
+    const builtInColumns = [{ key: 'account_name', order: 0, visible: true }]
     const activeFilters = ref<ListFilterCondition[]>(builtInFilters)
     const activeSorts = ref<ListSortCondition[]>(builtInSorts)
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>(builtInColumns)
     const refresh = vi.fn()
 
     const customFilterViews = useCustomFilterViews({
@@ -94,6 +99,7 @@ describe('useCustomFilterViews', () => {
       activeTab,
       activeFilters,
       activeSorts,
+      activeColumns,
       refresh,
     })
     customFilterViews.customViews.value = [customView]
@@ -107,18 +113,21 @@ describe('useCustomFilterViews', () => {
     expect(activeTab.value).toBe('public')
     expect(activeFilters.value).toEqual(builtInFilters)
     expect(activeSorts.value).toEqual(builtInSorts)
+    expect(activeColumns.value).toEqual(builtInColumns)
   })
 
   it('moves a custom view before built-in tabs', async () => {
     const activeTab = ref('all')
     const activeFilters = ref<ListFilterCondition[]>([])
     const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
     const refresh = vi.fn()
     const customFilterViews = useCustomFilterViews({
       viewKey: 'customers.list',
       activeTab,
       activeFilters,
       activeSorts,
+      activeColumns,
       refresh,
     })
     const secondView = { ...customView, id: 2, name: '视图 2' }
@@ -136,5 +145,85 @@ describe('useCustomFilterViews', () => {
       { key: 'all', label: '所有客户' },
       { key: 'public', label: '公海客户' },
     ]).map((tab) => tab.label)).toEqual(['视图 2', '所有客户', '公海客户', '视图 1'])
+  })
+
+  it('saves column config into the active custom view', async () => {
+    const activeTab = ref('custom-view:1')
+    const activeFilters = ref<ListFilterCondition[]>([])
+    const activeSorts = ref<ListSortCondition[]>([])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([])
+    const refresh = vi.fn()
+    const customFilterViews = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      refresh,
+    })
+    customFilterViews.customViews.value = [customView]
+    const columns = [{ key: 'account_name', order: 0, visible: true }]
+    vi.mocked(viewPreferenceApi.updateCustomView).mockResolvedValue({
+      ...customView,
+      config: {
+        ...customView.config,
+        columns,
+      },
+    })
+
+    await customFilterViews.saveActiveCustomViewColumns(columns)
+
+    expect(activeColumns.value).toEqual(columns)
+    expect(viewPreferenceApi.updateCustomView).toHaveBeenCalledWith('customers.list', 1, {
+      config: {
+        version: 1,
+        columns,
+        filters: [],
+        sorts: [],
+      },
+    })
+  })
+
+  it('updates the active custom view with filters, sorts, and columns together', async () => {
+    const activeTab = ref('custom-view:1')
+    const activeFilters = ref<ListFilterCondition[]>([
+      { field: 'account_name', op: 'contains', value: '重点' },
+    ])
+    const activeSorts = ref<ListSortCondition[]>([
+      { field: 'updated_time', direction: 'desc' },
+    ])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([
+      { key: 'owner_name', order: 0, visible: false },
+    ])
+    const refresh = vi.fn()
+    const customFilterViews = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      refresh,
+    })
+    customFilterViews.customViews.value = [customView]
+    vi.mocked(viewPreferenceApi.updateCustomView).mockResolvedValue({
+      ...customView,
+      config: {
+        version: 1,
+        columns: activeColumns.value,
+        filters: activeFilters.value as unknown as Record<string, unknown>[],
+        sorts: activeSorts.value as unknown as Record<string, unknown>[],
+      },
+    })
+
+    await customFilterViews.updateActiveCustomViewConfig()
+
+    expect(viewPreferenceApi.updateCustomView).toHaveBeenCalledWith('customers.list', 1, {
+      config: {
+        version: 1,
+        columns: activeColumns.value,
+        filters: activeFilters.value,
+        sorts: activeSorts.value,
+      },
+    })
   })
 })

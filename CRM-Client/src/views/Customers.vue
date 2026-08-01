@@ -25,6 +25,7 @@ import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Tras
 import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
@@ -45,7 +46,7 @@ import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { customerSourceOptions, companyScaleOptions } from '@/schemas/customer-form'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
@@ -169,6 +170,7 @@ const activeTab = ref('all')
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
+const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 
 // ==================== DataTable 配置 ====================
 const customerStatusFilterOptions = [
@@ -465,10 +467,18 @@ const customFilterViews = useCustomFilterViews({
   activeTab,
   activeFilters,
   activeSorts,
+  activeColumns,
   refresh: fetchCustomerList,
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
+  version: 1,
+  columns: activeColumns.value,
+}))
+const columnPreferenceMode = computed<'default' | 'custom'>(() =>
+  isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default'
+)
 
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
@@ -501,6 +511,22 @@ const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<voi
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.saveAsCustomView(filters)
+}
+
+const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
+  activeColumns.value = config.columns
+  void customFilterViews.saveActiveCustomViewColumns(config.columns)
+}
+
+const handleColumnConfigReset = (): void => {
+  activeColumns.value = []
+  void customFilterViews.saveActiveCustomViewColumns([])
+}
+
+const handleColumnConfigCurrentChange = (config: ViewPreferenceConfig): void => {
+  if (!isCustomFilterViewTab(activeTab.value)) {
+    activeColumns.value = config.columns
+  }
 }
 
 const handlePageChange = (page: number): void => {
@@ -767,8 +793,10 @@ watchEffect(() => {
     if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
       return
     }
-    customFilterViews.applyBuiltInTab(headerStore.activeTab)
-    activeSorts.value = []
+    const restoredBuiltInState = customFilterViews.applyBuiltInTab(headerStore.activeTab)
+    if (!restoredBuiltInState) {
+      activeSorts.value = []
+    }
     fetchCustomerList()
   }
 })
@@ -797,6 +825,8 @@ watchEffect(() => {
       v-model:sorts="activeSorts"
       view-key="customers.list"
       column-config-enabled
+      :column-preference-config="activeColumnPreferenceConfig"
+      :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
@@ -806,6 +836,9 @@ watchEffect(() => {
       @filter-save-view="handleSaveFilterView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
+      @column-config-current-change="handleColumnConfigCurrentChange"
+      @column-config-save="handleColumnConfigSave"
+      @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

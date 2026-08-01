@@ -22,6 +22,7 @@ import { Plus, Edit, Send, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDelete } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import contractApi, {
@@ -123,6 +124,7 @@ const filterFields = computed<ListFilterField[]>(() => {
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
+const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 
 const sortFields: ListSortField[] = [
   { key: 'contract_name', type: 'text', label: '合同名称' },
@@ -257,10 +259,18 @@ const customFilterViews = useCustomFilterViews({
   activeTab,
   activeFilters,
   activeSorts,
+  activeColumns,
   refresh: fetchContractList,
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
+  version: 1,
+  columns: activeColumns.value,
+}))
+const columnPreferenceMode = computed<'default' | 'custom'>(() =>
+  isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default'
+)
 
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
@@ -298,6 +308,22 @@ const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<voi
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.saveAsCustomView(filters)
+}
+
+const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
+  activeColumns.value = config.columns
+  void customFilterViews.saveActiveCustomViewColumns(config.columns)
+}
+
+const handleColumnConfigReset = (): void => {
+  activeColumns.value = []
+  void customFilterViews.saveActiveCustomViewColumns([])
+}
+
+const handleColumnConfigCurrentChange = (config: ViewPreferenceConfig): void => {
+  if (!isCustomFilterViewTab(activeTab.value)) {
+    activeColumns.value = config.columns
+  }
 }
 
 const handlePageChange = (page: number): void => {
@@ -442,10 +468,12 @@ watchEffect(() => {
     if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
       return
     }
-    customFilterViews.applyBuiltInTab(headerStore.activeTab)
-    // 切换 Tab 时清除状态筛选
-    activeFilters.value = activeFilters.value.filter((filter) => filter.field !== 'status')
-    activeSorts.value = []
+    const restoredBuiltInState = customFilterViews.applyBuiltInTab(headerStore.activeTab)
+    if (!restoredBuiltInState) {
+      // 切换 Tab 时清除状态筛选
+      activeFilters.value = activeFilters.value.filter((filter) => filter.field !== 'status')
+      activeSorts.value = []
+    }
     fetchContractList()
   }
 })
@@ -477,6 +505,8 @@ watchEffect(() => {
       :sorts="activeSorts"
       view-key="contracts.list"
       column-config-enabled
+      :column-preference-config="activeColumnPreferenceConfig"
+      :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
@@ -487,6 +517,9 @@ watchEffect(() => {
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
+      @column-config-current-change="handleColumnConfigCurrentChange"
+      @column-config-save="handleColumnConfigSave"
+      @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">

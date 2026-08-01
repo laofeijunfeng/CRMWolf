@@ -16,12 +16,14 @@ const props = withDefaults(defineProps<{
   saving?: boolean
   loading?: boolean
   scope?: ViewPreferenceScope
+  scopeEditable?: boolean
 }>(), {
   active: false,
   activeCount: 0,
   saving: false,
   loading: false,
-  scope: 'personal'
+  scope: 'personal',
+  scopeEditable: true
 })
 
 const emit = defineEmits<{
@@ -111,7 +113,7 @@ watch(() => props.scope, (scope) => {
         </div>
       </div>
 
-      <div class="column-config-scope" role="radiogroup" aria-label="保存范围">
+      <div v-if="scopeEditable" class="column-config-scope" role="radiogroup" aria-label="保存范围">
         <Button
           type="button"
           size="sm"

@@ -24,6 +24,7 @@ import { Plus, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus, F
 import { DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -53,7 +54,7 @@ import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
@@ -169,6 +170,7 @@ const filterFields = computed<ListFilterField[]>(() => {
 
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
+const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 
 const extraSortFields: ListSortField[] = [
   { key: 'last_modified_time', type: 'date', label: '最后更新' }
@@ -268,10 +270,18 @@ const customFilterViews = useCustomFilterViews({
   activeTab,
   activeFilters,
   activeSorts,
+  activeColumns,
   refresh: fetchLeadList,
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
+  version: 1,
+  columns: activeColumns.value,
+}))
+const columnPreferenceMode = computed<'default' | 'custom'>(() =>
+  isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default'
+)
 
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
@@ -304,6 +314,22 @@ const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<voi
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.saveAsCustomView(filters)
+}
+
+const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
+  activeColumns.value = config.columns
+  void customFilterViews.saveActiveCustomViewColumns(config.columns)
+}
+
+const handleColumnConfigReset = (): void => {
+  activeColumns.value = []
+  void customFilterViews.saveActiveCustomViewColumns([])
+}
+
+const handleColumnConfigCurrentChange = (config: ViewPreferenceConfig): void => {
+  if (!isCustomFilterViewTab(activeTab.value)) {
+    activeColumns.value = config.columns
+  }
 }
 
 const handlePageChange = (page: number): void => {
@@ -515,8 +541,10 @@ watchEffect(() => {
     if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
       return
     }
-    customFilterViews.applyBuiltInTab(headerStore.activeTab)
-    activeSorts.value = []
+    const restoredBuiltInState = customFilterViews.applyBuiltInTab(headerStore.activeTab)
+    if (!restoredBuiltInState) {
+      activeSorts.value = []
+    }
     fetchLeadList()
   }
 })
@@ -548,6 +576,8 @@ watchEffect(() => {
       :sorts="activeSorts"
       view-key="leads.list"
       column-config-enabled
+      :column-preference-config="activeColumnPreferenceConfig"
+      :column-preference-mode="columnPreferenceMode"
       filter-view-save-enabled
       :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
@@ -558,6 +588,9 @@ watchEffect(() => {
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
+      @column-config-current-change="handleColumnConfigCurrentChange"
+      @column-config-save="handleColumnConfigSave"
+      @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
     >
       <template #mobile-card="{ row }">
