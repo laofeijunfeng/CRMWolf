@@ -33,7 +33,7 @@ export interface ResourceConfig {
 export const resourceConfigs: Record<ResourceType, ResourceConfig> = {
   lead: {
     type: 'lead',
-    label: '我的线索',
+    label: '线索',
     menuIcon: 'User',
     searchPlaceholder: '搜索线索名称或联系人',
     nameField: 'lead_name',
@@ -67,7 +67,7 @@ export const resourceConfigs: Record<ResourceType, ResourceConfig> = {
 
   customer: {
     type: 'customer',
-    label: '我的客户',
+    label: '客户',
     menuIcon: 'OfficeBuilding',
     searchPlaceholder: '搜索客户名称',
     nameField: 'account_name',
@@ -158,7 +158,7 @@ export const resourceConfigs: Record<ResourceType, ResourceConfig> = {
         type: 'update_status',
         label: '更新状态',
         icon: 'Refresh',
-        template: '帮我把【{name}（ID：{id}）】的状态更新为【已签署/已生效】'
+        template: '帮我把【{name}（ID：{id}）】的状态更新为【已签署】'
       },
       {
         type: 'view_detail',
@@ -175,8 +175,8 @@ export const resourceConfigs: Record<ResourceType, ResourceConfig> = {
 
 // 菜单项列表（按顺序）
 export const menuItems: { type: ResourceType; label: string; icon: string }[] = [
-  { type: 'lead', label: '我的线索', icon: 'User' },
-  { type: 'customer', label: '我的客户', icon: 'OfficeBuilding' },
+  { type: 'lead', label: '线索', icon: 'User' },
+  { type: 'customer', label: '客户', icon: 'OfficeBuilding' },
   { type: 'opportunity', label: '我的商机', icon: 'Briefcase' },
   { type: 'contract', label: '我的合同', icon: 'Document' }
 ]

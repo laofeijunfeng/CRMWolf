@@ -36,15 +36,15 @@ def test_payment_management():
         print("❌ 未找到合同，请先创建合同")
         return
     
-    # 找到已签署或已生效的合同
+    # 找到已签署的合同
     contract = None
     for c in contracts:
-        if c["status"] in ["SIGNED", "EFFECTIVE"]:
+        if c["status"] == "SIGNED":
             contract = c
             break
     
     if not contract:
-        print("ℹ️  未找到已签署或已生效的合同，使用第一个合同")
+        print("ℹ️  未找到已签署的合同，使用第一个合同")
         contract = contracts[0]
     
     contract_id = contract["id"]
@@ -163,25 +163,6 @@ def test_payment_management():
     print(f"✅ 查询到 {len(records)} 条回款记录")
     for record in records:
         print(f"   - {record['actual_amount']} 元，日期: {record['payment_date']}，登记人: {record.get('creator_name', 'N/A')}")
-    
-    # 8. 测试即将到期提醒
-    print("\n8. 查询即将到期的回款...")
-    response = requests.get(
-        f"{BASE_URL}/api/v1/payments/reminders/upcoming?days=7",
-        headers=headers
-    )
-    
-    if response.status_code == 200:
-        upcoming = response.json()
-        if isinstance(upcoming, list):
-            print(f"✅ 未来7天内即将到期的回款: {len(upcoming)} 条")
-            for reminder in upcoming[:3]:
-                if isinstance(reminder, dict):
-                    print(f"   - {reminder.get('contract_name', 'N/A')} - {reminder.get('stage_name', 'N/A')}: {reminder.get('planned_amount', 0)} 元，还有 {reminder.get('days_until_due', 0)} 天")
-        else:
-            print(f"ℹ️  提醒功能返回: {upcoming}")
-    else:
-        print(f"ℹ️  提醒功能状态码: {response.status_code}")
     
     print("\n" + "=" * 60)
     print("✅ 回款管理功能测试完成！")

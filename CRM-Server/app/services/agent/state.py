@@ -1,66 +1,1174 @@
 """CRM AI Agent LangGraph state types."""
 import operator
-from typing import Annotated, Any, Dict, List, Optional, TypedDict
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Literal, Optional, TypedDict
 
+from langgraph.types import Interrupt
+
+from app.services.agent.input import AgentTurnInput
+from app.services.agent.interrupts import AgentInterruptPayload, AgentResumePayload
 from app.services.agent.schemas import (
+    AgentConfirmationIntentDecision,
     AgentFollowUpQualityResult,
     AgentMemorySnapshot,
     AgentSemanticParseResult,
     AgentSuggestionResult,
+    AgentTurnRelationDecision,
 )
+from app.services.agent.types import AgentRuntimeEventSink, JSONDict, JSONValue
+
+
+AgentRuntimeApplicationAction = Literal[
+    "pending_handled",
+    "execute_confirmed_task",
+    "run_new_flow",
+    "no_pending_confirmation",
+    "finish",
+]
+
+
+def merge_runtime_events(left: list[JSONDict], right: list[JSONDict]) -> list[JSONDict]:
+    """Keep root graph events scoped to one Agent turn."""
+
+    if right and right[0].get("event") == "agent_root_graph_started":
+        return list(right)
+    return [*left, *right]
+
+
+def merge_action_planning_events(left: list[JSONDict], right: list[JSONDict]) -> list[JSONDict]:
+    """Keep action-planning events scoped to one Agent turn."""
+
+    if right and right[0].get("event") == "action_planning_events_started":
+        return list(right[1:])
+    return [*left, *right]
 
 
 class AgentGraphState(TypedDict, total=False):
-    db: Any
     team_id: int
     user_id: int
     session_id: int
-    session_context: Dict[str, Any]
+    has_db: bool
+    has_authorization: bool
     content: str
-    authorization: Optional[str]
-    current_datetime: Any
+    current_date: Optional[str]
+    intent: Optional[str]
+    memory_snapshot: JSONDict
+    semantic: JSONDict
+    semantic_metadata: JSONDict
+    semantic_error: Optional[str]
+    follow_up_quality: JSONDict
+    follow_up_quality_metadata: JSONDict
+    follow_up_quality_error: Optional[str]
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    creation_duplicate_candidates: JSONDict
+    selected_customer: JSONDict | None
+    business_context: JSONDict
+    suggestion: JSONDict
+    suggestion_metadata: JSONDict
+    suggestion_error: Optional[str]
+    suppress_trace_events: bool
+    response: Optional[str]
+    events: Annotated[list[JSONDict], operator.add]
+
+
+class AgentGraphInput(TypedDict, total=False):
+    """Application input for one normal new-flow graph invocation."""
+
+    db: object
+    team_id: int
+    user_id: int
+    session_id: int
+    session_context: JSONDict
+    content: str
+    authorization: str
+    current_datetime: datetime
+    events: list[JSONDict]
+
+
+class AgentGraphResult(AgentGraphState, total=False):
+    """Application-facing new-flow graph result."""
+
+
+@dataclass
+class AgentGraphSideEffects:
+    """Non-serializable new-flow objects kept outside LangGraph checkpoints."""
+
+    current_datetime: datetime | None = None
+    memory: AgentMemorySnapshot | None = None
+    semantic_result: AgentSemanticParseResult | None = None
+    follow_up_quality_result: AgentFollowUpQualityResult | None = None
+    suggestion_result: AgentSuggestionResult | None = None
+
+
+class CustomerResolutionGraphState(TypedDict, total=False):
+    """Serializable state for customer resolution domain workflow."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    has_db: bool
+    has_authorization: bool
+    content: str
+    intent: Optional[str]
+    customer_search_requested: bool
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    selected_customer: JSONDict
+    events: Annotated[list[JSONDict], operator.add]
+
+
+class CustomerResolutionGraphInput(TypedDict, total=False):
+    """Application input for one customer resolution subgraph invocation."""
+
+    db: object
+    team_id: int
+    user_id: int
+    session_id: int
+    content: str
+    authorization: str
     intent: Optional[str]
     memory: AgentMemorySnapshot
     semantic_result: AgentSemanticParseResult
-    semantic_metadata: Dict[str, Any]
-    semantic_error: Optional[str]
-    follow_up_quality_result: AgentFollowUpQualityResult
-    follow_up_quality_metadata: Dict[str, Any]
-    follow_up_quality_error: Optional[str]
-    parsed: Dict[str, Any]
-    customer_candidates: List[Dict[str, Any]]
-    creation_duplicate_candidates: Dict[str, Any]
-    selected_customer: Dict[str, Any]
-    business_context: Dict[str, Any]
-    suggestion_result: AgentSuggestionResult
-    suggestion_metadata: Dict[str, Any]
+    parsed: JSONDict
+    events: list[JSONDict]
+
+
+class CustomerResolutionGraphResult(CustomerResolutionGraphState, total=False):
+    """Application-facing customer resolution graph result."""
+
+
+class CreationDuplicateGraphState(TypedDict, total=False):
+    """Serializable state for create-lead/customer duplicate checking."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    has_db: bool
+    has_authorization: bool
+    content: str
+    intent: Optional[str]
+    parsed: JSONDict
+    duplicate_search_requested: bool
+    duplicate_skip_reason: Optional[str]
+    duplicate_search_payload: JSONDict
+    creation_duplicate_candidates: JSONDict
+    events: Annotated[list[JSONDict], operator.add]
+
+
+class CreationDuplicateGraphInput(TypedDict, total=False):
+    """Application input for one creation duplicate-check subgraph invocation."""
+
+    db: object
+    team_id: int
+    user_id: int
+    session_id: int
+    content: str
+    authorization: str
+    semantic_result: AgentSemanticParseResult
+    parsed: JSONDict
+    events: list[JSONDict]
+
+
+class CreationDuplicateGraphResult(CreationDuplicateGraphState, total=False):
+    """Application-facing duplicate-check graph result."""
+
+
+@dataclass
+class CreationDuplicateRuntimeContext:
+    """Run-scoped dependencies for duplicate checking."""
+
+    db: object | None = None
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    authorization: str | None = None
+    semantic_result: AgentSemanticParseResult | None = None
+
+
+class BusinessContextGraphState(TypedDict, total=False):
+    """Serializable state for customer business-context workflow."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    has_db: bool
+    has_authorization: bool
+    content: str
+    intent: Optional[str]
+    current_date: Optional[str]
+    selected_customer: JSONDict
+    business_context: JSONDict
+    suggestion_metadata: JSONDict
     suggestion_error: Optional[str]
+    events: Annotated[list[JSONDict], operator.add]
+
+
+class BusinessContextGraphInput(TypedDict, total=False):
+    """Application input for one business-context subgraph invocation."""
+
+    db: object
+    team_id: int
+    user_id: int
+    session_id: int
+    content: str
+    authorization: str
+    current_date: str | date
+    selected_customer: JSONDict
+    semantic_result: AgentSemanticParseResult
+    business_context: JSONDict
+    events: list[JSONDict]
+
+
+class BusinessContextGraphResult(BusinessContextGraphState, total=False):
+    """Application-facing business-context graph result."""
+
+    suggestion_result: AgentSuggestionResult
+
+
+@dataclass
+class BusinessContextGraphSideEffects:
+    """Non-serializable business-context outputs kept outside checkpoints."""
+
+    suggestion_result: AgentSuggestionResult | None = None
+
+
+@dataclass
+class BusinessContextRuntimeContext:
+    """Run-scoped dependencies for business-context workflow."""
+
+    db: object | None = None
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    authorization: str | None = None
+    semantic_result: AgentSemanticParseResult | None = None
+    side_effects: BusinessContextGraphSideEffects = field(default_factory=BusinessContextGraphSideEffects)
+
+
+class FollowUpQualityGraphState(TypedDict, total=False):
+    """Serializable state for follow-up quality evaluation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    has_db: bool
+    content: str
+    current_date: Optional[str]
+    intent: Optional[str]
+    has_single_customer: bool
+    has_memory_customer: bool
+    quality_evaluation_requested: bool
+    quality_skip_reason: Optional[str]
+    follow_up_quality: JSONDict
+    follow_up_quality_metadata: JSONDict
+    follow_up_quality_error: Optional[str]
+    events: Annotated[list[JSONDict], operator.add]
+
+
+class FollowUpQualityGraphInput(TypedDict, total=False):
+    """Application input for one follow-up quality subgraph invocation."""
+
+    db: object
+    team_id: int
+    user_id: int
+    session_id: int
+    content: str
+    current_date: str | date
+    semantic_result: AgentSemanticParseResult
+    memory: AgentMemorySnapshot
+    has_single_customer: bool
+    has_memory_customer: bool
+    events: list[JSONDict]
+
+
+class FollowUpQualityGraphResult(FollowUpQualityGraphState, total=False):
+    """Application-facing follow-up quality graph result."""
+
+    follow_up_quality_result: AgentFollowUpQualityResult
+
+
+@dataclass
+class FollowUpQualityGraphSideEffects:
+    """Non-serializable follow-up quality outputs kept outside checkpoints."""
+
+    follow_up_quality_result: AgentFollowUpQualityResult | None = None
+
+
+@dataclass
+class FollowUpQualityRuntimeContext:
+    """Run-scoped dependencies for follow-up quality evaluation."""
+
+    db: object | None = None
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    semantic_result: AgentSemanticParseResult | None = None
+    memory: AgentMemorySnapshot | None = None
+    side_effects: FollowUpQualityGraphSideEffects = field(default_factory=FollowUpQualityGraphSideEffects)
+
+
+class ActionPlanningGraphState(TypedDict, total=False):
+    """Serializable state for response/action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    content: str
+    intent: Optional[str]
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    selected_customer: JSONDict | None
+    business_context: JSONDict
+    semantic: JSONDict
+    semantic_metadata: JSONDict
+    semantic_error: Optional[str]
+    follow_up_quality: JSONDict
+    follow_up_quality_metadata: JSONDict
+    follow_up_quality_error: Optional[str]
+    creation_duplicate_candidates: JSONDict
+    suggestion: JSONDict
+    suggestion_metadata: JSONDict
+    suggestion_error: Optional[str]
+    prior_events: list[JSONDict]
+    suppress_trace_events: bool
+    response_route: Optional[str]
+    business_action_route: Optional[str]
     response: Optional[str]
-    events: List[Dict[str, Any]]
+    action: JSONDict
+    events: Annotated[list[JSONDict], merge_action_planning_events]
+
+
+class ActionPlanningGraphInput(TypedDict, total=False):
+    """Application input for one action-planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    content: str
+    intent: Optional[str]
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    selected_customer: JSONDict | None
+    business_context: JSONDict
+    semantic: JSONDict
+    semantic_metadata: JSONDict
+    semantic_error: Optional[str]
+    follow_up_quality: JSONDict
+    follow_up_quality_metadata: JSONDict
+    follow_up_quality_error: Optional[str]
+    creation_duplicate_candidates: JSONDict
+    suggestion: JSONDict
+    suggestion_metadata: JSONDict
+    suggestion_error: Optional[str]
+    events: list[JSONDict]
+    suppress_trace_events: bool
+    memory: AgentMemorySnapshot
+    semantic_result: AgentSemanticParseResult
+    follow_up_quality_result: AgentFollowUpQualityResult
+    suggestion_result: AgentSuggestionResult
+
+
+class ActionPlanningGraphResult(ActionPlanningGraphState, total=False):
+    """Application-facing response/action planning graph result."""
+
+
+class ResourceResolutionGraphState(TypedDict, total=False):
+    """Serializable state for reusable business-resource resolution."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    resource_kind: str
+    action_name: str
+    content: str
+    target: JSONDict
+    candidates: list[JSONDict]
+    ranked_candidates: list[JSONDict]
+    selected_candidate: JSONDict
+    resolution_status: str
+    resolution_reason: Optional[str]
+    events: list[JSONDict]
+
+
+class ResourceResolutionGraphInput(TypedDict, total=False):
+    """Application input for one resource-resolution graph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    resource_kind: str
+    action_name: str
+    content: str
+    target: JSONDict
+    candidates: list[JSONDict]
+
+
+class ResourceResolutionGraphResult(ResourceResolutionGraphState, total=False):
+    """Application-facing reusable resource-resolution graph result."""
+
+
+ResourceResolutionRanker = Callable[[ResourceResolutionGraphState], Awaitable[list[JSONDict]]]
+
+
+@dataclass
+class ResourceResolutionRuntimeContext:
+    """Run-scoped dependencies for reusable business-resource resolution."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    ranker: ResourceResolutionRanker | None = None
+
+
+class CustomerActivityPlanningGraphState(TypedDict, total=False):
+    """Serializable state for customer-activity action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    customer_name: Optional[str]
+    selected_customer: JSONDict
+    activity_payload: JSONDict
+    customer_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class CustomerActivityPlanningGraphInput(TypedDict, total=False):
+    """Application input for one customer-activity planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+
+
+class CustomerActivityPlanningGraphResult(CustomerActivityPlanningGraphState, total=False):
+    """Application-facing customer-activity planning graph result."""
+
+
+@dataclass
+class CustomerActivityPlanningRuntimeContext:
+    """Run-scoped dependencies for customer-activity planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+class LeadPlanningGraphState(TypedDict, total=False):
+    """Serializable state for lead action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    lead: JSONDict
+    lead_follow_up: JSONDict
+    missing_fields: list[str]
+    lead_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class LeadPlanningGraphInput(TypedDict, total=False):
+    """Application input for one lead planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+
+
+class LeadPlanningGraphResult(LeadPlanningGraphState, total=False):
+    """Application-facing lead planning graph result."""
+
+
+@dataclass
+class LeadPlanningRuntimeContext:
+    """Run-scoped dependencies for lead planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+class CustomerCreationPlanningGraphState(TypedDict, total=False):
+    """Serializable state for customer-creation action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_create: JSONDict
+    customer_activity: JSONDict
+    missing_fields: list[str]
+    customer_create_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class CustomerCreationPlanningGraphInput(TypedDict, total=False):
+    """Application input for one customer-creation planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+
+
+class CustomerCreationPlanningGraphResult(CustomerCreationPlanningGraphState, total=False):
+    """Application-facing customer-creation planning graph result."""
+
+
+@dataclass
+class CustomerCreationPlanningRuntimeContext:
+    """Run-scoped dependencies for customer-creation planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+class PaymentRecordPlanningGraphState(TypedDict, total=False):
+    """Serializable state for payment-record action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    business_context: JSONDict
+    customer_name: Optional[str]
+    selected_customer: JSONDict
+    payment: JSONDict
+    contracts: list[JSONDict]
+    opportunities: list[JSONDict]
+    payment_plans: list[JSONDict]
+    missing_fields: list[str]
+    commission_member_id: Optional[str]
+    customer_route: Optional[str]
+    payment_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class PaymentRecordPlanningGraphInput(TypedDict, total=False):
+    """Application input for one payment-record planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    business_context: JSONDict
+
+
+class PaymentRecordPlanningGraphResult(PaymentRecordPlanningGraphState, total=False):
+    """Application-facing payment-record planning graph result."""
+
+
+@dataclass
+class PaymentRecordPlanningRuntimeContext:
+    """Run-scoped dependencies for payment-record planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+class OpportunityPlanningGraphState(TypedDict, total=False):
+    """Serializable state for opportunity action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    customer_name: Optional[str]
+    selected_customer: JSONDict
+    opportunity: JSONDict
+    missing_fields: list[str]
+    interaction_fields: list[str]
+    field_defaults: JSONDict
+    customer_route: Optional[str]
+    opportunity_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class OpportunityPlanningGraphInput(TypedDict, total=False):
+    """Application input for one opportunity planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+
+
+class OpportunityPlanningGraphResult(OpportunityPlanningGraphState, total=False):
+    """Application-facing opportunity planning graph result."""
+
+
+@dataclass
+class OpportunityPlanningRuntimeContext:
+    """Run-scoped dependencies for opportunity planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+class ContactPlanningGraphState(TypedDict, total=False):
+    """Serializable state for contact action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    customer_name: Optional[str]
+    selected_customer: JSONDict
+    contact: JSONDict
+    missing_fields: list[str]
+    customer_route: Optional[str]
+    contact_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class ContactPlanningGraphInput(TypedDict, total=False):
+    """Application input for one contact planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+
+
+class ContactPlanningGraphResult(ContactPlanningGraphState, total=False):
+    """Application-facing contact planning graph result."""
+
+
+@dataclass
+class ContactPlanningRuntimeContext:
+    """Run-scoped dependencies for contact planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+class InvoiceTitlePlanningGraphState(TypedDict, total=False):
+    """Serializable state for invoice-title action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    customer_name: Optional[str]
+    selected_customer: JSONDict
+    invoice_title: JSONDict
+    missing_fields: list[str]
+    set_default: bool
+    customer_route: Optional[str]
+    invoice_title_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class InvoiceTitlePlanningGraphInput(TypedDict, total=False):
+    """Application input for one invoice-title planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+
+
+class InvoiceTitlePlanningGraphResult(InvoiceTitlePlanningGraphState, total=False):
+    """Application-facing invoice-title planning graph result."""
+
+
+@dataclass
+class InvoiceTitlePlanningRuntimeContext:
+    """Run-scoped dependencies for invoice-title planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+class DeploymentInfoPlanningGraphState(TypedDict, total=False):
+    """Serializable state for deployment-info action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    customer_name: Optional[str]
+    selected_customer: JSONDict
+    deployment_info: JSONDict
+    missing_fields: list[str]
+    customer_route: Optional[str]
+    deployment_info_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class DeploymentInfoPlanningGraphInput(TypedDict, total=False):
+    """Application input for one deployment-info planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+
+
+class DeploymentInfoPlanningGraphResult(DeploymentInfoPlanningGraphState, total=False):
+    """Application-facing deployment-info planning graph result."""
+
+
+@dataclass
+class DeploymentInfoPlanningRuntimeContext:
+    """Run-scoped dependencies for deployment-info planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+class CustomerMemberPlanningGraphState(TypedDict, total=False):
+    """Serializable state for customer-member action planning."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    business_context: JSONDict
+    customer_name: Optional[str]
+    selected_customer: JSONDict
+    customer_member: JSONDict
+    resolved_member: JSONDict
+    member_error: Optional[str]
+    missing_fields: list[str]
+    customer_route: Optional[str]
+    customer_member_route: Optional[str]
+    response: Optional[str]
+    action: JSONDict
+
+
+class CustomerMemberPlanningGraphInput(TypedDict, total=False):
+    """Application input for one customer-member planning subgraph invocation."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    parsed: JSONDict
+    customer_candidates: list[JSONDict]
+    business_context: JSONDict
+
+
+class CustomerMemberPlanningGraphResult(CustomerMemberPlanningGraphState, total=False):
+    """Application-facing customer-member planning graph result."""
+
+
+@dataclass
+class CustomerMemberPlanningRuntimeContext:
+    """Run-scoped dependencies for customer-member planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+
+
+@dataclass
+class ActionPlanningRuntimeContext:
+    """Run-scoped dependencies for response/action planning."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    memory: AgentMemorySnapshot | None = None
+    semantic_result: AgentSemanticParseResult | None = None
+    follow_up_quality_result: AgentFollowUpQualityResult | None = None
+    suggestion_result: AgentSuggestionResult | None = None
+
+
+@dataclass
+class CustomerResolutionRuntimeContext:
+    """Run-scoped dependencies for customer resolution."""
+
+    db: object | None = None
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    authorization: str | None = None
+    memory: AgentMemorySnapshot | None = None
+    semantic_result: AgentSemanticParseResult | None = None
+
+
+@dataclass
+class AgentGraphRuntimeContext:
+    """Run-scoped dependencies for the new-flow LangGraph."""
+
+    db: object | None = None
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    session_context: JSONDict = field(default_factory=dict)
+    authorization: str | None = None
+    current_datetime: datetime | None = None
+    side_effects: AgentGraphSideEffects = field(default_factory=AgentGraphSideEffects)
 
 
 class PendingTaskGraphState(TypedDict, total=False):
-    db: Any
-    session: Any
-    task: Any
-    suspended_candidates: List[Dict[str, Any]]
-    turn_relation_decision: Any
-    resumed_task: Any
-    turn_input: Any
+    has_active_task: bool
+    task_projection: JSONDict
+    current_interrupt: AgentInterruptPayload | None
+    pending_interrupt_requested: bool
+    resume_payload: AgentResumePayload
+    resume_route: str
+    suspended_candidates: list[JSONDict]
+    turn_relation_decision: JSONDict
+    resumed_task_id: int
     content: str
     team_id: int
     user_id: int
     session_id: int
-    authorization: Optional[str]
     handled: bool
     assistant_content: Optional[str]
     switch_notice: Optional[str]
-    suspended_task: Any
+    suspended_task_id: int
     suspend_reason: Optional[str]
-    selected_customer: Dict[str, Any]
+    selected_customer: JSONDict
     remember_pending_task: bool
     clear_pending_task_id: Optional[int]
-    confirmation_decision: Any
-    preflight_result: Any
-    interaction_result: Any
-    events: Annotated[List[Dict[str, Any]], operator.add]
+    confirmation_decision: JSONDict
+    preflight_result: JSONDict
+    interaction_result: JSONDict
+    events: Annotated[list[JSONDict], operator.add]
+
+
+class PendingTaskGraphInput(TypedDict, total=False):
+    """Application input for one pending-task subgraph invocation."""
+
+    db: object
+    session: object
+    task: object
+    turn_input: AgentTurnInput
+    content: str
+    team_id: int
+    user_id: int
+    session_id: int
+    authorization: str
+    resume_payload: AgentResumePayload
+    suspended_candidates: list[JSONDict]
+    events: list[JSONDict]
+
+
+class PendingTaskGraphResult(PendingTaskGraphState, total=False):
+    """Checkpoint-safe pending-task graph result."""
+
+    __interrupt__: list[Interrupt]
+
+
+@dataclass(frozen=True)
+class PendingTaskTurnResult:
+    """Application-facing result from one pending interaction subgraph pass."""
+
+    handled: bool
+    events: list[JSONDict] = field(default_factory=list)
+    assistant_content: Optional[str] = None
+    selected_customer: Optional[JSONDict] = None
+    remember_pending_task: bool = False
+    clear_pending_task_id: Optional[int] = None
+
+
+@dataclass
+class PendingTaskGraphSideEffects:
+    """Non-serializable pending-task outputs kept outside graph checkpoint state."""
+
+    task: object | None = None
+    resumed_task: object | None = None
+    suspended_task: object | None = None
+    turn_relation_decision: AgentTurnRelationDecision | None = None
+    confirmation_decision: AgentConfirmationIntentDecision | None = None
+    preflight_result: object | None = None
+    interaction_result: object | None = None
+    event_sink: AgentRuntimeEventSink | None = None
+
+
+@dataclass
+class PendingTaskRuntimeContext:
+    """Run-scoped dependencies for the pending-task graph."""
+
+    db: object | None = None
+    session: object | None = None
+    task: object | None = None
+    turn_input: AgentTurnInput | None = None
+    content: str = ""
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    authorization: str | None = None
+    side_effects: PendingTaskGraphSideEffects = field(default_factory=PendingTaskGraphSideEffects)
+
+
+class ConfirmedTaskGraphState(TypedDict, total=False):
+    """Serializable state for confirmed write execution."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    task_projection: JSONDict
+    tool_request: JSONDict
+    tool_result: JSONDict
+    task_event: JSONDict
+    execution_status: str
+    assistant_content: Optional[str]
+    events: Annotated[list[JSONDict], operator.add]
+
+
+class ConfirmedTaskGraphInput(TypedDict, total=False):
+    """Application input for one confirmed-task subgraph invocation."""
+
+    db: object
+    session: object
+    task: object
+    team_id: int
+    user_id: int
+    session_id: int
+    authorization: str
+    events: list[JSONDict]
+    event_sink: AgentRuntimeEventSink
+
+
+class ConfirmedTaskGraphResult(ConfirmedTaskGraphState, total=False):
+    """Confirmed-task graph result enriched with application-facing events."""
+
+    output_events: list[JSONDict]
+
+
+@dataclass
+class ConfirmedTaskExecutionResult:
+    """Transport-neutral result produced inside the confirmed-task graph."""
+
+    tool_event: JSONDict | None
+    task_event: JSONDict
+    assistant_content: str
+    next_task: object | None = None
+    progress_events: list[JSONDict] = field(default_factory=list)
+
+
+@dataclass
+class ConfirmedTaskGraphSideEffects:
+    """Non-checkpointed outputs from confirmed-task execution."""
+
+    execution: ConfirmedTaskExecutionResult | None = None
+    tool_event: JSONDict | None = None
+    task_event: JSONDict = field(default_factory=dict)
+    assistant_content: str | None = None
+    output_events: list[JSONDict] = field(default_factory=list)
+
+
+@dataclass
+class ConfirmedTaskRuntimeContext:
+    """Run-scoped dependencies for confirmed-task graph execution."""
+
+    db: object | None = None
+    session: object | None = None
+    task: object | None = None
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    authorization: str | None = None
+    side_effects: ConfirmedTaskGraphSideEffects = field(default_factory=ConfirmedTaskGraphSideEffects)
+    event_sink: AgentRuntimeEventSink | None = None
+
+
+ActionReviewDecision = Literal[
+    "auto_execute",
+    "require_confirmation",
+    "require_fields",
+    "require_choice",
+    "block",
+]
+
+ActionReviewRiskLevel = Literal["low", "medium", "high"]
+
+
+class ActionReviewGraphState(TypedDict, total=False):
+    """Serializable state for risk-aware HITL policy review."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    event: JSONDict
+    action: str
+    payload: JSONDict
+    risk_level: ActionReviewRiskLevel
+    execution_confidence: float
+    decision: ActionReviewDecision
+    reason: str
+    events: Annotated[list[JSONDict], operator.add]
+
+
+class ActionReviewGraphInput(TypedDict, total=False):
+    """Application input for one HITL policy review graph invocation."""
+
+    event: JSONDict
+    team_id: int
+    user_id: int
+    session_id: int
+    events: list[JSONDict]
+
+
+class ActionReviewGraphResult(ActionReviewGraphState, total=False):
+    """Checkpoint-safe HITL policy review result."""
+
+
+@dataclass
+class ActionReviewRuntimeContext:
+    """Run-scoped policy parameters for action review."""
+
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    low_risk_auto_execute_threshold: float = 0.92
+
+
+class AgentRuntimeState(TypedDict, total=False):
+    """Serializable state owned by the LangGraph-native Agent root runtime."""
+
+    team_id: int
+    user_id: int
+    session_id: int
+    session_key: str
+    channel: str
+    content: str
+    turn_kind: str
+    current_interrupt: AgentInterruptPayload | None
+    task_projection: JSONDict
+    suspended_candidates: list[JSONDict]
+    pending_task_requested: bool
+    current_customer: JSONDict
+    semantic: JSONDict
+    candidates: dict[str, list[JSONDict]]
+    drafts: dict[str, JSONDict]
+    guardrails: JSONDict
+    tool_requests: list[JSONDict]
+    tool_results: list[JSONDict]
+    resume_payload: AgentResumePayload
+    pending_task_result: JSONDict
+    new_flow_result: JSONDict
+    runtime_status: str
+    route: str
+    application_action: AgentRuntimeApplicationAction
+    pending_task_handled: bool
+    checkpoint_unavailable: bool
+    fallback_reason: str
+    assistant_content: Optional[str]
+    switch_notice: Optional[str]
+    events: Annotated[list[JSONDict], merge_runtime_events]
+
+
+class AgentRuntimeStateHistoryItem(TypedDict, total=False):
+    """Checkpoint-safe projection of one root graph state snapshot."""
+
+    checkpoint_id: str
+    parent_checkpoint_id: str
+    thread_id: str
+    checkpoint_ns: str
+    created_at: str
+    source: str
+    step: int
+    next_nodes: list[str]
+    has_interrupt: bool
+    interrupts: list[JSONDict]
+    values: JSONDict
+
+
+@dataclass(frozen=True)
+class AgentSessionRuntimeProjection:
+    """Checkpoint-safe projection of non-HITL session memory for one Agent turn."""
+
+    session_context: JSONDict = field(default_factory=dict)
+    current_customer: JSONDict = field(default_factory=dict)
+
+
+class AgentRuntimeInvokeResult(AgentRuntimeState, total=False):
+    __interrupt__: list[Interrupt]
+
+
+@dataclass
+class AgentRootRuntimeSideEffects:
+    """Non-checkpointed outputs produced by root graph runtime nodes."""
+
+    pending_task_result: PendingTaskGraphResult | None = None
+    confirmed_task_result: ConfirmedTaskGraphResult | None = None
+    pending_task_events: list[JSONDict] = field(default_factory=list)
+    pending_task_assistant_content: str | None = None
+    pending_task_switch_notice: str | None = None
+    new_flow_events: list[JSONDict] = field(default_factory=list)
+    new_flow_assistant_content: str | None = None
+    current_interrupt: AgentInterruptPayload | None = None
+    confirmed_task_events: list[JSONDict] = field(default_factory=list)
+    confirmed_task_assistant_content: str | None = None
+    no_pending_confirmation_events: list[JSONDict] = field(default_factory=list)
+    no_pending_confirmation_assistant_content: str | None = None
+    pending_task_graph_side_effects: PendingTaskGraphSideEffects | None = None
+
+
+@dataclass
+class AgentRuntimeTurnOutput:
+    """Application-facing event stream and final assistant text for one turn."""
+
+    events: list[JSONDict] = field(default_factory=list)
+    assistant_content: str | None = None
+    switch_notice: str | None = None
+
+
+@dataclass
+class AgentApplicationRuntimeResult:
+    """Application-facing projection of one root graph invocation."""
+
+    state: AgentRuntimeState = field(default_factory=dict)
+    turn_output: AgentRuntimeTurnOutput = field(default_factory=AgentRuntimeTurnOutput)
+    pending_task_result: PendingTaskGraphResult = field(default_factory=dict)
+    checkpoint_unavailable: bool = False
+
+
+@dataclass
+class AgentRuntimeContext:
+    """Run-scoped context for non-serializable dependencies.
+
+    LangGraph state remains checkpoint-safe JSON-ish data. DB sessions, ORM
+    objects, and transport credentials live here for the duration of one invoke.
+    """
+
+    db: object | None = None
+    session: object | None = None
+    task: object | None = None
+    turn_input: AgentTurnInput | None = None
+    content: str = ""
+    team_id: int = 0
+    user_id: int = 0
+    session_id: int = 0
+    authorization: str | None = None
+    switch_notice: str | None = None
+    side_effects: AgentRootRuntimeSideEffects = field(default_factory=AgentRootRuntimeSideEffects)
+    event_sink: AgentRuntimeEventSink | None = None

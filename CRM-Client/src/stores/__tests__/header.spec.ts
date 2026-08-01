@@ -4,7 +4,7 @@
  * Tests the header store for unified top-bar management
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useHeaderStore } from '../header'
 
@@ -84,7 +84,8 @@ describe('header store', () => {
       store.setActions([{ id: 'edit', label: '编辑', handler: mockHandler }])
       store.setActions([{ id: 'delete', label: '删除', handler: mockHandler }])
       expect(store.actions.length).toBe(1)
-      expect(store.actions[0].id).toBe('delete')
+      const [action] = store.actions
+      expect(action?.id).toBe('delete')
     })
 
     it('should clear actions when given empty array', () => {
@@ -93,6 +94,20 @@ describe('header store', () => {
       store.setActions([])
       expect(store.actions).toEqual([])
       expect(store.hasActions).toBe(false)
+    })
+
+    it('should keep action array stable when only handler references change', () => {
+      const store = useHeaderStore()
+      const firstHandler = vi.fn()
+      const secondHandler = vi.fn()
+
+      store.setActions([{ id: 'edit', label: '编辑', handler: firstHandler }])
+      const previousActions = store.actions
+      store.setActions([{ id: 'edit', label: '编辑', handler: secondHandler }])
+
+      expect(store.actions).toBe(previousActions)
+      const [action] = store.actions
+      expect(action?.handler).toBe(secondHandler)
     })
   })
 
@@ -121,7 +136,8 @@ describe('header store', () => {
       ])
       store.removeAction('edit')
       expect(store.actions.length).toBe(1)
-      expect(store.actions[0].id).toBe('delete')
+      const [action] = store.actions
+      expect(action?.id).toBe('delete')
     })
 
     it('should not fail when removing non-existent action', () => {
@@ -189,6 +205,58 @@ describe('header store', () => {
       expect(store.hasActions).toBe(true)
       store.setActions([])
       expect(store.hasActions).toBe(false)
+    })
+  })
+
+  describe('setTabs', () => {
+    it('should keep the current active tab when the tab set is unchanged', () => {
+      const store = useHeaderStore()
+
+      store.setTabs([
+        { key: 'all', label: '全部' },
+        { key: 'mine', label: '我的' }
+      ], 'all')
+      store.setActiveTab('mine')
+      store.setTabs([
+        { key: 'all', label: '全部' },
+        { key: 'mine', label: '我的' }
+      ])
+
+      expect(store.activeTab).toBe('mine')
+    })
+
+    it('should keep tab array stable when only custom view handlers change', () => {
+      const store = useHeaderStore()
+      const firstRename = vi.fn()
+      const secondRename = vi.fn()
+
+      store.setTabs([
+        { key: 'custom-view:1', label: '视图 1', isCustomView: true, customViewId: 1, onRename: firstRename }
+      ], 'custom-view:1')
+      const previousTabs = store.tabs
+      store.setTabs([
+        { key: 'custom-view:1', label: '视图 1', isCustomView: true, customViewId: 1, onRename: secondRename }
+      ], 'custom-view:1')
+
+      expect(store.tabs).toBe(previousTabs)
+      const [tab] = store.tabs ?? []
+      expect(tab?.onRename).toBe(secondRename)
+    })
+
+    it('should keep the explicit active tab when tabs are reordered', () => {
+      const store = useHeaderStore()
+
+      store.setTabs([
+        { key: 'all', label: '全部' },
+        { key: 'public', label: '公海' }
+      ], 'all')
+      store.setTabs([
+        { key: 'custom-view:1', label: '视图 1', isCustomView: true, customViewId: 1 },
+        { key: 'all', label: '全部' },
+        { key: 'public', label: '公海' }
+      ], 'all')
+
+      expect(store.activeTab).toBe('all')
     })
   })
 })

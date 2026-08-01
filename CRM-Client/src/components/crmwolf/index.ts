@@ -30,6 +30,7 @@ export { default as MetricCard } from './MetricCard.vue'
 export { default as AreaTrendChart } from './AreaTrendChart.vue'
 export { default as ListFilterPopover } from './ListFilterPopover.vue'
 export { default as ListSortPopover } from './ListSortPopover.vue'
+export { default as ColumnConfigPopover } from './ColumnConfigPopover.vue'
 export { default as MultiSelect } from './MultiSelect.vue'
 export { default as TableToolbarButton } from './TableToolbarButton.vue'
 export { default as TableToolbarBuilderPanel } from './TableToolbarBuilderPanel.vue'
@@ -39,6 +40,7 @@ export { default as StatusBadge } from '../StatusBadge.vue'
 
 // Export types
 export type { ActionConfig } from './TableRowActions.vue'
+export type { ColumnConfigOption } from './columnConfigTypes'
 export type { ListFilterCondition, ListFilterField } from './listFilterTypes'
 export type { ListSortCondition, ListSortField } from './listSortTypes'
 
@@ -46,6 +48,7 @@ export type { ListSortCondition, ListSortField } from './listSortTypes'
 export { default as LoadingSkeleton } from './LoadingSkeleton.vue'
 export { default as SearchCard } from './SearchCard.vue'
 export { default as ConfirmDialog } from './ConfirmDialog.vue'
+export { default as RenameDialog } from './RenameDialog.vue'
 
 // Re-export shadcn-vue primitives for convenience
 // Core components

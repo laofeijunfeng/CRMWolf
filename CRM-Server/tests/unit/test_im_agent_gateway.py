@@ -161,13 +161,13 @@ async def test_im_gateway_maps_referenced_choice_number_to_interaction_metadata(
             "status": "waiting_user_input",
             "choices": [
                 {
-                    "label": "广州睿狐增购10个账号补商机信息",
-                    "value": "继续：广州睿狐增购10个账号补商机信息",
+                    "label": "继续处理：广州睿狐增购10个账号补商机信息",
+                    "value": "继续处理：广州睿狐增购10个账号补商机信息",
                     "metadata": {"selected_task_id": 201},
                 },
                 {
-                    "label": "广州睿狐创建商机确认",
-                    "value": "继续：广州睿狐创建商机确认",
+                    "label": "继续处理：广州睿狐创建商机确认",
+                    "value": "继续处理：广州睿狐创建商机确认",
                     "metadata": {"selected_task_id": 202},
                 },
             ],
@@ -193,7 +193,7 @@ async def test_im_gateway_maps_referenced_choice_number_to_interaction_metadata(
 
     assert result["final_content"] == "resumed"
     assert captured["session_id"] == 91
-    assert captured["content"] == "继续：广州睿狐增购10个账号补商机信息"
+    assert captured["content"] == "继续处理：广州睿狐增购10个账号补商机信息"
     assert captured["turn_input"].metadata["selected_task_id"] == 201
     assert captured["turn_input"].metadata["business_action"] == "select_suspended_task"
     assert captured["turn_input"].metadata["reply_to_message_ids"] == ["om_bot_reply"]
@@ -515,13 +515,13 @@ def test_feishu_renders_non_confirmation_choice_options():
             "type": "choice",
             "business_action": "select_suspended_task",
             "choices": [
-                {"label": "广州睿狐增购10个账号补商机信息", "value": "继续：广州睿狐增购10个账号补商机信息"},
-                {"label": "广州睿狐创建商机确认", "value": "继续：广州睿狐创建商机确认"},
+                {"label": "继续处理：广州睿狐增购10个账号补商机信息", "value": "继续处理：广州睿狐增购10个账号补商机信息"},
+                {"label": "继续处理：广州睿狐创建商机确认", "value": "继续处理：广州睿狐创建商机确认"},
             ],
         },
     })
 
-    assert "1. 广州睿狐增购10个账号补商机信息" in text
-    assert "2. 广州睿狐创建商机确认" in text
+    assert "1. 继续处理：广州睿狐增购10个账号补商机信息" in text
+    assert "2. 继续处理：广州睿狐创建商机确认" in text
     assert "回复序号或选项文字" in text
     assert "回复「是」确认" not in text

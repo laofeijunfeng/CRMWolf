@@ -1,11 +1,11 @@
 """Shared types for CRM AI Agent tools."""
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 
-JsonDict = Dict[str, Any]
+JsonDict = Dict[str, object]
 
 
 @dataclass
@@ -28,7 +28,7 @@ class AgentToolContext:
 class AgentToolResult:
     tool_name: str
     success: bool
-    data: Any = None
+    data: object = None
     error_message: Optional[str] = None
     status_code: Optional[int] = None
     tool_call_id: Optional[int] = None

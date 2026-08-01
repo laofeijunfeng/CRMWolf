@@ -13,7 +13,9 @@ from app.crud.ai_config import ai_config_crud
 from app.services.ai_service import ai_service
 from app.services.agent.prompts import (
     build_confirmation_intent_messages,
+    build_resource_resolution_messages,
     CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT,
+    CRM_AGENT_RESOURCE_RESOLUTION_SYSTEM_PROMPT,
     CRM_AGENT_SEMANTIC_SYSTEM_PROMPT,
     CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT,
     build_pending_interruption_messages,
@@ -25,9 +27,11 @@ from app.services.agent.schemas import (
     AgentConfirmationIntentDecision,
     AgentMemorySnapshot,
     AgentPendingInterruptionDecision,
+    AgentResourceResolutionResult,
     AgentSemanticParseResult,
     AgentTurnRelationDecision,
 )
+from app.services.agent.types import JSONDict
 
 
 class AgentSemanticParserError(Exception):
@@ -166,6 +170,74 @@ class AgentSemanticParser:
             return AgentConfirmationIntentDecision.model_validate(parsed)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise AgentSemanticParserError(f"AI 确认意图判断结果无效：{str(exc)}") from exc
+
+    async def rank_resource_candidates(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_message: str,
+        resource_kind: str,
+        action_name: str,
+        target: JSONDict,
+        candidates: list[JSONDict],
+        current_date: Optional[date] = None,
+    ) -> list[JSONDict]:
+        config = ai_config_crud.get_config(db, team_id)
+        if not config:
+            raise AgentSemanticParserError("AI 配置未设置，无法进行业务对象语义选择。")
+
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
+        if not api_key:
+            raise AgentSemanticParserError("AI API Key 未设置，无法进行业务对象语义选择。")
+
+        action = {
+            "resource_kind": resource_kind,
+            "action_name": action_name,
+        }
+        target_json = json.dumps(target, ensure_ascii=False, default=str)
+        candidates_json = json.dumps(candidates, ensure_ascii=False, default=str)
+        action_json = json.dumps(action, ensure_ascii=False, default=str)
+        try:
+            langchain_result = await self._rank_resource_candidates_with_langchain(
+                api_host=config.api_host,
+                api_key=api_key,
+                model=config.model_name,
+                user_message=user_message,
+                action_json=action_json,
+                target_json=target_json,
+                candidates_json=candidates_json,
+                temperature=min(float(config.temperature or 0.1), 0.2),
+                current_date=current_date,
+            )
+        except AgentSemanticParserError:
+            raise
+        except Exception:
+            langchain_result = None
+        if langchain_result is not None:
+            return [ranking.model_dump(exclude_none=True) for ranking in langchain_result.rankings]
+
+        raw = await self.ai_client._stream_chat_collect(
+            api_host=config.api_host,
+            api_key=api_key,
+            model=config.model_name,
+            messages=build_resource_resolution_messages(
+                user_message,
+                action_json,
+                target_json,
+                candidates_json,
+                current_date=current_date,
+            ),
+            temperature=min(float(config.temperature or 0.1), 0.2),
+            max_tokens=900,
+            response_format={"type": "json_object"},
+        )
+        try:
+            parsed = json.loads(self._clean_json(raw))
+            result = AgentResourceResolutionResult.model_validate(parsed)
+            return [ranking.model_dump(exclude_none=True) for ranking in result.rankings]
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise AgentSemanticParserError(f"AI 业务对象选择结果无效：{str(exc)}") from exc
 
     async def assess_turn_relation(
         self,
@@ -389,6 +461,45 @@ class AgentSemanticParser:
                 user_prompt=user_prompt,
                 response_model=AgentTurnRelationDecision,
                 error_prefix="LangChain 本轮关系判断",
+            )
+        except AgentLangChainStructuredOutputError as exc:
+            raise AgentSemanticParserError(str(exc)) from exc
+
+    async def _rank_resource_candidates_with_langchain(
+        self,
+        *,
+        api_host: str,
+        api_key: str,
+        model: str,
+        user_message: str,
+        action_json: str,
+        target_json: str,
+        candidates_json: str,
+        temperature: float,
+        current_date: Optional[date] = None,
+    ) -> Optional[AgentResourceResolutionResult]:
+        prompt_date = current_date or date.today()
+        system_prompt = f"{CRM_AGENT_RESOURCE_RESOLUTION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+        user_prompt = (
+            "【待办动作】\n"
+            f"{action_json}\n\n"
+            "【目标/上下文】\n"
+            f"{target_json}\n\n"
+            "【候选资源】\n"
+            f"{candidates_json}\n\n"
+            "【用户本轮回复】\n"
+            f"{user_message}"
+        )
+        try:
+            return await self.langchain_runtime.ainvoke_structured(
+                api_host=api_host,
+                api_key=api_key,
+                model=model,
+                temperature=temperature,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=AgentResourceResolutionResult,
+                error_prefix="LangChain 业务对象选择",
             )
         except AgentLangChainStructuredOutputError as exc:
             raise AgentSemanticParserError(str(exc)) from exc

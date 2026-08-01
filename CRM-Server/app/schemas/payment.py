@@ -26,7 +26,7 @@ class PaymentPlanStatusEnum(str, Enum):
             "PENDING": "待回款",
             "OVERDUE": "已逾期",
             "PARTIAL": "部分回款",
-            "COMPLETED": "已完成"
+            "COMPLETED": "已登记"
         }
         return descriptions.get(self.value, self.value)
 

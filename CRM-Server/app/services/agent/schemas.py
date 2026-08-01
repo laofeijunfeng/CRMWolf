@@ -1,7 +1,7 @@
 """Structured contracts for CRM AI Agent reasoning."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -182,10 +182,10 @@ class AgentSemanticParseResult(BaseModel):
     lead: AgentLeadEntity = Field(default_factory=AgentLeadEntity)
     customer_create: AgentCustomerCreateEntity = Field(default_factory=AgentCustomerCreateEntity)
     opportunity: AgentOpportunityEntity = Field(default_factory=AgentOpportunityEntity)
-    contact: Dict[str, Any] = Field(default_factory=dict)
-    invoice_title: Dict[str, Any] = Field(default_factory=dict)
-    deployment_info: Dict[str, Any] = Field(default_factory=dict)
-    customer_member: Dict[str, Any] = Field(default_factory=dict)
+    contact: Dict[str, object] = Field(default_factory=dict)
+    invoice_title: Dict[str, object] = Field(default_factory=dict)
+    deployment_info: Dict[str, object] = Field(default_factory=dict)
+    customer_member: Dict[str, object] = Field(default_factory=dict)
     business_signals: List[AgentBusinessSignal] = Field(default_factory=list)
     requested_actions: List[AgentRequestedAction] = Field(default_factory=list)
     missing_fields: List[str] = Field(default_factory=list)
@@ -203,7 +203,7 @@ class AgentBusinessSuggestion(BaseModel):
     missing_fields: List[str] = Field(default_factory=list, description="执行动作前仍需补充的字段")
     related_object_type: Optional[str] = Field(None, description="依赖对象类型，例如 contract/payment_plan/deployment_info")
     related_object_id: Optional[int] = Field(None, description="依赖对象 ID")
-    execution_payload: Dict[str, Any] = Field(default_factory=dict, description="建议执行所需的结构化参数，仍需代码校验和用户确认")
+    execution_payload: Dict[str, object] = Field(default_factory=dict, description="建议执行所需的结构化参数，仍需代码校验和用户确认")
     risk_notes: List[str] = Field(default_factory=list, description="不确定性或风险提示")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 
@@ -215,10 +215,22 @@ class AgentSuggestionResult(BaseModel):
     clarification_question: Optional[str] = Field(None, description="建议生成阶段需要追问的问题")
 
 
+class AgentResourceCandidateRank(BaseModel):
+    resource_id: int = Field(..., ge=1, description="候选业务资源 ID")
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="该资源与用户语义和目标动作的匹配置信度")
+    evidence: List[str] = Field(default_factory=list, max_length=3, description="支持选择该资源的简短证据")
+    risk_notes: List[str] = Field(default_factory=list, max_length=3, description="仍然不确定的点")
+
+
+class AgentResourceResolutionResult(BaseModel):
+    rankings: List[AgentResourceCandidateRank] = Field(default_factory=list, max_length=5)
+    reason: str = Field("", description="整体判断依据")
+
+
 class AgentMemorySnapshot(BaseModel):
-    recent_messages: List[Dict[str, Any]] = Field(default_factory=list)
-    pending_task: Optional[Dict[str, Any]] = None
-    session_context: Dict[str, Any] = Field(default_factory=dict)
+    recent_messages: List[Dict[str, object]] = Field(default_factory=list)
+    pending_task: Optional[Dict[str, object]] = None
+    session_context: Dict[str, object] = Field(default_factory=dict)
 
 
 class AgentPendingInterruptionDecision(BaseModel):
@@ -264,5 +276,5 @@ class AgentHITLPolicy(BaseModel):
 class AgentHITLDecision(BaseModel):
     decision: AgentHITLDecisionType
     task_id: Optional[int] = None
-    edited_payload: Optional[Dict[str, Any]] = None
+    edited_payload: Optional[Dict[str, object]] = None
     user_message: Optional[str] = None

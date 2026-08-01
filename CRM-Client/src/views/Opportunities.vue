@@ -31,6 +31,8 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
 import { normalizePaginatedResponse } from '@/types/pagination'
@@ -295,9 +297,20 @@ const fetchOpportunities = async (): Promise<void> => {
   }
 }
 
-const handleFilterApply = (filters: ListFilterCondition[]): void => {
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'opportunities.list',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  refresh: fetchOpportunities,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+
+const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
   pagination.current = 1
+  await customFilterViews.updateActiveCustomViewConfig()
   fetchOpportunities()
 }
 
@@ -310,13 +323,21 @@ const handleReset = (): void => {
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchOpportunities()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchOpportunities()
+}
+
+const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
+  activeFilters.value = filters
+  pagination.current = 1
+  await customFilterViews.saveAsCustomView(filters)
 }
 
 const handlePageChange = (page: number): void => {
@@ -573,7 +594,8 @@ const getApprovalPhaseClass = (phase: string | undefined): string => {
 onMounted(async () => {
   await Promise.all([
     fetchOpportunities(),
-    fetchOwnerFilterOptions()
+    fetchOwnerFilterOptions(),
+    customFilterViews.loadCustomViews()
   ])
   openOpportunityFromRoute()
 })
@@ -585,13 +607,11 @@ watch(
   }
 )
 
-// TopBar 配置（Tabs + Actions）
-watchEffect(() => {
-  // 注册 ContextTabs 到 TopBar
-  headerStore.setTabs(tabs, activeTab.value)
-
-  // 注册操作按钮
-  headerStore.setActions([
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actionDeps: [canCreateOpportunity],
+  actions: () => [
     {
       id: 'create-opportunity',
       label: '新建商机',
@@ -601,14 +621,17 @@ watchEffect(() => {
       visible: canCreateOpportunity.value,
       ariaLabel: '新建商机'
     }
-  ])
+  ]
 })
 
 // Watch activeTab changes from headerStore
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    activeTab.value = headerStore.activeTab
     pagination.current = 1
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
+      return
+    }
+    customFilterViews.applyBuiltInTab(headerStore.activeTab)
     activeSorts.value = []
     fetchOpportunities()
   }
@@ -639,10 +662,15 @@ watchEffect(() => {
       v-model:sorts="activeSorts"
       :filter-fields="filterFields"
       :sort-fields="sortFields"
+      view-key="opportunities.list"
+      column-config-enabled
+      filter-view-save-enabled
+      :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @filter-save-view="handleSaveFilterView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
       @row-click="handleViewDetail"

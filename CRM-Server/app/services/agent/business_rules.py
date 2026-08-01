@@ -1,7 +1,7 @@
 """Pure business rules used by the CRM agent."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from app.services.agent import agent_copy
 from app.utils.name_normalizer import normalize_corp_name
@@ -11,7 +11,7 @@ def customer_not_found_response(customer_name: str) -> str:
     return f"我识别到客户「{customer_name}」，但没有找到你可访问的客户。可以换成客户全称试试。"
 
 
-def context_items(value: Any) -> List[Dict[str, Any]]:
+def context_items(value: object) -> List[Dict[str, object]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
@@ -21,7 +21,7 @@ def context_items(value: Any) -> List[Dict[str, Any]]:
     return []
 
 
-def extract_customer_candidates(data: Any) -> List[Dict[str, Any]]:
+def extract_customer_candidates(data: object) -> List[Dict[str, object]]:
     if not isinstance(data, dict):
         return []
     items = data.get("items") or []
@@ -48,7 +48,7 @@ def creation_duplicate_keywords(name: Optional[str]) -> List[str]:
     return keywords
 
 
-def build_creation_duplicate_response(duplicate_candidates: Dict[str, Any]) -> str:
+def build_creation_duplicate_response(duplicate_candidates: Dict[str, object]) -> str:
     customers = duplicate_candidates.get("customers") or []
     leads = duplicate_candidates.get("leads") or []
     hidden_customer_count = duplicate_candidates.get("hidden_customer_count") or 0
@@ -78,15 +78,15 @@ def build_creation_duplicate_response(duplicate_candidates: Dict[str, Any]) -> s
     return f"已存在：{matched}。"
 
 
-def drop_empty_values(payload: Dict[str, Any]) -> Dict[str, Any]:
+def drop_empty_values(payload: Dict[str, object]) -> Dict[str, object]:
     return {key: value for key, value in payload.items() if value not in (None, "")}
 
 
-def customer_requires_procurement_method(customer: Dict[str, Any]) -> bool:
+def customer_requires_procurement_method(customer: Dict[str, object]) -> bool:
     return "default_procurement_method_id" in customer and not customer.get("default_procurement_method_id")
 
 
-def customer_default_procurement_method_id(customer: Dict[str, Any]) -> Optional[int]:
+def customer_default_procurement_method_id(customer: Dict[str, object]) -> Optional[int]:
     value = customer.get("default_procurement_method_id")
     if isinstance(value, int) and value > 0:
         return value
@@ -108,14 +108,14 @@ def opportunity_missing_display_fields(missing_fields: List[str]) -> List[str]:
     return opportunity_interaction_fields(missing_fields)
 
 
-def opportunity_field_defaults(customer: Dict[str, Any]) -> Dict[str, Any]:
+def opportunity_field_defaults(customer: Dict[str, object]) -> Dict[str, object]:
     default_procurement_method_id = customer_default_procurement_method_id(customer)
     if default_procurement_method_id is None:
         return {}
     return {"procurement_method_id": default_procurement_method_id}
 
 
-def append_suggestions_to_response(response: str, suggestions: List[Any]) -> str:
+def append_suggestions_to_response(response: str, suggestions: List[object]) -> str:
     actionable = [
         suggestion
         for suggestion in suggestions
@@ -131,10 +131,10 @@ def append_suggestions_to_response(response: str, suggestions: List[Any]) -> str
 
 
 def opportunity_next_task_from_suggestions(
-    suggestions: List[Any],
-    parsed: Dict[str, Any],
-    customer: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
+    suggestions: List[object],
+    parsed: Dict[str, object],
+    customer: Dict[str, object],
+) -> Optional[Dict[str, object]]:
     if not customer.get("id"):
         return None
     suggestion = next(
@@ -189,10 +189,10 @@ def opportunity_next_task_from_suggestions(
 
 
 def stage_move_action_from_suggestions(
-    suggestions: List[Any],
-    customer: Dict[str, Any],
-    business_context: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
+    suggestions: List[object],
+    customer: Dict[str, object],
+    business_context: Dict[str, object],
+) -> Optional[Dict[str, object]]:
     if not customer.get("id"):
         return None
     stage_suggestion = next(
@@ -215,13 +215,20 @@ def stage_move_action_from_suggestions(
         return None
 
     opportunity = find_opportunity_in_context(business_context, int(opportunity_id))
+    stage_target = resolve_stage_move_plan(business_context, int(opportunity_id), int(stage_template_id))
+    if not stage_target:
+        if context_items(business_context.get("active_opportunity_stage_context")):
+            return None
+        stage_target = {
+            "stage_template_id": int(stage_template_id),
+            "target_stage_name": execution_payload.get("target_stage_name"),
+            "stage_move_steps": [{
+                "stage_template_id": int(stage_template_id),
+                "stage_name": execution_payload.get("target_stage_name"),
+            }],
+        }
     opportunity_name = opportunity.get("opportunity_name") or opportunity.get("name") or f"商机 {opportunity_id}"
-    target_stage_name = execution_payload.get("target_stage_name")
-    content = (
-        f"我还识别到商机「{opportunity_name}」可能需要推进阶段"
-        f"{f'到「{target_stage_name}」' if target_stage_name else ''}。"
-        "请确认是否推进？"
-    )
+    content = build_stage_move_confirmation_content(opportunity_name, stage_target)
     return {
         "action": "move_opportunity_stage",
         "customer": customer,
@@ -229,8 +236,57 @@ def stage_move_action_from_suggestions(
         "payload": {
             "customer_id": customer.get("id"),
             "opportunity_id": int(opportunity_id),
-            "stage_template_id": int(stage_template_id),
+            "stage_template_id": int(stage_target["stage_template_id"]),
             "opportunity_name": opportunity_name,
+            "target_stage_name": stage_target.get("target_stage_name"),
+            "stage_move_steps": stage_target.get("stage_move_steps"),
+            "suggestion_title": getattr(stage_suggestion, "title", None),
+            "suggestion_reason": getattr(stage_suggestion, "reason", None),
+        },
+    }
+
+
+def stage_move_selection_action_from_suggestions(
+    suggestions: List[object],
+    customer: Dict[str, object],
+    business_context: Dict[str, object],
+) -> Optional[Dict[str, object]]:
+    if not customer.get("id"):
+        return None
+    stage_suggestion = next(
+        (
+            suggestion
+            for suggestion in suggestions
+            if getattr(suggestion, "action", None) == "MOVE_OPPORTUNITY_STAGE"
+            and getattr(suggestion, "requires_confirmation", True)
+            and getattr(suggestion, "confidence", 0.0) >= 0.75
+            and not getattr(suggestion, "related_object_id", None)
+        ),
+        None,
+    )
+    if not stage_suggestion:
+        return None
+    execution_payload = getattr(stage_suggestion, "execution_payload", None) or {}
+    stage_template_id = execution_payload.get("stage_template_id")
+    if not stage_template_id:
+        return None
+    candidates = stage_move_candidates(business_context, int(stage_template_id))
+    if len(candidates) < 2:
+        return None
+    target_stage_name = candidates[0].get("target_stage_name")
+    content = (
+        "我识别到这次跟进可能需要推进商机阶段"
+        f"{f'到「{target_stage_name}」' if target_stage_name else ''}，"
+        "但该客户有多个可推进商机。请选择要推进哪一个。"
+    )
+    return {
+        "action": "select_opportunity_for_stage_move",
+        "customer": customer,
+        "content": content,
+        "opportunities": candidates,
+        "payload": {
+            "customer_id": customer.get("id"),
+            "stage_template_id": int(stage_template_id),
             "target_stage_name": target_stage_name,
             "suggestion_title": getattr(stage_suggestion, "title", None),
             "suggestion_reason": getattr(stage_suggestion, "reason", None),
@@ -238,7 +294,212 @@ def stage_move_action_from_suggestions(
     }
 
 
-def find_opportunity_in_context(business_context: Dict[str, Any], opportunity_id: int) -> Dict[str, Any]:
+def stage_move_action_from_candidate(
+    *,
+    stage_suggestion: object,
+    customer: Dict[str, object],
+    candidate: Dict[str, object],
+) -> Optional[Dict[str, object]]:
+    opportunity_id = candidate.get("id")
+    stage_template_id = candidate.get("target_stage_template_id")
+    if opportunity_id is None or stage_template_id is None:
+        return None
+    opportunity_name = candidate.get("opportunity_name") or candidate.get("name") or f"商机 {opportunity_id}"
+    target_stage_name = candidate.get("target_stage_name")
+    stage_target = {
+        "stage_template_id": int(stage_template_id),
+        "target_stage_name": target_stage_name,
+        "stage_move_steps": candidate.get("stage_move_steps") or [],
+    }
+    return {
+        "action": "move_opportunity_stage",
+        "customer": customer,
+        "content": build_stage_move_confirmation_content(opportunity_name, stage_target),
+        "payload": {
+            "customer_id": customer.get("id"),
+            "opportunity_id": int(opportunity_id),
+            "stage_template_id": int(stage_template_id),
+            "opportunity_name": opportunity_name,
+            "target_stage_name": target_stage_name,
+            "stage_move_steps": candidate.get("stage_move_steps") or [],
+            "suggestion_title": getattr(stage_suggestion, "title", None),
+            "suggestion_reason": getattr(stage_suggestion, "reason", None),
+            "resolution_confidence": candidate.get("confidence"),
+            "resolution_evidence": candidate.get("evidence") or [],
+        },
+    }
+
+
+def stage_move_candidates(
+    business_context: Dict[str, object],
+    stage_template_id: int,
+) -> List[Dict[str, object]]:
+    candidates: List[Dict[str, object]] = []
+    for item in context_items(business_context.get("active_opportunity_stage_context")):
+        opportunity = item.get("opportunity") if isinstance(item.get("opportunity"), dict) else {}
+        if not _is_active_approved_opportunity(opportunity):
+            continue
+        stages = [stage for stage in item.get("procurement_stages") or [] if isinstance(stage, dict)]
+        current_stage = next((stage for stage in stages if stage.get("is_current")), None)
+        target_stage = _stage_by_template_id(stages, stage_template_id)
+        stage_plan = _forward_stage_move_plan(stages, current_stage, target_stage)
+        if not target_stage or not stage_plan:
+            continue
+        if _is_backward_stage_move(current_stage, target_stage) or target_stage.get("is_current"):
+            continue
+        opportunity_id = opportunity.get("id")
+        if opportunity_id is None:
+            continue
+        candidates.append({
+            "id": int(opportunity_id),
+            "opportunity_name": opportunity.get("opportunity_name") or opportunity.get("name") or f"商机 {opportunity_id}",
+            "current_stage_name": current_stage.get("stage_name") if current_stage else None,
+            "target_stage_template_id": int(stage_template_id),
+            "target_stage_name": target_stage.get("stage_name"),
+            "stage_move_steps": stage_plan,
+        })
+    return candidates
+
+
+def resolve_stage_move_plan(
+    business_context: Dict[str, object],
+    opportunity_id: int,
+    target_stage_template_id: int,
+) -> Optional[Dict[str, object]]:
+    for item in context_items(business_context.get("active_opportunity_stage_context")):
+        opportunity = item.get("opportunity") if isinstance(item.get("opportunity"), dict) else {}
+        if opportunity.get("id") is None or int(opportunity["id"]) != int(opportunity_id):
+            continue
+        stages = [stage for stage in item.get("procurement_stages") or [] if isinstance(stage, dict)]
+        current_stage = next((stage for stage in stages if stage.get("is_current")), None)
+        target_stage = _stage_by_template_id(stages, target_stage_template_id)
+        if not target_stage:
+            return None
+        if _is_backward_stage_move(current_stage, target_stage) or target_stage.get("is_current"):
+            return None
+        stage_plan = _forward_stage_move_plan(stages, current_stage, target_stage)
+        if not stage_plan:
+            return None
+        return {
+            "stage_template_id": int(target_stage_template_id),
+            "target_stage_name": target_stage.get("stage_name"),
+            "stage_move_steps": stage_plan,
+        }
+    return None
+
+
+def build_stage_move_confirmation_content(
+    opportunity_name: object,
+    stage_target: Dict[str, object],
+) -> str:
+    target_stage_name = stage_target.get("target_stage_name")
+    return (
+        f"我还识别到商机「{opportunity_name}」可能需要推进阶段"
+        f"{f'到「{target_stage_name}」' if target_stage_name else ''}。"
+        "请确认是否推进？"
+    )
+
+
+def _is_active_approved_opportunity(opportunity: Dict[str, object]) -> bool:
+    return str(opportunity.get("status")) == "0" and str(opportunity.get("approval_phase") or "").lower() == "approved"
+
+
+def _stage_by_template_id(stages: List[Dict[str, object]], stage_template_id: int) -> Optional[Dict[str, object]]:
+    return next(
+        (
+            stage
+            for stage in stages
+            if stage.get("id") is not None and int(stage["id"]) == int(stage_template_id)
+        ),
+        None,
+    )
+
+
+def _forward_stage_move_plan(
+    stages: List[Dict[str, object]],
+    current_stage: object,
+    target_stage: Dict[str, object],
+) -> List[Dict[str, object]]:
+    target_order = _stage_sort_order(target_stage)
+    if target_stage.get("id") is None or target_order is None:
+        return []
+    if not isinstance(current_stage, dict):
+        start_order = None
+    else:
+        start_order = _stage_sort_order(current_stage)
+        if start_order is None or target_order <= start_order:
+            return []
+    candidates = [
+        stage
+        for stage in stages
+        if stage.get("id") is not None
+        and _stage_sort_order(stage) is not None
+        and int(_stage_sort_order(stage) or 0) <= target_order
+        and (start_order is None or int(_stage_sort_order(stage) or 0) > start_order)
+    ]
+    return [
+        {
+            "stage_template_id": int(stage["id"]),
+            "stage_name": stage.get("stage_name"),
+        }
+        for stage in sorted(candidates, key=lambda stage: int(_stage_sort_order(stage) or 0))
+    ]
+
+
+def _next_stage_after_current(
+    stages: List[Dict[str, object]],
+    current_stage: object,
+) -> Optional[Dict[str, object]]:
+    if not stages:
+        return None
+    if not isinstance(current_stage, dict):
+        default_stage = next((stage for stage in stages if stage.get("is_default_start")), None)
+        if default_stage:
+            return default_stage
+        return _first_sorted_stage(stages)
+    current_order = _stage_sort_order(current_stage)
+    if current_order is None:
+        return None
+    forward_stages = [
+        stage
+        for stage in stages
+        if not stage.get("is_current")
+        and _stage_sort_order(stage) is not None
+        and int(_stage_sort_order(stage)) > current_order
+    ]
+    if not forward_stages:
+        return None
+    return min(forward_stages, key=lambda stage: int(_stage_sort_order(stage) or 0))
+
+
+def _first_sorted_stage(stages: List[Dict[str, object]]) -> Optional[Dict[str, object]]:
+    sortable = [stage for stage in stages if _stage_sort_order(stage) is not None]
+    if not sortable:
+        return None
+    return min(sortable, key=lambda stage: int(_stage_sort_order(stage) or 0))
+
+
+def _stage_sort_order(stage: Dict[str, object]) -> Optional[int]:
+    if stage.get("sort_order") is None:
+        return None
+    try:
+        return int(stage["sort_order"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_backward_stage_move(current_stage: object, target_stage: Dict[str, object]) -> bool:
+    if not isinstance(current_stage, dict):
+        return False
+    if target_stage.get("sort_order") is None or current_stage.get("sort_order") is None:
+        return False
+    try:
+        return int(target_stage["sort_order"]) < int(current_stage["sort_order"])
+    except (TypeError, ValueError):
+        return True
+
+
+def find_opportunity_in_context(business_context: Dict[str, object], opportunity_id: int) -> Dict[str, object]:
     for opportunity in context_items(business_context.get("opportunities")):
         if opportunity.get("id") is not None and int(opportunity["id"]) == opportunity_id:
             return opportunity
@@ -249,17 +510,17 @@ def find_opportunity_in_context(business_context: Dict[str, Any], opportunity_id
     return {"id": opportunity_id}
 
 
-def missing_contact_fields(contact: Dict[str, Any]) -> List[str]:
+def missing_contact_fields(contact: Dict[str, object]) -> List[str]:
     required_fields = ["name", "mobile", "position", "gender"]
     return [field for field in required_fields if not contact.get(field)]
 
 
-def missing_lead_fields(lead: Dict[str, Any]) -> List[str]:
+def missing_lead_fields(lead: Dict[str, object]) -> List[str]:
     required_fields = ["lead_name", "city", "contact_name", "contact_phone"]
     return [field for field in required_fields if not lead.get(field)]
 
 
-def missing_customer_fields(customer: Dict[str, Any]) -> List[str]:
+def missing_customer_fields(customer: Dict[str, object]) -> List[str]:
     missing = [field for field in ["account_name", "city"] if not customer.get(field)]
     has_contact = any(customer.get(field) for field in ["contact_name", "contact_phone", "contact_position", "contact_gender"])
     if has_contact:
@@ -301,7 +562,7 @@ def format_contact_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def missing_invoice_title_fields(invoice_title: Dict[str, Any]) -> List[str]:
+def missing_invoice_title_fields(invoice_title: Dict[str, object]) -> List[str]:
     required_fields = ["title_type", "title", "taxpayer_id"]
     return [field for field in required_fields if not invoice_title.get(field)]
 
@@ -315,7 +576,7 @@ def format_invoice_title_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def missing_deployment_info_fields(deployment_info: Dict[str, Any]) -> List[str]:
+def missing_deployment_info_fields(deployment_info: Dict[str, object]) -> List[str]:
     required_fields = ["deployment_name", "server_address", "authorized_users"]
     return [field for field in required_fields if not deployment_info.get(field)]
 
@@ -329,7 +590,7 @@ def format_deployment_info_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def missing_customer_member_fields(member: Dict[str, Any]) -> List[str]:
+def missing_customer_member_fields(member: Dict[str, object]) -> List[str]:
     if member.get("user_id") or member.get("user_name"):
         return []
     return ["user_name"]
@@ -343,7 +604,7 @@ def format_customer_member_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def resolve_customer_member(member: Dict[str, Any], business_context: Dict[str, Any]) -> tuple[Dict[str, Any], Optional[str]]:
+def resolve_customer_member(member: Dict[str, object], business_context: Dict[str, object]) -> tuple[Dict[str, object], Optional[str]]:
     normalized = {
         "user_id": member.get("user_id"),
         "member_role": member.get("member_role") or "PRESALES",
@@ -387,7 +648,7 @@ def resolve_customer_member(member: Dict[str, Any], business_context: Dict[str, 
     return member, f"我没在客户成员候选人里找到「{user_name}」。请确认成员姓名，或先把这个人加入团队。"
 
 
-def missing_payment_fields(actual_amount: Any, payment_date: Any) -> List[str]:
+def missing_payment_fields(actual_amount: object, payment_date: object) -> List[str]:
     fields = []
     if not actual_amount:
         fields.append("actual_amount")
@@ -397,7 +658,7 @@ def missing_payment_fields(actual_amount: Any, payment_date: Any) -> List[str]:
 
 
 def missing_opportunity_fields(
-    opportunity: Dict[str, Any],
+    opportunity: Dict[str, object],
     *,
     require_procurement_method: bool = False,
 ) -> List[str]:
@@ -440,7 +701,7 @@ def format_opportunity_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def format_opportunity_summary(opportunity: Dict[str, Any]) -> str:
+def format_opportunity_summary(opportunity: Dict[str, object]) -> str:
     parts = []
     if opportunity.get("total_amount"):
         parts.append(f"预计金额 {opportunity.get('total_amount')}")
@@ -454,7 +715,7 @@ def format_opportunity_summary(opportunity: Dict[str, Any]) -> str:
     return "，".join(parts) if parts else "商机名称将由系统自动生成"
 
 
-def is_open_payment_plan(plan: Dict[str, Any]) -> bool:
+def is_open_payment_plan(plan: Dict[str, object]) -> bool:
     status = str(plan.get("status") or "").upper()
     remaining_amount = plan.get("remaining_amount")
     try:
@@ -464,7 +725,7 @@ def is_open_payment_plan(plan: Dict[str, Any]) -> bool:
     return status != "COMPLETED" and has_remaining
 
 
-def resolve_commission_member_id(customer: Dict[str, Any]) -> Optional[str]:
+def resolve_commission_member_id(customer: Dict[str, object]) -> Optional[str]:
     collaborators = customer.get("collaborator_infos") or []
     if collaborators:
         first = collaborators[0] or {}
@@ -476,7 +737,7 @@ def resolve_commission_member_id(customer: Dict[str, Any]) -> Optional[str]:
     return str(owner_id) if owner_id else None
 
 
-def payment_record_payload(plan: Dict[str, Any], payment: Dict[str, Any], commission_member_id: str) -> Dict[str, Any]:
+def payment_record_payload(plan: Dict[str, object], payment: Dict[str, object], commission_member_id: str) -> Dict[str, object]:
     return {
         "payment_plan_id": plan.get("id"),
         "actual_amount": payment.get("actual_amount"),
@@ -487,7 +748,7 @@ def payment_record_payload(plan: Dict[str, Any], payment: Dict[str, Any], commis
     }
 
 
-def payment_plan_payload(contract: Dict[str, Any], payment: Dict[str, Any], commission_member_id: Optional[str]) -> Dict[str, Any]:
+def payment_plan_payload(contract: Dict[str, object], payment: Dict[str, object], commission_member_id: Optional[str]) -> Dict[str, object]:
     return {
         "contract_id": contract.get("id"),
         "stage_name": "AI登记回款计划",

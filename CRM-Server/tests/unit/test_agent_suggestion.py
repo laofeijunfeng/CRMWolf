@@ -1,5 +1,6 @@
 """CRM AI Agent suggestion generator tests."""
 import pytest
+from langchain.agents.structured_output import ToolStrategy
 
 from app.services.agent.prompts import CRM_AGENT_SUGGESTION_SYSTEM_PROMPT, build_suggestion_messages
 from app.services.agent.schemas import AgentSemanticParseResult, AgentSuggestionResult
@@ -148,7 +149,7 @@ async def test_suggestion_generator_uses_langchain_structured_output_path():
         temperature=0.1,
     )
 
-    assert calls["response_format"] is AgentSuggestionResult
+    assert isinstance(calls["response_format"], ToolStrategy)
     assert "CRM AI Agent 业务建议生成器" in calls["system_prompt"]
     assert result.suggestions[0].action == "CREATE_OPPORTUNITY"
 
@@ -277,6 +278,100 @@ def test_suggestion_guardrail_keeps_valid_opportunity_stage_move():
     assert guarded.suggestions[0].action == "MOVE_OPPORTUNITY_STAGE"
     assert guarded.suggestions[0].related_object_id == 301
     assert guarded.suggestions[0].execution_payload["target_stage_name"] == "招标准备"
+
+
+def test_suggestion_guardrail_limits_opportunity_stage_move_to_next_stage():
+    ai_result = AgentSuggestionResult.model_validate({
+        "summary": "客户已进入签约。",
+        "suggestions": [{
+            "action": "MOVE_OPPORTUNITY_STAGE",
+            "title": "推进商机阶段到签约",
+            "reason": "用户输入提到今天可以开始签合同。",
+            "priority": "high",
+            "requires_confirmation": True,
+            "missing_fields": [],
+            "related_object_type": "opportunity",
+            "related_object_id": 301,
+            "execution_payload": {"stage_template_id": 13},
+            "risk_notes": [],
+            "confidence": 0.9,
+        }],
+        "need_user_choice": True,
+        "clarification_question": None,
+    })
+
+    guarded = AgentSuggestionGenerator.apply_business_guardrails(
+        ai_result,
+        semantic_result(),
+        {
+            "active_opportunity_stage_context": [{
+                "opportunity": {"id": 301, "status": 0, "approval_phase": "approved"},
+                "procurement_stages": [
+                    {"id": 11, "stage_name": "立项", "sort_order": 1, "is_current": True},
+                    {"id": 12, "stage_name": "方案确认", "sort_order": 2, "is_current": False},
+                    {"id": 13, "stage_name": "签约", "sort_order": 3, "is_current": False},
+                ],
+            }],
+        },
+    )
+
+    payload = guarded.suggestions[0].execution_payload
+    assert guarded.suggestions[0].action == "MOVE_OPPORTUNITY_STAGE"
+    assert payload["stage_template_id"] == 13
+    assert payload["target_stage_name"] == "签约"
+    assert payload["stage_move_steps"] == [
+        {"stage_template_id": 12, "stage_name": "方案确认"},
+        {"stage_template_id": 13, "stage_name": "签约"},
+    ]
+
+
+def test_suggestion_guardrail_keeps_ambiguous_stage_move_for_business_selection():
+    ai_result = AgentSuggestionResult.model_validate({
+        "summary": "客户已进入签约。",
+        "suggestions": [{
+            "action": "MOVE_OPPORTUNITY_STAGE",
+            "title": "推进商机阶段到签约",
+            "reason": "用户输入提到今天可以开始签合同。",
+            "priority": "high",
+            "requires_confirmation": True,
+            "missing_fields": [],
+            "related_object_type": "opportunity",
+            "related_object_id": None,
+            "execution_payload": {"stage_template_id": 12},
+            "risk_notes": [],
+            "confidence": 0.88,
+        }],
+        "need_user_choice": True,
+        "clarification_question": None,
+    })
+
+    guarded = AgentSuggestionGenerator.apply_business_guardrails(
+        ai_result,
+        semantic_result(),
+        {
+            "active_opportunity_stage_context": [
+                {
+                    "opportunity": {"id": 301, "status": 0, "approval_phase": "approved"},
+                    "procurement_stages": [
+                        {"id": 11, "stage_name": "商务谈判", "sort_order": 1, "is_current": True},
+                        {"id": 12, "stage_name": "签约", "sort_order": 2, "is_current": False},
+                    ],
+                },
+                {
+                    "opportunity": {"id": 302, "status": 0, "approval_phase": "approved"},
+                    "procurement_stages": [
+                        {"id": 11, "stage_name": "商务谈判", "sort_order": 1, "is_current": True},
+                        {"id": 12, "stage_name": "签约", "sort_order": 2, "is_current": False},
+                    ],
+                },
+            ],
+        },
+    )
+
+    assert guarded.suggestions[0].action == "MOVE_OPPORTUNITY_STAGE"
+    assert guarded.suggestions[0].related_object_id is None
+    assert guarded.suggestions[0].missing_fields == ["opportunity_id"]
+    assert guarded.suggestions[0].execution_payload["target_stage_name"] == "签约"
 
 
 def test_suggestion_guardrail_blocks_stage_move_for_unapproved_opportunity():

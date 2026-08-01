@@ -9,6 +9,7 @@
  * - 统一样式（行高 44px、语义表头背景等）
  */
 import { computed, ref, watch } from 'vue'
+import { toast } from 'vue-sonner'
 import {
   Pagination,
   PaginationContent,
@@ -24,10 +25,13 @@ import {
   EmptyTitle
 } from '@/components/ui/empty'
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import ColumnConfigPopover from './ColumnConfigPopover.vue'
 import ListFilterPopover from './ListFilterPopover.vue'
 import ListSortPopover from './ListSortPopover.vue'
 import SelectField from './SelectField.vue'
-import type { ListFilterCondition, ListFilterField } from './listFilterTypes'
+import { viewPreferenceApi, type ViewPreferenceConfig, type ViewPreferenceScope } from '@/api/viewPreference'
+import type { ColumnConfigOption } from './columnConfigTypes'
+import type { ListFilterCondition, ListFilterField, ListFilterFieldType, ListFilterOption } from './listFilterTypes'
 import type { ListSortCondition, ListSortField, ListSortFieldType, ListSortOption } from './listSortTypes'
 import { buildPaginationEntries, type PaginationEntry } from './paginationWindow'
 
@@ -42,7 +46,17 @@ interface Column {
   /** 对齐方式 */
   align?: 'left' | 'center' | 'right'
   /** 固定列位置（left/right） */
-  fixed?: 'left' | 'right'
+  fixed?: 'left' | 'right' | undefined
+  /** 是否可筛选 */
+  filterable?: boolean
+  /** 筛选字段，默认使用 key */
+  filterKey?: string
+  /** 筛选展示名称，默认使用 title */
+  filterLabel?: string
+  /** 筛选字段类型 */
+  filterType?: ListFilterFieldType
+  /** 枚举筛选选项 */
+  filterOptions?: ListFilterOption[]
   /** 是否可排序 */
   sortable?: boolean
   /** 排序字段，默认使用 key */
@@ -51,6 +65,12 @@ interface Column {
   sortType?: ListSortFieldType
   /** 枚举排序选项顺序 */
   sortOptions?: ListSortOption[]
+  /** 是否允许在字段配置中拖动排序 */
+  configurable?: boolean | undefined
+  /** 是否允许在字段配置中隐藏 */
+  hideable?: boolean | undefined
+  /** 当前是否显示 */
+  visible?: boolean | undefined
 }
 
 interface Props {
@@ -100,6 +120,14 @@ interface Props {
   mobileStatusKey?: string
   /** 移动端兜底卡片元信息字段 */
   mobileMetaKeys?: string[]
+  /** 视图偏好 key，设置后可读取/保存列偏好 */
+  viewKey?: string
+  /** 是否启用字段配置 */
+  columnConfigEnabled?: boolean
+  /** 是否允许把当前筛选另存为视图 */
+  filterViewSaveEnabled?: boolean
+  /** 筛选视图保存中 */
+  filterViewSaveLoading?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -121,6 +149,10 @@ const props = withDefaults(defineProps<Props>(), {
   mobileSubtitleKey: '',
   mobileStatusKey: '',
   mobileMetaKeys: () => [],
+  viewKey: '',
+  columnConfigEnabled: false,
+  filterViewSaveEnabled: false,
+  filterViewSaveLoading: false,
 })
 
 // ==================== Emits ====================
@@ -131,6 +163,7 @@ const emit = defineEmits<{
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
   'filter-reset': []
+  'filter-save-view': [value: ListFilterCondition[]]
   'update:sorts': [value: ListSortCondition[]]
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
@@ -141,8 +174,28 @@ const totalPages = computed<number>(() => Math.ceil(props.total / props.pageSize
 const paginationEntries = computed<PaginationEntry[]>(() =>
   buildPaginationEntries(props.page, totalPages.value)
 )
-const normalizedFilterFields = computed<ListFilterField[]>(() => props.filterFields ?? [])
+const normalizedFilterFields = computed<ListFilterField[]>(() => {
+  if (props.filterFields.length > 0) {
+    return props.filterFields
+  }
+
+  return props.columns
+    .filter((col) => col.filterable === true && col.filterType !== undefined && col.key !== 'actions')
+    .map((col) => {
+      const field: ListFilterField = {
+        key: col.filterKey ?? col.key,
+        label: col.filterLabel ?? col.title,
+        type: col.filterType as ListFilterFieldType
+      }
+      if (col.filterOptions !== undefined) {
+        field.options = col.filterOptions
+      }
+      return field
+    })
+})
 const normalizedFilters = computed<ListFilterCondition[]>(() => props.filters ?? [])
+const filterViewSaveAvailable = computed(() => props.filterViewSaveEnabled === true)
+const filterViewSaving = computed(() => props.filterViewSaveLoading === true)
 const normalizedSortFields = computed<ListSortField[]>(() => {
   if (props.sortFields.length > 0) {
     return props.sortFields
@@ -164,7 +217,7 @@ const normalizedSortFields = computed<ListSortField[]>(() => {
 })
 const normalizedSorts = computed<ListSortCondition[]>(() => props.sorts ?? [])
 const hasTableTools = computed(() =>
-  normalizedFilterFields.value.length > 0 || normalizedSortFields.value.length > 0
+  normalizedFilterFields.value.length > 0 || normalizedSortFields.value.length > 0 || isColumnConfigAvailable.value
 )
 const pageSizeOptions = computed(() =>
   props.pageSizes.map((size) => ({
@@ -173,13 +226,25 @@ const pageSizeOptions = computed(() =>
   }))
 )
 
-/**
- * 计算固定列配置
- * - column.fixed 优先级最高
- * - 否则使用 fixedLeftCount/fixedRightCount 默认值
- */
-const processedColumns = computed(() => {
-  const cols = props.columns.map((col, index) => {
+type ProcessedColumn = Column & {
+  fixed?: 'left' | 'right' | undefined
+  index: number
+  sourceIndex: number
+}
+
+const columnPreferenceConfig = ref<ViewPreferenceConfig | null>(null)
+const draftColumnPreferenceConfig = ref<ViewPreferenceConfig | null>(null)
+const activeColumnConfigScope = ref<ViewPreferenceScope>('personal')
+const columnConfigLoading = ref(false)
+const columnConfigSaving = ref(false)
+const columnPreferenceLoadSeq = ref(0)
+
+const isColumnConfigAvailable = computed(() =>
+  props.columnConfigEnabled && props.viewKey.trim() !== ''
+)
+
+function resolveColumns(columns: Column[]): ProcessedColumn[] {
+  const cols = columns.map((col, index) => {
     let fixed: 'left' | 'right' | undefined = col.fixed
 
     // 自动固定左侧列（除非已有 explicit fixed 配置）
@@ -192,11 +257,91 @@ const processedColumns = computed(() => {
       fixed = 'right'
     }
 
-    return { ...col, fixed, index }
+    return { ...col, fixed, index, sourceIndex: index }
   })
 
   return cols
+}
+
+function isColumnConfigurable(column: ProcessedColumn): boolean {
+  if (column.configurable !== undefined) return column.configurable
+  return column.key !== 'actions' && column.fixed === undefined
+}
+
+function isColumnHideable(column: ProcessedColumn): boolean {
+  if (column.hideable !== undefined) return column.hideable
+  return column.key !== 'actions' && column.fixed === undefined
+}
+
+function applyColumnPreference(columns: ProcessedColumn[], config: ViewPreferenceConfig | null): ProcessedColumn[] {
+  const preferenceByKey = new Map((config?.columns ?? []).map((column) => [column.key, column]))
+  const decoratedColumns = columns.map((column) => {
+    const preference = preferenceByKey.get(column.key)
+    const defaultVisible = column.visible ?? true
+    return {
+      ...column,
+      visible: isColumnHideable(column) ? preference?.visible ?? defaultVisible : defaultVisible,
+      preferredOrder: isColumnConfigurable(column) ? preference?.order ?? column.sourceIndex * 10 : column.sourceIndex * 10,
+    }
+  })
+
+  const left = decoratedColumns.filter((column) => column.fixed === 'left')
+  const middle = decoratedColumns
+    .filter((column) => column.fixed === undefined)
+    .sort((a, b) => {
+      const orderDiff = a.preferredOrder - b.preferredOrder
+      return orderDiff === 0 ? a.sourceIndex - b.sourceIndex : orderDiff
+    })
+  const right = decoratedColumns.filter((column) => column.fixed === 'right')
+
+  return [...left, ...middle, ...right].map((column, index) => ({ ...column, index }))
+}
+
+function buildColumnPreferenceConfig(columns: ColumnConfigOption[]): ViewPreferenceConfig {
+  return {
+    version: 1,
+    columns: columns
+      .filter((column) => column.configurable || column.hideable)
+      .map((column, index) => ({
+        key: column.key,
+        order: index * 10,
+        visible: column.visible,
+      }))
+  }
+}
+
+const effectiveColumnPreferenceConfig = computed(() =>
+  draftColumnPreferenceConfig.value ?? columnPreferenceConfig.value
+)
+
+const preferredColumns = computed<ProcessedColumn[]>(() =>
+  applyColumnPreference(resolveColumns(props.columns), effectiveColumnPreferenceConfig.value)
+)
+
+const processedColumns = computed<ProcessedColumn[]>(() =>
+  preferredColumns.value
+    .filter((column) => column.visible !== false)
+    .map((column, index) => ({ ...column, index }))
+)
+
+const columnConfigOptions = computed<ColumnConfigOption[]>(() =>
+  preferredColumns.value.map((column) => ({
+    key: column.key,
+    title: column.title,
+    visible: column.visible !== false,
+    fixed: column.fixed,
+    configurable: isColumnConfigurable(column),
+    hideable: isColumnHideable(column)
+  }))
+)
+
+const columnConfigActiveCount = computed(() => {
+  if (!isColumnConfigAvailable.value) return 0
+  return columnConfigOptions.value.filter((column) => !column.visible).length
 })
+const columnConfigActive = computed(() =>
+  isColumnConfigAvailable.value && (effectiveColumnPreferenceConfig.value?.columns.length ?? 0) > 0
+)
 
 const dataColumns = computed(() => processedColumns.value.filter((col) => col.key !== 'actions'))
 const fallbackTitleColumn = computed(() =>
@@ -321,6 +466,10 @@ function handleFilterReset(): void {
   emit('filter-reset')
 }
 
+function handleFilterSaveView(filters: ListFilterCondition[]): void {
+  emit('filter-save-view', filters)
+}
+
 function handleSortUpdate(sorts: ListSortCondition[]): void {
   emit('update:sorts', sorts)
 }
@@ -331,6 +480,76 @@ function handleSortApply(sorts: ListSortCondition[]): void {
 
 function handleSortReset(): void {
   emit('sort-reset')
+}
+
+function handleColumnConfigChange(columns: ColumnConfigOption[]): void {
+  draftColumnPreferenceConfig.value = buildColumnPreferenceConfig(columns)
+}
+
+async function loadColumnPreference(): Promise<void> {
+  const loadSeq = ++columnPreferenceLoadSeq.value
+  if (!isColumnConfigAvailable.value) {
+    columnPreferenceConfig.value = null
+    draftColumnPreferenceConfig.value = null
+    activeColumnConfigScope.value = 'personal'
+    return
+  }
+
+  columnConfigLoading.value = true
+  try {
+    const response = await viewPreferenceApi.get(props.viewKey, { skipErrorNotification: true })
+    if (loadSeq !== columnPreferenceLoadSeq.value) return
+    columnPreferenceConfig.value = response.effective_config
+    draftColumnPreferenceConfig.value = null
+    activeColumnConfigScope.value = response.effective_scope ?? 'personal'
+  } catch {
+    if (loadSeq !== columnPreferenceLoadSeq.value) return
+    toast.error('字段配置加载失败')
+  } finally {
+    if (loadSeq === columnPreferenceLoadSeq.value) {
+      columnConfigLoading.value = false
+    }
+  }
+}
+
+async function handleColumnConfigSave(scope: ViewPreferenceScope): Promise<void> {
+  if (!isColumnConfigAvailable.value) return
+
+  columnConfigSaving.value = true
+  try {
+    const config = draftColumnPreferenceConfig.value ?? buildColumnPreferenceConfig(columnConfigOptions.value)
+    const response = await viewPreferenceApi.save(props.viewKey, {
+      scope,
+      config,
+      name: scope === 'team' ? '团队默认字段配置' : '我的字段配置',
+      is_default: true
+    })
+    columnPreferenceConfig.value = response.effective_config
+    draftColumnPreferenceConfig.value = null
+    activeColumnConfigScope.value = response.effective_scope ?? scope
+    toast.success(scope === 'team' ? '团队字段配置已同步' : '字段配置已保存')
+  } catch {
+    toast.error(scope === 'team' ? '团队字段配置保存失败' : '字段配置保存失败')
+  } finally {
+    columnConfigSaving.value = false
+  }
+}
+
+async function handleColumnConfigReset(scope: ViewPreferenceScope): Promise<void> {
+  if (!isColumnConfigAvailable.value) return
+
+  columnConfigSaving.value = true
+  try {
+    const response = await viewPreferenceApi.reset(props.viewKey, scope)
+    columnPreferenceConfig.value = response.effective_config
+    draftColumnPreferenceConfig.value = null
+    activeColumnConfigScope.value = response.effective_scope ?? 'personal'
+    toast.success(scope === 'team' ? '团队字段配置已恢复默认' : '字段配置已恢复默认')
+  } catch {
+    toast.error(scope === 'team' ? '团队字段配置恢复失败' : '字段配置恢复失败')
+  } finally {
+    columnConfigSaving.value = false
+  }
 }
 
 function getRowKey(row: T, index: number): string | number {
@@ -366,6 +585,14 @@ function handleScroll(event: Event): void {
 watch(() => props.data, () => {
   scrollLeft.value = 0
 })
+
+watch(
+  () => [props.viewKey, props.columnConfigEnabled] as const,
+  () => {
+    void loadColumnPreference()
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -390,9 +617,12 @@ watch(() => props.data, () => {
           v-if="normalizedFilterFields.length > 0"
           :model-value="normalizedFilters"
           :fields="normalizedFilterFields"
+          :save-view-enabled="filterViewSaveAvailable"
+          :save-view-loading="filterViewSaving"
           @update:model-value="handleFilterUpdate"
           @apply="handleFilterApply"
           @reset="handleFilterReset"
+          @save-view="handleFilterSaveView"
         />
         <ListSortPopover
           v-if="normalizedSortFields.length > 0"
@@ -401,6 +631,18 @@ watch(() => props.data, () => {
           @update:model-value="handleSortUpdate"
           @apply="handleSortApply"
           @reset="handleSortReset"
+        />
+        <ColumnConfigPopover
+          v-if="isColumnConfigAvailable"
+          :columns="columnConfigOptions"
+          :active="columnConfigActive"
+          :active-count="columnConfigActiveCount"
+          :scope="activeColumnConfigScope"
+          :loading="columnConfigLoading"
+          :saving="columnConfigSaving"
+          @change="handleColumnConfigChange"
+          @save="handleColumnConfigSave"
+          @reset="handleColumnConfigReset"
         />
         <slot name="tableTools" />
       </div>

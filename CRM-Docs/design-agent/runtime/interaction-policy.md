@@ -56,11 +56,13 @@ LLM 只负责用 structured output 产出候选意图、字段、建议和置信
 
 代码层使用 LangGraph 状态机选择当前唯一交互动作。
 
-LangChain middleware 或等价 runtime hooks 负责最终回复前的交互 guardrail。
+LangGraph interrupt/resume 负责表达所有等待用户响应的交互动作。
+
+LangChain middleware 或等价 runtime hooks 负责最终回复前的交互 guardrail，以及受控 tool-calling 子 Agent 的调用拦截。
 
 HITL 只暂停当前待执行动作，不代表允许同时收集多个用户决策。
 
-Memory 必须保存 pending task、next task、已补字段和被延后的建议。
+Memory 必须在 LangGraph checkpoint 中保存当前 interrupt、next action、已补字段和被延后的建议；pending task 只做投影。
 
 ## 输出约束
 
@@ -76,10 +78,12 @@ Memory 必须保存 pending task、next task、已补字段和被延后的建议
 
 新增或修改 Agent 响应逻辑时，必须经过 interaction planner。
 
-planner 输入包括 semantic result、business context、suggestions、pending task 和 tool capability。
+planner 输入包括 semantic result、business context、suggestions、current interrupt、pending task projection 和 tool capability。
 
 planner 输出只能有一个 `interaction_action`。
 
 最终回复前必须校验没有多个用户响应目标。
 
 违反本规则时，优先保留高优先级动作，其他动作写入 next task 或内部 trace。
+
+当 `interaction_action` 需要用户响应时，graph 必须发出 interrupt payload；最终回复只是 interrupt 的用户可见表达，不能成为恢复业务状态的唯一依据。

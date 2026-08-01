@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -14,7 +13,6 @@ from app.services.agent.schemas import AgentHITLPolicy, AgentMemorySnapshot, Age
 from app.services.agent.semantic import AgentSemanticParserError
 from app.services.agent.temporal import agent_temporal_resolver
 from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
-from app.services.agent.session_state import _remember_pending_task
 from app.services.agent.task_factory import _new_task_key
 from app.services.customer_activity_kinds import (
     infer_activity_kind,
@@ -75,7 +73,7 @@ def _merge_follow_up_fields(existing_payload: dict, semantic_result: AgentSemant
         }),
     }
 
-def _follow_up_content_for_create(payload: dict, quality: Any = None) -> str:
+def _follow_up_content_for_create(payload: dict, quality: object = None) -> str:
     revision = (getattr(quality, "suggested_revision", None) or "").strip() if quality else ""
     return revision or payload.get("content") or ""
 
@@ -123,7 +121,7 @@ async def _evaluate_lead_follow_up_quality(db: Session, task, follow_up: dict):
         current_date=agent_temporal_resolver.now().date(),
     )
 
-def _lead_follow_up_create_payload(lead_id: int, follow_up: dict, quality: Any = None) -> dict:
+def _lead_follow_up_create_payload(lead_id: int, follow_up: dict, quality: object = None) -> dict:
     return {
         "lead_id": lead_id,
         "content": _follow_up_content_for_create(follow_up, quality),
@@ -174,7 +172,7 @@ async def _evaluate_customer_activity_quality(db: Session, task, customer: dict,
         current_date=agent_temporal_resolver.now().date(),
     )
 
-def _customer_activity_create_payload(customer_id: int, activity: dict, quality: Any = None) -> dict:
+def _customer_activity_create_payload(customer_id: int, activity: dict, quality: object = None) -> dict:
     method = activity.get("method") or "AI录入"
     content = activity.get("content") or ""
     raw_source_content = activity.get("source_content") or activity.get("original_content") or content
@@ -230,7 +228,6 @@ def _create_customer_activity_task(
             },
         ),
     )
-    _remember_pending_task(db, session, next_task)
     return next_task
 
 async def _stage_customer_activity_after_create(
@@ -242,11 +239,11 @@ async def _stage_customer_activity_after_create(
     user_id: int,
     customer: dict,
     activity: dict,
-) -> str:
+) -> tuple[str, object | None]:
     try:
         envelope = await _evaluate_customer_activity_quality(db, task, customer, activity)
     except AgentFollowUpQualityEvaluatorError as exc:
-        _create_customer_activity_task(
+        next_task = _create_customer_activity_task(
             db,
             session,
             team_id=team_id,
@@ -258,12 +255,12 @@ async def _stage_customer_activity_after_create(
             required_tools=[],
             confirmation_summary="补充客户活动信息",
         )
-        return f"客户已创建，但我没有可靠评估客户活动。请补充一下活动信息。原因：{str(exc)}"
+        return f"客户已创建，但我没有可靠评估客户活动。请补充一下活动信息。原因：{str(exc)}", next_task
 
     quality = envelope.result
     activity = {**activity, "quality": quality.model_dump(exclude_none=True)}
     if not quality.passed:
-        _create_customer_activity_task(
+        next_task = _create_customer_activity_task(
             db,
             session,
             team_id=team_id,
@@ -276,10 +273,10 @@ async def _stage_customer_activity_after_create(
             confirmation_summary="补充客户活动信息",
         )
         question = quality.supplement_question or "这条客户活动还差一点关键信息，请继续补充。"
-        return f"客户已创建。{question}"
+        return f"客户已创建。{question}", next_task
 
     next_payload = _customer_activity_create_payload(customer["id"], activity, quality)
-    _create_customer_activity_task(
+    next_task = _create_customer_activity_task(
         db,
         session,
         team_id=team_id,
@@ -287,11 +284,11 @@ async def _stage_customer_activity_after_create(
         customer=customer,
         activity=next_payload,
         action="create_customer_activity",
-        summary="等待确认执行：create_customer_activity",
+        summary=f"等待确认记录「{customer.get('account_name')}」的跟进",
         required_tools=["create_customer_activity"],
         confirmation_summary=f"为「{customer.get('account_name')}」创建客户活动",
     )
-    return "客户已创建。请确认是否同步创建客户活动？"
+    return "客户已创建。请确认是否同步创建客户活动？", next_task
 
 def _create_lead_follow_up_task(
     db: Session,
@@ -331,7 +328,6 @@ def _create_lead_follow_up_task(
             },
         ),
     )
-    _remember_pending_task(db, session, next_task)
     return next_task
 
 async def _stage_lead_follow_up_after_create(
@@ -343,11 +339,11 @@ async def _stage_lead_follow_up_after_create(
     user_id: int,
     lead_id: int,
     follow_up: dict,
-) -> str:
+) -> tuple[str, object | None]:
     try:
         envelope = await _evaluate_lead_follow_up_quality(db, task, follow_up)
     except AgentFollowUpQualityEvaluatorError as exc:
-        _create_lead_follow_up_task(
+        next_task = _create_lead_follow_up_task(
             db,
             session,
             team_id=team_id,
@@ -359,12 +355,12 @@ async def _stage_lead_follow_up_after_create(
             required_tools=[],
             confirmation_summary="补充线索跟进信息",
         )
-        return f"线索已创建，但我没有可靠评估线索跟进记录。请补充一下跟进信息。原因：{str(exc)}"
+        return f"线索已创建，但我没有可靠评估线索跟进记录。请补充一下跟进信息。原因：{str(exc)}", next_task
 
     quality = envelope.result
     follow_up = {**follow_up, "quality": quality.model_dump(exclude_none=True)}
     if not quality.passed:
-        _create_lead_follow_up_task(
+        next_task = _create_lead_follow_up_task(
             db,
             session,
             team_id=team_id,
@@ -377,10 +373,10 @@ async def _stage_lead_follow_up_after_create(
             confirmation_summary="补充线索跟进信息",
         )
         question = quality.supplement_question or "这条线索跟进还差一点关键信息，请继续补充。"
-        return f"线索已创建。{question}"
+        return f"线索已创建。{question}", next_task
 
     next_payload = _lead_follow_up_create_payload(lead_id, follow_up, quality)
-    _create_lead_follow_up_task(
+    next_task = _create_lead_follow_up_task(
         db,
         session,
         team_id=team_id,
@@ -388,11 +384,11 @@ async def _stage_lead_follow_up_after_create(
         lead_id=lead_id,
         follow_up=next_payload,
         action="create_lead_follow_up",
-        summary="等待确认执行：create_lead_follow_up",
+        summary="等待确认创建线索跟进记录",
         required_tools=["create_lead_follow_up"],
         confirmation_summary="创建线索跟进记录",
     )
-    return "线索已创建。请确认是否同步创建线索跟进记录？"
+    return "线索已创建。请确认是否同步创建线索跟进记录？", next_task
 
 async def _apply_follow_up_quality_fields(db: Session, task, content: str):
     state = deepcopy(task.state_json or {})
@@ -465,7 +461,7 @@ async def _apply_follow_up_quality_fields(db: Session, task, content: str):
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_customer_activity",
+            summary=f"等待确认记录「{customer.get('account_name')}」的跟进",
             input_json=next_payload,
             state_json=new_state,
         ),
@@ -510,7 +506,7 @@ async def _apply_lead_follow_up_quality_fields(db: Session, task, content: str):
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_lead_follow_up",
+            summary="等待确认创建线索跟进记录",
             input_json=next_payload,
             state_json=new_state,
         ),

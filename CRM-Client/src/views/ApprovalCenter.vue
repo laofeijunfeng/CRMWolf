@@ -53,6 +53,8 @@
         :page-size="pageSize"
         :loading="listLoading"
         :filter-fields="filterFields"
+        view-key="approval-center.list"
+        column-config-enabled
         height="calc(100vh - 108px)"
         empty-title="暂无待审批事项"
         empty-description="所有回款与发票申请都已处理完毕"
@@ -546,6 +548,7 @@ import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { formatDateRelative } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
@@ -715,7 +718,7 @@ const contractStatusLabel = (status?: string | null): string => {
     DRAFT: '草稿',
     PENDING_REVIEW: '审批中',
     SIGNED: '已签署',
-    EFFECTIVE: '已生效',
+    EFFECTIVE: '已签署',
     EXPIRED: '已到期',
     TERMINATED: '已终止'
   }
@@ -1055,9 +1058,9 @@ onUnmounted(() => {
   headerStore.clear()
 })
 
-// TopBar 配置（Tabs）
-watchEffect(() => {
-  headerStore.setTabs(tabs.value, activeTab.value)
+useTopBarRegistration({
+  tabs,
+  activeTab: () => activeTab.value
 })
 
 // 监听 headerStore.activeTab 变化

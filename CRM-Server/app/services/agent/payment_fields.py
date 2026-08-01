@@ -69,7 +69,7 @@ async def _apply_payment_fields(db: Session, task, content: str):
                 confirmation_summary=f"为「{customer.get('account_name')}」登记回款 {payment.get('actual_amount')}",
             ).model_dump(exclude_none=True),
         }
-        agent_task_crud.update(db, task, AgentTaskUpdate(summary="等待确认执行：create_payment_record", input_json=next_payload, state_json=new_state))
+        agent_task_crud.update(db, task, AgentTaskUpdate(summary="等待确认登记回款", input_json=next_payload, state_json=new_state))
         return True, f"回款信息已补齐。请确认是否为「{customer.get('account_name')}」登记回款 {payment.get('actual_amount')}？"
 
     if len(contracts) == 1:
@@ -83,7 +83,7 @@ async def _apply_payment_fields(db: Session, task, content: str):
                 confirmation_summary=f"基于合同「{contracts[0].get('contract_name')}」创建回款计划",
             ).model_dump(exclude_none=True),
         }
-        agent_task_crud.update(db, task, AgentTaskUpdate(summary="等待确认执行：create_payment_plan", input_json=next_payload, state_json=new_state))
+        agent_task_crud.update(db, task, AgentTaskUpdate(summary="等待确认创建回款计划", input_json=next_payload, state_json=new_state))
         return True, f"回款信息已补齐。请确认是否基于合同「{contracts[0].get('contract_name')}」创建回款计划？"
 
     agent_task_crud.update(db, task, AgentTaskUpdate(input_json=payload, state_json=state))

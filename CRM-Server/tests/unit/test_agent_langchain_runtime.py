@@ -1,6 +1,7 @@
 """CRM AI Agent LangChain runtime tests."""
 
 import pytest
+from langchain.agents.structured_output import ProviderStrategy, ToolStrategy
 from pydantic import BaseModel
 
 from app.services.agent import langchain_runtime
@@ -81,6 +82,71 @@ async def test_langchain_runtime_validates_dict_structured_response():
 
 
 @pytest.mark.asyncio
+async def test_langchain_runtime_supports_explicit_tool_structured_output_strategy():
+    class FakeAgent:
+        async def ainvoke(self, payload):
+            return {"structured_response": {"value": "ok", "score": 90}}
+
+    calls = {}
+
+    def fake_agent_factory(**kwargs):
+        calls.update(kwargs)
+        return FakeAgent()
+
+    runtime = AgentLangChainRuntime(
+        agent_factory=fake_agent_factory,
+        chat_model_factory=FakeChatModel,
+    )
+
+    result = await runtime.ainvoke_structured(
+        api_host="https://ai.example.com/v1",
+        api_key="test-key",
+        model="test-model",
+        temperature=0.1,
+        system_prompt="system",
+        user_prompt="user",
+        response_model=SampleStructuredResult,
+        structured_output_strategy="tool",
+        error_prefix="测试",
+    )
+
+    assert result == SampleStructuredResult(value="ok", score=90)
+    assert isinstance(calls["response_format"], ToolStrategy)
+
+
+@pytest.mark.asyncio
+async def test_langchain_runtime_supports_explicit_provider_structured_output_strategy():
+    class FakeAgent:
+        async def ainvoke(self, payload):
+            return {"structured_response": {"value": "ok", "score": 90}}
+
+    calls = {}
+
+    def fake_agent_factory(**kwargs):
+        calls.update(kwargs)
+        return FakeAgent()
+
+    runtime = AgentLangChainRuntime(
+        agent_factory=fake_agent_factory,
+        chat_model_factory=FakeChatModel,
+    )
+
+    await runtime.ainvoke_structured(
+        api_host="https://ai.example.com/v1",
+        api_key="test-key",
+        model="test-model",
+        temperature=0.1,
+        system_prompt="system",
+        user_prompt="user",
+        response_model=SampleStructuredResult,
+        structured_output_strategy="provider",
+        error_prefix="测试",
+    )
+
+    assert isinstance(calls["response_format"], ProviderStrategy)
+
+
+@pytest.mark.asyncio
 async def test_langchain_runtime_raises_when_structured_response_invalid():
     class FakeAgent:
         async def ainvoke(self, payload):
@@ -115,7 +181,7 @@ async def test_langchain_runtime_wraps_agent_invoke_failure():
         chat_model_factory=FakeChatModel,
     )
 
-    with pytest.raises(RuntimeError, match="测试 调用失败：TimeoutError"):
+    with pytest.raises(RuntimeError, match="测试 调用失败：TimeoutError: timeout"):
         await runtime.ainvoke_structured(
             api_host="https://ai.example.com/v1",
             api_key="test-key",

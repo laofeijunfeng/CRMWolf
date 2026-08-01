@@ -1,7 +1,7 @@
 """Stable Agent interaction contracts shared by web and IM channels."""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 import uuid
 
 
@@ -47,7 +47,7 @@ EVENT_TITLES = {
     "customer_fields_required": "补充客户信息",
     "follow_up_quality_required": "补充跟进记录",
     "pending_interruption_confirmation_required": "切换流程",
-    "turn_relation_clarification_required": "选择草稿",
+    "turn_relation_clarification_required": "选择处理方式",
 }
 
 
@@ -73,20 +73,20 @@ def build_interaction(
     interaction_type: str,
     prompt: str,
     status: str,
-    choices: Optional[list[dict[str, Any]]] = None,
-    fields: Optional[list[dict[str, Any]]] = None,
+    choices: Optional[list[dict[str, object]]] = None,
+    fields: Optional[list[dict[str, object]]] = None,
     placeholder: Optional[str] = None,
     submit_label: Optional[str] = None,
     allow_free_text: bool = True,
     allow_cancel: bool = True,
     title: Optional[str] = None,
     business_action: Optional[str] = None,
-    payload: Optional[dict[str, Any]] = None,
-    task_id: Optional[Any] = None,
-    task_key: Optional[Any] = None,
-) -> dict[str, Any]:
+    payload: Optional[dict[str, object]] = None,
+    task_id: Optional[object] = None,
+    task_key: Optional[object] = None,
+) -> dict[str, object]:
     contract_payload = payload.copy() if isinstance(payload, dict) else {}
-    interaction: dict[str, Any] = {
+    interaction: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "interaction_id": f"int_{uuid.uuid4().hex}",
         "type": interaction_type,
@@ -113,7 +113,7 @@ def build_interaction(
     return interaction
 
 
-def payload_from_event(event: dict[str, Any], *, extra: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def payload_from_event(event: dict[str, object], *, extra: Optional[dict[str, object]] = None) -> dict[str, object]:
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
     result = payload.copy()
     for key in ("action", "customer", "customers", "business", "contracts", "payment_plans"):

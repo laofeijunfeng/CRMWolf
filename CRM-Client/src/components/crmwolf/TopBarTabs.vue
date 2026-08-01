@@ -3,7 +3,7 @@
  * TopBarTabs - TopBar 列表页筛选导航
  *
  * 基于 shadcn-vue Tabs 组件实现 Underline 模式（MASTER.md §5.5）
- * 用途：列表页筛选 tabs（全部客户/我的客户/公海客户）
+ * 用途：列表页筛选 tabs（全部客户/公海客户等）
  *
  * 设计规范（Underline 模式 - 轻量扁平）：
  * - 无容器背景（扁平）
@@ -16,7 +16,15 @@
 import { computed } from 'vue'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { ArrowLeftToLine, MoreVertical, Pencil, Trash2 } from 'lucide-vue-next'
 
 // ==================== Types ====================
 interface TabItem {
@@ -28,6 +36,16 @@ interface TabItem {
   disabled?: boolean
   /** 徽标内容（如待办数量） */
   badge?: number | string
+  /** 是否为用户自定义视图 */
+  isCustomView?: boolean
+  /** 自定义视图 ID */
+  customViewId?: number
+  /** 重命名处理 */
+  onRename?: () => void
+  /** 移到最前处理 */
+  onMoveToFirst?: () => void
+  /** 删除处理 */
+  onDelete?: () => void
 }
 
 interface Props {
@@ -59,6 +77,22 @@ function handleTabChange(key: string): void {
 function hasBadge(badge: number | string | undefined): boolean {
   return badge !== undefined && badge !== '' && badge !== 0
 }
+
+function hasCustomMenu(tab: TabItem): boolean {
+  return tab.isCustomView === true
+}
+
+function handleRename(tab: TabItem): void {
+  tab.onRename?.()
+}
+
+function handleMoveToFirst(tab: TabItem): void {
+  tab.onMoveToFirst?.()
+}
+
+function handleDelete(tab: TabItem): void {
+  tab.onDelete?.()
+}
 </script>
 
 <template>
@@ -68,24 +102,58 @@ function hasBadge(badge: number | string | undefined): boolean {
     @update:model-value="handleTabChange"
   >
     <TabsList class="tabs-list-underline">
-      <TabsTrigger
+      <div
         v-for="tab in tabs"
         :key="tab.key"
-        :value="tab.key"
-        :disabled="tab.disabled ?? false"
-        class="tabs-trigger-underline"
+        class="tabs-item"
+        :class="{ 'tabs-item--custom': hasCustomMenu(tab) }"
       >
-        <span class="tab-trigger-content">
-          {{ tab.label }}
-          <Badge
-            v-if="hasBadge(tab.badge)"
-            variant="destructive"
-            class="ml-1 tab-badge"
-          >
-            {{ tab.badge }}
-          </Badge>
-        </span>
-      </TabsTrigger>
+        <TabsTrigger
+          :value="tab.key"
+          :disabled="tab.disabled ?? false"
+          class="tabs-trigger-underline"
+        >
+          <span class="tab-trigger-content">
+            {{ tab.label }}
+            <Badge
+              v-if="hasBadge(tab.badge)"
+              variant="destructive"
+              class="ml-1 tab-badge"
+            >
+              {{ tab.badge }}
+            </Badge>
+          </span>
+        </TabsTrigger>
+
+        <DropdownMenu v-if="hasCustomMenu(tab)">
+          <DropdownMenuTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              class="tab-menu-trigger"
+              aria-label="视图操作"
+              @click.stop
+            >
+              <MoreVertical class="w-4 h-4" aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" side="bottom" :side-offset="6" class="tab-menu-content">
+            <DropdownMenuItem class="tab-menu-item" @select="handleMoveToFirst(tab)">
+              <ArrowLeftToLine class="tab-menu-icon" aria-hidden="true" />
+              <span>移到最前</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem class="tab-menu-item" @select="handleRename(tab)">
+              <Pencil class="tab-menu-icon" aria-hidden="true" />
+              <span>重命名</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem class="tab-menu-item tab-menu-item--danger" @select="handleDelete(tab)">
+              <Trash2 class="tab-menu-icon" aria-hidden="true" />
+              <span>删除</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </TabsList>
   </Tabs>
 </template>
@@ -126,6 +194,42 @@ function hasBadge(badge: number | string | undefined): boolean {
     gap: $wolf-space-sm-v2;  // 8px（移动端稍大）
     min-width: max-content;
   }
+}
+
+.tabs-item {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: $wolf-radius-v2;
+}
+
+.tabs-item--custom {
+  padding-right: 2px;
+}
+
+.tab-menu-trigger {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  margin-left: -4px;
+  color: $wolf-primary-v2;
+}
+
+:global(.tab-menu-content) {
+  min-width: 120px;
+}
+
+:global(.tab-menu-item) {
+  gap: 8px;
+}
+
+:global(.tab-menu-item--danger) {
+  color: $wolf-danger-v2;
+}
+
+:global(.tab-menu-icon) {
+  width: 14px;
+  height: 14px;
 }
 
 .tab-trigger-content {

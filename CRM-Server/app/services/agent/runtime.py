@@ -1,7 +1,7 @@
 """Runtime execution layer for CRM AI Agent tools."""
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from pydantic import ValidationError
 
@@ -23,7 +23,7 @@ class AgentToolRuntime:
         self,
         tool_name: str,
         context: AgentToolContext,
-        payload: Dict[str, Any],
+        payload: Dict[str, object],
         *,
         policy: Optional[AgentToolExecutionPolicy] = None,
     ) -> AgentToolResult:

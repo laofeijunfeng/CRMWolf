@@ -34,6 +34,8 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
@@ -68,8 +70,7 @@ const tabs = [
   { key: 'all', label: '全部合同' },
   { key: 'DRAFT', label: '草稿' },
   { key: 'PENDING_REVIEW', label: '审批中' },
-  { key: 'SIGNED', label: '已签署' },
-  { key: 'EFFECTIVE', label: '生效中' }
+  { key: 'SIGNED', label: '已签署' }
 ]
 
 // ==================== 列表筛选配置（状态下拉筛选包含全部状态）====================
@@ -86,7 +87,6 @@ const baseFilterFields: ListFilterField[] = [
       { value: 'DRAFT', label: '草稿' },
       { value: 'PENDING_REVIEW', label: '审批中' },
       { value: 'SIGNED', label: '已签署' },
-      { value: 'EFFECTIVE', label: '生效中' },
       { value: 'EXPIRED', label: '已到期' },
       { value: 'TERMINATED', label: '已终止' }
     ]
@@ -144,7 +144,6 @@ const sortFields: ListSortField[] = [
       { value: 'DRAFT', label: '草稿' },
       { value: 'PENDING_REVIEW', label: '审批中' },
       { value: 'SIGNED', label: '已签署' },
-      { value: 'EFFECTIVE', label: '生效中' },
       { value: 'EXPIRED', label: '已到期' },
       { value: 'TERMINATED', label: '已终止' }
     ]
@@ -211,7 +210,7 @@ const fetchContractList = async (): Promise<void> => {
   try {
     // Tab 状态筛选
     let statusFilter: string | null = null
-    if (activeTab.value !== 'all') {
+    if (['DRAFT', 'PENDING_REVIEW', 'SIGNED'].includes(activeTab.value)) {
       statusFilter = activeTab.value
     } else {
       statusFilter = getDelimitedFilterValues(activeFilters.value, 'status')
@@ -253,13 +252,24 @@ const fetchContractList = async (): Promise<void> => {
   }
 }
 
-const handleFilterApply = (filters: ListFilterCondition[]): void => {
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'contracts.list',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  refresh: fetchContractList,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+
+const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
   // 使用筛选弹层状态条件时，清除 Tab 状态
-  if (filters.some((filter) => filter.field === 'status')) {
+  if (!isCustomFilterViewTab(activeTab.value) && filters.some((filter) => filter.field === 'status')) {
     activeTab.value = 'all'
   }
   pagination.current = 1
+  await customFilterViews.updateActiveCustomViewConfig()
   fetchContractList()
 }
 
@@ -273,13 +283,21 @@ const handleReset = (): void => {
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchContractList()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchContractList()
+}
+
+const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
+  activeFilters.value = filters
+  pagination.current = 1
+  await customFilterViews.saveAsCustomView(filters)
 }
 
 const handlePageChange = (page: number): void => {
@@ -373,12 +391,12 @@ const getRowActions = (row: ContractListResponse): RowActions => ({
 })
 
 // ==================== 格式化函数 ====================
-const mapContractStatus = (status: string): 'draft' | 'pending_review' | 'signed' | 'effective' | 'expired' | 'terminated' => {
-  const map: Record<string, 'draft' | 'pending_review' | 'signed' | 'effective' | 'expired' | 'terminated'> = {
+const mapContractStatus = (status: string): 'draft' | 'pending_review' | 'signed' | 'expired' | 'terminated' => {
+  const map: Record<string, 'draft' | 'pending_review' | 'signed' | 'expired' | 'terminated'> = {
     'DRAFT': 'draft',
     'PENDING_REVIEW': 'pending_review',
     'SIGNED': 'signed',
-    'EFFECTIVE': 'effective',
+    'EFFECTIVE': 'signed',
     'EXPIRED': 'expired',
     'TERMINATED': 'terminated'
   }
@@ -396,16 +414,15 @@ const getLicenseTypeClass = (type: string): string => {
 // ==================== Lifecycle ====================
 onMounted(() => {
   void fetchOwnerFilterOptions()
+  void customFilterViews.loadCustomViews()
   fetchContractList()
 })
 
-// TopBar 配置（Tabs + Actions）
-watchEffect(() => {
-  // 注册 ContextTabs 到 TopBar
-  headerStore.setTabs(tabs, activeTab.value)
-
-  // 注册操作按钮
-  headerStore.setActions([
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actionDeps: [canCreateContract],
+  actions: () => [
     {
       id: 'create-contract',
       label: '新建合同',
@@ -415,17 +432,20 @@ watchEffect(() => {
       visible: canCreateContract.value,
       ariaLabel: '新建合同'
     }
-  ])
+  ]
 })
 
 // Watch activeTab changes from headerStore
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    activeTab.value = headerStore.activeTab
+    pagination.current = 1
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
+      return
+    }
+    customFilterViews.applyBuiltInTab(headerStore.activeTab)
     // 切换 Tab 时清除状态筛选
     activeFilters.value = activeFilters.value.filter((filter) => filter.field !== 'status')
     activeSorts.value = []
-    pagination.current = 1
     fetchContractList()
   }
 })
@@ -455,10 +475,15 @@ watchEffect(() => {
       :filter-fields="filterFields"
       :sort-fields="sortFields"
       :sorts="activeSorts"
+      view-key="contracts.list"
+      column-config-enabled
+      filter-view-save-enabled
+      :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @filter-save-view="handleSaveFilterView"
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"

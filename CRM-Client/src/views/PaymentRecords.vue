@@ -36,6 +36,8 @@ import { useApprovalStore } from '@/stores/approval'
 import { useHeaderStore } from '@/stores/header'
 import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { serializeListSorts } from '@/utils/listSorts'
 
@@ -68,10 +70,10 @@ const pagination = reactive({
 // ==================== ContextTabs 配置 ====================
 const tabs = [
   { key: 'all', label: '全部记录' },
-  { key: 'pending_submit', label: '待提交审批' },
+  { key: 'pending_submit', label: '待提交' },
   { key: 'pending_approval', label: '审批中' },
-  { key: 'confirmed', label: '已确认' },
-  { key: 'rejected', label: '已驳回' }
+  { key: 'rejected', label: '已驳回' },
+  { key: 'confirmed', label: '已确认' }
 ]
 
 const activeTab = ref('all')
@@ -86,8 +88,8 @@ const filterFields: ListFilterField[] = [
     options: [
       { value: 'pending_submit', label: '待提交' },
       { value: 'pending_approval', label: '审批中' },
-      { value: 'approved', label: '已确认' },
-      { value: 'rejected', label: '已驳回' }
+      { value: 'rejected', label: '已驳回' },
+      { value: 'approved', label: '已确认' }
     ]
   },
   { key: 'payment_date', type: 'date', label: '回款日期' }
@@ -200,13 +202,24 @@ const fetchPaymentRecords = async (): Promise<void> => {
   }
 }
 
-const handleFilterApply = (filters: ListFilterCondition[]): void => {
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'payment-records.list',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  refresh: fetchPaymentRecords,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+
+const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
-  if (filters.some((filter) => filter.field === 'approval_status')) {
+  if (!isCustomFilterViewTab(activeTab.value) && filters.some((filter) => filter.field === 'approval_status')) {
     activeTab.value = 'all'
     headerStore.setActiveTab('all')
   }
   pagination.current = 1
+  await customFilterViews.updateActiveCustomViewConfig()
   fetchPaymentRecords()
 }
 
@@ -219,13 +232,21 @@ const handleReset = (): void => {
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchPaymentRecords()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchPaymentRecords()
+}
+
+const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
+  activeFilters.value = filters
+  pagination.current = 1
+  await customFilterViews.saveAsCustomView(filters)
 }
 
 const handlePageChange = (page: number): void => {
@@ -357,16 +378,15 @@ const mapPaymentRecordStatus = (status: string): 'pending' | 'confirmed' | 'reje
 
 // ==================== Lifecycle ====================
 onMounted(() => {
+  void customFilterViews.loadCustomViews()
   fetchPaymentRecords()
 })
 
-// TopBar 配置（Tabs + Actions）
-watchEffect(() => {
-  // 注册 ContextTabs 到 TopBar
-  headerStore.setTabs(tabs, activeTab.value)
-
-  // 注册操作按钮
-  headerStore.setActions([
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actionDeps: [canCreateRecord],
+  actions: () => [
     {
       id: 'create-record',
       label: '登记回款',
@@ -376,14 +396,17 @@ watchEffect(() => {
       visible: canCreateRecord.value,
       ariaLabel: '登记回款'
     }
-  ])
+  ]
 })
 
 // Watch activeTab changes from headerStore
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    activeTab.value = headerStore.activeTab
     pagination.current = 1
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
+      return
+    }
+    customFilterViews.applyBuiltInTab(headerStore.activeTab)
     activeSorts.value = []
     fetchPaymentRecords()
   }
@@ -407,6 +430,10 @@ watchEffect(() => {
       :total="pagination.total"
       :filter-fields="filterFields"
       :sort-fields="sortFields"
+      view-key="payment-records.list"
+      column-config-enabled
+      filter-view-save-enabled
+      :filter-view-save-loading="customFilterViewSaving"
       height="calc(100vh - 121px)"
       empty-title="暂无回款记录"
       row-interactive
@@ -418,6 +445,7 @@ watchEffect(() => {
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @filter-save-view="handleSaveFilterView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
       @row-click="handleViewDetail"

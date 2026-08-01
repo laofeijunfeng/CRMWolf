@@ -4,7 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import uuid
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
@@ -33,13 +33,13 @@ from app.services.agent.schemas import (
 from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.temporal import agent_temporal_resolver
 from app.services.agent.tools.api_client import CRMAPIClientError
-from app.services.agent.tool_registry import AgentToolRegistry
+from app.services.agent.tool_registry import AgentOpportunityPayload, AgentToolRegistry
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext
 from app.utils.sse_encoder import SSEJsonEncoder
 
 
-def _normalize_gender(value: Any) -> str:
+def _normalize_gender(value: object) -> str:
     text = str(value or "").strip()
     return {"男": "1", "女": "2", "未知": "0"}.get(text, text or "0")
 
@@ -60,6 +60,21 @@ def _customer_create_api_payload(customer: dict) -> dict:
             "email": customer.get("contact_email"),
         }
     return payload
+
+
+_OPPORTUNITY_TOOL_FIELDS = frozenset(AgentOpportunityPayload.model_fields)
+
+
+def _opportunity_create_tool_payload(opportunity: dict, customer_id: object) -> dict:
+    tool_opportunity = {
+        key: value
+        for key, value in opportunity.items()
+        if key in _OPPORTUNITY_TOOL_FIELDS and value is not None
+    }
+    resolved_customer_id = customer_id if customer_id is not None else opportunity.get("customer_id")
+    if resolved_customer_id is not None:
+        tool_opportunity["customer_id"] = resolved_customer_id
+    return tool_opportunity
 
 def _tool_name_for_action(action: Optional[str]) -> Optional[str]:
     return {
@@ -124,9 +139,10 @@ def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dic
         member.pop("user_name", None)
         return {"customer_id": payload["customer_id"], "member": member}
     if action == "create_opportunity":
-        opportunity = dict(payload["opportunity"])
-        opportunity.pop("opportunity_name", None)
-        opportunity["customer_id"] = payload.get("customer_id") or opportunity.get("customer_id")
+        opportunity = _opportunity_create_tool_payload(
+            dict(payload["opportunity"]),
+            payload.get("customer_id"),
+        )
         return {"opportunity": opportunity, "idempotency_suffix": task_key}
     if action == "move_opportunity_stage":
         return {

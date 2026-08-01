@@ -19,6 +19,7 @@ from app.models.ai_config import AIConfig
 from app.models.conversation_log import ConversationLog
 from app.models.email_verification_code import EmailVerificationCode, VerificationPurpose
 from app.models.system_config import SystemConfig, ConfigType
+from app.models.view_preference import ViewPreference, ViewPreferenceScope
 from app.models.deployment import DeploymentInfo
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
@@ -54,6 +55,7 @@ __all__ = [
     "ConversationLog",
     "EmailVerificationCode", "VerificationPurpose",
     "SystemConfig", "ConfigType",
+    "ViewPreference", "ViewPreferenceScope",
     "DeploymentInfo",
     "LicenseApplication", "LicenseApplicationStatus", "LicenseType",
     "OAuthProviderConfig", "UserOAuthAccount",

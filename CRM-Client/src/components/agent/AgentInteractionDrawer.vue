@@ -35,6 +35,11 @@ const title = computed(() => {
   const prompt = props.interaction?.prompt?.trim()
   return prompt !== undefined && prompt.length > 0 ? prompt : "请补充信息"
 })
+const description = computed(() => {
+  const prompt = props.interaction?.prompt?.trim()
+  if (prompt === undefined || prompt.length === 0 || prompt === title.value) return ""
+  return prompt
+})
 const canSubmitForm = computed(() => {
   if (props.disabled || props.interaction?.type !== "form") return false
   return (props.interaction.fields ?? []).every((field) => {
@@ -97,21 +102,36 @@ const submitChoice = (choice: AgentInteractionChoice): void => {
   emit("submit", choice.value, choice.metadata)
 }
 
+const isNewFlowChoice = (choice: AgentInteractionChoice): boolean => {
+  return choice.metadata?.["turn_relation"] === "START_NEW_FLOW"
+}
+
 const submitForm = (): void => {
   const interaction = props.interaction
   if (!interaction || interaction.type !== "form" || !canSubmitForm.value) return
+  const formValuePayload: Record<string, string> = {}
+  const fieldLabelPayload: Record<string, string> = {}
+  const optionLabelPayload: Record<string, string> = {}
   const parts = (interaction.fields ?? [])
     .map((field) => {
       const value = String(formValues.value[field.key] ?? "").trim()
       if (value.length === 0) return ""
+      formValuePayload[field.key] = value
+      fieldLabelPayload[field.key] = field.label
       const optionLabel = field.options?.find(option => option.value === value)?.label
-      const displayValue = optionLabel !== undefined && optionLabel !== value
-        ? `${optionLabel}（${field.key}=${value}）`
-        : value
+      const displayValue = optionLabel ?? value
+      if (optionLabel !== undefined) {
+        optionLabelPayload[field.key] = optionLabel
+      }
       return `${field.label}：${displayValue}`
     })
     .filter(Boolean)
-  emit("submit", parts.join("，"))
+  const metadata: Record<string, unknown> = {
+    form_values: formValuePayload,
+    form_field_labels: fieldLabelPayload,
+    form_option_labels: optionLabelPayload,
+  }
+  emit("submit", parts.join("，"), metadata)
 }
 
 const submitText = (): void => {
@@ -130,6 +150,7 @@ const handleOpenChange = (nextOpen: boolean): void => {
   <AppDrawer
     :open="open"
     :title="title"
+    :description="description"
     :portal="false"
     :modal="false"
     :show-overlay="false"
@@ -142,6 +163,8 @@ const handleOpenChange = (nextOpen: boolean): void => {
         v-for="choice in interaction.choices ?? []"
         :key="choice.value"
         type="button"
+        :variant="isNewFlowChoice(choice) ? 'secondary' : 'default'"
+        class="agent-interaction-drawer__choice"
         :disabled="disabled"
         @click="submitChoice(choice)"
       >
@@ -219,6 +242,14 @@ const handleOpenChange = (nextOpen: boolean): void => {
   flex-wrap: wrap;
   justify-content: center;
   gap: $wolf-space-sm-v2;
+}
+
+.agent-interaction-drawer__choice {
+  max-width: min(100%, 520px);
+  height: auto;
+  min-height: 40px;
+  white-space: normal;
+  line-height: $wolf-line-height-body-v2;
 }
 
 .agent-interaction-drawer__form,

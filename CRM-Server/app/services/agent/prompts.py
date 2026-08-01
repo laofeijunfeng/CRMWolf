@@ -285,8 +285,9 @@ CRM_AGENT_SUGGESTION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 业务�
 - 如果客户已有进行中的商机，必须结合 active_opportunity_stage_context 判断是否涉及推进商机阶段。
 - 商机阶段取决于采购方式，禁止硬编码阶段名，禁止凭常识臆造阶段。
 - 判断推进商机阶段时，只能使用客户上下文中 procurement_stages 提供的阶段列表。
-- 只有一条明确的进行中且审批通过商机、目标阶段来自该商机 procurement_stages、且用户语义体现阶段已发生变化时，才可以建议 MOVE_OPPORTUNITY_STAGE。
-- 如果存在多条进行中商机，必须追问用户选择商机，不要直接建议推进阶段。
+- 只有目标阶段来自进行中且审批通过商机的 procurement_stages、且用户语义体现阶段已发生变化时，才可以建议 MOVE_OPPORTUNITY_STAGE。
+- 商机阶段必须按采购流程推进。MOVE_OPPORTUNITY_STAGE 的 execution_payload.stage_template_id 填写用户语义对应的目标阶段；如果目标阶段不是当前阶段的下一阶段，系统会在执行时按阶段顺序自动完成中间推进，不要向用户解释内部拆步。
+- MOVE_OPPORTUNITY_STAGE 必须优先结合用户原文、商机名称/项目名称、当前阶段、目标阶段、金额、预计成交时间、联系人和最近上下文判断具体商机；如果有一条商机明显匹配，必须带 related_object_id。只有多条商机都可推进且无法明显区分时，才把 related_object_id 置为 null、missing_fields 包含 opportunity_id，用于后续让用户选择商机。
 - 如果商机未审批通过、已赢单、已输单、没有采购方式或没有阶段列表，不要建议推进阶段。
 - 目标阶段不能是当前阶段；不能输出采购流程中不存在的阶段。
 - 用户输入体现已回款、到账、打款时，必须先检查客户上下文中的商机、合同和回款计划。
@@ -601,6 +602,59 @@ def build_suggestion_messages(
         f"{semantic_json}\n\n"
         "【客户上下文】\n"
         f"{customer_context_json}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+CRM_AGENT_RESOURCE_RESOLUTION_SYSTEM_PROMPT = """
+你是 CRMWolf 的 CRM 业务对象选择器。你的任务是在多个候选资源中，判断哪一个最符合用户本轮自然语言回复和当前待办动作。
+
+【职责】
+- 只做候选资源排序，不执行任何业务动作。
+- 必须只从候选资源列表中选择，不能编造资源。
+- 用户可能用名称、简称、业务属性、阶段、金额、日期、上下文承接、位置描述等方式表达选择。
+- 如果语义明显指向某一个候选，给出高置信度；如果多个候选都能解释用户输入，必须降低置信度并写明风险。
+- 不要把内部 ID 当成用户语义证据；ID 只用于返回 resource_id。
+
+【输出 JSON】
+{
+  "rankings": [
+    {
+      "resource_id": 1,
+      "confidence": 0.0,
+      "evidence": ["最多 3 条简短证据"],
+      "risk_notes": ["最多 3 条不确定点"]
+    }
+  ],
+  "reason": "整体判断依据"
+}
+
+【置信度参考】
+- 0.90-1.00：用户表达和某个候选高度一致，且明显优于其他候选。
+- 0.75-0.89：较可能匹配，但仍有少量歧义。
+- 0.50-0.74：能找到相关线索，但不足以自动选择。
+- 0.00-0.49：无法可靠判断。
+""".strip()
+
+
+def build_resource_resolution_messages(
+    user_message: str,
+    action_json: str,
+    target_json: str,
+    candidates_json: str,
+    current_date: Optional[date] = None,
+) -> list[dict]:
+    prompt_date = current_date or date.today()
+    system = f"{CRM_AGENT_RESOURCE_RESOLUTION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+    user = (
+        "【待办动作】\n"
+        f"{action_json}\n\n"
+        "【目标/上下文】\n"
+        f"{target_json}\n\n"
+        "【候选资源】\n"
+        f"{candidates_json}\n\n"
+        "【用户本轮回复】\n"
+        f"{user_message}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

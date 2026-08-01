@@ -1903,7 +1903,7 @@ async def approve_generic_approval(
     # 写 invoice.status / reviewed_time；此处仅补 reviewer_id / review_comment 两字段。
     # 对 APPROVE 与 REJECT 都写：审批人即 reviewer，意见即 review_comment。
     # D3 时序：approval_crud.approve 内部已 commit 落审批状态；此处是第二次 commit，
-    # 失败时仅记 ERROR 日志——审批已生效不可回滚，reviewer 是审计信息可后补。
+    # 失败时仅记 ERROR 日志——审批已完成不可回滚，reviewer 是审计信息可后补。
     if entity_type == BusinessType.INVOICE:
         inv_adapter = get_adapter(BusinessType.INVOICE)
         invoice = inv_adapter.get_entity(db, approval.business_id, approval.team_id)

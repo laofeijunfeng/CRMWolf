@@ -1,11 +1,11 @@
 """CRM AI Agent schemas."""
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional, TypeAlias
 
 from pydantic import BaseModel, Field
 
 
-JsonDict = Dict[str, Any]
+JsonDict: TypeAlias = dict[str, object]
 
 
 class AgentSessionCreate(BaseModel):
@@ -199,3 +199,33 @@ class AgentChatRequest(BaseModel):
     session_id: Optional[int] = Field(None, description="Agent会话ID")
     session_key: Optional[str] = Field(None, max_length=64, description="Agent会话唯一标识")
     interaction_metadata: Optional[JsonDict] = Field(None, description="前端结构化交互提交上下文")
+
+
+class AgentRuntimeCheckpointStateResponse(BaseModel):
+    session_id: int = Field(..., description="Agent会话ID")
+    session_key: str = Field(..., description="Agent会话唯一标识")
+    checkpoint_id: Optional[str] = Field(None, description="LangGraph checkpoint ID")
+    values: JsonDict = Field(default_factory=dict, description="LangGraph root checkpoint状态投影")
+
+
+class AgentRuntimeHistoryItemResponse(BaseModel):
+    checkpoint_id: Optional[str] = Field(None, description="LangGraph checkpoint ID")
+    parent_checkpoint_id: Optional[str] = Field(None, description="父checkpoint ID")
+    thread_id: Optional[str] = Field(None, description="LangGraph thread ID")
+    checkpoint_ns: Optional[str] = Field(None, description="LangGraph checkpoint命名空间")
+    created_at: Optional[str] = Field(None, description="checkpoint创建时间")
+    source: Optional[str] = Field(None, description="LangGraph checkpoint来源")
+    step: Optional[int] = Field(None, description="LangGraph执行步序号")
+    next_nodes: List[str] = Field(default_factory=list, description="下一批待执行节点")
+    has_interrupt: bool = Field(False, description="该checkpoint是否存在待恢复interrupt")
+    interrupts: List[JsonDict] = Field(default_factory=list, description="interrupt payload投影")
+    values: JsonDict = Field(default_factory=dict, description="checkpoint状态投影")
+
+
+class AgentRuntimeHistoryResponse(BaseModel):
+    session_id: int = Field(..., description="Agent会话ID")
+    session_key: str = Field(..., description="Agent会话唯一标识")
+    items: List[AgentRuntimeHistoryItemResponse] = Field(default_factory=list, description="LangGraph checkpoint历史")
+    total: int = Field(..., description="返回数量")
+    before_checkpoint_id: Optional[str] = Field(None, description="本次查询的checkpoint游标")
+    limit: int = Field(..., description="本次查询限制")

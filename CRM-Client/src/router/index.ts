@@ -80,11 +80,6 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '线索管理' }
       },
       {
-        path: 'leads/reminder',
-        name: 'FollowUpReminder',
-        redirect: '/leads'
-      },
-      {
         path: 'customers',
         name: 'Customers',
         component: () => import('@/views/Customers.vue'),

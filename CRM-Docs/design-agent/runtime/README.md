@@ -5,6 +5,7 @@
 | 主题 | 使用场景 |
 | --- | --- |
 | [Prompt 规范](prompts.md) | 编写或修改语义解析、建议生成和 tool-calling Prompt。 |
+| [LangGraph 原生运行时](langgraph-native-runtime.md) | 定义 root graph、checkpoint、interrupt/resume、subgraph 和状态恢复规则。 |
 | [结构化输出](structured-output.md) | 定义 AI 输出 schema、校验和 fallback 行为。 |
 | [跟进质量评估](follow-up-quality.md) | 定义跟进记录创建前的质量评分、补充问题和阈值策略。 |
 | [交互编排策略](interaction-policy.md) | 选择单轮唯一用户交互动作和动作优先级。 |

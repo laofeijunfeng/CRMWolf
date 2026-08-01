@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from app.services.agent.tools.base import AgentToolContext
 
@@ -32,7 +32,7 @@ class AgentToolGuardrails:
         is_write: bool,
         requires_confirmation: bool,
         context: AgentToolContext,
-        payload: Dict[str, Any],
+        payload: Dict[str, object],
         policy: Optional[AgentToolExecutionPolicy] = None,
     ) -> None:
         policy = policy or AgentToolExecutionPolicy()

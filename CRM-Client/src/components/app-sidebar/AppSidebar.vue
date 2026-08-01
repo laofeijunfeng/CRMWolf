@@ -63,7 +63,6 @@ const permissionStore = usePermissionStore()
 const currentPath = computed(() => {
   const path = route.path
   if (path.startsWith('/leads/public')) return '/leads/public'
-  if (path.startsWith('/leads/my')) return '/leads/my'
   if (path.startsWith('/leads/') && path.match(/\/leads\/\d+/)) return '/leads'
   if (path.startsWith('/opportunities/') && path.match(/\/opportunities\/\d+/)) return '/opportunities'
   return path

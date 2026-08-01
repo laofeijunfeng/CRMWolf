@@ -6,9 +6,12 @@ their transport format.
 """
 from __future__ import annotations
 
-from typing import Any, AsyncGenerator, Optional
+import asyncio
+import logging
+from typing import AsyncGenerator, Optional
 
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import SessionLocal
 from app.crud.agent import agent_message_crud, agent_session_crud
@@ -16,14 +19,23 @@ from app.models.agent import AgentMessageRole
 from app.schemas.agent import AgentMessageCreate, AgentSessionCreate
 from app.services.agent import (
     agent_copy,
-    crm_agent_graph_service,
     interactions,
+    session_projection,
     session_state,
 )
-from app.services.agent.confirmed_task_runtime import agent_confirmed_task_runtime
+from app.services.agent.checkpointer import is_checkpoint_storage_error
+from app.services.agent.checkpoint_fallback_runtime import agent_checkpoint_fallback_runtime
 from app.services.agent.input import AgentTurnInput
-from app.services.agent.new_flow_runtime import agent_new_flow_runtime
-from app.services.agent.pending_graph import pending_task_graph_service
+from app.services.agent.root_runtime import agent_root_runtime, project_turn_output
+from app.services.agent.state import (
+    AgentApplicationRuntimeResult,
+    AgentRootRuntimeSideEffects,
+    AgentRuntimeContext,
+)
+from app.services.agent.types import JSONDict, coerce_json_dict
+
+
+logger = logging.getLogger(__name__)
 
 
 class AgentApplicationService:
@@ -39,7 +51,7 @@ class AgentApplicationService:
         session_id: Optional[int] = None,
         session_key: Optional[str] = None,
         turn_input: Optional[AgentTurnInput] = None,
-    ) -> AsyncGenerator[dict[str, Any], None]:
+    ) -> AsyncGenerator[JSONDict, None]:
         db = SessionLocal()
         try:
             agent_turn_input = turn_input or AgentTurnInput.text(content)
@@ -88,109 +100,84 @@ class AgentApplicationService:
             }
 
             assistant_content = None
-            trace_events: list[dict] = []
+            trace_events: list[JSONDict] = []
+            runtime_event_queue: asyncio.Queue[JSONDict] = asyncio.Queue()
+            streamed_event_count = 0
 
-            def emit(event: dict[str, Any]) -> dict[str, Any]:
+            def emit(event: JSONDict) -> JSONDict:
                 event = interactions._with_interaction(event, db=db, team_id=team_id)
                 interactions._append_trace_event(trace_events, event)
-                return event
+                return coerce_json_dict(event)
 
-            task = session_state._get_current_waiting_task(db, session, team_id, user_id)
-            switch_notice = None
-            pending_interruption_handled = False
-            confirmation_decision = None
+            async def publish_runtime_event(event: JSONDict) -> None:
+                nonlocal streamed_event_count
+                streamed_event_count += 1
+                await runtime_event_queue.put(coerce_json_dict(event))
 
-            suspended_pending_tasks = (session.context_json or {}).get("suspended_pending_tasks")
-            should_run_pending_graph = bool(task) or bool(suspended_pending_tasks)
-            pending_graph_state = {}
-            if should_run_pending_graph:
-                pending_graph_state = await pending_task_graph_service.run({
-                    "db": db,
-                    "session": session,
-                    "task": task,
-                    "turn_input": agent_turn_input,
-                    "content": content,
-                    "team_id": team_id,
-                    "user_id": user_id,
-                    "session_id": session.id,
-                    "authorization": authorization,
-                    "events": [],
-                })
-            if pending_graph_state.get("task") or pending_graph_state.get("handled") or pending_graph_state.get("events"):
-                if pending_graph_state.get("suspended_task"):
-                    session_state._suspend_pending_task(
-                        db,
-                        session,
-                        pending_graph_state["suspended_task"],
-                        pending_graph_state.get("suspend_reason") or "用户开启了新的业务流程",
-                    )
-                task = pending_graph_state.get("task")
-                if pending_graph_state.get("selected_customer"):
-                    session_state._remember_current_customer(db, session, pending_graph_state["selected_customer"])
-                if pending_graph_state.get("remember_pending_task"):
-                    session_state._remember_pending_task(db, session, task)
-                if pending_graph_state.get("clear_pending_task_id"):
-                    session_state._clear_pending_task(db, session, pending_graph_state["clear_pending_task_id"])
-                switch_notice = pending_graph_state.get("switch_notice")
-                confirmation_decision = pending_graph_state.get("confirmation_decision")
-                assistant_content = pending_graph_state.get("assistant_content")
-                pending_interruption_handled = bool(pending_graph_state.get("handled"))
-                for pending_event in pending_graph_state.get("events", []):
-                    yield emit(pending_event)
+            runtime_session_projection = session_projection.project_session_runtime(session)
+            runtime_side_effects = AgentRootRuntimeSideEffects()
+            runtime_context = AgentRuntimeContext(
+                db=db,
+                session=session,
+                task=None,
+                turn_input=agent_turn_input,
+                content=content,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session.id,
+                authorization=authorization,
+                switch_notice=None,
+                side_effects=runtime_side_effects,
+                event_sink=publish_runtime_event,
+            )
 
-            if pending_interruption_handled:
-                pass
-            elif task:
-                if confirmation_decision and confirmation_decision.intent == "confirm":
-                    execution = await agent_confirmed_task_runtime.execute(
-                        db,
-                        task,
-                        session=session,
-                        team_id=team_id,
-                        user_id=user_id,
-                        authorization=authorization,
-                    )
-                    assistant_content = execution.assistant_content
-                    if execution.tool_event:
-                        yield emit(execution.tool_event)
-                    yield emit(execution.task_event)
-                    yield emit({"event": "final", "content": assistant_content})
-                elif session_state._is_confirmation(content):
-                    assistant_content = agent_copy.no_pending_confirmation()
-                    yield emit({"event": "final", "content": assistant_content})
-                else:
-                    assistant_ref = {"content": assistant_content}
-                    async for event in agent_new_flow_runtime.stream_events(
-                        db,
-                        session=session,
-                        team_id=team_id,
-                        user_id=user_id,
-                        content=content,
-                        authorization=authorization,
-                        switch_notice=switch_notice,
-                        assistant_ref=assistant_ref,
-                        graph_service=crm_agent_graph_service,
-                    ):
-                        yield emit(event)
-                    assistant_content = assistant_ref["content"]
-            elif session_state._is_confirmation(content):
-                assistant_content = agent_copy.no_pending_confirmation()
-                yield emit({"event": "final", "content": assistant_content})
-            else:
-                assistant_ref = {"content": assistant_content}
-                async for event in agent_new_flow_runtime.stream_events(
-                    db,
-                    session=session,
+            runtime_task = asyncio.create_task(
+                self._run_root_runtime_for_turn(
+                    agent_turn_input=agent_turn_input,
+                    content=content,
                     team_id=team_id,
                     user_id=user_id,
+                    session_id=session.id,
+                    session_key=session.session_key,
+                    current_customer=runtime_session_projection.current_customer,
+                    runtime_context=runtime_context,
+                )
+            )
+            while not runtime_task.done():
+                try:
+                    runtime_event = await asyncio.wait_for(runtime_event_queue.get(), timeout=0.05)
+                except asyncio.TimeoutError:
+                    continue
+                yield emit(runtime_event)
+            runtime_result = await runtime_task
+            while not runtime_event_queue.empty():
+                yield emit(runtime_event_queue.get_nowait())
+            runtime_state = runtime_result.state
+            for runtime_event in runtime_state.get("events", []):
+                interactions._append_trace_event(
+                    trace_events,
+                    interactions._with_interaction(runtime_event, db=db, team_id=team_id),
+                )
+
+            if runtime_result.checkpoint_unavailable:
+                runtime_result = await agent_checkpoint_fallback_runtime.run(
+                    db=db,
+                    session=session,
+                    task=None,
+                    turn_input=agent_turn_input,
                     content=content,
+                    team_id=team_id,
+                    user_id=user_id,
                     authorization=authorization,
-                    switch_notice=switch_notice,
-                    assistant_ref=assistant_ref,
-                    graph_service=crm_agent_graph_service,
-                ):
-                    yield emit(event)
-                assistant_content = assistant_ref["content"]
+                )
+                runtime_state = runtime_result.state
+
+            if streamed_event_count == 0:
+                for output_event in runtime_result.turn_output.events:
+                    yield emit(output_event)
+
+            assistant_value = runtime_result.turn_output.assistant_content or runtime_state.get("assistant_content")
+            assistant_content = assistant_value if isinstance(assistant_value, str) else None
 
             if not assistant_content:
                 assistant_content = agent_copy.generic_completed()
@@ -220,6 +207,40 @@ class AgentApplicationService:
             yield {"event": "error", "message": agent_copy.service_error(str(exc))}
         finally:
             db.close()
+
+    async def _run_root_runtime_for_turn(
+        self,
+        *,
+        agent_turn_input: AgentTurnInput,
+        content: str,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        session_key: str,
+        current_customer: JSONDict,
+        runtime_context: AgentRuntimeContext,
+    ) -> AgentApplicationRuntimeResult:
+        try:
+            runtime_state = await agent_root_runtime.run_turn(
+                turn_input=agent_turn_input,
+                content=content,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+                session_key=session_key,
+                current_customer=current_customer,
+                context=runtime_context,
+            )
+            return AgentApplicationRuntimeResult(
+                state=runtime_state,
+                turn_output=project_turn_output(runtime_state, runtime_context.side_effects),
+                pending_task_result=runtime_context.side_effects.pending_task_result or {},
+            )
+        except SQLAlchemyError as exc:
+            if not is_checkpoint_storage_error(exc):
+                raise
+            logger.warning("Agent root graph checkpoint is unavailable", exc_info=True)
+            return AgentApplicationRuntimeResult(checkpoint_unavailable=True)
 
 
 agent_application_service = AgentApplicationService()

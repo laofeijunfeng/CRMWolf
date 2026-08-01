@@ -54,7 +54,11 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
-def test_my_leads_list_includes_owner_info(client, db_session):
+def test_leads_list_owner_me_includes_owner_info(client, db_session, monkeypatch):
+    from app.crud.permission import permission_crud
+
+    monkeypatch.setattr(permission_crud, "get_user_permissions", lambda *args, **kwargs: [])
+
     db_session.add(User(id=1, email="sales@example.com", name="销售张", status=UserStatus.ACTIVE))
     db_session.add(
         Lead(
@@ -71,7 +75,7 @@ def test_my_leads_list_includes_owner_info(client, db_session):
     )
     db_session.commit()
 
-    response = client.get("/v1/leads/my/list")
+    response = client.get("/v1/leads/", params={"owner_id": "me"})
 
     assert response.status_code == 200
     item = response.json()["items"][0]

@@ -1,7 +1,7 @@
 """Memory helpers for CRM AI Agent."""
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ class AgentMemoryService:
         team_id: int,
         user_id: int,
         session_id: int,
-        session_context: Optional[Dict[str, Any]] = None,
+        session_context: Optional[Dict[str, object]] = None,
         message_limit: int = 12,
     ) -> AgentMemorySnapshot:
         messages, total = agent_message_crud.list_by_session(

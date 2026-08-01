@@ -42,6 +42,12 @@ export type AgentEventType =
   | "business_selection_required"
   | "business_selected"
   | "business_selection_failed"
+  | "action_review_started"
+  | "action_review_risk_classified"
+  | "action_review_confidence_scored"
+  | "action_review_decided"
+  | "action_review_finished"
+  | "action_auto_execution_queued"
   | "pending_interruption_confirmation_required"
   | "pending_task_interrupted"
   | "task_completed"
@@ -89,12 +95,19 @@ export interface AgentChatSSEEvent {
   task_key?: string
   intent?: string
   confidence?: number
+  execution_confidence?: number
+  risk_level?: "low" | "medium" | "high" | string
+  decision?: "auto_execute" | "require_confirmation" | "require_fields" | "require_choice" | "block" | string
+  reason?: string
+  source_event?: string
   step?: string
   status?: "started" | "completed" | string
   parse_source?: string | null
   model?: string | null
   fallback_reason?: string | null
   fallback_error?: string | null
+  fallback_error_message?: string | null
+  structured_output_strategy?: string | null
   score?: number
   passed?: boolean
   quality_source?: string | null

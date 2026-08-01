@@ -69,11 +69,6 @@ const stagePalette: Record<BusinessJourneyBoardStageKey, { column: string; count
     countBadge: 'bg-emerald-50 text-emerald-700 border-emerald-100',
     emphasisBadge: 'bg-emerald-600 text-white border-transparent'
   },
-  won_pending_contract: {
-    column: 'business-board-stage--green',
-    countBadge: 'bg-green-50 text-green-700 border-green-100',
-    emphasisBadge: 'bg-green-600 text-white border-transparent'
-  },
   contract_processing: {
     column: 'business-board-stage--violet',
     countBadge: 'bg-violet-50 text-violet-700 border-violet-100',
@@ -577,10 +572,6 @@ onMounted(() => {
 
 .business-board-stage--emerald {
   --column-bg: rgb(236 253 245);
-}
-
-.business-board-stage--green {
-  --column-bg: rgb(240 253 244);
 }
 
 .business-board-stage--slate {

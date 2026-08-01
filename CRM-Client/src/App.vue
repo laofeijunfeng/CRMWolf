@@ -3,6 +3,7 @@
   <Toast position="top-center" :duration="4000" />
   <!-- UI/UX Pro Max §8: Confirm dialog container (global) -->
   <ConfirmDialog />
+  <RenameDialog />
   <TooltipProvider>
     <router-view />
   </TooltipProvider>
@@ -17,7 +18,7 @@
  * - Toast container at root level - §8 toast-accessibility
  * - z-index: 1000 (highest) - §5 z-index-management
  */
-import { Toast, ConfirmDialog, TooltipProvider } from '@/components/crmwolf'
+import { Toast, ConfirmDialog, RenameDialog, TooltipProvider } from '@/components/crmwolf'
 </script>
 
 <style>

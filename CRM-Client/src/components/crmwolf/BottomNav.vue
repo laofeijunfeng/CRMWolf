@@ -96,7 +96,7 @@ const overflowItems = computed<NavItem[]>(() => {
 function isRouteActive(itemRoute: string): boolean {
   // Special handling for routes with sub-paths
   if (itemRoute === '/leads') {
-    // Leads has multiple sub-routes: /leads/public, /leads/my, /leads/:id
+    // Leads has multiple sub-routes: /leads/public, /leads/:id
     return route.path.startsWith('/leads')
   }
 

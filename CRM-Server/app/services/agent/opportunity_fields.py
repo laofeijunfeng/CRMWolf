@@ -96,7 +96,7 @@ async def _apply_opportunity_fields(db: Session, task, content: str):
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_opportunity",
+            summary="等待确认创建商机",
             input_json=payload,
             state_json=new_state,
         ),

@@ -135,41 +135,8 @@ def test_payment_api_optimizations():
     else:
         print(f"❌ 查询失败: {response.text}")
     
-    # 4. 测试即将到期提醒 - 验证客户和商机信息
-    print("\n4. 测试即将到期提醒（验证客户和商机信息）...")
-    response = requests.get(
-        f"{BASE_URL}/payments/reminders/upcoming?days=30",
-        headers=headers
-    )
-    if response.status_code == 200:
-        data = response.json()
-        print(f"✅ 查询成功，返回 {len(data)} 条提醒")
-        
-        if data:
-            item = data[0]
-            print(f"\n   示例数据:")
-            print(f"   - 合同名称: {item.get('contract_name', 'N/A')}")
-            print(f"   - 客户名称: {item.get('customer_name', 'N/A')}")
-            print(f"   - 商机名称: {item.get('opportunity_name', 'N/A')}")
-            print(f"   - 阶段名称: {item.get('stage_name', 'N/A')}")
-            print(f"   - 计划金额: {item.get('planned_amount', 'N/A')}")
-            print(f"   - 到期日期: {item.get('due_date', 'N/A')}")
-            print(f"   - 距离到期: {item.get('days_until_due', 'N/A')} 天")
-            
-            if item.get('customer_name'):
-                print(f"\n   ✅ 包含客户信息")
-            else:
-                print(f"\n   ⚠️  缺少客户信息")
-                
-            if item.get('opportunity_name'):
-                print(f"   ✅ 包含商机信息")
-            else:
-                print(f"   ⚠️  缺少商机信息")
-    else:
-        print(f"❌ 查询失败: {response.text}")
-    
-    # 5. 测试逾期提醒 - 验证客户和商机信息
-    print("\n5. 测试逾期提醒（验证客户和商机信息）...")
+    # 4. 测试逾期提醒 - 验证客户和商机信息
+    print("\n4. 测试逾期提醒（验证客户和商机信息）...")
     response = requests.get(
         f"{BASE_URL}/payments/reminders/overdue",
         headers=headers

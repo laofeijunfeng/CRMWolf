@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from app.services.agent import business_rules
 from app.services.agent.schemas import AgentSemanticParseResult
@@ -12,9 +12,9 @@ def parsed_from_semantic(
     semantic_result: AgentSemanticParseResult,
     original_content: str,
     *,
-    temporal_resolver: Any,
+    temporal_resolver: object,
     base_datetime: Optional[datetime] = None,
-) -> Dict[str, Any]:
+) -> Dict[str, object]:
     contact = dict(semantic_result.contact or {})
     invoice_title = dict(semantic_result.invoice_title or {})
     deployment_info = dict(semantic_result.deployment_info or {})

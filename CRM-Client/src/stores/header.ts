@@ -34,6 +34,16 @@ export interface TabItem {
   disabled?: boolean
   /** 徽标内容（如待办数量） */
   badge?: number | string
+  /** 是否为用户自定义视图 */
+  isCustomView?: boolean
+  /** 自定义视图 ID */
+  customViewId?: number
+  /** 重命名处理 */
+  onRename?: () => void
+  /** 移到最前处理 */
+  onMoveToFirst?: () => void
+  /** 删除处理 */
+  onDelete?: () => void
 }
 
 export interface HeaderConfig {
@@ -46,6 +56,40 @@ export interface HeaderConfig {
   tabs?: TabItem[] | null
   /** 当前激活的 Tab */
   activeTab?: string
+}
+
+const areTabsEqual = (left: TabItem[] | null, right: TabItem[] | null): boolean => {
+  if (left === right) return true
+  if (left === null || right === null) return left === right
+  if (left.length !== right.length) return false
+
+  return left.every((tab, index) => {
+    const nextTab = right[index]
+    return nextTab !== undefined &&
+      tab.key === nextTab.key &&
+      tab.label === nextTab.label &&
+      tab.disabled === nextTab.disabled &&
+      tab.badge === nextTab.badge &&
+      tab.isCustomView === nextTab.isCustomView &&
+      tab.customViewId === nextTab.customViewId
+  })
+}
+
+const areActionsEqual = (left: HeaderAction[], right: HeaderAction[]): boolean => {
+  if (left === right) return true
+  if (left.length !== right.length) return false
+
+  return left.every((action, index) => {
+    const nextAction = right[index]
+    return nextAction !== undefined &&
+      action.id === nextAction.id &&
+      action.label === nextAction.label &&
+      action.type === nextAction.type &&
+      action.icon === nextAction.icon &&
+      action.disabled === nextAction.disabled &&
+      action.visible === nextAction.visible &&
+      action.ariaLabel === nextAction.ariaLabel
+  })
 }
 
 export const useHeaderStore = defineStore('header', () => {
@@ -88,6 +132,15 @@ export const useHeaderStore = defineStore('header', () => {
   }
 
   function setActions(newActions: HeaderAction[]): void {
+    if (areActionsEqual(actions.value, newActions)) {
+      actions.value.forEach((action, index) => {
+        const nextAction = newActions[index]
+        if (nextAction !== undefined) {
+          action.handler = nextAction.handler
+        }
+      })
+      return
+    }
     actions.value = newActions
   }
 
@@ -109,15 +162,42 @@ export const useHeaderStore = defineStore('header', () => {
   }
 
   function setTabs(newTabs: TabItem[] | null, initialTab?: string): void {
-    tabs.value = newTabs
-    // 设置初始激活 Tab
-    if (newTabs && newTabs.length > 0) {
-      if (initialTab) {
-        activeTab.value = initialTab
-      } else {
-        activeTab.value = newTabs[0]!.key
-      }
+    const nextActiveTab = ((): string => {
+      if (!newTabs || newTabs.length === 0) return ''
+      if (initialTab !== undefined && initialTab !== '' && newTabs.some(tab => tab.key === initialTab)) return initialTab
+      if (activeTab.value && newTabs.some(tab => tab.key === activeTab.value)) return activeTab.value
+      return newTabs[0]?.key ?? ''
+    })()
+
+    if (areTabsEqual(tabs.value, newTabs)) {
+      tabs.value?.forEach((tab, index) => {
+        const nextTab = newTabs?.[index]
+        if (nextTab === undefined) return
+        if (nextTab.onRename === undefined) {
+          delete tab.onRename
+        } else {
+          tab.onRename = nextTab.onRename
+        }
+        if (nextTab.onMoveToFirst === undefined) {
+          delete tab.onMoveToFirst
+        } else {
+          tab.onMoveToFirst = nextTab.onMoveToFirst
+        }
+        if (nextTab.onDelete === undefined) {
+          delete tab.onDelete
+        } else {
+          tab.onDelete = nextTab.onDelete
+        }
+      })
     } else {
+      tabs.value = newTabs
+    }
+
+    if (activeTab.value !== nextActiveTab) {
+      activeTab.value = nextActiveTab
+    }
+
+    if (!newTabs || newTabs.length === 0) {
       activeTab.value = ''
     }
   }

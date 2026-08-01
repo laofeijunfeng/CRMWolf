@@ -447,6 +447,29 @@ class OpportunityCRUD:
         current_snapshot = db.query(OpportunityStageSnapshot).filter(
             OpportunityStageSnapshot.id == opportunity.current_stage_snapshot_id
         ).first()
+
+        stages = procurement_stage_template_crud.get_by_method(
+            db,
+            opportunity.procurement_method_id,
+            opportunity.team_id,
+        )
+        if current_snapshot:
+            next_stages = [
+                stage
+                for stage in stages
+                if stage.sort_order is not None
+                and current_snapshot.template_sort_order is not None
+                and stage.sort_order > current_snapshot.template_sort_order
+            ]
+            next_stage = next_stages[0] if next_stages else None
+            if not next_stage or int(next_stage.id) != int(target_stage.id):
+                raise ValueError("商机阶段只能按采购流程逐阶段推进")
+        else:
+            default_stage = next((stage for stage in stages if stage.is_default_start), None)
+            first_stage = stages[0] if stages else None
+            allowed_start_stage = default_stage or first_stage
+            if not allowed_start_stage or int(allowed_start_stage.id) != int(target_stage.id):
+                raise ValueError("商机起始阶段只能设置为采购流程的默认起始阶段")
         
         if current_snapshot:
             current_snapshot.exited_at = datetime.now()

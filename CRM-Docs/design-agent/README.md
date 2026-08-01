@@ -4,11 +4,13 @@
 
 ## 核心原则
 
-这些原则来自 LangChain 迁移到 LangGraph 过程中暴露的问题，后续设计、实现和评审必须优先按这些原则校验。
+这些原则来自 LangChain 迁移到 LangGraph 过程中暴露的问题，后续设计、实现和评审必须优先按这些原则校验。当前目标不是完成某个单点业务动作，而是把 Agent 底层升级为 LangGraph 原生、可恢复、可观测、可分支演进的运行时。
 
 1. LangGraph 管状态，不做包装层
 
    LangGraph 必须承载业务状态机：新流程、当前待办、字段补全、确认执行、暂停草稿、恢复草稿、跨渠道确认、用户追问。不能只是把原来的线性函数调用搬进图节点里。
+
+   任何跨轮、等待用户、可恢复、会影响业务写入的 Agent 状态，都必须进入 LangGraph checkpoint，并通过 `interrupt()` / `Command(resume=...)` 暂停和恢复。`crm_agent_tasks` 和消息表只能作为前端展示与审计投影；session context 只能保存非 HITL 记忆，不能承载等待态恢复。
 
 2. LangChain/LLM 管结构化语义，不管确定性写入
 
@@ -54,13 +56,15 @@
 
    失败必须尽早暴露在 schema 校验、业务校验、HITL、测试或外部 trace 中。不得让模型把 API 错误、权限失败、对象不唯一、字段缺失或 tool 静默失败改写成成功文案。
 
-## 当前架构
+## 目标架构
 
 - Channel Adapter：Web SSE、飞书事件、后续 IM 平台事件适配。只处理鉴权、协议解析、SSE/IM 回复编码。
 - IM Agent Gateway：归一化 IM 文本、引用消息、reaction、群聊 @ 过滤和会话绑定。禁止做 CRM 自然语言语义分析。
-- AgentApplicationService：统一一轮 Agent 交互，负责会话、消息、pending graph 入口、确认执行、新流程 runtime 和事件落库。
-- PendingTaskGraph：LangGraph 业务状态机，负责 active task、suspended task、打断、恢复、字段补全、选择和确认前路由。
-- CRMAgentGraphService：LangGraph 新流程编排，负责 memory、语义解析、客户搜索、跟进质检、客户上下文、业务建议和响应事件。
+- AgentApplicationService：统一一轮 Agent 交互的应用入口，只负责会话/thread 映射、消息落库、权限上下文注入、root graph 调用和事件投影，不拥有图外业务 pending 状态机。
+- Agent Root Graph：LangGraph 原生运行时入口，负责 checkpoint state 读取、语义路由、全局 guardrail、领域 subgraph 调用、interrupt/resume 和最终响应聚合。
+- Domain Subgraphs：客户识别、跟进记录、商机、客户资料维护、回款、tool 执行等领域子图。复杂业务分支必须沉淀为 subgraph，不得堆在单个线性 runtime 中。
+- Interrupt Runtime：所有选择、补字段、确认、编辑、拒绝和暂停恢复都通过 LangGraph interrupt 表达，并通过 `Command(resume=...)` 继续原图执行。
+- Task Projection：`crm_agent_tasks` 保存等待动作投影、前端展示和审计；运行时恢复以 LangGraph checkpoint 为准。
 - AI Capability：基于 LangChain structured output 优先输出结构化结果；失败时才走 JSON fallback。
 - Interaction Contract：统一生成 `choice/form/text` 交互协议，供 Web 和 IM 共用。
 - Tool Runtime：统一执行 CRM tool，所有写入走 HITL、权限、幂等、审计和现有 CRM API。
@@ -73,9 +77,12 @@ LangGraph 适合：
 
 - 多轮任务状态管理。
 - 当前任务和暂停草稿之间的路由。
+- checkpoint/thread 持久化和跨轮恢复。
+- interrupt/resume 用户确认、选择、补字段、编辑和拒绝。
+- 领域 subgraph 组合和复用。
 - 分支、回退、追问和终止条件。
 - 编排确定性节点，例如客户搜索、质检、上下文加载、建议生成。
-- 统一 stream/runtime 路径，避免手写流程绕过图。
+- 统一 stream/runtime 路径、state history 和 trace，避免手写流程绕过图。
 
 LangChain 适合：
 
@@ -91,6 +98,8 @@ LangChain 适合：
 - 字段安全合并。
 - 前端 interaction 协议生成。
 - IM 事件去重和 session 绑定。
+
+采用标准见 [LangGraph 原生运行时](runtime/langgraph-native-runtime.md)。评审时如果发现新能力只把 LangGraph 当作 service 外层包装，而没有使用 checkpoint、interrupt/resume、conditional edge 和 subgraph 解决真实跨轮分支问题，应判定为架构不合格。
 
 ## 任务关系模型
 
@@ -174,16 +183,27 @@ LangChain 适合：
 - 合同、回款、发票和 License 写入闭环不是当前阶段主目标。
 - Agent 自有会话、消息、任务、tool 调用、幂等记录可以使用 Agent 自有表。
 
-当前实现模块：
+当前实现模块与迁移方向：
 
-- `session_state.py`：会话归属、当前客户记忆、pending task、suspended task、任务关系判断入口。
+- `root_runtime.py`：Agent Root Graph 的主入口，使用 `StateGraph`、`context_schema`、checkpoint thread id、conditional edges、`interrupt()` 和 `Command(resume=...)` 承载一轮 Agent 的运行时事实；`run_turn()` 是 application 正常路径唯一入口，负责 checkpoint interrupt 读取、pending subgraph、新流程 graph、确认执行、无待办确认等分支，并产出统一 `AgentRuntimeTurnOutput`。当 checkpoint interrupt 带有 task projection 时，root runtime 必须先按 checkpoint 对齐 runtime context task；没有 checkpoint interrupt 时，不得从 session context 或 waiting task 反向恢复旧等待态。
+- `state.py`：定义 checkpoint-safe state、graph input、graph result、run-scoped runtime context、side effects 和应用层 turn output。Graph input 可以承接本轮 DB/session/task/authorization 等运行依赖；checkpoint state 只能保存结构化 JSON-ish 数据；Graph result 通过 side effects 合并本轮对象，不能反向污染可持久状态。
+- `application.py`：只作为应用入口和 transport/message adapter，负责 session/user message/assistant message 落库、调用 `agent_root_runtime.run_turn()`、trace 投影和 SSE 事件输出；正常路径不得直接调用 `checkpoint_turn_start()`、`resume_interrupt()` 或重新实现 pending/new-flow/confirmed-task 业务分支。checkpoint 存储不可用时允许进入显式 fallback，但 fallback 只能作为故障隔离路径，并且必须通过 `agent_root_checkpoint_unavailable_fallback_started` 在 SSE 与 assistant trace 中显式暴露。
+- `app/api/agent.py`：除会话、消息和 SSE 入口外，还提供 root runtime 的只读 checkpoint state/history 查询接口。诊断多分支、HITL 恢复和跨轮行为时必须优先读取 LangGraph checkpoint 投影，不应只依赖 message payload 或 `crm_agent_tasks`。
+- `interrupts.py`：统一 `agent.interrupt.v1` 等待/恢复协议，把 confirm、form、choice、text 等等待态映射到 LangGraph interrupt payload；`WAITING_USER` task 只能作为新等待事件写入 checkpoint interrupt 时的展示/审计投影源，不作为恢复真相。
+- `pending_effects.py`、`new_flow_effects.py`：Graph 节点内应用业务 side effects，例如创建等待任务投影、记忆当前客户、暂停/恢复 pending task、补充切换提示和最终回复；本轮产生的等待事件必须投影为 `current_interrupt` 并交回 root graph 写入 checkpoint。side effect handler 必须由 graph 节点调用，不能散落到 application 编排里。若业务子图已经产出原生 `current_interrupt`，side effect handler 必须优先使用子图 interrupt；事件投影只用于把本轮新等待事件标准化为 checkpoint payload。
+- `confirmed_task_graph.py`：确认后的写入执行子图，由 root graph 调用；使用独立 `StateGraph`、`context_schema`、checkpoint thread 和 input/state/result 边界承载确认执行、tool 结果、任务完成/失败和最终回复事件。
+- `checkpointer.py`：统一 checkpoint 存储错误识别和 fallback 审计事件；root/application、pending-task、confirmed-task 等长期运行路径进入 no-checkpointer fallback 时必须显式暴露 `checkpoint_unavailable` 与 `fallback_reason`。
+- `confirmed_task_graph.py` / `confirmed_task_effects.py`：confirmed-task subgraph 直接拥有写任务执行节点，复用现有 tool registry、HITL guardrails、幂等和 CRM API；任务清理、下一步任务建议等非 checkpoint 副作用集中在 effects 层。application 正常路径不得绕过 subgraph 直接调用写任务执行。
+- `session_projection.py`：session context 的非 HITL 记忆白名单，只允许向 runtime 暴露 `current_customer` 等记忆；等待态、挂起态和任务恢复不得从 session JSON 投影。
+- `session_state.py`：当前用于会话归属、当前客户记忆、pending task、suspended task、任务关系判断入口；pending/suspended 的恢复只能从 LangGraph checkpoint interrupt 进入，`crm_agent_tasks` 只作为展示、审计和本轮 task projection 读取，session context 不再承载运行时 pending 真相。
 - `input.py`：Web、IM 文本和 reaction 的通道无关输入模型。
 - `confirmation_intent.py`：可执行任务确认/拒绝/未知判断。
-- `pending_graph.py`：active/suspended task 的 LangGraph 状态机。
-- `graph.py`：新流程 LangGraph 编排。
+- `pending_graph.py`：active/suspended task 子图，由 root graph 调用并通过 side effect handler 应用结果；已按 `context_schema` 拆分 input/state/result，避免 DB session、ORM task 和 authorization 进入 checkpoint。挂起草稿归属澄清、字段补充、客户选择、业务对象选择、文本补充和二段确认已进入子图原生 `interrupt()` 暂停点，并通过 root 传入的 `Command(resume=...)` 恢复同一 pending 子图 thread。
+- `pending_interaction_graph.py`：pending interaction 领域子图，使用显式节点、handler registry 和 conditional edge 承载字段补充、客户选择和业务对象选择；字段类等待任务的 route/node/predicate/collector/event 归图注册表表达，等待恢复执行原语已并入子图节点边界，不再保留独立 pending interaction runtime。
+- `graph.py`：新流程 LangGraph 编排，已经由 root graph 直接调用；已按 `AgentGraphInput`、`AgentGraphState`、`AgentGraphResult` 和 `AgentGraphRuntimeContext` 区分应用输入、checkpoint 状态、输出结果和运行依赖。客户识别、重复检查、业务上下文、行动规划、跟进质量、商机、联系人、发票抬头、部署信息、客户成员、回款登记等已拆为 domain subgraphs；后续新增业务必须继续按领域子图扩展，不能回到单流程 runtime。
+- `*_graph.py` 领域子图：每个子图必须有 checkpoint-safe state、`context_schema`、明确 route event 和独立单测；只读/规划类子图可调用 LLM structured output，写入类子图只能生成候选 tool request 或等待确认，不能直接绕过 confirmed-task/tool 执行边界。
 - `semantic.py` / `prompts.py`：LangChain structured output 和 JSON fallback。
 - `interactions.py`：统一构造端内和 IM 可复用的交互描述。
-- `response_builder.py`：新流程响应和事件构造。
 - `agent_copy.py`：用户可见短文案。
 - `task_factory.py`：从图事件创建等待确认的 Agent task。
 - `field_common.py`：字段补全过程共用解析和安全合并。

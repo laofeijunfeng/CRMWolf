@@ -4,7 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import uuid
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,6 +22,8 @@ from app.schemas.agent import (
     AgentTaskUpdate,
 )
 from app.services.agent import business_rules
+from app.services.agent import session_projection
+from app.services.agent import task_display
 from app.services.agent.guardrails import AgentToolExecutionPolicy
 from app.services.agent.quality import AgentFollowUpQualityEvaluatorError, agent_follow_up_quality_evaluator
 from app.services.agent.runtime import AgentToolRuntime
@@ -76,38 +78,9 @@ def _get_owned_session(
     return session
 
 def _remember_current_customer(db: Session, session, customer: Optional[dict]) -> None:
-    if not customer or not customer.get("id") or not customer.get("account_name"):
+    context = session_projection.with_current_customer(session_projection.session_context(session), customer)
+    if context == session_projection.session_context(session):
         return
-    context = dict(session.context_json or {})
-    context["current_customer"] = {
-        "id": customer.get("id"),
-        "account_name": customer.get("account_name"),
-        "owner_info": customer.get("owner_info"),
-        "collaborator_infos": customer.get("collaborator_infos") or [],
-    }
-    agent_session_crud.update(db, session, AgentSessionUpdate(context_json=context))
-
-def _remember_pending_task(db: Session, session, task) -> None:
-    if not task or task.status != AgentTaskStatus.WAITING_USER:
-        return
-    context = dict(session.context_json or {})
-    context["current_pending_task"] = {
-        "id": task.id,
-        "action": (task.state_json or {}).get("action"),
-        "intent": task.intent,
-        "target_id": task.target_id,
-        "summary": task.summary,
-    }
-    agent_session_crud.update(db, session, AgentSessionUpdate(context_json=context))
-
-def _clear_pending_task(db: Session, session, task_id: Optional[int] = None) -> None:
-    context = dict(session.context_json or {})
-    pending = context.get("current_pending_task")
-    if task_id is not None and isinstance(pending, dict) and pending.get("id") != task_id:
-        return
-    if "current_pending_task" not in context:
-        return
-    context.pop("current_pending_task", None)
     agent_session_crud.update(db, session, AgentSessionUpdate(context_json=context))
 
 def _suspend_pending_task(db: Session, session, task, reason: str) -> None:
@@ -120,47 +93,8 @@ def _suspend_pending_task(db: Session, session, task, reason: str) -> None:
         task,
         AgentTaskUpdate(status=AgentTaskStatus.SUSPENDED, state_json=state),
     )
-    context = dict(session.context_json or {})
-    suspended = context.get("suspended_pending_tasks")
-    if not isinstance(suspended, list):
-        suspended = []
-    suspended.insert(0, {
-        "id": task.id,
-        "action": state.get("action"),
-        "intent": task.intent,
-        "target_id": task.target_id,
-        "summary": task.summary,
-        "reason": reason,
-    })
-    context["suspended_pending_tasks"] = suspended[:5]
-    if isinstance(context.get("current_pending_task"), dict) and context["current_pending_task"].get("id") == task.id:
-        context.pop("current_pending_task", None)
-    agent_session_crud.update(db, session, AgentSessionUpdate(context_json=context))
-
-def _get_current_waiting_task(db: Session, session, team_id: int, user_id: int):
-    pending = (session.context_json or {}).get("current_pending_task")
-    if isinstance(pending, dict) and pending.get("id"):
-        task = agent_task_crud.get_by_id(db, pending["id"], team_id=team_id, user_id=user_id)
-        if task and task.status == AgentTaskStatus.WAITING_USER:
-            return task
-    return agent_task_crud.get_latest_waiting(
-        db,
-        session_id=session.id,
-        team_id=team_id,
-        user_id=user_id,
-    )
 
 def _get_latest_suspended_task(db: Session, session, team_id: int, user_id: int):
-    context = session.context_json or {}
-    suspended = context.get("suspended_pending_tasks")
-    if isinstance(suspended, list):
-        for item in suspended:
-            if not isinstance(item, dict) or not item.get("id"):
-                continue
-            task = agent_task_crud.get_by_id(db, item["id"], team_id=team_id, user_id=user_id)
-            if task and task.status == AgentTaskStatus.SUSPENDED and _is_resumable_task(task):
-                return task
-
     for task in agent_task_crud.list_by_session(db, session.id, team_id=team_id, user_id=user_id):
         if task.status == AgentTaskStatus.SUSPENDED and _is_resumable_task(task):
             return task
@@ -174,20 +108,6 @@ def _resume_suspended_task(db: Session, session, task):
         task,
         AgentTaskUpdate(status=AgentTaskStatus.WAITING_USER, state_json=state),
     )
-    context = dict(session.context_json or {})
-    suspended = context.get("suspended_pending_tasks")
-    if isinstance(suspended, list):
-        context["suspended_pending_tasks"] = [
-            item for item in suspended if not (isinstance(item, dict) and item.get("id") == task.id)
-        ][:5]
-    context["current_pending_task"] = {
-        "id": task.id,
-        "action": state.get("action"),
-        "intent": task.intent,
-        "target_id": task.target_id,
-        "summary": task.summary,
-    }
-    agent_session_crud.update(db, session, AgentSessionUpdate(context_json=context))
     return task
 
 def _is_resumable_task(task) -> bool:
@@ -197,7 +117,7 @@ def _is_resumable_task(task) -> bool:
         "create_opportunity",
     }
 
-def _task_input_payload(task_input: dict[str, Any]) -> dict[str, Any]:
+def _task_input_payload(task_input: dict[str, object]) -> dict[str, object]:
     nested_payload = task_input.get("payload")
     if isinstance(nested_payload, dict):
         return nested_payload
@@ -206,29 +126,25 @@ def _task_input_payload(task_input: dict[str, Any]) -> dict[str, Any]:
 def _pending_task_display_summary(
     task,
     *,
-    state: dict[str, Any],
-    task_input: dict[str, Any],
-    payload: dict[str, Any],
-    customer: dict[str, Any],
+    state: dict[str, object],
+    task_input: dict[str, object],
+    payload: dict[str, object],
+    customer: dict[str, object],
     missing_fields: list[str],
 ) -> str:
     action = state.get("action") or task_input.get("action")
-    customer_name = customer.get("account_name") or customer.get("name") or state.get("customer_name")
-    opportunity = payload.get("opportunity") if isinstance(payload.get("opportunity"), dict) else {}
-    customer_part = str(customer_name or "未选客户")
-    if action == "collect_opportunity_fields":
-        display_fields = business_rules.format_opportunity_missing_fields(
-            business_rules.opportunity_missing_display_fields(missing_fields)
-        )
-        if display_fields:
-            return f"补商机信息｜{customer_part}｜缺：{display_fields}"
-        return f"确认采购方式｜{customer_part}"
-    if action == "create_opportunity":
-        opportunity_summary = business_rules.format_opportunity_summary(opportunity)
-        return f"确认创建商机｜{customer_part}｜{opportunity_summary}"
-    return task.summary or str(task.intent or "业务草稿")
+    return task_display.pending_task_display_summary(
+        action=action,
+        summary=task.summary,
+        intent=task.intent,
+        state=state,
+        task_input=task_input,
+        payload=payload,
+        customer=customer,
+        missing_fields=missing_fields,
+    )
 
-def _pending_task_snapshot(task) -> dict[str, Any]:
+def _pending_task_snapshot(task) -> dict[str, object]:
     state = task.state_json or {}
     task_input = task.input_json or {}
     payload = _task_input_payload(task_input) if isinstance(task_input, dict) else {}
@@ -269,22 +185,12 @@ def _pending_task_snapshot(task) -> dict[str, Any]:
 def _memory_snapshot_for_session(session, task=None) -> AgentMemorySnapshot:
     return AgentMemorySnapshot(
         pending_task=_pending_task_snapshot(task) if task else None,
-        session_context=session.context_json or {},
+        session_context=session_projection.session_context(session),
     )
 
-def _suspended_task_snapshots(db: Session, session, team_id: int, user_id: int) -> list[dict[str, Any]]:
-    snapshots: list[dict[str, Any]] = []
-    context = session.context_json or {}
-    suspended = context.get("suspended_pending_tasks")
+def _suspended_task_snapshots(db: Session, session, team_id: int, user_id: int) -> list[dict[str, object]]:
+    snapshots: list[dict[str, object]] = []
     seen_ids: set[int] = set()
-    if isinstance(suspended, list):
-        for item in suspended:
-            if not isinstance(item, dict) or not item.get("id"):
-                continue
-            task = agent_task_crud.get_by_id(db, item["id"], team_id=team_id, user_id=user_id)
-            if task and task.status == AgentTaskStatus.SUSPENDED and _is_resumable_task(task):
-                snapshots.append(_pending_task_snapshot(task))
-                seen_ids.add(task.id)
     for task in agent_task_crud.list_by_session(db, session.id, team_id=team_id, user_id=user_id):
         if task.id in seen_ids:
             continue

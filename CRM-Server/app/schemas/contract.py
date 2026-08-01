@@ -12,8 +12,8 @@ class ContractStatusEnum(str, Enum):
     
     - DRAFT: 草稿状态，可编辑、可删除
     - PENDING_REVIEW: 待审核，已提交审批等待审核
-    - SIGNED: 已签署，双方签署完成等待生效
-    - EFFECTIVE: 已生效，合同正式生效中
+    - SIGNED: 已签署，双方签署完成
+    - EFFECTIVE: 历史兼容状态，按已签署处理
     - EXPIRED: 已到期，合同到期失效
     - TERMINATED: 已终止，合同提前终止
     """
@@ -30,7 +30,7 @@ class ContractStatusEnum(str, Enum):
             "DRAFT": "草稿",
             "PENDING_REVIEW": "待审核",
             "SIGNED": "已签署",
-            "EFFECTIVE": "生效中",
+            "EFFECTIVE": "已签署",
             "EXPIRED": "已到期",
             "TERMINATED": "已终止"
         }

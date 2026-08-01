@@ -39,6 +39,8 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
@@ -235,12 +237,23 @@ const fetchInvoiceApplications = async (): Promise<void> => {
   }
 }
 
-const handleFilterApply = (filters: ListFilterCondition[]): void => {
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'invoices.list',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  refresh: fetchInvoiceApplications,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+
+const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
-  if (filters.some((filter) => filter.field === 'status')) {
+  if (!isCustomFilterViewTab(activeTab.value) && filters.some((filter) => filter.field === 'status')) {
     activeTab.value = 'all'
   }
   pagination.current = 1
+  await customFilterViews.updateActiveCustomViewConfig()
   fetchInvoiceApplications()
 }
 
@@ -253,13 +266,21 @@ const handleReset = (): void => {
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchInvoiceApplications()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchInvoiceApplications()
+}
+
+const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
+  activeFilters.value = filters
+  pagination.current = 1
+  await customFilterViews.saveAsCustomView(filters)
 }
 
 const handlePageChange = (page: number): void => {
@@ -470,17 +491,16 @@ const formatDateTime = (dateStr: string): string => {
 
 // ==================== Lifecycle ====================
 onMounted(() => {
+  void customFilterViews.loadCustomViews()
   fetchCustomers()
   fetchInvoiceApplications()
 })
 
-// TopBar 配置（Tabs + Actions）
-watchEffect(() => {
-  // 注册 ContextTabs 到 TopBar
-  headerStore.setTabs(tabs, activeTab.value)
-
-  // 注册操作按钮
-  headerStore.setActions([
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actionDeps: [canCreateInvoice],
+  actions: () => [
     {
       id: 'create-invoice',
       label: '新建发票',
@@ -490,14 +510,17 @@ watchEffect(() => {
       visible: canCreateInvoice.value,
       ariaLabel: '新建发票申请'
     }
-  ])
+  ]
 })
 
 // Watch activeTab changes from headerStore
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    activeTab.value = headerStore.activeTab
     pagination.current = 1
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
+      return
+    }
+    customFilterViews.applyBuiltInTab(headerStore.activeTab)
     activeSorts.value = []
     fetchInvoiceApplications()
   }
@@ -528,10 +551,15 @@ watchEffect(() => {
       v-model:sorts="activeSorts"
       :filter-fields="filterFields"
       :sort-fields="sortFields"
+      view-key="invoices.list"
+      column-config-enabled
+      filter-view-save-enabled
+      :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @filter-save-view="handleSaveFilterView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
       @row-click="handleViewDetail"

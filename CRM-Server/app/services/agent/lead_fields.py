@@ -65,7 +65,7 @@ async def _apply_lead_fields(db: Session, task, content: str):
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_lead",
+            summary="等待确认创建线索",
             input_json=next_payload,
             state_json=new_state,
         ),

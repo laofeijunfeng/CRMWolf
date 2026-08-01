@@ -32,9 +32,9 @@ DISAMBIGUATION_RULES: Dict[str, Dict[str, Any]] = {
     "create_payment_plan": {
         "trigger_field": "contract_name",
         "entity_type": "contract",
-        "filter_status": ["生效中"],
+        "filter_status": ["已签署"],
         "display_fields": ["contract_name", "total_amount"],
-        "message_template": "存在多个生效合同，请选择要创建回款计划的合同"
+        "message_template": "存在多个已签署合同，请选择要创建回款计划的合同"
     },
     "create_payment_record": {
         "trigger_field": "stage_name",
@@ -50,7 +50,7 @@ DISAMBIGUATION_RULES: Dict[str, Dict[str, Any]] = {
         "entity_type": "payment_plan",
         "search_context_field": "contract_name",
         "search_by_contract": True,
-        "filter_status": ["待回款", "部分回款", "已完成"],
+        "filter_status": ["待回款", "部分回款", "已登记"],
         "display_fields": ["stage_name", "planned_amount"],
         "message_template": "该合同有多个回款阶段，请选择要申请开票的阶段"
     },

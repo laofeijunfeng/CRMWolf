@@ -74,7 +74,7 @@ async def _apply_contact_fields(db: Session, task, content: str):
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_contact",
+            summary="等待确认创建联系人",
             input_json=payload,
             state_json=new_state,
         ),
@@ -121,7 +121,7 @@ async def _apply_invoice_title_fields(db: Session, task, content: str):
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_invoice_title",
+            summary="等待确认创建发票抬头",
             input_json=payload,
             state_json=new_state,
         ),
@@ -166,7 +166,7 @@ async def _apply_deployment_info_fields(db: Session, task, content: str):
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_deployment_info",
+            summary="等待确认创建部署信息",
             input_json=payload,
             state_json=new_state,
         ),
@@ -216,7 +216,7 @@ async def _apply_customer_member_fields(db: Session, task, content: str):
         db,
         task,
         AgentTaskUpdate(
-            summary="等待确认执行：create_customer_member",
+            summary="等待确认设置客户成员",
             input_json=next_payload,
             state_json=new_state,
         ),

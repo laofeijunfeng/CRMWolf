@@ -124,7 +124,7 @@ const approvalAccordionValue = ref('approval')
 const stageAccordionValue = ref('')
 const isStageComplete = ref(false)
 const stageWinProbability = ref(0)
-const approvedContractStatuses: readonly ContractStatus[] = ['SIGNED', 'EFFECTIVE']
+const approvedContractStatuses: readonly ContractStatus[] = ['SIGNED']
 
 const winDialogOpen = ref(false)
 const loseDialogOpen = ref(false)

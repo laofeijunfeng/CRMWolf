@@ -1,12 +1,16 @@
 """CRM AI Agent API tests."""
+import asyncio
+import json
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import create_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.types import BigInteger
 
 from app.api import agent as agent_api
@@ -25,6 +29,11 @@ from app.services.agent.schemas import (
     AgentSemanticParseResult,
     AgentTurnRelationDecision,
 )
+from app.services.agent.confirmed_task_graph import ConfirmedTaskGraphService
+from app.services.agent.pending_graph import PendingTaskGraphService
+from app.services.agent.root_runtime import AgentRootRuntime
+from app.services.agent.state import AgentRuntimeTurnOutput
+from app.services.agent.input import AgentTurnInput
 from app.services.agent.tools.base import AgentToolResult
 
 
@@ -59,6 +68,18 @@ def _build_client(monkeypatch):
         status="active",
     )
     monkeypatch.setattr(agent_api, "SessionLocal", lambda: Session())
+    if agent_api.agent_application_module.agent_root_runtime is agent_api.agent_root_runtime:
+        checkpointer = InMemorySaver()
+        monkeypatch.setattr(
+            agent_api.agent_application_module,
+            "agent_root_runtime",
+            AgentRootRuntime(
+                checkpointer=checkpointer,
+                new_flow_graph_service=agent_api.crm_agent_graph_service,
+                pending_graph_service=PendingTaskGraphService(checkpointer=checkpointer),
+                confirmed_task_graph_service=ConfirmedTaskGraphService(checkpointer=checkpointer),
+            ),
+        )
 
     return TestClient(app), engine
 
@@ -166,13 +187,20 @@ class FakeQualityEvaluator:
 
 
 def test_agent_session_and_stream_api(monkeypatch):
-    class FakeGraphService:
-        async def stream_events(self, input_state):
-            yield {"event": "agent_step", "step": "semantic_parse", "status": "started", "content": "AI 语义理解"}
-            yield {"event": "tool_result", "tool_name": "get_customer_context", "success": True}
-            yield {"event": "final", "content": f"已收到：{input_state['content']}"}
+    class FakeRootRuntime:
+        async def run_turn(self, *, content, context, **kwargs):
+            context.side_effects.new_flow_events.extend([
+                {"event": "agent_step", "step": "semantic_parse", "status": "started", "content": "AI 语义理解"},
+                {"event": "tool_result", "tool_name": "get_customer_context", "success": True},
+                {"event": "final", "content": f"已收到：{content}"},
+            ])
+            context.side_effects.new_flow_assistant_content = f"已收到：{content}"
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": f"已收到：{content}",
+            }
 
-    monkeypatch.setattr(agent_api, "crm_agent_graph_service", FakeGraphService())
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
 
     client, engine = _build_client(monkeypatch)
     try:
@@ -206,6 +234,637 @@ def test_agent_session_and_stream_api(monkeypatch):
         trace_events = assistant_message["payload_json"]["trace_events"]
         assert [event["event"] for event in trace_events] == ["agent_step", "tool_result"]
         assert trace_events[1]["tool_name"] == "get_customer_context"
+    finally:
+        engine.dispose()
+
+
+async def test_agent_application_streams_runtime_events_before_turn_finishes(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.release = asyncio.Event()
+            self.finished = False
+
+        async def run_turn(self, *, content, context, **kwargs):
+            if context.event_sink:
+                await context.event_sink({
+                    "event": "agent_step",
+                    "step": "semantic_parse",
+                    "status": "started",
+                    "content": "AI 语义理解",
+                })
+            await self.release.wait()
+            self.finished = True
+            context.side_effects.new_flow_assistant_content = f"已收到：{content}"
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": f"已收到：{content}",
+            }
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(agent_api.agent_application_module, "SessionLocal", lambda: Session())
+    fake_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_runtime)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "流式事件"}).json()
+        stream = agent_api.agent_application_service.stream_chat_events(
+            content="今天和越秀金融沟通了项目进展",
+            team_id=1,
+            user_id=2,
+            authorization="Bearer test-token",
+            session_id=session["id"],
+        )
+
+        assert (await anext(stream))["event"] == "session"
+        user_event = await anext(stream)
+        assert user_event["event"] == "message"
+        assert user_event["role"] == "USER"
+
+        step_event = await asyncio.wait_for(anext(stream), timeout=0.2)
+
+        assert step_event == {
+            "event": "agent_step",
+            "step": "semantic_parse",
+            "status": "started",
+            "content": "AI 语义理解",
+        }
+        assert fake_runtime.finished is False
+
+        fake_runtime.release.set()
+        remaining_events = [event async for event in stream]
+        assert [event["event"] for event in remaining_events] == ["message", "done"]
+        assert fake_runtime.finished is True
+    finally:
+        engine.dispose()
+
+
+def test_agent_runtime_state_api_reads_root_checkpoint(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.calls = []
+
+        async def current_checkpoint_state(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "runtime_status": "waiting",
+                "current_interrupt": {"type": "confirm", "business_action": "CREATE_FOLLOW_UP"},
+            }
+
+    fake_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api, "agent_root_runtime", fake_runtime)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "运行态会话"}).json()
+
+        response = client.get(f"/v1/agent/sessions/{session['id']}/runtime/state")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["session_id"] == session["id"]
+        assert body["session_key"] == session["session_key"]
+        assert body["values"]["runtime_status"] == "waiting"
+        assert body["values"]["current_interrupt"]["business_action"] == "CREATE_FOLLOW_UP"
+        assert fake_runtime.calls[0] == {
+            "team_id": 1,
+            "user_id": 2,
+            "session_id": session["id"],
+            "session_key": session["session_key"],
+        }
+    finally:
+        engine.dispose()
+
+
+def test_agent_runtime_history_api_exposes_langgraph_checkpoints(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.calls = []
+
+        async def state_history(self, **kwargs):
+            self.calls.append(kwargs)
+            return [
+                {
+                    "checkpoint_id": "cp-2",
+                    "parent_checkpoint_id": "cp-1",
+                    "thread_id": "crm_agent:1:2:3:key",
+                    "checkpoint_ns": "crm_agent",
+                    "source": "loop",
+                    "step": 2,
+                    "next_nodes": ["pending_task_subgraph"],
+                    "has_interrupt": True,
+                    "interrupts": [{"type": "confirm"}],
+                    "values": {
+                        "application_action": "execute_confirmed_task",
+                        "current_interrupt": {"type": "confirm"},
+                    },
+                }
+            ]
+
+    fake_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api, "agent_root_runtime", fake_runtime)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "运行态历史"}).json()
+
+        response = client.get(
+            f"/v1/agent/sessions/{session['id']}/runtime/history",
+            params={"before_checkpoint_id": "cp-3", "limit": 5},
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["session_id"] == session["id"]
+        assert body["total"] == 1
+        assert body["before_checkpoint_id"] == "cp-3"
+        assert body["limit"] == 5
+        assert body["items"][0]["checkpoint_id"] == "cp-2"
+        assert body["items"][0]["has_interrupt"] is True
+        assert body["items"][0]["values"]["application_action"] == "execute_confirmed_task"
+        assert fake_runtime.calls[0] == {
+            "team_id": 1,
+            "user_id": 2,
+            "session_id": session["id"],
+            "session_key": session["session_key"],
+            "before_checkpoint_id": "cp-3",
+            "limit": 5,
+        }
+    finally:
+        engine.dispose()
+
+
+def test_agent_runtime_checkpoint_api_reads_historical_state(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.calls = []
+
+        async def checkpoint_state_at(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "runtime_status": "waiting",
+                "current_interrupt": {"type": "form", "reason": "missing_required_fields"},
+                "events": [{"event": "agent_root_pending_task_effects_applied"}],
+            }
+
+    fake_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api, "agent_root_runtime", fake_runtime)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "历史状态"}).json()
+
+        response = client.get(f"/v1/agent/sessions/{session['id']}/runtime/checkpoints/cp-1")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["session_id"] == session["id"]
+        assert body["checkpoint_id"] == "cp-1"
+        assert body["values"]["current_interrupt"]["reason"] == "missing_required_fields"
+        assert fake_runtime.calls[0] == {
+            "checkpoint_id": "cp-1",
+            "team_id": 1,
+            "user_id": 2,
+            "session_id": session["id"],
+            "session_key": session["session_key"],
+        }
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_does_not_inject_waiting_task_without_checkpoint_interrupt(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.context_tasks = []
+
+        async def run_turn(self, *, context, **kwargs):
+            self.context_tasks.append(context.task)
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": "按新一轮输入处理",
+                "events": [{"event": "agent_root_new_flow_graph_completed"}],
+            }
+
+    fake_root_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_root_runtime)
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "跟进会话"})
+        assert create_response.status_code == 201, create_response.text
+        session = create_response.json()
+
+        db = Session()
+        try:
+            db.add(
+                AgentTask(
+                    task_key="task-opportunity-fields",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    intent="CREATE_OPPORTUNITY",
+                    status=AgentTaskStatus.WAITING_USER,
+                    target_type="customer",
+                    target_id=101,
+                    summary="等待补充商机信息",
+                    state_json={
+                        "action": "collect_opportunity_fields",
+                        "customer": {"id": 101, "account_name": "广州睿狐科技有限公司"},
+                        "payload": {
+                            "customer_id": 101,
+                            "missing_fields": ["total_amount", "license_type"],
+                            "interaction_fields": ["total_amount", "license_type"],
+                        },
+                    },
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        stream_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "预计成交金额10万，授权模式订阅"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert stream_response.status_code == 200, stream_response.text
+
+        assert fake_root_runtime.context_tasks == [None]
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_prefers_root_checkpoint_interrupt_over_session_projection(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.run_calls = []
+
+        async def run_turn(self, *, context, **kwargs):
+            self.run_calls.append({"context": context, **kwargs})
+            return {
+                "application_action": "no_pending_confirmation",
+                "assistant_content": "已按 checkpoint 恢复",
+                "events": [{"event": "agent_root_interrupt_resumed"}],
+            }
+
+    fake_root_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_root_runtime)
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    try:
+        create_response = client.post("/v1/agent/sessions", json={"title": "跟进会话"})
+        assert create_response.status_code == 201, create_response.text
+        session = create_response.json()
+
+        db = Session()
+        try:
+            saved_session = db.query(AgentSession).one()
+            saved_session.context_json = {
+                "current_interrupt": {
+                    "type": "confirm",
+                    "reason": "write_confirmation",
+                    "business_action": "stale_session_action",
+                    "allowed_resume_actions": ["reject"],
+                }
+            }
+            db.commit()
+        finally:
+            db.close()
+
+        stream_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "确认"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert stream_response.status_code == 200, stream_response.text
+
+        assert fake_root_runtime.run_calls
+        assert "stale_session_action" not in stream_response.text
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_does_not_use_waiting_task_table_as_runtime_source(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.run_context_task_keys = []
+
+        async def run_turn(self, *, context, **kwargs):
+            task = getattr(context, "task", None)
+            self.run_context_task_keys.append(getattr(task, "task_key", None))
+            return {
+                "application_action": "no_pending_confirmation",
+                "assistant_content": "已按 checkpoint task 恢复",
+                "events": [{"event": "agent_root_interrupt_resumed"}],
+            }
+
+    fake_root_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_root_runtime)
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "投影冲突会话"}).json()
+        db = Session()
+        try:
+            db.add(
+                AgentTask(
+                    task_key="task-waiting-db",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    intent="CREATE_FOLLOW_UP",
+                    status=AgentTaskStatus.WAITING_USER,
+                    summary="等待确认",
+                    state_json={"action": "create_customer_activity", "payload": {"customer_id": 101}},
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        stream_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "确认"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert stream_response.status_code == 200, stream_response.text
+        assert fake_root_runtime.run_context_task_keys == [None]
+    finally:
+        engine.dispose()
+
+
+def test_agent_application_structured_confirm_resumes_checkpoint_interrupt_as_approve(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.run_calls = []
+
+        async def run_turn(self, *, turn_input, **kwargs):
+            self.run_calls.append({"turn_input": turn_input, **kwargs})
+            return {
+                "application_action": "no_pending_confirmation",
+                "assistant_content": "已按结构化确认恢复",
+                "events": [{"event": "agent_root_interrupt_resumed"}],
+            }
+
+    fake_root_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_root_runtime)
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(agent_api.agent_application_module, "SessionLocal", lambda: Session())
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "确认会话"}).json()
+
+        async def collect_events():
+            events = []
+            async for event in agent_api.agent_application_service.stream_chat_events(
+                content="确认",
+                team_id=1,
+                user_id=2,
+                authorization="Bearer test-token",
+                session_id=session["id"],
+                turn_input=AgentTurnInput.confirm(source="web"),
+            ):
+                events.append(event)
+            return events
+
+        events = asyncio.run(collect_events())
+
+        assert fake_root_runtime.run_calls
+        assert fake_root_runtime.run_calls[0]["turn_input"].kind.value == "confirm"
+        assert any(event.get("content") == "已按结构化确认恢复" for event in events)
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_uses_root_runtime_new_flow_side_effects(monkeypatch):
+    class FakeRootRuntime:
+        async def run_turn(self, *, context, **kwargs):
+            context.side_effects.new_flow_events.extend([
+                {"event": "agent_step", "step": "semantic_parse", "status": "started", "content": "AI 语义理解"},
+                {"event": "final", "content": "root 已处理"},
+            ])
+            context.side_effects.new_flow_assistant_content = "root 已处理"
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": "root 已处理",
+                "events": [{"event": "agent_root_new_flow_graph_completed"}],
+            }
+
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "跟进会话"}).json()
+        response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "今天和越秀金融沟通"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert '"event": "agent_step"' in response.text
+        assert '"content": "root 已处理"' in response.text
+        assert "application must not run new-flow directly" not in response.text
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_uses_root_runtime_confirmed_task_side_effects(monkeypatch):
+    class FakeRootRuntime:
+        async def run_turn(self, *, context, **kwargs):
+            task_projection = {
+                "id": 501,
+                "task_key": "task-follow-up",
+                "status": AgentTaskStatus.WAITING_USER,
+            }
+            context.side_effects.confirmed_task_events.extend([
+                {"event": "tool_result", "tool_name": "create_customer_activity", "success": True},
+                {"event": "task_completed", "task_id": task_projection["id"], "content": "root 已执行"},
+                {"event": "final", "content": "root 已执行"},
+            ])
+            context.side_effects.confirmed_task_assistant_content = "root 已执行"
+            return {
+                "task_projection": task_projection,
+                "application_action": "execute_confirmed_task",
+                "assistant_content": "root 已执行",
+                "events": [{"event": "agent_root_confirmed_task_execution_completed"}],
+            }
+
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "确认会话"}).json()
+        db = Session()
+        try:
+            db.add(
+                AgentTask(
+                    task_key="task-follow-up",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    intent="CREATE_FOLLOW_UP",
+                    status=AgentTaskStatus.WAITING_USER,
+                    summary="等待确认跟进记录",
+                    state_json={"action": "create_customer_activity", "payload": {"customer_id": 101}},
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "确认"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert '"event": "tool_result"' in response.text
+        assert '"content": "root 已执行"' in response.text
+        assert "application must not execute confirmed task directly" not in response.text
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_falls_back_to_pending_graph_only_for_checkpoint_storage_errors(monkeypatch):
+    class FakeRootRuntime:
+        async def run_turn(self, **kwargs):
+            raise SQLAlchemyError("checkpoint storage failed")
+
+    class FakeCheckpointFallbackRuntime:
+        def __init__(self):
+            self.calls = []
+
+        async def run(self, **kwargs):
+            self.calls.append(kwargs)
+            return agent_api.agent_application_module.AgentApplicationRuntimeResult(
+                state={
+                    "checkpoint_unavailable": True,
+                    "fallback_reason": "checkpoint_storage_error",
+                    "events": [{
+                        "event": "agent_root_checkpoint_unavailable_fallback_started",
+                        "runtime": "crm_agent_root",
+                        "checkpoint_unavailable": True,
+                        "fallback_reason": "checkpoint_storage_error",
+                    }],
+                },
+                turn_output=AgentRuntimeTurnOutput(
+                    events=[
+                        {
+                            "event": "agent_root_checkpoint_unavailable_fallback_started",
+                            "runtime": "crm_agent_root",
+                            "checkpoint_unavailable": True,
+                            "fallback_reason": "checkpoint_storage_error",
+                        },
+                        {"event": "final", "content": "已切到 checkpoint 故障隔离处理。"},
+                    ],
+                    assistant_content="已切到 checkpoint 故障隔离处理。",
+                ),
+                pending_task_result={"handled": True},
+                checkpoint_unavailable=True,
+            )
+
+    fake_checkpoint_fallback_runtime = FakeCheckpointFallbackRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+    monkeypatch.setattr(
+        agent_api.agent_application_module,
+        "agent_checkpoint_fallback_runtime",
+        fake_checkpoint_fallback_runtime,
+    )
+    monkeypatch.setattr(agent_api.agent_application_module, "is_checkpoint_storage_error", lambda exc: True)
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "跟进会话"}).json()
+        db = Session()
+        try:
+            db.add(
+                AgentTask(
+                    task_key="task-follow-up",
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    intent="CREATE_FOLLOW_UP",
+                    status=AgentTaskStatus.WAITING_USER,
+                    summary="等待确认跟进记录",
+                    state_json={"action": "create_customer_activity", "payload": {"customer_id": 101}},
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "确认"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert "agent_root_checkpoint_unavailable_fallback_started" in response.text
+        assert '"fallback_reason": "checkpoint_storage_error"' in response.text
+        assert "已切到 checkpoint 故障隔离处理。" in response.text
+        assert len(fake_checkpoint_fallback_runtime.calls) == 1
+        assert fake_checkpoint_fallback_runtime.calls[0]["task"] is None
+
+        messages_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assert messages_response.status_code == 200, messages_response.text
+        assistant_message = messages_response.json()["items"][1]
+        trace_events = assistant_message["payload_json"]["trace_events"]
+        fallback_events = [
+            event
+            for event in trace_events
+            if event.get("event") == "agent_root_checkpoint_unavailable_fallback_started"
+        ]
+        assert fallback_events
+        assert fallback_events[0]["runtime"] == "crm_agent_root"
+        assert fallback_events[0]["checkpoint_unavailable"] is True
+        assert fallback_events[0]["fallback_reason"] == "checkpoint_storage_error"
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_does_not_fallback_for_business_sqlalchemy_errors(monkeypatch):
+    class FakeRootRuntime:
+        async def run_turn(self, **kwargs):
+            raise SQLAlchemyError("business db failed")
+
+    class FakeCheckpointFallbackRuntime:
+        def __init__(self):
+            self.calls = []
+
+        async def run(self, **kwargs):
+            self.calls.append(kwargs)
+            return agent_api.agent_application_module.AgentApplicationRuntimeResult(checkpoint_unavailable=True)
+
+    fake_checkpoint_fallback_runtime = FakeCheckpointFallbackRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+    monkeypatch.setattr(
+        agent_api.agent_application_module,
+        "agent_checkpoint_fallback_runtime",
+        fake_checkpoint_fallback_runtime,
+    )
+    monkeypatch.setattr(agent_api.agent_application_module, "is_checkpoint_storage_error", lambda exc: False)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "跟进会话"}).json()
+        response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "确认"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert "business db failed" in response.text
+        assert fake_checkpoint_fallback_runtime.calls == []
     finally:
         engine.dispose()
 
@@ -245,20 +904,73 @@ def test_agent_event_interaction_protocol_for_turn_relation_clarification():
     assert interaction["schema_version"] == "agent.interaction.v1"
     assert interaction["business_action"] == "select_suspended_task"
     assert interaction["status"] == "waiting_user_input"
-    assert interaction["title"] == "选择草稿"
+    assert interaction["title"] == "选择处理方式"
     assert interaction["prompt"] == "你想继续哪个草稿？"
     assert interaction["choices"] == [
         {
-            "label": "广州睿狐增购10个账号补商机信息",
-            "value": "继续：广州睿狐增购10个账号补商机信息",
+            "label": "继续处理：广州睿狐增购10个账号补商机信息",
+            "value": "继续处理：广州睿狐增购10个账号补商机信息",
             "metadata": {"selected_task_id": 201},
         },
         {
-            "label": "广州睿狐创建商机确认",
-            "value": "继续：广州睿狐创建商机确认",
+            "label": "继续处理：广州睿狐创建商机确认",
+            "value": "继续处理：广州睿狐创建商机确认",
             "metadata": {"selected_task_id": 202},
         },
+        {
+            "label": "作为新流程处理",
+            "value": "作为新流程处理",
+            "metadata": {"turn_relation": "START_NEW_FLOW"},
+        },
     ]
+
+
+def test_agent_event_interaction_protocol_for_turn_relation_clarification_uses_display_summary_and_new_flow_choice():
+    event = agent_api._with_interaction({
+        "event": "turn_relation_clarification_required",
+        "content": "这句是继续跟进草稿，还是新开一个流程？",
+        "candidates": [
+            {
+                "id": 301,
+                "summary": "等待确认执行：create_customer_activity",
+                "display_summary": "确认记录跟进｜广州睿狐科技有限公司",
+            },
+        ],
+    })
+
+    interaction = event["interaction"]
+    assert interaction["choices"] == [
+        {
+            "label": "继续处理：确认记录跟进｜广州睿狐科技有限公司",
+            "value": "继续处理：确认记录跟进｜广州睿狐科技有限公司",
+            "metadata": {"selected_task_id": 301},
+        },
+        {
+            "label": "作为新流程处理",
+            "value": "作为新流程处理",
+            "metadata": {"turn_relation": "START_NEW_FLOW"},
+        },
+    ]
+
+
+def test_agent_event_interaction_protocol_for_turn_relation_clarification_hides_legacy_action_summary():
+    event = agent_api._with_interaction({
+        "event": "turn_relation_clarification_required",
+        "content": "这句是继续「等待确认执行：create_customer_activity」，还是新开一个流程？",
+        "candidates": [
+            {
+                "id": 301,
+                "summary": "等待确认执行：create_customer_activity",
+                "action": "create_customer_activity",
+                "customer_name": "广州睿狐科技有限公司",
+            },
+        ],
+    })
+
+    interaction = event["interaction"]
+    labels = [choice["label"] for choice in interaction["choices"]]
+    assert labels == ["继续处理：确认记录跟进｜广州睿狐科技有限公司", "作为新流程处理"]
+    assert "create_customer_activity" not in str(interaction)
 
 
 def test_agent_event_interaction_protocol_for_missing_opportunity_fields():
@@ -370,6 +1082,41 @@ def test_agent_tool_payload_for_create_lead_defaults_source():
     }
 
 
+def test_agent_tool_payload_for_create_opportunity_strips_draft_fields():
+    payload = agent_api._tool_payload_for_action(
+        "create_opportunity",
+        {
+            "customer_id": 101,
+            "opportunity": {
+                "customer_id": 101,
+                "opportunity_name": "广州睿狐科技 100人订阅商机",
+                "total_amount": 50000,
+                "user_count": 100,
+                "license_type": "SUBSCRIPTION",
+                "subscription_years": 1,
+                "purchase_type": "NEW",
+                "expected_closing_date_text": "8 月底",
+                "expected_closing_date": "2026-08-31",
+            },
+        },
+        customer={"id": 101, "account_name": "广州睿狐科技有限公司"},
+        task_key="task-opportunity-001",
+    )
+
+    assert payload == {
+        "opportunity": {
+            "customer_id": 101,
+            "total_amount": 50000,
+            "user_count": 100,
+            "license_type": "SUBSCRIPTION",
+            "subscription_years": 1,
+            "purchase_type": "NEW",
+            "expected_closing_date": "2026-08-31",
+        },
+        "idempotency_suffix": "task-opportunity-001",
+    }
+
+
 def test_agent_event_interaction_protocol_for_follow_up_quality():
     event = agent_api._with_interaction({
         "event": "follow_up_quality_required",
@@ -400,9 +1147,60 @@ def test_agent_event_interaction_protocol_for_customer_selection():
     assert event["interaction"]["business_action"] == "select_customer"
     assert event["interaction"]["title"] == "选择客户"
     assert event["interaction"]["choices"] == [
-        {"label": "广州睿狐科技有限公司", "value": "1"},
-        {"label": "深圳睿狐科技有限公司", "value": "2"},
+        {
+            "label": "广州睿狐科技有限公司",
+            "value": "1",
+            "metadata": {
+                "resource_type": "customer",
+                "choice_index": 1,
+                "selected_customer_id": 1,
+                "resource_id": 1,
+            },
+        },
+        {
+            "label": "深圳睿狐科技有限公司",
+            "value": "2",
+            "metadata": {
+                "resource_type": "customer",
+                "choice_index": 2,
+                "selected_customer_id": 2,
+                "resource_id": 2,
+            },
+        },
     ]
+
+
+def test_agent_event_interaction_protocol_for_business_selection_hides_internal_identifiers():
+    event = agent_api._with_interaction({
+        "event": "business_selection_required",
+        "content": "找到多个商机，请选择",
+        "opportunities": [
+            {
+                "id": 11,
+                "opportunity_name": "越秀 CRM 一期",
+                "purchase_type": "NEW",
+                "procurement_method_id": 2,
+                "procurement_method_name": "公开招标",
+                "expected_closing_date": "2026-12-31",
+                "current_stage_name": "方案交流",
+                "target_stage_template_id": 9,
+                "target_stage_name": "POC",
+            },
+        ],
+    })
+
+    serialized = json.dumps(event["interaction"], ensure_ascii=False)
+    assert "procurement_method_id" not in serialized
+    assert "target_stage_template_id" not in serialized
+    assert "越秀 CRM 一期" in event["interaction"]["choices"][0]["label"]
+    assert "公开招标" in event["interaction"]["choices"][0]["label"]
+    assert event["interaction"]["choices"][0]["value"] == "1"
+    assert event["interaction"]["choices"][0]["metadata"] == {
+        "resource_type": "opportunity",
+        "choice_index": 1,
+        "selected_opportunity_id": 11,
+        "resource_id": 11,
+    }
 
 
 def test_agent_stream_creates_waiting_task_and_executes_confirmation(monkeypatch):
@@ -609,9 +1407,7 @@ def test_agent_stream_cancels_waiting_task_when_user_rejects(monkeypatch):
         db = Session()
         try:
             task = db.query(AgentTask).one()
-            saved_session = db.query(AgentSession).one()
             assert task.status == AgentTaskStatus.SUSPENDED
-            assert "current_pending_task" not in (saved_session.context_json or {})
         finally:
             db.close()
     finally:
@@ -785,8 +1581,7 @@ def test_agent_stream_collects_opportunity_fields_without_rerunning_graph(monkey
         Session = sessionmaker(bind=engine)
         db = Session()
         try:
-            saved_session = db.query(AgentSession).one()
-            assert saved_session.context_json["current_pending_task"]["action"] == "collect_opportunity_fields"
+            assert db.query(AgentSession).one().context_json is None
         finally:
             db.close()
 
@@ -805,8 +1600,6 @@ def test_agent_stream_collects_opportunity_fields_without_rerunning_graph(monkey
         try:
             task = db.query(AgentTask).one()
             assert task.state_json["action"] == "create_opportunity"
-            saved_session = db.query(AgentSession).one()
-            assert saved_session.context_json["current_pending_task"]["action"] == "create_opportunity"
             opportunity = task.state_json["payload"]["opportunity"]
             assert opportunity["total_amount"] == 50000
             assert opportunity["user_count"] == 100
@@ -882,6 +1675,7 @@ def test_agent_stream_create_opportunity_completion_is_terminal(monkeypatch):
                         "license_type": "SUBSCRIPTION",
                         "subscription_years": 1,
                         "purchase_type": "NEW",
+                        "expected_closing_date_text": "8 月底",
                         "expected_closing_date": "2026-08-30",
                     },
                 },
@@ -891,6 +1685,7 @@ def test_agent_stream_create_opportunity_completion_is_terminal(monkeypatch):
     class FakeToolService:
         async def create_opportunity(self, context, **kwargs):
             assert kwargs["opportunity"]["customer_id"] == customer["id"]
+            assert "expected_closing_date_text" not in kwargs["opportunity"]
             return AgentToolResult(
                 tool_name="create_opportunity",
                 success=True,
@@ -1594,9 +2389,6 @@ def test_agent_stream_interrupts_pending_task_for_clear_new_customer_flow(monkey
         try:
             task = db.query(AgentTask).one()
             assert task.status == AgentTaskStatus.SUSPENDED
-            saved_session = db.query(AgentSession).one()
-            assert "current_pending_task" not in saved_session.context_json
-            assert saved_session.context_json["suspended_pending_tasks"][0]["id"] == task.id
         finally:
             db.close()
     finally:

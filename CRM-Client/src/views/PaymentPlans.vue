@@ -35,7 +35,8 @@ import paymentApi, {
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
-import { formatLocalDate } from '@/utils/format'
+import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { serializeListSorts } from '@/utils/listSorts'
 
@@ -68,21 +69,19 @@ const pagination = reactive({
 
 // ==================== ContextTabs 配置 ====================
 const tabs = [
+  { key: 'all', label: '全部计划' },
   { key: 'pending', label: '待登记' },
   { key: 'partial', label: '部分回款' },
-  { key: 'overdue', label: '已逾期' },
-  { key: 'upcoming', label: '即将到期' },
-  { key: 'all', label: '全部计划' }
+  { key: 'completed', label: '已登记' }
 ]
 
-const activeTab = ref('pending')
+const activeTab = ref('all')
 
 // Badge counts from store（暂不使用，保留供未来扩展）
 // const tabBadgeCounts = computed(() => ({
 //   pending: paymentPlansStore.pendingCount,
 //   partial: paymentPlansStore.partialCount,
-//   overdue: paymentPlansStore.overdueCount,
-//   upcoming: 0,
+//   completed: paymentPlansStore.completedCount,
 //   all: paymentPlansStore.total
 // }))
 
@@ -96,7 +95,7 @@ const filterFields: ListFilterField[] = [
     options: [
       { value: 'PENDING', label: '待登记' },
       { value: 'PARTIAL', label: '部分回款' },
-      { value: 'COMPLETED', label: '已完成' },
+      { value: 'COMPLETED', label: '已登记' },
       { value: 'OVERDUE', label: '已逾期' }
     ]
   },
@@ -117,7 +116,7 @@ const sortFields: ListSortField[] = [
     options: [
       { value: 'PENDING', label: '待登记' },
       { value: 'PARTIAL', label: '部分回款' },
-      { value: 'COMPLETED', label: '已完成' },
+      { value: 'COMPLETED', label: '已登记' },
       { value: 'OVERDUE', label: '已逾期' }
     ]
   }
@@ -148,12 +147,6 @@ const registerDefaultAmount = computed<number | null>(() => {
 const registerDefaultPayerName = computed<string>(() => selectedConfirmPlan.value?.customer_name?.trim() ?? '')
 
 // ==================== Methods ====================
-const getUpcomingDate = (days: number): string => {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return formatLocalDate(date)
-}
-
 const fetchPaymentPlans = async (): Promise<void> => {
   loading.value = true
   try {
@@ -167,10 +160,8 @@ const fetchPaymentPlans = async (): Promise<void> => {
       params.status = 'PENDING'
     } else if (activeTab.value === 'partial') {
       params.status = 'PARTIAL'
-    } else if (activeTab.value === 'overdue') {
-      params.status = 'OVERDUE'
-    } else if (activeTab.value === 'upcoming') {
-      params.due_date_end = getUpcomingDate(7)
+    } else if (activeTab.value === 'completed') {
+      params.status = 'COMPLETED'
     } else {
       const status = getDelimitedFilterValues(activeFilters.value, 'status')
       const statusExclude = getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains'])
@@ -211,13 +202,24 @@ const fetchPaymentPlans = async (): Promise<void> => {
   }
 }
 
-const handleFilterApply = (filters: ListFilterCondition[]): void => {
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'payment-plans.list',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  refresh: fetchPaymentPlans,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+
+const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
-  if (filters.some((filter) => filter.field === 'status')) {
+  if (!isCustomFilterViewTab(activeTab.value) && filters.some((filter) => filter.field === 'status')) {
     activeTab.value = 'all'
     headerStore.setActiveTab('all')
   }
   pagination.current = 1
+  await customFilterViews.updateActiveCustomViewConfig()
   fetchPaymentPlans()
 }
 
@@ -230,13 +232,21 @@ const handleReset = (): void => {
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchPaymentPlans()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchPaymentPlans()
+}
+
+const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
+  activeFilters.value = filters
+  pagination.current = 1
+  await customFilterViews.saveAsCustomView(filters)
 }
 
 const handlePageChange = (page: number): void => {
@@ -353,17 +363,16 @@ const mapPaymentPlanStatus = (status: string): 'pending' | 'partial' | 'complete
 
 // ==================== Lifecycle ====================
 onMounted(() => {
+  void customFilterViews.loadCustomViews()
   fetchPaymentPlans()
   // paymentPlansStore.fetchCounts() // 暂时注释，store 中可能没有此方法
 })
 
-// TopBar 配置（Tabs + Actions）
-watchEffect(() => {
-  // 注册 ContextTabs 到 TopBar
-  headerStore.setTabs(tabs, activeTab.value)
-
-  // 注册操作按钮
-  headerStore.setActions([
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actionDeps: [canCreatePlan],
+  actions: () => [
     {
       id: 'create-plan',
       label: '新建回款计划',
@@ -373,14 +382,17 @@ watchEffect(() => {
       visible: canCreatePlan.value,
       ariaLabel: '新建回款计划'
     }
-  ])
+  ]
 })
 
 // Watch activeTab changes from headerStore
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    activeTab.value = headerStore.activeTab
     pagination.current = 1
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
+      return
+    }
+    customFilterViews.applyBuiltInTab(headerStore.activeTab)
     fetchPaymentPlans()
   }
 })
@@ -411,6 +423,10 @@ watch(
       :filter-fields="filterFields"
       :sort-fields="sortFields"
       :sorts="activeSorts"
+      view-key="payment-plans.list"
+      column-config-enabled
+      filter-view-save-enabled
+      :filter-view-save-loading="customFilterViewSaving"
       height="calc(100vh - 121px)"
       empty-title="暂无回款计划"
       row-interactive
@@ -422,6 +438,7 @@ watch(
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @filter-save-view="handleSaveFilterView"
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"

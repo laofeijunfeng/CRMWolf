@@ -354,7 +354,7 @@ def get_customer_contracts(
 - customer_id: 客户ID
 
 **查询参数：**
-- status: 回款状态筛选（可选）：PENDING待回款、OVERDUE已逾期、PARTIAL部分回款、COMPLETED已完成
+- status: 回款状态筛选（可选）：PENDING待回款、OVERDUE已逾期、PARTIAL部分回款、COMPLETED已登记
 - skip: 分页跳过记录数（默认0）
 - limit: 每页记录数（默认20，最大100）
 
@@ -385,7 +385,7 @@ def get_customer_payment_plans(
         PaymentPlanStatus.PENDING: "待回款",
         PaymentPlanStatus.OVERDUE: "已逾期",
         PaymentPlanStatus.PARTIAL: "部分回款",
-        PaymentPlanStatus.COMPLETED: "已完成"
+        PaymentPlanStatus.COMPLETED: "已登记"
     }
     
     from sqlalchemy import text
@@ -642,7 +642,7 @@ def get_customers(
     created_time_end: Optional[date] = Query(None, description="创建时间结束"),
     order_by: str = Query(None, description="排序字段（created_time/account_name/city/status/industry）"),
     order_dir: str = Query(None, description="排序方向（asc/desc）"),
-    scope: Optional[str] = Query(None, description="客户范围：owned/collaborated/accessible"),
+    scope: Optional[str] = Query(None, description="客户范围：collaborated/accessible"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -670,18 +670,16 @@ def get_customers(
                 detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
             )
 
-    allowed_scopes = {None, "owned", "collaborated", "accessible"}
+    allowed_scopes = {None, "collaborated", "accessible"}
     if scope not in allowed_scopes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="scope 仅支持 owned/collaborated/accessible"
+            detail="scope 仅支持 collaborated/accessible"
         )
 
     current_user_id = str(current_user.id)
     include_collaborated = False
-    if scope == "owned":
-        actual_owner_id = current_user_id
-    elif scope == "collaborated":
+    if scope == "collaborated":
         actual_owner_id = None
     elif scope == "accessible" and not has_view_all:
         actual_owner_id = None

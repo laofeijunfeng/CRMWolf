@@ -15,6 +15,9 @@ from app.schemas.agent import (
     AgentChatRequest,
     AgentCreateSessionRequest,
     AgentMessageResponse,
+    AgentRuntimeCheckpointStateResponse,
+    AgentRuntimeHistoryItemResponse,
+    AgentRuntimeHistoryResponse,
     AgentSessionResponse,
 )
 from app.schemas.common import PaginatedResponse
@@ -36,6 +39,7 @@ from app.services.agent.session_state import (
     _build_session_create,
     _get_owned_session,
 )
+from app.services.agent.root_runtime import agent_root_runtime
 from app.services.agent.task_actions import _tool_payload_for_action
 from app.services.agent.tools import CRMAgentToolService
 from app.utils.sse_encoder import SSEJsonEncoder
@@ -141,6 +145,83 @@ async def list_agent_messages(
         page=page,
         page_size=page_size,
         total_pages=(total + page_size - 1) // page_size,
+    )
+
+
+@router.get("/sessions/{session_id}/runtime/state", response_model=AgentRuntimeCheckpointStateResponse)
+async def get_agent_runtime_state(
+    session_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    session = _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    state = await agent_root_runtime.current_checkpoint_state(
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session.id,
+        session_key=session.session_key,
+    )
+    return AgentRuntimeCheckpointStateResponse(
+        session_id=session.id,
+        session_key=session.session_key,
+        values=state,
+    )
+
+
+@router.get("/sessions/{session_id}/runtime/history", response_model=AgentRuntimeHistoryResponse)
+async def list_agent_runtime_history(
+    session_id: int,
+    before_checkpoint_id: Optional[str] = Query(None, description="从指定checkpoint之前继续读取"),
+    limit: int = Query(20, ge=1, le=100, description="返回checkpoint数量"),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    session = _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    history = await agent_root_runtime.state_history(
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session.id,
+        session_key=session.session_key,
+        before_checkpoint_id=before_checkpoint_id,
+        limit=limit,
+    )
+    items = [AgentRuntimeHistoryItemResponse(**item) for item in history]
+    return AgentRuntimeHistoryResponse(
+        session_id=session.id,
+        session_key=session.session_key,
+        items=items,
+        total=len(items),
+        before_checkpoint_id=before_checkpoint_id,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/runtime/checkpoints/{checkpoint_id}",
+    response_model=AgentRuntimeCheckpointStateResponse,
+)
+async def get_agent_runtime_checkpoint_state(
+    session_id: int,
+    checkpoint_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    session = _get_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
+    state = await agent_root_runtime.checkpoint_state_at(
+        checkpoint_id=checkpoint_id,
+        team_id=team_id,
+        user_id=current_user.id,
+        session_id=session.id,
+        session_key=session.session_key,
+    )
+    return AgentRuntimeCheckpointStateResponse(
+        session_id=session.id,
+        session_key=session.session_key,
+        checkpoint_id=checkpoint_id,
+        values=state,
     )
 
 

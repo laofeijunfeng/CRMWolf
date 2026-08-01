@@ -2,8 +2,11 @@
 from datetime import datetime
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.services.agent.graph import CRMAgentGraphService
+from app.services.agent import graph as agent_graph_module
+from app.services.agent.graph import CRMAgentGraphService, build_new_flow_graph_config, build_new_flow_thread_id
 from app.services.agent.schemas import (
     AgentFollowUpQualityResult,
     AgentMemorySnapshot,
@@ -406,6 +409,18 @@ def build_service(result, tool_service=None):
     )
 
 
+def build_checkpointed_service(result, tool_service=None):
+    return CRMAgentGraphService(
+        tool_service=tool_service or FakeToolService(),
+        semantic_parser=FakeSemanticParser(result),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
+        checkpointer=InMemorySaver(),
+    )
+
+
 def build_service_with_memory(result, tool_service=None, session_context=None):
     return CRMAgentGraphService(
         tool_service=tool_service or FakeToolService(),
@@ -633,6 +648,8 @@ async def test_agent_graph_streams_step_events_before_final_response():
     assert event_names[0] == "agent_step"
     assert events[0]["step"] == "load_memory"
     assert events[0]["status"] == "started"
+    assert event_names.count("semantic_parsed") == 1
+    assert event_names.count("business_suggestions") == 1
     assert event_names.index("semantic_parsed") < event_names.index("final")
     assert event_names.index("tool_result") < event_names.index("final")
     assert event_names.index("business_suggestions") < event_names.index("final")
@@ -910,10 +927,15 @@ async def test_agent_graph_attaches_opportunity_stage_move_as_next_task_after_fo
             "customer": {"id": 101, "account_name": "睿狐科技"},
             "opportunities": {"items": [{"id": 301, "opportunity_name": "睿狐科技采购项目"}]},
             "active_opportunity_stage_context": [{
-                "opportunity": {"id": 301, "opportunity_name": "睿狐科技采购项目"},
+                "opportunity": {
+                    "id": 301,
+                    "opportunity_name": "睿狐科技采购项目",
+                    "status": 0,
+                    "approval_phase": "approved",
+                },
                 "procurement_stages": [
-                    {"id": 901, "stage_name": "立项评估", "is_current": True},
-                    {"id": 902, "stage_name": "招标准备", "is_current": False},
+                    {"id": 901, "stage_name": "立项评估", "sort_order": 1, "is_current": True},
+                    {"id": 902, "stage_name": "招标准备", "sort_order": 2, "is_current": False},
                 ],
             }],
             "contracts": {"items": []},
@@ -1252,7 +1274,7 @@ async def test_agent_graph_requires_customer_selection_when_multiple_candidates(
     selection_events = [event for event in result["events"] if event["event"] == "customer_selection_required"]
     assert selection_events[0]["action"] == "select_customer_for_activity"
     assert selection_events[0]["customers"][1]["id"] == 102
-    assert "请回复序号或客户名称" in result["response"]
+    assert "请告诉我要记录到哪一个客户" in result["response"]
 
 
 @pytest.mark.asyncio
@@ -1412,3 +1434,138 @@ async def test_agent_graph_requires_customer_member_name_when_missing():
 
     field_events = [event for event in result["events"] if event["event"] == "customer_member_fields_required"]
     assert field_events[0]["payload"]["missing_fields"] == ["user_name"]
+
+
+def test_new_flow_graph_builds_stable_langgraph_thread_config():
+    assert build_new_flow_thread_id(team_id=1, user_id=2, session_id=3) == "crm_agent_new_flow:1:2:3"
+
+    config = build_new_flow_graph_config(team_id=1, user_id=2, session_id=3)
+
+    assert config["configurable"]["thread_id"] == "crm_agent_new_flow:1:2:3"
+    assert config["metadata"]["runtime"] == "crm_agent_new_flow"
+    assert config["metadata"]["runtime_namespace"] == "crm_agent_new_flow"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_uses_runtime_context_not_checkpoint_state_for_dependencies():
+    class CapturingGraph:
+        def __init__(self):
+            self.state = {}
+            self.config = {}
+            self.context = None
+
+        async def ainvoke(self, state, config=None, *, context=None):
+            self.state = state
+            self.config = config or {}
+            self.context = context
+            return {**state, "response": "ok"}
+
+    db = object()
+    graph = CapturingGraph()
+    service = build_service(semantic_result())
+    service._graph = graph
+
+    result = await service.run({
+        **input_state("今天和越秀金融沟通"),
+        "db": db,
+        "authorization": "Bearer token",
+        "session_context": {"current_customer": {"id": 101, "account_name": "越秀金融"}},
+    })
+
+    assert result["response"] == "ok"
+    assert "db" not in graph.state
+    assert "authorization" not in graph.state
+    assert "session_context" not in graph.state
+    assert graph.state["has_db"] is True
+    assert graph.state["has_authorization"] is True
+    assert graph.context.db is db
+    assert graph.context.authorization == "Bearer token"
+    assert graph.context.session_context["current_customer"]["id"] == 101
+    assert graph.config["configurable"]["thread_id"] == "crm_agent_new_flow:1:2:3"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_checkpoints_json_projections_not_runtime_objects():
+    service = build_checkpointed_service(semantic_result())
+
+    await service.run({
+        **input_state("今天和越秀金融沟通"),
+        "current_datetime": datetime(2026, 7, 24, 15, 0, 0),
+    })
+    snapshot = await service._graph.aget_state(build_new_flow_graph_config(
+        team_id=1,
+        user_id=2,
+        session_id=3,
+    ))
+
+    assert "current_datetime" not in snapshot.values
+    assert "memory" not in snapshot.values
+    assert "semantic_result" not in snapshot.values
+    assert "follow_up_quality_result" not in snapshot.values
+    assert "suggestion_result" not in snapshot.values
+    assert snapshot.values["current_date"] == "2026-07-24"
+    assert snapshot.values["semantic"]["intent"] == "CUSTOMER_ACTIVITY"
+    assert isinstance(snapshot.values["memory_snapshot"], dict)
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_falls_back_only_for_checkpoint_storage_errors(monkeypatch):
+    class FailingGraph:
+        async def ainvoke(self, state, config=None, *, context=None):
+            raise SQLAlchemyError("database unavailable")
+
+        async def astream(self, state, config=None, *, context=None, stream_mode=None):
+            raise SQLAlchemyError("database unavailable")
+            yield {}
+
+    class FallbackGraph:
+        def __init__(self):
+            self.called = False
+            self.streamed = False
+
+        async def ainvoke(self, state, config=None, *, context=None):
+            self.called = True
+            return {**state, "response": "fallback"}
+
+        async def astream(self, state, config=None, *, context=None, stream_mode=None):
+            self.streamed = True
+            yield {
+                "build_response": {
+                    "events": [{"event": "final", "content": "fallback"}],
+                    "response": "fallback",
+                }
+            }
+
+    monkeypatch.setattr(agent_graph_module, "is_checkpoint_storage_error", lambda exc: True)
+    fallback_graph = FallbackGraph()
+    service = build_service(semantic_result())
+    service._checkpoint_enabled = True
+    service._graph = FailingGraph()
+    service._fallback_graph = fallback_graph
+
+    result = await service.run(input_state("今天和越秀金融沟通"))
+
+    assert result["response"] == "fallback"
+    assert result["events"][0]["event"] == "agent_checkpoint_unavailable_fallback_started"
+    assert result["events"][0]["runtime"] == "crm_agent_new_flow"
+    assert result["events"][0]["graph"] == "crm_agent_new_flow"
+    assert result["events"][0]["fallback_reason"] == "checkpoint_storage_error"
+    assert fallback_graph.called is True
+
+    stream_events = []
+    async for event in service.stream_events(input_state("今天和越秀金融沟通")):
+        stream_events.append(event)
+
+    assert stream_events[0]["event"] == "agent_checkpoint_unavailable_fallback_started"
+    assert stream_events[0]["runtime"] == "crm_agent_new_flow"
+    assert stream_events[0]["graph"] == "crm_agent_new_flow"
+    assert stream_events[-1] == {"event": "final", "content": "fallback"}
+    assert fallback_graph.streamed is True
+
+    monkeypatch.setattr(agent_graph_module, "is_checkpoint_storage_error", lambda exc: False)
+    fallback_graph = FallbackGraph()
+    service._fallback_graph = fallback_graph
+
+    with pytest.raises(SQLAlchemyError):
+        await service.run(input_state("今天和越秀金融沟通"))
+    assert fallback_graph.called is False

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -26,8 +26,10 @@ class AgentSuggestionEnvelope:
     result: AgentSuggestionResult
     suggestion_source: str
     model: str
+    structured_output_strategy: Optional[str] = None
     fallback_reason: Optional[str] = None
     fallback_error: Optional[str] = None
+    fallback_error_message: Optional[str] = None
 
 
 class AgentSuggestionGenerator:
@@ -58,7 +60,7 @@ class AgentSuggestionGenerator:
         team_id: int,
         user_message: str,
         semantic_result: AgentSemanticParseResult,
-        customer_context: dict[str, Any],
+        customer_context: dict[str, object],
         current_date: Optional[date] = None,
     ) -> AgentSuggestionEnvelope:
         config = ai_config_crud.get_config(db, team_id)
@@ -73,6 +75,8 @@ class AgentSuggestionGenerator:
         context_json = json.dumps(customer_context, ensure_ascii=False, default=str)
         fallback_reason = None
         fallback_error = None
+        fallback_error_message = None
+        structured_output_strategy = "tool"
         try:
             langchain_result = await self._generate_with_langchain(
                 api_host=config.api_host,
@@ -90,11 +94,13 @@ class AgentSuggestionGenerator:
             langchain_result = None
             fallback_reason = "langchain_structured_output_failed"
             fallback_error = exc.__class__.__name__
+            fallback_error_message = str(exc)
         if langchain_result is not None:
             return AgentSuggestionEnvelope(
                 result=self.apply_business_guardrails(langchain_result, semantic_result, customer_context),
                 suggestion_source="langchain_structured_output",
                 model=config.model_name,
+                structured_output_strategy=structured_output_strategy,
             )
 
         raw = await self.ai_client._stream_chat_collect(
@@ -110,8 +116,10 @@ class AgentSuggestionGenerator:
             result=self.apply_business_guardrails(self.parse_raw_response(raw), semantic_result, customer_context),
             suggestion_source="system_ai_json_object",
             model=config.model_name,
+            structured_output_strategy=structured_output_strategy,
             fallback_reason=fallback_reason or "langchain_unavailable",
             fallback_error=fallback_error,
+            fallback_error_message=fallback_error_message,
         )
 
     async def _generate_with_langchain(
@@ -145,6 +153,7 @@ class AgentSuggestionGenerator:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_model=AgentSuggestionResult,
+                structured_output_strategy="tool",
                 error_prefix="LangChain suggestion structured output",
             )
         except AgentLangChainStructuredOutputError as exc:
@@ -181,7 +190,7 @@ class AgentSuggestionGenerator:
         cls,
         result: AgentSuggestionResult,
         semantic_result: AgentSemanticParseResult,
-        customer_context: dict[str, Any],
+        customer_context: dict[str, object],
     ) -> AgentSuggestionResult:
         valid_suggestions: list[AgentBusinessSuggestion] = []
         contracts = cls._context_items(customer_context.get("contracts"))
@@ -256,7 +265,7 @@ class AgentSuggestionGenerator:
     def _guard_move_opportunity_stage_suggestion(
         cls,
         suggestion: AgentBusinessSuggestion,
-        active_stage_context: list[dict[str, Any]],
+        active_stage_context: list[dict[str, object]],
     ) -> Optional[AgentBusinessSuggestion]:
         target_stage_id = (suggestion.execution_payload or {}).get("stage_template_id")
         if not target_stage_id:
@@ -284,24 +293,39 @@ class AgentSuggestionGenerator:
         elif len(valid_contexts) == 1:
             related_id = valid_contexts[0]["opportunity"].get("id")
         else:
-            return None
+            candidate_contexts = [
+                item
+                for item in valid_contexts
+                if cls._stage_move_target(item, target_stage_id) is not None
+            ]
+            if len(candidate_contexts) >= 2:
+                target_stage = cls._stage_move_target(candidate_contexts[0], target_stage_id)
+                return suggestion.model_copy(update={
+                    "related_object_type": "opportunity",
+                    "related_object_id": None,
+                    "missing_fields": list(dict.fromkeys([*suggestion.missing_fields, "opportunity_id"])),
+                    "execution_payload": {
+                        **(suggestion.execution_payload or {}),
+                        "stage_template_id": target_stage_id,
+                        "target_stage_name": target_stage.get("stage_name") if target_stage else None,
+                        "stage_move_steps": target_stage.get("stage_move_steps") if target_stage else [],
+                    },
+                })
+            if len(candidate_contexts) == 1:
+                valid_contexts = candidate_contexts
+                related_id = candidate_contexts[0]["opportunity"].get("id")
+            else:
+                return None
 
         if related_id is None or len(valid_contexts) != 1:
             return None
 
         stage_context = valid_contexts[0]
         stages = [stage for stage in stage_context.get("procurement_stages") or [] if isinstance(stage, dict)]
-        target_stage = next((stage for stage in stages if stage.get("id") is not None and int(stage["id"]) == target_stage_id), None)
+        requested_stage = next((stage for stage in stages if stage.get("id") is not None and int(stage["id"]) == target_stage_id), None)
+        target_stage = cls._stage_move_target(stage_context, target_stage_id)
         if not target_stage or target_stage.get("is_current"):
             return None
-
-        current_stage = next((stage for stage in stages if stage.get("is_current")), None)
-        if current_stage and target_stage.get("sort_order") is not None and current_stage.get("sort_order") is not None:
-            try:
-                if int(target_stage["sort_order"]) < int(current_stage["sort_order"]):
-                    return None
-            except (TypeError, ValueError):
-                return None
 
         return suggestion.model_copy(update={
             "related_object_type": "opportunity",
@@ -310,14 +334,109 @@ class AgentSuggestionGenerator:
                 **(suggestion.execution_payload or {}),
                 "stage_template_id": target_stage_id,
                 "target_stage_name": target_stage.get("stage_name"),
+                "stage_move_steps": target_stage.get("stage_move_steps"),
             },
         })
+
+    @staticmethod
+    def _stage_move_target(
+        stage_context: dict[str, object],
+        target_stage_id: int,
+    ) -> Optional[dict[str, object]]:
+        stages = [stage for stage in stage_context.get("procurement_stages") or [] if isinstance(stage, dict)]
+        requested_stage = next(
+            (
+                stage
+                for stage in stages
+                if stage.get("id") is not None and int(stage["id"]) == int(target_stage_id)
+            ),
+            None,
+        )
+        if not requested_stage or requested_stage.get("is_current"):
+            return None
+        current_stage = next((stage for stage in stages if stage.get("is_current")), None)
+        if current_stage and requested_stage.get("sort_order") is not None and current_stage.get("sort_order") is not None:
+            try:
+                if int(requested_stage["sort_order"]) < int(current_stage["sort_order"]):
+                    return None
+            except (TypeError, ValueError):
+                return None
+        stage_plan = AgentSuggestionGenerator._forward_stage_move_plan(stages, current_stage, requested_stage)
+        if not stage_plan:
+            return None
+        return {
+            **requested_stage,
+            "stage_move_steps": stage_plan,
+        }
+
+    @staticmethod
+    def _forward_stage_move_plan(
+        stages: list[dict[str, object]],
+        current_stage: object,
+        target_stage: dict[str, object],
+    ) -> list[dict[str, object]]:
+        target_order = AgentSuggestionGenerator._stage_sort_order(target_stage)
+        if target_stage.get("id") is None or target_order is None:
+            return []
+        if not isinstance(current_stage, dict):
+            start_order = None
+        else:
+            start_order = AgentSuggestionGenerator._stage_sort_order(current_stage)
+            if start_order is None or target_order <= start_order:
+                return []
+        candidates = [
+            stage
+            for stage in stages
+            if stage.get("id") is not None
+            and AgentSuggestionGenerator._stage_sort_order(stage) is not None
+            and int(AgentSuggestionGenerator._stage_sort_order(stage) or 0) <= target_order
+            and (start_order is None or int(AgentSuggestionGenerator._stage_sort_order(stage) or 0) > start_order)
+        ]
+        return [
+            {
+                "stage_template_id": int(stage["id"]),
+                "stage_name": stage.get("stage_name"),
+            }
+            for stage in sorted(candidates, key=lambda stage: int(AgentSuggestionGenerator._stage_sort_order(stage) or 0))
+        ]
+
+    @staticmethod
+    def _next_stage_after_current(
+        stages: list[dict[str, object]],
+        current_stage: object,
+    ) -> Optional[dict[str, object]]:
+        if not isinstance(current_stage, dict):
+            default_stage = next((stage for stage in stages if stage.get("is_default_start")), None)
+            if default_stage:
+                return default_stage
+            sortable = [stage for stage in stages if AgentSuggestionGenerator._stage_sort_order(stage) is not None]
+            return min(sortable, key=lambda stage: int(AgentSuggestionGenerator._stage_sort_order(stage) or 0)) if sortable else None
+        current_order = AgentSuggestionGenerator._stage_sort_order(current_stage)
+        if current_order is None:
+            return None
+        forward_stages = [
+            stage
+            for stage in stages
+            if not stage.get("is_current")
+            and AgentSuggestionGenerator._stage_sort_order(stage) is not None
+            and int(AgentSuggestionGenerator._stage_sort_order(stage) or 0) > current_order
+        ]
+        return min(forward_stages, key=lambda stage: int(AgentSuggestionGenerator._stage_sort_order(stage) or 0)) if forward_stages else None
+
+    @staticmethod
+    def _stage_sort_order(stage: dict[str, object]) -> Optional[int]:
+        if stage.get("sort_order") is None:
+            return None
+        try:
+            return int(stage["sort_order"])
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _guard_payment_plan_suggestion(
         suggestion: AgentBusinessSuggestion,
         contract_ids: set[int],
-        contracts: list[dict[str, Any]],
+        contracts: list[dict[str, object]],
     ) -> Optional[AgentBusinessSuggestion]:
         related_id = suggestion.related_object_id
         if related_id is not None and int(related_id) in contract_ids:
@@ -335,7 +454,7 @@ class AgentSuggestionGenerator:
     def _guard_payment_record_suggestion(
         suggestion: AgentBusinessSuggestion,
         payment_plan_ids: set[int],
-        open_payment_plans: list[dict[str, Any]],
+        open_payment_plans: list[dict[str, object]],
     ) -> Optional[AgentBusinessSuggestion]:
         related_id = suggestion.related_object_id
         if related_id is not None and int(related_id) in payment_plan_ids:
@@ -354,9 +473,9 @@ class AgentSuggestionGenerator:
         suggestion: AgentBusinessSuggestion,
         approved_opportunity_ids: set[int],
         approved_contract_ids: set[int],
-        approved_opportunities: list[dict[str, Any]],
-        approved_contracts: list[dict[str, Any]],
-        deployment_infos: list[dict[str, Any]],
+        approved_opportunities: list[dict[str, object]],
+        approved_contracts: list[dict[str, object]],
+        deployment_infos: list[dict[str, object]],
     ) -> Optional[AgentBusinessSuggestion]:
         if not deployment_infos:
             return None
@@ -381,9 +500,9 @@ class AgentSuggestionGenerator:
         cls,
         summary: str,
         suggestions: list[AgentBusinessSuggestion],
-        opportunities: list[dict[str, Any]],
-        contracts: list[dict[str, Any]],
-        open_payment_plans: list[dict[str, Any]],
+        opportunities: list[dict[str, object]],
+        contracts: list[dict[str, object]],
+        open_payment_plans: list[dict[str, object]],
     ) -> list[AgentBusinessSuggestion]:
         if contracts and open_payment_plans:
             return suggestions
@@ -429,26 +548,26 @@ class AgentSuggestionGenerator:
         return suggestions
 
     @staticmethod
-    def _context_items(value: Any) -> list[dict[str, Any]]:
+    def _context_items(value: object) -> list[dict[str, object]]:
         return business_rules.context_items(value)
 
     @staticmethod
-    def _is_open_payment_plan(plan: dict[str, Any]) -> bool:
+    def _is_open_payment_plan(plan: dict[str, object]) -> bool:
         return business_rules.is_open_payment_plan(plan)
 
     @staticmethod
-    def _is_approved_opportunity(opportunity: dict[str, Any]) -> bool:
+    def _is_approved_opportunity(opportunity: dict[str, object]) -> bool:
         return str(opportunity.get("approval_phase") or "").lower() == "approved"
 
     @staticmethod
-    def _is_active_opportunity(opportunity: dict[str, Any]) -> bool:
+    def _is_active_opportunity(opportunity: dict[str, object]) -> bool:
         return str(opportunity.get("status")) == "0"
 
     @staticmethod
-    def _is_approved_contract(contract: dict[str, Any]) -> bool:
+    def _is_approved_contract(contract: dict[str, object]) -> bool:
         status = str(contract.get("status") or "").upper()
         approval_phase = str(contract.get("approval_phase") or "").lower()
-        return status in {"SIGNED", "EFFECTIVE"} or approval_phase == "approved"
+        return status == "SIGNED" or approval_phase == "approved"
 
 
 agent_suggestion_generator = AgentSuggestionGenerator()

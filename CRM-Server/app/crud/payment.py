@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, text, case
 from sqlalchemy.orm import joinedload
 from typing import Optional, List, Tuple
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 
 from app.models.payment import PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus
@@ -360,37 +360,6 @@ class PaymentPlanCRUD:
             db.commit()
             db.refresh(plan)
         return plan
-    
-    def get_upcoming_payments(self, db: Session, team_id: int, days: int = 7) -> List[PaymentPlan]:
-        from app.models.contract import Contract
-        from app.models.customer import Customer
-        from app.models.opportunity import Opportunity
-
-        target_date = date.today() + timedelta(days=days)
-
-        plans = db.query(PaymentPlan).filter(
-            and_(
-                PaymentPlan.team_id == team_id,
-                PaymentPlan.status == PaymentPlanStatus.PENDING,
-                PaymentPlan.due_date <= target_date,
-                PaymentPlan.due_date >= date.today()
-            )
-        ).order_by(PaymentPlan.due_date.asc()).all()
-        
-        for plan in plans:
-            contract = db.query(Contract).filter(Contract.id == plan.contract_id).first()
-            if contract:
-                plan.contract = contract
-                if contract.customer_id:
-                    customer = db.query(Customer).filter(Customer.id == contract.customer_id).first()
-                    if customer:
-                        contract.customer = customer
-                if contract.opportunity_id:
-                    opportunity = db.query(Opportunity).filter(Opportunity.id == contract.opportunity_id).first()
-                    if opportunity:
-                        contract.opportunity = opportunity
-        
-        return plans
     
     def get_overdue_payments(self, db: Session, team_id: int) -> List[PaymentPlan]:
         from app.models.contract import Contract

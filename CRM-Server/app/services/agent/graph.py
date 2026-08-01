@@ -1,35 +1,82 @@
 """CRM AI Agent LangGraph service."""
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from datetime import date, datetime
+from typing import AsyncGenerator, Dict, List, Optional
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.agent import business_rules
-from app.services.agent.business_response import BusinessResponseBuilder
+from app.services.agent.action_planning_graph import ActionPlanningGraphService
+from app.services.agent.business_context_graph import BusinessContextGraphService
+from app.services.agent.checkpointer import (
+    agent_checkpoint_saver,
+    checkpoint_unavailable_fallback_event,
+    is_checkpoint_storage_error,
+    with_checkpoint_unavailable_fallback_event,
+)
+from app.services.agent.creation_duplicates_graph import CreationDuplicateGraphService
+from app.services.agent.customer_resolution_graph import CustomerResolutionGraphService
 from app.services.agent.customer_mentions import explicit_customer_hint_from_message
+from app.services.agent.follow_up_quality_graph import FollowUpQualityGraphService
 from app.services.agent.memory import AgentMemoryService, agent_memory_service
 from app.services.agent.quality import (
     AgentFollowUpQualityEvaluator,
-    AgentFollowUpQualityEvaluatorError,
     agent_follow_up_quality_evaluator,
 )
-from app.services.agent.schemas import AgentFollowUpQualityResult, AgentSemanticParseResult
+from app.services.agent.schemas import (
+    AgentFollowUpQualityResult,
+    AgentMemorySnapshot,
+    AgentSemanticParseResult,
+    AgentSuggestionResult,
+)
 from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.semantic_payload import parsed_from_semantic
-from app.services.agent.state import AgentGraphState
-from app.services.agent.response_builder import AgentResponseBuilder
+from app.services.agent.state import AgentGraphInput, AgentGraphResult, AgentGraphRuntimeContext, AgentGraphState
 from app.services.agent.suggestion import (
     AgentSuggestionGenerator,
-    AgentSuggestionGeneratorError,
     agent_suggestion_generator,
 )
 from app.services.agent.temporal import AgentTemporalResolver, agent_temporal_resolver
 from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_registry
 from app.services.agent.tools import CRMAgentToolService
-from app.services.agent.tools.base import AgentToolContext
-from app.services.customer_activity_kinds import get_activity_category, infer_activity_kind
+from app.services.agent.trace_events import (
+    build_follow_up_quality_trace_events,
+    build_semantic_trace_events,
+    build_suggestion_trace_events,
+)
+from app.services.agent.types import JSONDict, coerce_json_dict
+
+
+NEW_FLOW_CHECKPOINT_NS = "crm_agent_new_flow"
+
+
+def build_new_flow_thread_id(*, team_id: int, user_id: int, session_id: int) -> str:
+    """Return the stable LangGraph thread id for one new-flow conversation."""
+
+    return f"crm_agent_new_flow:{team_id}:{user_id}:{session_id}"
+
+
+def build_new_flow_graph_config(*, team_id: int, user_id: int, session_id: int) -> RunnableConfig:
+    return {
+        "configurable": {
+            "thread_id": build_new_flow_thread_id(
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+            ),
+        },
+        "metadata": {
+            "team_id": team_id,
+            "user_id": user_id,
+            "session_id": session_id,
+            "runtime": "crm_agent_new_flow",
+            "runtime_namespace": NEW_FLOW_CHECKPOINT_NS,
+        },
+    }
 
 
 class CRMAgentGraphService:
@@ -42,6 +89,7 @@ class CRMAgentGraphService:
         temporal_resolver: Optional[AgentTemporalResolver] = None,
         suggestion_generator: Optional[AgentSuggestionGenerator] = None,
         follow_up_quality_evaluator: Optional[AgentFollowUpQualityEvaluator] = None,
+        checkpointer: object | None = None,
     ) -> None:
         self.semantic_parser = semantic_parser or agent_semantic_parser
         self.memory_service = memory_service or agent_memory_service
@@ -54,29 +102,36 @@ class CRMAgentGraphService:
             self.tool_registry = AgentToolRegistry(tool_service)
         else:
             self.tool_registry = agent_tool_registry
-        self.response_builder = AgentResponseBuilder(
-            requires_clarification=self._requires_clarification,
-            memory_current_customer=self._memory_current_customer,
-            follow_up_quality_blocks=self._follow_up_quality_blocks,
-            apply_follow_up_revision=self._apply_follow_up_revision,
-            build_creation_duplicate_response=business_rules.build_creation_duplicate_response,
-            build_business_response=self._build_business_response,
-            stage_move_action_from_suggestions=business_rules.stage_move_action_from_suggestions,
-            opportunity_next_task_from_suggestions=business_rules.opportunity_next_task_from_suggestions,
-            append_suggestions_to_response=business_rules.append_suggestions_to_response,
-            has_deferred_next_task=self._has_deferred_next_task,
+        self.customer_resolution_graph_service = CustomerResolutionGraphService(
+            tool_registry=self.tool_registry,
+            checkpointer=checkpointer,
         )
-        self._graph = self._build_graph()
+        self.creation_duplicate_graph_service = CreationDuplicateGraphService(
+            tool_registry=self.tool_registry,
+            checkpointer=checkpointer,
+        )
+        self.follow_up_quality_graph_service = FollowUpQualityGraphService(
+            follow_up_quality_evaluator=self.follow_up_quality_evaluator,
+            checkpointer=checkpointer,
+        )
+        self.business_context_graph_service = BusinessContextGraphService(
+            tool_registry=self.tool_registry,
+            suggestion_generator=self.suggestion_generator,
+            checkpointer=checkpointer,
+        )
+        self.action_planning_graph_service = ActionPlanningGraphService(checkpointer=checkpointer)
+        self._checkpoint_enabled = checkpointer is not None
+        self._graph = self._build_graph(checkpointer)
+        self._fallback_graph = self._build_graph(None)
 
-    def _build_graph(self):
-        graph = StateGraph(AgentGraphState)
+    def _build_graph(self, checkpointer: object | None):
+        graph = StateGraph(AgentGraphState, context_schema=AgentGraphRuntimeContext)
         graph.add_node("load_memory", self._load_memory)
         graph.add_node("semantic_parse", self._semantic_parse)
         graph.add_node("search_creation_duplicates", self._search_creation_duplicates)
         graph.add_node("evaluate_follow_up_quality", self._evaluate_follow_up_quality)
         graph.add_node("search_customer", self._search_customer)
         graph.add_node("load_customer_context", self._load_customer_context)
-        graph.add_node("generate_suggestions", self._generate_suggestions)
         graph.add_node("build_response", self._build_response)
         graph.add_edge(START, "load_memory")
         graph.add_edge("load_memory", "semantic_parse")
@@ -111,13 +166,13 @@ class CRMAgentGraphService:
             "load_customer_context",
             self._route_after_customer_context,
             {
-                "suggestions": "generate_suggestions",
                 "response": "build_response",
             },
         )
-        graph.add_edge("generate_suggestions", "build_response")
         graph.add_edge("build_response", END)
-        return graph.compile()
+        if checkpointer is None:
+            return graph.compile()
+        return graph.compile(checkpointer=checkpointer)
 
     def _route_after_semantic_parse(self, state: AgentGraphState) -> str:
         if self._should_run_creation_duplicate_search(state):
@@ -139,36 +194,47 @@ class CRMAgentGraphService:
         return "response"
 
     def _route_after_customer_context(self, state: AgentGraphState) -> str:
-        if self._should_run_suggestions(state):
-            return "suggestions"
         return "response"
 
-    def _load_memory(self, state: AgentGraphState) -> AgentGraphState:
-        db = state.get("db")
-        current_datetime = state.get("current_datetime") or self.temporal_resolver.now()
-        if not db:
-            return {"current_datetime": current_datetime}
+    def _load_memory(
+        self,
+        state: AgentGraphState,
+        runtime: Runtime[AgentGraphRuntimeContext],
+    ) -> AgentGraphState:
+        context = runtime.context
+        current_datetime = context.current_datetime or self.temporal_resolver.now()
+        context.side_effects.current_datetime = current_datetime
+        current_date = current_datetime.date().isoformat()
+        if not context.db:
+            return {"current_date": current_date}
         memory = self.memory_service.load_snapshot(
-            db,
-            team_id=state["team_id"],
-            user_id=state["user_id"],
-            session_id=state["session_id"],
-            session_context=state.get("session_context"),
+            context.db,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+            session_context=context.session_context,
         )
+        context.side_effects.memory = memory
         return {
-            "current_datetime": current_datetime,
-            "memory": memory,
+            "current_date": current_date,
+            "memory_snapshot": coerce_json_dict(memory.model_dump(exclude_none=True)),
             "events": [{"event": "memory_loaded"}],
         }
 
-    async def _semantic_parse(self, state: AgentGraphState) -> AgentGraphState:
+    async def _semantic_parse(
+        self,
+        state: AgentGraphState,
+        runtime: Runtime[AgentGraphRuntimeContext],
+    ) -> AgentGraphState:
+        context = runtime.context
+        memory = context.side_effects.memory
         try:
             if hasattr(self.semantic_parser, "parse_with_metadata"):
                 envelope = await self.semantic_parser.parse_with_metadata(
-                    state["db"],
-                    team_id=state["team_id"],
+                    context.db,
+                    team_id=context.team_id,
                     user_message=state.get("content", ""),
-                    memory=state.get("memory"),
+                    memory=memory,
                     current_date=self._current_date(state),
                 )
                 semantic_result = envelope.result
@@ -178,10 +244,10 @@ class CRMAgentGraphService:
                 fallback_error = envelope.fallback_error
             else:
                 semantic_result = await self.semantic_parser.parse(
-                    state["db"],
-                    team_id=state["team_id"],
+                    context.db,
+                    team_id=context.team_id,
                     user_message=state.get("content", ""),
-                    memory=state.get("memory"),
+                    memory=memory,
                 )
                 parse_source = "test_parser"
                 model_name = None
@@ -198,17 +264,18 @@ class CRMAgentGraphService:
             semantic_result,
             state.get("content", ""),
             temporal_resolver=self.temporal_resolver,
-            base_datetime=state.get("current_datetime"),
+            base_datetime=context.side_effects.current_datetime,
         )
         parsed = self._apply_explicit_customer_hint(
             semantic_result,
             parsed,
             state.get("content", ""),
-            state.get("memory"),
+            memory,
         )
+        context.side_effects.semantic_result = semantic_result
         return {
             "intent": semantic_result.intent,
-            "semantic_result": semantic_result,
+            "semantic": coerce_json_dict(semantic_result.model_dump(exclude_none=True)),
             "semantic_metadata": {
                 "parse_source": parse_source,
                 "model": model_name,
@@ -218,236 +285,210 @@ class CRMAgentGraphService:
             "parsed": parsed,
         }
 
-    async def _search_creation_duplicates(self, state: AgentGraphState) -> AgentGraphState:
-        semantic_result = state.get("semantic_result")
-        intent = state.get("intent")
-        parsed = state.get("parsed") or {}
-        if (
-            intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
-            or not state.get("authorization")
-            or not state.get("db")
-            or self._requires_clarification(semantic_result)
-        ):
+    async def _search_creation_duplicates(
+        self,
+        state: AgentGraphState,
+        runtime: Runtime[AgentGraphRuntimeContext],
+    ) -> AgentGraphState:
+        context = runtime.context
+        semantic_result = context.side_effects.semantic_result
+        if not semantic_result:
             return {}
 
-        create_payload = (
-            parsed.get("lead") or {}
-            if intent == "CREATE_LEAD"
-            else parsed.get("customer_create") or {}
-        )
-        name = create_payload.get("lead_name") if intent == "CREATE_LEAD" else create_payload.get("account_name")
-        phone = create_payload.get("contact_phone")
-        customer_keywords = business_rules.creation_duplicate_keywords(name)
-        lead_keywords = list(customer_keywords)
-        if not customer_keywords and not lead_keywords and not phone:
-            return {}
-
-        context = AgentToolContext(
-            db=state["db"],
-            team_id=state["team_id"],
-            user_id=state["user_id"],
-            session_id=state["session_id"],
-            authorization=state["authorization"],
-        )
-        events: List[Dict[str, Any]] = []
-        result = await self.tool_registry.execute(
-            "search_creation_duplicates",
-            context,
-            {
-                "customer_keywords": customer_keywords,
-                "lead_keywords": lead_keywords,
-                "phone": phone,
-                "limit": 5,
-            },
-        )
-        events.append(result.to_event())
-        if not result.success or not isinstance(result.data, dict):
-            return {"events": events}
-
-        duplicate_candidates = {
-            "customers": result.data.get("customers") or [],
-            "leads": result.data.get("leads") or [],
-            "hidden_customer_count": result.data.get("hidden_customer_count") or 0,
-            "hidden_lead_count": result.data.get("hidden_lead_count") or 0,
-        }
-        if (
-            not duplicate_candidates["customers"]
-            and not duplicate_candidates["leads"]
-            and not duplicate_candidates["hidden_customer_count"]
-            and not duplicate_candidates["hidden_lead_count"]
-        ):
-            return {"events": events}
-
-        events.append({
-            "event": "creation_duplicate_candidates",
-            "customers": duplicate_candidates["customers"],
-            "leads": duplicate_candidates["leads"],
-            "hidden_customer_count": duplicate_candidates["hidden_customer_count"],
-            "hidden_lead_count": duplicate_candidates["hidden_lead_count"],
+        result = await self.creation_duplicate_graph_service.run({
+            "db": context.db,
+            "team_id": context.team_id,
+            "user_id": context.user_id,
+            "session_id": context.session_id,
+            "content": state.get("content", ""),
+            "authorization": context.authorization or "",
+            "semantic_result": semantic_result,
+            "parsed": state.get("parsed") or {},
+            "events": [],
         })
-        return {"creation_duplicate_candidates": duplicate_candidates, "events": events}
-
-    async def _evaluate_follow_up_quality(self, state: AgentGraphState) -> AgentGraphState:
-        semantic_result = state.get("semantic_result")
-        if (
-            not semantic_result
-            or semantic_result.intent != "CUSTOMER_ACTIVITY"
-            or self._requires_clarification(semantic_result, has_memory_customer=bool(self._memory_current_customer(state.get("memory"))))
-            or not state.get("db")
-            or not self._has_single_customer(state)
-        ):
-            return {}
-
-        try:
-            envelope = await self.follow_up_quality_evaluator.evaluate_with_metadata(
-                state["db"],
-                team_id=state["team_id"],
-                user_message=state.get("content", ""),
-                semantic_result=semantic_result,
-                memory=state.get("memory"),
-                current_date=self._current_date(state),
-            )
-        except AgentFollowUpQualityEvaluatorError as exc:
-            return {
-                "follow_up_quality_error": str(exc),
-                "events": [{"event": "follow_up_quality_failed", "message": str(exc)}],
-            }
-
-        return {
-            "follow_up_quality_result": envelope.result,
-            "follow_up_quality_metadata": {
-                "quality_source": envelope.quality_source,
-                "model": envelope.model,
-                "fallback_reason": envelope.fallback_reason,
-                "fallback_error": envelope.fallback_error,
-            },
-        }
-
-    async def _search_customer(self, state: AgentGraphState) -> AgentGraphState:
-        semantic_result = state.get("semantic_result")
-        parsed = state.get("parsed") or {}
-        memory_customer = self._memory_current_customer(state.get("memory"))
-        if self._should_use_memory_customer(semantic_result, parsed, memory_customer):
-            parsed = {**parsed, "customer_name": memory_customer.get("account_name")}
-            return {
-                "parsed": parsed,
-                "customer_candidates": [memory_customer],
-                "selected_customer": memory_customer,
-                "events": [{"event": "customer_memory_used", "customer": memory_customer}],
-            }
-        customer_name = parsed.get("customer_name")
-        if (
-            not customer_name
-            or not state.get("authorization")
-            or not state.get("db")
-            or self._requires_clarification(semantic_result)
-        ):
-            return {}
-
-        context = AgentToolContext(
-            db=state["db"],
-            team_id=state["team_id"],
-            user_id=state["user_id"],
-            session_id=state["session_id"],
-            authorization=state["authorization"],
-        )
-        result = await self.tool_registry.execute(
-            "search_customers",
-            context,
-            {"keyword": customer_name, "limit": 10},
-        )
-        events = [result.to_event()]
-        candidates = business_rules.extract_customer_candidates(result.data) if result.success else []
-        if candidates:
-            events.append({"event": "customer_candidates", "customers": candidates})
-        state_update: AgentGraphState = {"customer_candidates": candidates, "events": events}
-        if len(candidates) == 1:
-            state_update["selected_customer"] = candidates[0]
+        state_update: AgentGraphState = {"events": result.get("events") or []}
+        duplicate_candidates = result.get("creation_duplicate_candidates")
+        if duplicate_candidates:
+            state_update["creation_duplicate_candidates"] = duplicate_candidates
         return state_update
 
-    async def _load_customer_context(self, state: AgentGraphState) -> AgentGraphState:
-        customer = state.get("selected_customer") or {}
-        customer_id = customer.get("id")
+    async def _evaluate_follow_up_quality(
+        self,
+        state: AgentGraphState,
+        runtime: Runtime[AgentGraphRuntimeContext],
+    ) -> AgentGraphState:
+        context = runtime.context
+        semantic_result = context.side_effects.semantic_result
+        if not semantic_result:
+            return {}
+
+        result = await self.follow_up_quality_graph_service.run({
+            "db": context.db,
+            "team_id": context.team_id,
+            "user_id": context.user_id,
+            "session_id": context.session_id,
+            "content": state.get("content", ""),
+            "current_date": self._current_date(state) or "",
+            "semantic_result": semantic_result,
+            "memory": context.side_effects.memory,
+            "has_single_customer": self._has_single_customer(state),
+            "has_memory_customer": bool(self._memory_current_customer(context.side_effects.memory)),
+            "events": [],
+        })
+        state_update: AgentGraphState = {"events": result.get("events") or []}
+        follow_up_quality_result = result.get("follow_up_quality_result")
+        if follow_up_quality_result:
+            context.side_effects.follow_up_quality_result = follow_up_quality_result
+            state_update["follow_up_quality"] = coerce_json_dict(
+                follow_up_quality_result.model_dump(exclude_none=True)
+            )
+        follow_up_quality_metadata = result.get("follow_up_quality_metadata")
+        if follow_up_quality_metadata:
+            state_update["follow_up_quality_metadata"] = follow_up_quality_metadata
+        follow_up_quality_error = result.get("follow_up_quality_error")
+        if isinstance(follow_up_quality_error, str):
+            state_update["follow_up_quality_error"] = follow_up_quality_error
+        return state_update
+
+    async def _search_customer(
+        self,
+        state: AgentGraphState,
+        runtime: Runtime[AgentGraphRuntimeContext],
+    ) -> AgentGraphState:
+        context = runtime.context
+        result = await self.customer_resolution_graph_service.run({
+            "db": context.db,
+            "team_id": context.team_id,
+            "user_id": context.user_id,
+            "session_id": context.session_id,
+            "content": state.get("content", ""),
+            "authorization": context.authorization or "",
+            "intent": state.get("intent"),
+            "memory": context.side_effects.memory,
+            "semantic_result": context.side_effects.semantic_result,
+            "parsed": state.get("parsed") or {},
+            "events": [],
+        })
+        state_update: AgentGraphState = {
+            "customer_candidates": result.get("customer_candidates") or [],
+            "events": result.get("events") or [],
+        }
+        parsed = result.get("parsed")
+        if parsed:
+            state_update["parsed"] = parsed
+        selected_customer = result.get("selected_customer")
+        if selected_customer:
+            state_update["selected_customer"] = selected_customer
+        return state_update
+
+    async def _load_customer_context(
+        self,
+        state: AgentGraphState,
+        runtime: Runtime[AgentGraphRuntimeContext],
+    ) -> AgentGraphState:
+        context = runtime.context
         if (
-            not customer_id
-            or not state.get("authorization")
-            or not state.get("db")
-            or self._requires_clarification(state.get("semantic_result"), has_memory_customer=bool(self._memory_current_customer(state.get("memory"))))
-            or self._follow_up_quality_blocks(state)
+            not self._should_run_customer_context(state)
+            or not context.side_effects.semantic_result
         ):
             return {}
 
-        context = AgentToolContext(
-            db=state["db"],
-            team_id=state["team_id"],
-            user_id=state["user_id"],
-            session_id=state["session_id"],
-            authorization=state["authorization"],
-        )
-        result = await self.tool_registry.execute(
-            "get_customer_context",
-            context,
-            {"customer_id": customer_id},
-        )
-        events = [result.to_event()]
-        if not result.success:
-            return {"events": events}
-        events.append({
-            "event": "business_context_loaded",
-            "customer_id": customer_id,
-            "customer": customer,
+        result = await self.business_context_graph_service.run({
+            "db": context.db,
+            "team_id": context.team_id,
+            "user_id": context.user_id,
+            "session_id": context.session_id,
+            "content": state.get("content", ""),
+            "authorization": context.authorization or "",
+            "current_date": self._current_date(state),
+            "selected_customer": state.get("selected_customer") or {},
+            "semantic_result": context.side_effects.semantic_result,
+            "events": [],
         })
-        return {"business_context": result.data or {}, "events": events}
+        state_update: AgentGraphState = {"events": result.get("events") or []}
+        business_context = result.get("business_context")
+        if business_context:
+            state_update["business_context"] = business_context
+        suggestion_result = result.get("suggestion_result")
+        if suggestion_result:
+            context.side_effects.suggestion_result = suggestion_result
+            state_update["suggestion"] = coerce_json_dict(suggestion_result.model_dump(exclude_none=True))
+        suggestion_metadata = result.get("suggestion_metadata")
+        if suggestion_metadata:
+            state_update["suggestion_metadata"] = suggestion_metadata
+        suggestion_error = result.get("suggestion_error")
+        if isinstance(suggestion_error, str):
+            state_update["suggestion_error"] = suggestion_error
+        return state_update
 
-    async def _generate_suggestions(self, state: AgentGraphState) -> AgentGraphState:
-        semantic_result = state.get("semantic_result")
-        business_context = state.get("business_context") or {}
-        if not semantic_result or not business_context or self._requires_clarification(semantic_result, has_memory_customer=bool(self._memory_current_customer(state.get("memory")))):
-            return {}
-        if self._follow_up_quality_blocks(state):
-            return {}
-
-        try:
-            envelope = await self.suggestion_generator.generate_with_metadata(
-                state["db"],
-                team_id=state["team_id"],
-                user_message=state.get("content", ""),
-                semantic_result=semantic_result,
-                customer_context=business_context,
-                current_date=self._current_date(state),
-            )
-        except AgentSuggestionGeneratorError as exc:
-            return {
-                "suggestion_error": str(exc),
-                "events": [{"event": "suggestion_failed", "message": str(exc)}],
-            }
-
+    async def _build_response(
+        self,
+        state: AgentGraphState,
+        runtime: Runtime[AgentGraphRuntimeContext],
+    ) -> AgentGraphState:
+        context = runtime.context
+        result = await self.action_planning_graph_service.run({
+            "team_id": context.team_id,
+            "user_id": context.user_id,
+            "session_id": context.session_id,
+            "content": state.get("content", ""),
+            "intent": state.get("intent"),
+            "parsed": state.get("parsed") or {},
+            "customer_candidates": state.get("customer_candidates") or [],
+            "selected_customer": state.get("selected_customer"),
+            "business_context": state.get("business_context") or {},
+            "semantic": state.get("semantic") or {},
+            "semantic_metadata": state.get("semantic_metadata") or {},
+            "semantic_error": state.get("semantic_error"),
+            "follow_up_quality": state.get("follow_up_quality") or {},
+            "follow_up_quality_metadata": state.get("follow_up_quality_metadata") or {},
+            "follow_up_quality_error": state.get("follow_up_quality_error"),
+            "creation_duplicate_candidates": state.get("creation_duplicate_candidates") or {},
+            "suggestion": state.get("suggestion") or {},
+            "suggestion_metadata": state.get("suggestion_metadata") or {},
+            "suggestion_error": state.get("suggestion_error"),
+            "events": state.get("events") or [],
+            "suppress_trace_events": bool(state.get("suppress_trace_events")),
+            "memory": context.side_effects.memory,
+            "semantic_result": context.side_effects.semantic_result,
+            "follow_up_quality_result": context.side_effects.follow_up_quality_result,
+            "suggestion_result": context.side_effects.suggestion_result,
+        })
         return {
-            "suggestion_result": envelope.result,
-            "suggestion_metadata": {
-                "suggestion_source": envelope.suggestion_source,
-                "model": envelope.model,
-                "fallback_reason": getattr(envelope, "fallback_reason", None),
-                "fallback_error": getattr(envelope, "fallback_error", None),
-            },
+            "response": result.get("response"),
+            "events": result.get("events") or [],
         }
 
-    def _build_response(self, state: AgentGraphState) -> AgentGraphState:
-        return self.response_builder.build(state)
+    async def run(self, input_state: AgentGraphInput) -> AgentGraphResult:
+        checkpoint_state = _checkpoint_state_from_input(input_state)
+        context = _runtime_context_from_input(input_state)
+        config = build_new_flow_graph_config(
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+        )
+        try:
+            return await self._graph.ainvoke(checkpoint_state, config, context=context)
+        except SQLAlchemyError as exc:
+            if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
+                raise
+            fallback_context = _runtime_context_from_input(input_state)
+            result = await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
+            return with_checkpoint_unavailable_fallback_event(
+                result,
+                runtime="crm_agent_new_flow",
+                graph=NEW_FLOW_CHECKPOINT_NS,
+            )
 
-    @staticmethod
-    def _has_deferred_next_task(action: Optional[Dict[str, Any]]) -> bool:
-        if not action:
-            return False
-        payload = action.get("payload")
-        return isinstance(payload, dict) and isinstance(payload.get("_next_task"), dict)
-
-    async def run(self, input_state: AgentGraphState) -> AgentGraphState:
-        result: Dict[str, Any] = await self._graph.ainvoke(input_state)
-        return result
-
-    async def stream_events(self, input_state: AgentGraphState) -> AsyncGenerator[Dict[str, Any], None]:
-        state: AgentGraphState = dict(input_state)
+    async def stream_events(self, input_state: AgentGraphInput) -> AsyncGenerator[JSONDict, None]:
+        checkpoint_state = _checkpoint_state_from_input(input_state)
+        checkpoint_state["suppress_trace_events"] = True
+        context = _runtime_context_from_input(input_state)
+        config = build_new_flow_graph_config(
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+        )
         step_labels = {
             "load_memory": "加载会话记忆",
             "semantic_parse": "AI 语义理解",
@@ -458,7 +499,44 @@ class CRMAgentGraphService:
             "generate_suggestions": "AI 生成业务建议",
             "build_response": "生成业务回复",
         }
-        async for chunk in self._graph.astream(input_state, stream_mode="updates"):
+        try:
+            async for event in self._stream_graph_updates(
+                self._graph,
+                checkpoint_state,
+                context,
+                config,
+                step_labels,
+            ):
+                yield event
+        except SQLAlchemyError as exc:
+            if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
+                raise
+            fallback_context = _runtime_context_from_input(input_state)
+            yield checkpoint_unavailable_fallback_event(
+                runtime="crm_agent_new_flow",
+                graph=NEW_FLOW_CHECKPOINT_NS,
+            )
+            async for event in self._stream_graph_updates(
+                self._fallback_graph,
+                checkpoint_state,
+                fallback_context,
+                config,
+                step_labels,
+            ):
+                yield event
+
+    async def _stream_graph_updates(
+        self,
+        graph: object,
+        checkpoint_state: AgentGraphState,
+        context: AgentGraphRuntimeContext,
+        config: RunnableConfig,
+        step_labels: dict[str, str],
+    ) -> AsyncGenerator[JSONDict, None]:
+        state: AgentGraphState = dict(checkpoint_state)
+        if not hasattr(graph, "astream"):
+            return
+        async for chunk in graph.astream(checkpoint_state, config, context=context, stream_mode="updates"):
             if not isinstance(chunk, dict):
                 continue
             for step_name, update in chunk.items():
@@ -469,16 +547,19 @@ class CRMAgentGraphService:
                     yield {"event": "agent_step", "step": step_name, "status": "started", "content": step_label}
                 self._merge_stream_update(state, update)
                 for event in update.get("events", []):
-                    yield event
+                    yield coerce_json_dict(event)
                 if step_name == "semantic_parse":
                     for event in self._build_semantic_trace_events(state):
-                        yield event
+                        yield coerce_json_dict(event)
                 elif step_name == "evaluate_follow_up_quality":
                     for event in self._build_follow_up_quality_trace_events(state):
-                        yield event
+                        yield coerce_json_dict(event)
+                elif step_name == "load_customer_context":
+                    for event in self._build_suggestion_trace_events(state):
+                        yield coerce_json_dict(event)
                 elif step_name == "generate_suggestions":
                     for event in self._build_suggestion_trace_events(state):
-                        yield event
+                        yield coerce_json_dict(event)
                 if step_name != "build_response":
                     yield {"event": "agent_step", "step": step_name, "status": "completed", "content": step_label}
 
@@ -496,15 +577,15 @@ class CRMAgentGraphService:
         return False
 
     def _should_run_creation_duplicate_search(self, state: AgentGraphState) -> bool:
-        semantic_result = state.get("semantic_result")
+        semantic_result = _semantic_from_state(state)
         parsed = state.get("parsed") or {}
         lead = parsed.get("lead") or {}
         customer = parsed.get("customer_create") or {}
         return (
             bool(semantic_result)
             and semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"}
-            and bool(state.get("authorization"))
-            and bool(state.get("db"))
+            and bool(state.get("has_authorization"))
+            and bool(state.get("has_db"))
             and not self._requires_clarification(semantic_result)
             and bool(
                 lead.get("lead_name")
@@ -515,15 +596,15 @@ class CRMAgentGraphService:
         )
 
     def _should_run_customer_search(self, state: AgentGraphState) -> bool:
-        semantic_result = state.get("semantic_result")
+        semantic_result = _semantic_from_state(state)
         if not semantic_result or semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"}:
             return False
         parsed = state.get("parsed") or {}
-        memory_customer = self._memory_current_customer(state.get("memory"))
+        memory_customer = self._memory_current_customer(_memory_from_state(state))
         return (
             not self._follow_up_quality_blocks(state)
-            and bool(state.get("authorization"))
-            and bool(state.get("db"))
+            and bool(state.get("has_authorization"))
+            and bool(state.get("has_db"))
             and bool(parsed.get("customer_name"))
             and not self._requires_clarification(
                 semantic_result,
@@ -533,17 +614,17 @@ class CRMAgentGraphService:
         )
 
     def _should_enter_customer_resolution(self, state: AgentGraphState) -> bool:
-        semantic_result = state.get("semantic_result")
+        semantic_result = _semantic_from_state(state)
         if not semantic_result or semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"}:
             return False
         parsed = state.get("parsed") or {}
-        memory_customer = self._memory_current_customer(state.get("memory"))
+        memory_customer = self._memory_current_customer(_memory_from_state(state))
         if self._should_run_customer_search(state):
             return True
         return (
             not self._follow_up_quality_blocks(state)
-            and bool(state.get("authorization"))
-            and bool(state.get("db"))
+            and bool(state.get("has_authorization"))
+            and bool(state.get("has_db"))
             and not self._requires_clarification(
                 semantic_result,
                 has_memory_customer=bool(memory_customer),
@@ -552,34 +633,34 @@ class CRMAgentGraphService:
         )
 
     def _should_run_follow_up_quality(self, state: AgentGraphState) -> bool:
-        semantic_result = state.get("semantic_result")
+        semantic_result = _semantic_from_state(state)
         return (
             bool(semantic_result)
             and semantic_result.intent == "CUSTOMER_ACTIVITY"
-            and bool(state.get("db"))
+            and bool(state.get("has_db"))
             and self._has_single_customer(state)
             and not self._requires_clarification(
                 semantic_result,
-                has_memory_customer=bool(self._memory_current_customer(state.get("memory"))),
+                has_memory_customer=bool(self._memory_current_customer(_memory_from_state(state))),
             )
         )
 
     def _should_run_customer_context(self, state: AgentGraphState) -> bool:
-        semantic_result = state.get("semantic_result")
+        semantic_result = _semantic_from_state(state)
         return (
             not (semantic_result and semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"})
             and not self._follow_up_quality_blocks(state)
             and bool((state.get("selected_customer") or {}).get("id"))
-            and bool(state.get("authorization"))
-            and bool(state.get("db"))
+            and bool(state.get("has_authorization"))
+            and bool(state.get("has_db"))
             and not self._requires_clarification(
                 semantic_result,
-                has_memory_customer=bool(self._memory_current_customer(state.get("memory"))),
+                has_memory_customer=bool(self._memory_current_customer(_memory_from_state(state))),
             )
         )
 
     def _should_run_suggestions(self, state: AgentGraphState) -> bool:
-        semantic_result = state.get("semantic_result")
+        semantic_result = _semantic_from_state(state)
         return (
             not (semantic_result and semantic_result.intent in {"CREATE_LEAD", "CREATE_CUSTOMER"})
             and not self._follow_up_quality_blocks(state)
@@ -587,7 +668,7 @@ class CRMAgentGraphService:
             and bool(state.get("business_context"))
             and not self._requires_clarification(
                 semantic_result,
-                has_memory_customer=bool(self._memory_current_customer(state.get("memory"))),
+                has_memory_customer=bool(self._memory_current_customer(_memory_from_state(state))),
             )
         )
 
@@ -599,34 +680,21 @@ class CRMAgentGraphService:
             state[key] = value
 
     @staticmethod
-    def _build_semantic_trace_events(state: AgentGraphState) -> List[Dict[str, Any]]:
-        return AgentResponseBuilder.build_semantic_trace_events(state)
+    def _build_semantic_trace_events(state: AgentGraphState) -> List[Dict[str, object]]:
+        return build_semantic_trace_events(_response_state_from_checkpoint(state))
 
     @staticmethod
-    def _build_suggestion_trace_events(state: AgentGraphState) -> List[Dict[str, Any]]:
-        return AgentResponseBuilder.build_suggestion_trace_events(state)
+    def _build_suggestion_trace_events(state: AgentGraphState) -> List[Dict[str, object]]:
+        return build_suggestion_trace_events(_response_state_from_checkpoint(state))
 
     @staticmethod
-    def _build_follow_up_quality_trace_events(state: AgentGraphState) -> List[Dict[str, Any]]:
-        return AgentResponseBuilder.build_follow_up_quality_trace_events(state)
+    def _build_follow_up_quality_trace_events(state: AgentGraphState) -> List[Dict[str, object]]:
+        return build_follow_up_quality_trace_events(_response_state_from_checkpoint(state))
 
     @staticmethod
     def _follow_up_quality_blocks(state: AgentGraphState) -> bool:
-        quality = state.get("follow_up_quality_result")
+        quality = _follow_up_quality_from_state(state)
         return bool(quality and not quality.passed)
-
-    @staticmethod
-    def _apply_follow_up_revision(parsed: Dict[str, Any], quality: Optional[AgentFollowUpQualityResult]) -> Dict[str, Any]:
-        revision = (quality.suggested_revision or "").strip() if quality else ""
-        if not revision:
-            return parsed
-        activity_kind = infer_activity_kind(
-            parsed.get("method") or "AI录入",
-            parsed.get("original_content") or parsed.get("follow_up_content") or "",
-        )
-        if get_activity_category(activity_kind) == "MEETING":
-            return parsed
-        return {**parsed, "follow_up_content": revision}
 
     @staticmethod
     def _has_single_customer(state: AgentGraphState) -> bool:
@@ -635,11 +703,11 @@ class CRMAgentGraphService:
         return len(state.get("customer_candidates") or []) == 1
 
     @staticmethod
-    def _customer_requires_procurement_method(customer: Dict[str, Any]) -> bool:
+    def _customer_requires_procurement_method(customer: Dict[str, object]) -> bool:
         return business_rules.customer_requires_procurement_method(customer)
 
     @staticmethod
-    def _customer_default_procurement_method_id(customer: Dict[str, Any]) -> Optional[int]:
+    def _customer_default_procurement_method_id(customer: Dict[str, object]) -> Optional[int]:
         return business_rules.customer_default_procurement_method_id(customer)
 
     @staticmethod
@@ -651,7 +719,7 @@ class CRMAgentGraphService:
         return business_rules.opportunity_missing_display_fields(missing_fields)
 
     @staticmethod
-    def opportunity_field_defaults(customer: Dict[str, Any]) -> Dict[str, Any]:
+    def opportunity_field_defaults(customer: Dict[str, object]) -> Dict[str, object]:
         return business_rules.opportunity_field_defaults(customer)
 
     @staticmethod
@@ -673,14 +741,17 @@ class CRMAgentGraphService:
         )
 
     @staticmethod
-    def _current_date(state: AgentGraphState):
-        current_datetime = state.get("current_datetime")
-        if isinstance(current_datetime, datetime):
-            return current_datetime.date()
+    def _current_date(state: AgentGraphState) -> date | None:
+        current_date = state.get("current_date")
+        if isinstance(current_date, str):
+            try:
+                return date.fromisoformat(current_date)
+            except ValueError:
+                return None
         return None
 
     @staticmethod
-    def _memory_current_customer(memory: Optional[Any]) -> Optional[Dict[str, Any]]:
+    def _memory_current_customer(memory: Optional[object]) -> Optional[Dict[str, object]]:
         context = getattr(memory, "session_context", None) if memory else None
         if not isinstance(context, dict):
             return None
@@ -692,8 +763,8 @@ class CRMAgentGraphService:
     @staticmethod
     def _should_use_memory_customer(
         semantic_result: Optional[AgentSemanticParseResult],
-        parsed: Dict[str, Any],
-        memory_customer: Optional[Dict[str, Any]],
+        parsed: Dict[str, object],
+        memory_customer: Optional[Dict[str, object]],
     ) -> bool:
         if not semantic_result or not memory_customer:
             return False
@@ -708,10 +779,10 @@ class CRMAgentGraphService:
     @staticmethod
     def _apply_explicit_customer_hint(
         semantic_result: AgentSemanticParseResult,
-        parsed: Dict[str, Any],
+        parsed: Dict[str, object],
         content: str,
-        memory: Optional[Any],
-    ) -> Dict[str, Any]:
+        memory: Optional[object],
+    ) -> Dict[str, object]:
         if semantic_result.customer.resolution_source == "EXPLICIT":
             return parsed
         if semantic_result.intent in {"UNKNOWN", "CUSTOMER_QUERY", "CREATE_LEAD", "CREATE_CUSTOMER"}:
@@ -730,14 +801,120 @@ class CRMAgentGraphService:
             "_customer_name_source": "EXPLICIT_TEXT_HINT",
         }
 
-    @staticmethod
-    def _build_business_response(intent: str, parsed: Dict[str, Any], candidates: List[Dict[str, Any]], business_context: Dict[str, Any]):
-        return BusinessResponseBuilder().build(
-            intent,
-            parsed,
-            candidates,
-            business_context,
-        )
+
+def _checkpoint_state_from_input(input_state: AgentGraphInput) -> AgentGraphState:
+    """Project caller input into serializable LangGraph checkpoint state."""
+
+    state: AgentGraphState = {
+        "team_id": int(input_state.get("team_id") or 0),
+        "user_id": int(input_state.get("user_id") or 0),
+        "session_id": int(input_state.get("session_id") or 0),
+        "content": str(input_state.get("content") or ""),
+        "has_db": input_state.get("db") is not None,
+        "has_authorization": isinstance(input_state.get("authorization"), str)
+        and bool(str(input_state.get("authorization")).strip()),
+        "intent": None,
+        "memory_snapshot": {},
+        "semantic": {},
+        "semantic_metadata": {},
+        "semantic_error": None,
+        "follow_up_quality": {},
+        "follow_up_quality_metadata": {},
+        "follow_up_quality_error": None,
+        "parsed": {},
+        "customer_candidates": [],
+        "creation_duplicate_candidates": {},
+        "selected_customer": None,
+        "business_context": {},
+        "suggestion": {},
+        "suggestion_metadata": {},
+        "suggestion_error": None,
+        "suppress_trace_events": False,
+        "response": None,
+        "events": [],
+    }
+    current_datetime = input_state.get("current_datetime")
+    if isinstance(current_datetime, datetime):
+        state["current_date"] = current_datetime.date().isoformat()
+    events = input_state.get("events")
+    if isinstance(events, list):
+        state["events"] = [
+            coerce_json_dict(event)
+            for event in events
+            if isinstance(event, dict)
+        ]
+    return state
 
 
-crm_agent_graph_service = CRMAgentGraphService()
+def _runtime_context_from_input(input_state: AgentGraphInput) -> AgentGraphRuntimeContext:
+    authorization = input_state.get("authorization")
+    current_datetime = input_state.get("current_datetime")
+    return AgentGraphRuntimeContext(
+        db=input_state.get("db"),
+        team_id=int(input_state.get("team_id") or 0),
+        user_id=int(input_state.get("user_id") or 0),
+        session_id=int(input_state.get("session_id") or 0),
+        session_context=coerce_json_dict(input_state.get("session_context")),
+        authorization=authorization if isinstance(authorization, str) else None,
+        current_datetime=current_datetime if isinstance(current_datetime, datetime) else None,
+    )
+
+
+def _response_state_from_checkpoint(state: AgentGraphState) -> dict[str, object]:
+    response_state: dict[str, object] = dict(state)
+    memory = _memory_from_state(state)
+    semantic_result = _semantic_from_state(state)
+    follow_up_quality_result = _follow_up_quality_from_state(state)
+    suggestion_result = _suggestion_from_state(state)
+    if memory:
+        response_state["memory"] = memory
+    if semantic_result:
+        response_state["semantic_result"] = semantic_result
+    if follow_up_quality_result:
+        response_state["follow_up_quality_result"] = follow_up_quality_result
+    if suggestion_result:
+        response_state["suggestion_result"] = suggestion_result
+    return response_state
+
+
+def _semantic_from_state(state: AgentGraphState) -> AgentSemanticParseResult | None:
+    semantic = coerce_json_dict(state.get("semantic"))
+    if not semantic:
+        return None
+    try:
+        return AgentSemanticParseResult.model_validate(semantic)
+    except ValueError:
+        return None
+
+
+def _memory_from_state(state: AgentGraphState) -> AgentMemorySnapshot | None:
+    memory = coerce_json_dict(state.get("memory_snapshot"))
+    if not memory:
+        return None
+    try:
+        return AgentMemorySnapshot.model_validate(memory)
+    except ValueError:
+        return None
+
+
+def _follow_up_quality_from_state(state: AgentGraphState) -> AgentFollowUpQualityResult | None:
+    quality = coerce_json_dict(state.get("follow_up_quality"))
+    if not quality:
+        return None
+    try:
+        return AgentFollowUpQualityResult.model_validate(quality)
+    except ValueError:
+        return None
+
+
+def _suggestion_from_state(state: AgentGraphState) -> AgentSuggestionResult | None:
+    suggestion = coerce_json_dict(state.get("suggestion"))
+    if not suggestion:
+        return None
+    try:
+        return AgentSuggestionResult.model_validate(suggestion)
+    except ValueError:
+        return None
+
+
+crm_agent_graph_service = CRMAgentGraphService(checkpointer=agent_checkpoint_saver)

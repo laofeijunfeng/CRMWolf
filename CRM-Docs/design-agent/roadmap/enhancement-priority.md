@@ -7,6 +7,10 @@
 
 ## P0
 
+- 继续收敛 LangGraph 原生运行时边界：正常路径必须保持 root graph、`AgentRuntimeState`、thread/checkpoint、interrupt/resume 和领域 subgraph 主导，不允许新增图外业务状态机。
+- 禁止 session/task projection 承担等待态恢复；任何恢复用户等待态的正常路径必须从 LangGraph checkpoint + interrupt state 进入，`crm_agent_tasks` 只承担展示、审计和本轮新等待事件投影。
+- 为 root graph、pending graph、pending interaction graph、new-flow graph 和 confirmed-task graph 补齐跨服务重启 checkpoint 恢复测试。
+- 将已接入 root runtime 的 state history/time travel 投影扩展到 API/前端 trace，让分支原因、resume payload、tool request/result 和 fallback 原因可回放。
 - 强化 structured output 失败、fallback 和来源记录。
 - 前端事件展示模型、解析来源、fallback 和 tool 调用链路。
 - 保证时间基准来自运行时上下文，而不是隐式服务器日期。
@@ -19,9 +23,9 @@
 
 - 引入 middleware 或等价 runtime hooks，统一记录模型调用、tool 调用、错误分类和耗时。
 - 为写入 tool 增加更完整的 HITL edit/reject 流程。
-- 完善商机阶段推进的多商机选择、字段编辑和前端展示。
+- 完善商机阶段推进 opportunity subgraph 的多商机选择、置信度裁决、阶段 guardrail、字段编辑和前端展示。
 - 补充 LangSmith 或本地 tracing。
-- 建立 interaction planner 的最终校验：每轮只能有一个用户响应目标，多余建议进入 next task 或 trace。
+- 建立 root/domain graph 层的最终交互校验：每轮只能有一个用户响应目标，多余建议进入 next task 或 trace。
 - 把枚举归一、必填字段、业务前置条件和建议动作过滤沉淀为代码策略，不依赖 prompt 保证。
 - 增加 trace 回放视图或日志汇总，能逐步区分“读取事实”“模型判断”“代码裁决”“tool 执行”。
 
@@ -29,7 +33,6 @@
 
 - 为只读 tool 引入受控 LangChain tool-calling 子 Agent。
 - 在写入 tool 进入子 Agent 前接入 LangChain HITL middleware。
-- 评估 LangGraph checkpointer 对复杂多轮任务恢复的价值。
 - 对管理者查询类能力引入代码侧聚合、排序、过滤和分页，模型只做摘要和解释，不负责计算事实。
 - 建立真实模型回归数据集分层：语义解析、对象消歧、多轮草稿、跨渠道确认和业务建议分别验收。
 

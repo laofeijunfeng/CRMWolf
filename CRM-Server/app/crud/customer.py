@@ -81,9 +81,7 @@ class CustomerCRUD:
         query = db.query(Customer).filter(Customer.team_id == team_id)
 
         current_user_id = str(current_user_id) if current_user_id is not None else None
-        if scope == "owned" and current_user_id:
-            query = query.filter(Customer.owner_id == current_user_id)
-        elif scope == "collaborated" and current_user_id:
+        if scope == "collaborated" and current_user_id:
             query = query.filter(
                 db.query(CustomerMember.id).filter(
                     CustomerMember.team_id == team_id,

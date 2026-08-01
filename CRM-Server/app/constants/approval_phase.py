@@ -8,7 +8,7 @@ class ApprovalPhase(str, Enum):
     所有业务单据的审批流程状态统一使用此枚举。
 
     状态说明：
-    - DRAFT: 草稿/待提交审批，单据已创建但未提交审批
+    - DRAFT: 草稿/待提交，单据已创建但未提交审批
     - PENDING_REVIEW: 待审批，单据已提交审批，等待审批流转
     - APPROVED: 审批通过，审批流程已完成，单据可继续后续业务流程
     - REJECTED: 审批拒绝，审批流程已拒绝，用户可修改后重新提交
@@ -19,7 +19,7 @@ class ApprovalPhase(str, Enum):
                   Payment.confirmation_status 表示回款确认状态等）
     """
 
-    DRAFT = "draft"           # 草稿/待提交审批
+    DRAFT = "draft"           # 草稿/待提交
     PENDING_REVIEW = "pending_review"  # 待审批（整个审批流程中）
     APPROVED = "approved"     # 审批通过
     REJECTED = "rejected"     # 审批拒绝

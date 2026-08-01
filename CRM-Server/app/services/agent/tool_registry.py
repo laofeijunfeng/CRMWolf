@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
+from typing import Awaitable, Callable, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -97,7 +97,7 @@ class AgentOpportunityPayload(AgentStrictPayload):
         return self
 
 
-def _dump_payload(payload: BaseModel) -> Dict[str, Any]:
+def _dump_payload(payload: BaseModel) -> Dict[str, object]:
     return payload.model_dump(exclude_none=True)
 
 
@@ -295,7 +295,7 @@ class AgentToolRegistry:
         self,
         name: str,
         context: AgentToolContext,
-        payload: Dict[str, Any],
+        payload: Dict[str, object],
         *,
         policy: Optional[AgentToolExecutionPolicy] = None,
     ) -> AgentToolResult:

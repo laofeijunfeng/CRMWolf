@@ -138,7 +138,7 @@ def _validate_payment_commission_member(
         )
 
 
-@router.post("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], status_code=status.HTTP_201_CREATED, summary="创建回款计划", description="为指定合同创建回款计划，支持批量创建多个阶段。只有已签署或已生效的合同可以创建回款计划，所有阶段的计划金额之和不能超过合同总金额。返回创建成功的回款计划列表。")
+@router.post("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], status_code=status.HTTP_201_CREATED, summary="创建回款计划", description="为指定合同创建回款计划，支持批量创建多个阶段。只有已签署的合同可以创建回款计划，所有阶段的计划金额之和不能超过合同总金额。返回创建成功的回款计划列表。")
 def create_payment_plans(
     contract_id: int,
     plans_data: PaymentPlanBatchCreate,
@@ -149,10 +149,10 @@ def create_payment_plans(
     contract = check_contract_edit_permission(contract_id, team_id, current_user, db)
 
     from app.models.contract import ContractStatus
-    if contract.status not in [ContractStatus.SIGNED, ContractStatus.EFFECTIVE]:
+    if contract.status != ContractStatus.SIGNED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"只有已签署或已生效的合同可以创建回款计划，当前状态: {contract.status}"
+            detail=f"只有已签署的合同可以创建回款计划，当前状态: {contract.status}"
         )
 
     try:
@@ -170,7 +170,7 @@ def create_payment_plans(
         )
 
 
-@router.get("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], summary="查询合同回款计划", description="获取指定合同下的所有回款计划，包括计划金额、已回款金额、待回款金额等信息。支持按回款状态筛选（PENDING待回款、OVERDUE已逾期、PARTIAL部分回款、COMPLETED已完成）。")
+@router.get("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], summary="查询合同回款计划", description="获取指定合同下的所有回款计划，包括计划金额、已回款金额、待回款金额等信息。支持按回款状态筛选（PENDING待回款、OVERDUE已逾期、PARTIAL部分回款、COMPLETED已登记）。")
 def get_payment_plans(
     contract_id: int,
     status: Optional[str] = Query(None, description="回款状态筛选"),
@@ -310,7 +310,7 @@ def list_payment_plans(
         )
 
 
-@router.get("/payment-plans/badge-counts", summary="获取回款计划 Badge 数量", description="返回各类待处理数量：pending(未登记)、partial(部分回款)、overdue(逾期)、pending_submit(待提交审批)、pending_approval(审批中-团队)、pending_approval_me(审批中-待我审批)")
+@router.get("/payment-plans/badge-counts", summary="获取回款计划 Badge 数量", description="返回各类待处理数量：pending(未登记)、partial(部分回款)、overdue(逾期)、pending_submit(待提交)、pending_approval(审批中-团队)、pending_approval_me(审批中-待我审批)")
 def get_payment_plan_badge_counts(
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -323,7 +323,7 @@ def get_payment_plan_badge_counts(
     - pending: 未登记的计划数（status=PENDING 且 payment_records.length=0）
     - partial: 部分回款的计划数（status=PARTIAL）
     - overdue: 逾期计划数（status=OVERDUE）
-    - pending_submit: 待提交审批的记录数（confirmation_status=PENDING 且无关联审批）
+    - pending_submit: 待提交的记录数（confirmation_status=PENDING 且无关联审批）
     - pending_approval: 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）- 团队总数
     - pending_approval_me: 待我审批的数量（与审批中心一致）
     """
@@ -346,7 +346,7 @@ def get_payment_plan_badge_counts(
         PaymentPlan.status == PaymentPlanStatus.OVERDUE
     ).count()
 
-    # 4. 待提交审批的记录数（confirmation_status=PENDING 且没有关联审批）
+    # 4. 待提交的记录数（confirmation_status=PENDING 且没有关联审批）
     # 查找没有审批记录的回款记录
     pending_submit_count = db.query(PaymentRecord).filter(
         PaymentRecord.team_id == team_id,
@@ -653,7 +653,7 @@ def get_payment_plan_detail(
     return response
 
 
-@router.put("/payment-plans/{plan_id}", response_model=PaymentPlanResponse, summary="修改回款计划", description="修改指定的回款计划。已完成的计划或已有回款记录的计划不能修改金额和日期，只能修改阶段名称和备注。")
+@router.put("/payment-plans/{plan_id}", response_model=PaymentPlanResponse, summary="修改回款计划", description="修改指定的回款计划。已登记的计划或已有回款记录的计划不能修改金额和日期，只能修改阶段名称和备注。")
 def update_payment_plan(
     plan_id: int,
     plan_data: PaymentPlanUpdate,
@@ -666,7 +666,7 @@ def update_payment_plan(
     if plan.status in [PaymentPlanStatus.COMPLETED]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="已完成的回款计划不能修改"
+            detail="已登记的回款计划不能修改"
         )
 
     if plan.payment_records:
@@ -736,7 +736,7 @@ async def create_payment_record(
     if plan.status == PaymentPlanStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该回款计划已完成，无法继续登记回款"
+            detail="该回款计划已登记，无法继续登记回款"
         )
 
     try:
@@ -930,7 +930,7 @@ def list_payment_records(
     creator_id: Optional[str] = Query(None, description="登记人飞书ID"),
     keyword: Optional[str] = Query(None, description="关键词，支持客户、合同、阶段名称"),
     me: bool = Query(False, description="是否只查询当前用户登记的记录"),
-    approval_status: Optional[str] = Query(None, description="审批状态筛选: pending_submit(待提交), pending_approval(审批中), approved(已通过), rejected(已驳回)，多个值用逗号分隔"),
+    approval_status: Optional[str] = Query(None, description="审批状态筛选: pending_submit(待提交), pending_approval(审批中), rejected(已驳回), approved(已通过)，多个值用逗号分隔"),
     approval_status_exclude: Optional[str] = Query(None, description="排除的审批状态，多个值用逗号分隔"),
     sort: Optional[str] = Query(None, description="多字段排序，格式：field:asc,field2:desc"),
     order_by: Optional[str] = Query(None, description="兼容旧版单字段排序"),
@@ -1135,43 +1135,6 @@ def list_payment_records(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"查询回款记录失败: {str(e)}"
         )
-
-
-@router.get("/reminders/upcoming", response_model=List[PaymentReminder], summary="查询即将到期的回款", description="获取指定天数内即将到期的回款计划，用于提醒。支持查询未来1-30天内的回款计划")
-def get_upcoming_payments(
-    days: int = Query(7, ge=1, le=30, description="查询天数范围，默认7天，可设置1-30天"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    plans = payment_plan_crud.get_upcoming_payments(db, team_id, days)
-    
-    reminders = []
-    for plan in plans:
-        days_until = (plan.due_date - date.today()).days
-        
-        customer_name = None
-        opportunity_name = None
-        
-        if hasattr(plan, 'contract') and plan.contract:
-            if hasattr(plan.contract, 'customer') and plan.contract.customer:
-                customer_name = plan.contract.customer.account_name
-            if hasattr(plan.contract, 'opportunity') and plan.contract.opportunity:
-                opportunity_name = plan.contract.opportunity.opportunity_name
-        
-        reminders.append(PaymentReminder(
-            plan_id=plan.id,
-            contract_name=plan.contract.contract_name,
-            stage_name=plan.stage_name,
-            planned_amount=float(plan.planned_amount),
-            due_date=plan.due_date,
-            days_until_due=days_until,
-            contract_owner_id=plan.contract.creator_id,
-            customer_name=customer_name,
-            opportunity_name=opportunity_name
-        ))
-    
-    return reminders
 
 
 @router.get("/reminders/overdue", response_model=List[PaymentReminder], summary="查询逾期回款", description="获取所有逾期的回款计划，用于催收提醒")

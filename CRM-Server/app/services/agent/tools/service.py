@@ -5,7 +5,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from sqlalchemy import or_
 
@@ -594,7 +594,7 @@ class CRMAgentToolService:
         )
         return result
 
-    async def _get_active_opportunity_stage_context(self, context: AgentToolContext, opportunities_value: Any) -> list[JsonDict]:
+    async def _get_active_opportunity_stage_context(self, context: AgentToolContext, opportunities_value: object) -> list[JsonDict]:
         opportunities = self._extract_items(opportunities_value)
         active_opportunities = [
             opportunity
@@ -630,7 +630,7 @@ class CRMAgentToolService:
         return stage_context
 
     @staticmethod
-    def _extract_items(value: Any) -> list[JsonDict]:
+    def _extract_items(value: object) -> list[JsonDict]:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
         if isinstance(value, dict):
@@ -644,7 +644,7 @@ class CRMAgentToolService:
         context: AgentToolContext,
         tool_name: str,
         request_json: JsonDict,
-        call_api: Callable[[], Any],
+        call_api: Callable[[], object],
     ) -> AgentToolResult:
         tool_call = self._create_tool_call(context, tool_name, request_json)
         try:
@@ -671,7 +671,7 @@ class CRMAgentToolService:
         tool_name: str,
         request_json: JsonDict,
         action_key: str,
-        call_api: Callable[[], Any],
+        call_api: Callable[[], object],
     ) -> AgentToolResult:
         request_hash = self._hash_json(request_json)
         idempotency = agent_idempotency_key_crud.get_or_create(
@@ -729,7 +729,7 @@ class CRMAgentToolService:
         tool_name: str,
         message: str,
         status_code: Optional[int],
-        response_json: Any,
+        response_json: object,
     ) -> AgentToolResult:
         agent_tool_call_crud.update(
             context.db,

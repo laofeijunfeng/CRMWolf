@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.agent.new_flow_runtime import AgentNewFlowRuntime
+from app.services.agent.checkpoint_fallback_runtime import CheckpointFallbackNewFlowAdapter
 
 
 class FakeGraphService:
@@ -21,26 +21,26 @@ class FakeGraphService:
 
 
 @pytest.mark.asyncio
-async def test_new_flow_runtime_applies_event_side_effects(monkeypatch):
-    runtime = AgentNewFlowRuntime()
+async def test_checkpoint_fallback_new_flow_adapter_applies_event_side_effects(monkeypatch):
+    adapter = CheckpointFallbackNewFlowAdapter()
     db = object()
     session = SimpleNamespace(id=3, context_json={"current_customer": {"id": 9}})
     remembered_customers = []
     waiting_events = []
 
     monkeypatch.setattr(
-        "app.services.agent.new_flow_runtime.session_state._remember_current_customer",
+        "app.services.agent.new_flow_effects.session_state._remember_current_customer",
         lambda db_arg, session_arg, customer: remembered_customers.append(customer),
     )
     monkeypatch.setattr(
-        "app.services.agent.new_flow_runtime.task_factory._create_waiting_task_from_event",
+        "app.services.agent.new_flow_effects.task_factory._create_waiting_task_from_event",
         lambda db_arg, event, team_id, user_id, session_arg: waiting_events.append(event),
     )
 
     assistant_ref = {"content": None}
     events = [
         event
-        async for event in runtime.stream_events(
+        async for event in adapter.stream_events(
             db,
             session=session,
             team_id=1,

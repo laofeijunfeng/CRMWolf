@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +18,7 @@ class AgentTurnInput(BaseModel):
     content: str = ""
     source: str = "web"
     provider: Optional[str] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict)
 
     @classmethod
     def text(
@@ -27,7 +27,7 @@ class AgentTurnInput(BaseModel):
         *,
         source: str = "web",
         provider: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: Optional[dict[str, object]] = None,
     ) -> "AgentTurnInput":
         return cls(
             kind=AgentInputKind.TEXT,
@@ -43,7 +43,7 @@ class AgentTurnInput(BaseModel):
         *,
         source: str = "system",
         provider: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: Optional[dict[str, object]] = None,
     ) -> "AgentTurnInput":
         return cls(
             kind=AgentInputKind.CONFIRM,
@@ -59,7 +59,7 @@ class AgentTurnInput(BaseModel):
         *,
         source: str = "system",
         provider: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: Optional[dict[str, object]] = None,
     ) -> "AgentTurnInput":
         return cls(
             kind=AgentInputKind.REJECT,

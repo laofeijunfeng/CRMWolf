@@ -166,7 +166,7 @@ def get_leads(
     city: Optional[str] = Query(None, description="所在城市"),
     keyword: Optional[str] = Query(None, description="关键词搜索"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    owner_id: Optional[str] = Query(None, description="按负责人ID筛选（可选，用于筛选我的线索）"),
+    owner_id: Optional[str] = Query(None, description="按负责人ID筛选（支持 me/my 表示当前用户）"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
     team_id: int = Depends(get_current_user_team),
@@ -561,48 +561,6 @@ def get_public_leads(
         page_size=limit,
         total_pages=total_pages
     )
-
-
-@router.get("/my/list", response_model=PaginatedResponse[LeadListResponse], summary="我的线索", description="获取当前用户负责的线索列表")
-def get_my_leads(
-    skip: int = Query(0, ge=0, description="跳过记录数"),
-    limit: int = Query(100, ge=1, le=100, description="返回记录数"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    order_by: Optional[str] = Query(None, description="排序字段"),
-    order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    leads, total = lead_crud.get_leads_by_owner(
-        db,
-        team_id,
-        str(current_user.id),
-        skip,
-        limit,
-        filters=parse_filter_conditions(filters),
-        order_by=order_by,
-        order_dir=order_dir
-    )
-    page = skip // limit + 1
-    total_pages = (total + limit - 1) // limit if total > 0 else 0
-    return PaginatedResponse[LeadListResponse](
-        items=_build_lead_list_responses(db, leads),
-        total=total,
-        page=page,
-        page_size=limit,
-        total_pages=total_pages
-    )
-
-
-@router.get("/follow-up/reminder", response_model=List[LeadResponse], summary="待跟进线索", description="获取需要跟进的线索列表")
-def get_leads_need_follow_up(
-    days: int = Query(7, ge=1, le=30, description="天数"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    return lead_crud.get_leads_need_follow_up(db, team_id, str(current_user.id), days)
 
 
 analytics_router = APIRouter(prefix="/v1/analytics/leads", tags=["线索分析"])

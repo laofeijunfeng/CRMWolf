@@ -320,7 +320,7 @@ export interface CustomerQueryParams {
   created_time_end?: string
   order_by?: string
   order_dir?: 'asc' | 'desc'
-  scope?: 'owned' | 'collaborated' | 'accessible'
+  scope?: 'collaborated' | 'accessible'
 }
 
 export type ReturnReasonEnum = '丢单' | '无意向' | '信息错误' | '长期未跟进' | '预算不足' | '其他'

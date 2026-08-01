@@ -4,7 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import uuid
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,6 +23,8 @@ from app.schemas.agent import (
 )
 from app.services.agent import business_rules
 from app.services.agent import agent_copy
+from app.services.agent import choice_resolution
+from app.services.agent import task_display
 from app.services.agent.interaction_contract import (
     INTERACTION_TYPE_CHOICE,
     INTERACTION_TYPE_FORM,
@@ -57,13 +59,13 @@ def _append_trace_event(trace_events: list[dict], event: dict) -> None:
 
 def _choice_interaction(
     prompt: str,
-    choices: list[dict[str, Any]],
+    choices: list[dict[str, object]],
     *,
-    event: Optional[dict[str, Any]] = None,
+    event: Optional[dict[str, object]] = None,
     title: Optional[str] = None,
     business_action: Optional[str] = None,
     status: str = STATUS_WAITING_USER_INPUT,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     event = event or {}
     return build_interaction(
         event_name=event.get("event"),
@@ -86,8 +88,8 @@ def _form_field(
     required: bool = True,
     options: Optional[list[dict[str, str]]] = None,
     placeholder: Optional[str] = None,
-    default_value: Optional[Any] = None,
-) -> dict[str, Any]:
+    default_value: Optional[object] = None,
+) -> dict[str, object]:
     field = {
         "key": key,
         "label": label,
@@ -130,7 +132,7 @@ def _opportunity_field_defaults(
     db: Optional[Session] = None,
     team_id: Optional[int] = None,
     customer_id: Optional[int] = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     default_procurement_method_id = _customer_default_procurement_method_id(customer)
     if default_procurement_method_id is None and db is not None and customer_id:
         try:
@@ -153,8 +155,8 @@ def _fields_for_missing(
     *,
     db: Optional[Session] = None,
     team_id: Optional[int] = None,
-    default_values: Optional[dict[str, Any]] = None,
-) -> list[dict[str, Any]]:
+    default_values: Optional[dict[str, object]] = None,
+) -> list[dict[str, object]]:
     default_values = default_values or {}
     option_sets = {
         "license_type": [
@@ -276,29 +278,23 @@ def _interaction_for_event(
     *,
     db: Optional[Session] = None,
     team_id: Optional[int] = None,
-) -> Optional[dict[str, Any]]:
+) -> Optional[dict[str, object]]:
     event_name = event.get("event")
     content = str(event.get("content") or "")
     if event.get("interaction"):
         return event["interaction"]
     if event_name == "confirmation_required":
-        return _choice_interaction(content or agent_copy.confirm_prompt(event.get("action")), [
+        return _choice_interaction(_confirmation_prompt(content, event), [
             {"label": "是", "value": "是"},
             {"label": "否", "value": "否"},
         ], event=event, status=STATUS_WAITING_CONFIRMATION)
     if event_name == "customer_selection_required":
-        customers = event.get("customers") or []
-        choices = [
-            {"label": str(customer.get("account_name") or f"客户 {index}"), "value": str(index)}
-            for index, customer in enumerate(customers, start=1)
-        ]
+        raw_customers = event.get("customers") or []
+        customers = [item for item in raw_customers if isinstance(item, dict)] if isinstance(raw_customers, list) else []
+        choices = choice_resolution.project_choices(choice_resolution.CUSTOMER_SPEC, customers)
         return _choice_interaction(content or agent_copy.choose_customer(), choices, event=event)
     if event_name == "business_selection_required":
-        choices = []
-        for key in ("contracts", "payment_plans"):
-            for index, item in enumerate(event.get(key) or [], start=1):
-                name = item.get("contract_name") or item.get("plan_name") or item.get("name") or f"业务对象 {index}"
-                choices.append({"label": str(name), "value": str(index)})
+        choices = choice_resolution.project_business_choices(event)
         return _choice_interaction(content or agent_copy.choose_business_object(), choices, event=event)
     form_kinds = {
         "opportunity_fields_required": "opportunity",
@@ -372,23 +368,56 @@ def _interaction_for_event(
         for index, candidate in enumerate(candidates[:2], start=1):
             if not isinstance(candidate, dict):
                 continue
-            summary = str(candidate.get("display_summary") or candidate.get("summary") or candidate.get("intent") or f"草稿 {index}")
-            choice: dict[str, Any] = {
-                "label": summary,
-                "value": f"继续：{summary}",
+            summary = _turn_relation_candidate_summary(candidate, index)
+            continue_label = f"继续处理：{summary}"
+            choice: dict[str, object] = {
+                "label": continue_label,
+                "value": continue_label,
             }
             if candidate.get("id") is not None:
                 choice["metadata"] = {"selected_task_id": candidate.get("id")}
             choices.append(choice)
-        if not choices:
-            return None
+        choices.append({
+            "label": "作为新流程处理",
+            "value": "作为新流程处理",
+            "metadata": {"turn_relation": "START_NEW_FLOW"},
+        })
         return _choice_interaction(
-            content or agent_copy.turn_relation_clarification(),
+            _turn_relation_prompt(content, candidates),
             choices,
             event=event,
             status=STATUS_WAITING_USER_INPUT,
         )
     return None
+
+
+def _turn_relation_candidate_summary(candidate: dict[object, object], index: int) -> str:
+    return task_display.readable_task_summary_from_candidate(candidate, index=index)
+
+
+def _confirmation_prompt(content: str, event: dict) -> str:
+    action_label = task_display.readable_action_label(event.get("action"))
+    if _is_internal_confirmation_content(content):
+        return agent_copy.confirm_prompt(action_label)
+    if content.strip():
+        return content
+    return agent_copy.confirm_prompt(action_label)
+
+
+def _is_internal_confirmation_content(content: str) -> bool:
+    value = content.strip()
+    return bool(value and ("_" in value or "等待确认执行：" in value))
+
+
+def _turn_relation_prompt(content: str, candidates: list[object]) -> str:
+    if content.strip() and "_" not in content and "等待确认执行：" not in content:
+        return content
+    summaries = [
+        _turn_relation_candidate_summary(candidate, index)
+        for index, candidate in enumerate(candidates[:2], start=1)
+        if isinstance(candidate, dict)
+    ]
+    return agent_copy.turn_relation_clarification(summary for summary in summaries if summary)
 
 def _with_interaction(event: dict, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> dict:
     interaction = _interaction_for_event(event, db=db, team_id=team_id)
@@ -396,13 +425,13 @@ def _with_interaction(event: dict, *, db: Optional[Session] = None, team_id: Opt
         return event
     return {**event, "interaction": interaction}
 
-def _pending_task_confirmation_interaction(content: str) -> dict[str, Any]:
+def _pending_task_confirmation_interaction(content: str) -> dict[str, object]:
     return _choice_interaction(content or "要继续处理下一步吗？", [
         {"label": "继续处理", "value": "是"},
     ], event={"event": "confirmation_required"}, status=STATUS_WAITING_CONFIRMATION)
 
 
-def _pending_task_interaction(task, content: str, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> dict[str, Any]:
+def _pending_task_interaction(task, content: str, *, db: Optional[Session] = None, team_id: Optional[int] = None) -> dict[str, object]:
     state = task.state_json or {}
     action = state.get("action")
     payload = state.get("payload") if isinstance(state.get("payload"), dict) else {}
@@ -420,6 +449,7 @@ def _pending_task_interaction(task, content: str, *, db: Optional[Session] = Non
         "collect_lead_follow_up_quality_fields": "follow_up_quality_required",
         "create_opportunity": "confirmation_required",
         "move_opportunity_stage": "confirmation_required",
+        "select_opportunity_for_stage_move": "business_selection_required",
         "create_customer_activity": "confirmation_required",
         "create_lead_follow_up": "confirmation_required",
         "create_payment_record": "confirmation_required",
@@ -440,6 +470,10 @@ def _pending_task_interaction(task, content: str, *, db: Optional[Session] = Non
     }
     if customer:
         event["customer"] = customer
+    for key in ("opportunities", "contracts", "payment_plans"):
+        values = state.get(key)
+        if isinstance(values, list):
+            event[key] = values
     interaction = _interaction_for_event(event, db=db, team_id=team_id)
     return interaction or _pending_task_confirmation_interaction(content)
 

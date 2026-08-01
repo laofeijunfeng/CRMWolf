@@ -87,7 +87,7 @@ const mapStatus = (status: ContractStatus): string => {
     'DRAFT': 'draft',
     'PENDING_REVIEW': 'pending_review',
     'SIGNED': 'signed',
-    'EFFECTIVE': 'effective',
+    'EFFECTIVE': 'signed',
     'EXPIRED': 'expired',
     'TERMINATED': 'terminated'
   }

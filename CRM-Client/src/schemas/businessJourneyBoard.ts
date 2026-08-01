@@ -4,7 +4,6 @@ export const BusinessJourneyBoardStageKeySchema = z.enum([
   'early_communication',
   'active_progress',
   'closing_soon',
-  'won_pending_contract',
   'contract_processing',
   'payment_processing',
   'invoice_processing',

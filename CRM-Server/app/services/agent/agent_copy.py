@@ -125,7 +125,7 @@ def pending_interruption_clarification() -> str:
 def turn_relation_clarification(summaries: Iterable[object] = ()) -> str:
     items = _clean_items(summaries)[:2]
     if len(items) == 1:
-        return f"这句是继续「{items[0]}」，还是新开一个流程？"
+        return f"这句是继续处理「{items[0]}」，还是作为新流程处理？"
     if len(items) >= 2:
-        return f"这句是继续「{items[0]}」还是「{items[1]}」，还是新开一个流程？"
-    return "这句是在继续刚才放下的任务，还是要开启新的流程？"
+        return f"这句是继续处理「{items[0]}」还是「{items[1]}」，还是作为新流程处理？"
+    return "这句是在继续处理刚才放下的任务，还是作为新流程处理？"

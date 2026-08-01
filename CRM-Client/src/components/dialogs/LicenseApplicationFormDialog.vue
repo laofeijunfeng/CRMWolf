@@ -22,7 +22,7 @@ import type { ContractListResponse } from '@/api/contract'
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { handleApiError } from '@/utils/errorHandler'
 
-const APPROVED_CONTRACT_STATUSES = ['SIGNED', 'EFFECTIVE']
+const APPROVED_CONTRACT_STATUSES = ['SIGNED']
 
 interface Props {
   open: boolean
@@ -343,7 +343,7 @@ watch(
             label="关联合同"
             required
             :options="contractOptions"
-            :placeholder="approvedContracts.length > 0 ? '请选择合同' : '暂无可关联的已签署/已生效合同'"
+            :placeholder="approvedContracts.length > 0 ? '请选择合同' : '暂无可关联的已签署合同'"
             :disabled="submitting || hasFixedContract || approvedContracts.length === 0"
             :error="errors.contractId"
             :title="selectedContractLabel || undefined"

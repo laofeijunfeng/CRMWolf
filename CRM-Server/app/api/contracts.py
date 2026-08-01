@@ -431,7 +431,7 @@ async def create_contract_from_opportunity(
 **业务场景：**
 - 查看所有合同
 - 按客户筛选合同
-- 按状态筛选待处理、已生效等合同
+- 按状态筛选草稿、审批中、已签署等合同
 """)
 def get_contracts(
     skip: int = Query(0, ge=0, description="分页跳过记录数，从0开始，默认为0表示第一页"),
@@ -711,7 +711,7 @@ def get_customer_contracts(
     customer_id: int,
     skip: int = Query(0, ge=0, description="分页跳过记录数，从0开始"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数，默认100，最大100"),
-    status: Optional[ContractStatusEnum] = Query(None, description="按合同状态筛选，可选值：DRAFT(草稿)、PENDING_REVIEW(待审核)、SIGNED(已签署)、EFFECTIVE(已生效)、EXPIRED(已到期)、TERMINATED(已终止)"),
+    status: Optional[ContractStatusEnum] = Query(None, description="按合同状态筛选，可选值：DRAFT(草稿)、PENDING_REVIEW(待审核)、SIGNED(已签署)、EXPIRED(已到期)、TERMINATED(已终止)"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -779,7 +779,7 @@ def get_customer_contracts(
 - 修改金额或用户数会自动重新计算标准单价
 
 **注意事项：**
-- 已提交审批或已生效的合同不可编辑
+- 已提交审批或已签署的合同不可编辑
 - 修改后标准单价会自动更新
 """)
 def update_contract(

@@ -330,31 +330,6 @@ class LeadCRUD:
 
         return lead
 
-    def get_leads_by_owner(
-        self,
-        db: Session,
-        team_id: int,
-        owner_id: str,
-        skip: int = 0,
-        limit: int = 100,
-        filters: Optional[List[Dict[str, Any]]] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
-    ) -> Tuple[List[Lead], int]:
-        query = db.query(Lead).filter(
-            and_(
-                Lead.team_id == team_id,
-                Lead.owner_id == owner_id,
-                Lead.status != LeadStatus.CONVERTED
-            )
-        )
-        if filters:
-            query = self._apply_filters(query, filters)
-        total = query.count()
-        query = self._apply_sort(query, order_by, order_dir)
-        leads = query.offset(skip).limit(limit).all()
-        return leads, total
-
     def get_public_leads(
         self,
         db: Session,
@@ -399,17 +374,6 @@ class LeadCRUD:
                 return query.order_by(order_column.desc())
             return query.order_by(order_column.asc())
         return query.order_by(Lead.created_time.desc())
-
-    def get_leads_need_follow_up(self, db: Session, team_id: int, user_id: str, days: int = 7) -> List[Lead]:
-        cutoff_date = datetime.now() - timedelta(days=days)
-        return db.query(Lead).filter(
-            and_(
-                Lead.team_id == team_id,
-                Lead.owner_id == user_id,
-                Lead.status == LeadStatus.FOLLOWING,
-                Lead.last_modified_time < cutoff_date
-            )
-        ).order_by(Lead.last_modified_time.asc()).all()
 
     def get_statistics(self, db: Session, team_id: int, owner_id: Optional[str] = None) -> dict:
         from sqlalchemy import case

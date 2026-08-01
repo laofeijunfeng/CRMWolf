@@ -59,6 +59,22 @@ const currentStep = computed(() => {
   return allStages.value.findIndex(s => s.id === current.id)
 })
 
+const nextAdvanceIndex = computed(() => {
+  const current = allStages.value.find(stage => stage.is_current)
+  if (!current) {
+    const defaultStartIndex = allStages.value.findIndex(stage => stage.is_default_start)
+    return defaultStartIndex >= 0 ? defaultStartIndex : 0
+  }
+  const currentIndex = allStages.value.findIndex(stage => stage.id === current.id)
+  return currentIndex >= 0 && currentIndex < allStages.value.length - 1
+    ? currentIndex + 1
+    : -1
+})
+
+const canClickStage = (index: number): boolean => (
+  props.canAdvance && !loading.value && index === nextAdvanceIndex.value
+)
+
 const emitStageStatus = (): void => {
   const current = allStages.value.find(stage => stage.is_current)
   const currentWinProbability = current?.win_probability ?? 0
@@ -89,14 +105,9 @@ const fetchStages = async (): Promise<void> => {
 // 点击阶段推进
 const handleStageClick = async (stage: OpportunityProcurementStageInfo, index: number): Promise<void> => {
   if (loading.value) return
-  if (!props.canAdvance) return
+  if (!canClickStage(index)) return
 
   const current = allStages.value.find(s => s.is_current)
-  const currentStepIndex = current ? allStages.value.findIndex(s => s.id === current.id) : -1
-
-  // 只能点击未完成阶段
-  if (index <= currentStepIndex) return
-
   const isNewOpportunity = !current
   const confirmMessage = isNewOpportunity
     ? `确定将商机的起始阶段设置为「${stage.stage_name}」？赢率将从 0% 变为 ${stage.win_probability}%。`
@@ -140,7 +151,7 @@ onMounted(fetchStages)
           :key="stage.id"
           :step="index + 1"
           class="flex-1"
-          :class="{ 'cursor-pointer': canAdvance }"
+          :class="canClickStage(index) ? 'cursor-pointer' : 'cursor-default opacity-70'"
           @click="handleStageClick(stage, index)"
         >
           <!-- 官方样式：竖向分布 -->
@@ -168,7 +179,7 @@ onMounted(fetchStages)
 
       <!-- 帮助提示 -->
       <p v-if="canAdvance" class="mt-4 text-xs text-wolf-text-tertiary-v2 text-center">
-        点击未完成阶段可推进商机状态
+        点击下一阶段可推进商机状态
       </p>
     </CardContent>
   </component>

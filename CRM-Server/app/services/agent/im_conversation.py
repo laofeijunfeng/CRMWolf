@@ -1,6 +1,6 @@
 """Non-browser Agent conversation adapter for IM channels."""
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from app.core.security import create_access_token
 from app.services.agent import agent_copy
@@ -31,14 +31,14 @@ class AgentIMConversationService:
         session_id: Optional[int] = None,
         session_key: Optional[str] = None,
         turn_input: Optional[AgentTurnInput] = None,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, object]:
         token = create_access_token(
             {"sub": str(user_id), "team_id": team_id},
             expires_delta=timedelta(minutes=10),
         )
         authorization = f"Bearer {token}"
 
-        events: List[Dict[str, Any]] = []
+        events: List[Dict[str, object]] = []
         final_content = ""
         interaction = None
         session_payload = None

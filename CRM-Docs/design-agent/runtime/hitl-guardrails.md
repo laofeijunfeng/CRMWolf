@@ -11,6 +11,8 @@
 
 确认前 Agent 只能说明将要执行什么，不得声称已完成。
 
+写入确认必须以 LangGraph interrupt 表达。用户通过按钮、表单、IM reaction 或文本确认后，必须转换成 resume payload，并通过 `Command(resume=...)` 回到原图节点继续执行。不得在图外重新解析原始自然语言后直接执行写入。
+
 一轮回复只能有一个主确认目标。跟进记录需要确认时，不得在同一条最终回复里同时展示下一步建议。
 
 跟进记录创建成功后，Agent 才能继续提出创建商机、推进阶段等下一步建议或第二个确认任务。
@@ -21,7 +23,8 @@
 
 执行前必须校验：
 
-- 当前 task 是否存在且未过期。
+- 当前 graph interrupt 是否存在、未过期且允许当前 resume action。
+- 当前 task 投影是否存在且未过期。
 - 用户是否 approve。
 - tool 是否在当前任务允许列表。
 - 客户或业务对象是否在当前确认上下文内。
@@ -73,6 +76,8 @@ License 建议必须校验：
 
 切换后新流程中的写入动作仍必须重新走 HITL。
 
+在 LangGraph 原生运行时中，pending 中断保护应表现为 conditional edge：继续当前 interrupt、暂停当前草稿并启动新 subgraph、或进入澄清 interrupt。该分支原因必须进入 trace。
+
 ## Edit/Reject
 
 用户修改字段时，应更新待确认 payload，再次要求确认。
@@ -84,3 +89,5 @@ License 建议必须校验：
 当引入受控 tool-calling 子 Agent 时，应接入 LangChain HITL middleware。
 
 现有自定义 HITL 不应被移除，除非新链路能覆盖确认、审计、恢复和权限上下文。
+
+LangChain HITL middleware 只能用于受控 tool-calling 子 Agent 的 tool 调用拦截；CRM 主业务流程的用户等待点以 LangGraph interrupt/resume 为权威实现。

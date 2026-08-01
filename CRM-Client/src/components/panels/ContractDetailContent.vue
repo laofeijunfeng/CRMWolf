@@ -85,7 +85,6 @@ const editDialogOpen = ref<boolean>(false)
 
 const statusesWithPaymentPlans: readonly ContractStatus[] = [
   'SIGNED',
-  'EFFECTIVE',
   'EXPIRED'
 ]
 
@@ -277,7 +276,7 @@ const getStatusText = (status: ContractStatus | undefined): string => {
     DRAFT: '草稿',
     PENDING_REVIEW: '审批中',
     SIGNED: '已签署',
-    EFFECTIVE: '生效中',
+    EFFECTIVE: '已签署',
     EXPIRED: '已到期',
     TERMINATED: '已终止'
   }
@@ -290,7 +289,7 @@ const getStatusClass = (status: ContractStatus | undefined): string => {
     DRAFT: 'status-default',
     PENDING_REVIEW: 'status-warning',
     SIGNED: 'status-info',
-    EFFECTIVE: 'status-success',
+    EFFECTIVE: 'status-info',
     EXPIRED: 'status-danger',
     TERMINATED: 'status-muted'
   }

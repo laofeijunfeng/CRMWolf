@@ -74,7 +74,7 @@ export interface LeadListParams {
   status?: number
   source?: string
   city?: string
-  owner_id?: string  // 新增：负责人ID筛选（用于「我的线索」）
+  owner_id?: string
   order_by?: string
   order_dir?: 'asc' | 'desc'
 }
@@ -139,83 +139,93 @@ export interface LeadOwnerFilterOptionsResponse {
 }
 
 export const leadApi = {
-  createLead: (data: LeadCreate) => {
+  createLead: (data: LeadCreate): Promise<Lead> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>('/v1/leads/', data)
   },
 
-  batchImport: (data: LeadBatchImportRequest) => {
+  batchImport: (data: LeadBatchImportRequest): Promise<LeadBatchImportResponse> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<LeadBatchImportResponse>('/v1/leads/batch-import', data)
   },
 
-  getLeadList: (params: LeadListParams) => {
+  getLeadList: (params: LeadListParams): Promise<Lead[] | PaginatedResponse<Lead>> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<Lead[] | PaginatedResponse<Lead>>('/v1/leads/', { params })
   },
 
-  getLeadDetail: (id: number) => {
+  getLeadDetail: (id: number): Promise<LeadDetail> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<LeadDetail>(`/v1/leads/${id}`)
   },
 
-  updateLead: (id: number, data: LeadUpdate) => {
+  updateLead: (id: number, data: LeadUpdate): Promise<Lead> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.put<Lead>(`/v1/leads/${id}`, data)
   },
 
-  deleteLead: (id: number) => {
+  deleteLead: (id: number): Promise<Lead> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.delete<Lead>(`/v1/leads/${id}`)
   },
 
-  claimLead: (id: number) => {
+  claimLead: (id: number): Promise<Lead> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>(`/v1/leads/${id}/claim`)
   },
 
-  assignLead: (id: number, data: LeadAssignRequest) => {
+  assignLead: (id: number, data: LeadAssignRequest): Promise<Lead> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>(`/v1/leads/${id}/assign`, data)
   },
 
-  returnLead: (id: number) => {
+  returnLead: (id: number): Promise<Lead> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>(`/v1/leads/${id}/return`)
   },
 
-  getFollowUps: (id: number, params?: { skip?: number; limit?: number }) => {
+  getFollowUps: (id: number, params?: { skip?: number; limit?: number }): Promise<LeadFollowUp[]> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<LeadFollowUp[]>(`/v1/leads/${id}/follow-ups`, { params })
   },
 
-  addFollowUp: (id: number, data: LeadFollowUpCreate) => {
+  addFollowUp: (id: number, data: LeadFollowUpCreate): Promise<LeadFollowUp> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<LeadFollowUp>(`/v1/leads/${id}/follow-ups`, data)
   },
 
-  deleteFollowUp: (leadId: number, followUpId: number) => {
+  deleteFollowUp: (leadId: number, followUpId: number): Promise<unknown> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.delete(`/v1/leads/${leadId}/follow-ups/${followUpId}`)
   },
 
-  markInvalid: (id: number, data: LeadMarkInvalidRequest) => {
+  markInvalid: (id: number, data: LeadMarkInvalidRequest): Promise<Lead> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>(`/v1/leads/${id}/mark-invalid`, data)
   },
 
-  getPublicLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters'>) => {
+  getPublicLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters'>): Promise<Lead[] | PaginatedResponse<Lead>> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<Lead[] | PaginatedResponse<Lead>>('/v1/leads/public/list', { params })
   },
 
-  getMyLeads: (params?: Pick<LeadListParams, 'skip' | 'limit' | 'filters'>) => {
-    return request.get<Lead[] | PaginatedResponse<Lead>>('/v1/leads/my/list', { params })
-  },
-
   getOwnerFilterOptions: (): Promise<LeadOwnerFilterOptionsResponse> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<LeadOwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'lead' } })
   },
 
-  getFollowUpReminder: (days?: number) => {
-    return request.get<Lead[]>('/v1/leads/follow-up/reminder', { params: { days } })
-  },
-
-  getStatistics: () => {
+  getStatistics: (): Promise<unknown> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get('/v1/leads/statistics')
   },
 
-  getTrend: (days?: number) => {
+  getTrend: (days?: number): Promise<LeadTrendItem[]> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<LeadTrendItem[]>('/v1/analytics/leads/trend', { params: { days } })
   },
 
-  getConversion: () => {
+  getConversion: (): Promise<LeadConversionItem[]> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<LeadConversionItem[]>('/v1/analytics/leads/conversion')
   }
 }

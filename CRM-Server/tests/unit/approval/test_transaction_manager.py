@@ -267,7 +267,7 @@ class TestApprovalTransactionManager:
         验证点：
         - DRAFT → draft
         - PENDING_REVIEW → pending_review
-        - SIGNED/EFFECTIVE/EXPIRED/TERMINATED → approved
+        - SIGNED/EXPIRED/TERMINATED → approved
         """
         # TODO: 实现测试逻辑
         pass

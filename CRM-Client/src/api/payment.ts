@@ -154,17 +154,6 @@ export interface PaymentPlanUpdate {
   notes?: string
 }
 
-export interface UpcomingPayment {
-  contract_id: number
-  contract_name: string
-  plan_id: number
-  stage_name: string
-  planned_amount: number
-  due_date: string
-  days_until_due: number
-  owner_name?: string
-}
-
 export interface OverduePayment {
   contract_id: number
   contract_name: string
@@ -240,7 +229,7 @@ export interface BadgeCounts {
   pending: number           // 未登记的计划数
   partial: number           // 部分回款的计划数
   overdue: number           // 逾期计划数
-  pending_submit: number    // 待提交审批的记录数
+  pending_submit: number    // 待提交的记录数
   pending_approval: number  // 审批中的记录数（团队总数）
   pending_approval_me: number  // Task 8.3: 待我审批的数量（与审批中心一致）
 }
@@ -288,11 +277,6 @@ const paymentApi = {
 
   deletePaymentRecord: (recordId: number) => {
     return request.delete(`/v1/payments/payment-records/${recordId}`)
-  },
-
-  getUpcomingPayments: (days?: number) => {
-    const params = days !== undefined && days !== null ? { days } : {}
-    return request.get<UpcomingPayment[]>('/v1/payments/reminders/upcoming', { params })
   },
 
   getOverduePayments: () => {

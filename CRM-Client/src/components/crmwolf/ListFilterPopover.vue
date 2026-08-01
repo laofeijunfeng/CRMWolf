@@ -32,14 +32,19 @@ interface EditableCondition {
 const props = withDefaults(defineProps<{
   fields: ListFilterField[]
   modelValue?: ListFilterCondition[]
+  saveViewEnabled?: boolean
+  saveViewLoading?: boolean
 }>(), {
-  modelValue: () => []
+  modelValue: () => [],
+  saveViewEnabled: false,
+  saveViewLoading: false
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: ListFilterCondition[]]
   apply: [value: ListFilterCondition[]]
   reset: []
+  'save-view': [value: ListFilterCondition[]]
 }>()
 
 const open = ref(false)
@@ -78,6 +83,8 @@ const operatorsByType: Record<ListFilterFieldType, { value: ListFilterOperator, 
 const firstField = computed(() => props.fields[0])
 
 const activeFilterCount = computed(() => normalizeConditions(props.modelValue).length)
+const localValidConditions = computed(() => normalizeConditions(localConditions.value))
+const canSaveView = computed(() => props.saveViewEnabled && localValidConditions.value.length > 0)
 
 function getField(fieldKey: string): ListFilterField | undefined {
   return props.fields.find((field) => field.key === fieldKey)
@@ -206,6 +213,14 @@ function resetFilters(): void {
   open.value = false
 }
 
+function saveAsView(): void {
+  const conditions = localValidConditions.value
+  if (conditions.length === 0) return
+  emit('update:modelValue', conditions)
+  emit('save-view', conditions)
+  open.value = false
+}
+
 watch(
   () => props.modelValue,
   () => syncLocalConditions(),
@@ -313,15 +328,28 @@ watch(
         </div>
 
         <template #footer>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            @click="addCondition"
-          >
-            <Plus class="w-4 h-4 mr-1" aria-hidden="true" />
-            添加条件
-          </Button>
+          <div class="filter-secondary-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              @click="addCondition"
+            >
+              <Plus class="w-4 h-4 mr-1" aria-hidden="true" />
+              添加条件
+            </Button>
+
+            <Button
+              v-if="canSaveView"
+              type="button"
+              variant="ghost"
+              size="sm"
+              :disabled="saveViewLoading"
+              @click="saveAsView"
+            >
+              另存为视图
+            </Button>
+          </div>
 
           <div class="filter-actions">
             <Button
@@ -382,6 +410,13 @@ watch(
   align-items: center;
 }
 
+.filter-secondary-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
 .icon-button {
   width: 32px;
   height: 32px;
@@ -399,6 +434,10 @@ watch(
 
   .icon-button {
     justify-self: end;
+  }
+
+  .filter-secondary-actions {
+    width: 100%;
   }
 }
 </style>

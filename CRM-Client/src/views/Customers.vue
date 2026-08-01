@@ -9,7 +9,7 @@
  *
  * 改动清单：
  * - ✅ TopBar 集成（useHeaderStore）
- * - ✅ ContextTabs 组件（所有客户、我的客户、公海客户）
+ * - ✅ ContextTabs 组件（所有客户、协作客户、公海客户）
  * - ✅ ListFilterPopover 筛选
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
@@ -23,8 +23,8 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
 import { DataTable, TableRowActions, type ActionConfig } from '@/components/crmwolf'
-import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
@@ -45,9 +45,11 @@ import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { customerSourceOptions, companyScaleOptions } from '@/schemas/customer-form'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
-import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
+import { getPrimarySort } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -159,92 +161,124 @@ const loseForm = reactive<CustomerLoseRequest>({
 // ==================== ContextTabs 配置 ====================
 const tabs = [
   { key: 'all', label: '所有客户' },
-  { key: 'my', label: '我的客户' },
   { key: 'collaborated', label: '协作客户' },
   { key: 'public', label: '公海客户' }
 ]
 
 const activeTab = ref('all')
 
-// ==================== 列表筛选配置 ====================
-const baseFilterFields: ListFilterField[] = [
-  { key: 'account_name', type: 'text', label: '客户名称' },
-  {
-    key: 'status',
-    type: 'enum',
-    label: '状态',
-    options: [
-      { value: '0', label: '跟进中' },
-      { value: '1', label: '已赢单' },
-      { value: '2', label: '已输单' },
-      { value: '3', label: '已失效' }
-    ]
-  },
-  {
-    key: 'industry',
-    type: 'enum',
-    label: '行业',
-    options: []
-  },
-  {
-    key: 'source',
-    type: 'enum',
-    label: '来源',
-    options: [...customerSourceOptions]
-  },
-  { key: 'city', type: 'text', label: '城市' },
-  {
-    key: 'company_scale',
-    type: 'enum',
-    label: '规模',
-    options: [...companyScaleOptions]
-  },
-  { key: 'created_time', type: 'date', label: '创建时间' }
-]
-
-const filterFields = computed<ListFilterField[]>(() => {
-  const fields: ListFilterField[] = baseFilterFields.map((field) => (
-    field.key === 'industry' ? { ...field, options: industryFilterOptions.value } : field
-  ))
-  if (ownerFilterOptions.value.length > 0) {
-    fields.push({
-      key: 'owner_id',
-      type: 'enum',
-      label: '负责人',
-      options: ownerFilterOptions.value.map((owner) => ({
-        value: owner.id,
-        label: owner.name
-      }))
-    })
-  }
-  return fields
-})
-
 const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 
-const sortFields = computed<ListSortField[]>(() =>
-  buildSortFieldsFromFilterFields(filterFields.value)
+// ==================== DataTable 配置 ====================
+const customerStatusFilterOptions = [
+  { value: '0', label: '跟进中' },
+  { value: '1', label: '已赢单' },
+  { value: '2', label: '已输单' },
+  { value: '3', label: '已失效' }
+]
+
+const ownerFieldOptions = computed(() =>
+  ownerFilterOptions.value.map((owner) => ({
+    value: owner.id,
+    label: owner.name
+  }))
 )
 
-// ==================== DataTable 配置 ====================
-const columns = [
-  { key: 'account_name', title: '客户名称', width: '220px' },
-  { key: 'owner', title: '负责人', width: '100px' },
+const columns = computed(() => [
+  {
+    key: 'account_name',
+    title: '客户名称',
+    width: '220px',
+    filterable: true,
+    filterType: 'text' as const,
+    sortable: true,
+    sortType: 'text' as const
+  },
+  {
+    key: 'owner',
+    title: '负责人',
+    width: '100px',
+    filterable: ownerFieldOptions.value.length > 0,
+    filterKey: 'owner_id',
+    filterType: 'enum' as const,
+    filterOptions: ownerFieldOptions.value,
+    sortable: true,
+    sortKey: 'owner_id',
+    sortType: 'enum' as const,
+    sortOptions: ownerFieldOptions.value
+  },
   { key: 'collaborators', title: '协作者', width: '100px' },
-  { key: 'city', title: '城市', width: '100px' },
-  { key: 'company_scale', title: '规模', width: '120px' },
-  { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
+  {
+    key: 'city',
+    title: '城市',
+    width: '100px',
+    filterable: true,
+    filterType: 'text' as const,
+    sortable: true,
+    sortType: 'text' as const
+  },
+  {
+    key: 'company_scale',
+    title: '规模',
+    width: '120px',
+    filterable: true,
+    filterType: 'enum' as const,
+    filterOptions: [...companyScaleOptions],
+    sortable: true,
+    sortType: 'enum' as const,
+    sortOptions: [...companyScaleOptions]
+  },
+  {
+    key: 'status',
+    title: '状态',
+    align: 'center' as const,
+    width: '100px',
+    filterable: true,
+    filterType: 'enum' as const,
+    filterOptions: customerStatusFilterOptions,
+    sortable: true,
+    sortType: 'enum' as const,
+    sortOptions: customerStatusFilterOptions
+  },
   { key: 'score', title: '热力值', align: 'center' as const, width: '100px' },
   { key: 'license_status', title: '授权状态', align: 'center' as const, width: '100px' },
   { key: 'license_expiry_date', title: '授权到期', width: '120px' },
   { key: 'default_procurement_method', title: '默认采购方式', width: '140px' },
-  { key: 'industry', title: '行业', width: '120px' },
-  { key: 'source', title: '来源', width: '120px' },
+  {
+    key: 'industry',
+    title: '行业',
+    width: '120px',
+    filterable: true,
+    filterType: 'enum' as const,
+    filterOptions: industryFilterOptions.value,
+    sortable: true,
+    sortType: 'enum' as const,
+    sortOptions: industryFilterOptions.value
+  },
+  {
+    key: 'source',
+    title: '来源',
+    width: '120px',
+    filterable: true,
+    filterType: 'enum' as const,
+    filterOptions: [...customerSourceOptions],
+    sortable: true,
+    sortType: 'enum' as const,
+    sortOptions: [...customerSourceOptions]
+  },
   { key: 'creator', title: '创建人', width: '100px' },
-  { key: 'created_time', title: '创建时间', width: '160px' },
+  {
+    key: 'created_time',
+    title: '创建时间',
+    width: '160px',
+    filterable: true,
+    filterType: 'date' as const,
+    sortable: true,
+    sortType: 'date' as const
+  },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
-]
+])
 
 const formatCollaborators = (row: CustomerTableRow): string => {
   const names = row.collaborator_infos
@@ -407,9 +441,7 @@ const fetchCustomerList = async (): Promise<void> => {
       tableData.value = normalized.items
       pagination.total = normalized.total
     } else {
-      if (activeTab.value === 'my') {
-        params['scope'] = 'owned'
-      } else if (activeTab.value === 'collaborated') {
+      if (activeTab.value === 'collaborated') {
         params['scope'] = 'collaborated'
       } else {
         params['owner_id'] = getDelimitedFilterValues(activeFilters.value, 'owner_id')
@@ -428,9 +460,20 @@ const fetchCustomerList = async (): Promise<void> => {
   }
 }
 
-const handleFilterApply = (filters: ListFilterCondition[]): void => {
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'customers.list',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  refresh: fetchCustomerList,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+
+const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
   pagination.current = 1
+  await customFilterViews.updateActiveCustomViewConfig()
   fetchCustomerList()
 }
 
@@ -443,13 +486,21 @@ const handleReset = (): void => {
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchCustomerList()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchCustomerList()
+}
+
+const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
+  activeFilters.value = filters
+  pagination.current = 1
+  await customFilterViews.saveAsCustomView(filters)
 }
 
 const handlePageChange = (page: number): void => {
@@ -685,16 +736,15 @@ const mapCustomerStatus = (status: number): 'following' | 'won' | 'lost' | 'expi
 onMounted(() => {
   void fetchOwnerFilterOptions()
   void fetchIndustryFilterOptions()
+  void customFilterViews.loadCustomViews()
   fetchCustomerList()
 })
 
-// TopBar 配置（Tabs + Actions）
-watchEffect(() => {
-  // 注册 ContextTabs 到 TopBar
-  headerStore.setTabs(tabs, activeTab.value)
-
-  // 注册操作按钮
-  headerStore.setActions([
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actionDeps: [canCreateCustomer],
+  actions: () => [
     {
       id: 'create-customer',
       label: '创建客户',
@@ -707,14 +757,17 @@ watchEffect(() => {
       visible: canCreateCustomer.value,
       ariaLabel: '创建客户'
     }
-  ])
+  ]
 })
 
 // Watch activeTab changes from headerStore
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    activeTab.value = headerStore.activeTab
     pagination.current = 1
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
+      return
+    }
+    customFilterViews.applyBuiltInTab(headerStore.activeTab)
     activeSorts.value = []
     fetchCustomerList()
   }
@@ -742,12 +795,15 @@ watchEffect(() => {
       :mobile-meta-keys="['industry', 'source', 'owner', 'collaborators']"
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
-      :filter-fields="filterFields"
-      :sort-fields="sortFields"
+      view-key="customers.list"
+      column-config-enabled
+      filter-view-save-enabled
+      :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @filter-save-view="handleSaveFilterView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
       @row-click="handleViewDetail"

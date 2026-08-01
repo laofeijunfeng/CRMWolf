@@ -385,8 +385,14 @@ const stepIcon = (kind?: AgentEventType): Component => {
     case "intent":
     case "entity_parse":
     case "business_suggestions":
+    case "action_review_started":
+    case "action_review_risk_classified":
+    case "action_review_confidence_scored":
+    case "action_review_decided":
+    case "action_review_finished":
       return Brain
     case "tool_result":
+    case "action_auto_execution_queued":
       return Wrench
     case "customer_candidates":
     case "customer_selected":
@@ -429,7 +435,7 @@ const stepIcon = (kind?: AgentEventType): Component => {
 const stepIconClass = (kind?: AgentEventType, active = false): string => {
   const statusClass = active ? "agent-chat__stream-icon--active" : ""
   const normalizedKind = kind ?? ""
-  if (kind === "tool_result" || kind === "task_completed") return `agent-chat__stream-icon--success ${statusClass}`
+  if (kind === "tool_result" || kind === "task_completed" || kind === "action_auto_execution_queued") return `agent-chat__stream-icon--success ${statusClass}`
   if (kind === "error" || kind === "task_failed" || kind === "suggestion_failed" || normalizedKind.endsWith("_failed")) {
     return `agent-chat__stream-icon--danger ${statusClass}`
   }
@@ -452,13 +458,83 @@ const formatCustomerNames = (customers?: Record<string, unknown>[]): string => {
     .join("；")
 }
 
-const formatAITrace = (prefix: string, source: unknown, model: unknown, fallbackReason?: unknown, fallbackError?: unknown): string => {
+const AI_SOURCE_LABELS: Record<string, string> = {
+  langchain_structured_output: "结构化输出",
+  system_ai_json_object: "JSON 结构化输出",
+  test_parser: "测试解析器",
+}
+
+const formatAISource = (source: unknown): string => {
+  if (typeof source !== "string" || source.length === 0) return "-"
+  return AI_SOURCE_LABELS[source] ?? "AI 结构化输出"
+}
+
+const formatAITrace = (prefix: string, source: unknown, model: unknown, fallbackReason?: unknown): string => {
   const hasFallbackReason = fallbackReason !== null && fallbackReason !== undefined && fallbackReason !== ""
-  const hasFallbackError = fallbackError !== null && fallbackError !== undefined && fallbackError !== ""
   const fallbackText = hasFallbackReason
-    ? `，fallback：${stringifyValue(fallbackReason)}${hasFallbackError ? `/${stringifyValue(fallbackError)}` : ""}`
+    ? "，已自动切换备用通道"
     : ""
-  return `${prefix}：${stringifyValue(source)}，模型：${stringifyValue(model)}${fallbackText}`
+  return `${prefix}：${formatAISource(source)}，模型：${stringifyValue(model)}${fallbackText}`
+}
+
+const TOOL_DISPLAY_LABELS: Record<string, string> = {
+  create_customer_activity: "记录跟进",
+  create_lead_follow_up: "记录线索跟进",
+  create_opportunity: "创建商机",
+  move_opportunity_stage: "推进商机阶段",
+  select_opportunity_for_stage_move: "选择商机",
+  create_payment_plan: "创建回款计划",
+  create_payment_record: "登记回款",
+  create_contact: "新增联系人",
+  create_invoice_title: "新增发票抬头",
+  create_deployment_info: "新增部署信息",
+  create_customer_member: "新增客户成员",
+  create_customer: "创建客户",
+  create_lead: "创建线索",
+  get_customer_context: "加载客户上下文",
+  search_customers: "搜索客户",
+  search_creation_duplicates: "检查重复客户和线索",
+}
+
+const formatToolResult = (event: AgentChatSSEEvent): string => {
+  if (typeof event.content === "string" && event.content.length > 0) return event.content
+  const toolName = typeof event.tool_name === "string" ? event.tool_name : ""
+  const label = TOOL_DISPLAY_LABELS[toolName] ?? "业务操作"
+  return event.success === true ? `${label}已完成` : `${label}失败`
+}
+
+const formatBusinessAction = (action: unknown): string => {
+  if (typeof action !== "string" || action.length === 0) return "业务操作"
+  return TOOL_DISPLAY_LABELS[action] ?? "业务操作"
+}
+
+const formatReviewRisk = (riskLevel: unknown): string => {
+  if (riskLevel === "low") return "低风险"
+  if (riskLevel === "medium") return "需谨慎"
+  if (riskLevel === "high") return "高风险"
+  return "待评估"
+}
+
+const formatPercent = (value: unknown): string => {
+  if (typeof value !== "number" || Number.isNaN(value)) return "-"
+  return `${Math.round(Math.max(0, Math.min(value, 1)) * 100)}%`
+}
+
+const formatReviewDecision = (event: AgentChatSSEEvent): string => {
+  switch (event.decision) {
+    case "auto_execute":
+      return "判断结果：可直接执行"
+    case "require_confirmation":
+      return `判断结果：需要确认${formatBusinessAction(event.action)}`
+    case "require_fields":
+      return "判断结果：需要补充信息"
+    case "require_choice":
+      return "判断结果：需要选择业务对象"
+    case "block":
+      return "判断结果：暂不执行"
+    default:
+      return "判断结果：继续按业务流程处理"
+  }
 }
 
 const eventToLogText = (event: AgentChatSSEEvent): string | null => {
@@ -466,9 +542,9 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
     case "agent_step":
       return `${event.status === "completed" ? "完成" : "开始"}：${stringifyValue(event.content ?? event.step)}`
     case "semantic_parsed":
-      return formatAITrace("AI 语义解析", event.parse_source, event.model, event.fallback_reason, event.fallback_error)
+      return formatAITrace("AI 语义解析", event.parse_source, event.model, event.fallback_reason)
     case "follow_up_quality_evaluated":
-      return `${formatAITrace("AI 跟进质量评估", event.quality_source, event.model, event.fallback_reason, event.fallback_error)}，评分：${stringifyValue(event.score)}`
+      return `${formatAITrace("AI 跟进质量评估", event.quality_source, event.model, event.fallback_reason)}，评分：${stringifyValue(event.score)}`
     case "follow_up_quality_required":
       return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充客户活动信息"
     case "intent":
@@ -476,13 +552,13 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
     case "entity_parse":
       return "已解析客户、业务内容和下一步动作"
     case "tool_result":
-      return `${event.success === true ? "Tool 调用成功" : "Tool 调用失败"}：${stringifyValue(event.tool_name)}`
+      return formatToolResult(event)
     case "customer_candidates":
       return `找到候选客户：${formatCustomerNames(event.customers)}`
     case "business_context_loaded":
       return `已加载客户上下文：${stringifyValue(event.customer?.["account_name"])}`
     case "business_suggestions":
-      return `${formatAITrace("AI 业务建议", event.suggestion_source, event.model, event.fallback_reason, event.fallback_error)}，建议：${formatSuggestionTitles(event.suggestions)}`
+      return `${formatAITrace("AI 业务建议", event.suggestion_source, event.model, event.fallback_reason)}，建议：${formatSuggestionTitles(event.suggestions)}`
     case "suggestion_failed":
       return `AI 业务建议生成失败：${stringifyValue(event.message)}`
     case "follow_up_quality_failed":
@@ -494,7 +570,7 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
     case "customer_selection_failed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "客户选择未匹配"
     case "confirmation_required":
-      return `等待确认：${stringifyValue(event.action)}`
+      return `等待确认：${formatBusinessAction(event.action)}`
     case "opportunity_fields_required":
       return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充商机信息"
     case "opportunity_fields_completed":
@@ -525,6 +601,18 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
       return event.content !== undefined && event.content.length > 0 ? event.content : "业务对象已选择"
     case "business_selection_failed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "业务对象选择未匹配"
+    case "action_review_started":
+      return `校验执行策略：${formatBusinessAction(event.action)}`
+    case "action_review_risk_classified":
+      return `操作风险评估：${formatReviewRisk(event.risk_level)}`
+    case "action_review_confidence_scored":
+      return `执行置信度：${formatPercent(event.execution_confidence)}`
+    case "action_review_decided":
+      return formatReviewDecision(event)
+    case "action_review_finished":
+      return event.decision === "auto_execute" ? "执行策略已确认" : null
+    case "action_auto_execution_queued":
+      return event.content !== undefined && event.content.length > 0 ? event.content : `正在执行：${formatBusinessAction(event.action)}`
     case "task_completed":
       return event.content !== undefined && event.content.length > 0 ? event.content : "任务已完成"
     case "task_failed":

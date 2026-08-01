@@ -9,7 +9,7 @@
  *
  * 改动清单：
  * - ✅ TopBar 集成（useHeaderStore）
- * - ✅ ContextTabs 组件（全部线索、我的线索、公海线索、待跟进）
+ * - ✅ ContextTabs 组件（全部线索、公海线索）
  * - ✅ ListFilterPopover 筛选
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
@@ -53,6 +53,8 @@ import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
 
@@ -98,9 +100,7 @@ const invalidForm = reactive({ reason: '' })
 // ==================== ContextTabs 配置 ====================
 const tabs = [
   { key: 'all', label: '全部线索' },
-  { key: 'my', label: '我的线索' },
-  { key: 'public', label: '公海线索' },
-  { key: 'following', label: '待跟进' }
+  { key: 'public', label: '公海线索' }
 ]
 
 const activeTab = ref('all')
@@ -250,15 +250,7 @@ const fetchLeadList = async (): Promise<void> => {
       const normalized = normalizePaginatedResponse(response)
       tableData.value = normalized.items.filter((item: Lead) => item.status !== 2)
       pagination.total = normalized.total
-    } else if (activeTab.value === 'my') {
-      const response = await leadApi.getMyLeads(params)
-      const normalized = normalizePaginatedResponse(response)
-      tableData.value = normalized.items.filter((item: Lead) => item.status !== 2)
-      pagination.total = normalized.total
     } else {
-      if (activeTab.value === 'following') {
-        params['status'] = 1
-      }
       const response = await leadApi.getLeadList(params as LeadListParams)
       const normalized = normalizePaginatedResponse(response)
       tableData.value = normalized.items.filter((item: Lead) => item.status !== 2)
@@ -271,9 +263,20 @@ const fetchLeadList = async (): Promise<void> => {
   }
 }
 
-const handleFilterApply = (filters: ListFilterCondition[]): void => {
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'leads.list',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  refresh: fetchLeadList,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+
+const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
   pagination.current = 1
+  await customFilterViews.updateActiveCustomViewConfig()
   fetchLeadList()
 }
 
@@ -286,13 +289,21 @@ const handleReset = (): void => {
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchLeadList()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
+  void customFilterViews.updateActiveCustomViewConfig()
   fetchLeadList()
+}
+
+const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
+  activeFilters.value = filters
+  pagination.current = 1
+  await customFilterViews.saveAsCustomView(filters)
 }
 
 const handlePageChange = (page: number): void => {
@@ -475,17 +486,16 @@ const getScoreColorClass = (score: number | null | undefined): string => {
 
 // ==================== Lifecycle ====================
 onMounted(() => {
+  void customFilterViews.loadCustomViews()
   fetchOwnerFilterOptions()
   fetchLeadList()
 })
 
-// TopBar 配置（Tabs + Actions）
-watchEffect(() => {
-  // 注册 ContextTabs 到 TopBar
-  headerStore.setTabs(tabs, activeTab.value)
-
-  // 注册操作按钮
-  headerStore.setActions([
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actionDeps: [canCreateLead],
+  actions: () => [
     {
       id: 'create-lead',
       label: '创建线索',
@@ -495,15 +505,18 @@ watchEffect(() => {
       visible: canCreateLead.value,
       ariaLabel: '创建线索'
     }
-  ])
+  ]
 })
 
 // Watch activeTab changes from headerStore
 watchEffect(() => {
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    activeTab.value = headerStore.activeTab
-    activeSorts.value = []
     pagination.current = 1
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
+      return
+    }
+    customFilterViews.applyBuiltInTab(headerStore.activeTab)
+    activeSorts.value = []
     fetchLeadList()
   }
 })
@@ -533,10 +546,15 @@ watchEffect(() => {
       :filter-fields="filterFields"
       :sort-fields="sortFields"
       :sorts="activeSorts"
+      view-key="leads.list"
+      column-config-enabled
+      filter-view-save-enabled
+      :filter-view-save-loading="customFilterViewSaving"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
+      @filter-save-view="handleSaveFilterView"
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"

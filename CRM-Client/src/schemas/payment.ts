@@ -11,14 +11,14 @@ import { PaginatedResponseSchema, OptionalStringFromNullableSchema } from './com
 export const PaymentStatusSchema = z.enum([
   'PENDING',    // 待收款
   'PARTIAL',    // 部分收款
-  'COMPLETED',  // 已完成
+  'COMPLETED',  // 已登记
   'OVERDUE'     // 已逾期
 ])
 
 export const PaymentStatusMap: Record<string, string> = {
   'PENDING': '待收款',
   'PARTIAL': '部分收款',
-  'COMPLETED': '已完成',
+  'COMPLETED': '已登记',
   'OVERDUE': '已逾期'
 }
 

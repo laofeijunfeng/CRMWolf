@@ -61,6 +61,9 @@ from app.schemas.agent import (
     AgentIdempotencyKeyUpdate,
     AgentIdempotencyKeyResponse,
     AgentChatRequest,
+    AgentRuntimeCheckpointStateResponse,
+    AgentRuntimeHistoryItemResponse,
+    AgentRuntimeHistoryResponse,
 )
 
 __all__ = [
@@ -114,4 +117,7 @@ __all__ = [
     "AgentIdempotencyKeyUpdate",
     "AgentIdempotencyKeyResponse",
     "AgentChatRequest",
+    "AgentRuntimeCheckpointStateResponse",
+    "AgentRuntimeHistoryItemResponse",
+    "AgentRuntimeHistoryResponse",
 ]

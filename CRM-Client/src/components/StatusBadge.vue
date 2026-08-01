@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge'
 export type LeadStatus = 'new' | 'following' | 'converted' | 'invalid'
 export type CustomerStatus = 'following' | 'won' | 'lost' | 'expired'
 export type OpportunityStatus = 'active' | 'won' | 'lost'
-export type ContractStatus = 'draft' | 'pending_review' | 'signed' | 'effective' | 'expired' | 'terminated'
+export type ContractStatus = 'draft' | 'pending_review' | 'signed' | 'expired' | 'terminated'
 export type InvoiceStatus = 'draft' | 'pending_review' | 'approved' | 'rejected' | 'issued' | 'cancelled'
 export type PaymentPlanStatus = 'pending' | 'partial' | 'completed' | 'overdue'
 export type PaymentRecordStatus = 'pending' | 'confirmed' | 'rejected'
@@ -73,7 +73,6 @@ const STATUS_CONFIG = {
     draft: { label: '草稿', color: 'neutral' },
     pending_review: { label: '审批中', color: 'warning' },
     signed: { label: '已签署', color: 'success' },
-    effective: { label: '生效中', color: 'success' },
     expired: { label: '已到期', color: 'danger' },
     terminated: { label: '已终止', color: 'neutral' }
   },
@@ -88,7 +87,7 @@ const STATUS_CONFIG = {
   paymentPlan: {
     pending: { label: '待登记', color: 'warning' },
     partial: { label: '部分回款', color: 'warning' },
-    completed: { label: '已完成', color: 'success' },
+    completed: { label: '已登记', color: 'success' },
     overdue: { label: '已逾期', color: 'danger' }
   },
   paymentRecord: {
