@@ -440,6 +440,10 @@ class CustomerIntelligenceBatchRebuildRequest(BaseModel):
     limit: int = Field(100, ge=1, le=500, description="本次最多调度的客户数")
 
 
+class CustomerIntelligenceRegenerateRequest(BaseModel):
+    scope: Literal["full", "brief"] = Field("full", description="重建范围：full=客户档案和客户概况，brief=客户概况")
+
+
 class CustomerIntelligenceBatchRebuildResponse(BaseModel):
     message: str = Field(..., description="响应消息")
     request_id: str = Field(..., description="批量重建请求ID")

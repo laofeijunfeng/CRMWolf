@@ -673,7 +673,7 @@ const handleRegenerateBrief = async (): Promise<void> => {
   if (props.customerId === null) return
   regeneratingBrief.value = true
   try {
-    await customerApi.regenerateCustomerBrief(props.customerId)
+    await customerApi.regenerateCustomerIntelligence(props.customerId, 'full')
     toast.success('客户智能档案正在刷新')
     await loadAllData(props.customerId)
   } catch (error) {

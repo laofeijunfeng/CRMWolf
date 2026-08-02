@@ -40,6 +40,7 @@ from app.schemas.customer import (
     CustomerIndustryOption,
     CustomerIntelligenceBatchRebuildRequest,
     CustomerIntelligenceBatchRebuildResponse,
+    CustomerIntelligenceRegenerateRequest,
     CustomerIntelligenceRetryDueResponse,
     CustomerIntelligenceRunDiagnosticListResponse,
     CustomerIntelligenceRunDiagnosticResponse,
@@ -1595,6 +1596,33 @@ async def regenerate_customer_brief(
     )
 
     return MessageResponse(message="客户概况正在生成")
+
+
+@router.post(
+    "/{customer_id}/regenerate-intelligence",
+    response_model=MessageResponse,
+    summary="重新生成客户智能档案",
+    description="AI重新生成客户档案和客户概况",
+)
+async def regenerate_customer_intelligence(
+    customer_id: int,
+    payload: CustomerIntelligenceRegenerateRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
+
+    _get_viewable_customer(db, customer_id, team_id, current_user)
+    await customer_intelligence_refresh_service.trigger_manual_refresh(
+        db,
+        team_id=team_id,
+        customer_id=customer_id,
+        actor_id=str(current_user.id),
+        scope=payload.scope,
+    )
+
+    return MessageResponse(message="客户智能档案正在生成")
 
 
 @router.post(

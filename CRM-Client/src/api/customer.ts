@@ -501,6 +501,9 @@ const customerApi = {
   regenerateCustomerBrief: (customerId: number): Promise<{ message: string }> =>
     api.post('/v1/customers/' + customerId + '/regenerate-brief'),
 
+  regenerateCustomerIntelligence: (customerId: number, scope: 'full' | 'brief' = 'full'): Promise<{ message: string }> =>
+    api.post('/v1/customers/' + customerId + '/regenerate-intelligence', { scope }),
+
   updateCustomer: (customerId: number, data: CustomerUpdate): Promise<CustomerResponse> =>
     api.put('/v1/customers/' + customerId, data, undefined, CustomerResponseSchema),
 
