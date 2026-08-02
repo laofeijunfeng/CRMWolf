@@ -676,7 +676,13 @@ async def test_agent_graph_searches_customer_and_requires_follow_up_confirmation
     result = await build_service(semantic_result(), tool_service).run(input_state())
 
     assert tool_service.searches[0]["keyword"] == "越秀金融"
-    assert result["customer_candidates"] == [{"id": 101, "account_name": "越秀金融", "owner_info": None, "collaborator_infos": []}]
+    assert result["customer_candidates"] == [{
+        "id": 101,
+        "account_name": "越秀金融",
+        "owner_info": None,
+        "collaborator_infos": [],
+        "match": {},
+    }]
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
     assert confirmation_events[0]["action"] == "create_customer_activity"
     assert confirmation_events[0]["payload"]["customer_id"] == 101

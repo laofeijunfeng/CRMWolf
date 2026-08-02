@@ -1,6 +1,7 @@
 """Customer resolution domain subgraph for the CRM Agent."""
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from langchain_core.runnables import RunnableConfig
@@ -187,7 +188,13 @@ class CustomerResolutionGraphService:
             "events": events,
         }
         if len(candidates) == 1:
-            state_update["selected_customer"] = candidates[0]
+            selected = _select_single_customer_candidate(
+                candidate=candidates[0],
+                target_name=str(customer_name),
+                content=state.get("content") or "",
+            )
+            if selected:
+                state_update["selected_customer"] = selected
         elif len(candidates) > 1:
             resolution = await self.resource_resolution_graph.run(
                 {
@@ -337,6 +344,8 @@ async def _rank_customer_candidates_by_search_match(state: CustomerResolutionGra
     candidates = state.get("candidates")
     if not isinstance(candidates, list):
         return []
+    target_name = str(coerce_json_dict(state.get("target")).get("target_name") or "")
+    content = str(state.get("content") or "")
     rankings: list[JSONDict] = []
     for candidate in candidates:
         if not isinstance(candidate, dict):
@@ -345,15 +354,96 @@ async def _rank_customer_candidates_by_search_match(state: CustomerResolutionGra
         if not isinstance(customer_id, int):
             continue
         match = coerce_json_dict(candidate.get("match"))
-        score = _candidate_match_score(match)
-        evidence = _candidate_match_evidence(match)
+        score = _customer_identity_score(candidate, match=match, target_name=target_name, content=content)
+        evidence = _customer_identity_evidence(candidate, match=match, target_name=target_name)
+        risk_notes = [] if score >= 0.82 else ["候选客户身份证据不足"]
         rankings.append({
             "resource_id": customer_id,
             "confidence": score,
             "evidence": evidence,
-            "risk_notes": [],
+            "risk_notes": risk_notes,
         })
     return sorted(rankings, key=lambda item: float(item.get("confidence") or 0), reverse=True)
+
+
+def _select_single_customer_candidate(*, candidate: JSONDict, target_name: str, content: str) -> JSONDict:
+    match = coerce_json_dict(candidate.get("match"))
+    score = _customer_identity_score(candidate, match=match, target_name=target_name, content=content)
+    if score < 0.82:
+        return {}
+    selected = dict(candidate)
+    selected["confidence"] = score
+    selected["evidence"] = _customer_identity_evidence(candidate, match=match, target_name=target_name)
+    return selected
+
+
+def _customer_identity_score(candidate: JSONDict, *, match: JSONDict, target_name: str, content: str) -> float:
+    source = str(match.get("source") or "")
+    raw_score = _candidate_match_score(match)
+    identity_support = _identity_support_score(candidate, match=match, target_name=target_name, content=content)
+    if identity_support >= 0.95:
+        return min(1.0, max(raw_score, 0.95))
+    if identity_support >= 0.88:
+        return min(0.94, max(raw_score, 0.93))
+    if identity_support >= 0.78:
+        return min(0.86, max(raw_score, 0.78))
+    if source == "customer_knowledge":
+        return min(raw_score, 0.68)
+    if source == "customer_alias":
+        return min(raw_score, 0.72)
+    if source in {"customer_search", "hybrid"}:
+        return min(raw_score, 0.76)
+    return min(raw_score, 0.55)
+
+
+def _identity_support_score(candidate: JSONDict, *, match: JSONDict, target_name: str, content: str) -> float:
+    target = _normalize_identity_text(target_name)
+    if not target:
+        return 0.0
+    candidate_names = _customer_candidate_names(candidate, match)
+    for name in candidate_names:
+        normalized_name = _normalize_identity_text(name)
+        if not normalized_name:
+            continue
+        if normalized_name == target:
+            return 0.98
+        if _contains_identity(normalized_name, target):
+            return 0.78 if len(target) <= 3 else 0.92
+        if _contains_identity(target, normalized_name):
+            return 0.92
+    evidence_text = _candidate_evidence_text(match)
+    if _contains_identity(_normalize_identity_text(evidence_text), target):
+        return 0.88
+    if _contains_identity(_normalize_identity_text(content), target):
+        return 0.72
+    return 0.0
+
+
+def _customer_candidate_names(candidate: JSONDict, match: JSONDict) -> list[str]:
+    names: list[str] = []
+    for field in ("account_name", "name", "display_name"):
+        value = candidate.get(field)
+        if isinstance(value, str) and value.strip():
+            names.append(value.strip())
+    aliases = match.get("matched_aliases")
+    if isinstance(aliases, list):
+        names.extend(alias.strip() for alias in aliases if isinstance(alias, str) and alias.strip())
+    return list(dict.fromkeys(names))
+
+
+def _customer_identity_evidence(candidate: JSONDict, *, match: JSONDict, target_name: str) -> list[str]:
+    evidence = _candidate_match_evidence(match)
+    account_name = candidate.get("account_name")
+    if isinstance(account_name, str) and account_name.strip():
+        normalized_target = _normalize_identity_text(target_name)
+        normalized_name = _normalize_identity_text(account_name)
+        if normalized_target and (
+            normalized_target == normalized_name
+            or _contains_identity(normalized_name, normalized_target)
+            or _contains_identity(normalized_target, normalized_name)
+        ):
+            evidence.insert(0, f"客户名称匹配「{account_name.strip()}」")
+    return list(dict.fromkeys(evidence))[:3]
 
 
 def _candidate_match_score(match: JSONDict) -> float:
@@ -381,3 +471,30 @@ def _candidate_match_evidence(match: JSONDict) -> list[str]:
         if isinstance(title, str) and isinstance(snippet, str):
             evidence.append(f"{title}: {snippet}")
     return evidence[:3]
+
+
+def _candidate_evidence_text(match: JSONDict) -> str:
+    parts: list[str] = []
+    reason = match.get("reason")
+    if isinstance(reason, str):
+        parts.append(reason)
+    for item in match.get("evidence") or []:
+        if not isinstance(item, dict):
+            continue
+        for field in ("title", "snippet", "text"):
+            value = item.get(field)
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+    return " ".join(parts)
+
+
+def _normalize_identity_text(value: object) -> str:
+    text = re.sub(r"[\s·,，、.。/／()（）【】\\-]+", "", str(value or "").strip().lower())
+    for suffix in ("股份有限公司", "有限责任公司", "集团有限公司", "有限公司", "股份公司", "集团", "公司"):
+        if text.endswith(suffix) and len(text) > len(suffix) + 1:
+            return text[: -len(suffix)]
+    return text
+
+
+def _contains_identity(container: str, needle: str) -> bool:
+    return len(needle) >= 2 and needle in container

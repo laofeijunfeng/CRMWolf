@@ -252,6 +252,7 @@ class CustomerIntelligenceRefreshService:
         )
         self._mark_pending(db, request)
         self._ensure_pending_run(db, request)
+        self._commit_pending_schedule(db, request)
         asyncio.create_task(self.run_refresh(request))
         return request
 
@@ -278,6 +279,7 @@ class CustomerIntelligenceRefreshService:
         )
         self._mark_pending(db, request)
         self._ensure_pending_run(db, request)
+        self._commit_pending_schedule(db, request)
         asyncio.create_task(self.run_refresh(request))
         return request
 
@@ -309,6 +311,16 @@ class CustomerIntelligenceRefreshService:
             )
             self._mark_pending(db, request)
             self._ensure_pending_run(db, request)
+        self._commit_pending_schedule(db, request_id=request_id)
+        for customer_id in target_customer_ids:
+            request = CustomerIntelligenceRefreshRequest(
+                team_id=team_id,
+                customer_id=customer_id,
+                actor_id=actor_id,
+                scope=scope,
+                request_id=request_id,
+                trigger_type="customer_intelligence_batch_rebuild_requested",
+            )
             asyncio.create_task(self.run_refresh(request))
         return CustomerIntelligenceBatchRebuildResult(
             success=True,
@@ -754,6 +766,36 @@ class CustomerIntelligenceRefreshService:
                 scope=request.scope,
             ),
         )
+
+    def _commit_pending_schedule(
+        self,
+        db: Session,
+        request: CustomerIntelligenceRefreshRequest | None = None,
+        *,
+        request_id: str | None = None,
+    ) -> None:
+        try:
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                logger.exception(
+                    "回滚客户智能刷新调度事务失败: request_id=%s",
+                    request.request_id if request else request_id,
+                )
+            if request is not None:
+                logger.exception(
+                    "客户智能刷新调度提交失败: team_id=%s, customer_id=%s, trigger_type=%s, scope=%s, request_id=%s",
+                    request.team_id,
+                    request.customer_id,
+                    request.trigger_type,
+                    request.scope,
+                    request.request_id,
+                )
+            else:
+                logger.exception("客户智能批量刷新调度提交失败: request_id=%s", request_id)
+            raise
 
     def _schedule_committed_event_run(
         self,

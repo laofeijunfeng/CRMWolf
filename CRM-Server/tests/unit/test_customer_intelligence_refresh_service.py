@@ -253,6 +253,7 @@ class FakeVectorDocumentService:
 async def test_customer_intelligence_refresh_service_schedules_manual_full_refresh_and_marks_pending(monkeypatch):
     scheduled = []
     status_calls = []
+    fake_session = FakeSession()
 
     def fake_create_task(coro):
         scheduled.append(coro)
@@ -281,7 +282,7 @@ async def test_customer_intelligence_refresh_service_schedules_manual_full_refre
     )
 
     request = await service.trigger_manual_refresh(
-        object(),
+        fake_session,
         team_id=2,
         customer_id=101,
         actor_id="9",
@@ -294,6 +295,7 @@ async def test_customer_intelligence_refresh_service_schedules_manual_full_refre
     assert request.request_id.startswith("manual-refresh-")
     assert [call[0] for call in status_calls] == ["profile", "brief"]
     assert [call[3] for call in status_calls] == ["PENDING", "PENDING"]
+    assert fake_session.committed is True
     assert len(scheduled) == 1
 
 
@@ -352,6 +354,7 @@ async def test_customer_intelligence_refresh_service_runs_manual_refresh_through
 async def test_customer_intelligence_refresh_service_schedules_customer_lifecycle_refresh(monkeypatch):
     scheduled = []
     status_calls = []
+    fake_session = FakeSession()
 
     def fake_create_task(coro):
         scheduled.append(coro)
@@ -380,7 +383,7 @@ async def test_customer_intelligence_refresh_service_schedules_customer_lifecycl
     )
 
     request = await service.trigger_customer_created_refresh(
-        object(),
+        fake_session,
         team_id=2,
         customer_id=101,
         actor_id="9",
@@ -391,6 +394,7 @@ async def test_customer_intelligence_refresh_service_schedules_customer_lifecycl
     assert request.trigger_type == "customer_converted_from_lead"
     assert request.source_lead_id == 501
     assert [call[0] for call in status_calls] == ["profile", "brief"]
+    assert fake_session.committed is True
     assert len(scheduled) == 1
 
 

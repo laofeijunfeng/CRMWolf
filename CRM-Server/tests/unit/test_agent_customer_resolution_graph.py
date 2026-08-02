@@ -190,3 +190,89 @@ async def test_customer_resolution_graph_auto_selects_clear_customer_knowledge_m
         event for event in result["events"]
         if event.get("event") == "resource_resolution" and event.get("status") == "selected"
     ]
+
+
+@pytest.mark.asyncio
+async def test_customer_resolution_graph_prefers_identity_match_over_raw_semantic_score():
+    registry = FakeToolRegistry(items=[
+        {
+            "id": 401,
+            "account_name": "深圳市赤道科技有限公司",
+            "match": {
+                "source": "customer_knowledge",
+                "score": 0.96,
+                "reason": "客户知识库语义匹配",
+                "evidence": [{"title": "客户概况", "snippet": "客户有 License 增购需求。"}],
+            },
+        },
+        {
+            "id": 402,
+            "account_name": "三一新能源投资有限公司",
+            "match": {
+                "source": "customer_knowledge",
+                "score": 0.78,
+                "reason": "客户知识库语义匹配",
+                "evidence": [{"title": "客户概况", "snippet": "三一新能源当前有采购流程。"}],
+            },
+        },
+    ])
+    service = CustomerResolutionGraphService(
+        tool_registry=registry,
+        resource_resolution_graph=ResourceResolutionGraphService(checkpointer=InMemorySaver()),
+        checkpointer=InMemorySaver(),
+    )
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 33,
+        "content": "三一新能源现在是什么情况",
+        "authorization": "Bearer test",
+        "intent": "CUSTOMER_QUERY",
+        "semantic_result": semantic_result(
+            intent="CUSTOMER_QUERY",
+            customer={"name_text": "三一新能源", "confidence": 0.95},
+        ),
+        "parsed": {"customer_name": "三一新能源"},
+        "events": [],
+    })
+
+    assert result["selected_customer"]["id"] == 402
+    assert result["selected_customer"]["account_name"] == "三一新能源投资有限公司"
+
+
+@pytest.mark.asyncio
+async def test_customer_resolution_graph_rejects_single_candidate_without_identity_support():
+    registry = FakeToolRegistry(items=[{
+        "id": 401,
+        "account_name": "深圳市赤道科技有限公司",
+        "match": {
+            "source": "customer_knowledge",
+            "score": 0.96,
+            "reason": "客户知识库语义匹配",
+            "evidence": [{"title": "客户概况", "snippet": "客户有 License 增购需求。"}],
+        },
+    }])
+    service = CustomerResolutionGraphService(
+        tool_registry=registry,
+        checkpointer=InMemorySaver(),
+    )
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 34,
+        "content": "三一新能源现在是什么情况",
+        "authorization": "Bearer test",
+        "intent": "CUSTOMER_QUERY",
+        "semantic_result": semantic_result(
+            intent="CUSTOMER_QUERY",
+            customer={"name_text": "三一新能源", "confidence": 0.95},
+        ),
+        "parsed": {"customer_name": "三一新能源"},
+        "events": [],
+    })
+
+    assert result.get("selected_customer") in ({}, None)
