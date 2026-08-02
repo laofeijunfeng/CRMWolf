@@ -227,6 +227,13 @@ class AgentResourceResolutionResult(BaseModel):
     reason: str = Field("", description="整体判断依据")
 
 
+class CustomerContextAnswerResult(BaseModel):
+    answer: str = Field("", description="面向销售用户的客户上下文回答，不暴露内部 ID、枚举编码或工具名称")
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="回答基于现有上下文的可靠程度")
+    used_sections: List[str] = Field(default_factory=list, max_length=8, description="回答参考的业务上下文分区")
+    missing_context: List[str] = Field(default_factory=list, max_length=5, description="回答仍缺少的上下文")
+
+
 class AgentMemorySnapshot(BaseModel):
     recent_messages: List[Dict[str, object]] = Field(default_factory=list)
     pending_task: Optional[Dict[str, object]] = None

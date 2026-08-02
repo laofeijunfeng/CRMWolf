@@ -1,6 +1,6 @@
 import json
+import logging
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -10,14 +10,20 @@ from app.models.lead import LeadFollowUp
 from app.schemas.customer_activity import CustomerActivityCreate, CustomerActivityUpdate
 from app.services.customer_activity_kinds import FOLLOW_UP_METHOD_TO_KIND, CustomerActivityKind, get_activity_kind_meta
 
+logger = logging.getLogger(__name__)
 
-def _json_dumps(value: Any) -> Optional[str]:
+JSONPrimitive = str | int | float | bool | None
+JSONValue = JSONPrimitive | list["JSONValue"] | dict[str, "JSONValue"]
+JSONObject = dict[str, JSONValue]
+
+
+def _json_dumps(value: JSONValue) -> str | None:
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False)
 
 
-def _default_content_json(activity_kind: str, source_content: str, next_action: Optional[str] = None) -> dict[str, Any]:
+def _default_content_json(activity_kind: str, source_content: str, next_action: str | None = None) -> JSONObject:
     meta = get_activity_kind_meta(activity_kind)
     if meta["category"] == "MEETING":
         return {
@@ -44,8 +50,26 @@ def _default_content_json(activity_kind: str, source_content: str, next_action: 
     }
 
 
+def _upsert_customer_activity_evidence(db: Session, activity: CustomerActivity) -> None:
+    try:
+        from app.services.customer_vector_document_service import customer_vector_document_service
+
+        customer_vector_document_service.upsert_customer_activity(db, activity)
+    except Exception:
+        logger.exception("客户活动证据元数据写入失败: activity_id=%s", activity.id)
+
+
+def _mark_customer_activity_evidence_deleted(db: Session, activity: CustomerActivity) -> None:
+    try:
+        from app.services.customer_vector_document_service import customer_vector_document_service
+
+        customer_vector_document_service.mark_customer_activity_deleted(db, activity)
+    except Exception:
+        logger.exception("客户活动证据元数据删除标记失败: activity_id=%s", activity.id)
+
+
 class CustomerActivityCRUD:
-    def get_by_id(self, db: Session, activity_id: int, team_id: Optional[int] = None) -> Optional[CustomerActivity]:
+    def get_by_id(self, db: Session, activity_id: int, team_id: int | None = None) -> CustomerActivity | None:
         query = db.query(CustomerActivity).filter(CustomerActivity.id == activity_id)
         if team_id is not None:
             query = query.filter(CustomerActivity.team_id == team_id)
@@ -55,29 +79,34 @@ class CustomerActivityCRUD:
         self,
         db: Session,
         customer_id: int,
-        team_id: Optional[int] = None,
+        team_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[CustomerActivity], int]:
+    ) -> tuple[list[CustomerActivity], int]:
         query = db.query(CustomerActivity).filter(CustomerActivity.customer_id == customer_id)
         if team_id is not None:
             query = query.filter(CustomerActivity.team_id == team_id)
         total = query.count()
-        activities = query.order_by(CustomerActivity.occurred_at.desc(), CustomerActivity.id.desc()).offset(skip).limit(limit).all()
+        activities = (
+            query.order_by(CustomerActivity.occurred_at.desc(), CustomerActivity.id.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
         return activities, total
 
     def get_by_original_lead_id(
         self,
         db: Session,
         lead_id: int,
-        team_id: Optional[int] = None,
-    ) -> List[CustomerActivity]:
+        team_id: int | None = None,
+    ) -> list[CustomerActivity]:
         query = db.query(CustomerActivity).filter(CustomerActivity.original_lead_id == lead_id)
         if team_id is not None:
             query = query.filter(CustomerActivity.team_id == team_id)
         return query.order_by(CustomerActivity.occurred_at.asc(), CustomerActivity.id.asc()).all()
 
-    def get_unfinished_ai_activities(self, db: Session, limit: int = 100) -> List[CustomerActivity]:
+    def get_unfinished_ai_activities(self, db: Session, limit: int = 100) -> list[CustomerActivity]:
         return (
             db.query(CustomerActivity)
             .filter(
@@ -98,8 +127,8 @@ class CustomerActivityCRUD:
         customer_id: int,
         creator_id: str,
         team_id: int,
-        operator_name: Optional[str] = None,
-        original_lead_id: Optional[int] = None,
+        operator_name: str | None = None,
+        original_lead_id: int | None = None,
     ) -> CustomerActivity:
         from app.services.deal_journey_service import deal_journey_service
         from app.services.operation_log_service import operation_log_service
@@ -146,7 +175,7 @@ class CustomerActivityCRUD:
             source_id=db_obj.id,
             event_time=db_obj.occurred_at,
             actor_id=creator_id,
-            summary=f"新增客户活动：{label}",
+            summary=f"新增客户活动: {label}",
         )
         db.commit()
 
@@ -162,9 +191,16 @@ class CustomerActivityCRUD:
             team_id=team_id,
             activity_id=db_obj.id,
         )
+        _upsert_customer_activity_evidence(db, db_obj)
         return db_obj
 
-    def migrate_from_lead(self, db: Session, lead_id: int, new_customer_id: int, team_id: int) -> List[CustomerActivity]:
+    def migrate_from_lead(
+        self,
+        db: Session,
+        lead_id: int,
+        new_customer_id: int,
+        team_id: int,
+    ) -> list[CustomerActivity]:
         lead_follow_ups = db.query(LeadFollowUp).filter(LeadFollowUp.lead_id == lead_id).all()
         migrated = []
         for lead_follow_up in lead_follow_ups:
@@ -193,6 +229,9 @@ class CustomerActivityCRUD:
             db.add(activity)
             migrated.append(activity)
         db.commit()
+        for activity in migrated:
+            db.refresh(activity)
+            _upsert_customer_activity_evidence(db, activity)
         return migrated
 
     def update(self, db: Session, db_obj: CustomerActivity, obj_in: CustomerActivityUpdate) -> CustomerActivity:
@@ -209,13 +248,20 @@ class CustomerActivityCRUD:
             setattr(db_obj, field, value)
         db.commit()
         db.refresh(db_obj)
+        _upsert_customer_activity_evidence(db, db_obj)
         return db_obj
 
-    def update_next_time(self, db: Session, db_obj: CustomerActivity, next_follow_time) -> CustomerActivity:
+    def update_next_time(
+        self,
+        db: Session,
+        db_obj: CustomerActivity,
+        next_follow_time: datetime | None,
+    ) -> CustomerActivity:
         db_obj.next_follow_time = next_follow_time
         db_obj.next_follow_time_source = "USER"
         db.commit()
         db.refresh(db_obj)
+        _upsert_customer_activity_evidence(db, db_obj)
         return db_obj
 
     def update_processing_status(
@@ -223,8 +269,8 @@ class CustomerActivityCRUD:
         db: Session,
         activity_id: int,
         status: str,
-        error_message: Optional[str] = None,
-    ) -> Optional[CustomerActivity]:
+        error_message: str | None = None,
+    ) -> CustomerActivity | None:
         activity = self.get_by_id(db, activity_id)
         if not activity:
             return None
@@ -234,6 +280,7 @@ class CustomerActivityCRUD:
             activity.processed_at = datetime.now()
         db.commit()
         db.refresh(activity)
+        _upsert_customer_activity_evidence(db, activity)
         return activity
 
     def update_processed_content(
@@ -241,13 +288,13 @@ class CustomerActivityCRUD:
         db: Session,
         activity_id: int,
         *,
-        title: Optional[str],
-        content_json: dict[str, Any],
-        summary: Optional[str],
-        next_action: Optional[str] = None,
-        next_follow_time=None,
-        next_follow_time_source: Optional[str] = None,
-    ) -> Optional[CustomerActivity]:
+        title: str | None,
+        content_json: JSONObject,
+        summary: str | None,
+        next_action: str | None = None,
+        next_follow_time: datetime | None = None,
+        next_follow_time_source: str | None = None,
+    ) -> CustomerActivity | None:
         activity = self.get_by_id(db, activity_id)
         if not activity:
             return None
@@ -264,6 +311,7 @@ class CustomerActivityCRUD:
         activity.processed_at = datetime.now()
         db.commit()
         db.refresh(activity)
+        _upsert_customer_activity_evidence(db, activity)
         return activity
 
     def update_effectiveness_status(
@@ -271,8 +319,8 @@ class CustomerActivityCRUD:
         db: Session,
         activity_id: int,
         status: str,
-        error_message: Optional[str] = None,
-    ) -> Optional[CustomerActivity]:
+        error_message: str | None = None,
+    ) -> CustomerActivity | None:
         activity = self.get_by_id(db, activity_id)
         if not activity:
             return None
@@ -297,8 +345,8 @@ class CustomerActivityCRUD:
         score: int,
         is_valid: bool,
         reason: str,
-        detail_json: Optional[str] = None,
-    ) -> Optional[CustomerActivity]:
+        detail_json: str | None = None,
+    ) -> CustomerActivity | None:
         activity = self.get_by_id(db, activity_id)
         if not activity:
             return None
@@ -314,18 +362,19 @@ class CustomerActivityCRUD:
         return activity
 
     def delete(self, db: Session, db_obj: CustomerActivity) -> CustomerActivity:
+        _mark_customer_activity_evidence_deleted(db, db_obj)
         db.delete(db_obj)
         db.commit()
         return db_obj
 
-    def build_title(self, activity_kind: str, content_json: dict[str, Any]) -> str:
+    def build_title(self, activity_kind: str, content_json: JSONObject) -> str:
         meta = get_activity_kind_meta(activity_kind)
         if meta["category"] == "MEETING":
             subject = str(content_json.get("meeting_subject") or "").strip()
             return subject or meta["label"]
         return meta["label"]
 
-    def build_summary(self, activity_kind: str, content_json: dict[str, Any], source_content: str) -> str:
+    def build_summary(self, activity_kind: str, content_json: JSONObject, source_content: str) -> str:
         meta = get_activity_kind_meta(activity_kind)
         if meta["category"] == "MEETING":
             minutes = content_json.get("key_minutes")

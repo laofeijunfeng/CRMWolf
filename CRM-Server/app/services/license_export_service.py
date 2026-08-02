@@ -56,19 +56,18 @@ def export_license_document(application: LicenseApplication) -> str:
     doc.add_paragraph(f"企业名称: {application.customer.account_name}")
     doc.add_paragraph(f"到期时间: {application.expiry_date.strftime('%Y-%m-%d')}")
 
-    # 授权人数和服务器地址（从部署信息获取）
+    # 授权人数来自本次 License 申请，服务器地址来自部署信息。
+    doc.add_paragraph(f"授权人数: {application.authorized_users}")
     if application.deployment_info:
-        doc.add_paragraph(f"授权人数: {application.deployment_info.authorized_users}")
         doc.add_paragraph(f"服务器: {application.deployment_info.server_address}")
     else:
-        doc.add_paragraph("授权人数: 未配置")
         doc.add_paragraph("服务器: 未配置")
 
     doc.add_paragraph(f"支持模块: {application.supported_modules or '未填写'}")
 
     # License 类型标题
     license_type_text = '试用' if application.license_type == LicenseType.TRIAL else '正式'
-    authorized_users = application.deployment_info.authorized_users if application.deployment_info else 0
+    authorized_users = application.authorized_users
     doc.add_paragraph()
     doc.add_paragraph(f"{license_type_text} License（{authorized_users}人）")
 

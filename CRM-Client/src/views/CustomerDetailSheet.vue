@@ -321,6 +321,35 @@ const renderedCustomerBrief = computed<CustomerBriefBlock[]>(() => {
   return parseSimpleMarkdown(markdownText, customerBriefCitationMap.value)
 })
 
+const hasCustomerBriefContent = computed(() => renderedCustomerBrief.value.length > 0)
+const hasCustomerIntelligenceInputs = computed(() => {
+  if (customer.value === null) return false
+  if (customer.value.customer_intelligence_has_inputs !== undefined) {
+    return customer.value.customer_intelligence_has_inputs
+  }
+  return (
+    (customer.value.contacts ?? []).length > 0 ||
+    followUps.value.length > 0 ||
+    opportunities.value.length > 0 ||
+    contracts.value.length > 0 ||
+    paymentPlans.value.length > 0 ||
+    invoiceTitles.value.length > 0 ||
+    deployments.value.length > 0
+  )
+})
+const isCustomerBriefRefreshing = computed(() => (
+  regeneratingBrief.value || customer.value?.customer_brief_status === 'GENERATING'
+))
+const isCustomerBriefAwaitingAutoBuild = computed(() => (
+  !hasCustomerBriefContent.value &&
+  hasCustomerIntelligenceInputs.value &&
+  (
+    customer.value?.customer_brief_status === 'PENDING' ||
+    customer.value?.customer_brief_status === undefined ||
+    customer.value?.customer_brief_status === null
+  )
+))
+
 // ==================== Navigation Tabs ====================
 interface NavTabItem {
   key: string
@@ -484,10 +513,11 @@ const getLicenseStatusClass = (licenseType: string | null | undefined, expiryDat
 }
 
 const getCustomerBriefStatusLabel = (status: string | null | undefined): string => {
-  if (status === 'COMPLETED') return '已完成'
-  if (status === 'GENERATING') return '生成中'
-  if (status === 'FAILED') return '失败'
-  return '待生成'
+  if (status === 'COMPLETED') return '已整理'
+  if (status === 'GENERATING') return '整理中'
+  if (status === 'PENDING') return '待整理'
+  if (status === 'FAILED') return '需关注'
+  return '暂无档案'
 }
 
 const getCustomerBriefStatusClass = (status: string | null | undefined): string => {
@@ -496,6 +526,12 @@ const getCustomerBriefStatusClass = (status: string | null | undefined): string 
   if (status === 'FAILED') return 'brief-status-badge--failed'
   return 'brief-status-badge--pending'
 }
+
+const customerBriefUpdatedText = computed(() => {
+  const generatedTime = customer.value?.customer_brief_generated_time
+  if (generatedTime === undefined || generatedTime === null || generatedTime.trim() === '') return ''
+  return `更新于 ${formatDate(generatedTime)}`
+})
 
 const canManageCustomerMembers = computed(() => {
   if (!customer.value) return false
@@ -638,10 +674,10 @@ const handleRegenerateBrief = async (): Promise<void> => {
   regeneratingBrief.value = true
   try {
     await customerApi.regenerateCustomerBrief(props.customerId)
-    toast.success('客户档案生成中，请稍后刷新')
+    toast.success('客户智能档案正在刷新')
     await loadAllData(props.customerId)
   } catch (error) {
-    handleApiError(error, '生成客户档案')
+    handleApiError(error, '刷新客户智能档案')
   } finally {
     regeneratingBrief.value = false
   }
@@ -1178,9 +1214,9 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               <Card class="customer-brief-card">
                 <CardContent class="p-0">
                   <div class="brief-card-header">
-                    <div class="flex items-center gap-2 min-w-0">
+                    <div class="brief-card-title">
                       <Sparkles class="h-4 w-4 text-wolf-primary-v2 flex-shrink-0" aria-hidden="true" />
-                      <h3 class="text-sm font-semibold text-wolf-text-primary-v2">客户档案</h3>
+                      <h3 class="text-sm font-semibold text-wolf-text-primary-v2 truncate">客户档案</h3>
                       <Badge
                         variant="outline"
                         class="brief-status-badge"
@@ -1188,26 +1224,29 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                       >
                         {{ getCustomerBriefStatusLabel(customer?.customer_brief_status) }}
                       </Badge>
+                      <span v-if="customerBriefUpdatedText" class="brief-card-meta">
+                        {{ customerBriefUpdatedText }}
+                      </span>
                     </div>
                     <Button
                       variant="ghost"
                       size="icon"
                       class="h-8 w-8 text-wolf-text-tertiary-v2 hover:text-wolf-primary-v2"
-                      :disabled="regeneratingBrief || customer?.customer_brief_status === 'GENERATING'"
+                      :disabled="isCustomerBriefRefreshing"
                       @click="handleRegenerateBrief"
                     >
                       <RefreshCw
                         class="h-4 w-4"
-                        :class="{ 'animate-spin': regeneratingBrief || customer?.customer_brief_status === 'GENERATING' }"
+                        :class="{ 'animate-spin': isCustomerBriefRefreshing }"
                         aria-hidden="true"
                       />
-                      <span class="sr-only">生成客户档案</span>
+                      <span class="sr-only">刷新智能档案</span>
                     </Button>
                   </div>
 
                   <div class="p-4">
                     <div
-                      v-if="customer?.customer_brief_status === 'COMPLETED' && renderedCustomerBrief.length > 0"
+                      v-if="hasCustomerBriefContent"
                       class="customer-brief-content"
                     >
                       <template v-for="(block, blockIndex) in renderedCustomerBrief" :key="blockIndex">
@@ -1282,11 +1321,20 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                       </template>
                     </div>
                     <div
-                      v-else-if="customer?.customer_brief_status === 'GENERATING'"
+                      v-else-if="customer?.customer_brief_status === 'GENERATING' || isCustomerBriefAwaitingAutoBuild"
                       class="brief-inline-state"
                     >
-                      <Loader2 class="h-4 w-4 animate-spin text-wolf-primary-v2" aria-hidden="true" />
-                      <span>客户档案正在生成中，请稍后刷新查看</span>
+                      <Loader2
+                        v-if="customer?.customer_brief_status === 'GENERATING'"
+                        class="h-4 w-4 animate-spin text-wolf-primary-v2"
+                        aria-hidden="true"
+                      />
+                      <Sparkles
+                        v-else
+                        class="h-4 w-4 text-wolf-primary-v2"
+                        aria-hidden="true"
+                      />
+                      <span>客户智能档案正在整理，会根据客户活动和业务进展自动更新</span>
                     </div>
                     <Empty
                       v-else-if="customer?.customer_brief_status === 'FAILED'"
@@ -1296,9 +1344,9 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                         <EmptyMedia variant="icon">
                           <Sparkles class="h-5 w-5" aria-hidden="true" />
                         </EmptyMedia>
-                        <EmptyTitle class="text-sm font-medium">客户档案生成失败</EmptyTitle>
+                        <EmptyTitle class="text-sm font-medium">客户智能档案暂未刷新成功</EmptyTitle>
                         <EmptyDescription>
-                          {{ customer?.customer_brief_error_message || '请稍后重新生成' }}
+                          {{ customer?.customer_brief_error_message || '可稍后重试' }}
                         </EmptyDescription>
                       </EmptyHeader>
                       <EmptyContent>
@@ -1309,7 +1357,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                           @click="handleRegenerateBrief"
                         >
                           <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingBrief }" />
-                          重新生成
+                          重新整理
                         </Button>
                       </EmptyContent>
                     </Empty>
@@ -1318,20 +1366,11 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                         <EmptyMedia variant="icon">
                           <Sparkles class="h-5 w-5" aria-hidden="true" />
                         </EmptyMedia>
-                        <EmptyTitle class="text-sm font-medium">暂无客户档案</EmptyTitle>
-                        <EmptyDescription>生成后可查看销售侧客户经营摘要</EmptyDescription>
+                        <EmptyTitle class="text-sm font-medium">暂无客户智能档案</EmptyTitle>
+                        <EmptyDescription>
+                          有客户活动、商机、合同、回款等业务进展后，这里会自动更新
+                        </EmptyDescription>
                       </EmptyHeader>
-                      <EmptyContent>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          :disabled="regeneratingBrief"
-                          @click="handleRegenerateBrief"
-                        >
-                          <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': regeneratingBrief }" />
-                          生成概况
-                        </Button>
-                      </EmptyContent>
                     </Empty>
                   </div>
                 </CardContent>
@@ -1517,22 +1556,11 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
         </ScrollArea>
 
         <!-- Footer -->
-        <SheetFooter class="customer-detail-sheet__footer p-4 border-t border-wolf-border-default-v2">
-          <template v-if="activePanel === 'customer-brief'">
-            <Button
-              variant="default"
-              :disabled="regeneratingBrief || customer?.customer_brief_status === 'GENERATING'"
-              @click="handleRegenerateBrief"
-            >
-              <RefreshCw
-                class="w-4 h-4 mr-2"
-                :class="{ 'animate-spin': regeneratingBrief || customer?.customer_brief_status === 'GENERATING' }"
-              />
-              生成概况
-            </Button>
-          </template>
-
-          <template v-else-if="activePanel === 'customer-info'">
+        <SheetFooter
+          v-if="activePanel !== 'customer-brief'"
+          class="customer-detail-sheet__footer p-4 border-t border-wolf-border-default-v2"
+        >
+          <template v-if="activePanel === 'customer-info'">
             <Button v-if="canCreateContact" variant="default" @click="handleCreateContact">
               <Plus class="w-4 h-4 mr-2" />
               新建联系人
@@ -1785,7 +1813,23 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   border-bottom: 1px solid $wolf-border-light-v2;
 }
 
+.brief-card-title {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+}
+
+.brief-card-meta {
+  min-width: fit-content;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
 .brief-status-badge {
+  flex-shrink: 0;
   height: 22px;
   border-radius: $wolf-radius-v2;
   font-size: $wolf-font-size-caption-v2;

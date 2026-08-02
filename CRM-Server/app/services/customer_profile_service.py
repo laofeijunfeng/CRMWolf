@@ -1,24 +1,27 @@
 """
-客户档案 AI 自动补充服务
+客户基础档案刷新引擎
 
-负责在客户创建或线索转化后，异步调用 AI 生成客户档案信息
-使用行业分级体系进行行业匹配和同行业客户筛选
+只负责生成并写入客户基础档案字段。触发、重试、执行轨迹和客户概况刷新
+必须由 CustomerIntelligenceGraphService / CustomerIntelligenceRefreshService 编排。
 """
 import json
-import asyncio
 import logging
-from typing import Optional, Dict, Any, List
-from sqlalchemy.orm import Session
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from app.core.database import SessionLocal
-from app.models.customer import Customer
+from app.crud.ai_config import ai_config_crud
 from app.crud.customer import customer_crud
 from app.crud.customer_activity import customer_activity_crud
 from app.crud.industry import industry_crud
-from app.crud.ai_config import ai_config_crud
-from app.services.ai_task_limiter import ai_generation_semaphore
+from app.models.customer import Customer
 from app.services.ai_service import ai_service
+from app.services.ai_task_limiter import ai_generation_semaphore
+from app.services.customer_intelligence_context_service import (
+    CustomerIntelligenceContext,
+    customer_intelligence_context_service,
+)
+from app.services.customer_vector_document_service import customer_vector_document_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +29,17 @@ logger = logging.getLogger(__name__)
 class CustomerProfileService:
     """客户档案生成服务"""
 
+    PROFILE_RETRIEVAL_QUERY = (
+        "客户档案 企业背景 主营业务 项目背景 客户需求 行业 判断依据 "
+        "跟进记录 采购进展 商机 合同 业务流程 联系人 决策人 风险"
+    )
+
     async def generate_profile(
         self,
         customer_id: int,
         account_name: str,
         source_lead_id: Optional[int] = None,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         生成客户档案
@@ -117,13 +125,31 @@ class CustomerProfileService:
                         db, industry_code, customer_id, effective_team_id, limit=50
                     )
                     logger.info(f"同行业客户候选数量: {len(similar_customer_candidates) if similar_customer_candidates else 0}")
+                    intelligence_context = customer_intelligence_context_service.build_context(
+                        db,
+                        team_id=effective_team_id,
+                        customer_id=customer_id,
+                        query_text=self.PROFILE_RETRIEVAL_QUERY,
+                        evidence_limit=10,
+                        source_types=[
+                            "customer",
+                            "customer_profile",
+                            "customer_brief",
+                            "follow_up",
+                            "business_flow",
+                            "opportunity",
+                            "contract",
+                            "contact",
+                        ],
+                    )
 
                     prompt2 = self._build_prompt_for_profile(
                         account_name,
                         industry_code,
                         industry_hierarchy,
                         similar_customer_candidates,
-                        lead_follow_ups
+                        lead_follow_ups,
+                        intelligence_context,
                     )
                 finally:
                     db.close()
@@ -146,7 +172,7 @@ class CustomerProfileService:
 
                 # 4. 短连接写入档案
                 profile_data = self._parse_profile_response(full_content2, similar_customer_candidates)
-                logger.info(f"档案解析完成")
+                logger.info("档案解析完成")
 
                 db = SessionLocal()
                 try:
@@ -163,15 +189,15 @@ class CustomerProfileService:
                             "profile_generated_time": datetime.now()
                         }
                     )
+                    updated_customer = db.query(Customer).filter(Customer.id == customer_id).first()
+                    if updated_customer is not None:
+                        try:
+                            customer_vector_document_service.upsert_customer_profile(db, updated_customer)
+                        except Exception:
+                            logger.exception("客户档案证据元数据写入失败: customer_id=%s", customer_id)
                 finally:
                     db.close()
                 logger.info(f"客户档案更新完成: customer_id={customer_id}, status=COMPLETED")
-
-                try:
-                    from app.services.customer_brief_service import customer_brief_service
-                    await customer_brief_service.trigger_generation(customer_id=customer_id, team_id=effective_team_id)
-                except Exception as brief_error:
-                    logger.warning("客户档案完成后触发客户概况生成失败: %s", brief_error)
 
                 return {
                     "success": True,
@@ -293,7 +319,8 @@ class CustomerProfileService:
         industry_code: str,
         industry_hierarchy: dict,
         similar_customer_candidates: List[str],
-        lead_follow_ups: Optional[List[Any]]
+        lead_follow_ups: Optional[List[Any]],
+        intelligence_context: CustomerIntelligenceContext | None = None,
     ) -> str:
         """构建档案生成的提示词"""
 
@@ -317,7 +344,87 @@ class CustomerProfileService:
             follow_up_summary = self._summarize_follow_ups(lead_follow_ups)
             prompt += f"\n\n以下是该企业的客户活动（请分析其中的客户需求和痛点）：\n{follow_up_summary}"
 
+        if intelligence_context is not None:
+            customer_intelligence_summary = self._summarize_customer_intelligence(intelligence_context)
+            if customer_intelligence_summary:
+                prompt += (
+                    "\n\n以下是 CRM 统一客户智能上下文。业务字段以结构化事实为准；"
+                    "语义证据只作为归纳、补充和引用依据：\n"
+                    f"{customer_intelligence_summary}"
+                )
+
         return prompt
+
+    def _summarize_customer_intelligence(self, context: CustomerIntelligenceContext) -> str:
+        payload = context.to_dict()
+        strong_context = payload["strong_context"]
+        sections: list[str] = []
+
+        customer = strong_context["customer"]
+        if isinstance(customer, dict):
+            sections.append(
+                "客户事实: "
+                + json.dumps(
+                    {
+                        "客户名称": customer.get("account_name"),
+                        "城市": customer.get("city"),
+                        "规模": customer.get("company_scale"),
+                        "已有企业背景": customer.get("company_background"),
+                        "已有主营业务": customer.get("main_business"),
+                        "已有项目背景": customer.get("project_background"),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            )
+
+        for label, key, limit in [
+            ("联系人", "contacts", 8),
+            ("商机", "opportunities", 8),
+            ("合同", "contracts", 6),
+            ("回款计划", "payment_plans", 6),
+            ("回款记录", "payment_records", 6),
+            ("近期活动", "recent_activities", 10),
+        ]:
+            rows = strong_context.get(key)
+            if isinstance(rows, list) and rows:
+                sections.append(
+                    f"{label}: "
+                    + json.dumps(rows[:limit], ensure_ascii=False, separators=(",", ":"))
+                )
+
+        same_industry_customers = strong_context.get("same_industry_customers")
+        if isinstance(same_industry_customers, list) and same_industry_customers:
+            sections.append(
+                "系统内同业客户: "
+                + json.dumps(same_industry_customers[:10], ensure_ascii=False, separators=(",", ":"))
+            )
+
+        semantic_evidence = payload["semantic_evidence"]
+        if isinstance(semantic_evidence, list) and semantic_evidence:
+            evidence_items = []
+            for item in semantic_evidence[:8]:
+                if isinstance(item, dict):
+                    evidence_items.append({
+                        "标题": item.get("title"),
+                        "来源": item.get("source_type"),
+                        "内容": item.get("text"),
+                        "相似度": item.get("score"),
+                    })
+            if evidence_items:
+                sections.append(
+                    "语义证据: "
+                    + json.dumps(evidence_items, ensure_ascii=False, separators=(",", ":"))
+                )
+
+        retrieval = payload["retrieval"]
+        if isinstance(retrieval, dict) and retrieval.get("status") != "ok":
+            sections.append(
+                "语义检索状态: "
+                + json.dumps(retrieval, ensure_ascii=False, separators=(",", ":"))
+            )
+
+        return "\n".join(sections)
 
     def _get_industry_name(self, industry_code: str, industry_hierarchy: dict) -> str:
         """根据行业编码获取行业名称"""
@@ -385,7 +492,7 @@ class CustomerProfileService:
 
             return {"industry_code": industry_code}
 
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             return {"industry_code": "other"}
 
     def _parse_profile_response(self, content: str, candidates: List[str]) -> Dict[str, Any]:
@@ -413,7 +520,7 @@ class CustomerProfileService:
 
             return parsed
 
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             return {
                 "company_background": None,
                 "company_website": None,
@@ -421,25 +528,5 @@ class CustomerProfileService:
                 "similar_customers": [],
                 "project_background": None
             }
-
-    async def trigger_generation(
-        self,
-        customer_id: int,
-        account_name: str,
-        source_lead_id: Optional[int] = None,
-        team_id: Optional[int] = None
-    ):
-        """
-        触发档案生成（异步后台任务）
-        """
-        asyncio.create_task(
-            self.generate_profile(
-                customer_id=customer_id,
-                account_name=account_name,
-                source_lead_id=source_lead_id,
-                team_id=team_id
-            )
-        )
-
 
 customer_profile_service = CustomerProfileService()

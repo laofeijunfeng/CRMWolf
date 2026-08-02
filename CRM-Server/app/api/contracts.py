@@ -1,36 +1,45 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, UploadFile, File, Form
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from typing import List, Optional
-from datetime import date
-from urllib.parse import quote
 import logging
 import os
+from datetime import date
+from typing import List, Literal, Optional
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import (
-    get_current_active_user,
-    get_current_user_team,
-    check_contract_edit_permission,
     check_contract_delete_permission,
+    check_contract_edit_permission,
     check_contract_view_permission,
     check_customer_edit_permission,
     check_customer_view_permission,
+    get_current_active_user,
+    get_current_user_team,
 )
-from app.crud.contract import contract_crud, ApprovalService
-from app.crud.customer import customer_crud, contact_crud
+from app.crud.contract import ApprovalService, contract_crud
+from app.crud.customer import contact_crud
 from app.crud.opportunity import opportunity_crud
 from app.crud.role import role_crud
-from app.schemas.contract import (
-    ContractCreate, ContractUpdate,
-    ContractResponse, ContractListResponse, ContractDetailResponse,
-    ContractStatusEnum, LicenseTypeEnum, MessageResponse
-)
-from app.schemas.common import PaginatedResponse
-from app.services.approval_adapter import get_approval_card_fields, get_approval_customer_name, get_approval_type_name
-from app.services.feishu_notification import feishu_notification_service
-from app.services.file_storage import file_storage_service, FileStorageError
 from app.models.approval import BusinessType
+from app.schemas.common import PaginatedResponse
+from app.schemas.contract import (
+    ContractCreate,
+    ContractDetailResponse,
+    ContractListResponse,
+    ContractResponse,
+    ContractStatusEnum,
+    ContractUpdate,
+    MessageResponse,
+)
+from app.services.approval_adapter import get_approval_card_fields, get_approval_customer_name, get_approval_type_name
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeRefreshInput,
+    customer_business_object_intelligence_service,
+)
+from app.services.feishu_notification import feishu_notification_service
+from app.services.file_storage import FileStorageError, file_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +147,34 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{fallback_name}\"; filename*=UTF-8''{quoted_name}"
 
 
+def _build_contract_intelligence_change(
+    contract,
+    *,
+    change_type: Literal["created", "updated", "deleted"],
+    actor_id: str | None,
+) -> CustomerBusinessObjectChangeRefreshInput:
+    change = customer_business_object_intelligence_service.build_change(
+        None,
+        source_type="contract",
+        business_object=contract,
+        change_type=change_type,
+        actor_id=actor_id,
+    )
+    if change is None:
+        raise ValueError("合同缺少客户智能刷新所需字段")
+    return change
+
+
+async def _trigger_contract_intelligence_refresh(
+    db: Session,
+    change: CustomerBusinessObjectChangeRefreshInput,
+) -> None:
+    await customer_business_object_intelligence_service.trigger_change_refresh(
+        db,
+        change,
+    )
+
+
 @router.post("/", response_model=ContractResponse, status_code=status.HTTP_201_CREATED, summary="创建合同", description="""
 手动创建新合同，系统自动生成合同编号并计算标准单价。
 
@@ -223,6 +260,14 @@ async def create_contract(
         db_contract.contract_file_mime_type = file.content_type
         db.commit()
         db.refresh(db_contract)
+        await _trigger_contract_intelligence_refresh(
+            db,
+            _build_contract_intelligence_change(
+                db_contract,
+                change_type="created",
+                actor_id=str(current_user.id),
+            ),
+        )
 
         # 提交审批并发送通知
         approval = ApprovalService.submit_for_approval(db, db_contract.id)
@@ -387,6 +432,14 @@ async def create_contract_from_opportunity(
         db_contract.contract_file_mime_type = file.content_type
         db.commit()
         db.refresh(db_contract)
+        await _trigger_contract_intelligence_refresh(
+            db,
+            _build_contract_intelligence_change(
+                db_contract,
+                change_type="created",
+                actor_id=str(current_user.id),
+            ),
+        )
 
         # 提交审批并发送通知
         approval = ApprovalService.submit_for_approval(db, db_contract.id)
@@ -782,10 +835,11 @@ def get_customer_contracts(
 - 已提交审批或已签署的合同不可编辑
 - 修改后标准单价会自动更新
 """)
-def update_contract(
+async def update_contract(
     contract_id: int,
     contract_update: ContractUpdate,
     contract = Depends(check_contract_edit_permission),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     # check_contract_edit_permission 已处理存在性和权限检查
@@ -803,6 +857,14 @@ def update_contract(
             db=db,
             db_obj=contract,
             obj_in=contract_update
+        )
+        await _trigger_contract_intelligence_refresh(
+            db,
+            _build_contract_intelligence_change(
+                updated_contract,
+                change_type="updated",
+                actor_id=str(current_user.id),
+            ),
         )
         return updated_contract
     except ValueError as e:
@@ -832,9 +894,10 @@ def update_contract(
 - 建议在删除前确认合同状态
 - 删除后合同相关的回款计划也会被清理
 """)
-def delete_contract(
+async def delete_contract(
     contract_id: int,
     contract = Depends(check_contract_delete_permission),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     # check_contract_delete_permission 已处理存在性和权限检查
@@ -846,7 +909,16 @@ def delete_contract(
         )
     
     try:
+        change = _build_contract_intelligence_change(
+            contract,
+            change_type="deleted",
+            actor_id=str(current_user.id),
+        )
         contract_crud.delete(db, contract_id)
+        await _trigger_contract_intelligence_refresh(
+            db,
+            change,
+        )
         return MessageResponse(message="合同删除成功")
     except ValueError as e:
         raise HTTPException(

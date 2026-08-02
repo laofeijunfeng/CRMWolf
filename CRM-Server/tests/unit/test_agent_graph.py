@@ -85,8 +85,8 @@ class FakeToolService:
             tool_call_id=503,
         )
 
-    async def get_customer_context(self, context, customer_id):
-        self.context_queries.append({"context": context, "customer_id": customer_id})
+    async def get_customer_context(self, context, customer_id, query_text=None):
+        self.context_queries.append({"context": context, "customer_id": customer_id, "query_text": query_text})
         if self.customer_context is not None:
             return AgentToolResult(
                 tool_name="get_customer_context",
@@ -1381,14 +1381,13 @@ async def test_agent_graph_requires_deployment_info_fields_when_ai_fields_missin
         intent="CREATE_DEPLOYMENT_INFO",
         customer={"name_text": "越秀金融", "confidence": 0.95},
         deployment_info={"is_default": False},
-        missing_fields=["deployment_name", "server_address", "authorized_users"],
+        missing_fields=["deployment_name", "server_address"],
     )).run(input_state())
 
     field_events = [event for event in result["events"] if event["event"] == "deployment_info_fields_required"]
     assert field_events[0]["payload"]["missing_fields"] == [
         "deployment_name",
         "server_address",
-        "authorized_users",
     ]
 
 

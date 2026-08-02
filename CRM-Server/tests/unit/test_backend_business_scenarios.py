@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -35,10 +35,14 @@ from app.models.agent import (
     AgentTask,
     AgentTaskStatus,
     AgentToolCall,
+    AgentMemoryEntry,
 )
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord, ApprovalStatus
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Contact, Customer, CustomerMember
+from app.models.customer_fact import CustomerFact, CustomerFactReviewAudit, CustomerFactRevision, CustomerFactSource
+from app.models.customer_intelligence_run import CustomerIntelligenceRun
+from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyEventType
 from app.models.deployment import DeploymentInfo
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle, InvoiceType
@@ -59,6 +63,51 @@ from app.services.agent.tools.base import AgentToolResult
 @compiles(BigInteger, "sqlite")
 def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
     return "INTEGER"
+
+
+def _create_checkpoint_tables(engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE crm_langgraph_checkpoints (
+                thread_id VARCHAR(191) NOT NULL,
+                checkpoint_ns VARCHAR(191) NOT NULL DEFAULT '',
+                checkpoint_id VARCHAR(191) NOT NULL,
+                parent_checkpoint_id VARCHAR(191),
+                checkpoint_type VARCHAR(100) NOT NULL,
+                checkpoint_blob BLOB NOT NULL,
+                metadata_type VARCHAR(100) NOT NULL,
+                metadata_blob BLOB NOT NULL,
+                created_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE crm_langgraph_checkpoint_blobs (
+                thread_id VARCHAR(191) NOT NULL,
+                checkpoint_ns VARCHAR(191) NOT NULL DEFAULT '',
+                channel VARCHAR(191) NOT NULL,
+                version VARCHAR(191) NOT NULL,
+                serde_type VARCHAR(100) NOT NULL,
+                `blob` BLOB NOT NULL,
+                created_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (thread_id, checkpoint_ns, channel, version)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE crm_langgraph_checkpoint_writes (
+                thread_id VARCHAR(191) NOT NULL,
+                checkpoint_ns VARCHAR(191) NOT NULL DEFAULT '',
+                checkpoint_id VARCHAR(191) NOT NULL,
+                task_id VARCHAR(191) NOT NULL,
+                write_idx INTEGER NOT NULL,
+                task_path VARCHAR(255) NOT NULL DEFAULT '',
+                channel VARCHAR(191) NOT NULL,
+                serde_type VARCHAR(100) NOT NULL,
+                `blob` BLOB NOT NULL,
+                created_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, write_idx)
+            )
+        """))
 
 
 class FakeSemanticParser:
@@ -128,6 +177,13 @@ def scenario_env(monkeypatch):
         AgentTask.__table__,
         AgentToolCall.__table__,
         AgentIdempotencyKey.__table__,
+        AgentMemoryEntry.__table__,
+        CustomerVectorDocument.__table__,
+        CustomerFact.__table__,
+        CustomerFactSource.__table__,
+        CustomerFactRevision.__table__,
+        CustomerFactReviewAudit.__table__,
+        CustomerIntelligenceRun.__table__,
     ]
     renamed_indexes = []
     for table in tables:
@@ -137,6 +193,7 @@ def scenario_env(monkeypatch):
                 index.name = f"{table.name}_{index.name}"
     try:
         Base.metadata.create_all(engine, tables=tables)
+        _create_checkpoint_tables(engine)
     finally:
         for index, original_name in renamed_indexes:
             index.name = original_name
@@ -181,6 +238,7 @@ def scenario_env(monkeypatch):
             app.dependency_overrides[module.get_current_active_user] = lambda: current_user
 
     monkeypatch.setattr(agent_api, "SessionLocal", lambda: Session())
+    monkeypatch.setattr("app.services.agent.checkpointer.agent_checkpoint_saver.engine", engine)
     with TestClient(app) as client:
         yield SimpleNamespace(
             client=client,
@@ -309,6 +367,7 @@ def seed_license(env, *, applicant_id="1"):
         customer_id=customer.id,
         expiry_date=date(2027, 12, 31),
         license_type="TRIAL",
+        authorized_users=10,
         applicant_id=str(applicant_id),
         remark="客户申请试用 desktop,web,branch 模块",
         status=LicenseApplicationStatus.DRAFT,

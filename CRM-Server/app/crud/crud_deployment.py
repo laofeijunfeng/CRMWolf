@@ -1,6 +1,6 @@
+from typing import List, Optional, Tuple
+
 from sqlalchemy.orm import Session
-from typing import List, Tuple, Optional
-from datetime import datetime
 
 from app.models.deployment import DeploymentInfo
 from app.schemas.deployment import DeploymentInfoCreate, DeploymentInfoUpdate
@@ -251,5 +251,10 @@ def update_deployment_info(db: Session, team_id: int, deployment_id: int, obj_in
 def delete_deployment_info(db: Session, team_id: int, deployment_id: int) -> bool:
     return deployment_info_crud.delete(db, team_id, deployment_id)
 
-def set_default_deployment_info(db: Session, team_id: int, deployment_id: int) -> Optional[DeploymentInfo]:
-    return deployment_info_crud.set_default(db, team_id, deployment_id)
+def set_default_deployment_info(
+    db: Session,
+    team_id: int,
+    customer_id: int,
+    deployment_id: int,
+) -> Optional[DeploymentInfo]:
+    return deployment_info_crud.set_default(db, team_id, customer_id, deployment_id)

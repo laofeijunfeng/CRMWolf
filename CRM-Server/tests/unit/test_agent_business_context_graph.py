@@ -1,8 +1,7 @@
 """Business-context domain LangGraph tests."""
 
-from langgraph.checkpoint.memory import InMemorySaver
-
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 
 from app.services.agent.business_context_graph import (
     BusinessContextGraphService,
@@ -107,7 +106,7 @@ async def test_business_context_graph_loads_context_generates_suggestions_and_ch
         "crm_agent_business_context:1:2:3"
     )
     assert registry.calls[0]["tool_name"] == "get_customer_context"
-    assert registry.calls[0]["payload"] == {"customer_id": 101}
+    assert registry.calls[0]["payload"] == {"customer_id": 101, "query_text": "张总说今天可以开始签合同了"}
     assert suggestion_generator.calls[0]["customer_context"]["customer"]["id"] == 101
     assert result["suggestion_result"].suggestions[0].action == "MOVE_OPPORTUNITY_STAGE"
     assert result["suggestion_metadata"]["structured_output_strategy"] == "tool"
@@ -138,4 +137,34 @@ async def test_business_context_graph_accepts_numeric_string_customer_id():
         "events": [],
     })
 
-    assert registry.calls[0]["payload"] == {"customer_id": 101}
+    assert registry.calls[0]["payload"] == {"customer_id": 101, "query_text": "张总说今天可以开始签合同了"}
+
+
+@pytest.mark.asyncio
+async def test_business_context_graph_does_not_generate_suggestions_for_customer_query():
+    registry = FakeToolRegistry()
+    suggestion_generator = FakeSuggestionGenerator()
+    service = BusinessContextGraphService(
+        tool_registry=registry,
+        suggestion_generator=suggestion_generator,
+        checkpointer=InMemorySaver(),
+    )
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "content": "中科院现在是什么情况",
+        "authorization": "Bearer test",
+        "current_date": "2026-08-02",
+        "selected_customer": {"id": 101, "account_name": "中国科学院信息工程研究所"},
+        "semantic_result": semantic_result(intent="CUSTOMER_QUERY"),
+        "events": [],
+    })
+
+    assert registry.calls[0]["tool_name"] == "get_customer_context"
+    assert suggestion_generator.calls == []
+    assert "business_context" in result
+    assert "suggestion_result" not in result
+    assert "suggestion_metadata" not in result or result["suggestion_metadata"] == {}

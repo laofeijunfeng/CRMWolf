@@ -1,35 +1,41 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session, joinedload
-from typing import List, Optional
-from datetime import date
 import logging
+from datetime import date
+from typing import List, Literal, Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
+from app.constants.approval_phase import ApprovalPhase
+from app.constants.business_types import BusinessType
 from app.core.database import get_db
 from app.core.deps import (
-    get_current_active_user,
-    get_current_user_team,
-    require_permission,
     check_contract_edit_permission,
     check_contract_view_permission,
     check_payment_view_permission,
+    get_current_active_user,
+    get_current_user_team,
+    require_permission,
 )
 from app.crud.approval import approval_crud, approval_flow_crud
-from app.crud.permission import permission_crud
-from app.crud.payment import payment_plan_crud, payment_record_crud, query_pending_approval_me
-from app.crud.contract import contract_crud
 from app.crud.customer_member import customer_member_crud
+from app.crud.payment import payment_plan_crud, payment_record_crud, query_pending_approval_me
+from app.crud.permission import permission_crud
 from app.crud.role import role_crud
 from app.crud.user import user_crud
-from app.constants.business_types import BusinessType
-from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord, PaymentConfirmationStatus
-from app.models.approval import Approval, ApprovalStatus, ApprovalRecord, ApprovalNode
-from app.constants.approval_phase import ApprovalPhase
+from app.models.approval import Approval, ApprovalNode, ApprovalRecord, ApprovalStatus
+from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.schemas.payment import (
-    PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate, PaymentPlanResponse,
-    PaymentRecordCreate, PaymentRecordUpdate, PaymentRecordResponse,
-    PaymentRecordConfirm, PaymentRecordWithConfirmation,
-    ContractPaymentSummary, PaymentReminder, PaginatedResponse,
-    PaymentRecordListItem, PaymentRecordListResponse
+    ContractPaymentSummary,
+    PaginatedResponse,
+    PaymentPlanBatchCreate,
+    PaymentPlanResponse,
+    PaymentPlanUpdate,
+    PaymentRecordCreate,
+    PaymentRecordListItem,
+    PaymentRecordListResponse,
+    PaymentRecordResponse,
+    PaymentRecordUpdate,
+    PaymentReminder,
 )
 from app.services.approval_adapter import (
     get_adapter,
@@ -37,11 +43,67 @@ from app.services.approval_adapter import (
     get_approval_customer_name,
     get_approval_type_name,
 )
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeRefreshInput,
+    customer_business_object_intelligence_service,
+)
 from app.services.feishu_notification import feishu_notification_service
-
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
 logger = logging.getLogger(__name__)
+
+
+def _build_payment_plan_intelligence_change(
+    db: Session,
+    plan: PaymentPlan,
+    *,
+    change_type: Literal["created", "updated", "deleted"],
+    actor_id: str | None,
+) -> CustomerBusinessObjectChangeRefreshInput | None:
+    return customer_business_object_intelligence_service.build_change(
+        db,
+        source_type="payment_plan",
+        business_object=plan,
+        change_type=change_type,
+        actor_id=actor_id,
+    )
+
+
+async def _trigger_payment_plan_intelligence_refresh(
+    db: Session,
+    change: CustomerBusinessObjectChangeRefreshInput | None,
+) -> None:
+    if change is None:
+        return
+    await customer_business_object_intelligence_service.trigger_change_refresh(db, change)
+
+
+def _build_payment_record_intelligence_change(
+    db: Session,
+    record: PaymentRecord,
+    *,
+    change_type: Literal["created", "updated", "deleted"],
+    actor_id: str | None,
+) -> CustomerBusinessObjectChangeRefreshInput | None:
+    return customer_business_object_intelligence_service.build_change(
+        db,
+        source_type="payment_record",
+        business_object=record,
+        change_type=change_type,
+        actor_id=actor_id,
+    )
+
+
+async def _trigger_payment_record_intelligence_refresh(
+    db: Session,
+    change: CustomerBusinessObjectChangeRefreshInput | None,
+) -> None:
+    if change is None:
+        return
+    await customer_business_object_intelligence_service.trigger_change_refresh(
+        db,
+        change,
+    )
 
 
 def _get_current_approver_names(db: Session, approval: Approval, team_id: int) -> Optional[str]:
@@ -139,7 +201,7 @@ def _validate_payment_commission_member(
 
 
 @router.post("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], status_code=status.HTTP_201_CREATED, summary="创建回款计划", description="为指定合同创建回款计划，支持批量创建多个阶段。只有已签署的合同可以创建回款计划，所有阶段的计划金额之和不能超过合同总金额。返回创建成功的回款计划列表。")
-def create_payment_plans(
+async def create_payment_plans(
     contract_id: int,
     plans_data: PaymentPlanBatchCreate,
     team_id: int = Depends(get_current_user_team),
@@ -157,6 +219,16 @@ def create_payment_plans(
 
     try:
         plans = payment_plan_crud.batch_create(db, contract_id, plans_data.plans, str(current_user.id), team_id)
+        for plan in plans:
+            await _trigger_payment_plan_intelligence_refresh(
+                db,
+                _build_payment_plan_intelligence_change(
+                    db,
+                    plan,
+                    change_type="created",
+                    actor_id=str(current_user.id),
+                ),
+            )
         return plans
     except ValueError as e:
         raise HTTPException(
@@ -415,7 +487,6 @@ def get_payment_summary(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.models.contract import Contract
     from app.models.customer import Customer
     from app.models.opportunity import Opportunity
 
@@ -654,7 +725,7 @@ def get_payment_plan_detail(
 
 
 @router.put("/payment-plans/{plan_id}", response_model=PaymentPlanResponse, summary="修改回款计划", description="修改指定的回款计划。已登记的计划或已有回款记录的计划不能修改金额和日期，只能修改阶段名称和备注。")
-def update_payment_plan(
+async def update_payment_plan(
     plan_id: int,
     plan_data: PaymentPlanUpdate,
     team_id: int = Depends(get_current_user_team),
@@ -677,6 +748,15 @@ def update_payment_plan(
 
     try:
         updated_plan = payment_plan_crud.update(db, plan, plan_data)
+        await _trigger_payment_plan_intelligence_refresh(
+            db,
+            _build_payment_plan_intelligence_change(
+                db,
+                updated_plan,
+                change_type="updated",
+                actor_id=str(current_user.id),
+            ),
+        )
         # Task 1.2: Computed fields are properties on the model, no need to set them
         return updated_plan
     except ValueError as e:
@@ -687,20 +767,30 @@ def update_payment_plan(
 
 
 @router.delete("/payment-plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除回款计划", description="删除指定的回款计划。存在关联回款记录的计划不能删除，删除后无法恢复。")
-def delete_payment_plan(
+async def delete_payment_plan(
     plan_id: int,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("payment:plan:delete")),
     db: Session = Depends(get_db)
 ):
     try:
-        check_payment_view_permission(plan_id, team_id, current_user, db)
+        plan = check_payment_view_permission(plan_id, team_id, current_user, db)
+        change = _build_payment_plan_intelligence_change(
+            db,
+            plan,
+            change_type="deleted",
+            actor_id=str(current_user.id),
+        )
         success = payment_plan_crud.delete(db, plan_id, team_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="回款计划不存在"
             )
+        await _trigger_payment_plan_intelligence_refresh(
+            db,
+            change,
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -748,6 +838,15 @@ async def create_payment_record(
             str(current_user.id),
             current_user.name,
             team_id
+        )
+        await _trigger_payment_record_intelligence_refresh(
+            db,
+            _build_payment_record_intelligence_change(
+                db,
+                record,
+                change_type="created",
+                actor_id=str(current_user.id),
+            ),
         )
 
         # 发送审批通知（API 层 - 异步）
@@ -817,7 +916,7 @@ def get_payment_records(
 
 
 @router.put("/payment-records/{record_id}", response_model=PaymentRecordResponse, summary="更新回款记录", description="更新指定的回款记录。更新后会自动重新计算相关金额、计划状态和合同回款状态。支持修改回款金额、回款日期、凭证附件和备注信息。")
-def update_payment_record(
+async def update_payment_record(
     record_id: int,
     record_data: PaymentRecordUpdate,
     team_id: int = Depends(get_current_user_team),
@@ -883,6 +982,15 @@ def update_payment_record(
 
     try:
         updated_record = payment_record_crud.update(db, record, record_data)
+        await _trigger_payment_record_intelligence_refresh(
+            db,
+            _build_payment_record_intelligence_change(
+                db,
+                updated_record,
+                change_type="updated",
+                actor_id=str(current_user.id),
+            ),
+        )
         return updated_record
     except ValueError as e:
         raise HTTPException(
@@ -892,7 +1000,7 @@ def update_payment_record(
 
 
 @router.delete("/payment-records/{record_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除回款记录", description="删除指定的回款记录。审批中或审批通过后不可删除；删除后会自动重新计算相关金额、计划状态和合同回款状态。")
-def delete_payment_record(
+async def delete_payment_record(
     record_id: int,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("payment:record:delete")),
@@ -907,12 +1015,22 @@ def delete_payment_record(
             )
         check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
 
+        change = _build_payment_record_intelligence_change(
+            db,
+            record,
+            change_type="deleted",
+            actor_id=str(current_user.id),
+        )
         success = payment_record_crud.delete(db, record_id, team_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="回款记录不存在"
             )
+        await _trigger_payment_record_intelligence_refresh(
+            db,
+            change,
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

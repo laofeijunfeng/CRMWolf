@@ -7,6 +7,13 @@ from app.models.team import Team, UserTeam
 from app.models.lead import Lead, LeadFollowUp, LeadSource, LeadStatus, CompanyScale, FollowUpMethod
 from app.models.customer import Customer, Contact, CustomerMember
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_fact import CustomerFact, CustomerFactReviewAudit, CustomerFactReviewDecision, CustomerFactRevision, CustomerFactRevisionType, CustomerFactSource, CustomerFactStatus
+from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.models.customer_vector_document import (
+    CustomerVectorDocument,
+    CustomerVectorDocumentSourceType,
+    CustomerVectorDocumentSyncStatus,
+)
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyStatus, DealJourneyEventType, DealJourneySourceType
 from app.models.opportunity import Opportunity, OpportunityStage, PurchaseType, OpportunityStatus
 from app.models.contract import Contract, ContractStatus, PaymentStatus
@@ -24,7 +31,7 @@ from app.models.deployment import DeploymentInfo
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
 from app.models.agent import (
-    AgentSession, AgentMessage, AgentTask, AgentToolCall, AgentIdempotencyKey,
+    AgentSession, AgentMessage, AgentTask, AgentToolCall, AgentIdempotencyKey, AgentMemoryEntry,
     AgentSessionStatus, AgentMessageRole, AgentTaskStatus, AgentToolCallStatus, AgentIdempotencyStatus,
 )
 from app.models.im_bot import (
@@ -43,6 +50,9 @@ __all__ = [
     "LeadSource", "LeadStatus", "CompanyScale", "FollowUpMethod",
     "Customer", "Contact", "CustomerMember",
     "CustomerActivity",
+    "CustomerFact", "CustomerFactReviewAudit", "CustomerFactReviewDecision", "CustomerFactRevision", "CustomerFactRevisionType", "CustomerFactSource", "CustomerFactStatus",
+    "CustomerIntelligenceRun", "CustomerIntelligenceRunStatus",
+    "CustomerVectorDocument", "CustomerVectorDocumentSourceType", "CustomerVectorDocumentSyncStatus",
     "CustomerDealJourney", "CustomerDealJourneyEvent", "DealJourneyStatus", "DealJourneyEventType", "DealJourneySourceType",
     "Opportunity", "OpportunityStage", "PurchaseType", "OpportunityStatus",
     "Contract", "ContractStatus", "PaymentStatus",
@@ -59,7 +69,7 @@ __all__ = [
     "DeploymentInfo",
     "LicenseApplication", "LicenseApplicationStatus", "LicenseType",
     "OAuthProviderConfig", "UserOAuthAccount",
-    "AgentSession", "AgentMessage", "AgentTask", "AgentToolCall", "AgentIdempotencyKey",
+    "AgentSession", "AgentMessage", "AgentTask", "AgentToolCall", "AgentIdempotencyKey", "AgentMemoryEntry",
     "AgentSessionStatus", "AgentMessageRole", "AgentTaskStatus", "AgentToolCallStatus", "AgentIdempotencyStatus",
     "AgentChannelSession", "IMInboundEvent",
     "IMBotProvider", "IMBotStatus", "IMInboundEventStatus",

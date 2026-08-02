@@ -1,4 +1,4 @@
-import type { AgentMessageResponse } from "@/api/agent"
+import type { AgentMessageResponse, AgentSessionResponse } from "@/api/agent"
 import type { PaginatedResponse } from "@/types/pagination"
 
 type ListAgentMessages = (
@@ -7,6 +7,19 @@ type ListAgentMessages = (
 ) => Promise<PaginatedResponse<AgentMessageResponse>>
 
 export const AGENT_HISTORY_PAGE_SIZE = 100
+
+export const resolveInitialAgentSession = (
+  sessions: AgentSessionResponse[],
+  storedSessionId?: number
+): AgentSessionResponse | undefined => {
+  const latestSession = sessions[0]
+  if (latestSession === undefined) return undefined
+
+  const storedSession = sessions.find(session => session.id === storedSessionId)
+  if (storedSession?.id === latestSession.id) return storedSession
+
+  return latestSession
+}
 
 export const loadLatestAgentMessages = async (
   listMessages: ListAgentMessages,

@@ -265,7 +265,7 @@ class CustomerCRUD:
         customer_id: int,
         profile_data: dict
     ) -> Customer:
-        """更新客户档案信息"""
+        """写入客户智能图生成的基础档案字段"""
         customer = db.query(Customer).filter(Customer.id == customer_id).first()
         if not customer:
             raise ValueError("客户不存在")

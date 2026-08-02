@@ -145,6 +145,11 @@ if [ "$BACKEND_HEALTH" = "200" ] && [ "$FRONTEND_HEALTH" = "200" ]; then
     echo "✅ 后端健康检查通过 (HTTP $BACKEND_HEALTH)"
     echo "✅ 前端健康检查通过 (HTTP $FRONTEND_HEALTH)"
     echo ""
+    echo "[检查] 客户智能档案与知识库后台任务..."
+    docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'crm-backend|crm-qdrant-dev' || true
+    docker exec crm-backend python -c "from app.core.config import get_settings; s=get_settings(); print(f'QDRANT_ENABLED={s.QDRANT_ENABLED} QDRANT_HOST={s.QDRANT_HOST} QDRANT_PORT={s.QDRANT_PORT} CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED={s.CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED} CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE} CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE={s.CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE}')"
+    docker logs crm-backend --since 10m | grep -E '客户智能历史补档|客户证据向量同步|Qdrant' || echo "未看到客户智能/Qdrant 启动日志，请检查 crm-backend 日志。"
+    echo ""
     echo "=== 部署成功 ==="
     echo "访问地址: https://crm.apipark.cn"
 else

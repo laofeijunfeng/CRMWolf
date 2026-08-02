@@ -26,8 +26,6 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
 import { customerFormSchema, customerSourceOptions, companyScaleOptions, type CustomerForm } from '@/schemas/customer-form'
 
 usePageTitle()
@@ -51,20 +49,6 @@ const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
 const customerId = computed(() => Number(route.params['id']))
 const isEdit = computed(() => !!customerId.value)
 
-// Profile status related
-const profileStatus = ref<string | null>(null)
-const hasProfile = computed(() => profileStatus.value === 'COMPLETED')
-
-const profileStatusConfig = computed(() => {
-  switch (profileStatus.value) {
-    case 'COMPLETED': return { label: '已生成', variant: 'default' as const }
-    case 'GENERATING': return { label: '生成中', variant: 'secondary' as const }
-    case 'PENDING': return { label: '待生成', variant: 'outline' as const }
-    case 'FAILED': return { label: '生成失败', variant: 'destructive' as const }
-    default: return { label: '未生成', variant: 'outline' as const }
-  }
-})
-
 // VeeValidate form setup
 const { handleSubmit, setValues } = useForm({
   validationSchema: toTypedSchema(customerFormSchema),
@@ -74,11 +58,7 @@ const { handleSubmit, setValues } = useForm({
     address: '',
     company_scale: undefined,
     source: undefined,
-    default_procurement_method_id: undefined,
-    company_background: '',
-    company_website: '',
-    main_business: '',
-    project_background: ''
+    default_procurement_method_id: undefined
   } as unknown as CustomerForm
 })
 
@@ -110,13 +90,8 @@ const fetchCustomerDetail = async (): Promise<void> => {
       address: res.address ?? '',
       company_scale: normalizeCompanyScale(res.company_scale),
       source: normalizeCustomerSource(res.source),
-      default_procurement_method_id: res.default_procurement_method_id ?? undefined,
-      company_background: res.company_background ?? '',
-      company_website: res.company_website ?? '',
-      main_business: res.main_business ?? '',
-      project_background: res.project_background ?? ''
+      default_procurement_method_id: res.default_procurement_method_id ?? undefined
     } as Partial<CustomerForm>)
-    profileStatus.value = res.profile_status
   } catch (error: unknown) {
     handleApiError(error, '获取客户详情')
     router.back()
@@ -145,11 +120,7 @@ const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
         address: emptyToNull(formValues.address),
         company_scale: formValues.company_scale ?? null,
         source: formValues.source ?? null,
-        default_procurement_method_id: formValues.default_procurement_method_id ?? null,
-        company_background: emptyToNull(formValues.company_background),
-        company_website: emptyToNull(formValues.company_website),
-        main_business: emptyToNull(formValues.main_business),
-        project_background: emptyToNull(formValues.project_background)
+        default_procurement_method_id: formValues.default_procurement_method_id ?? null
       } as CustomerUpdate
       await customerApi.updateCustomer(customerId.value, updateData)
       toast.success('客户更新成功')
@@ -324,84 +295,6 @@ onMounted(async () => {
               </FormItem>
             </FormField>
           </div>
-        </form>
-      </div>
-
-      <!-- Profile Card (Edit mode only) -->
-      <div v-if="isEdit && hasProfile" class="form-card">
-        <div class="card-title">
-          <span>客户档案</span>
-          <Badge :variant="profileStatusConfig.variant">
-            {{ profileStatusConfig.label }}
-          </Badge>
-        </div>
-
-        <form class="space-y-4">
-          <div class="form-grid">
-            <!-- Company Website -->
-            <FormField v-slot="{ componentField }" name="company_website">
-              <FormItem>
-                <FormLabel>公司官网</FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    type="url"
-                    placeholder="请输入公司官网地址"
-                    class="h-11 sm:h-8"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            </FormField>
-          </div>
-
-          <!-- Company Background -->
-          <FormField v-slot="{ componentField }" name="company_background">
-            <FormItem>
-              <FormLabel>企业背景</FormLabel>
-              <FormControl>
-                <Textarea
-                  v-bind="componentField as any"
-                  :rows="4"
-                  placeholder="请输入企业背景介绍"
-                  class="resize-none"
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          </FormField>
-
-          <!-- Main Business -->
-          <FormField v-slot="{ componentField }" name="main_business">
-            <FormItem>
-              <FormLabel>主营业务</FormLabel>
-              <FormControl>
-                <Textarea
-                  v-bind="componentField as any"
-                  :rows="4"
-                  placeholder="请输入主营业务描述"
-                  class="resize-none"
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          </FormField>
-
-          <!-- Project Background -->
-          <FormField v-slot="{ componentField }" name="project_background">
-            <FormItem>
-              <FormLabel>项目需求背景</FormLabel>
-              <FormControl>
-                <Textarea
-                  v-bind="componentField as any"
-                  :rows="4"
-                  placeholder="请输入项目需求背景"
-                  class="resize-none"
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          </FormField>
         </form>
       </div>
 

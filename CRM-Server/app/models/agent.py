@@ -3,7 +3,7 @@
 These tables store Agent conversation state and audit data only. Business data
 must still be created or changed through existing CRM APIs.
 """
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -46,6 +46,29 @@ class AgentIdempotencyStatus:
     PENDING = "PENDING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+
+
+class AgentMemoryEntry(Base):
+    """LangGraph Store backed long-term Agent memory."""
+
+    __tablename__ = "crm_agent_memory_entries"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID，当前与团队ID一致")
+    namespace = Column(String(500), nullable=False, index=True, comment="LangGraph Store namespace")
+    key = Column(String(200), nullable=False, comment="namespace内记忆键")
+    value_json = Column(JSON, nullable=False, comment="JSON可序列化记忆内容")
+    version = Column(BigInteger, nullable=False, default=1, comment="记忆版本")
+    expires_at = Column(DateTime, nullable=True, index=True, comment="过期时间")
+    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+
+    __table_args__ = (
+        UniqueConstraint("namespace", "key", name="uq_agent_memory_namespace_key"),
+        Index("idx_agent_memory_tenant_namespace", "tenant_id", "namespace"),
+        Index("idx_agent_memory_namespace_updated", "namespace", "updated_time"),
+        {"comment": "CRM AI Agent LangGraph长期记忆表"},
+    )
 
 
 class AgentSession(Base):

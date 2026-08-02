@@ -29,7 +29,6 @@ from app.services.agent.graph import crm_agent_graph_service
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.interactions import (
     _interaction_for_event as _service_interaction_for_event,
-    _opportunity_interaction_fields,
     _procurement_method_options,
     _with_interaction as _service_with_interaction,
 )
@@ -40,7 +39,6 @@ from app.services.agent.session_state import (
     _get_owned_session,
 )
 from app.services.agent.root_runtime import agent_root_runtime
-from app.services.agent.task_actions import _tool_payload_for_action
 from app.services.agent.tools import CRMAgentToolService
 from app.utils.sse_encoder import SSEJsonEncoder
 
@@ -60,6 +58,7 @@ def _sync_legacy_agent_overrides() -> None:
     """Keep legacy API-level monkeypatch hooks wired to service modules."""
     agent_application_module.SessionLocal = SessionLocal
     agent_application_module.crm_agent_graph_service = crm_agent_graph_service
+    agent_root_runtime.new_flow_graph_service = crm_agent_graph_service
     task_execution.CRMAgentToolService = CRMAgentToolService
     selection.CRMAgentToolService = CRMAgentToolService
     field_common.agent_semantic_parser = agent_semantic_parser

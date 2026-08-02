@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   DateField,
+  InputField,
   SelectField,
   SegmentedChoiceControl,
   TextareaField,
@@ -43,6 +44,7 @@ interface LicenseForm {
   deploymentId: string
   licenseType: LicenseType
   contractId: string
+  authorizedUsers: string
   expiryDate: string
   remark: string
 }
@@ -50,6 +52,7 @@ interface LicenseForm {
 interface LicenseFormErrors {
   deploymentId: string
   contractId: string
+  authorizedUsers: string
   expiryDate: string
 }
 
@@ -66,6 +69,7 @@ const form = reactive<LicenseForm>({
   deploymentId: '',
   licenseType: 'TRIAL',
   contractId: '',
+  authorizedUsers: '1',
   expiryDate: '',
   remark: '',
 })
@@ -73,6 +77,7 @@ const form = reactive<LicenseForm>({
 const errors = reactive<LicenseFormErrors>({
   deploymentId: '',
   contractId: '',
+  authorizedUsers: '',
   expiryDate: '',
 })
 
@@ -115,7 +120,6 @@ const selectedDeploymentSummaryItems = computed(() => {
   return [
     { label: '部署名称', value: selectedDeployment.value.deployment_name },
     { label: '服务器地址', value: selectedDeployment.value.server_address },
-    { label: '授权人数', value: `${selectedDeployment.value.authorized_users} 人` },
     { label: '默认部署', value: selectedDeployment.value.is_default ? '是' : '否' },
   ]
 })
@@ -134,6 +138,7 @@ const licenseTypeOptions: { value: LicenseType, label: string, tone: 'success' |
 function clearErrors(): void {
   errors.deploymentId = ''
   errors.contractId = ''
+  errors.authorizedUsers = ''
   errors.expiryDate = ''
 }
 
@@ -170,14 +175,30 @@ function getInitialContractId(licenseType: LicenseType): string {
   return approvedContracts.value[0] !== undefined ? String(approvedContracts.value[0].id) : ''
 }
 
+function getInitialAuthorizedUsers(contractId: string): string {
+  const contract = approvedContracts.value.find((item) => String(item.id) === contractId)
+  if (contract !== undefined && Number.isInteger(contract.user_count) && contract.user_count > 0) {
+    return String(contract.user_count)
+  }
+
+  const deployment = props.deployments.find((item) => String(item.id) === form.deploymentId)
+  if (deployment?.authorized_users !== null && deployment?.authorized_users !== undefined && deployment.authorized_users > 0) {
+    return String(deployment.authorized_users)
+  }
+
+  return '1'
+}
+
 function resetForm(): void {
   const defaultDeployment = props.deployments.find((deployment) => deployment.is_default)
   const initialLicenseType = getInitialLicenseType()
+  const initialContractId = getInitialContractId(initialLicenseType)
   form.deploymentId = defaultDeployment !== undefined
     ? String(defaultDeployment.id)
     : props.deployments[0] !== undefined ? String(props.deployments[0].id) : ''
   form.licenseType = initialLicenseType
-  form.contractId = getInitialContractId(initialLicenseType)
+  form.contractId = initialContractId
+  form.authorizedUsers = getInitialAuthorizedUsers(initialContractId)
   form.expiryDate = ''
   form.remark = ''
   clearErrors()
@@ -192,6 +213,11 @@ function validateForm(): boolean {
 
   if (form.licenseType === 'OFFICIAL' && form.contractId === '') {
     errors.contractId = '正式 License 必须关联合同'
+  }
+
+  const authorizedUsers = Number(form.authorizedUsers)
+  if (form.authorizedUsers.trim() === '' || !Number.isInteger(authorizedUsers) || authorizedUsers < 1) {
+    errors.authorizedUsers = '请输入大于 0 的整数'
   }
 
   if (form.expiryDate === '') {
@@ -222,6 +248,7 @@ async function handleSubmit(): Promise<void> {
     deployment_info_id: Number(form.deploymentId),
     license_type: form.licenseType,
     contract_id: form.licenseType === 'OFFICIAL' ? Number(form.contractId) : null,
+    authorized_users: Number(form.authorizedUsers),
     expiry_date: form.expiryDate,
     remark: form.remark.trim() === '' ? null : form.remark.trim(),
   }
@@ -265,9 +292,19 @@ watch(
     }
     if (type === 'OFFICIAL' && form.contractId === '' && approvedContracts.value[0] !== undefined) {
       form.contractId = String(approvedContracts.value[0].id)
+      form.authorizedUsers = getInitialAuthorizedUsers(form.contractId)
     }
     if (type === 'TRIAL') {
       form.contractId = ''
+    }
+  }
+)
+
+watch(
+  () => form.contractId,
+  (contractId) => {
+    if (form.licenseType === 'OFFICIAL' && contractId !== '') {
+      form.authorizedUsers = getInitialAuthorizedUsers(contractId)
     }
   }
 )
@@ -361,6 +398,21 @@ watch(
             :disabled="submitting"
             :error="errors.expiryDate"
             @update:model-value="handleExpiryDateChange"
+          />
+
+          <InputField
+            id="license-authorized-users"
+            v-model="form.authorizedUsers"
+            class="license-application-dialog__field"
+            label="使用人数"
+            required
+            type="number"
+            inputmode="numeric"
+            min="1"
+            step="1"
+            placeholder="请输入使用人数"
+            :disabled="submitting"
+            :error="errors.authorizedUsers"
           />
         </div>
 

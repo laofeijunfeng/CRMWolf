@@ -432,7 +432,7 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
             "客户名称": _customer_name(db, business_type, entity),
             "授权类型": _license_application_type_label(getattr(entity, "license_type", None)),
             "服务地址": getattr(deployment_info, "server_address", None),
-            "授权人数": _format_count(getattr(deployment_info, "authorized_users", None)),
+            "使用人数": _format_count(getattr(entity, "authorized_users", None)),
             "到期日期": _format_date(getattr(entity, "expiry_date", None)),
             "备注": getattr(entity, "remark", None),
         }

@@ -1,44 +1,69 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from typing import List, Optional
 from datetime import date
+from typing import List, Literal, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import (
-    get_current_active_user,
-    require_permission,
-    get_current_user_team,
     check_customer_delete_permission,
     check_customer_edit_permission,
-    check_customer_view_permission,
     check_customer_member_manage_permission,
+    check_customer_view_permission,
+    get_current_active_user,
+    get_current_user_team,
+    require_permission,
 )
-from app.crud.customer import customer_crud, contact_crud
-from app.crud.lead import lead_crud
-from app.crud.customer_member import customer_member_crud
-from app.crud.user import user_crud
-from app.crud.team import team_crud
 from app.crud.contract import contract_crud
-from app.crud.payment import payment_plan_crud
+from app.crud.customer import contact_crud, customer_crud
+from app.crud.customer_member import customer_member_crud
 from app.crud.invoice import invoice_application_crud, invoice_title_crud
-from app.schemas.customer import (
-    CustomerCreate, CustomerUpdate, CustomerStatusUpdate,
-    CustomerResponse, CustomerDetailResponse, CustomerListResponse,
-    ConvertLeadToCustomer, ConvertResponse,
-    ContactCreate, ContactUpdate, ContactResponse,
-    MessageResponse, StatisticsResponse, TrendResponse,
-    CustomerStatusEnum, CustomerReturnRequest, CustomerReturnResponse,
-    ReturnReasonEnum, CustomerClaimRequest, CustomerAssignRequest,
-    CustomerAssignResponse, CustomerIndustryOption, CustomerLoseRequest,
-    CustomerMemberCreate, CustomerMemberUpdate, CustomerMemberResponse,
-    CustomerMemberCandidate, CustomerMemberUserInfo
-)
-from app.schemas.contract import ContractListResponse, ContractStatusEnum
+from app.crud.lead import lead_crud
+from app.crud.team import team_crud
+from app.crud.user import user_crud
+from app.models.customer import Contact
+from app.services.industry_display_service import industry_display_service
 from app.schemas.common import PaginatedResponse
-from app.schemas.payment import PaymentPlanResponse
+from app.schemas.contract import ContractListResponse, ContractStatusEnum
+from app.schemas.customer import (
+    ContactCreate,
+    ContactResponse,
+    ContactUpdate,
+    ConvertLeadToCustomer,
+    ConvertResponse,
+    CustomerAssignRequest,
+    CustomerAssignResponse,
+    CustomerClaimRequest,
+    CustomerCreate,
+    CustomerDetailResponse,
+    CustomerIndustryOption,
+    CustomerIntelligenceBatchRebuildRequest,
+    CustomerIntelligenceBatchRebuildResponse,
+    CustomerIntelligenceRetryDueResponse,
+    CustomerIntelligenceRunDiagnosticListResponse,
+    CustomerIntelligenceRunDiagnosticResponse,
+    CustomerListResponse,
+    CustomerLoseRequest,
+    CustomerMemberCandidate,
+    CustomerMemberCreate,
+    CustomerMemberResponse,
+    CustomerMemberUpdate,
+    CustomerMemberUserInfo,
+    CustomerResponse,
+    CustomerReturnRequest,
+    CustomerReturnResponse,
+    CustomerStatusUpdate,
+    CustomerUpdate,
+    MessageResponse,
+    StatisticsResponse,
+    TrendResponse,
+)
 from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
-
+from app.schemas.payment import PaymentPlanResponse
+from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
+from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
+from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
 
@@ -99,6 +124,42 @@ def _get_viewable_customer(db: Session, customer_id: int, team_id: int, current_
 
 def _get_editable_customer(db: Session, customer_id: int, team_id: int, current_user):
     return check_customer_edit_permission(customer_id, team_id, current_user, db)
+
+
+async def _schedule_contact_intelligence_refresh(
+    db: Session,
+    contact: Contact,
+    *,
+    trigger_type: Literal[
+        "customer_contact_created",
+        "customer_contact_updated",
+        "customer_contact_deleted",
+    ],
+    actor_id: str,
+) -> None:
+    from app.services.customer_intelligence_event_service import customer_intelligence_event_service
+
+    event = customer_intelligence_event_service.from_contact(
+        contact,
+        trigger_type=trigger_type,
+        actor_id=actor_id,
+    )
+    if event is None:
+        return
+    await _schedule_customer_intelligence_event_refresh(db, event)
+
+
+async def _schedule_customer_intelligence_event_refresh(
+    db: Session,
+    event: CustomerIntelligenceEvent,
+) -> None:
+    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
+
+    await customer_intelligence_refresh_service.trigger_committed_event_refresh(
+        db,
+        event=event,
+        scope="brief",
+    )
 
 
 def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
@@ -167,6 +228,44 @@ def _contract_status_info(status_value) -> Optional[dict]:
     }
 
 
+def _customer_intelligence_run_response(
+    diagnostic: CustomerIntelligenceRunDiagnostic,
+) -> CustomerIntelligenceRunDiagnosticResponse:
+    result_summary = dict(diagnostic.result)
+    result_summary.pop("route", None)
+    return CustomerIntelligenceRunDiagnosticResponse(
+        id=diagnostic.id,
+        request_id=diagnostic.request_id,
+        customer_id=diagnostic.customer_id,
+        actor_id=diagnostic.actor_id,
+        trigger_type=diagnostic.trigger_type,
+        scope=diagnostic.scope,
+        status=diagnostic.status,
+        attempt_count=diagnostic.attempt_count,
+        max_attempts=diagnostic.max_attempts,
+        route_label=_customer_intelligence_route_label(diagnostic.route),
+        result=result_summary,
+        visible_trace=diagnostic.visible_trace,
+        trace_events=diagnostic.trace_events,
+        error_message=diagnostic.error_message,
+        created_time=diagnostic.created_time,
+        started_time=diagnostic.started_time,
+        finished_time=diagnostic.finished_time,
+        next_retry_at=diagnostic.next_retry_at,
+        last_duration_ms=diagnostic.last_duration_ms,
+    )
+
+
+def _customer_intelligence_route_label(route: str | None) -> Optional[str]:
+    if route == "refresh_profile":
+        return "刷新客户档案"
+    if route == "refresh_brief":
+        return "刷新客户概况"
+    if route == "answer_customer_question":
+        return "回答客户问题"
+    return None
+
+
 @router.get("/industries", response_model=List[CustomerIndustryOption], summary="获取客户所属行业选项", description="""
 获取客户所属行业的下拉选项列表（用于客户创建、编辑等场景）。
 
@@ -196,8 +295,8 @@ async def convert_from_lead(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
     from app.services.feishu import feishu_service
-    from app.services.customer_profile_service import customer_profile_service
 
     source_lead = lead_crud.get_by_id(db, data.lead_id, team_id)
     if not source_lead:
@@ -227,12 +326,13 @@ async def convert_from_lead(
         # 设置档案状态为 PENDING
         customer_crud.update_profile_status(db, customer.id, "PENDING")
 
-        # 触发档案生成（异步，包含线索跟进记录分析）
-        await customer_profile_service.trigger_generation(
+        # 触发客户智能档案生成（异步，进入 LangGraph 统一编排）
+        await customer_intelligence_refresh_service.trigger_customer_created_refresh(
+            db,
+            team_id=team_id,
             customer_id=customer.id,
-            account_name=customer.account_name,
+            actor_id=str(current_user.id),
             source_lead_id=data.lead_id,
-            team_id=team_id
         )
 
         await feishu_service.notify_account_created(
@@ -244,7 +344,7 @@ async def convert_from_lead(
         return ConvertResponse(
             customer_id=customer.id,
             contact_id=contact.id,
-            message="转化成功，AI正在生成客户档案"
+            message="转化成功，客户智能档案正在整理"
         )
     except ValueError as e:
         raise HTTPException(
@@ -378,8 +478,6 @@ def get_customer_payment_plans(
     from app.models.payment import PaymentPlanStatus
 
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
-    
-    from app.models.payment import PaymentPlanStatus
     
     status_map = {
         PaymentPlanStatus.PENDING: "待回款",
@@ -522,7 +620,7 @@ def get_customer_invoices(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
+    _get_viewable_customer(db, customer_id, team_id, current_user)
 
     invoices, total = invoice_application_crud.list_applications(
         db=db,
@@ -588,7 +686,7 @@ async def create_customer(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.services.customer_profile_service import customer_profile_service
+    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 
     _ensure_customer_name_available(db, customer.account_name, team_id)
 
@@ -611,12 +709,13 @@ async def create_customer(
     # 设置档案状态为 PENDING
     customer_crud.update_profile_status(db, new_customer.id, "PENDING")
 
-    # 触发档案生成（异步）
-    await customer_profile_service.trigger_generation(
+    # 触发客户智能档案生成（异步，进入 LangGraph 统一编排）
+    await customer_intelligence_refresh_service.trigger_customer_created_refresh(
+        db,
+        team_id=team_id,
         customer_id=new_customer.id,
-        account_name=new_customer.account_name,
+        actor_id=str(current_user.id),
         source_lead_id=None,
-        team_id=team_id
     )
 
     return new_customer
@@ -1072,13 +1171,27 @@ def get_customer(
                 'secondary_name': industry.name if industry.level == 2 else None
             }
     
-    return CustomerDetailResponse(
+    customer_payload = {
         **customer.__dict__,
+        "customer_brief_markdown": industry_display_service.sanitize_markdown(
+            db,
+            customer.customer_brief_markdown,
+            industry_code=customer.industry,
+        ),
+    }
+
+    return CustomerDetailResponse(
+        **customer_payload,
         contacts=contacts,
         owner_info=owner_info,
         creator_info=creator_info,
         default_procurement_method_info=procurement_method_info,
-        industry_info=industry_info
+        industry_info=industry_info,
+        customer_intelligence_has_inputs=customer_intelligence_refresh_service.has_customer_business_data(
+            db,
+            customer_id=customer_id,
+            team_id=team_id,
+        ),
     )
 
 
@@ -1174,7 +1287,7 @@ def delete_customer(
 
 
 @router.post("/{customer_id}/contacts", response_model=ContactResponse, status_code=status.HTTP_201_CREATED, summary="添加联系人", description="为指定客户添加新联系人")
-def create_contact(
+async def create_contact(
     customer_id: int,
     contact: ContactCreate,
     team_id: int = Depends(get_current_user_team),
@@ -1183,7 +1296,14 @@ def create_contact(
 ):
     _get_editable_customer(db, customer_id, team_id, current_user)
 
-    return contact_crud.create(db, contact, customer_id, team_id)
+    created_contact = contact_crud.create(db, contact, customer_id, team_id)
+    await _schedule_contact_intelligence_refresh(
+        db,
+        created_contact,
+        trigger_type="customer_contact_created",
+        actor_id=str(current_user.id),
+    )
+    return created_contact
 
 
 @router.get("/{customer_id}/contacts", response_model=List[ContactResponse], summary="查询联系人列表", description="获取指定客户下的全部联系人")
@@ -1199,7 +1319,7 @@ def get_contacts(
 
 
 @router.put("/contacts/{contact_id}", response_model=ContactResponse, summary="编辑联系人", description="更新联系人信息")
-def update_contact(
+async def update_contact(
     contact_id: int,
     contact_update: ContactUpdate,
     team_id: int = Depends(get_current_user_team),
@@ -1214,11 +1334,18 @@ def update_contact(
         )
     _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
-    return contact_crud.update(db, contact, contact_update)
+    updated_contact = contact_crud.update(db, contact, contact_update)
+    await _schedule_contact_intelligence_refresh(
+        db,
+        updated_contact,
+        trigger_type="customer_contact_updated",
+        actor_id=str(current_user.id),
+    )
+    return updated_contact
 
 
 @router.patch("/contacts/{contact_id}/set-primary", response_model=ContactResponse, summary="设置主联系人", description="设置某联系人为主联系人")
-def set_primary_contact(
+async def set_primary_contact(
     contact_id: int,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1232,11 +1359,18 @@ def set_primary_contact(
         )
     _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
-    return contact_crud.set_primary(db, contact, team_id)
+    updated_contact = contact_crud.set_primary(db, contact, team_id)
+    await _schedule_contact_intelligence_refresh(
+        db,
+        updated_contact,
+        trigger_type="customer_contact_updated",
+        actor_id=str(current_user.id),
+    )
+    return updated_contact
 
 
 @router.delete("/contacts/{contact_id}", response_model=MessageResponse, summary="删除联系人", description="删除联系人")
-def delete_contact(
+async def delete_contact(
     contact_id: int,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1250,8 +1384,17 @@ def delete_contact(
         )
     _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
+    from app.services.customer_intelligence_event_service import customer_intelligence_event_service
+
+    deleted_event = customer_intelligence_event_service.from_contact(
+        contact,
+        trigger_type="customer_contact_deleted",
+        actor_id=str(current_user.id),
+    )
     try:
         contact_crud.delete(db, contact)
+        if deleted_event is not None:
+            await _schedule_customer_intelligence_event_refresh(db, deleted_event)
         return MessageResponse(message="删除成功")
     except ValueError as e:
         raise HTTPException(
@@ -1433,31 +1576,6 @@ def assign_customer(
         )
 
 
-@router.post("/{customer_id}/regenerate-profile", response_model=MessageResponse, summary="重新生成客户档案", description="AI重新生成客户档案信息")
-async def regenerate_profile(
-    customer_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    from app.services.customer_profile_service import customer_profile_service
-
-    customer = _get_editable_customer(db, customer_id, team_id, current_user)
-
-    # 重置状态为 PENDING
-    customer_crud.update_profile_status(db, customer_id, "PENDING")
-
-    # 触发档案重新生成
-    await customer_profile_service.trigger_generation(
-        customer_id=customer_id,
-        account_name=customer.account_name,
-        source_lead_id=customer.source_lead_id,
-        team_id=team_id
-    )
-
-    return MessageResponse(message="档案正在重新生成")
-
-
 @router.post("/{customer_id}/regenerate-brief", response_model=MessageResponse, summary="重新生成客户概况", description="AI重新生成销售侧客户概况")
 async def regenerate_customer_brief(
     customer_id: int,
@@ -1465,10 +1583,133 @@ async def regenerate_customer_brief(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.services.customer_brief_service import customer_brief_service
+    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 
     _get_viewable_customer(db, customer_id, team_id, current_user)
-    customer_crud.update_customer_brief_status(db, customer_id, "PENDING")
-    await customer_brief_service.trigger_generation(customer_id=customer_id, team_id=team_id)
+    await customer_intelligence_refresh_service.trigger_manual_refresh(
+        db,
+        team_id=team_id,
+        customer_id=customer_id,
+        actor_id=str(current_user.id),
+        scope="brief",
+    )
 
     return MessageResponse(message="客户概况正在生成")
+
+
+@router.post(
+    "/intelligence/batch-rebuild",
+    response_model=CustomerIntelligenceBatchRebuildResponse,
+    summary="批量重建客户智能档案",
+    description="通过客户智能 LangGraph 运行时批量重建客户档案/客户概况",
+)
+async def rebuild_customer_intelligence_batch(
+    payload: CustomerIntelligenceBatchRebuildRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(require_permission("customer:edit:all")),
+    db: Session = Depends(get_db),
+):
+    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
+
+    result = await customer_intelligence_refresh_service.trigger_batch_rebuild(
+        db,
+        team_id=team_id,
+        actor_id=str(current_user.id),
+        scope=payload.scope,
+        customer_ids=payload.customer_ids,
+        limit=payload.limit,
+    )
+    return CustomerIntelligenceBatchRebuildResponse(
+        message="客户智能档案批量重建已开始",
+        request_id=result.request_id,
+        scope=result.scope,
+        total=result.total,
+        scheduled=result.scheduled,
+        customer_ids=result.customer_ids,
+    )
+
+
+@router.get(
+    "/intelligence/runs",
+    response_model=CustomerIntelligenceRunDiagnosticListResponse,
+    summary="查询客户智能运行诊断",
+    description="查询客户智能 LangGraph 运行审计和用户可见执行轨迹",
+)
+def list_customer_intelligence_runs(
+    customer_id: Optional[int] = Query(None, ge=1, description="客户ID"),
+    request_id: Optional[str] = Query(None, min_length=1, max_length=120, description="请求ID"),
+    run_status: Optional[str] = Query(None, alias="status", min_length=1, max_length=30, description="运行状态"),
+    limit: int = Query(20, ge=1, le=100, description="返回记录数"),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(require_permission("customer:edit:all")),
+    db: Session = Depends(get_db),
+):
+    from app.services.customer_intelligence_run_service import customer_intelligence_run_service
+
+    diagnostics = customer_intelligence_run_service.list_diagnostics(
+        db,
+        team_id=team_id,
+        customer_id=customer_id,
+        request_id=request_id,
+        status=run_status,
+        limit=limit,
+    )
+    return CustomerIntelligenceRunDiagnosticListResponse(
+        items=[_customer_intelligence_run_response(diagnostic) for diagnostic in diagnostics],
+        total=len(diagnostics),
+        limit=limit,
+    )
+
+
+@router.get(
+    "/intelligence/runs/{run_id}",
+    response_model=CustomerIntelligenceRunDiagnosticResponse,
+    summary="查询客户智能运行详情",
+    description="查询单次客户智能 LangGraph 运行审计和可回放执行轨迹",
+)
+def get_customer_intelligence_run(
+    run_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(require_permission("customer:edit:all")),
+    db: Session = Depends(get_db),
+):
+    from app.services.customer_intelligence_run_service import customer_intelligence_run_service
+
+    diagnostic = customer_intelligence_run_service.get_diagnostic(
+        db,
+        team_id=team_id,
+        run_id=run_id,
+    )
+    if diagnostic is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="客户智能运行记录不存在",
+        )
+    return _customer_intelligence_run_response(diagnostic)
+
+
+@router.post(
+    "/intelligence/retries/run-due",
+    response_model=CustomerIntelligenceRetryDueResponse,
+    summary="执行到期客户智能重试",
+    description="调度已到重试时间的客户智能 LangGraph 运行",
+)
+async def run_due_customer_intelligence_retries(
+    limit: int = Query(20, ge=1, le=100, description="本次最多处理数量"),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(require_permission("customer:edit:all")),
+):
+    from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
+
+    result = await customer_intelligence_refresh_service.run_due_retries(team_id=team_id, limit=limit)
+    return CustomerIntelligenceRetryDueResponse(
+        success=result.get("success") is True,
+        total=int(result.get("total") or 0),
+        succeeded=int(result.get("succeeded") or 0),
+        failed=int(result.get("failed") or 0),
+        results=[
+            item
+            for item in result.get("results", [])
+            if isinstance(item, dict)
+        ],
+    )

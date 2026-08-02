@@ -11,6 +11,7 @@ import { OptionalNullableStringSchema } from './common'
 export const LicenseApplicationStatusSchema = z.enum([
   'DRAFT',      // 草稿
   'PENDING',    // 待审批
+  'PENDING_REVIEW', // 待审核（后端兼容状态）
   'APPROVED',   // 已批准
   'REJECTED',   // 已拒绝
   'ISSUED'      // 已发放
@@ -19,6 +20,7 @@ export const LicenseApplicationStatusSchema = z.enum([
 export const LicenseApplicationStatusMap: Record<string, string> = {
   'DRAFT': '草稿',
   'PENDING': '待审批',
+  'PENDING_REVIEW': '待审核',
   'APPROVED': '已批准',
   'REJECTED': '已拒绝',
   'ISSUED': '已发放'
@@ -43,6 +45,7 @@ export const LicenseApplicationSchema = z.object({
   customer_id: z.number().int().positive(),
   deployment_info_id: z.number().int().nullable(),
   contract_id: z.number().int().nullable(),
+  authorized_users: z.number().int().positive('使用人数必须大于0'),
   expiry_date: z.string()
     .refine((val) => {
       const date = new Date(val)
@@ -117,6 +120,7 @@ export type LicenseApplicationCreate = z.infer<typeof LicenseApplicationCreateSc
 export const LicenseApplicationUpdateSchema = z.object({
   deployment_info_id: z.number().int().nullable(),
   contract_id: z.number().int().nullable(),
+  authorized_users: z.number().int().positive('使用人数必须大于0'),
   expiry_date: z.string()
     .refine((val) => {
       if (!val) return true // 可选字段，允许为空

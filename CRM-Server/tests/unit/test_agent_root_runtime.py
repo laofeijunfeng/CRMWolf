@@ -1,9 +1,10 @@
 """Tests for the LangGraph-native CRM Agent root runtime."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from types import SimpleNamespace
 
 from app.services.agent import agent_copy
 from app.services.agent import root_runtime as root_runtime_module
@@ -317,6 +318,177 @@ class FakeAutoExecutableNewFlowGraphService:
         yield {"event": "final", "content": "请确认是否创建这条跟进记录？"}
 
 
+class FakeCustomerIntelligenceGraphService:
+    def __init__(self):
+        self.run_calls = []
+        self.resume_calls = []
+
+    async def run(self, input_state):
+        self.run_calls.append(input_state)
+        return {
+            "event": {"event_key": "ci-event-1", "customer_id": 101},
+            "route": "refresh_profile",
+            "visible_trace": [
+                {"title": "读取客户上下文", "content": "已读取客户、商机和跟进动态"},
+                {"title": "复核客户事实", "content": "提炼出 1 条需复核事实"},
+            ],
+            "customer_fact_review": {
+                "schema_version": "agent.interrupt.v1",
+                "type": "confirm",
+                "reason": "user_input_required",
+                "business_action": "review_customer_facts",
+                "allowed_resume_actions": ["approve", "reject", "cancel"],
+                "draft_payload": {"customer_name": "越秀金融", "candidate_count": 1},
+                "interaction": {
+                    "schema_version": "agent.interrupt.v1",
+                    "interaction_id": "ci-event-1",
+                    "type": "confirm",
+                    "business_action": "review_customer_facts",
+                    "status": "waiting_confirmation",
+                    "title": "确认是否沉淀客户事实",
+                    "prompt": "是否沉淀到客户智能档案？",
+                    "payload": {"customer_name": "越秀金融"},
+                    "allow_cancel": True,
+                },
+                "source_event": "customer_fact_review_required",
+            },
+            "__interrupt__": [
+                SimpleNamespace(value={
+                    "schema_version": "agent.interrupt.v1",
+                    "type": "confirm",
+                    "reason": "user_input_required",
+                    "business_action": "review_customer_facts",
+                    "allowed_resume_actions": ["approve", "reject", "cancel"],
+                    "draft_payload": {"customer_name": "越秀金融", "candidate_count": 1},
+                    "interaction": {
+                        "schema_version": "agent.interrupt.v1",
+                        "interaction_id": "ci-event-1",
+                        "type": "confirm",
+                        "business_action": "review_customer_facts",
+                        "status": "waiting_confirmation",
+                        "title": "确认是否沉淀客户事实",
+                        "prompt": "是否沉淀到客户智能档案？",
+                        "payload": {"customer_name": "越秀金融"},
+                        "allow_cancel": True,
+                    },
+                    "source_event": "customer_fact_review_required",
+                }),
+            ],
+            "events": [{"event": "customer_intelligence_fact_review_required"}],
+        }
+
+    async def resume_review(self, input_state):
+        self.resume_calls.append(input_state)
+        return {
+            "event": {"event_key": input_state["event_key"], "customer_id": 101},
+            "route": "refresh_profile",
+            "visible_trace": [
+                {"title": "复核客户事实", "content": "已确认沉淀"},
+                {"title": "沉淀客户事实", "content": "已沉淀 1 条客户事实"},
+            ],
+            "customer_fact_review": {"status": "resolved", "resume_action": "approve"},
+            "persisted_customer_fact_refs": [{"fact_id": 901}],
+            "events": [{"event": "customer_intelligence_facts_persisted"}],
+        }
+
+
+class FakeAnsweringCustomerIntelligenceGraphService:
+    def __init__(self):
+        self.run_calls = []
+
+    async def run(self, input_state):
+        self.run_calls.append(input_state)
+        event = input_state["event"]
+        return {
+            "event": {"event_key": event.event_key, "customer_id": event.customer_id},
+            "route": "answer_context",
+            "customer_context_answer": {
+                "answer": "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。",
+                "confidence": 0.86,
+                "used_sections": ["customer", "opportunities", "activities"],
+                "missing_context": [],
+            },
+            "assistant_content": "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。",
+            "visible_trace": [
+                {"title": "读取客户上下文", "content": "已读取客户智能上下文"},
+                {"title": "制定更新计划", "content": "本次用于回答客户问题"},
+                {"title": "生成客户回答", "content": "已基于客户档案、业务上下文和检索证据整理回答，置信度 86%"},
+            ],
+            "events": [{"event": "customer_intelligence_trace_ready"}],
+        }
+
+
+class FakeStreamingCustomerIntelligenceGraphService:
+    def __init__(self):
+        self.stream_calls = []
+
+    async def stream_run(self, input_state):
+        self.stream_calls.append(input_state)
+        event = input_state["event"]
+        yield {
+            "kind": "event",
+            "event": {
+                "event": "agent_step",
+                "step": "customer_intelligence",
+                "status": "completed",
+                "content": "读取客户上下文：已读取客户智能上下文",
+            },
+        }
+        yield {
+            "kind": "event",
+            "event": {
+                "event": "agent_step",
+                "step": "customer_intelligence",
+                "status": "completed",
+                "content": "制定更新计划：本次用于回答客户问题",
+            },
+        }
+        yield {
+            "kind": "event",
+            "event": {
+                "event": "agent_step",
+                "step": "customer_intelligence",
+                "status": "completed",
+                "content": "生成客户回答：已基于客户档案、业务上下文和检索证据整理回答，置信度 86%",
+            },
+        }
+        yield {
+            "kind": "result",
+            "result": {
+                "event": {"event_key": event.event_key, "customer_id": event.customer_id},
+                "route": "answer_context",
+                "customer_context_answer": {
+                    "answer": "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。",
+                    "confidence": 0.86,
+                    "used_sections": ["customer", "opportunities", "activities"],
+                    "missing_context": [],
+                },
+                "assistant_content": "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。",
+                "visible_trace": [
+                    {"title": "读取客户上下文", "content": "已读取客户智能上下文"},
+                    {"title": "制定更新计划", "content": "本次用于回答客户问题"},
+                    {"title": "生成客户回答", "content": "已基于客户档案、业务上下文和检索证据整理回答，置信度 86%"},
+                ],
+                "events": [{"event": "customer_intelligence_trace_ready"}],
+            },
+        }
+
+
+class FakeCustomerIntelligenceTriggerPolicy:
+    def __init__(self, event=None):
+        self.event = event
+        self.new_flow_calls = []
+        self.tool_result_calls = []
+
+    def from_new_flow_events(self, events, *, turn):
+        self.new_flow_calls.append({"events": events, "turn": turn})
+        return self.event
+
+    def from_confirmed_tool_result(self, db, tool_result, *, team_id):
+        self.tool_result_calls.append({"db": db, "tool_result": tool_result, "team_id": team_id})
+        return self.event
+
+
 def waiting_task_stub():
     return SimpleNamespace(
         id=101,
@@ -381,6 +553,282 @@ async def test_root_runtime_checkpoints_serializable_agent_state():
     assert new_flow_graph_service.calls[0]["session_context"] == {}
     assert side_effects.new_flow_events[-1] == {"event": "final", "content": "已处理新流程"}
     assert side_effects.new_flow_assistant_content == "已处理新流程"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_bubbles_customer_intelligence_review_interrupt():
+    customer_intelligence_graph_service = FakeCustomerIntelligenceGraphService()
+    side_effects = AgentRootRuntimeSideEffects()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        customer_intelligence_graph_service=customer_intelligence_graph_service,
+    )
+
+    state = await runtime.checkpoint_turn_start({
+        "team_id": 2,
+        "user_id": 3,
+        "session_id": 4,
+        "session_key": "abc",
+        "channel": "web",
+        "content": "刷新客户档案",
+        "turn_kind": "text",
+        "customer_intelligence_requested": True,
+    }, context=AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="刷新客户档案",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        customer_intelligence_event=SimpleNamespace(event_key="ci-event-1"),
+        side_effects=side_effects,
+    ))
+
+    assert customer_intelligence_graph_service.run_calls
+    assert state["current_interrupt"]["business_action"] == "review_customer_facts"
+    assert state["customer_intelligence_event"]["event_key"] == "ci-event-1"
+    assert state["customer_intelligence_result"]["has_interrupt"] is True
+    assert state["__interrupt__"][0].value["business_action"] == "review_customer_facts"
+    assert side_effects.current_interrupt["business_action"] == "review_customer_facts"
+    assert side_effects.customer_intelligence_events[-1]["event"] == "final"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_routes_customer_query_to_customer_intelligence_graph():
+    customer_intelligence_event = SimpleNamespace(
+        event_key="agent-question-1",
+        customer_id=101,
+    )
+    customer_intelligence_graph_service = FakeAnsweringCustomerIntelligenceGraphService()
+    trigger_policy = FakeCustomerIntelligenceTriggerPolicy(customer_intelligence_event)
+    side_effects = AgentRootRuntimeSideEffects()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        customer_intelligence_graph_service=customer_intelligence_graph_service,
+        customer_intelligence_trigger_policy=trigger_policy,
+    )
+
+    state = await runtime.checkpoint_turn_start({
+        "team_id": 2,
+        "user_id": 3,
+        "session_id": 4,
+        "session_key": "abc",
+        "channel": "web",
+        "content": "总结一下这个客户",
+        "turn_kind": "text",
+    }, context=AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="总结一下这个客户",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        user_message_id=88,
+        authorization="Bearer test",
+        side_effects=side_effects,
+    ))
+
+    assert trigger_policy.new_flow_calls
+    assert customer_intelligence_graph_service.run_calls[0]["event"] == customer_intelligence_event
+    assert state["customer_intelligence_requested"] is False
+    assert state["customer_intelligence_result"]["route"] == "answer_context"
+    assert state["assistant_content"] == "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。"
+    assert [event for event in side_effects.new_flow_events if event.get("event") == "final"] == []
+    assert side_effects.customer_intelligence_assistant_content == "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。"
+    assert side_effects.customer_intelligence_events[-1] == {
+        "event": "final",
+        "content": "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。",
+        "content_format": "markdown",
+    }
+    output = project_turn_output(state, side_effects)
+    assert [
+        (event.get("content"), event.get("content_format"))
+        for event in output.events
+        if event.get("event") == "final"
+    ] == [("越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。", "markdown")]
+    assert output.assistant_content == "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_streams_customer_intelligence_trace_without_duplicate_batch_events():
+    customer_intelligence_event = SimpleNamespace(
+        event_key="agent-question-stream-1",
+        customer_id=101,
+    )
+    customer_intelligence_graph_service = FakeStreamingCustomerIntelligenceGraphService()
+    trigger_policy = FakeCustomerIntelligenceTriggerPolicy(customer_intelligence_event)
+    side_effects = AgentRootRuntimeSideEffects()
+    streamed_events = []
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        customer_intelligence_graph_service=customer_intelligence_graph_service,
+        customer_intelligence_trigger_policy=trigger_policy,
+    )
+
+    async def event_sink(event):
+        streamed_events.append(event)
+
+    state = await runtime.checkpoint_turn_start({
+        "team_id": 2,
+        "user_id": 3,
+        "session_id": 4,
+        "session_key": "abc",
+        "channel": "web",
+        "content": "总结一下这个客户",
+        "turn_kind": "text",
+    }, context=AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="总结一下这个客户",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        user_message_id=88,
+        authorization="Bearer test",
+        event_sink=event_sink,
+        side_effects=side_effects,
+    ))
+
+    customer_intelligence_step_contents = [
+        event["content"]
+        for event in side_effects.customer_intelligence_events
+        if event.get("event") == "agent_step" and event.get("step") == "customer_intelligence"
+    ]
+    assert customer_intelligence_graph_service.stream_calls[0]["event"] == customer_intelligence_event
+    assert state["customer_intelligence_result"]["route"] == "answer_context"
+    assert customer_intelligence_step_contents == [
+        "更新客户智能档案",
+        "读取客户上下文：已读取客户智能上下文",
+        "制定更新计划：本次用于回答客户问题",
+        "生成客户回答：已基于客户档案、业务上下文和检索证据整理回答，置信度 86%",
+    ]
+    assert [
+        event["content"]
+        for event in streamed_events
+        if event.get("event") == "agent_step" and event.get("step") == "customer_intelligence"
+    ] == customer_intelligence_step_contents
+    assert [
+        (event.get("content"), event.get("content_format"))
+        for event in streamed_events
+        if event.get("event") == "final"
+    ] == [("越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。", "markdown")]
+    assert state["assistant_content"] == "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_continues_to_customer_intelligence_after_confirmed_activity_write():
+    customer_intelligence_event = SimpleNamespace(
+        event_key="activity-created-1",
+        customer_id=101,
+    )
+    customer_intelligence_graph_service = FakeAnsweringCustomerIntelligenceGraphService()
+    trigger_policy = FakeCustomerIntelligenceTriggerPolicy(customer_intelligence_event)
+    side_effects = AgentRootRuntimeSideEffects()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        pending_graph_service=FakeConfirmingPendingGraphService(),
+        confirmed_task_graph_service=FakeConfirmedTaskGraphService(),
+        customer_intelligence_graph_service=customer_intelligence_graph_service,
+        customer_intelligence_trigger_policy=trigger_policy,
+    )
+    task = waiting_task_stub()
+
+    state = await runtime.checkpoint_turn_start({
+        "team_id": 2,
+        "user_id": 3,
+        "session_id": 4,
+        "session_key": "abc",
+        "channel": "web",
+        "content": "确认",
+        "turn_kind": "confirm",
+        "pending_task_requested": True,
+        "task_projection": {"id": task.id, "task_key": task.task_key},
+    }, context=AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        task=task,
+        turn_input=AgentTurnInput.confirm(source="web"),
+        content="确认",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        side_effects=side_effects,
+    ))
+
+    assert trigger_policy.tool_result_calls
+    assert customer_intelligence_graph_service.run_calls[0]["event"] == customer_intelligence_event
+    assert state["customer_intelligence_result"]["route"] == "answer_context"
+    assert side_effects.confirmed_task_assistant_content == "跟进记录已创建。"
+    assert side_effects.customer_intelligence_events
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_resumes_customer_intelligence_review_through_root_interrupt():
+    customer_intelligence_graph_service = FakeCustomerIntelligenceGraphService()
+    side_effects = AgentRootRuntimeSideEffects()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        customer_intelligence_graph_service=customer_intelligence_graph_service,
+    )
+    context = AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="刷新客户档案",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        authorization="Bearer test",
+        customer_intelligence_event=SimpleNamespace(event_key="ci-event-1"),
+        side_effects=side_effects,
+    )
+
+    first_state = await runtime.checkpoint_turn_start({
+        "team_id": 2,
+        "user_id": 3,
+        "session_id": 4,
+        "session_key": "abc",
+        "channel": "web",
+        "content": "刷新客户档案",
+        "turn_kind": "text",
+        "customer_intelligence_requested": True,
+    }, context=context)
+
+    resumed_side_effects = AgentRootRuntimeSideEffects()
+    resumed_state = await runtime.resume_interrupt(
+        resume_payload={
+            "action": "approve",
+            "source": "web",
+            "business_action": "review_customer_facts",
+            "interrupt_reason": "user_input_required",
+        },
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        session_key="abc",
+        current_interrupt=first_state["current_interrupt"],
+        context=AgentRuntimeContext(
+            db=object(),
+            session=SimpleNamespace(id=4, context_json={}),
+            content="确认",
+            team_id=2,
+            user_id=3,
+            session_id=4,
+            authorization="Bearer test",
+            side_effects=resumed_side_effects,
+        ),
+    )
+
+    assert customer_intelligence_graph_service.resume_calls[0]["event_key"] == "ci-event-1"
+    assert customer_intelligence_graph_service.resume_calls[0]["resume_payload"]["action"] == "approve"
+    assert resumed_state["current_interrupt"] is None
+    assert resumed_state["customer_intelligence_result"]["persisted_fact_count"] == 1
+    assert resumed_side_effects.customer_intelligence_assistant_content == "客户智能档案已更新，沉淀了 1 条客户事实。"
 
 
 @pytest.mark.asyncio

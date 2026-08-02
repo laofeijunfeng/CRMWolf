@@ -7,7 +7,7 @@ class DeploymentInfoBase(BaseModel):
     """部署信息基础模型"""
     deployment_name: str = Field(..., min_length=1, max_length=100, description="部署名称（如：生产环境、测试环境）")
     server_address: str = Field(..., max_length=500, description="服务器地址（http:// 或 https:// 开头）")
-    authorized_users: int = Field(..., gt=0, description="授权人数（必须大于0）")
+    authorized_users: Optional[int] = Field(None, gt=0, description="历史授权人数（新申请人数记录在 License 申请）")
     is_default: bool = Field(default=False, description="是否默认部署")
 
     @field_validator('deployment_name')
@@ -37,7 +37,7 @@ class DeploymentInfoUpdate(BaseModel):
     """更新部署信息请求模型"""
     deployment_name: Optional[str] = Field(None, min_length=1, max_length=100, description="部署名称")
     server_address: Optional[str] = Field(None, max_length=500, description="服务器地址")
-    authorized_users: Optional[int] = Field(None, gt=0, description="授权人数（必须大于0）")
+    authorized_users: Optional[int] = Field(None, gt=0, description="历史授权人数（新申请人数记录在 License 申请）")
     is_default: Optional[bool] = Field(None, description="是否默认部署")
 
     @field_validator('deployment_name')

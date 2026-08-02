@@ -1,35 +1,47 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
-from typing import List, Optional, Dict
-from urllib.parse import quote
 import os
+from datetime import date
+from datetime import datetime as _datetime
+from typing import Dict, List, Optional
+from urllib.parse import quote
 
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
+
+from app.constants.approval_phase import ApprovalPhase
+from app.constants.business_types import BusinessType, is_valid_business_type
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
 from app.core.logging import get_logger, log_with_fields
+from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.contract import contract_crud
-from app.crud.approval import approval_flow_crud, approval_crud
 from app.crud.role import role_crud
-from app.models.approval import Approval, ApprovalStatus, ApprovalAction, ApprovalRecord
+from app.models.approval import Approval, ApprovalAction, ApprovalRecord, ApprovalStatus
 from app.models.contract import ContractStatus
 from app.models.user import User
 from app.schemas.approval import (
-    ApprovalFlowCreate, ApprovalFlowUpdate, ApprovalFlowResponse, ApprovalFlowDetailResponse,
-    ApprovalSubmitRequest, ApprovalActionRequest, ApprovalDetailResponse, ApprovalListResponse,
-    ApprovalRecordResponse, MessageResponse, OverdueApprovalResponse, OverdueApprovalListResponse,
     ApprovalActionEnum,
+    ApprovalActionRequest,
+    ApprovalDetailResponse,
+    ApprovalFlowCreate,
+    ApprovalFlowDetailResponse,
+    ApprovalFlowResponse,
+    ApprovalFlowUpdate,
+    ApprovalRecordResponse,
+    ApprovalSubmitRequest,
+    MessageResponse,
+    OverdueApprovalListResponse,
+    OverdueApprovalResponse,
+)
+from app.schemas.approval_generic import (
+    ApprovalGenericListResponse,
+    ApprovalListItemResponse,
+    GenericApprovalSubmitResponse,
 )
 from app.schemas.approval_generic import (
     ApprovalSubmitRequest as GenericApprovalSubmitRequest,
-    GenericApprovalSubmitResponse,
-    ApprovalListItemResponse,
-    ApprovalGenericListResponse,
 )
-from app.constants.business_types import is_valid_business_type, BusinessType
-from app.constants.approval_phase import ApprovalPhase
 from app.services.approval_adapter import (
     get_adapter,
     get_approval_action_path,
@@ -37,10 +49,12 @@ from app.services.approval_adapter import (
     get_approval_customer_name,
     get_approval_type_name,
 )
+from app.services.customer_approval_intelligence_service import (
+    CustomerApprovalChangeRefreshInput,
+    customer_approval_intelligence_service,
+)
 from app.services.feishu_notification import feishu_notification_service
-from app.services.file_storage import file_storage_service, FileStorageError
-from datetime import date, datetime as _datetime
-
+from app.services.file_storage import FileStorageError, file_storage_service
 
 router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
 
@@ -80,6 +94,37 @@ def _approval_file_content_disposition(filename: str) -> str:
     encoded = quote(filename)
     ascii_name = filename.encode("ascii", "ignore").decode("ascii") or "attachment"
     return f'inline; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded}'
+
+
+def _enqueue_customer_approval_intelligence(
+    db: Session,
+    *,
+    entity_type: str,
+    entity,
+    approval: Approval,
+    actor_id: str,
+    action: str,
+) -> None:
+    try:
+        customer_approval_intelligence_service.enqueue_approval_change_refresh(
+            db,
+            CustomerApprovalChangeRefreshInput(
+                entity_type=entity_type,
+                entity=entity,
+                approval=approval,
+                actor_id=actor_id,
+                action=action,
+            ),
+        )
+    except Exception as refresh_error:
+        db.rollback()
+        logger.error(
+            "[Approval] Customer intelligence refresh enqueue failed: "
+            "entity_type=%s, business_id=%s, error=%s",
+            entity_type,
+            getattr(entity, "id", None),
+            refresh_error,
+        )
 
 
 def log_approval_operation(
@@ -375,8 +420,8 @@ def update_approval_flow(
     db: Session = Depends(get_db)
 ):
     # 权限检查：TEAM_ADMIN 或 approval:flow:edit
-    from app.crud.role import role_crud
     from app.crud.permission import permission_crud
+    from app.crud.role import role_crud
 
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
@@ -1027,7 +1072,7 @@ def get_approval_detail(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.models.user import User, UserStatus
+    from app.models.user import UserStatus
 
     approval = approval_crud.get_by_contract_id(db, contract_id, team_id)
     if not approval:
@@ -1333,7 +1378,7 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
     并补 business_type / business_id。审批人状态展示（在职/离职）由 A8 通知泛化时
     统一加，此处先返回基础字段，保证前端通用审批页可用。
     """
-    from app.models.user import User, UserStatus
+    from app.models.user import UserStatus
 
     records = approval_crud.get_records(db, approval.id)
 
@@ -1572,7 +1617,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "status": license_application.status,
             "deployment_name": deployment.deployment_name if deployment else None,
             "server_address": deployment.server_address if deployment else None,
-            "authorized_users": deployment.authorized_users if deployment else None,
+            "authorized_users": license_application.authorized_users,
             "contract_name": license_application.contract.contract_name if license_application.contract else None,
             "remark": license_application.remark,
             "enterprise_id": license_application.enterprise_id,
@@ -1927,6 +1972,15 @@ async def approve_generic_approval(
     adapter = get_adapter(entity_type)
     entity = adapter.get_entity(db, approval.business_id, approval.team_id)
     entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{entity_id}"
+    if entity is not None:
+        _enqueue_customer_approval_intelligence(
+            db,
+            entity_type=entity_type,
+            entity=entity,
+            approval=approval,
+            actor_id=str(current_user.id),
+            action=action_request.action.value,
+        )
 
     try:
         if action_request.action.value == ApprovalAction.APPROVE:
@@ -2046,6 +2100,16 @@ async def cancel_generic_approval(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        )
+    entity = adapter.get_entity(db, entity_id, team_id)
+    if entity is not None:
+        _enqueue_customer_approval_intelligence(
+            db,
+            entity_type=entity_type,
+            entity=entity,
+            approval=approval,
+            actor_id=str(current_user.id),
+            action="CANCEL",
         )
 
     notification_status = "skipped"

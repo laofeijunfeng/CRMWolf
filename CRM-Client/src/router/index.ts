@@ -71,7 +71,7 @@ const routes: RouteRecordRaw[] = [
         path: 'agent',
         name: 'AgentChat',
         component: () => import('@/views/AgentChat.vue'),
-        meta: { requiresAuth: true, title: 'AI Agent' }
+        meta: { requiresAuth: true, title: 'AI Agent', keepAlive: true }
       },
       {
         path: 'leads',

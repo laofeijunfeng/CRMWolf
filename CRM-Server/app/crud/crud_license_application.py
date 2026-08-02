@@ -180,6 +180,7 @@ class LicenseApplicationCRUD:
             contract_id=obj_in.contract_id,
             expiry_date=obj_in.expiry_date,
             license_type=obj_in.license_type.value,
+            authorized_users=obj_in.authorized_users,
             remark=obj_in.remark,  # 补充需求：备注字段
             applicant_id=applicant_id,
             status=LicenseApplicationStatus.DRAFT

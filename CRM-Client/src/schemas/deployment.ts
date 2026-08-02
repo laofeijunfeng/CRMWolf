@@ -19,7 +19,7 @@ export const DeploymentInfoSchema = z.object({
       (val) => val.startsWith('http://') || val.startsWith('https://'),
       '服务器地址必须以 http:// 或 https:// 开头'
     ),
-  authorized_users: z.number().int().positive('授权人数必须大于0'),
+  authorized_users: z.number().int().positive('授权人数必须大于0').nullable().optional(),
   is_default: z.boolean(),
   created_time: z.string().datetime(),
   last_modified_time: z.string().datetime()

@@ -17,7 +17,6 @@ const routerReplace = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const customerApi = vi.hoisted(() => ({
   getCustomerDetail: vi.fn(),
   getCustomerMembers: vi.fn(),
-  regenerateProfile: vi.fn(),
 }))
 const customerActivityApi = vi.hoisted(() => ({ getActivities: vi.fn() }))
 const opportunityApi = vi.hoisted(() => ({ getOpportunities: vi.fn() }))

@@ -5,7 +5,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 from sqlalchemy import or_
 
@@ -14,9 +14,25 @@ from app.crud.permission import permission_crud
 from app.models.agent import AgentIdempotencyStatus, AgentToolCallStatus
 from app.models.customer import Contact, Customer, CustomerMember
 from app.models.lead import Lead, LeadStatus
-from app.schemas.agent import AgentIdempotencyKeyCreate, AgentIdempotencyKeyUpdate, AgentToolCallCreate, AgentToolCallUpdate
+from app.schemas.agent import (
+    AgentIdempotencyKeyCreate,
+    AgentIdempotencyKeyUpdate,
+    AgentToolCallCreate,
+    AgentToolCallUpdate,
+)
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult, JsonDict
+from app.services.customer_alias_service import CustomerAliasMatch, CustomerAliasService, customer_alias_service
+from app.services.customer_intelligence_context_service import (
+    CustomerIntelligenceContextService,
+    customer_intelligence_context_service,
+)
+from app.services.customer_knowledge_candidate_service import (
+    CustomerKnowledgeCandidateResult,
+    CustomerKnowledgeCandidateService,
+    CustomerVisibilityPredicate,
+    customer_knowledge_candidate_service,
+)
 
 
 class CRMAgentToolService:
@@ -27,21 +43,192 @@ class CRMAgentToolService:
     directly when the result must follow a different disclosure policy.
     """
 
-    def __init__(self, api_client: Optional[InternalCRMAPIClient] = None) -> None:
+    def __init__(
+        self,
+        api_client: Optional[InternalCRMAPIClient] = None,
+        intelligence_context_service: Optional[CustomerIntelligenceContextService] = None,
+        knowledge_candidate_service: Optional[CustomerKnowledgeCandidateService] = None,
+        alias_service: Optional[CustomerAliasService] = None,
+    ) -> None:
         self.api_client = api_client or InternalCRMAPIClient()
+        self.intelligence_context_service = intelligence_context_service or customer_intelligence_context_service
+        self.knowledge_candidate_service = knowledge_candidate_service or customer_knowledge_candidate_service
+        self.alias_service = alias_service or customer_alias_service
 
     async def search_customers(self, context: AgentToolContext, keyword: str, limit: int = 10) -> AgentToolResult:
-        payload = {"keyword": keyword, "limit": limit, "scope": "accessible"}
+        clean_keyword = keyword.strip()
+        expanded_terms = self.alias_service.expand_query_terms(clean_keyword)
+        payload = {
+            "keyword": clean_keyword,
+            "limit": limit,
+            "scope": "accessible",
+            "retrieval_mode": "hybrid",
+            "query_terms": expanded_terms,
+        }
 
         async def call_api():
-            return await self.api_client.request(
+            lexical = await self.api_client.request(
                 "GET",
                 "/v1/customers/",
                 context.authorization,
-                params={"keyword": keyword, "limit": limit, "scope": "accessible"},
+                params={"keyword": clean_keyword, "limit": limit, "scope": "accessible"},
+            )
+            return self._merge_customer_search_with_semantic_evidence(
+                context,
+                keyword=clean_keyword,
+                lexical_data=lexical,
+                limit=limit,
             )
 
         return await self._run_read_tool(context, "search_customers", payload, call_api)
+
+    def _merge_customer_search_with_semantic_evidence(
+        self,
+        context: AgentToolContext,
+        *,
+        keyword: str,
+        lexical_data: object,
+        limit: int,
+    ) -> JsonDict:
+        lexical_payload = lexical_data if isinstance(lexical_data, dict) else {}
+        lexical_items = [
+            item for item in lexical_payload.get("items", [])
+            if isinstance(item, dict) and isinstance(item.get("id"), int)
+        ]
+        visibility_predicate = self._customer_visibility_predicate(context)
+        retrieval: JsonDict = {
+            "mode": "hybrid",
+            "lexical_status": "completed",
+            "alias_status": "not_attempted",
+            "semantic_status": "not_attempted",
+            "semantic_source": "customer_evidence",
+        }
+        alias_candidates: list[JsonDict] = []
+        if keyword:
+            alias_matches = self.alias_service.recall(
+                context.db,
+                team_id=context.team_id,
+                query_text=keyword,
+                limit=limit,
+                visibility_predicate=visibility_predicate,
+            )
+            alias_candidates = [_alias_match_item(match) for match in alias_matches]
+            retrieval["alias_status"] = "completed"
+            retrieval["alias_candidate_count"] = len(alias_candidates)
+        semantic_candidates: list[JsonDict] = []
+        if keyword:
+            knowledge_result = self._search_accessible_customers_by_evidence(context, keyword, limit=limit)
+            semantic_candidates = knowledge_result.candidates
+            retrieval.update(_semantic_retrieval_metadata(knowledge_result.retrieval_event))
+        items = self._merge_customer_candidates(
+            lexical_items=lexical_items,
+            alias_items=alias_candidates,
+            semantic_items=semantic_candidates,
+            limit=limit,
+        )
+        return {
+            **lexical_payload,
+            "items": items,
+            "total": len(items),
+            "retrieval": retrieval,
+        }
+
+    def _search_accessible_customers_by_evidence(
+        self,
+        context: AgentToolContext,
+        keyword: str,
+        *,
+        limit: int,
+    ) -> CustomerKnowledgeCandidateResult:
+        return self.knowledge_candidate_service.recall(
+            context.db,
+            team_id=context.team_id,
+            query_text=keyword,
+            limit=limit,
+            source_types=[
+                "customer",
+                "customer_profile",
+                "customer_brief",
+                "follow_up",
+                "business_flow",
+                "opportunity",
+                "contract",
+                "payment",
+                "contact",
+            ],
+            visibility_predicate=self._customer_visibility_predicate(context),
+        )
+
+    @staticmethod
+    def _merge_customer_candidates(
+        *,
+        lexical_items: list[JsonDict],
+        alias_items: list[JsonDict],
+        semantic_items: list[JsonDict],
+        limit: int,
+    ) -> list[JsonDict]:
+        merged: dict[int, JsonDict] = {}
+        order: list[int] = []
+        for item in [*lexical_items, *alias_items]:
+            customer_id = item.get("id")
+            if not isinstance(customer_id, int):
+                continue
+            candidate = dict(item)
+            candidate.setdefault(
+                "match",
+                {"source": "customer_search", "score": 1.0, "reason": "客户名称匹配"},
+            )
+            if customer_id in merged:
+                merged[customer_id] = _combine_customer_candidate_matches(
+                    merged[customer_id],
+                    candidate,
+                    source="hybrid",
+                    reason="客户名称和常用称呼均匹配",
+                )
+            else:
+                merged[customer_id] = candidate
+                order.append(customer_id)
+        for item in semantic_items:
+            customer_id = item.get("id")
+            if not isinstance(customer_id, int):
+                continue
+            if customer_id in merged:
+                merged[customer_id] = _combine_customer_candidate_matches(
+                    merged[customer_id],
+                    item,
+                    source="hybrid",
+                    reason="客户名称、常用称呼或客户知识库匹配",
+                )
+            else:
+                merged[customer_id] = item
+                order.append(customer_id)
+        return [merged[customer_id] for customer_id in order[:limit]]
+
+    def _customer_visibility_predicate(self, context: AgentToolContext) -> CustomerVisibilityPredicate:
+        user_id = str(context.user_id)
+        permission_flags: tuple[bool, bool] | None = None
+
+        def can_view_customer(customer: Customer) -> bool:
+            nonlocal permission_flags
+            if permission_flags is None:
+                permission_codes = {
+                    permission.code
+                    for permission in permission_crud.get_user_permissions(context.db, context.user_id, context.team_id)
+                }
+                permission_flags = (
+                    "customer:view:all" in permission_codes,
+                    "customer:view:own" in permission_codes,
+                )
+            customer_view_all, customer_view_own = permission_flags
+            return self._can_view_customer(
+                context,
+                customer,
+                user_id,
+                customer_view_all,
+                customer_view_own,
+            )
+
+        return can_view_customer
 
     async def search_creation_duplicates(
         self,
@@ -208,8 +395,13 @@ class CRMAgentToolService:
                 cleaned.append(value)
         return cleaned
 
-    async def get_customer_context(self, context: AgentToolContext, customer_id: int) -> AgentToolResult:
-        payload = {"customer_id": customer_id}
+    async def get_customer_context(
+        self,
+        context: AgentToolContext,
+        customer_id: int,
+        query_text: Optional[str] = None,
+    ) -> AgentToolResult:
+        payload = {"customer_id": customer_id, "query_text": query_text}
 
         async def call_api():
             detail = await self.api_client.request(
@@ -218,9 +410,46 @@ class CRMAgentToolService:
                 context.authorization,
             )
             related = await self._get_customer_related_context(context, customer_id)
-            return {"customer": detail, **related}
+            return {
+                "customer": detail,
+                **related,
+                "customer_intelligence": self._get_customer_intelligence_payload(
+                    context,
+                    customer_id=customer_id,
+                    query_text=query_text,
+                ),
+            }
 
         return await self._run_read_tool(context, "get_customer_context", payload, call_api)
+
+    def _get_customer_intelligence_payload(
+        self,
+        context: AgentToolContext,
+        *,
+        customer_id: int,
+        query_text: Optional[str],
+    ) -> JsonDict:
+        try:
+            intelligence_context = self.intelligence_context_service.build_context(
+                context.db,
+                team_id=context.team_id,
+                customer_id=customer_id,
+                query_text=query_text,
+            )
+            return intelligence_context.to_agent_payload()
+        except Exception as exc:
+            return {
+                "retrieval": {
+                    "status": "failed",
+                    "enabled": False,
+                    "error_message": str(exc),
+                },
+                "usage_policy": {
+                    "strong_facts_source": "mysql",
+                    "semantic_evidence_source": "qdrant",
+                    "rule": "客户智能上下文暂不可用时, 继续使用当前工具返回的 CRM 业务上下文。",
+                },
+            }
 
     async def create_customer_activity(
         self,
@@ -758,3 +987,92 @@ class CRMAgentToolService:
     def _hash_json(payload: JsonDict) -> str:
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _compact_text(value: str | None, *, limit: int) -> str | None:
+    if not value:
+        return None
+    compacted = " ".join(value.split())
+    if len(compacted) <= limit:
+        return compacted
+    return f"{compacted[:limit - 1]}..."
+
+
+def _alias_match_item(match: CustomerAliasMatch) -> JsonDict:
+    return {
+        "id": match.customer_id,
+        "account_name": match.account_name,
+        "city": match.city,
+        "owner_info": None,
+        "collaborator_infos": [],
+        "match": {
+            "source": "customer_alias",
+            "score": match.score,
+            "reason": match.reason,
+            "evidence": [
+                {"title": "常用称呼", "snippet": alias, "score": match.score}
+                for alias in match.matched_aliases[:3]
+            ],
+        },
+    }
+
+
+def _combine_customer_candidate_matches(
+    existing_item: JsonDict,
+    new_item: JsonDict,
+    *,
+    source: str,
+    reason: str,
+) -> JsonDict:
+    existing = dict(existing_item)
+    existing_match = existing.get("match") if isinstance(existing.get("match"), dict) else {}
+    new_match = new_item.get("match") if isinstance(new_item.get("match"), dict) else {}
+    existing["match"] = {
+        "source": source,
+        "score": max(_float_score(existing_match.get("score")), _float_score(new_match.get("score"))),
+        "reason": reason,
+        "evidence": [
+            *(_json_dict_list(existing_match.get("evidence"))),
+            *(_json_dict_list(new_match.get("evidence"))),
+        ][:5],
+    }
+    return existing
+
+
+def _json_dict_list(value: object) -> list[JsonDict]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _float_score(value: object) -> float:
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _semantic_retrieval_metadata(event: JsonDict) -> JsonDict:
+    status = event.get("status")
+    if status == "ok":
+        semantic_status = "completed"
+    elif status == "embedding_unavailable":
+        semantic_status = "unavailable"
+    elif isinstance(status, str) and status:
+        semantic_status = status
+    else:
+        semantic_status = "unknown"
+
+    candidate_count = event.get("candidate_count")
+    metadata: JsonDict = {
+        "semantic_status": semantic_status,
+        "semantic_candidate_count": candidate_count if isinstance(candidate_count, int) else 0,
+    }
+    reason = event.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        metadata["semantic_unavailable_reason"] = reason
+    return metadata

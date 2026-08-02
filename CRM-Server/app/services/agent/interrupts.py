@@ -4,15 +4,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal, Mapping, NotRequired, Optional, Protocol, TypedDict
 
-from app.services.agent.input import AgentInputKind, AgentTurnInput
 from app.services.agent import task_display
+from app.services.agent.input import AgentInputKind, AgentTurnInput
 from app.services.agent.interaction_contract import (
     STATUS_WAITING_CONFIRMATION,
     STATUS_WAITING_USER_INPUT,
 )
 from app.services.agent.task_factory import WAITING_TASK_EVENT_TYPES
 from app.services.agent.types import JSONDict, JSONValue, coerce_json_dict, coerce_json_value
-
 
 INTERRUPT_SCHEMA_VERSION = "agent.interrupt.v1"
 TURN_RELATION_SOURCE_EVENT = "turn_relation_clarification_required"
@@ -361,6 +360,12 @@ def interrupt_payload_from_json(value: object) -> AgentInterruptPayload | None:
     source_event = payload.get("source_event")
     if isinstance(source_event, str):
         interrupt_payload["source_event"] = source_event
+
+    runtime_events = payload.get("runtime_events")
+    if isinstance(runtime_events, list):
+        events = [coerce_json_dict(event) for event in runtime_events if isinstance(event, dict)]
+        if events:
+            interrupt_payload["runtime_events"] = events
 
     return interrupt_payload or None
 

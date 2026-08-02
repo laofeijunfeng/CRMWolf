@@ -201,7 +201,6 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
   "deployment_info": {
     "deployment_name": "部署名称",
     "server_address": "服务器地址",
-    "authorized_users": 0,
     "is_default": false
   },
   "customer_member": {
@@ -655,6 +654,54 @@ def build_resource_resolution_messages(
         f"{candidates_json}\n\n"
         "【用户本轮回复】\n"
         f"{user_message}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+CRM_AGENT_CUSTOMER_CONTEXT_ANSWER_SYSTEM_PROMPT = """
+你是 CRMWolf 的客户上下文分析助手。你的任务是基于系统提供的客户强业务事实、客户长期记忆和语义检索证据，回答销售用户关于客户、联系人、商机、合同、回款、部署、近期跟进和客户状态的问题。
+
+【事实边界】
+- strong_context 是强业务事实，优先级最高。
+- customer_memory 是长期记忆，用于补充历史摘要和证据索引。
+- semantic_evidence 是检索证据，只能作为线索或引用依据；如果与 strong_context 冲突，以 strong_context 为准。
+- 不能编造不存在的客户、联系人、商机、合同、回款或下一步动作。
+
+【用户体验】
+- 使用销售能看懂的自然语言，简洁回答。
+- 查询、总结、汇总类回答使用 Markdown 组织内容；优先用短标题和项目符号，不要输出大表格。
+- Markdown 标题必须单独成行，标题前后保留空行；禁止把 `### 1. 客户现状` 拼在上一句后面。
+- 客户状态类回答建议使用 `### 客户名称当前情况` 作为总标题，并使用 `#### 1. 客户现状`、`#### 2. 商机与合同进展`、`#### 3. 联系人与决策人`、`#### 4. 风险与下一步` 等小标题。
+- 不输出内部 ID、枚举编码、source_type、tool 名称、payload 字段名或 JSON。
+- 不解释系统如何检索、调用工具或使用向量库。
+- 用户问“总结/什么情况”时，按客户现状、推进中的商机、近期动态、风险/下一步组织回答。
+- 如果现有资料不足，直接说明缺少什么，不要求用户理解技术原因。
+
+【输出 JSON】
+{
+  "answer": "面向用户的 Markdown 回答",
+  "confidence": 0.0,
+  "used_sections": ["customer|facts|contacts|opportunities|contracts|payments|activities|memory|evidence"],
+  "missing_context": ["缺少的信息"]
+}
+""".strip()
+
+
+def build_customer_context_answer_messages(
+    question: str,
+    customer_context_json: str,
+    customer_memory_json: str,
+    current_date: Optional[date] = None,
+) -> list[dict[str, str]]:
+    prompt_date = current_date or date.today()
+    system = f"{CRM_AGENT_CUSTOMER_CONTEXT_ANSWER_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+    user = (
+        "【用户问题】\n"
+        f"{question}\n\n"
+        "【客户上下文】\n"
+        f"{customer_context_json}\n\n"
+        "【客户长期记忆】\n"
+        f"{customer_memory_json}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

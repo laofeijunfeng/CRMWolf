@@ -29,14 +29,12 @@ interface Emits {
 interface DeploymentForm {
   deploymentName: string
   serverAddress: string
-  authorizedUsers: string
   isDefault: boolean
 }
 
 interface DeploymentFormErrors {
   deploymentName: string
   serverAddress: string
-  authorizedUsers: string
 }
 
 const props = defineProps<Props>()
@@ -47,14 +45,12 @@ const submitting = ref(false)
 const form = reactive<DeploymentForm>({
   deploymentName: '',
   serverAddress: '',
-  authorizedUsers: '1',
   isDefault: false,
 })
 
 const errors = reactive<DeploymentFormErrors>({
   deploymentName: '',
   serverAddress: '',
-  authorizedUsers: '',
 })
 
 const visible = computed({
@@ -65,13 +61,11 @@ const visible = computed({
 function clearErrors(): void {
   errors.deploymentName = ''
   errors.serverAddress = ''
-  errors.authorizedUsers = ''
 }
 
 function resetForm(): void {
   form.deploymentName = ''
   form.serverAddress = ''
-  form.authorizedUsers = '1'
   form.isDefault = false
   clearErrors()
 }
@@ -93,14 +87,8 @@ function validateForm(): boolean {
     errors.serverAddress = '服务器地址不能超过 500 个字符'
   }
 
-  const users = Number(form.authorizedUsers)
-  if (form.authorizedUsers.trim() === '' || !Number.isInteger(users) || users < 1) {
-    errors.authorizedUsers = '请输入大于 0 的整数'
-  }
-
   return errors.deploymentName === ''
     && errors.serverAddress === ''
-    && errors.authorizedUsers === ''
 }
 
 async function handleSubmit(): Promise<void> {
@@ -110,7 +98,6 @@ async function handleSubmit(): Promise<void> {
     customer_id: props.customerId,
     deployment_name: form.deploymentName.trim(),
     server_address: form.serverAddress.trim(),
-    authorized_users: Number(form.authorizedUsers),
     is_default: form.isDefault,
   }
 
@@ -151,7 +138,7 @@ watch(
     <DialogContent class="deployment-dialog">
       <DialogHeader>
         <DialogTitle>新增部署信息</DialogTitle>
-        <DialogDescription>填写客户的部署环境和授权规模，后续 License 申请会关联到部署信息。</DialogDescription>
+        <DialogDescription>填写客户的部署环境，后续 License 申请会关联到部署信息。</DialogDescription>
       </DialogHeader>
 
       <form class="deployment-dialog__form" novalidate @submit.prevent="handleSubmit">
@@ -175,21 +162,6 @@ watch(
           placeholder="https://crm.example.com:8891"
           :disabled="submitting"
           :error="errors.serverAddress"
-        />
-
-        <InputField
-          id="deployment-users"
-          v-model="form.authorizedUsers"
-          class="deployment-dialog__field"
-          label="授权人数"
-          required
-          type="number"
-          inputmode="numeric"
-          min="1"
-          step="1"
-          placeholder="请输入授权人数"
-          :disabled="submitting"
-          :error="errors.authorizedUsers"
         />
 
         <div class="deployment-dialog__switch-row">

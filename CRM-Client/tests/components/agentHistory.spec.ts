@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
-import type { AgentMessageResponse } from "@/api/agent"
+import type { AgentMessageResponse, AgentSessionResponse } from "@/api/agent"
 import type { PaginatedResponse } from "@/types/pagination"
-import { loadLatestAgentMessages } from "@/components/agent/agentHistory"
+import { loadLatestAgentMessages, resolveInitialAgentSession } from "@/components/agent/agentHistory"
 
 const message = (id: number): AgentMessageResponse => ({
   id,
@@ -16,6 +16,34 @@ const page = (items: AgentMessageResponse[], total: number, pageNumber: number, 
   page: pageNumber,
   page_size: pageSize,
   total_pages: Math.ceil(total / pageSize),
+})
+
+const session = (id: number, lastModifiedTime = `2026-07-29T00:${String(id).padStart(2, "0")}:00Z`): AgentSessionResponse => ({
+  id,
+  session_key: `session-${id}`,
+  title: `session ${id}`,
+  status: "active",
+  summary: null,
+  created_time: lastModifiedTime,
+  last_modified_time: lastModifiedTime,
+})
+
+describe("resolveInitialAgentSession", () => {
+  it("uses the latest server session as the Agent default entry", () => {
+    const sessions = [session(3), session(2), session(1)]
+
+    expect(resolveInitialAgentSession(sessions, 1)?.id).toBe(3)
+  })
+
+  it("keeps the cached session only when it already points to the latest session", () => {
+    const sessions = [session(3), session(2), session(1)]
+
+    expect(resolveInitialAgentSession(sessions, 3)?.id).toBe(3)
+  })
+
+  it("returns undefined when the user has no Agent session history", () => {
+    expect(resolveInitialAgentSession([], 1)).toBeUndefined()
+  })
 })
 
 describe("loadLatestAgentMessages", () => {

@@ -1,47 +1,46 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from typing import List, Optional
 from datetime import date
+from typing import List, Literal, Optional
 
-from app.core.database import get_db
-from app.core.deps import (
-    get_current_active_user,
-    require_permission,
-    get_current_user_team,
-    check_opportunity_edit_permission,
-    check_opportunity_delete_permission,
-    check_opportunity_view_permission,
-    check_customer_edit_permission,
-    check_customer_view_permission,
-)
-from app.crud.opportunity import opportunity_crud, opportunity_stage_crud
-from app.crud.customer import customer_crud
-from app.schemas.opportunity import (
-    OpportunityStageCreate,
-    OpportunityStageUpdate,
-    OpportunityStageResponse,
-    OpportunityCreate,
-    OpportunityUpdate,
-    OpportunityResponse,
-    OpportunityDetailResponse,
-    OpportunityListResponse,
-    OpportunityStageUpdate as OpportunityStageUpdateRequest,
-    OpportunityWin,
-    OpportunityLose,
-    MessageResponse,
-    SalesFunnelResponse,
-    StageDurationResponse,
-    AnalyticsFilter,
-    OpportunityMoveToStage,
-    OpportunityProcurementStageInfo
-)
-from app.schemas.common import PaginatedResponse
-from app.services.feishu import feishu_service
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
+from app.core.database import get_db
+from app.core.deps import (
+    check_customer_edit_permission,
+    check_customer_view_permission,
+    check_opportunity_delete_permission,
+    check_opportunity_edit_permission,
+    check_opportunity_view_permission,
+    get_current_active_user,
+    get_current_user_team,
+    require_permission,
+)
+from app.crud.customer import customer_crud
+from app.crud.opportunity import opportunity_crud
 from app.models.approval import ApprovalStatus
+from app.schemas.common import PaginatedResponse
+from app.schemas.opportunity import (
+    MessageResponse,
+    OpportunityCreate,
+    OpportunityDetailResponse,
+    OpportunityListResponse,
+    OpportunityLose,
+    OpportunityMoveToStage,
+    OpportunityProcurementStageInfo,
+    OpportunityResponse,
+    OpportunityUpdate,
+    OpportunityWin,
+    SalesFunnelResponse,
+    StageDurationResponse,
+)
 from app.services.approval_transaction_manager import approval_transaction_manager
-
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeRefreshInput,
+    customer_business_object_intelligence_service,
+)
+from app.services.feishu import feishu_service
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机管理"])
 
@@ -102,10 +101,38 @@ def _ensure_opportunity_approved(db: Session, opportunity, team_id: Optional[int
         )
 
 
+def _build_opportunity_intelligence_change(
+    opportunity,
+    *,
+    change_type: Literal["created", "updated", "deleted"],
+    actor_id: str | None,
+) -> CustomerBusinessObjectChangeRefreshInput:
+    change = customer_business_object_intelligence_service.build_change(
+        None,
+        source_type="opportunity",
+        business_object=opportunity,
+        change_type=change_type,
+        actor_id=actor_id,
+    )
+    if change is None:
+        raise ValueError("商机缺少客户智能刷新所需字段")
+    return change
+
+
+async def _trigger_opportunity_intelligence_refresh(
+    db: Session,
+    change: CustomerBusinessObjectChangeRefreshInput,
+) -> None:
+    await customer_business_object_intelligence_service.trigger_change_refresh(
+        db,
+        change,
+    )
+
+
 
 
 @router.post("/", response_model=OpportunityResponse, status_code=status.HTTP_201_CREATED, summary="创建商机", description="为指定客户创建商机")
-def create_opportunity(
+async def create_opportunity(
     opportunity: OpportunityCreate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("opportunity:create")),
@@ -145,6 +172,14 @@ def create_opportunity(
         )
 
     opportunity_crud.log_created(db, entity, submitter_id, team_id)
+    await _trigger_opportunity_intelligence_refresh(
+        db,
+        _build_opportunity_intelligence_change(
+            entity,
+            change_type="created",
+            actor_id=submitter_id,
+        ),
+    )
     return entity
 
 
@@ -174,7 +209,7 @@ def get_opportunities(
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
-    from app.models.user import User
+
     from app.crud.permission import permission_crud
 
     # 获取用户权限码
@@ -426,8 +461,9 @@ def get_opportunity(
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
-    from app.schemas.opportunity import CurrentStageSnapshotInfo
+
     from app.schemas.customer import ProcurementMethodInfo
+    from app.schemas.opportunity import CurrentStageSnapshotInfo
 
     opportunity = check_opportunity_view_permission(opportunity_id, team_id, current_user, db)
 
@@ -553,6 +589,7 @@ def get_opportunity_procurement_stages(
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
+
     from app.crud.procurement import procurement_stage_template_crud
 
     opportunity = check_opportunity_view_permission(opportunity_id, team_id, current_user, db)
@@ -589,14 +626,24 @@ def get_opportunity_procurement_stages(
 
 
 @router.put("/{opportunity_id}", response_model=OpportunityResponse, summary="编辑商机", description="更新商机基础信息")
-def update_opportunity(
+async def update_opportunity(
     opportunity_id: int,
     opportunity: OpportunityUpdate,
     db_opportunity = Depends(check_opportunity_edit_permission),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     _ensure_opportunity_not_pending(db, db_opportunity, db_opportunity.team_id)
-    return opportunity_crud.update(db, db_opportunity, opportunity)
+    updated_opportunity = opportunity_crud.update(db, db_opportunity, opportunity)
+    await _trigger_opportunity_intelligence_refresh(
+        db,
+        _build_opportunity_intelligence_change(
+            updated_opportunity,
+            change_type="updated",
+            actor_id=str(current_user.id),
+        ),
+    )
+    return updated_opportunity
 
 
 @router.post("/{opportunity_id}/move-stage", response_model=OpportunityDetailResponse, summary="推进商机阶段", description="推进商机到下一阶段，使用新的采购阶段模板系统，创建阶段快照")
@@ -607,9 +654,10 @@ async def move_opportunity_stage(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+
     from sqlalchemy import text
+
     from app.schemas.opportunity import CurrentStageSnapshotInfo
-    from datetime import datetime
 
     _ensure_opportunity_approved(db, db_opportunity, db_opportunity.team_id)
 
@@ -618,6 +666,14 @@ async def move_opportunity_stage(
         opportunity_id=opportunity_id,
         target_stage_template_id=stage_move.stage_template_id,
         operator_id=str(current_user.id)
+    )
+    await _trigger_opportunity_intelligence_refresh(
+        db,
+        _build_opportunity_intelligence_change(
+            updated_opportunity,
+            change_type="updated",
+            actor_id=str(current_user.id),
+        ),
     )
     
     procurement_stage_info = None
@@ -714,6 +770,14 @@ async def mark_opportunity_as_won(
     _ensure_opportunity_approved(db, db_opportunity, team_id)
 
     updated_opportunity = opportunity_crud.mark_as_won(db, db_opportunity, win_data, str(current_user.id))
+    await _trigger_opportunity_intelligence_refresh(
+        db,
+        _build_opportunity_intelligence_change(
+            updated_opportunity,
+            change_type="updated",
+            actor_id=str(current_user.id),
+        ),
+    )
 
     customer = customer_crud.get_by_id(db, db_opportunity.customer_id, team_id)
     
@@ -739,6 +803,14 @@ async def mark_opportunity_as_lost(
     _ensure_opportunity_approved(db, db_opportunity, team_id)
 
     updated_opportunity = opportunity_crud.mark_as_lost(db, db_opportunity, lose_data, str(current_user.id))
+    await _trigger_opportunity_intelligence_refresh(
+        db,
+        _build_opportunity_intelligence_change(
+            updated_opportunity,
+            change_type="updated",
+            actor_id=str(current_user.id),
+        ),
+    )
 
     customer = customer_crud.get_by_id(db, db_opportunity.customer_id, team_id)
     
@@ -753,13 +825,23 @@ async def mark_opportunity_as_lost(
 
 
 @router.delete("/{opportunity_id}", response_model=MessageResponse, summary="删除商机", description="删除商机")
-def delete_opportunity(
+async def delete_opportunity(
     opportunity_id: int,
     db_opportunity = Depends(check_opportunity_delete_permission),
+    current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     try:
+        change = _build_opportunity_intelligence_change(
+            db_opportunity,
+            change_type="deleted",
+            actor_id=str(current_user.id),
+        )
         opportunity_crud.delete(db, opportunity_id)
+        await _trigger_opportunity_intelligence_refresh(
+            db,
+            change,
+        )
         return MessageResponse(message="删除成功")
     except ValueError as e:
         raise HTTPException(

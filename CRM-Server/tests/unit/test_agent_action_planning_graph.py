@@ -122,6 +122,98 @@ async def test_action_planning_graph_routes_create_customer_through_domain_subgr
 
 
 @pytest.mark.asyncio
+async def test_action_planning_graph_leaves_customer_query_answer_to_customer_intelligence_graph():
+    service = ActionPlanningGraphService(checkpointer=InMemorySaver())
+    semantic = semantic_result(intent="CUSTOMER_QUERY")
+
+    result = await service.run(action_input(
+        semantic_result=semantic,
+        intent="CUSTOMER_QUERY",
+        parsed={"customer_name": "越秀金融"},
+        business_context={"customer": {"id": 101, "account_name": "越秀金融"}},
+    ))
+
+    assert result["business_action_route"] == "customer_query"
+    assert result["action"] == {}
+    assert result["response"] == ""
+    final_events = [event for event in result["events"] if event["event"] == "final"]
+    assert final_events[-1]["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_action_planning_graph_explains_unresolved_customer_query_without_old_placeholder():
+    service = ActionPlanningGraphService(checkpointer=InMemorySaver())
+    semantic = semantic_result(intent="CUSTOMER_QUERY")
+
+    result = await service.run(action_input(
+        semantic_result=semantic,
+        intent="CUSTOMER_QUERY",
+        parsed={"customer_name": "中科院"},
+        customer_candidates=[],
+        selected_customer=None,
+        business_context={},
+    ))
+
+    assert result["action"] == {}
+    assert result["response"] == "我没能确定「中科院」对应的客户。请补充客户全称或更多线索。"
+
+
+@pytest.mark.asyncio
+async def test_action_planning_graph_explains_customer_search_failure_for_customer_query():
+    service = ActionPlanningGraphService(checkpointer=InMemorySaver())
+    semantic = semantic_result(intent="CUSTOMER_QUERY")
+
+    result = await service.run(action_input(
+        semantic_result=semantic,
+        intent="CUSTOMER_QUERY",
+        parsed={"customer_name": "中科院"},
+        customer_candidates=[],
+        selected_customer=None,
+        business_context={},
+        events=[{
+            "event": "tool_result",
+            "tool_name": "search_customers",
+            "success": False,
+        }],
+    ))
+
+    assert result["action"] == {}
+
+
+@pytest.mark.asyncio
+async def test_action_planning_graph_does_not_turn_customer_query_suggestions_into_answer_or_action():
+    service = ActionPlanningGraphService(checkpointer=InMemorySaver())
+    suggestion_result = AgentSuggestionResult.model_validate({
+        "summary": "建议查看客户状态。",
+        "suggestions": [{
+            "action": "CUSTOMER_QUERY_SUMMARY",
+            "title": "查看中科院当前客户状态汇总",
+            "reason": "用户在询问客户现状。",
+            "priority": "medium",
+            "requires_confirmation": False,
+            "confidence": 0.93,
+        }],
+        "need_user_choice": False,
+        "clarification_question": None,
+    })
+    semantic = semantic_result(intent="CUSTOMER_QUERY")
+
+    result = await service.run(action_input(
+        semantic_result=semantic,
+        intent="CUSTOMER_QUERY",
+        parsed={"customer_name": "中科院"},
+        selected_customer={"id": 101, "account_name": "中国科学院信息工程研究所"},
+        business_context={"customer": {"id": 101, "account_name": "中国科学院信息工程研究所"}},
+        suggestion=suggestion_result.model_dump(exclude_none=True),
+        suggestion_result=suggestion_result,
+    ))
+
+    assert result["action"] == {}
+    assert result["response"] == ""
+    assert "基于客户上下文" not in result["events"][-1]["content"]
+
+
+@pytest.mark.asyncio
 async def test_action_planning_graph_resets_events_between_turns_on_same_thread():
     service = ActionPlanningGraphService(checkpointer=InMemorySaver())
 
@@ -205,7 +297,7 @@ async def test_action_planning_graph_attaches_stage_move_as_deferred_next_task()
 
 
 @pytest.mark.asyncio
-async def test_action_planning_graph_routes_direct_stage_move_to_confirmation():
+async def test_action_planning_graph_attaches_stage_move_next_task_to_customer_activity():
     service = ActionPlanningGraphService()
     suggestion_result = AgentSuggestionResult.model_validate({
         "summary": "客户表达可以签合同。",
@@ -229,11 +321,16 @@ async def test_action_planning_graph_routes_direct_stage_move_to_confirmation():
         "clarification_question": None,
     })
 
-    semantic = semantic_result(intent="CUSTOMER_QUERY")
+    semantic = semantic_result(intent="CUSTOMER_ACTIVITY")
     result = await service.run(action_input(
         semantic_result=semantic,
-        intent="CUSTOMER_QUERY",
-        parsed={"customer_name": "越秀金融"},
+        intent="CUSTOMER_ACTIVITY",
+        parsed={
+            "customer_name": "越秀金融",
+            "follow_up_content": "张总说今天可以开始签合同。",
+            "original_content": "张总说今天可以开始签合同。",
+            "method": "未指定",
+        },
         business_context={
             "opportunities": {
                 "items": [{"id": 301, "opportunity_name": "CRM 项目"}],
@@ -244,9 +341,10 @@ async def test_action_planning_graph_routes_direct_stage_move_to_confirmation():
     ))
 
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
-    assert result["action"]["action"] == "move_opportunity_stage"
-    assert confirmation_events[0]["action"] == "move_opportunity_stage"
-    assert confirmation_events[0]["payload"]["opportunity_id"] == 301
+    assert result["action"]["action"] == "create_customer_activity"
+    assert confirmation_events[0]["action"] == "create_customer_activity"
+    assert confirmation_events[0]["payload"]["_next_task"]["action"] == "move_opportunity_stage"
+    assert confirmation_events[0]["payload"]["_next_task"]["payload"]["opportunity_id"] == 301
 
 
 @pytest.mark.asyncio
@@ -274,11 +372,16 @@ async def test_action_planning_graph_plans_multi_step_stage_move_to_target_stage
         "clarification_question": None,
     })
 
-    semantic = semantic_result(intent="CUSTOMER_QUERY")
+    semantic = semantic_result(intent="CUSTOMER_ACTIVITY")
     result = await service.run(action_input(
         semantic_result=semantic,
-        intent="CUSTOMER_QUERY",
-        parsed={"customer_name": "越秀金融"},
+        intent="CUSTOMER_ACTIVITY",
+        parsed={
+            "customer_name": "越秀金融",
+            "follow_up_content": "张总说今天可以开始签合同。",
+            "original_content": "张总说今天可以开始签合同。",
+            "method": "未指定",
+        },
         business_context={
             "opportunities": {
                 "items": [{"id": 301, "opportunity_name": "CRM 项目"}],
@@ -297,15 +400,15 @@ async def test_action_planning_graph_plans_multi_step_stage_move_to_target_stage
     ))
 
     confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
-    payload = confirmation_events[0]["payload"]
-    assert result["action"]["action"] == "move_opportunity_stage"
+    payload = confirmation_events[0]["payload"]["_next_task"]["payload"]
+    assert result["action"]["action"] == "create_customer_activity"
+    assert confirmation_events[0]["payload"]["_next_task"]["action"] == "move_opportunity_stage"
     assert payload["stage_template_id"] == 10
     assert payload["target_stage_name"] == "签约"
     assert payload["stage_move_steps"] == [
         {"stage_template_id": 9, "stage_name": "方案确认"},
         {"stage_template_id": 10, "stage_name": "签约"},
     ]
-    assert "签约" in result["response"]
     assert "逐阶段推进" not in result["response"]
 
 
@@ -512,7 +615,7 @@ async def test_action_planning_graph_routes_create_deployment_info_through_domai
         intent="CREATE_DEPLOYMENT_INFO",
         customer={"name_text": "越秀金融", "confidence": 0.95},
         deployment_info={"deployment_name": "生产环境"},
-        missing_fields=["server_address", "authorized_users"],
+        missing_fields=["server_address"],
     )
 
     result = await service.run(action_input(
@@ -533,7 +636,7 @@ async def test_action_planning_graph_routes_create_deployment_info_through_domai
     assert result["business_action_route"] == "create_deployment_info"
     assert field_events[0]["action"] == "collect_deployment_info_fields"
     assert field_events[0]["payload"]["customer_id"] == 101
-    assert field_events[0]["payload"]["missing_fields"] == ["server_address", "authorized_users"]
+    assert field_events[0]["payload"]["missing_fields"] == ["server_address"]
 
 
 @pytest.mark.asyncio

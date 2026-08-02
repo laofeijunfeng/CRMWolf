@@ -57,6 +57,8 @@ export type AgentEventType =
   | "done"
   | "error"
 
+export type AgentContentFormat = "text" | "markdown"
+
 export interface AgentChatRequest {
   content: string
   session_id?: number
@@ -86,6 +88,7 @@ export interface AgentMessageResponse {
 export interface AgentChatSSEEvent {
   event: AgentEventType
   content?: string
+  content_format?: AgentContentFormat | string
   message?: string
   role?: "user" | "assistant" | "system" | string
   session_id?: number

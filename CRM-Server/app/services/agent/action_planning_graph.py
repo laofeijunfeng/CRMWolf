@@ -168,7 +168,6 @@ class ActionPlanningGraphService:
         graph.add_node("create_invoice_title_action", self._create_invoice_title_action)
         graph.add_node("create_deployment_info_action", self._create_deployment_info_action)
         graph.add_node("create_customer_member_action", self._create_customer_member_action)
-        graph.add_node("customer_query_action", self._customer_query_action)
         graph.add_node("unknown_business_action", self._unknown_business_action)
         graph.add_node("apply_business_suggestions", self._apply_business_suggestions)
         graph.add_node("emit_business_interaction_event", self._emit_business_interaction_event)
@@ -203,7 +202,7 @@ class ActionPlanningGraphService:
                 "create_invoice_title": "create_invoice_title_action",
                 "create_deployment_info": "create_deployment_info_action",
                 "create_customer_member": "create_customer_member_action",
-                "customer_query": "customer_query_action",
+                "customer_query": "apply_business_suggestions",
                 "unknown": "unknown_business_action",
             },
         )
@@ -216,7 +215,6 @@ class ActionPlanningGraphService:
         graph.add_edge("create_invoice_title_action", "apply_business_suggestions")
         graph.add_edge("create_deployment_info_action", "apply_business_suggestions")
         graph.add_edge("create_customer_member_action", "apply_business_suggestions")
-        graph.add_edge("customer_query_action", "apply_business_suggestions")
         graph.add_edge("unknown_business_action", "apply_business_suggestions")
         graph.add_edge("apply_business_suggestions", "emit_business_interaction_event")
         graph.add_edge("emit_business_interaction_event", "finalize_response")
@@ -561,13 +559,6 @@ class ActionPlanningGraphService:
             "action": coerce_json_dict(result.get("action")),
         }
 
-    def _customer_query_action(
-        self,
-        state: ActionPlanningGraphState,
-        runtime: Runtime[ActionPlanningRuntimeContext],
-    ) -> ActionPlanningGraphState:
-        return {"response": "我识别到这是查询请求。下一步会接入客户上下文查询和汇总能力。", "action": {}}
-
     def _unknown_business_action(
         self,
         state: ActionPlanningGraphState,
@@ -610,32 +601,33 @@ class ActionPlanningGraphService:
             state.get("selected_customer") or {},
         )
 
-        if runtime.context.suggestion_result and not action:
+        if runtime.context.suggestion_result and not action and state.get("intent") != "CUSTOMER_QUERY":
             response = business_rules.append_suggestions_to_response(response, suggestions)
 
         stage_move = coerce_json_dict(stage_move_action)
         next_task = coerce_json_dict(opportunity_next_task)
-        if stage_move:
-            if action.get("action") == "create_customer_activity":
-                _attach_next_task(action, stage_move)
-            elif not action:
-                action = stage_move
-                payload = _json_dict_value(stage_move.get("payload"))
-                target_stage_name = _string_value(payload.get("target_stage_name"))
-                response = (
-                    f"我识别到这次跟进可能已经推进了商机阶段"
-                    f"{f'到「{target_stage_name}」' if target_stage_name else ''}。"
-                    "请确认是否推进？"
-                )
-        elif stage_move_selection_action:
-            stage_selection = coerce_json_dict(stage_move_selection_action)
-            if action.get("action") == "create_customer_activity":
-                _attach_next_task(action, stage_selection)
-            elif not action:
-                action = stage_selection
-                response = _string_value(stage_selection.get("content")) or response
-        elif next_task and action.get("action") == "create_customer_activity":
-            _attach_next_task(action, next_task)
+        if state.get("intent") != "CUSTOMER_QUERY":
+            if stage_move:
+                if action.get("action") == "create_customer_activity":
+                    _attach_next_task(action, stage_move)
+                elif not action:
+                    action = stage_move
+                    payload = _json_dict_value(stage_move.get("payload"))
+                    target_stage_name = _string_value(payload.get("target_stage_name"))
+                    response = (
+                        f"我识别到这次跟进可能已经推进了商机阶段"
+                        f"{f'到「{target_stage_name}」' if target_stage_name else ''}。"
+                        "请确认是否推进？"
+                    )
+            elif stage_move_selection_action:
+                stage_selection = coerce_json_dict(stage_move_selection_action)
+                if action.get("action") == "create_customer_activity":
+                    _attach_next_task(action, stage_selection)
+                elif not action:
+                    action = stage_selection
+                    response = _string_value(stage_selection.get("content")) or response
+            elif next_task and action.get("action") == "create_customer_activity":
+                _attach_next_task(action, next_task)
 
         return {
             "response": response,
@@ -647,8 +639,8 @@ class ActionPlanningGraphService:
         self,
         state: ActionPlanningGraphState,
         runtime: Runtime[ActionPlanningRuntimeContext],
-        selection_action: Dict[str, object],
-    ) -> tuple[Dict[str, object], list[JSONDict]]:
+        selection_action: dict[str, object],
+    ) -> tuple[dict[str, object], list[JSONDict]]:
         candidates = business_rules.context_items(selection_action.get("opportunities"))
         if len(candidates) < 2:
             return selection_action, []
@@ -706,7 +698,13 @@ class ActionPlanningGraphService:
         return update
 
     def _finalize_response(self, state: ActionPlanningGraphState) -> ActionPlanningGraphState:
-        response = state.get("response") or "我还不能可靠理解这条消息，请补充客户名称、业务内容或你希望我执行的动作。"
+        if state.get("intent") == "CUSTOMER_QUERY" and not coerce_json_dict(state.get("action")):
+            response = state.get("response") or _customer_query_unresolved_response(state)
+        else:
+            response = (
+                state.get("response")
+                or "我还不能可靠理解这条消息，请补充客户名称、业务内容或你希望我执行的动作。"
+            )
         return {
             "response": response,
             "events": [{
@@ -755,6 +753,28 @@ def _business_action_route(intent: str) -> BusinessActionRoute:
         "CUSTOMER_QUERY": "customer_query",
     }
     return routes.get(intent, "unknown")
+
+
+def _customer_query_unresolved_response(state: ActionPlanningGraphState) -> str:
+    selected_customer = coerce_json_dict(state.get("selected_customer"))
+    if selected_customer.get("id"):
+        return ""
+    if _has_failed_customer_search(state.get("events") or []):
+        return "客户搜索暂时失败，当前无法读取客户情况。请稍后再试。"
+    parsed = coerce_json_dict(state.get("parsed"))
+    customer_name = parsed.get("customer_name")
+    if isinstance(customer_name, str) and customer_name.strip():
+        return f"我没能确定「{customer_name.strip()}」对应的客户。请补充客户全称或更多线索。"
+    return "我没能确定你要查询的客户。请补充客户全称或更多线索。"
+
+
+def _has_failed_customer_search(events: list[JSONDict]) -> bool:
+    for event in events:
+        if event.get("event") != "tool_result":
+            continue
+        if event.get("tool_name") == "search_customers" and event.get("success") is False:
+            return True
+    return False
 
 
 def _semantic_trace_events(

@@ -1,6 +1,7 @@
 import json
+import logging
 from datetime import date, datetime, time
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -12,6 +13,9 @@ from app.models.deal_journey import (
     DealJourneySourceType,
     DealJourneyStatus,
 )
+from app.services.customer_intelligence_event_service import JsonObject
+
+logger = logging.getLogger(__name__)
 
 
 class DealJourneyService:
@@ -69,10 +73,10 @@ class DealJourneyService:
         event_type: str,
         source_type: str,
         source_id: Optional[int],
-        event_time: Optional[Any] = None,
+        event_time: date | datetime | None = None,
         actor_id: Optional[str] = None,
         summary: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: JsonObject | None = None,
     ) -> Optional[CustomerDealJourneyEvent]:
         if not deal_journey_id:
             return None
@@ -85,6 +89,8 @@ class DealJourneyService:
             CustomerDealJourneyEvent.source_id == source_id,
         ).first()
         if existing:
+            self._upsert_event_evidence(db, existing)
+            self._enqueue_customer_intelligence_refresh(db, existing)
             return existing
 
         event = CustomerDealJourneyEvent(
@@ -100,11 +106,38 @@ class DealJourneyService:
             metadata_json=json.dumps(metadata, ensure_ascii=False) if metadata else None,
         )
         db.add(event)
+        db.flush()
+        self._upsert_event_evidence(db, event)
+        self._enqueue_customer_intelligence_refresh(db, event)
 
         journey = db.query(CustomerDealJourney).filter(CustomerDealJourney.id == deal_journey_id).first()
         if journey and (journey.last_event_at is None or normalized_event_time > journey.last_event_at):
             journey.last_event_at = normalized_event_time
         return event
+
+    def _upsert_event_evidence(self, db: Session, event: CustomerDealJourneyEvent) -> None:
+        try:
+            from app.services.customer_vector_document_service import customer_vector_document_service
+
+            customer_vector_document_service.upsert_deal_journey_event(db, event, commit=False)
+        except Exception:
+            logger.exception("成交旅程事件证据元数据写入失败: event_id=%s", event.id)
+
+    def _enqueue_customer_intelligence_refresh(self, db: Session, event: CustomerDealJourneyEvent) -> None:
+        try:
+            from app.services.customer_intelligence_event_service import customer_intelligence_event_service
+            from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
+
+            intelligence_event = customer_intelligence_event_service.from_deal_journey_event(event)
+            if intelligence_event is None:
+                return
+            customer_intelligence_refresh_service.enqueue_committed_event_refresh(
+                db,
+                event=intelligence_event,
+                scope="brief",
+            )
+        except Exception:
+            logger.exception("成交旅程事件客户智能刷新入队失败: event_id=%s", event.id)
 
     def record_opportunity_created(self, db: Session, opportunity, actor_id: Optional[str] = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
@@ -207,7 +240,7 @@ class DealJourneyService:
 
         from app.models.contract import Contract, PaymentStatus
         from app.models.opportunity import Opportunity
-        from app.models.payment import PaymentRecord, PaymentConfirmationStatus
+        from app.models.payment import PaymentConfirmationStatus, PaymentRecord
 
         journey = db.query(CustomerDealJourney).filter(CustomerDealJourney.id == deal_journey_id).first()
         if not journey:
@@ -255,7 +288,7 @@ class DealJourneyService:
             or getattr(opportunity, "last_modified_time", None)
         )
 
-    def _as_datetime(self, value: Optional[Any]) -> Optional[datetime]:
+    def _as_datetime(self, value: date | datetime | None) -> Optional[datetime]:
         if value is None:
             return None
         if isinstance(value, datetime):

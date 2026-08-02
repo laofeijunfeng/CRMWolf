@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, DateTime, Date, Text, ForeignKey, Index
+from sqlalchemy import Column, BigInteger, Integer, String, DateTime, Date, Text, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -32,6 +32,7 @@ class LicenseApplication(Base):
 
     expiry_date = Column(Date, nullable=False, comment="到期时间")
     license_type = Column(String(20), nullable=False, comment="License 类型")
+    authorized_users = Column(Integer, nullable=False, comment="本次申请使用人数")
 
     # 审批人回填的 License 详细信息（补充需求）
     enterprise_id = Column(String(50), nullable=True, comment="企业编号（审批人回填，如：15739）")

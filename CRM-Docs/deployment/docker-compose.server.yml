@@ -16,6 +16,9 @@ services:
       SECRET_KEY_FILE: /run/secrets/secret_key
       REDIS_HOST: redis6
       REDIS_PASSWORD: ""
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       # 前端应用地址（用于飞书通知跳转链接）
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.apipark.cn}
       # 后端公网入口地址（用于飞书事件回调；同域部署时与 FRONTEND_URL 一致）
@@ -37,6 +40,13 @@ services:
       file: docker-compose.yml
       service: frontend
     image: crm-frontend:amd64
+    networks:
+      - crmwolf-network
+
+  qdrant:
+    extends:
+      file: docker-compose.yml
+      service: qdrant
     networks:
       - crmwolf-network
 

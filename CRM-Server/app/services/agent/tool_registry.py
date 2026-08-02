@@ -68,7 +68,7 @@ class AgentDeploymentInfoPayload(AgentStrictPayload):
     customer_id: int = Field(..., ge=1)
     deployment_name: str = Field(..., min_length=1, max_length=100)
     server_address: str = Field(..., min_length=1, max_length=500)
-    authorized_users: int = Field(..., gt=0)
+    authorized_users: Optional[int] = Field(None, gt=0)
     is_default: bool = False
 
 
@@ -115,6 +115,7 @@ class SearchCreationDuplicatesInput(BaseModel):
 
 class GetCustomerContextInput(BaseModel):
     customer_id: int = Field(..., ge=1)
+    query_text: Optional[str] = None
 
 
 class CreateCustomerActivityInput(BaseModel):
@@ -326,7 +327,7 @@ class AgentToolRegistry:
             )
 
         async def get_customer_context(service, context, model):
-            return await service.get_customer_context(context, model.customer_id)
+            return await service.get_customer_context(context, model.customer_id, query_text=model.query_text)
 
         async def create_customer_activity(service, context, model):
             return await service.create_customer_activity(
@@ -454,7 +455,14 @@ class AgentToolRegistry:
             )
 
         specs = [
-            AgentToolSpec("search_customers", "按当前用户权限搜索可访问客户", SearchCustomersInput, False, False, search_customers),
+            AgentToolSpec(
+                "search_customers",
+                "按当前用户权限混合检索客户；支持客户名称、简称、别称、跟进记录和客户知识库语义证据",
+                SearchCustomersInput,
+                False,
+                False,
+                search_customers,
+            ),
             AgentToolSpec("search_creation_duplicates", "创建客户/线索前按团队范围检查重复", SearchCreationDuplicatesInput, False, False, search_creation_duplicates),
             AgentToolSpec("get_customer_context", "获取客户业务上下文", GetCustomerContextInput, False, False, get_customer_context),
             AgentToolSpec("create_customer_activity", "创建客户活动记录", CreateCustomerActivityInput, True, True, create_customer_activity),

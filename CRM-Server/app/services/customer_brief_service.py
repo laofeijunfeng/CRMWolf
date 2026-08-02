@@ -1,29 +1,30 @@
 """
-客户概况 AI 生成服务
+客户概况 AI 刷新引擎
 
 生成销售侧客户经营概况：客户档案、联系人、商机、合同、回款和客户活动。
 不纳入发票、License、部署交付等财务/交付侧流程。
+触发、重试、执行轨迹和刷新顺序由客户智能 LangGraph 编排。
 """
-import asyncio
 import json
 import logging
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.crud.ai_config import ai_config_crud
 from app.crud.customer import customer_crud
-from app.models.contract import Contract
-from app.models.customer import Contact, Customer
-from app.models.customer_activity import CustomerActivity
-from app.models.opportunity import Opportunity
-from app.models.payment import PaymentPlan, PaymentRecord
-from app.services.ai_task_limiter import ai_generation_semaphore
+from app.models.customer import Customer
 from app.services.ai_service import ai_service
-
+from app.services.ai_task_limiter import ai_generation_semaphore
+from app.services.customer_intelligence_context_service import (
+    ActivityFact,
+    CustomerIntelligenceContext,
+    customer_intelligence_context_service,
+)
+from app.services.customer_vector_document_service import customer_vector_document_service
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +32,15 @@ logger = logging.getLogger(__name__)
 class CustomerBriefService:
     """客户概况生成服务"""
 
+    BRIEF_RETRIEVAL_QUERY = (
+        "客户概况 经营总结 项目需求背景 采购进度 商机阶段 合同签署 回款节点 "
+        "客户活动 风险 下一步 跟进计划 决策人 组织关系"
+    )
+
     async def generate_brief(self, customer_id: int, team_id: int) -> Dict[str, Any]:
         logger.info("开始生成客户概况: customer_id=%s, team_id=%s", customer_id, team_id)
         async with ai_generation_semaphore:
+            context: Dict[str, Any] | None = None
             try:
                 db = SessionLocal()
                 try:
@@ -93,6 +100,12 @@ class CustomerBriefService:
                             "customer_brief_error_message": None,
                         },
                     )
+                    updated_customer = db.query(Customer).filter(Customer.id == customer_id, Customer.team_id == team_id).first()
+                    if updated_customer is not None:
+                        try:
+                            customer_vector_document_service.upsert_customer_brief(db, updated_customer)
+                        except Exception:
+                            logger.exception("客户概况证据元数据写入失败: customer_id=%s", customer_id)
                 finally:
                     db.close()
                 logger.info("客户概况生成完成: customer_id=%s", customer_id)
@@ -100,6 +113,15 @@ class CustomerBriefService:
 
             except Exception as exc:
                 logger.exception("客户概况生成失败: customer_id=%s", customer_id)
+                if context is not None:
+                    fallback_result = self._persist_degraded_brief(
+                        customer_id=customer_id,
+                        team_id=team_id,
+                        context=context,
+                        error_message=str(exc),
+                    )
+                    if fallback_result.get("success") is True:
+                        return fallback_result
                 db = SessionLocal()
                 try:
                     customer_crud.update_customer_brief_status(db, customer_id, "FAILED", str(exc))
@@ -109,10 +131,27 @@ class CustomerBriefService:
                     db.close()
                 return {"success": False, "customer_id": customer_id, "error": str(exc)}
 
-    async def trigger_generation(self, customer_id: int, team_id: int) -> None:
-        asyncio.create_task(self.generate_brief(customer_id=customer_id, team_id=team_id))
-
     def _build_context(self, db: Session, customer: Customer, team_id: int) -> Dict[str, Any]:
+        intelligence_context = customer_intelligence_context_service.build_context(
+            db,
+            team_id=team_id,
+            customer_id=int(customer.id),
+            query_text=self.BRIEF_RETRIEVAL_QUERY,
+            evidence_limit=12,
+            source_types=[
+                "customer",
+                "customer_profile",
+                "follow_up",
+                "business_flow",
+                "opportunity",
+                "contract",
+                "payment",
+                "contact",
+            ],
+        )
+        return self._build_context_from_intelligence(intelligence_context)
+
+    def _build_context_from_intelligence(self, intelligence_context: CustomerIntelligenceContext) -> Dict[str, Any]:
         citation_map: Dict[str, Dict[str, str]] = {}
         citation_index = 1
 
@@ -128,24 +167,22 @@ class CustomerBriefService:
             }
             return key
 
+        strong_context = intelligence_context.strong_context
+        customer = strong_context.customer
         customer_source = add_source(
             "customer",
             customer.id,
             f"客户：{customer.account_name}",
             f"城市：{customer.city}，规模：{customer.company_scale or '未填写'}，来源：{customer.source or '未填写'}",
         )
+        industry_name = customer.industry_name or customer.industry_code
 
         profile_sources: List[str] = []
         if customer.profile_status == "COMPLETED":
             profile_sources.append(add_source("customer_profile", customer.id, "客户档案", customer.company_background))
 
-        contacts = db.query(Contact).filter(
-            Contact.customer_id == customer.id,
-            Contact.team_id == team_id,
-        ).order_by(Contact.is_primary.desc(), Contact.is_decision_maker.desc(), Contact.created_time.asc()).all()
-
         contact_items = []
-        for contact in contacts:
+        for contact in strong_context.contacts:
             contact_excerpt_parts = [
                 f"职位：{contact.position or '未填写'}",
                 "主联系人" if contact.is_primary else "",
@@ -169,17 +206,12 @@ class CustomerBriefService:
                 "reports_to": contact.reports_to,
             })
 
-        opportunities = db.query(Opportunity).filter(
-            Opportunity.customer_id == customer.id,
-            Opportunity.team_id == team_id,
-        ).order_by(Opportunity.status.asc(), Opportunity.last_modified_time.desc()).all()
-
         opportunity_items = []
         opportunity_sources_by_id: Dict[int, str] = {}
-        for opp in opportunities:
+        for opp in strong_context.opportunities:
             opportunity_excerpt_parts = [
-                f"阶段：{opp.current_stage_name or '未填写'}",
-                f"金额：{self._number(opp.total_amount)}" if opp.total_amount is not None else "",
+                f"阶段：{opp.stage or '未填写'}",
+                f"金额：{self._number(opp.amount)}" if opp.amount is not None else "",
                 f"用户数：{opp.user_count}" if opp.user_count is not None else "",
                 f"授权：{opp.license_type or '未填写'}",
                 f"预计成交：{self._date(opp.expected_closing_date)}" if opp.expected_closing_date else "",
@@ -187,17 +219,17 @@ class CustomerBriefService:
             source = add_source(
                 "opportunity",
                 opp.id,
-                f"商机：{opp.opportunity_name}",
+                f"商机：{opp.name}",
                 "，".join(part for part in opportunity_excerpt_parts if part),
             )
             opportunity_sources_by_id[int(opp.id)] = source
             opportunity_items.append({
                 "source_id": source,
                 "id": opp.id,
-                "name": opp.opportunity_name,
-                "stage": opp.current_stage_name,
-                "win_probability": opp.current_win_probability,
-                "amount": self._number(opp.total_amount),
+                "name": opp.name,
+                "stage": opp.stage,
+                "win_probability": opp.win_probability,
+                "amount": self._number(opp.amount),
                 "actual_amount": self._number(opp.actual_amount),
                 "user_count": opp.user_count,
                 "license_type": opp.license_type,
@@ -212,20 +244,13 @@ class CustomerBriefService:
                 "actual_closing_date": self._date(opp.actual_closing_date),
             })
 
-        contracts = db.query(Contract).options(
-            joinedload(Contract.payment_plans).joinedload(PaymentPlan.payment_records)
-        ).filter(
-            Contract.customer_id == customer.id,
-            Contract.team_id == team_id,
-            Contract.deleted_at.is_(None),
-        ).order_by(Contract.created_time.desc()).all()
-
         contract_items = []
         payment_plan_items = []
         payment_record_items = []
         payment_milestones = []
+        contracts_by_id = {contract.id: contract for contract in strong_context.contracts}
 
-        for contract in contracts:
+        for contract in strong_context.contracts:
             source = add_source("contract", contract.id, f"合同：{contract.contract_name}", contract.contract_number)
             contract_items.append({
                 "source_id": source,
@@ -237,7 +262,7 @@ class CustomerBriefService:
                 ),
                 "contract_number": contract.contract_number,
                 "contract_name": contract.contract_name,
-                "amount": self._number(contract.total_amount),
+                "amount": self._number(contract.amount),
                 "user_count": contract.user_count,
                 "license_type": contract.license_type,
                 "subscription_years": contract.subscription_years,
@@ -250,42 +275,43 @@ class CustomerBriefService:
                 "created_time": self._datetime(contract.created_time),
             })
 
-            for plan in sorted(contract.payment_plans or [], key=lambda item: item.due_date or date.min):
-                plan_source = add_source("payment_plan", plan.id, f"回款计划：{plan.stage_name}", plan.notes)
-                payment_plan_items.append({
-                    "source_id": plan_source,
-                    "id": plan.id,
-                    "contract_id": contract.id,
-                    "opportunity_id": contract.opportunity_id,
-                    "stage_name": plan.stage_name,
-                    "planned_amount": self._number(plan.planned_amount),
-                    "due_date": self._date(plan.due_date),
-                    "status": plan.status,
-                    "notes": plan.notes,
-                })
+        for plan in strong_context.payment_plans:
+            contract = contracts_by_id.get(plan.contract_id)
+            plan_source = add_source("payment_plan", plan.id, f"回款计划：{plan.stage_name}", plan.notes)
+            payment_plan_items.append({
+                "source_id": plan_source,
+                "id": plan.id,
+                "contract_id": plan.contract_id,
+                "opportunity_id": contract.opportunity_id if contract else None,
+                "stage_name": plan.stage_name,
+                "planned_amount": self._number(plan.planned_amount),
+                "due_date": self._date(plan.due_date),
+                "status": plan.status,
+                "notes": plan.notes,
+            })
 
-                for record in sorted(plan.payment_records or [], key=lambda item: item.payment_date or date.min):
-                    record_source = add_source("payment_record", record.id, f"回款记录：{record.record_number}", record.notes)
-                    record_item = {
-                        "source_id": record_source,
-                        "id": record.id,
-                        "payment_plan_id": plan.id,
-                        "contract_id": contract.id,
-                        "opportunity_id": contract.opportunity_id,
-                        "actual_amount": self._number(record.actual_amount),
-                        "payment_date": self._date(record.payment_date),
-                        "confirmation_status": record.confirmation_status,
-                        "approval_phase": record.approval_phase,
-                        "notes": record.notes,
-                    }
-                    payment_record_items.append(record_item)
-                    payment_milestones.append(record_item)
+        for record in strong_context.payment_records:
+            contract = contracts_by_id.get(record.contract_id) if record.contract_id is not None else None
+            record_source = add_source("payment_record", record.id, f"回款记录：{record.record_number}", record.notes)
+            record_item = {
+                "source_id": record_source,
+                "id": record.id,
+                "payment_plan_id": record.payment_plan_id,
+                "contract_id": record.contract_id,
+                "opportunity_id": contract.opportunity_id if contract else None,
+                "actual_amount": self._number(record.actual_amount),
+                "payment_date": self._date(record.payment_date),
+                "confirmation_status": record.confirmation_status,
+                "approval_phase": record.approval_phase,
+                "notes": record.notes,
+            }
+            payment_record_items.append(record_item)
+            payment_milestones.append(record_item)
 
-        latest_follow_ups = db.query(CustomerActivity).filter(
-            CustomerActivity.customer_id == customer.id,
-            CustomerActivity.team_id == team_id,
-        ).order_by(CustomerActivity.occurred_at.desc()).limit(200).all()
-        follow_ups = sorted(latest_follow_ups, key=lambda item: item.occurred_at or item.created_time or datetime.min)
+        follow_ups = sorted(
+            strong_context.recent_activities,
+            key=lambda item: item.occurred_at or datetime.min.isoformat(),
+        )
 
         follow_up_items = []
         for follow_up in follow_ups:
@@ -294,7 +320,7 @@ class CustomerBriefService:
                 opportunities=opportunity_items,
                 payment_records=payment_milestones,
             )
-            content = follow_up.summary or follow_up.source_content
+            content = follow_up.content
             source = add_source("activity", follow_up.id, f"客户活动：{self._datetime(follow_up.occurred_at)}", content)
             follow_up_items.append({
                 "source_id": source,
@@ -307,19 +333,35 @@ class CustomerBriefService:
                 "candidate_opportunity_refs": candidates,
             })
 
-        similar_customers = db.query(Customer.account_name).filter(
-            Customer.team_id == team_id,
-            Customer.id != customer.id,
-            Customer.industry == customer.industry,
-        ).order_by(Customer.last_modified_time.desc()).limit(10).all() if customer.industry else []
+        semantic_evidence_items = []
+        for evidence in intelligence_context.evidence_hits:
+            source = add_source(
+                evidence.source_type or "semantic_evidence",
+                evidence.source_object_id or evidence.evidence_id,
+                evidence.title or "客户智能证据",
+                evidence.text,
+            )
+            semantic_evidence_items.append({
+                "source_id": source,
+                "evidence_id": evidence.evidence_id,
+                "score": evidence.score,
+                "source_type": evidence.source_type,
+                "business_object_type": evidence.business_object_type,
+                "business_object_id": evidence.business_object_id,
+                "title": evidence.title,
+                "text": evidence.text,
+            })
 
         return {
             "mode": "full_generate",
+            "context_source": "customer_intelligence",
+            "retrieval": intelligence_context.retrieval_state.to_dict(),
             "customer": {
                 "source_id": customer_source,
                 "id": customer.id,
                 "account_name": customer.account_name,
-                "industry": customer.industry,
+                "industry_code": customer.industry_code,
+                "industry_name": industry_name,
                 "city": customer.city,
                 "address": customer.address,
                 "company_scale": customer.company_scale,
@@ -344,13 +386,14 @@ class CustomerBriefService:
             "payment_plans": payment_plan_items,
             "payment_records": payment_record_items,
             "follow_ups": follow_up_items,
-            "same_industry_customers": [row[0] for row in similar_customers],
+            "semantic_evidence": semantic_evidence_items,
+            "same_industry_customers": strong_context.same_industry_customers,
             "citation_map": citation_map,
         }
 
     def _candidate_opportunities(
         self,
-        follow_up: CustomerActivity,
+        follow_up: ActivityFact,
         opportunities: List[Dict[str, Any]],
         payment_records: List[Dict[str, Any]],
     ) -> List[Dict[str, str]]:
@@ -358,7 +401,7 @@ class CustomerBriefService:
             return []
 
         active_opps = [opp for opp in opportunities if opp.get("status") == 0]
-        created_at = follow_up.occurred_at or follow_up.created_time
+        follow_up_date = self._date(follow_up.occurred_at)
 
         if len(active_opps) == 1 and not payment_records:
             return [{
@@ -372,7 +415,6 @@ class CustomerBriefService:
             [item for item in payment_records if item.get("payment_date")],
             key=lambda item: item["payment_date"],
         )
-        follow_up_date = created_at.date().isoformat() if created_at else None
 
         if follow_up_date:
             previous_payment = None
@@ -426,18 +468,19 @@ class CustomerBriefService:
 5. 弱归因不能表述为确定事实；置信度不足时归入客户级跟进。
 6. 多商机场景必须区分客户级概况和每个商机的进展，不要混成一段。
 7. 客户档案状态不是 COMPLETED 时，企业背景、主营业务、项目背景等档案来源章节留空。
-8. 不要机械复述原始字段。每个章节回答不同问题：
+8. 不要输出内部编码、数据库字段名或技术标识；行业只能使用 industry_name，不要输出 industry_code。
+9. 不要机械复述原始字段。每个章节回答不同问题：
    - enterprise_background：企业背景，只使用客户档案/客户基础资料。
    - rd_team_scale：研发或采购使用规模。优先使用商机 user_count / 合同 user_count；没有时再使用客户 company_scale。只要商机里有 user_count，就必须输出。
-   - industry：行业归类和同行客户线索，不要重复企业背景。
+   - industry：只在有明确行业展示名时输出行业归类，不要重复企业背景。
    - organization：联系人和组织关系。即使只有 1 个联系人，也要说明“当前已记录 1 位联系人”，并标出职位、主联系人、决策人等已知信息。
    - project_need_background：客户为什么需要采购/替换/增购，提炼需求背景，不要写采购时间表。
    - procurement_progress：采购所处阶段和关键节点。客户活动出现“立项、招标、挂网、投标、合同、回款、首付款、预算”等词时，要提炼成阶段判断，例如“正在准备立项材料”“预计挂网投标”“目标签约/回款时间”。
    - follow_up_progress：最近跟进动作和已达成共识，避免重复 procurement_progress 的完整时间表。
    - risks：只输出对成交有影响的风险；没有明确风险可为空，不要凑字。
    - next_steps：输出可执行动作，最多 3 条，按优先级排序。
-9. 客户级概况只放跨商机或当前主要商机的结论；商机概况补充该商机自己的阶段、金额、授权、下一步。不要把同一句客户活动在客户级和商机级完整重复。
-10. 单个商机时，可以把客户活动归到该商机，但客户级章节要提炼结论，商机级章节要补充交易信息。
+10. 客户级概况只放跨商机或当前主要商机的结论；商机概况补充该商机自己的阶段、金额、授权、下一步。不要把同一句客户活动在客户级和商机级完整重复。
+11. 单个商机时，可以把客户活动归到该商机，但客户级章节要提炼结论，商机级章节要补充交易信息。
 
 JSON 结构：
 {
@@ -520,11 +563,23 @@ JSON 结构：
                 organization_section["citations"] = citations
 
         industry_section = ensure_section("industry")
+        self._sanitize_industry_section(industry_section, context)
         if is_blank(industry_section.get("content")):
             customer = context.get("customer") or {}
-            if customer.get("industry"):
-                industry_section["content"] = str(customer["industry"])
+            if customer.get("industry_name"):
+                industry_section["content"] = str(customer["industry_name"])
                 industry_section["citations"] = [customer.get("source_id")]
+
+        similar_section = overview.get("similar_customers")
+        if not isinstance(similar_section, dict):
+            similar_section = {}
+            overview["similar_customers"] = similar_section
+        similar_items = similar_section.get("items")
+        if not isinstance(similar_items, list) or not similar_items:
+            fallback_similar = self._fallback_similar_customers(context)
+            if fallback_similar:
+                similar_section["items"] = fallback_similar
+                similar_section.setdefault("citations", self._customer_citations(context))
 
         procurement_section = ensure_section("procurement_progress")
         if is_blank(procurement_section.get("content")):
@@ -534,6 +589,183 @@ JSON 结构：
                 procurement_section["citations"] = citations
 
         return brief
+
+    def _persist_degraded_brief(
+        self,
+        *,
+        customer_id: int,
+        team_id: int,
+        context: Dict[str, Any],
+        error_message: str,
+    ) -> Dict[str, Any]:
+        brief_json = self._build_degraded_brief(context)
+        markdown = self._render_markdown(brief_json)
+        if not _has_meaningful_brief_markdown(markdown):
+            return {"success": False, "customer_id": customer_id, "error": error_message}
+
+        citation_map = context.get("citation_map") if isinstance(context.get("citation_map"), dict) else {}
+        db = SessionLocal()
+        try:
+            customer_crud.update_customer_brief(
+                db,
+                customer_id,
+                {
+                    "customer_brief_json": json.dumps(brief_json, ensure_ascii=False),
+                    "customer_brief_markdown": markdown,
+                    "customer_brief_citations": json.dumps(citation_map, ensure_ascii=False),
+                    "customer_brief_status": "COMPLETED",
+                    "customer_brief_generated_time": datetime.now(),
+                    "customer_brief_error_message": f"AI 增强暂不可用，已先生成基础概况：{error_message[:500]}",
+                },
+            )
+            updated_customer = db.query(Customer).filter(Customer.id == customer_id, Customer.team_id == team_id).first()
+            if updated_customer is not None:
+                try:
+                    customer_vector_document_service.upsert_customer_brief(db, updated_customer)
+                except Exception:
+                    logger.exception("客户概况降级证据元数据写入失败: customer_id=%s", customer_id)
+        finally:
+            db.close()
+        logger.warning("客户概况已降级生成: customer_id=%s, reason=%s", customer_id, error_message[:200])
+        return {
+            "success": True,
+            "customer_id": customer_id,
+            "degraded": True,
+            "error": error_message,
+        }
+
+    def _build_degraded_brief(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        overview = {
+            "enterprise_background": {"content": self._fallback_enterprise_background(context), "citations": self._customer_citations(context)},
+            "rd_team_scale": {"content": "", "citations": []},
+            "industry": {"content": "", "citations": []},
+            "similar_customers": {"items": self._fallback_similar_customers(context), "citations": self._customer_citations(context)},
+            "organization": {"content": "", "items": [], "citations": []},
+            "project_need_background": {"content": self._fallback_project_need_background(context), "citations": self._latest_follow_up_citations(context)},
+            "procurement_progress": {"content": "", "citations": []},
+            "follow_up_progress": {"content": self._fallback_follow_up_progress(context), "citations": self._latest_follow_up_citations(context)},
+            "risks": {"items": self._fallback_risks(context), "citations": self._latest_follow_up_citations(context)},
+            "next_steps": {"items": self._fallback_next_steps(context), "citations": self._latest_follow_up_citations(context)},
+        }
+        brief = {
+            "overview": overview,
+            "opportunity_summaries": self._fallback_opportunity_summaries(context),
+            "generation_mode": "business_data_fallback",
+        }
+        return self._normalize_brief(brief, context)
+
+    def _fallback_enterprise_background(self, context: Dict[str, Any]) -> str:
+        customer = context.get("customer") if isinstance(context.get("customer"), dict) else {}
+        if not customer:
+            return ""
+        parts = [str(customer.get("account_name") or "").strip()]
+        city = str(customer.get("city") or "").strip()
+        source = str(customer.get("source") or "").strip()
+        company_scale = str(customer.get("company_scale") or "").strip()
+        if city:
+            parts.append(f"位于{city}")
+        if company_scale:
+            parts.append(f"公司规模为{company_scale}")
+        if source:
+            parts.append(f"客户来源为{source}")
+        return "，".join(part for part in parts if part) + "。"
+
+    def _fallback_similar_customers(self, context: Dict[str, Any]) -> List[str]:
+        customers = context.get("same_industry_customers") if isinstance(context.get("same_industry_customers"), list) else []
+        return [str(item) for item in customers[:5] if str(item or "").strip()]
+
+    def _fallback_project_need_background(self, context: Dict[str, Any]) -> str:
+        follow_ups = context.get("follow_ups") if isinstance(context.get("follow_ups"), list) else []
+        for follow_up in reversed(follow_ups):
+            content = str(follow_up.get("content") or "").strip() if isinstance(follow_up, dict) else ""
+            if content:
+                return f"最近跟进中提到：{content[:180]}"
+        opportunities = context.get("opportunities") if isinstance(context.get("opportunities"), list) else []
+        active = [item for item in opportunities if isinstance(item, dict) and item.get("status") == 0]
+        if active:
+            names = "、".join(str(item.get("name") or "未命名商机") for item in active[:3])
+            return f"当前存在跟进中商机：{names}。"
+        return ""
+
+    def _fallback_follow_up_progress(self, context: Dict[str, Any]) -> str:
+        follow_ups = context.get("follow_ups") if isinstance(context.get("follow_ups"), list) else []
+        if not follow_ups:
+            return ""
+        latest = follow_ups[-1]
+        if not isinstance(latest, dict):
+            return ""
+        content = str(latest.get("content") or "").strip()
+        next_action = str(latest.get("next_action") or "").strip()
+        if content and next_action:
+            return f"最近跟进：{content[:160]}。下一步：{next_action[:120]}。"
+        if content:
+            return f"最近跟进：{content[:220]}"
+        return ""
+
+    def _fallback_risks(self, context: Dict[str, Any]) -> List[str]:
+        follow_ups = context.get("follow_ups") if isinstance(context.get("follow_ups"), list) else []
+        risk_words = ["风险", "延期", "搁置", "预算不足", "竞争", "流失", "不同意", "无法", "未确认"]
+        risks = []
+        for follow_up in reversed(follow_ups):
+            content = str(follow_up.get("content") or "").strip() if isinstance(follow_up, dict) else ""
+            if content and any(word in content for word in risk_words):
+                risks.append(content[:120])
+            if len(risks) >= 3:
+                break
+        return risks
+
+    def _fallback_next_steps(self, context: Dict[str, Any]) -> List[str]:
+        follow_ups = context.get("follow_ups") if isinstance(context.get("follow_ups"), list) else []
+        for follow_up in reversed(follow_ups):
+            if not isinstance(follow_up, dict):
+                continue
+            next_action = str(follow_up.get("next_action") or "").strip()
+            if next_action:
+                return [next_action[:120]]
+        opportunities = context.get("opportunities") if isinstance(context.get("opportunities"), list) else []
+        active = [item for item in opportunities if isinstance(item, dict) and item.get("status") == 0]
+        if active:
+            return ["继续推进当前跟进中商机，并补齐下一步跟进计划。"]
+        return []
+
+    def _fallback_opportunity_summaries(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        opportunities = context.get("opportunities") if isinstance(context.get("opportunities"), list) else []
+        summaries: List[Dict[str, Any]] = []
+        for opportunity in opportunities[:5]:
+            if not isinstance(opportunity, dict):
+                continue
+            name = str(opportunity.get("name") or "未命名商机")
+            parts = []
+            if opportunity.get("stage"):
+                parts.append(f"阶段：{opportunity['stage']}")
+            if opportunity.get("amount") is not None:
+                parts.append(f"预计金额：{opportunity['amount']}")
+            if opportunity.get("expected_closing_date"):
+                parts.append(f"预计成交：{opportunity['expected_closing_date']}")
+            summaries.append({
+                "opportunity_id": opportunity.get("id") or 0,
+                "opportunity_name": name,
+                "summary": "，".join(parts),
+                "procurement_progress": str(opportunity.get("stage") or ""),
+                "latest_progress": "",
+                "risks": [],
+                "next_steps": [],
+                "citations": [opportunity.get("source_id")] if opportunity.get("source_id") else [],
+            })
+        return summaries
+
+    def _customer_citations(self, context: Dict[str, Any]) -> List[str]:
+        customer = context.get("customer") if isinstance(context.get("customer"), dict) else {}
+        source_id = customer.get("source_id") if isinstance(customer, dict) else None
+        return [str(source_id)] if source_id else []
+
+    def _latest_follow_up_citations(self, context: Dict[str, Any]) -> List[str]:
+        follow_ups = context.get("follow_ups") if isinstance(context.get("follow_ups"), list) else []
+        for follow_up in reversed(follow_ups):
+            source_id = follow_up.get("source_id") if isinstance(follow_up, dict) else None
+            if source_id:
+                return [str(source_id)]
+        return []
 
     def _fallback_rd_team_scale(self, context: Dict[str, Any]) -> Tuple[str, List[str]]:
         opportunities = context.get("opportunities") or []
@@ -625,6 +857,19 @@ JSON 结构：
 
         return "", []
 
+    def _sanitize_industry_section(self, section: Dict[str, Any], context: Dict[str, Any]) -> None:
+        customer = context.get("customer") if isinstance(context.get("customer"), dict) else {}
+        industry_code = str(customer.get("industry_code") or "").strip()
+        industry_name = str(customer.get("industry_name") or "").strip()
+        content = str(section.get("content") or "").strip()
+        if not content or not industry_code:
+            return
+        if content == industry_code:
+            section["content"] = industry_name if industry_name and industry_name != industry_code else ""
+            return
+        if industry_name and industry_name != industry_code and industry_code in content:
+            section["content"] = content.replace(industry_code, industry_name)
+
     def _render_markdown(self, brief: Dict[str, Any]) -> str:
         overview = brief.get("overview") or {}
 
@@ -655,7 +900,7 @@ JSON 结构：
             "",
             f"### 研发团队规模\n{content('rd_team_scale')}",
             "",
-            f"### 行业与同行客户\n{content('industry')}",
+            f"### 同行业客户\n{content('industry')}",
         ]
 
         similar = overview.get("similar_customers") or {}
@@ -748,3 +993,12 @@ JSON 结构：
 
 
 customer_brief_service = CustomerBriefService()
+
+
+def _has_meaningful_brief_markdown(markdown: str) -> bool:
+    content_lines = [
+        line.strip()
+        for line in markdown.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    return any(content_lines)

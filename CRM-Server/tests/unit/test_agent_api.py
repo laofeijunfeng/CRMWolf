@@ -298,6 +298,69 @@ async def test_agent_application_streams_runtime_events_before_turn_finishes(mon
         engine.dispose()
 
 
+async def test_agent_application_uses_streamed_final_as_assistant_content(monkeypatch):
+    class FakeRootRuntime:
+        async def run_turn(self, *, context, **kwargs):
+            if context.event_sink:
+                await context.event_sink({
+                    "event": "agent_step",
+                    "step": "customer_intelligence",
+                    "status": "completed",
+                    "content": "生成客户回答：已基于客户档案、业务上下文和检索证据整理回答，置信度 92%",
+                })
+                await context.event_sink({
+                    "event": "final",
+                    "content": "中国科学院信息工程研究所当前有 1 个推进中的商机。",
+                    "content_format": "markdown",
+                })
+            return {
+                "application_action": "run_new_flow",
+                "events": [{"event": "agent_root_customer_intelligence_graph_completed"}],
+            }
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(agent_api.agent_application_module, "SessionLocal", lambda: Session())
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "客户查询"}).json()
+        events = []
+        async for event in agent_api.agent_application_service.stream_chat_events(
+            content="中科院现在是什么情况",
+            team_id=1,
+            user_id=2,
+            authorization="Bearer test-token",
+            session_id=session["id"],
+        ):
+            events.append(event)
+
+        assistant_messages = [
+            event for event in events
+            if event.get("event") == "message" and event.get("role") == "ASSISTANT"
+        ]
+        assert assistant_messages[-1]["content"] == "中国科学院信息工程研究所当前有 1 个推进中的商机。"
+        assert assistant_messages[-1]["content_format"] == "markdown"
+        assert "好嘞，已处理完成。" not in [event.get("content") for event in events]
+
+        db = Session()
+        try:
+            persisted_assistant = (
+                db.query(AgentMessage)
+                .filter(
+                    AgentMessage.session_id == session["id"],
+                    AgentMessage.role == "ASSISTANT",
+                )
+                .order_by(AgentMessage.id.desc())
+                .first()
+            )
+            assert persisted_assistant is not None
+            assert persisted_assistant.payload_json["content_format"] == "markdown"
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
 def test_agent_runtime_state_api_reads_root_checkpoint(monkeypatch):
     class FakeRootRuntime:
         def __init__(self):
@@ -2890,10 +2953,10 @@ def test_agent_stream_collects_deployment_info_fields_then_executes_confirmation
                 "payload": {
                     "customer_id": 101,
                     "deployment_info": {"customer_id": 101, "is_default": False},
-                    "missing_fields": ["deployment_name", "server_address", "authorized_users"],
+                    "missing_fields": ["deployment_name", "server_address"],
                 },
             }
-            yield {"event": "final", "content": "还需要补充：部署名称、服务器地址、授权人数。"}
+            yield {"event": "final", "content": "还需要补充：部署名称、服务器地址。"}
 
     class FakeToolService:
         async def create_deployment_info(self, context, **kwargs):
@@ -2904,7 +2967,6 @@ def test_agent_stream_collects_deployment_info_fields_then_executes_confirmation
                 "is_default": True,
                 "deployment_name": "生产环境",
                 "server_address": "https://crm.example.com",
-                "authorized_users": 100,
             }
             return AgentToolResult(
                 tool_name="create_deployment_info",
@@ -2929,7 +2991,6 @@ def test_agent_stream_collects_deployment_info_fields_then_executes_confirmation
         "deployment_info": {
             "deployment_name": "生产环境",
             "server_address": "https://crm.example.com",
-            "authorized_users": 100,
             "is_default": True,
         },
         "business_signals": [],
@@ -2937,7 +2998,7 @@ def test_agent_stream_collects_deployment_info_fields_then_executes_confirmation
         "missing_fields": [],
         "need_clarification": False,
         "clarification_question": None,
-        "evidence": ["部署名称是生产环境，服务器地址 https://crm.example.com，授权人数100，设为默认"],
+        "evidence": ["部署名称是生产环境，服务器地址 https://crm.example.com，设为默认"],
     }))
 
     client, engine = _build_client(monkeypatch)
@@ -2958,7 +3019,7 @@ def test_agent_stream_collects_deployment_info_fields_then_executes_confirmation
             "/v1/agent/chat/stream",
             json={
                 "session_id": session["id"],
-                "content": "部署名称是生产环境，服务器地址 https://crm.example.com，授权人数100，设为默认",
+                "content": "部署名称是生产环境，服务器地址 https://crm.example.com，设为默认",
             },
             headers={"Authorization": "Bearer test-token"},
         )

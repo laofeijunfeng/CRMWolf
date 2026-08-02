@@ -21,9 +21,6 @@ export const companyScaleOptions = [
   { value: '1000人以上', label: '1000人以上' }
 ] as const
 
-// Profile status type
-export const profileStatusSchema = z.enum(['PENDING', 'GENERATING', 'COMPLETED', 'FAILED']).nullable()
-
 // Customer form schema for create/edit
 export const customerFormSchema = z.object({
   // Required fields
@@ -62,29 +59,6 @@ export const customerFormSchema = z.object({
     required_error: '请选择采购方式',
     invalid_type_error: '请选择采购方式'
   }).int().positive('请选择采购方式'),
-
-  // Profile fields (only for edit mode)
-  company_background: z.string()
-    .max(2000, '企业背景不能超过2000个字符')
-    .optional()
-    .or(z.literal('')),
-
-  company_website: z.string()
-    .url('请输入正确的网址格式')
-    .max(255, '网址不能超过255个字符')
-    .optional()
-    .or(z.literal(''))
-    .or(z.literal(null)),
-
-  main_business: z.string()
-    .max(2000, '主营业务不能超过2000个字符')
-    .optional()
-    .or(z.literal('')),
-
-  project_background: z.string()
-    .max(2000, '项目需求背景不能超过2000个字符')
-    .optional()
-    .or(z.literal(''))
 })
 
 export type CustomerForm = z.infer<typeof customerFormSchema>

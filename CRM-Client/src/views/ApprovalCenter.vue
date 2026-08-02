@@ -916,7 +916,7 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
         commonCustomerField,
         { key: 'deployment_name', label: '部署名称', value: entityDetailValue('deployment_name') },
         { key: 'server_address', label: '服务器地址', value: entityDetailValue('server_address'), type: 'mono', wide: true },
-        { key: 'authorized_users', label: '授权人数', value: entityDetailValue('authorized_users') },
+        { key: 'authorized_users', label: '使用人数', value: entityDetailValue('authorized_users') },
         { key: 'expiry_date', label: '到期时间', value: formatDateValue(entityDetailValue('expiry_date')) },
         { key: 'contract', label: '关联合同', value: entityDetailValue('contract_name'), wide: true },
         { key: 'remark', label: '申请备注', value: entityDetailValue('remark'), wide: true },

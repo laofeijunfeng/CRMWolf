@@ -144,7 +144,20 @@
       </header>
 
       <div class="main-view" :class="mainViewClass">
-        <router-view />
+        <router-view v-slot="{ Component, route: currentRoute }">
+          <KeepAlive>
+            <component
+              :is="Component"
+              v-if="currentRoute.meta['keepAlive'] === true"
+              :key="currentRoute.name ?? currentRoute.fullPath"
+            />
+          </KeepAlive>
+          <component
+            :is="Component"
+            v-if="currentRoute.meta['keepAlive'] !== true"
+            :key="currentRoute.fullPath"
+          />
+        </router-view>
       </div>
     </SidebarInset>
 

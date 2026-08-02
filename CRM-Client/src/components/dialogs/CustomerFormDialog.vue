@@ -31,7 +31,6 @@ import {
   InputField,
   SegmentedChoiceControl,
   SelectField,
-  TextareaField,
 } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
@@ -164,12 +163,7 @@ watch([(): boolean => props.open, (): number | undefined => props.customerId], a
         address: customer.address ?? '',
         company_scale: normalizeCompanyScale(customer.company_scale),
         source: normalizeCustomerSource(customer.source),
-        default_procurement_method_id: customer.default_procurement_method_id ?? undefined,
-        // Profile fields (only in edit mode)
-        company_background: customer.company_background ?? '',
-        company_website: customer.company_website ?? '',
-        main_business: customer.main_business ?? '',
-        project_background: customer.project_background ?? ''
+        default_procurement_method_id: customer.default_procurement_method_id ?? undefined
       } as Partial<CustomerForm>)
       // Reset dirty state after loading
       isDirty.value = false
@@ -232,12 +226,7 @@ const onSubmit = handleSubmit(async (formValues): Promise<void> => {
         address: editData.address !== '' && editData.address !== undefined ? editData.address : null,
         company_scale: editData.company_scale ?? null,
         source: editData.source ?? null,
-        default_procurement_method_id: editData.default_procurement_method_id ?? null,
-        // Profile fields (only in edit mode)
-        company_background: editData.company_background !== '' && editData.company_background !== undefined ? editData.company_background : null,
-        company_website: editData.company_website !== '' && editData.company_website !== undefined ? editData.company_website : null,
-        main_business: editData.main_business !== '' && editData.main_business !== undefined ? editData.main_business : null,
-        project_background: editData.project_background !== '' && editData.project_background !== undefined ? editData.project_background : null
+        default_procurement_method_id: editData.default_procurement_method_id ?? null
       }
       await customerApi.updateCustomer(props.customerId, data)
       toast.success('客户更新成功')
@@ -452,72 +441,6 @@ function continueEditing(): void {
               </p>
             </div>
           </div>
-        </div>
-
-        <!-- Profile Section (only in edit mode) -->
-        <div v-if="mode === 'edit'" class="space-y-4 pt-4 border-t">
-          <h3 class="text-sm font-medium text-muted-foreground">档案信息</h3>
-
-          <!-- Company Background -->
-          <FormField v-slot="{ value, handleChange }" name="company_background">
-            <FormItem>
-              <TextareaField
-                id="customer-company-background"
-                :model-value="String(value ?? '')"
-                label="公司背景"
-                :rows="3"
-                placeholder="请输入公司背景信息"
-                @update:model-value="handleChange"
-              />
-              <FormMessage />
-            </FormItem>
-          </FormField>
-
-          <!-- Company Website -->
-          <FormField v-slot="{ value, handleChange }" name="company_website">
-            <FormItem>
-              <InputField
-                id="customer-company-website"
-                :model-value="String(value ?? '')"
-                label="公司网站"
-                type="url"
-                autocomplete="url"
-                placeholder="请输入公司网站URL"
-                @update:model-value="handleChange"
-              />
-              <FormMessage />
-            </FormItem>
-          </FormField>
-
-          <!-- Main Business -->
-          <FormField v-slot="{ value, handleChange }" name="main_business">
-            <FormItem>
-              <TextareaField
-                id="customer-main-business"
-                :model-value="String(value ?? '')"
-                label="主营业务"
-                :rows="3"
-                placeholder="请输入主营业务信息"
-                @update:model-value="handleChange"
-              />
-              <FormMessage />
-            </FormItem>
-          </FormField>
-
-          <!-- Project Background -->
-          <FormField v-slot="{ value, handleChange }" name="project_background">
-            <FormItem>
-              <TextareaField
-                id="customer-project-background"
-                :model-value="String(value ?? '')"
-                label="项目背景"
-                :rows="3"
-                placeholder="请输入项目背景信息"
-                @update:model-value="handleChange"
-              />
-              <FormMessage />
-            </FormItem>
-          </FormField>
         </div>
 
         <!-- DialogFooter -->

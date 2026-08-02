@@ -57,7 +57,7 @@ async def test_deployment_info_graph_routes_missing_fields_to_form_action():
 
     assert result["deployment_info_route"] == "collect_fields"
     assert result["action"]["action"] == "collect_deployment_info_fields"
-    assert result["action"]["payload"]["missing_fields"] == ["server_address", "authorized_users"]
+    assert result["action"]["payload"]["missing_fields"] == ["server_address"]
 
 
 @pytest.mark.asyncio
@@ -95,4 +95,4 @@ async def test_deployment_info_graph_resets_action_between_turns_on_same_thread(
     assert snapshot.values["customer_route"] == "customer_not_found"
     assert snapshot.values["action"] == {}
     assert snapshot.values["selected_customer"] == {}
-    assert snapshot.values["missing_fields"] == ["deployment_name", "server_address", "authorized_users"]
+    assert snapshot.values["missing_fields"] == ["deployment_name", "server_address"]

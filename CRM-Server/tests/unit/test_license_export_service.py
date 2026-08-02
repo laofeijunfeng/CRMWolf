@@ -19,6 +19,7 @@ def test_export_license_document_omits_enterprise_id_line():
     application = LicenseApplication(
         customer=customer,
         deployment_info=deployment_info,
+        authorized_users=80,
         expiry_date=date(2026, 12, 31),
         license_type=LicenseType.TRIAL,
         enterprise_id="15739",
@@ -36,5 +37,7 @@ def test_export_license_document_omits_enterprise_id_line():
         Path(file_path).unlink(missing_ok=True)
 
     assert "企业名称: 测试客户" in paragraph_text
+    assert "授权人数: 80" in paragraph_text
+    assert "试用 License（80人）" in paragraph_text
     assert "企业编号" not in paragraph_text
     assert "15739" not in paragraph_text

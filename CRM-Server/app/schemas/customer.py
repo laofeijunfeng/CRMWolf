@@ -1,8 +1,13 @@
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from typing import Optional, List, Literal
+from __future__ import annotations
+
+import enum
 from datetime import date, datetime
 from enum import Enum
-import enum
+from typing import Dict, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+JsonObject = Dict[str, object]
 
 
 class CustomerIndustryOption(BaseModel):
@@ -223,11 +228,6 @@ class CustomerUpdate(BaseModel):
     company_scale: Optional[str] = Field(None, max_length=50, description="公司规模")
     source: Optional[CustomerSource] = Field(None, description="客户来源")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
-    # 档案字段（支持编辑）
-    company_background: Optional[str] = Field(None, description="企业背景")
-    company_website: Optional[str] = Field(None, description="公司官网")
-    main_business: Optional[str] = Field(None, description="主营业务")
-    project_background: Optional[str] = Field(None, description="项目需求背景")
 
     @field_validator('account_name')
     @classmethod
@@ -413,6 +413,7 @@ class CustomerDetailResponse(BaseModel):
     customer_brief_status: Optional[str] = None
     customer_brief_generated_time: Optional[datetime] = None
     customer_brief_error_message: Optional[str] = None
+    customer_intelligence_has_inputs: bool = Field(False, description="是否存在可用于整理客户智能档案的业务输入")
     # 热力值字段
     score: Optional[int] = Field(None, description="热力值分数（0-100）")
     score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
@@ -431,6 +432,57 @@ class ConvertResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str = Field(..., description="响应消息")
+
+
+class CustomerIntelligenceBatchRebuildRequest(BaseModel):
+    scope: Literal["full", "brief"] = Field("full", description="重建范围：full=客户档案和客户概况，brief=客户概况")
+    customer_ids: Optional[List[int]] = Field(None, description="指定客户ID；为空时按团队批量重建")
+    limit: int = Field(100, ge=1, le=500, description="本次最多调度的客户数")
+
+
+class CustomerIntelligenceBatchRebuildResponse(BaseModel):
+    message: str = Field(..., description="响应消息")
+    request_id: str = Field(..., description="批量重建请求ID")
+    scope: Literal["full", "brief"] = Field(..., description="重建范围")
+    total: int = Field(..., description="匹配客户数")
+    scheduled: int = Field(..., description="已调度客户数")
+    customer_ids: List[int] = Field(..., description="已调度的客户ID")
+
+
+class CustomerIntelligenceRunDiagnosticResponse(BaseModel):
+    id: int = Field(..., description="运行记录ID")
+    request_id: str = Field(..., description="请求ID")
+    customer_id: int = Field(..., description="客户ID")
+    actor_id: Optional[str] = Field(None, description="触发人ID")
+    trigger_type: str = Field(..., description="触发类型")
+    scope: str = Field(..., description="刷新范围")
+    status: str = Field(..., description="运行状态")
+    attempt_count: int = Field(..., description="已尝试次数")
+    max_attempts: int = Field(..., description="最大尝试次数")
+    route_label: Optional[str] = Field(None, description="运行类型")
+    result: JsonObject = Field(default_factory=dict, description="运行结果摘要")
+    visible_trace: List[JsonObject] = Field(default_factory=list, description="用户可见执行轨迹")
+    trace_events: List[JsonObject] = Field(default_factory=list, description="可回放执行事件")
+    error_message: Optional[str] = Field(None, description="错误信息")
+    created_time: Optional[datetime] = Field(None, description="创建时间")
+    started_time: Optional[datetime] = Field(None, description="开始时间")
+    finished_time: Optional[datetime] = Field(None, description="结束时间")
+    next_retry_at: Optional[datetime] = Field(None, description="下次重试时间")
+    last_duration_ms: Optional[int] = Field(None, description="最近一次运行耗时毫秒")
+
+
+class CustomerIntelligenceRunDiagnosticListResponse(BaseModel):
+    items: List[CustomerIntelligenceRunDiagnosticResponse] = Field(default_factory=list, description="运行诊断列表")
+    total: int = Field(..., description="返回数量")
+    limit: int = Field(..., description="查询限制")
+
+
+class CustomerIntelligenceRetryDueResponse(BaseModel):
+    success: bool = Field(..., description="是否调度成功")
+    total: int = Field(..., description="本次处理数量")
+    succeeded: int = Field(..., description="成功数量")
+    failed: int = Field(..., description="失败数量")
+    results: List[JsonObject] = Field(default_factory=list, description="重试结果")
 
 
 class StatisticsResponse(BaseModel):

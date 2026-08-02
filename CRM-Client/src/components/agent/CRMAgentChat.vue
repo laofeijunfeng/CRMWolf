@@ -4,6 +4,7 @@
       class="agent-chat__messages"
       :content-style="messageContentStyle"
       :items-count="messageScrollCount"
+      :scroll-key="messageScrollKey"
     >
       <div v-if="messages.length === 0" class="agent-chat__empty">
         <Sparkles class="agent-chat__empty-icon" aria-hidden="true" />
@@ -82,7 +83,7 @@
                   </div>
                 </div>
               </div>
-              <div>{{ message.content }}</div>
+              <AgentMessageBody :content="message.content" :format="message.contentFormat" />
             </div>
           </Bubble>
           <Avatar v-if="message.role === 'user'" class="agent-chat__avatar agent-chat__avatar--user">
@@ -129,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, type Component } from "vue"
+import { computed, onActivated, onMounted, ref, type Component } from "vue"
 import { toast } from "vue-sonner"
 import {
   AlertTriangle,
@@ -148,8 +149,16 @@ import {
   Wrench,
 } from "lucide-vue-next"
 import { useUserStore } from "@/stores/user"
-import { agentApi, type AgentChatSSEEvent, type AgentEventType, type AgentInteraction, type AgentMessageResponse } from "@/api/agent"
-import { loadLatestAgentMessages } from "@/components/agent/agentHistory"
+import {
+  agentApi,
+  type AgentChatSSEEvent,
+  type AgentContentFormat,
+  type AgentEventType,
+  type AgentInteraction,
+  type AgentMessageResponse,
+} from "@/api/agent"
+import { loadLatestAgentMessages, resolveInitialAgentSession } from "@/components/agent/agentHistory"
+import AgentMessageBody from "@/components/agent/AgentMessageBody.vue"
 import AgentInteractionDrawer from "@/components/agent/AgentInteractionDrawer.vue"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Bubble } from "@/components/ui/bubble"
@@ -162,6 +171,7 @@ interface ChatMessage {
   id: string
   role: "user" | "assistant"
   content: string
+  contentFormat: AgentContentFormat
   steps: EventLog[]
   isStreaming?: boolean
   stepsExpanded?: boolean
@@ -184,6 +194,7 @@ const isLoadingHistory = ref(false)
 const activeAssistantId = ref<string | null>(null)
 const activeInteraction = ref<AgentInteraction | null>(null)
 const interactionDrawerHeight = ref(0)
+const messageScrollKey = ref(0)
 
 const LAST_SESSION_STORAGE_KEY = "crm_agent_last_session_id"
 
@@ -222,11 +233,23 @@ const normalizeRole = (role: AgentChatSSEEvent["role"]): ChatMessage["role"] | n
   return null
 }
 
-const addAssistantMessage = (content: string, id?: string | number): void => {
+const normalizeContentFormat = (format: unknown): AgentContentFormat => {
+  return format === "markdown" ? "markdown" : "text"
+}
+
+const payloadContentFormat = (payload?: Record<string, unknown> | null): AgentContentFormat => {
+  return normalizeContentFormat(payload?.["content_format"])
+}
+
+const addAssistantMessage = (
+  content: string,
+  id?: string | number,
+  contentFormat: AgentContentFormat = "text"
+): void => {
   if (content.length === 0) return
   const lastMessage = messages.value[messages.value.length - 1]
   if (lastMessage?.role === "assistant" && lastMessage.content === content) return
-  messages.value.push({ id: String(id ?? nextId("assistant")), role: "assistant", content, steps: [] })
+  messages.value.push({ id: String(id ?? nextId("assistant")), role: "assistant", content, contentFormat, steps: [] })
 }
 
 const activeAssistantMessage = (): ChatMessage | null => {
@@ -241,23 +264,30 @@ const startAssistantDraft = (): void => {
     id,
     role: "assistant",
     content: "正在理解你的 CRM 操作意图...",
+    contentFormat: "text",
     steps: [],
     isStreaming: true,
   })
   activeAssistantId.value = id
 }
 
-const updateAssistantDraft = (content: string, id?: string | number, keepActive = false): void => {
+const updateAssistantDraft = (
+  content: string,
+  id?: string | number,
+  keepActive = false,
+  contentFormat?: AgentContentFormat
+): void => {
   if (content.length === 0) return
   const draft = activeAssistantMessage()
   if (draft) {
     draft.content = content
+    if (contentFormat !== undefined) draft.contentFormat = contentFormat
     draft.isStreaming = false
     if (id !== undefined) draft.id = String(id)
     if (!keepActive) activeAssistantId.value = null
     return
   }
-  addAssistantMessage(content, id)
+  addAssistantMessage(content, id, contentFormat)
 }
 
 const payloadTraceEvents = (payload?: Record<string, unknown> | null): AgentChatSSEEvent[] => {
@@ -292,6 +322,7 @@ const toChatMessage = (message: AgentMessageResponse): ChatMessage | null => {
     id: String(message.id),
     role,
     content,
+    contentFormat: role === "assistant" ? payloadContentFormat(message.payload_json) : "text",
     steps: role === "assistant"
       ? payloadTraceEvents(message.payload_json).map(traceEventToStep).filter((step): step is EventLog => step !== null)
       : [],
@@ -333,6 +364,7 @@ const loadSessionMessages = async (targetSessionId: number): Promise<boolean> =>
   restoreInteractionFromMessages(loadedMessages)
   sessionId.value = targetSessionId
   localStorage.setItem(LAST_SESSION_STORAGE_KEY, String(targetSessionId))
+  messageScrollKey.value += 1
   return true
 }
 
@@ -342,17 +374,11 @@ const loadInitialSession = async (): Promise<void> => {
   isLoadingHistory.value = true
   try {
     const storedSessionId = Number(localStorage.getItem(LAST_SESSION_STORAGE_KEY))
-    if (Number.isInteger(storedSessionId) && storedSessionId > 0) {
-      try {
-        await loadSessionMessages(storedSessionId)
-        return
-      } catch {
-        localStorage.removeItem(LAST_SESSION_STORAGE_KEY)
-      }
-    }
-
     const sessions = await agentApi.listSessions()
-    const latestSession = sessions.items[0]
+    const latestSession = resolveInitialAgentSession(
+      sessions.items,
+      Number.isInteger(storedSessionId) && storedSessionId > 0 ? storedSessionId : undefined
+    )
     if (latestSession === undefined) return
 
     sessionKey.value = latestSession.session_key
@@ -647,13 +673,15 @@ const handleSSEEvent = (event: AgentChatSSEEvent): void => {
   if (event.event === "message") {
     const role = normalizeRole(event.role)
     if (role === "assistant" && event.content !== undefined) {
-      updateAssistantDraft(event.content, event.message_id)
+      updateAssistantDraft(event.content, event.message_id, false, normalizeContentFormat(event.content_format))
     }
     return
   }
 
   if (event.event === "final") {
-    if (event.content !== undefined) updateAssistantDraft(event.content, undefined, true)
+    if (event.content !== undefined) {
+      updateAssistantDraft(event.content, undefined, true, normalizeContentFormat(event.content_format))
+    }
     return
   }
 
@@ -684,7 +712,7 @@ const sendMessageContent = async (content: string, interactionMetadata?: Record<
     return
   }
 
-  messages.value.push({ id: nextId("user"), role: "user", content, steps: [] })
+  messages.value.push({ id: nextId("user"), role: "user", content, contentFormat: "text", steps: [] })
   startAssistantDraft()
   input.value = ""
   setActiveInteraction(null)
@@ -738,6 +766,10 @@ const useExample = (example: string): void => {
 
 onMounted(() => {
   void loadInitialSession()
+})
+
+onActivated(() => {
+  messageScrollKey.value += 1
 })
 </script>
 
@@ -799,7 +831,6 @@ onMounted(() => {
 }
 
 .agent-chat__bubble {
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: $wolf-font-size-auxiliary-v2;
   line-height: $wolf-line-height-body-v2;

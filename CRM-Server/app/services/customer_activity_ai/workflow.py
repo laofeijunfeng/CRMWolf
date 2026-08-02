@@ -31,6 +31,7 @@ from app.services.customer_activity_ai.structuring_agent import (
 )
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.follow_up_parser import follow_up_parser_service
+from app.services.industry_display_service import industry_display_service
 
 
 logger = logging.getLogger(__name__)
@@ -238,7 +239,8 @@ class CustomerActivityAIWorkflow:
             "customer": {
                 "id": customer.id,
                 "account_name": customer.account_name,
-                "industry": customer.industry,
+                "industry_code": customer.industry,
+                "industry_name": industry_display_service.display_name(db, customer.industry),
                 "city": customer.city,
                 "company_scale": customer.company_scale,
                 "source": customer.source,

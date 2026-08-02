@@ -1,45 +1,47 @@
-# CRM-Server/app/api/license_application.py
 """License 申请管理 API 端点"""
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import os
+from datetime import datetime
+from typing import List
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List
-from datetime import datetime
-from urllib.parse import quote
-import os
 
+from app.constants.business_types import BusinessType
 from app.core.database import get_db
 from app.core.deps import (
+    check_customer_edit_permission,
+    check_customer_view_permission,
     get_current_active_user,
     get_current_user_team,
     require_permission,
-    check_customer_edit_permission,
-    check_customer_view_permission,
 )
+from app.core.logging import get_logger
+from app.crud.approval import approval_crud
 from app.crud.crud_license_application import (
     create_license_application,
+    delete_license_application,
     get_license_application,
     get_license_applications_by_customer,
-    update_license_application,
-    delete_license_application,
-    submit_license_application,
     issue_license_application_full,
+    update_license_application,
 )
+from app.models.license_application import LicenseApplication, LicenseApplicationStatus
 from app.schemas.license_application import (
-    LicenseApplicationCreate,
-    LicenseApplicationUpdate,
     LicenseApplicationApprove,
     LicenseApplicationApproveFull,
-    LicenseApplicationResponse
+    LicenseApplicationCreate,
+    LicenseApplicationResponse,
+    LicenseApplicationUpdate,
 )
-from app.models.license_application import LicenseApplicationStatus
-from app.constants.business_types import BusinessType
-from app.crud.approval import approval_crud
 from app.services.approval_adapter import get_adapter, get_approval_card_fields
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeType,
+    customer_business_object_intelligence_service,
+)
 from app.services.feishu_notification import feishu_notification_service
 from app.services.license_export_service import export_license_document
-from app.core.logging import get_logger
-
 
 router = APIRouter(prefix="/v1/license-applications", tags=["License申请管理"])
 logger = get_logger(__name__)
@@ -63,6 +65,22 @@ def _export_filename(application) -> str:
     return f"私有化部署License-{safe_customer_name}_{current_date}.docx"
 
 
+def _enqueue_license_application_intelligence_refresh(
+    db: Session,
+    application: LicenseApplication,
+    *,
+    change_type: CustomerBusinessObjectChangeType,
+    actor_id: str | None,
+) -> None:
+    customer_business_object_intelligence_service.enqueue_object_change_refresh(
+        db,
+        source_type="license_application",
+        business_object=application,
+        change_type=change_type,
+        actor_id=actor_id,
+    )
+
+
 @router.post("/", response_model=LicenseApplicationResponse, status_code=status.HTTP_201_CREATED, summary="创建License申请")
 def create_application(
     application: LicenseApplicationCreate,
@@ -72,7 +90,14 @@ def create_application(
 ):
     """创建 License 申请（草稿状态）"""
     check_customer_edit_permission(application.customer_id, team_id, current_user, db)
-    return create_license_application(db, team_id, application, current_user.id)
+    created = create_license_application(db, team_id, application, current_user.id)
+    _enqueue_license_application_intelligence_refresh(
+        db,
+        created,
+        change_type="created",
+        actor_id=str(current_user.id),
+    )
+    return created
 
 
 @router.get("/", response_model=List[LicenseApplicationResponse], summary="获取客户License申请列表")
@@ -127,7 +152,19 @@ def update_application(
             detail="仅草稿状态的申请可以编辑"
         )
     check_customer_edit_permission(existing.customer_id, team_id, current_user, db)
-    return update_license_application(db, team_id, application_id, application)
+    updated = update_license_application(db, team_id, application_id, application)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="License申请不存在"
+        )
+    _enqueue_license_application_intelligence_refresh(
+        db,
+        updated,
+        change_type="updated",
+        actor_id=str(current_user.id),
+    )
+    return updated
 
 
 @router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除License申请")
@@ -151,6 +188,12 @@ def delete_application(
         )
     check_customer_edit_permission(existing.customer_id, team_id, current_user, db)
     delete_license_application(db, team_id, application_id)
+    _enqueue_license_application_intelligence_refresh(
+        db,
+        existing,
+        change_type="deleted",
+        actor_id=str(current_user.id),
+    )
 
 
 @router.post("/{application_id}/submit", response_model=LicenseApplicationResponse, summary="提交License申请")
@@ -196,6 +239,12 @@ def submit_application(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="License申请不存在"
             )
+        _enqueue_license_application_intelligence_refresh(
+            db,
+            application,
+            change_type="updated",
+            actor_id=str(current_user.id),
+        )
         return application
     except ValueError as e:
         raise HTTPException(
@@ -274,6 +323,12 @@ async def issue_application(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="License申请不存在"
             )
+        _enqueue_license_application_intelligence_refresh(
+            db,
+            issued,
+            change_type="updated",
+            actor_id=str(current_user.id),
+        )
         if approval and approval.submitter_id:
             try:
                 await feishu_notification_service.notify_approval_issued(

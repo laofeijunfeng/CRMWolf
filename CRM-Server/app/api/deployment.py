@@ -1,8 +1,8 @@
-# CRM-Server/app/api/deployment.py
 """部署信息管理 API 端点"""
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
 from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import (
@@ -13,20 +13,40 @@ from app.core.deps import (
 )
 from app.crud.crud_deployment import (
     create_deployment_info,
+    delete_deployment_info,
     get_deployment_info,
     get_deployment_infos_by_customer,
+    set_default_deployment_info,
     update_deployment_info,
-    delete_deployment_info,
-    set_default_deployment_info
 )
+from app.models.deployment import DeploymentInfo
 from app.schemas.deployment import (
     DeploymentInfoCreate,
+    DeploymentInfoResponse,
     DeploymentInfoUpdate,
-    DeploymentInfoResponse
+)
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeType,
+    customer_business_object_intelligence_service,
 )
 
-
 router = APIRouter(prefix="/v1/deployment-infos", tags=["部署信息管理"])
+
+
+def _enqueue_deployment_intelligence_refresh(
+    db: Session,
+    deployment: DeploymentInfo,
+    *,
+    change_type: CustomerBusinessObjectChangeType,
+    actor_id: str | None,
+) -> None:
+    customer_business_object_intelligence_service.enqueue_object_change_refresh(
+        db,
+        source_type="deployment_info",
+        business_object=deployment,
+        change_type=change_type,
+        actor_id=actor_id,
+    )
 
 
 @router.post("/", response_model=DeploymentInfoResponse, status_code=status.HTTP_201_CREATED, summary="创建部署信息")
@@ -38,7 +58,14 @@ def create_deployment(
 ):
     """创建部署信息"""
     check_customer_edit_permission(deployment.customer_id, team_id, current_user, db)
-    return create_deployment_info(db, team_id, deployment)
+    created = create_deployment_info(db, team_id, deployment)
+    _enqueue_deployment_intelligence_refresh(
+        db,
+        created,
+        change_type="created",
+        actor_id=str(current_user.id),
+    )
+    return created
 
 
 @router.get("/", response_model=List[DeploymentInfoResponse], summary="获取客户部署信息列表")
@@ -93,6 +120,12 @@ def update_deployment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="部署信息不存在"
         )
+    _enqueue_deployment_intelligence_refresh(
+        db,
+        updated,
+        change_type="updated",
+        actor_id=str(current_user.id),
+    )
     return updated
 
 
@@ -116,6 +149,12 @@ def delete_deployment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="部署信息不存在"
         )
+    _enqueue_deployment_intelligence_refresh(
+        db,
+        deployment,
+        change_type="deleted",
+        actor_id=str(current_user.id),
+    )
 
 
 @router.patch("/{deployment_id}/set-default", response_model=DeploymentInfoResponse, summary="设置默认部署")
@@ -134,4 +173,10 @@ def set_default_deployment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="部署信息不存在"
         )
+    _enqueue_deployment_intelligence_refresh(
+        db,
+        deployment,
+        change_type="updated",
+        actor_id=str(current_user.id),
+    )
     return deployment

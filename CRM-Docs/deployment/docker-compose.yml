@@ -1,6 +1,8 @@
 # docker-compose.yml - 服务器部署基础服务定义
 # 由 CRM-Docs/deployment/deploy.sh 上传，并配合 docker-compose.server.yml 使用。
 
+name: crmwolf
+
 services:
   backend:
     image: crm-backend:${IMAGE_TAG:-amd64}
@@ -12,16 +14,33 @@ services:
       DB_PORT: 3306
       REDIS_PORT: 6379
       REDIS_DB: 5
+      QDRANT_ENABLED: ${QDRANT_ENABLED:-true}
+      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
+      QDRANT_COLLECTION_CUSTOMER_EVIDENCE: ${QDRANT_COLLECTION_CUSTOMER_EVIDENCE:-crm_customer_evidence}
+      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-1536}
       CRM_DEBUG: ${CRM_DEBUG:-false}
     volumes:
       - backend_logs:/app/logs
       - ./uploads:/app/uploads
+    depends_on:
+      qdrant:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    container_name: crm-qdrant-dev
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
 
   frontend:
     image: crm-frontend:${IMAGE_TAG:-amd64}
@@ -39,3 +58,10 @@ services:
 volumes:
   backend_logs:
     driver: local
+  qdrant_data:
+    name: crm-qdrant-dev-data
+    driver: local
+
+networks:
+  default:
+    name: crm-dev-network

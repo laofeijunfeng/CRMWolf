@@ -1,19 +1,21 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
-from typing import Optional, List, Tuple
 from datetime import date, datetime, time
+from typing import List, Optional, Tuple
 
-from app.models.invoice import InvoiceTitle, InvoiceApplication, InvoiceApplicationStatus, InvoiceType
-from app.models.payment import PaymentPlan, PaymentRecord
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+
+from app.constants.business_types import BusinessType
 from app.models.contract import Contract
 from app.models.customer import Customer
-from app.models.opportunity import Opportunity
-from app.constants.business_types import BusinessType
-from app.utils.approval_delete_guard import assert_deletable_approval_resource
+from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle
+from app.models.payment import PaymentPlan
 from app.schemas.invoice import (
-    InvoiceTitleCreate, InvoiceTitleUpdate,
-    InvoiceApplicationCreate, InvoiceApplicationUpdate
+    InvoiceApplicationCreate,
+    InvoiceApplicationUpdate,
+    InvoiceTitleCreate,
+    InvoiceTitleUpdate,
 )
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -96,8 +98,8 @@ class InvoiceTitleCRUD:
             return title
         return None
     
-    def delete(self, db: Session, title_id: int) -> bool:
-        title = self.get_by_id(db, title_id)
+    def delete(self, db: Session, title_id: int, team_id: Optional[int] = None) -> bool:
+        title = self.get_by_id(db, title_id, team_id)
         if not title:
             return False
         
@@ -359,8 +361,8 @@ class InvoiceApplicationCRUD:
             invoice_file_path: 发票文件相对路径（审批通过后的开票业务附件）
             invoice_number: 发票号码
         """
-        from app.crud.approval import approval_crud
         from app.constants.business_types import BusinessType
+        from app.crud.approval import approval_crud
         from app.models.approval import ApprovalStatus
 
         application = self.get_by_id(db, application_id, team_id)

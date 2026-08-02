@@ -1,74 +1,73 @@
 import request from '@/utils/request'
+import { z } from 'zod'
+import {
+  DeploymentInfoSchema,
+  type DeploymentInfo,
+  type DeploymentInfoCreate,
+  type DeploymentInfoUpdate
+} from '@/schemas/deployment'
 
-export interface DeploymentInfoCreate {
-  customer_id: number
-  deployment_name: string
-  server_address: string
-  authorized_users: number
-  is_default?: boolean
-}
+export type DeploymentInfoResponse = DeploymentInfo
 
-export interface DeploymentInfoUpdate {
-  deployment_name?: string | null
-  server_address?: string | null
-  authorized_users?: number | null
-  is_default?: boolean | null
-}
-
-export interface DeploymentInfoResponse {
-  id: number
-  customer_id: number
-  team_id: number
-  deployment_name: string
-  server_address: string
-  authorized_users: number
-  is_default: boolean
-  created_time: string
-  last_modified_time: string
-}
+const DeploymentInfoListSchema = z.array(DeploymentInfoSchema)
 
 const deploymentApi = {
   // 创建部署信息
-  create: (data: DeploymentInfoCreate) => {
-    return request.post<DeploymentInfoResponse>('/v1/deployment-infos/', data)
+  async create(data: DeploymentInfoCreate): Promise<DeploymentInfoResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.post<DeploymentInfoResponse>('/v1/deployment-infos/', data)
+    return DeploymentInfoSchema.parse(response)
   },
 
   // 获取部署信息列表（别名）
-  list: (customerId: number) => {
-    return request.get<DeploymentInfoResponse[]>('/v1/deployment-infos/', {
+  async list(customerId: number): Promise<DeploymentInfoResponse[]> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<DeploymentInfoResponse[]>('/v1/deployment-infos/', {
       params: { customer_id: customerId }
     })
+    return DeploymentInfoListSchema.parse(response)
   },
 
   // 原方法名（向后兼容）
-  createDeployment: (data: DeploymentInfoCreate) => {
-    return request.post<DeploymentInfoResponse>('/v1/deployment-infos/', data)
+  async createDeployment(data: DeploymentInfoCreate): Promise<DeploymentInfoResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.post<DeploymentInfoResponse>('/v1/deployment-infos/', data)
+    return DeploymentInfoSchema.parse(response)
   },
 
-  getDeployments: (customerId: number) => {
-    return request.get<DeploymentInfoResponse[]>('/v1/deployment-infos/', {
+  async getDeployments(customerId: number): Promise<DeploymentInfoResponse[]> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<DeploymentInfoResponse[]>('/v1/deployment-infos/', {
       params: { customer_id: customerId }
     })
+    return DeploymentInfoListSchema.parse(response)
   },
 
-  getDeployment: (deploymentId: number) => {
-    return request.get<DeploymentInfoResponse>(`/v1/deployment-infos/${deploymentId}`)
+  async getDeployment(deploymentId: number): Promise<DeploymentInfoResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<DeploymentInfoResponse>(`/v1/deployment-infos/${deploymentId}`)
+    return DeploymentInfoSchema.parse(response)
   },
 
-  updateDeployment: (deploymentId: number, data: DeploymentInfoUpdate) => {
-    return request.put<DeploymentInfoResponse>(`/v1/deployment-infos/${deploymentId}`, data)
+  async updateDeployment(deploymentId: number, data: DeploymentInfoUpdate): Promise<DeploymentInfoResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.put<DeploymentInfoResponse>(`/v1/deployment-infos/${deploymentId}`, data)
+    return DeploymentInfoSchema.parse(response)
   },
 
-  deleteDeployment: (deploymentId: number) => {
-    return request.delete<void>(`/v1/deployment-infos/${deploymentId}`)
+  async deleteDeployment(deploymentId: number): Promise<unknown> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.delete<unknown>(`/v1/deployment-infos/${deploymentId}`)
+    return z.unknown().parse(response)
   },
 
-  setDefaultDeployment: (deploymentId: number, customerId: number) => {
-    return request.patch<DeploymentInfoResponse>(
+  async setDefaultDeployment(deploymentId: number, customerId: number): Promise<DeploymentInfoResponse> {
+    const response = await request.patch<DeploymentInfoResponse>(
       `/v1/deployment-infos/${deploymentId}/set-default`,
       null,
       { params: { customer_id: customerId } }
     )
+    return DeploymentInfoSchema.parse(response)
   }
 }
 

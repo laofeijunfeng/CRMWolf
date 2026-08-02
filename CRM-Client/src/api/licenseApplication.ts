@@ -1,96 +1,80 @@
 import request from '@/utils/request'
+import { z } from 'zod'
+import {
+  LicenseApplicationApproveFullSchema,
+  LicenseApplicationSchema,
+  type LicenseApplication,
+  type LicenseApplicationCreate,
+  type LicenseApplicationUpdate
+} from '@/schemas/licenseApplication'
 
 export type LicenseApplicationStatus = 'DRAFT' | 'PENDING' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'ISSUED'
 export type LicenseType = 'TRIAL' | 'OFFICIAL'
 export type ApprovalPhase = 'draft' | 'pending_review' | 'approved' | 'rejected'
 
-export interface LicenseApplicationCreate {
-  customer_id: number
-  deployment_info_id?: number | null
-  contract_id?: number | null
-  license_type: LicenseType
-  expiry_date: string
-  remark?: string | null  // 补充需求：备注字段
-}
+export type LicenseApplicationResponse = LicenseApplication
 
-export interface LicenseApplicationUpdate {
-  deployment_info_id?: number | null
-  contract_id?: number | null
-  expiry_date?: string | null
-  remark?: string | null  // 补充需求：备注字段
-}
-
-export interface LicenseApplicationResponse {
-  id: number
-  team_id: number
-  application_number: string
-  customer_id: number
-  deployment_info_id: number | null
-  contract_id: number | null
-  expiry_date: string
-  license_type: string
-  // 补充需求字段
-  enterprise_id: string | null
-  supported_modules: string | null
-  server_license_code: string | null
-  client_license_code: string | null
-  remark: string | null
-  // 原有字段
-  license_code: string | null
-  status: LicenseApplicationStatus
-  approval_phase?: ApprovalPhase | null
-  applicant_id: string
-  approver_id: string | null
-  approved_time: string | null
-  created_time: string
-  last_modified_time: string
-  customer_name?: string | null
-  deployment_name?: string | null
-  contract_name?: string | null
-}
+const LicenseApplicationListSchema = z.array(LicenseApplicationSchema)
 
 const licenseApplicationApi = {
   // 创建申请
-  create: (data: LicenseApplicationCreate) => {
-    return request.post<LicenseApplicationResponse>('/v1/license-applications/', data)
+  async create(data: LicenseApplicationCreate): Promise<LicenseApplicationResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.post<LicenseApplicationResponse>('/v1/license-applications/', data)
+    return LicenseApplicationSchema.parse(response)
   },
 
   // 获取申请列表（别名）
-  list: (customerId: number) => {
-    return request.get<LicenseApplicationResponse[]>('/v1/license-applications/', {
+  async list(customerId: number): Promise<LicenseApplicationResponse[]> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<LicenseApplicationResponse[]>('/v1/license-applications/', {
       params: { customer_id: customerId }
     })
+    return LicenseApplicationListSchema.parse(response)
   },
 
   // 原方法名（向后兼容）
-  createApplication: (data: LicenseApplicationCreate) => {
-    return request.post<LicenseApplicationResponse>('/v1/license-applications/', data)
+  async createApplication(data: LicenseApplicationCreate): Promise<LicenseApplicationResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.post<LicenseApplicationResponse>('/v1/license-applications/', data)
+    return LicenseApplicationSchema.parse(response)
   },
 
-  getApplications: (customerId: number) => {
-    return request.get<LicenseApplicationResponse[]>('/v1/license-applications/', {
+  async getApplications(customerId: number): Promise<LicenseApplicationResponse[]> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<LicenseApplicationResponse[]>('/v1/license-applications/', {
       params: { customer_id: customerId }
     })
+    return LicenseApplicationListSchema.parse(response)
   },
 
-  getApplication: (applicationId: number) => {
-    return request.get<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}`)
+  async getApplication(applicationId: number): Promise<LicenseApplicationResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.get<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}`)
+    return LicenseApplicationSchema.parse(response)
   },
 
-  updateApplication: (applicationId: number, data: LicenseApplicationUpdate) => {
-    return request.put<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}`, data)
+  async updateApplication(applicationId: number, data: LicenseApplicationUpdate): Promise<LicenseApplicationResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.put<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}`, data)
+    return LicenseApplicationSchema.parse(response)
   },
 
-  deleteApplication: (applicationId: number) => {
-    return request.delete(`/v1/license-applications/${applicationId}`)
+  async deleteApplication(applicationId: number): Promise<unknown> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.delete<unknown>(`/v1/license-applications/${applicationId}`)
+    return z.unknown().parse(response)
   },
 
-  submitApplication: (applicationId: number) => {
-    return request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/submit`)
+  async submitApplication(applicationId: number): Promise<LicenseApplicationResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response = await request.post<LicenseApplicationResponse>(`/v1/license-applications/${applicationId}/submit`)
+    return LicenseApplicationSchema.parse(response)
   },
 
   // 导出 Word 文档
   exportDocument: (applicationId: number): Promise<Blob> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get(`/v1/license-applications/${applicationId}/export`, {
       responseType: 'blob'
     })
@@ -105,10 +89,15 @@ const licenseApplicationApi = {
     license_info: string
     comment?: string
   }): Promise<LicenseApplicationResponse> => {
+    const payload = LicenseApplicationApproveFullSchema.parse({
+      license_info: data.license_info,
+      comment: data.comment ?? null
+    })
+    // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<LicenseApplicationResponse>(
       `/v1/license-applications/${applicationId}/issue`,
-      data
-    )
+      payload
+    ).then((response) => LicenseApplicationSchema.parse(response))
   }
 }
 

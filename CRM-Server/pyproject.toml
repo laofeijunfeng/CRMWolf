@@ -29,6 +29,7 @@ dependencies = [
     "langchain-anthropic>=0.3.0",
     "langchain-core>=0.3.0",
     "langgraph>=1.2.5",
+    "qdrant-client==1.18.0",
 ]
 
 [project.optional-dependencies]

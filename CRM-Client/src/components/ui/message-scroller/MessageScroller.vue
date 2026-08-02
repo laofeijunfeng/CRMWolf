@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes, StyleValue } from "vue"
-import { nextTick, ref, watch } from "vue"
+import { nextTick, onMounted, ref, watch } from "vue"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -9,8 +9,10 @@ const props = withDefaults(defineProps<{
   contentClass?: HTMLAttributes["class"]
   contentStyle?: StyleValue
   itemsCount?: number
+  scrollKey?: number
 }>(), {
   itemsCount: 0,
+  scrollKey: 0,
 })
 
 const contentRef = ref<HTMLElement | null>(null)
@@ -26,6 +28,8 @@ const scrollToBottom = async (): Promise<void> => {
 
 watch(() => props.itemsCount, scrollToBottom, { flush: "post" })
 watch(() => props.contentStyle, scrollToBottom, { flush: "post" })
+watch(() => props.scrollKey, scrollToBottom, { flush: "post" })
+onMounted(() => void scrollToBottom())
 </script>
 
 <template>

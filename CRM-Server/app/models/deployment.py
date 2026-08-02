@@ -14,7 +14,7 @@ class DeploymentInfo(Base):
 
     deployment_name = Column(String(100), nullable=False, comment="部署名称（如：生产环境、测试环境）")
     server_address = Column(String(500), nullable=False, comment="服务器地址（http:// 或 https:// 开头）")
-    authorized_users = Column(Integer, nullable=False, comment="授权人数")
+    authorized_users = Column(Integer, nullable=True, comment="历史授权人数（新申请人数记录在 License 申请）")
     is_default = Column(Boolean, nullable=False, default=False, comment="是否默认部署")
 
     created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")

@@ -1,32 +1,65 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
-from sqlalchemy.exc import SQLAlchemyError
 import os
 
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+
 # 初始化日志系统（开发环境开启 DEBUG）
-from app.core.logging import setup_logging, get_logger
+from app.core.logging import get_logger, setup_logging
+
 debug_mode = os.getenv("CRM_DEBUG", "true").lower() == "true"
 setup_logging(debug=debug_mode)
 logger = get_logger(__name__)
 
-from app.api import auth, users, roles, permissions, leads, customers, customer_activities, opportunities, filter_options, contracts, approvals, payments, invoices, finance, operation_logs, procurement_methods, procurement_stage_templates, opportunity_stages, customer_procurement, procurement_admin, teams, industry, procurement_ai, approval_ai, system_configs, sales_dashboard, business_journey_board, oauth, view_preferences
-from app.api.deployment import router as deployment_router  # 新增
-from app.api.license_application import router as license_application_router  # 新增
-from app.api.customer_ai import router as customer_ai_router
-from app.api.ai_config import router as ai_config_router
+from app.api import (
+    approval_ai,
+    approvals,
+    auth,
+    business_journey_board,
+    contracts,
+    customer_activities,
+    customer_procurement,
+    customers,
+    filter_options,
+    finance,
+    industry,
+    invoices,
+    leads,
+    oauth,
+    operation_logs,
+    opportunities,
+    opportunity_stages,
+    payments,
+    permissions,
+    procurement_admin,
+    procurement_ai,
+    procurement_methods,
+    procurement_stage_templates,
+    roles,
+    sales_dashboard,
+    system_configs,
+    teams,
+    users,
+    view_preferences,
+)
 from app.api.agent import router as agent_router
-from app.api.im_bots import router as im_bots_router
+from app.api.ai_config import router as ai_config_router
+from app.api.customer_ai import router as customer_ai_router
+from app.api.deployment import router as deployment_router  # 新增
+
 # Frontend Logs 路由
 from app.api.frontend_logs import router as frontend_logs_router
+from app.api.im_bots import router as im_bots_router
+from app.api.license_application import router as license_application_router  # 新增
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
-    validation_exception_handler,
+    generic_exception_handler,
     pydantic_validation_exception_handler,
     sqlalchemy_exception_handler,
-    generic_exception_handler
+    validation_exception_handler,
 )
 
 # 导入初始化服务
@@ -56,6 +89,7 @@ app.add_exception_handler(Exception, generic_exception_handler)
 # 路由注册（统一 /api 前缀）
 # ========================================
 from fastapi import APIRouter
+
 from app.api.score_weights import router as score_weights_router
 from app.api.scores import router as scores_router
 
@@ -129,7 +163,33 @@ async def startup_event():
     recovered_count = await customer_activity_processing_service.recover_unfinished()
     logger.info("已重新派发 %s 个未完成客户活动 AI workflow", recovered_count)
 
+    logger.info("启动客户证据向量同步任务...")
+    from app.tasks.customer_evidence_sync import start_customer_evidence_sync_scheduler
+    start_customer_evidence_sync_scheduler()
+
+    logger.info("启动客户智能档案刷新重试任务...")
+    from app.tasks.customer_intelligence_refresh_retry import start_customer_intelligence_refresh_retry_scheduler
+    start_customer_intelligence_refresh_retry_scheduler()
+
+    logger.info("启动客户智能历史补档任务...")
+    from app.tasks.customer_intelligence_backfill import start_customer_intelligence_backfill_scheduler
+    start_customer_intelligence_backfill_scheduler()
+
     logger.info("审批超时自动催办任务已停用，催办改为审批中心手动触发")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """应用关闭时停止后台调度任务"""
+    from app.tasks.customer_evidence_sync import stop_customer_evidence_sync_scheduler
+    from app.tasks.customer_intelligence_backfill import stop_customer_intelligence_backfill_scheduler
+    from app.tasks.customer_intelligence_refresh_retry import stop_customer_intelligence_refresh_retry_scheduler
+    from app.tasks.score_scheduler import stop_score_scheduler
+
+    stop_customer_intelligence_backfill_scheduler()
+    stop_customer_intelligence_refresh_retry_scheduler()
+    stop_customer_evidence_sync_scheduler()
+    stop_score_scheduler()
 
 
 @app.get("/")

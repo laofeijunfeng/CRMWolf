@@ -162,7 +162,6 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
           <Server class="w-3 h-3" />
           {{ item.server_address || '-' }}
         </span>
-        <span> · 授权人数: {{ item.authorized_users }} 人</span>
       </template>
 
       <template #itemBadges="{ item }">
@@ -207,6 +206,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
           <Calendar class="w-3 h-3" />
           到期: {{ formatDate(item.expiry_date) }}
         </span>
+        <span> · 使用人数: {{ item.authorized_users }} 人</span>
         <span v-if="item.contract_name"> · </span>
         <span v-if="item.contract_name" class="inline-flex items-center gap-1">
           <FileText class="w-3 h-3" />

@@ -46,6 +46,46 @@ bash CRM-Docs/deployment/deploy.sh
 - 服务器已有容器或服务名：
   - `mysql8`
   - `redis6`
+- Qdrant 由本目录的 Docker Compose 自动创建：
+  - 容器名：`crm-qdrant-dev`
+  - 服务名：`qdrant`
+  - 数据卷：`crm-qdrant-dev-data`
+
+## 客户智能档案与知识库上线检查
+
+客户智能档案、Agent 客户搜索、简称召回和向量知识库不要靠人工补历史数据。正式服务启动后，后端会自动启动两类后台任务：
+
+1. `customer_intelligence_backfill`：补齐历史客户智能档案，并重建过期的客户 profile 向量证据。
+2. `customer_evidence_sync`：把待同步的客户证据写入 Qdrant。
+
+部署时确认以下配置保持启用：
+
+```bash
+QDRANT_ENABLED=true
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
+QDRANT_COLLECTION_CUSTOMER_EVIDENCE=crm_customer_evidence
+CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED=true
+CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE=20
+CUSTOMER_INTELLIGENCE_BACKFILL_INTERVAL_SECONDS=300
+CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE=50
+CUSTOMER_EVIDENCE_SYNC_INTERVAL_SECONDS=30
+```
+
+当前 `docker-compose.yml` 和 `docker-compose.server.yml` 已提供 Qdrant 默认值；补件和同步批次使用后端配置默认值。上线后只要 Qdrant 容器正常、后端服务正常，历史客户会按批次自动补：
+
+- 没有客户智能概况的客户，会进入客户智能档案补件。
+- 已有客户智能概况但客户 profile 向量证据版本旧的客户，会自动重建向量证据。
+- 重建后的证据会标记为待同步，再由向量同步任务写入 Qdrant。
+
+上线验证命令：
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'crm-backend|crm-qdrant-dev'
+docker logs crm-backend --since 10m | grep -E '客户智能历史补档|客户证据向量同步|Qdrant'
+```
+
+如果日志里能看到“客户智能历史补档调度已启动”和“客户证据向量同步调度已启动”，说明自动补件链路已经启动；后续看到“客户智能历史补档已调度”或“客户证据向量同步完成”，说明历史数据正在分批补齐。
 
 ## 文件说明
 

@@ -47,6 +47,7 @@ class LicenseApplicationBase(BaseModel):
     customer_id: int = Field(..., description="关联客户ID")
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     license_type: LicenseType = Field(..., description="License 类型")
+    authorized_users: int = Field(..., gt=0, description="本次申请使用人数")
     expiry_date: date = Field(..., description="到期时间")
     remark: Optional[str] = Field(None, description="备注（申请时填写）")
 
@@ -83,6 +84,7 @@ class LicenseApplicationUpdate(BaseModel):
     """更新 License 申请请求模型"""
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     contract_id: Optional[int] = Field(None, description="关联合同ID")
+    authorized_users: Optional[int] = Field(None, gt=0, description="本次申请使用人数")
     expiry_date: Optional[date] = Field(None, description="到期时间")
     remark: Optional[str] = Field(None, description="备注")
 
@@ -116,6 +118,7 @@ class LicenseApplicationResponse(BaseModel):
     contract_id: Optional[int] = Field(None, description="关联合同ID")
     expiry_date: date = Field(..., description="到期时间")
     license_type: str = Field(..., description="License 类型")
+    authorized_users: int = Field(..., description="本次申请使用人数")
     # 补充需求字段
     enterprise_id: Optional[str] = Field(None, description="企业编号")
     supported_modules: Optional[str] = Field(None, description="支持模块")

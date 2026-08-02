@@ -3,18 +3,19 @@
 
 实现客户创建的 AI 解析功能，含行业识别和档案生成
 """
-from typing import Dict, Any
-from sqlalchemy.orm import Session
 from datetime import datetime
+from typing import Any, Dict
 
-from app.services.ai_parser.base_parser import EntityAIParserBase
-from app.services.ai_parser.constants import CUSTOMER_SOURCE_ENUM_MAP, COMPANY_SCALE_ENUM_MAP
-from app.services.follow_up_parser import follow_up_parser_service
-from app.crud.customer import customer_crud, contact_crud
+from sqlalchemy.orm import Session
+
+from app.crud.customer import contact_crud, customer_crud
 from app.crud.industry import industry_crud
-from app.schemas.customer import CustomerCreate, ContactCreate
 from app.models.customer import CustomerSource
-from app.services.customer_profile_service import customer_profile_service
+from app.schemas.customer import ContactCreate, CustomerCreate
+from app.services.ai_parser.base_parser import EntityAIParserBase
+from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP, CUSTOMER_SOURCE_ENUM_MAP
+from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
+from app.services.follow_up_parser import follow_up_parser_service
 
 
 def _resolve_customer_source(value: str | None) -> CustomerSource | None:
@@ -330,11 +331,12 @@ class CustomerAIParser(EntityAIParserBase):
         """
         customer = entity
 
-        # 1. 触发档案生成（异步）
-        await customer_profile_service.trigger_generation(
+        # 1. 触发客户智能档案生成（异步，进入 LangGraph 统一编排）
+        await customer_intelligence_refresh_service.trigger_customer_created_refresh(
+            db,
+            team_id=team_id,
             customer_id=customer.id,
-            account_name=customer.account_name,
-            team_id=team_id
+            actor_id=user_id,
         )
 
         # 2. 创建客户活动（如果有）

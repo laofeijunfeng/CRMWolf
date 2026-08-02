@@ -34,6 +34,7 @@ def extract_customer_candidates(data: object) -> List[Dict[str, object]]:
             "account_name": item.get("account_name"),
             "owner_info": item.get("owner_info"),
             "collaborator_infos": item.get("collaborator_infos") or [],
+            "match": item.get("match") if isinstance(item.get("match"), dict) else {},
         })
     return candidates
 
@@ -577,7 +578,7 @@ def format_invoice_title_missing_fields(fields: List[str]) -> str:
 
 
 def missing_deployment_info_fields(deployment_info: Dict[str, object]) -> List[str]:
-    required_fields = ["deployment_name", "server_address", "authorized_users"]
+    required_fields = ["deployment_name", "server_address"]
     return [field for field in required_fields if not deployment_info.get(field)]
 
 
@@ -585,7 +586,6 @@ def format_deployment_info_missing_fields(fields: List[str]) -> str:
     labels = {
         "deployment_name": "部署名称",
         "server_address": "服务器地址（需以 http:// 或 https:// 开头）",
-        "authorized_users": "授权人数",
     }
     return "、".join(labels.get(field, field) for field in fields)
 

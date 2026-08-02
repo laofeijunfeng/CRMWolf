@@ -1,8 +1,8 @@
 """CRM AI Agent LangGraph state types."""
 import operator
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from collections.abc import Awaitable, Callable
 from typing import Annotated, Literal, Optional, TypedDict
 
 from langgraph.types import Interrupt
@@ -17,8 +17,7 @@ from app.services.agent.schemas import (
     AgentSuggestionResult,
     AgentTurnRelationDecision,
 )
-from app.services.agent.types import AgentRuntimeEventSink, JSONDict, JSONValue
-
+from app.services.agent.types import AgentRuntimeEventSink, JSONDict, JSONValue  # noqa: F401
 
 AgentRuntimeApplicationAction = Literal[
     "pending_handled",
@@ -1075,6 +1074,9 @@ class AgentRuntimeState(TypedDict, total=False):
     resume_payload: AgentResumePayload
     pending_task_result: JSONDict
     new_flow_result: JSONDict
+    customer_intelligence_requested: bool
+    customer_intelligence_event: JSONDict
+    customer_intelligence_result: JSONDict
     runtime_status: str
     route: str
     application_action: AgentRuntimeApplicationAction
@@ -1126,6 +1128,9 @@ class AgentRootRuntimeSideEffects:
     new_flow_events: list[JSONDict] = field(default_factory=list)
     new_flow_assistant_content: str | None = None
     current_interrupt: AgentInterruptPayload | None = None
+    customer_intelligence_result: JSONDict | None = None
+    customer_intelligence_events: list[JSONDict] = field(default_factory=list)
+    customer_intelligence_assistant_content: str | None = None
     confirmed_task_events: list[JSONDict] = field(default_factory=list)
     confirmed_task_assistant_content: str | None = None
     no_pending_confirmation_events: list[JSONDict] = field(default_factory=list)
@@ -1168,7 +1173,9 @@ class AgentRuntimeContext:
     team_id: int = 0
     user_id: int = 0
     session_id: int = 0
+    user_message_id: int | None = None
     authorization: str | None = None
     switch_notice: str | None = None
+    customer_intelligence_event: object | None = None
     side_effects: AgentRootRuntimeSideEffects = field(default_factory=AgentRootRuntimeSideEffects)
     event_sink: AgentRuntimeEventSink | None = None

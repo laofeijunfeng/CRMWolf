@@ -1,45 +1,108 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, UploadFile, File, Form
-from sqlalchemy.orm import Session
-from typing import Optional
-from datetime import date
+import logging
 import os
+from datetime import date
+from typing import Literal, Optional
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from sqlalchemy.orm import Session
+
+from app.constants.business_types import BusinessType
 from app.core.database import get_db
 from app.core.deps import (
-    get_current_active_user,
-    require_permission,
-    get_current_user_team,
     check_customer_edit_permission,
     check_customer_view_permission,
     check_invoice_edit_permission,
     check_invoice_view_permission,
     check_payment_view_permission,
+    get_current_active_user,
+    get_current_user_team,
+    require_permission,
 )
-from app.models.user import User
-from app.models.customer import Customer
+from app.crud.approval import approval_crud
+from app.crud.invoice import invoice_application_crud, invoice_title_crud
+from app.models.approval import ApprovalStatus
 from app.models.contract import Contract
+from app.models.customer import Customer
+from app.models.invoice import InvoiceApplicationStatus
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan
-from app.models.invoice import InvoiceApplicationStatus
-from app.models.approval import ApprovalStatus
-from app.constants.business_types import BusinessType
+from app.models.user import User
 from app.schemas.invoice import (
-    InvoiceTitleCreate, InvoiceTitleUpdate, InvoiceTitleResponse,
-    InvoiceApplicationCreate, InvoiceApplicationUpdate, InvoiceApplicationResponse,
+    InvoiceApplicationCreate,
+    InvoiceApplicationListResponse,
+    InvoiceApplicationResponse,
+    InvoiceApplicationUpdate,
+    InvoiceTitleCreate,
+    InvoiceTitleListResponse,
+    InvoiceTitleResponse,
+    InvoiceTitleUpdate,
     MessageResponse,
-    InvoiceTitleListResponse, InvoiceApplicationListResponse, PaymentPlanInvoiceSummary
+    PaymentPlanInvoiceSummary,
 )
-from app.crud.invoice import invoice_title_crud, invoice_application_crud
-from app.crud.approval import approval_crud
 from app.services.approval_adapter import get_adapter, get_approval_card_fields
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeRefreshInput,
+    CustomerBusinessObjectChangeType,
+    customer_business_object_intelligence_service,
+)
 from app.services.feishu_notification import feishu_notification_service
-from app.services.file_storage import file_storage_service, FileStorageError
-
-import logging
+from app.services.file_storage import FileStorageError, file_storage_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/invoice-titles", tags=["开票抬头管理"])
+
+
+def _build_invoice_title_intelligence_change(
+    title,
+    *,
+    change_type: Literal["created", "updated", "deleted"],
+    actor_id: str | None,
+) -> CustomerBusinessObjectChangeRefreshInput:
+    change = customer_business_object_intelligence_service.build_change(
+        None,
+        source_type="invoice_title",
+        business_object=title,
+        change_type=change_type,
+        actor_id=actor_id,
+    )
+    if change is None:
+        raise ValueError("开票抬头缺少客户智能刷新所需字段")
+    return change
+
+
+def _enqueue_invoice_business_object_intelligence_refresh(
+    db: Session,
+    change: CustomerBusinessObjectChangeRefreshInput | None,
+) -> None:
+    if change is None:
+        return
+    customer_business_object_intelligence_service.enqueue_change_refresh(db, change)
+
+
+def _build_invoice_application_intelligence_change(
+    application,
+    *,
+    change_type: CustomerBusinessObjectChangeType,
+    actor_id: str | None,
+) -> CustomerBusinessObjectChangeRefreshInput:
+    change = customer_business_object_intelligence_service.build_change(
+        None,
+        source_type="invoice_application",
+        business_object=application,
+        change_type=change_type,
+        actor_id=actor_id,
+    )
+    if change is None:
+        raise ValueError("发票申请缺少客户智能刷新所需字段")
+    return change
+
+
+def _enqueue_invoice_application_intelligence_refresh(
+    db: Session,
+    change: CustomerBusinessObjectChangeRefreshInput,
+) -> None:
+    _enqueue_invoice_business_object_intelligence_refresh(db, change)
 
 
 @router.post("", response_model=InvoiceTitleResponse, summary="添加开票抬头", description="为指定客户添加开票抬头信息")
@@ -60,6 +123,14 @@ def create_invoice_title(
         )
 
     title = invoice_title_crud.create(db, customer_id, title_data, team_id)
+    _enqueue_invoice_business_object_intelligence_refresh(
+        db,
+        _build_invoice_title_intelligence_change(
+            title,
+            change_type="created",
+            actor_id=str(current_user.id),
+        ),
+    )
     return title
 
 
@@ -109,6 +180,14 @@ def update_invoice_title(
     check_customer_edit_permission(title.customer_id, team_id, current_user, db)
 
     updated_title = invoice_title_crud.update(db, title, title_data)
+    _enqueue_invoice_business_object_intelligence_refresh(
+        db,
+        _build_invoice_title_intelligence_change(
+            updated_title,
+            change_type="updated",
+            actor_id=str(current_user.id),
+        ),
+    )
     return updated_title
 
 
@@ -133,6 +212,14 @@ def set_default_invoice_title(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="设置默认抬头失败"
         )
+    _enqueue_invoice_business_object_intelligence_refresh(
+        db,
+        _build_invoice_title_intelligence_change(
+            updated_title,
+            change_type="updated",
+            actor_id=str(current_user.id),
+        ),
+    )
     return updated_title
 
 
@@ -151,12 +238,18 @@ def delete_invoice_title(
         )
     check_customer_edit_permission(title.customer_id, team_id, current_user, db)
 
+    change = _build_invoice_title_intelligence_change(
+        title,
+        change_type="deleted",
+        actor_id=str(current_user.id),
+    )
     success = invoice_title_crud.delete(db, title_id, team_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="删除开票抬头失败"
         )
+    _enqueue_invoice_business_object_intelligence_refresh(db, change)
     return {"message": "删除成功"}
 
 
@@ -176,6 +269,14 @@ def create_invoice_application(
             application_data,
             str(current_user.id),
             team_id
+        )
+        _enqueue_invoice_application_intelligence_refresh(
+            db,
+            _build_invoice_application_intelligence_change(
+                application,
+                change_type="created",
+                actor_id=str(current_user.id),
+            ),
         )
         return _populate_application_info(db, application, team_id)
     except ValueError as e:
@@ -299,6 +400,14 @@ def update_invoice_application(
 
     try:
         updated_application = invoice_application_crud.update(db, application, application_data)
+        _enqueue_invoice_application_intelligence_refresh(
+            db,
+            _build_invoice_application_intelligence_change(
+                updated_application,
+                change_type="updated",
+                actor_id=str(current_user.id),
+            ),
+        )
         return _populate_application_info(db, updated_application, team_id)
     except ValueError as e:
         raise HTTPException(
@@ -367,6 +476,14 @@ async def mark_invoice_issued(
             invoice_file_path=invoice_file_path,
             invoice_number=normalized_invoice_number,
         )
+        _enqueue_invoice_application_intelligence_refresh(
+            db,
+            _build_invoice_application_intelligence_change(
+                issued_application,
+                change_type="updated",
+                actor_id=str(current_user.id),
+            ),
+        )
         try:
             await feishu_notification_service.notify_approval_issued(
                 db=db,
@@ -397,13 +514,19 @@ def delete_invoice_application(
     db: Session = Depends(get_db)
 ):
     try:
-        check_invoice_edit_permission(application_id, team_id, current_user, db)
+        application = check_invoice_edit_permission(application_id, team_id, current_user, db)
+        change = _build_invoice_application_intelligence_change(
+            application,
+            change_type="deleted",
+            actor_id=str(current_user.id),
+        )
         success = invoice_application_crud.delete(db, application_id, team_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="发票申请不存在"
             )
+        _enqueue_invoice_application_intelligence_refresh(db, change)
         return {"message": "删除成功"}
     except ValueError as e:
         raise HTTPException(

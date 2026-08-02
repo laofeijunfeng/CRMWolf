@@ -158,6 +158,7 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
         LicenseApplicationCreate(
             customer_id=test_customer.id,
             license_type="TRIAL",
+            authorized_users=10,
             expiry_date=date(2026, 12, 31),
             remark="测试申请"
         )
@@ -210,6 +211,7 @@ def test_license_application_without_flow_direct_approval(db, test_team, test_us
         LicenseApplicationCreate(
             customer_id=test_customer.id,
             license_type="TRIAL",
+            authorized_users=10,
             expiry_date=date(2026, 12, 31),
             remark="测试申请（免审批）"
         )
@@ -262,6 +264,7 @@ def test_license_approval_flow_visible_in_approval_center(db, test_team, test_us
         LicenseApplicationCreate(
             customer_id=test_customer.id,
             license_type="TRIAL",
+            authorized_users=10,
             expiry_date=date(2027, 12, 31),
             remark="试用License申请"
         )

@@ -1,6 +1,8 @@
 """LangGraph-native root runtime foundation for CRM Agent turns."""
 from __future__ import annotations
 
+import logging
+
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
@@ -11,9 +13,25 @@ from app.services.agent import agent_copy, execution_trace, interactions, task_d
 from app.services.agent.checkpointer import agent_checkpoint_saver
 from app.services.agent.confirmed_task_graph import (
     ConfirmedTaskGraphService,
+)
+from app.services.agent.confirmed_task_graph import (
     confirmed_task_graph_service as default_confirmed_task_graph_service,
 )
+from app.services.agent.customer_intelligence_graph import (
+    CustomerIntelligenceGraphService,
+)
+from app.services.agent.customer_intelligence_graph import (
+    customer_intelligence_graph_service as default_customer_intelligence_graph_service,
+)
+from app.services.agent.customer_intelligence_trigger import (
+    AgentCustomerIntelligenceTurn,
+    CustomerIntelligenceTriggerPolicy,
+)
+from app.services.agent.customer_intelligence_trigger import (
+    customer_intelligence_trigger_policy as default_customer_intelligence_trigger_policy,
+)
 from app.services.agent.graph import crm_agent_graph_service
+from app.services.agent.input import AgentTurnInput
 from app.services.agent.interrupts import (
     AgentInterruptPayload,
     AgentResumePayload,
@@ -22,35 +40,39 @@ from app.services.agent.interrupts import (
     resume_payload_from_turn_input,
     validate_resume_payload,
 )
-from app.services.agent.input import AgentTurnInput
 from app.services.agent.new_flow_effects import (
     NewFlowGraphRunner,
     NewFlowGraphStreamer,
     NewFlowSideEffectContext,
     NewFlowSideEffectHandler,
+)
+from app.services.agent.new_flow_effects import (
     new_flow_side_effect_handler as default_new_flow_side_effect_handler,
 )
 from app.services.agent.pending_effects import (
     PendingTaskSideEffectContext,
     PendingTaskSideEffectHandler,
+)
+from app.services.agent.pending_effects import (
     pending_task_side_effect_handler as default_pending_task_side_effect_handler,
 )
 from app.services.agent.pending_graph import PendingTaskGraphService, pending_task_graph_service
 from app.services.agent.state import (
+    AgentRootRuntimeSideEffects,
     AgentRuntimeApplicationAction,
     AgentRuntimeContext,
     AgentRuntimeInvokeResult,
-    AgentRuntimeStateHistoryItem,
     AgentRuntimeState,
+    AgentRuntimeStateHistoryItem,
     AgentRuntimeTurnOutput,
-    AgentRootRuntimeSideEffects,
     PendingTaskGraphResult,
     PendingTaskGraphSideEffects,
 )
 from app.services.agent.types import JSONDict, JSONList, coerce_json_dict, coerce_json_value
-
+from app.services.customer_intelligence_trace_service import visible_trace_events
 
 AGENT_CHECKPOINT_NS = "crm_agent"
+logger = logging.getLogger(__name__)
 
 
 def build_agent_thread_id(*, team_id: int, user_id: int, session_id: int, session_key: str | None = None) -> str:
@@ -103,6 +125,8 @@ class AgentRootRuntime:
         new_flow_side_effect_handler: NewFlowSideEffectHandler | None = None,
         confirmed_task_graph_service: ConfirmedTaskGraphService | None = None,
         pending_task_side_effect_handler: PendingTaskSideEffectHandler | None = None,
+        customer_intelligence_graph_service: CustomerIntelligenceGraphService | None = None,
+        customer_intelligence_trigger_policy: CustomerIntelligenceTriggerPolicy | None = None,
     ) -> None:
         self.pending_graph_service = pending_graph_service or pending_task_graph_service
         self.new_flow_graph_service = new_flow_graph_service or crm_agent_graph_service
@@ -110,6 +134,12 @@ class AgentRootRuntime:
         self.confirmed_task_graph_service = confirmed_task_graph_service or default_confirmed_task_graph_service
         self.pending_task_side_effect_handler = (
             pending_task_side_effect_handler or default_pending_task_side_effect_handler
+        )
+        self.customer_intelligence_graph_service = (
+            customer_intelligence_graph_service or default_customer_intelligence_graph_service
+        )
+        self.customer_intelligence_trigger_policy = (
+            customer_intelligence_trigger_policy or default_customer_intelligence_trigger_policy
         )
         self._graph = self._build_graph(checkpointer)
 
@@ -124,6 +154,7 @@ class AgentRootRuntime:
         graph.add_node("new_flow_route_marker", self._new_flow_route_marker)
         graph.add_node("decide_application_action", self._decide_application_action)
         graph.add_node("new_flow_graph", self._run_new_flow_graph)
+        graph.add_node("customer_intelligence_graph", self._run_customer_intelligence_graph)
         graph.add_node("confirmed_task_execution", self._run_confirmed_task_execution)
         graph.add_node("no_pending_confirmation", self._run_no_pending_confirmation)
         graph.add_node("generated_interrupt_wait", self._wait_for_interrupt_resume)
@@ -145,6 +176,7 @@ class AgentRootRuntime:
             self._route_after_interrupt_resume,
             {
                 "pending_task_subgraph": "pending_task_subgraph",
+                "customer_intelligence_graph": "customer_intelligence_graph",
                 "finish": "decide_application_action",
             },
         )
@@ -167,10 +199,26 @@ class AgentRootRuntime:
             self._route_after_graph_output,
             {
                 "generated_interrupt_wait": "generated_interrupt_wait",
+                "customer_intelligence_graph": "customer_intelligence_graph",
                 "finish": "finish_turn",
             },
         )
-        graph.add_edge("confirmed_task_execution", "finish_turn")
+        graph.add_conditional_edges(
+            "customer_intelligence_graph",
+            self._route_after_customer_intelligence_graph,
+            {
+                "generated_interrupt_wait": "generated_interrupt_wait",
+                "finish": "finish_turn",
+            },
+        )
+        graph.add_conditional_edges(
+            "confirmed_task_execution",
+            self._route_after_confirmed_task_execution,
+            {
+                "customer_intelligence_graph": "customer_intelligence_graph",
+                "finish": "finish_turn",
+            },
+        )
         graph.add_edge("no_pending_confirmation", "finish_turn")
         graph.add_edge("generated_interrupt_wait", "resume_route_marker")
         graph.add_edge("finish_turn", END)
@@ -610,6 +658,8 @@ class AgentRootRuntime:
         return update
 
     def _route_after_interrupt_resume(self, state: AgentRuntimeState) -> str:
+        if _is_customer_intelligence_resume(state.get("resume_payload")):
+            return "customer_intelligence_graph"
         if state.get("pending_task_requested"):
             return "pending_task_subgraph"
         return "finish"
@@ -793,6 +843,131 @@ class AgentRootRuntime:
     def _route_after_graph_output(self, state: AgentRuntimeState) -> str:
         if state.get("current_interrupt"):
             return "generated_interrupt_wait"
+        if state.get("customer_intelligence_requested"):
+            return "customer_intelligence_graph"
+        return "finish"
+
+    async def _run_customer_intelligence_graph(
+        self,
+        state: AgentRuntimeState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> AgentRuntimeState:
+        context = runtime.context
+        started_event = _step_event(
+            "customer_intelligence",
+            "started",
+            "更新客户智能档案",
+        )
+        context.side_effects.customer_intelligence_events.append(started_event)
+        await _publish_event(context, started_event)
+        if not context.db:
+            return {
+                "customer_intelligence_result": {"handled": False, "reason": "missing_runtime_context"},
+                "events": [{
+                    "event": "agent_root_customer_intelligence_unavailable",
+                    "reason": "missing_runtime_context",
+                }],
+            }
+
+        streamed_customer_intelligence_trace = False
+        if _is_customer_intelligence_resume(state.get("resume_payload")):
+            event_key = _customer_intelligence_event_key_from_state(state)
+            if not event_key:
+                return {
+                    "customer_intelligence_result": {"handled": False, "reason": "missing_event_key"},
+                    "events": [{
+                        "event": "agent_root_customer_intelligence_resume_skipped",
+                        "reason": "missing_event_key",
+                    }],
+                }
+            graph_input = {
+                "team_id": context.team_id,
+                "user_id": context.user_id,
+                "session_id": context.session_id,
+                "event_key": event_key,
+                "resume_payload": state.get("resume_payload") or {},
+            }
+            stream_resume_review = getattr(self.customer_intelligence_graph_service, "stream_resume_review", None)
+            if callable(stream_resume_review):
+                result = {}
+                async for chunk in stream_resume_review(graph_input):
+                    if not isinstance(chunk, dict):
+                        continue
+                    if chunk.get("kind") == "event":
+                        event = coerce_json_dict(chunk.get("event"))
+                        streamed_customer_intelligence_trace = True
+                        context.side_effects.customer_intelligence_events.append(event)
+                        await _publish_event(context, event)
+                    elif chunk.get("kind") == "result" and isinstance(chunk.get("result"), dict):
+                        result = chunk["result"]
+            else:
+                result = await self.customer_intelligence_graph_service.resume_review(graph_input)
+        else:
+            event_object = context.customer_intelligence_event
+            if event_object is None:
+                return {
+                    "customer_intelligence_requested": False,
+                    "customer_intelligence_result": {"handled": False, "reason": "missing_event"},
+                    "events": [{
+                        "event": "agent_root_customer_intelligence_skipped",
+                        "reason": "missing_event",
+                    }],
+                }
+            graph_input = {
+                "team_id": context.team_id,
+                "user_id": context.user_id,
+                "session_id": context.session_id,
+                "event": event_object,
+            }
+            stream_run = getattr(self.customer_intelligence_graph_service, "stream_run", None)
+            if callable(stream_run):
+                result = {}
+                async for chunk in stream_run(graph_input):
+                    if not isinstance(chunk, dict):
+                        continue
+                    if chunk.get("kind") == "event":
+                        event = coerce_json_dict(chunk.get("event"))
+                        streamed_customer_intelligence_trace = True
+                        context.side_effects.customer_intelligence_events.append(event)
+                        await _publish_event(context, event)
+                    elif chunk.get("kind") == "result" and isinstance(chunk.get("result"), dict):
+                        result = chunk["result"]
+            else:
+                result = await self.customer_intelligence_graph_service.run(graph_input)
+
+        projected_result = _customer_intelligence_result_projection(result)
+        output_events = _unstreamed_customer_intelligence_output_events(
+            result,
+            streamed_trace_events=streamed_customer_intelligence_trace,
+        )
+        await _publish_events(context, output_events)
+        context.side_effects.customer_intelligence_events.extend(output_events)
+        context.side_effects.customer_intelligence_result = result
+        assistant_content = _customer_intelligence_assistant_content(result)
+        if assistant_content:
+            context.side_effects.customer_intelligence_assistant_content = assistant_content
+        current_interrupt = _customer_intelligence_interrupt_from_result(result)
+        if current_interrupt:
+            context.side_effects.current_interrupt = current_interrupt
+
+        update: AgentRuntimeState = {
+            "customer_intelligence_requested": False,
+            "customer_intelligence_event": coerce_json_dict(result.get("event")),
+            "customer_intelligence_result": projected_result,
+            "current_interrupt": current_interrupt,
+            "events": [{
+                "event": "agent_root_customer_intelligence_graph_completed",
+                "has_interrupt": bool(current_interrupt),
+                "event_count": len(output_events),
+            }],
+        }
+        if assistant_content:
+            update["assistant_content"] = assistant_content
+        return update
+
+    def _route_after_customer_intelligence_graph(self, state: AgentRuntimeState) -> str:
+        if state.get("current_interrupt"):
+            return "generated_interrupt_wait"
         return "finish"
 
     async def _run_new_flow_graph(
@@ -840,6 +1015,7 @@ class AgentRootRuntime:
         }
         event_count = 0
         review_event_count = 0
+        deferred_final_events: list[JSONDict] = []
         stream_events = getattr(self.new_flow_graph_service, "stream_events", None)
         if callable(stream_events):
             async for event in stream_events(graph_input):
@@ -852,7 +1028,9 @@ class AgentRootRuntime:
                     side_effect_context,
                     review_event_count,
                 )
-                if _should_emit_new_flow_event(processed_event, side_effect_context):
+                if processed_event.get("event") == "final":
+                    deferred_final_events.append(processed_event)
+                elif _should_emit_new_flow_event(processed_event, side_effect_context):
                     context.side_effects.new_flow_events.append(processed_event)
                     await _publish_event(context, processed_event)
                     event_count += 1
@@ -868,7 +1046,9 @@ class AgentRootRuntime:
                     side_effect_context,
                     review_event_count,
                 )
-                if _should_emit_new_flow_event(processed_event, side_effect_context):
+                if processed_event.get("event") == "final":
+                    deferred_final_events.append(processed_event)
+                elif _should_emit_new_flow_event(processed_event, side_effect_context):
                     context.side_effects.new_flow_events.append(processed_event)
                     await _publish_event(context, processed_event)
                     event_count += 1
@@ -877,9 +1057,23 @@ class AgentRootRuntime:
             context,
             side_effect_context,
         )
+        customer_intelligence_event = self._customer_intelligence_event_from_new_flow(
+            context,
+            side_effect_context,
+        )
 
         assistant_content = auto_execute_result.get("assistant_content") or side_effect_context.assistant_content
         current_interrupt = auto_execute_result.get("current_interrupt") or side_effect_context.current_interrupt
+        if _should_publish_deferred_new_flow_final(
+            deferred_final_events,
+            customer_intelligence_requested=customer_intelligence_event is not None,
+            current_interrupt=current_interrupt,
+            context=side_effect_context,
+        ):
+            for final_event in deferred_final_events:
+                context.side_effects.new_flow_events.append(final_event)
+                await _publish_event(context, final_event)
+                event_count += 1
         if current_interrupt:
             context.side_effects.current_interrupt = current_interrupt
         if isinstance(assistant_content, str):
@@ -887,6 +1081,7 @@ class AgentRootRuntime:
             update: AgentRuntimeState = {
                 "assistant_content": assistant_content,
                 "current_interrupt": current_interrupt,
+                "customer_intelligence_requested": customer_intelligence_event is not None,
                 "new_flow_result": _new_flow_result_projection(
                     event_count=event_count,
                     assistant_content=assistant_content,
@@ -904,6 +1099,7 @@ class AgentRootRuntime:
             return update
         update = {
             "current_interrupt": current_interrupt,
+            "customer_intelligence_requested": customer_intelligence_event is not None,
             "new_flow_result": _new_flow_result_projection(
                 event_count=event_count,
                 assistant_content=None,
@@ -919,6 +1115,27 @@ class AgentRootRuntime:
         if current_interrupt:
             update["task_projection"] = _interrupt_task_projection(current_interrupt)
         return update
+
+    def _customer_intelligence_event_from_new_flow(
+        self,
+        context: AgentRuntimeContext,
+        side_effect_context: NewFlowSideEffectContext,
+    ) -> object | None:
+        if context.customer_intelligence_event is not None or context.user_message_id is None:
+            return context.customer_intelligence_event
+        event = self.customer_intelligence_trigger_policy.from_new_flow_events(
+            context.side_effects.new_flow_events,
+            turn=AgentCustomerIntelligenceTurn(
+                team_id=context.team_id,
+                user_id=context.user_id,
+                session_id=context.session_id,
+                message_id=context.user_message_id,
+                content=context.content,
+            ),
+        )
+        if event is not None:
+            context.customer_intelligence_event = event
+        return event
 
     async def _publish_new_review_events(
         self,
@@ -972,6 +1189,10 @@ class AgentRootRuntime:
             await _publish_events(context, output_events)
             context.side_effects.new_flow_events.extend(output_events)
             emitted_event_count += len(output_events) + 1
+            self._customer_intelligence_event_from_confirmed_tool_result(
+                context,
+                result.get("tool_result") or {},
+            )
             result_content = result.get("assistant_content")
             if isinstance(result_content, str):
                 assistant_content = result_content
@@ -1035,11 +1256,16 @@ class AgentRootRuntime:
         context.side_effects.confirmed_task_events.extend(output_events)
         await _publish_events(context, output_events)
         context.side_effects.current_interrupt = current_interrupt
+        customer_intelligence_event = self._customer_intelligence_event_from_confirmed_tool_result(
+            context,
+            result.get("tool_result") or {},
+        )
         if isinstance(assistant_content, str):
             context.side_effects.confirmed_task_assistant_content = assistant_content
         update: AgentRuntimeState = {
             "assistant_content": assistant_content if isinstance(assistant_content, str) else None,
             "current_interrupt": current_interrupt,
+            "customer_intelligence_requested": customer_intelligence_event is not None,
             "events": [{
                 "event": "agent_root_confirmed_task_subgraph_completed",
                 "emitted_event_count": len(output_events),
@@ -1051,6 +1277,41 @@ class AgentRootRuntime:
         if current_interrupt:
             update["task_projection"] = _interrupt_task_projection(current_interrupt)
         return update
+
+    def _customer_intelligence_event_from_confirmed_tool_result(
+        self,
+        context: AgentRuntimeContext,
+        tool_result: object,
+    ) -> object | None:
+        if context.customer_intelligence_event is not None:
+            return context.customer_intelligence_event
+        try:
+            event = self.customer_intelligence_trigger_policy.from_confirmed_tool_result(
+                context.db,
+                coerce_json_dict(tool_result),
+                team_id=context.team_id,
+            )
+        except Exception:
+            logger.exception(
+                "Agent 确认任务客户智能触发失败，已隔离为非阻塞后置效果: team_id=%s, session_id=%s",
+                context.team_id,
+                context.session_id,
+            )
+            context.side_effects.customer_intelligence_events.append({
+                "event": "agent_root_customer_intelligence_trigger_failed",
+                "source": "confirmed_tool_result",
+            })
+            return None
+        if event is not None:
+            context.customer_intelligence_event = event
+        return event
+
+    def _route_after_confirmed_task_execution(self, state: AgentRuntimeState) -> str:
+        if state.get("current_interrupt"):
+            return "finish"
+        if state.get("customer_intelligence_requested"):
+            return "customer_intelligence_graph"
+        return "finish"
 
     async def _run_no_pending_confirmation(
         self,
@@ -1106,7 +1367,11 @@ def project_turn_output(
         )
     if action == "execute_confirmed_task":
         return AgentRuntimeTurnOutput(
-            events=[*side_effects.pending_task_events, *side_effects.confirmed_task_events],
+            events=[
+                *side_effects.pending_task_events,
+                *side_effects.confirmed_task_events,
+                *side_effects.customer_intelligence_events,
+            ],
             assistant_content=side_effects.confirmed_task_assistant_content or _assistant_content_from_state(state),
             switch_notice=_switch_notice_from_state(state),
         )
@@ -1120,8 +1385,16 @@ def project_turn_output(
             switch_notice=_switch_notice_from_state(state),
         )
     return AgentRuntimeTurnOutput(
-        events=[*side_effects.pending_task_events, *side_effects.new_flow_events],
-        assistant_content=side_effects.new_flow_assistant_content or _assistant_content_from_state(state),
+        events=[
+            *side_effects.pending_task_events,
+            *side_effects.new_flow_events,
+            *side_effects.customer_intelligence_events,
+        ],
+        assistant_content=(
+            side_effects.customer_intelligence_assistant_content
+            or side_effects.new_flow_assistant_content
+            or _assistant_content_from_state(state)
+        ),
         switch_notice=side_effects.pending_task_switch_notice or _switch_notice_from_state(state),
     )
 
@@ -1241,6 +1514,126 @@ def _new_flow_result_projection(
     return projection
 
 
+def _customer_intelligence_result_projection(result: object) -> JSONDict:
+    if not isinstance(result, dict):
+        return {"handled": False}
+    projection: JSONDict = {
+        "handled": True,
+        "route": str(result.get("route") or ""),
+        "has_interrupt": bool(_customer_intelligence_interrupt_from_result(result)),
+        "has_assistant_content": bool(_customer_intelligence_assistant_content(result)),
+        "persisted_fact_count": len(result.get("persisted_customer_fact_refs", []))
+        if isinstance(result.get("persisted_customer_fact_refs"), list)
+        else 0,
+        "event_count": len(result.get("events", [])) if isinstance(result.get("events"), list) else 0,
+    }
+    event = coerce_json_dict(result.get("event"))
+    event_key = event.get("event_key")
+    if isinstance(event_key, str):
+        projection["event_key"] = event_key
+    review = coerce_json_dict(result.get("customer_fact_review"))
+    if review:
+        projection["customer_fact_review"] = {
+            "status": str(review.get("status") or ""),
+            "candidate_count": len(review.get("candidates", [])) if isinstance(review.get("candidates"), list) else 0,
+        }
+    return projection
+
+
+def _customer_intelligence_output_events(result: object) -> list[JSONDict]:
+    if not isinstance(result, dict):
+        return []
+    events = _customer_intelligence_trace_events(result)
+    assistant_content = _customer_intelligence_assistant_content(result)
+    if assistant_content:
+        events.append({
+            "event": "final",
+            "content": assistant_content,
+            "content_format": _customer_intelligence_content_format(result),
+        })
+    return events
+
+
+def _unstreamed_customer_intelligence_output_events(
+    result: object,
+    *,
+    streamed_trace_events: bool,
+) -> list[JSONDict]:
+    events = _customer_intelligence_output_events(result)
+    if not streamed_trace_events:
+        return events
+    return [event for event in events if event.get("event") != "agent_step"]
+
+
+def _customer_intelligence_trace_events(result: object) -> list[JSONDict]:
+    return visible_trace_events(result)
+
+
+def _customer_intelligence_assistant_content(result: object) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    interrupt_payload = _customer_intelligence_interrupt_from_result(result)
+    if interrupt_payload:
+        return _interrupt_assistant_content(interrupt_payload)
+    route = result.get("route")
+    if route == "answer_context":
+        answer = coerce_json_dict(result.get("customer_context_answer")).get("answer")
+        if isinstance(answer, str) and answer.strip():
+            return answer.strip()
+        assistant_content = result.get("assistant_content")
+        if isinstance(assistant_content, str) and assistant_content.strip():
+            return assistant_content.strip()
+        return None
+    persisted_refs = result.get("persisted_customer_fact_refs")
+    if isinstance(persisted_refs, list) and persisted_refs:
+        return f"客户智能档案已更新，沉淀了 {len(persisted_refs)} 条客户事实。"
+    review = coerce_json_dict(result.get("customer_fact_review"))
+    if review.get("status") == "resolved":
+        action = review.get("resume_action")
+        if action == "approve":
+            return "已按确认更新客户智能档案。"
+        return "已跳过本次客户事实沉淀。"
+    return None
+
+
+def _customer_intelligence_content_format(result: object) -> str:
+    if not isinstance(result, dict):
+        return "text"
+    return "markdown" if result.get("route") == "answer_context" else "text"
+
+
+def _customer_intelligence_interrupt_from_result(result: object) -> AgentInterruptPayload | None:
+    if not isinstance(result, dict):
+        return None
+    interrupt_items = result.get("__interrupt__")
+    if isinstance(interrupt_items, list):
+        for item in interrupt_items:
+            payload = interrupt_payload_from_json(getattr(item, "value", item))
+            if payload:
+                runtime_events = _customer_intelligence_trace_events(result)
+                if runtime_events:
+                    payload["runtime_events"] = runtime_events
+                return payload
+    review = interrupt_payload_from_json(result.get("customer_fact_review"))
+    if review and review.get("status") == "required":
+        return review
+    return None
+
+def _is_customer_intelligence_resume(resume_payload: object) -> bool:
+    payload = coerce_json_dict(resume_payload)
+    return payload.get("business_action") == "review_customer_facts"
+
+
+def _customer_intelligence_event_key_from_state(state: AgentRuntimeState) -> str | None:
+    event = coerce_json_dict(state.get("customer_intelligence_event"))
+    event_key = event.get("event_key")
+    if isinstance(event_key, str) and event_key:
+        return event_key
+    result = coerce_json_dict(state.get("customer_intelligence_result"))
+    event_key = result.get("event_key")
+    return event_key if isinstance(event_key, str) and event_key else None
+
+
 def _task_projection(task: object) -> JSONDict:
     projection: JSONDict = {}
     for key in ("id", "task_key", "status", "intent", "target_type", "target_id"):
@@ -1296,6 +1689,7 @@ def _turn_start_state(
         "task_projection": task_projection,
         "suspended_candidates": suspended_candidates,
         "pending_task_requested": current_interrupt is not None or bool(suspended_candidates),
+        "customer_intelligence_requested": context.customer_intelligence_event is not None,
         "current_customer": current_customer,
     }
 
@@ -1331,6 +1725,22 @@ def _should_emit_new_flow_event(event: JSONDict, context: NewFlowSideEffectConte
     if event.get("event") != "final":
         return True
     return not bool(context.auto_execute_tasks)
+
+
+def _should_publish_deferred_new_flow_final(
+    events: list[JSONDict],
+    *,
+    customer_intelligence_requested: bool,
+    current_interrupt: AgentInterruptPayload | None,
+    context: NewFlowSideEffectContext,
+) -> bool:
+    if not events:
+        return False
+    if not _should_emit_new_flow_event({"event": "final"}, context):
+        return False
+    if current_interrupt:
+        return True
+    return not customer_intelligence_requested
 
 
 def _task_action(task: object) -> str | None:
@@ -1743,6 +2153,9 @@ def _root_state_history_values(values: JSONDict) -> JSONDict:
         "resume_payload",
         "pending_task_result",
         "new_flow_result",
+        "customer_intelligence_requested",
+        "customer_intelligence_event",
+        "customer_intelligence_result",
         "assistant_content",
         "switch_notice",
         "events",

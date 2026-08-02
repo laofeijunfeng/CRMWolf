@@ -14,6 +14,10 @@ from app.services.agent.checkpointer import (
     is_checkpoint_storage_error,
     with_checkpoint_unavailable_fallback_event,
 )
+from app.services.agent.resource_resolution_graph import (
+    ResourceResolutionGraphService,
+    resource_resolution_graph_service,
+)
 from app.services.agent.schemas import AgentSemanticParseResult
 from app.services.agent.state import (
     CustomerResolutionGraphInput,
@@ -64,9 +68,11 @@ class CustomerResolutionGraphService:
         self,
         *,
         tool_registry: AgentToolRegistry | None = None,
+        resource_resolution_graph: ResourceResolutionGraphService | None = None,
         checkpointer: object | None = None,
     ) -> None:
         self.tool_registry = tool_registry or agent_tool_registry
+        self.resource_resolution_graph = resource_resolution_graph or resource_resolution_graph_service
         self._checkpoint_enabled = checkpointer is not None
         self._graph = self._build_graph(checkpointer)
         self._fallback_graph = self._build_graph(None)
@@ -182,6 +188,27 @@ class CustomerResolutionGraphService:
         }
         if len(candidates) == 1:
             state_update["selected_customer"] = candidates[0]
+        elif len(candidates) > 1:
+            resolution = await self.resource_resolution_graph.run(
+                {
+                    "team_id": context.team_id,
+                    "user_id": context.user_id,
+                    "session_id": context.session_id,
+                    "resource_kind": "customer",
+                    "action_name": "resolve_customer",
+                    "content": state.get("content") or "",
+                    "target": {"target_name": customer_name},
+                    "candidates": candidates,
+                },
+                ranker=_rank_customer_candidates_by_search_match,
+            )
+            events.extend([
+                event for event in resolution.get("events", [])
+                if isinstance(event, dict)
+            ])
+            selected = coerce_json_dict(resolution.get("selected_candidate"))
+            if selected.get("id"):
+                state_update["selected_customer"] = selected
         return state_update
 
     def _should_run_customer_search(self, state: CustomerResolutionGraphState) -> bool:
@@ -304,3 +331,53 @@ def _runtime_context_from_input(input_state: CustomerResolutionGraphInput) -> Cu
 
 
 customer_resolution_graph_service = CustomerResolutionGraphService(checkpointer=agent_checkpoint_saver)
+
+
+async def _rank_customer_candidates_by_search_match(state: CustomerResolutionGraphState) -> list[JSONDict]:
+    candidates = state.get("candidates")
+    if not isinstance(candidates, list):
+        return []
+    rankings: list[JSONDict] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        customer_id = candidate.get("id")
+        if not isinstance(customer_id, int):
+            continue
+        match = coerce_json_dict(candidate.get("match"))
+        score = _candidate_match_score(match)
+        evidence = _candidate_match_evidence(match)
+        rankings.append({
+            "resource_id": customer_id,
+            "confidence": score,
+            "evidence": evidence,
+            "risk_notes": [],
+        })
+    return sorted(rankings, key=lambda item: float(item.get("confidence") or 0), reverse=True)
+
+
+def _candidate_match_score(match: JSONDict) -> float:
+    source = match.get("source")
+    score = match.get("score")
+    if isinstance(score, (int, float)):
+        return min(max(float(score), 0.0), 1.0)
+    if source == "customer_search":
+        return 0.88
+    if source == "hybrid":
+        return 0.94
+    if source == "customer_knowledge":
+        return 0.84
+    return 0.5
+
+
+def _candidate_match_evidence(match: JSONDict) -> list[str]:
+    reason = match.get("reason")
+    evidence = [reason] if isinstance(reason, str) and reason.strip() else []
+    for item in match.get("evidence") or []:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title")
+        snippet = item.get("snippet")
+        if isinstance(title, str) and isinstance(snippet, str):
+            evidence.append(f"{title}: {snippet}")
+    return evidence[:3]

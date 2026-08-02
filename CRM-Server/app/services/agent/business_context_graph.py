@@ -27,8 +27,7 @@ from app.services.agent.suggestion import (
 )
 from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_registry
 from app.services.agent.tools.base import AgentToolContext
-from app.services.agent.types import JSONDict, coerce_json_dict
-
+from app.services.agent.types import coerce_json_dict
 
 BUSINESS_CONTEXT_CHECKPOINT_NS = "crm_agent_business_context"
 
@@ -139,7 +138,10 @@ class BusinessContextGraphService:
         result = await self.tool_registry.execute(
             "get_customer_context",
             tool_context,
-            {"customer_id": customer_id},
+            {
+                "customer_id": customer_id,
+                "query_text": state.get("content", ""),
+            },
         )
         events = [result.to_event()]
         if not result.success:
@@ -197,7 +199,7 @@ class BusinessContextGraphService:
 
 
 def runtime_semantic_allows_suggestions(intent: object) -> bool:
-    return isinstance(intent, str) and intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
+    return isinstance(intent, str) and intent not in {"CREATE_LEAD", "CREATE_CUSTOMER", "CUSTOMER_QUERY"}
 
 
 def _attach_side_effects(

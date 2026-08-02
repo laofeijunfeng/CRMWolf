@@ -23,8 +23,8 @@ from app.services.agent import (
     session_projection,
     session_state,
 )
-from app.services.agent.checkpointer import is_checkpoint_storage_error
 from app.services.agent.checkpoint_fallback_runtime import agent_checkpoint_fallback_runtime
+from app.services.agent.checkpointer import is_checkpoint_storage_error
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.root_runtime import agent_root_runtime, project_turn_output
 from app.services.agent.state import (
@@ -33,7 +33,6 @@ from app.services.agent.state import (
     AgentRuntimeContext,
 )
 from app.services.agent.types import JSONDict, coerce_json_dict
-
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +102,8 @@ class AgentApplicationService:
             trace_events: list[JSONDict] = []
             runtime_event_queue: asyncio.Queue[JSONDict] = asyncio.Queue()
             streamed_event_count = 0
+            streamed_final_content: str | None = None
+            streamed_final_content_format: str | None = None
 
             def emit(event: JSONDict) -> JSONDict:
                 event = interactions._with_interaction(event, db=db, team_id=team_id)
@@ -110,7 +111,12 @@ class AgentApplicationService:
                 return coerce_json_dict(event)
 
             async def publish_runtime_event(event: JSONDict) -> None:
-                nonlocal streamed_event_count
+                nonlocal streamed_event_count, streamed_final_content, streamed_final_content_format
+                if event.get("event") == "final":
+                    content = event.get("content")
+                    if isinstance(content, str) and content.strip():
+                        streamed_final_content = content
+                    streamed_final_content_format = _normalize_content_format(event.get("content_format"))
                 streamed_event_count += 1
                 await runtime_event_queue.put(coerce_json_dict(event))
 
@@ -125,6 +131,7 @@ class AgentApplicationService:
                 team_id=team_id,
                 user_id=user_id,
                 session_id=session.id,
+                user_message_id=user_message.id,
                 authorization=authorization,
                 switch_notice=None,
                 side_effects=runtime_side_effects,
@@ -176,11 +183,22 @@ class AgentApplicationService:
                 for output_event in runtime_result.turn_output.events:
                     yield emit(output_event)
 
-            assistant_value = runtime_result.turn_output.assistant_content or runtime_state.get("assistant_content")
+            assistant_value = (
+                streamed_final_content
+                or runtime_result.turn_output.assistant_content
+                or runtime_state.get("assistant_content")
+            )
             assistant_content = assistant_value if isinstance(assistant_value, str) else None
+            assistant_content_format = (
+                streamed_final_content_format
+                or _content_format_from_events(runtime_result.turn_output.events)
+                or _content_format_from_events(runtime_state.get("events", []))
+                or "text"
+            )
 
             if not assistant_content:
                 assistant_content = agent_copy.generic_completed()
+                assistant_content_format = "text"
 
             assistant_message = agent_message_crud.create(
                 db,
@@ -191,7 +209,11 @@ class AgentApplicationService:
                     role=AgentMessageRole.ASSISTANT,
                     event_type="assistant_message",
                     content=assistant_content,
-                    payload_json={"source": "langgraph", "trace_events": trace_events},
+                    payload_json={
+                        "source": "langgraph",
+                        "trace_events": trace_events,
+                        "content_format": assistant_content_format,
+                    },
                 ),
             )
             yield {
@@ -199,6 +221,7 @@ class AgentApplicationService:
                 "role": AgentMessageRole.ASSISTANT,
                 "message_id": assistant_message.id,
                 "content": assistant_content,
+                "content_format": assistant_content_format,
             }
             yield {"event": "done", "session_id": session.id}
         except HTTPException as exc:
@@ -244,3 +267,23 @@ class AgentApplicationService:
 
 
 agent_application_service = AgentApplicationService()
+
+
+def _normalize_content_format(value: object) -> str | None:
+    if value == "markdown":
+        return "markdown"
+    if value == "text":
+        return "text"
+    return None
+
+
+def _content_format_from_events(events: object) -> str | None:
+    if not isinstance(events, list):
+        return None
+    for event in reversed(events):
+        if not isinstance(event, dict) or event.get("event") != "final":
+            continue
+        normalized = _normalize_content_format(event.get("content_format"))
+        if normalized:
+            return normalized
+    return None

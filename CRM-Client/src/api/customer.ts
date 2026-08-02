@@ -124,11 +124,6 @@ export interface CustomerUpdate {
   company_scale?: string | null
   source?: string | null
   default_procurement_method_id?: number | null
-  // 档案字段（支持手动编辑）
-  company_background?: string | null
-  company_website?: string | null
-  main_business?: string | null
-  project_background?: string | null
 }
 
 export type CustomerStatus = 0 | 1 | 2 | 3
@@ -254,6 +249,7 @@ export interface CustomerDetailResponse {
   customer_brief_status?: string | null
   customer_brief_generated_time?: string | null
   customer_brief_error_message?: string | null
+  customer_intelligence_has_inputs?: boolean
 }
 
 export interface ContactCreate {
@@ -578,10 +574,7 @@ const customerApi = {
     api.get<PaymentPlanResponse[]>('/v1/customers/' + customerId + '/payment-plans', { params }),
 
   getInvoices: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }): Promise<InvoiceApplicationResponse[]> =>
-    api.get<InvoiceApplicationResponse[]>('/v1/customers/' + customerId + '/invoices', { params }),
-
-  regenerateProfile: (customerId: number): Promise<{ message: string }> =>
-    api.post('/v1/customers/' + customerId + '/regenerate-profile')
+    api.get<InvoiceApplicationResponse[]>('/v1/customers/' + customerId + '/invoices', { params })
 }
 
 export default customerApi
