@@ -46,11 +46,15 @@ class Settings(BaseSettings):
     QDRANT_PORT: int = 6333
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION_CUSTOMER_EVIDENCE: str = "crm_customer_evidence"
-    QDRANT_VECTOR_SIZE: int = 1536
+    QDRANT_VECTOR_SIZE: int = 1024
     QDRANT_TIMEOUT_SECONDS: float = 5.0
-    CUSTOMER_EVIDENCE_EMBEDDING_MODEL: str = "text-embedding-v4"
-    CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS: int = 1536
+    CUSTOMER_EVIDENCE_EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"
+    CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS: int = 1024
+    CUSTOMER_EVIDENCE_EMBEDDING_DIMENSION: int = 0
     CUSTOMER_EVIDENCE_EMBEDDING_API_HOST: str = ""
+    CUSTOMER_EVIDENCE_EMBEDDING_BASE_URL: str = ""
+    CUSTOMER_EVIDENCE_EMBEDDING_API_KEY: str = ""
+    CUSTOMER_EVIDENCE_EMBEDDING_API_KEY_FILE: str = ""
     CUSTOMER_EVIDENCE_SYNC_ENABLED: bool = True
     CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE: int = 50
     CUSTOMER_EVIDENCE_SYNC_INTERVAL_SECONDS: int = 30
@@ -142,6 +146,22 @@ class Settings(BaseSettings):
         if self.SECRET_KEY_FILE:
             return _read_secret_file(self.SECRET_KEY_FILE)
         return self.SECRET_KEY
+
+    def get_customer_evidence_embedding_api_key(self) -> str:
+        """获取客户证据向量模型 API Key, 支持从 Docker secrets 文件读取"""
+        if self.CUSTOMER_EVIDENCE_EMBEDDING_API_KEY_FILE:
+            secret_value = _read_secret_file(self.CUSTOMER_EVIDENCE_EMBEDDING_API_KEY_FILE)
+            if secret_value:
+                return secret_value
+        return self.CUSTOMER_EVIDENCE_EMBEDDING_API_KEY
+
+    def get_customer_evidence_embedding_base_url(self) -> str:
+        """获取客户证据向量模型 Base URL, 兼容历史 API_HOST 配置名"""
+        return self.CUSTOMER_EVIDENCE_EMBEDDING_BASE_URL or self.CUSTOMER_EVIDENCE_EMBEDDING_API_HOST
+
+    def get_customer_evidence_embedding_dimensions(self) -> int:
+        """获取客户证据向量维度, 兼容单数 DIMENSION 配置名"""
+        return self.CUSTOMER_EVIDENCE_EMBEDDING_DIMENSION or self.CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS
 
     class Config:
         env_file = ".env"

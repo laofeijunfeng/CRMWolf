@@ -45,10 +45,15 @@ def _session():
     return Session()
 
 
-def _customer_activity(db, *, source_content: str = "张总说今天可以开始签合同了") -> CustomerActivity:
+def _customer_activity(
+    db,
+    *,
+    source_content: str = "张总说今天可以开始签合同了",
+    account_name: str = "测试客户",
+) -> CustomerActivity:
     customer = Customer(
         team_id=2,
-        account_name="测试客户",
+        account_name=account_name,
         city="上海",
         creator_id="9",
     )
@@ -410,9 +415,15 @@ class FailingEmbeddingService:
 
 
 class FakeIndexWriter:
-    def __init__(self) -> None:
+    def __init__(self, *, collection_created: bool = False) -> None:
+        self.collection_created = collection_created
+        self.ensure_collection_calls = 0
         self.upserted: list[CustomerEvidenceDocument] = []
         self.deleted_sources: list[tuple[int, int, SourceType, str]] = []
+
+    def ensure_collection(self) -> bool:
+        self.ensure_collection_calls += 1
+        return self.collection_created
 
     def upsert_evidence(self, document: CustomerEvidenceDocument) -> None:
         self.upserted.append(document)
@@ -487,3 +498,94 @@ def test_vector_sync_marks_failed_without_blocking_metadata():
     document = db.query(CustomerVectorDocument).one()
     assert document.sync_status == CustomerVectorDocumentSyncStatus.FAILED
     assert document.sync_error == "embedding failed"
+
+
+def test_vector_sync_retries_failed_metadata_when_provider_recovers():
+    db = _session()
+    activity = _customer_activity(db)
+    customer_vector_document_service.upsert_customer_activity(db, activity)
+    failing_sync_service = CustomerVectorSyncService(
+        embedding_service=FailingEmbeddingService(),
+        index_writer=FakeIndexWriter(),
+    )
+    failing_sync_service.sync_once(db, limit=10)
+    failed_document = db.query(CustomerVectorDocument).one()
+    assert failed_document.sync_status == CustomerVectorDocumentSyncStatus.FAILED
+
+    index_writer = FakeIndexWriter()
+    recovered_sync_service = CustomerVectorSyncService(
+        embedding_service=FakeEmbeddingService(),
+        index_writer=index_writer,
+    )
+    stats = recovered_sync_service.sync_once(db, limit=10)
+
+    assert stats.scanned == 1
+    assert stats.upserted == 1
+    assert stats.failed == 0
+    assert len(index_writer.upserted) == 1
+    recovered_document = db.query(CustomerVectorDocument).one()
+    assert recovered_document.sync_status == CustomerVectorDocumentSyncStatus.SYNCED
+    assert recovered_document.sync_error is None
+
+
+def test_service_requeues_synced_and_failed_documents_for_rebuilt_vector_index():
+    db = _session()
+    synced_activity = _customer_activity(db, account_name="测试客户1")
+    synced_document = customer_vector_document_service.upsert_customer_activity(db, synced_activity)
+    failed_activity = _customer_activity(db, source_content="客户准备启动 POC", account_name="测试客户2")
+    failed_document = customer_vector_document_service.upsert_customer_activity(db, failed_activity)
+    delete_pending_activity = _customer_activity(db, source_content="客户记录需要删除", account_name="测试客户3")
+    delete_pending_document = customer_vector_document_service.upsert_customer_activity(db, delete_pending_activity)
+    deleted_activity = _customer_activity(db, source_content="客户记录已经删除", account_name="测试客户4")
+    deleted_document = customer_vector_document_service.upsert_customer_activity(db, deleted_activity)
+
+    assert synced_document is not None
+    assert failed_document is not None
+    assert delete_pending_document is not None
+    assert deleted_document is not None
+    synced_document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
+    synced_document.synced_at = datetime(2026, 8, 2, 12, 0, 0)
+    failed_document.sync_status = CustomerVectorDocumentSyncStatus.FAILED
+    failed_document.sync_error = "old vector schema mismatch"
+    delete_pending_document.sync_status = CustomerVectorDocumentSyncStatus.DELETE_PENDING
+    deleted_document.sync_status = CustomerVectorDocumentSyncStatus.DELETED
+    db.commit()
+
+    requeued = customer_vector_document_service.requeue_indexable_documents(db)
+
+    assert requeued == 2
+    refreshed = {
+        document.id: document
+        for document in db.query(CustomerVectorDocument).order_by(CustomerVectorDocument.id.asc()).all()
+    }
+    assert refreshed[synced_document.id].sync_status == CustomerVectorDocumentSyncStatus.PENDING
+    assert refreshed[synced_document.id].synced_at is None
+    assert refreshed[failed_document.id].sync_status == CustomerVectorDocumentSyncStatus.PENDING
+    assert refreshed[failed_document.id].sync_error is None
+    assert refreshed[delete_pending_document.id].sync_status == CustomerVectorDocumentSyncStatus.DELETE_PENDING
+    assert refreshed[deleted_document.id].sync_status == CustomerVectorDocumentSyncStatus.DELETED
+
+
+def test_vector_sync_requeues_history_when_collection_is_rebuilt():
+    db = _session()
+    activity = _customer_activity(db)
+    document = customer_vector_document_service.upsert_customer_activity(db, activity)
+    assert document is not None
+    document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
+    document.synced_at = datetime(2026, 8, 2, 12, 0, 0)
+    db.commit()
+    index_writer = FakeIndexWriter(collection_created=True)
+    sync_service = CustomerVectorSyncService(
+        embedding_service=FakeEmbeddingService(),
+        index_writer=index_writer,
+    )
+
+    stats = sync_service.sync_once(db, limit=10)
+
+    assert index_writer.ensure_collection_calls == 1
+    assert stats.scanned == 1
+    assert stats.upserted == 1
+    assert index_writer.upserted[0].id == document.qdrant_point_id
+    refreshed = db.query(CustomerVectorDocument).one()
+    assert refreshed.sync_status == CustomerVectorDocumentSyncStatus.SYNCED
+    assert refreshed.synced_at is not None

@@ -76,6 +76,7 @@ upload_to_server() {
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=no \
         "$SCRIPT_DIR/secrets/db_password.txt" \
         "$SCRIPT_DIR/secrets/secret_key.txt" \
+        "$SCRIPT_DIR/secrets/customer_evidence_embedding_api_key.txt" \
         "$SERVER:$DEPLOY_DIR/secrets/"
 
     ssh -i "$SSH_KEY" "$SERVER" "chmod 600 $DEPLOY_DIR/secrets/*.txt"
@@ -147,7 +148,7 @@ if [ "$BACKEND_HEALTH" = "200" ] && [ "$FRONTEND_HEALTH" = "200" ]; then
     echo ""
     echo "[检查] 客户智能档案与知识库后台任务..."
     docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'crm-backend|crm-qdrant-dev' || true
-    docker exec crm-backend python -c "from app.core.config import get_settings; s=get_settings(); print(f'QDRANT_ENABLED={s.QDRANT_ENABLED} QDRANT_HOST={s.QDRANT_HOST} QDRANT_PORT={s.QDRANT_PORT} AI_GENERATION_CONCURRENCY={s.AI_GENERATION_CONCURRENCY} CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED={s.CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED} CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE} CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE} CUSTOMER_EVIDENCE_SYNC_ENABLED={s.CUSTOMER_EVIDENCE_SYNC_ENABLED} CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE={s.CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE}')"
+    docker exec crm-backend python -c "from app.core.config import get_settings; s=get_settings(); print(f'QDRANT_ENABLED={s.QDRANT_ENABLED} QDRANT_HOST={s.QDRANT_HOST} QDRANT_PORT={s.QDRANT_PORT} QDRANT_VECTOR_SIZE={s.QDRANT_VECTOR_SIZE} CUSTOMER_EVIDENCE_EMBEDDING_MODEL={s.CUSTOMER_EVIDENCE_EMBEDDING_MODEL} CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS={s.get_customer_evidence_embedding_dimensions()} CUSTOMER_EVIDENCE_EMBEDDING_BASE_URL={s.get_customer_evidence_embedding_base_url()} CUSTOMER_EVIDENCE_EMBEDDING_API_KEY_CONFIGURED={bool(s.get_customer_evidence_embedding_api_key())} AI_GENERATION_CONCURRENCY={s.AI_GENERATION_CONCURRENCY} CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED={s.CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED} CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE} CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE} CUSTOMER_EVIDENCE_SYNC_ENABLED={s.CUSTOMER_EVIDENCE_SYNC_ENABLED} CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE={s.CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE}')"
     docker logs crm-backend --since 10m | grep -E '客户智能历史补档|客户证据向量同步|Qdrant' || echo "未看到客户智能/Qdrant 启动日志，请检查 crm-backend 日志。"
     echo ""
     echo "=== 部署成功 ==="
@@ -189,6 +190,17 @@ main() {
         log_info "请先运行: ssh-keygen -t ed25519 -f $SSH_KEY -N ''"
         exit 1
     fi
+
+    # 检查部署密钥文件
+    for secret_file in \
+        "$SCRIPT_DIR/secrets/db_password.txt" \
+        "$SCRIPT_DIR/secrets/secret_key.txt" \
+        "$SCRIPT_DIR/secrets/customer_evidence_embedding_api_key.txt"; do
+        if [ ! -s "$secret_file" ]; then
+            log_error "部署密钥文件不存在或为空: $secret_file"
+            exit 1
+        fi
+    done
 
     # 执行部署流程
     build_images

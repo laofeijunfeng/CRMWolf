@@ -19,6 +19,14 @@ services:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-1024}
+      CUSTOMER_EVIDENCE_EMBEDDING_API_HOST: ${CUSTOMER_EVIDENCE_EMBEDDING_API_HOST:-https://api.siliconflow.cn/v1}
+      CUSTOMER_EVIDENCE_EMBEDDING_BASE_URL: ${CUSTOMER_EVIDENCE_EMBEDDING_BASE_URL:-https://api.siliconflow.cn/v1}
+      CUSTOMER_EVIDENCE_EMBEDDING_MODEL: ${CUSTOMER_EVIDENCE_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}
+      CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS: ${CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS:-1024}
+      CUSTOMER_EVIDENCE_EMBEDDING_DIMENSION: ${CUSTOMER_EVIDENCE_EMBEDDING_DIMENSION:-1024}
+      CUSTOMER_EVIDENCE_EMBEDDING_API_KEY: ${CUSTOMER_EVIDENCE_EMBEDDING_API_KEY:-}
+      CUSTOMER_EVIDENCE_EMBEDDING_API_KEY_FILE: ${CUSTOMER_EVIDENCE_EMBEDDING_API_KEY_FILE:-/run/secrets/customer_evidence_embedding_api_key}
       # 前端应用地址（用于飞书通知跳转链接）
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.apipark.cn}
       # 后端公网入口地址（用于飞书事件回调；同域部署时与 FRONTEND_URL 一致）
@@ -32,6 +40,7 @@ services:
     secrets:
       - db_password
       - secret_key
+      - customer_evidence_embedding_api_key
     networks:
       - crmwolf-network
 
@@ -55,6 +64,8 @@ secrets:
     file: ./secrets/db_password.txt
   secret_key:
     file: ./secrets/secret_key.txt
+  customer_evidence_embedding_api_key:
+    file: ./secrets/customer_evidence_embedding_api_key.txt
 
 networks:
   crmwolf-network:

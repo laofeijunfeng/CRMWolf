@@ -62,11 +62,21 @@ class CustomerEvidenceSearchResult:
     text: str | None
 
 
+class CustomerQdrantSchemaMismatchError(Exception):
+    """Raised when an existing Qdrant collection cannot accept the configured embedding vector."""
+
+
 class CustomerEvidenceVectorClient(Protocol):
     def collection_exists(self, collection_name: str) -> bool:
         raise NotImplementedError
 
+    def get_collection(self, collection_name: str) -> qmodels.CollectionInfo:
+        raise NotImplementedError
+
     def create_collection(self, collection_name: str, vectors_config: qmodels.VectorParams) -> bool:
+        raise NotImplementedError
+
+    def delete_collection(self, collection_name: str) -> bool:
         raise NotImplementedError
 
     def upsert(self, collection_name: str, points: Sequence[qmodels.PointStruct], wait: bool) -> object:
@@ -109,7 +119,23 @@ class CustomerQdrantIndexService:
         if not self.enabled:
             return False
         if self.client.collection_exists(self.collection_name):
-            return False
+            collection_info = self.client.get_collection(self.collection_name)
+            existing_vector_size = self._collection_vector_size(collection_info)
+            if existing_vector_size == self.vector_size:
+                return False
+            points_count = self._collection_points_count(collection_info)
+            if points_count == 0:
+                self.client.delete_collection(self.collection_name)
+                self._create_collection()
+                return True
+            raise CustomerQdrantSchemaMismatchError(
+                f"客户证据 Qdrant collection 维度不匹配: collection={self.collection_name}, "
+                f"existing={existing_vector_size}, expected={self.vector_size}, points_count={points_count}"
+            )
+        self._create_collection()
+        return True
+
+    def _create_collection(self) -> None:
         self.client.create_collection(
             collection_name=self.collection_name,
             vectors_config=qmodels.VectorParams(
@@ -117,7 +143,30 @@ class CustomerQdrantIndexService:
                 distance=qmodels.Distance.COSINE,
             ),
         )
-        return True
+
+    @staticmethod
+    def _collection_vector_size(collection_info: qmodels.CollectionInfo) -> int | None:
+        config = getattr(collection_info, "config", None)
+        params = getattr(config, "params", None)
+        vectors = getattr(params, "vectors", None)
+        size = getattr(vectors, "size", None)
+        if isinstance(size, int):
+            return size
+        if isinstance(vectors, dict) and len(vectors) == 1:
+            only_vector = next(iter(vectors.values()))
+            only_size = getattr(only_vector, "size", None)
+            return only_size if isinstance(only_size, int) else None
+        return None
+
+    @staticmethod
+    def _collection_points_count(collection_info: qmodels.CollectionInfo) -> int:
+        points_count = getattr(collection_info, "points_count", None)
+        if isinstance(points_count, int):
+            return points_count
+        vectors_count = getattr(collection_info, "vectors_count", None)
+        if isinstance(vectors_count, int):
+            return vectors_count
+        return 1
 
     def upsert_evidence(self, document: CustomerEvidenceDocument) -> None:
         if not self.enabled:

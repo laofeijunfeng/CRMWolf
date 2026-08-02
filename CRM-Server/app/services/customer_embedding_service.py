@@ -26,16 +26,24 @@ class CustomerEmbeddingService:
             raise CustomerEmbeddingUnavailableError("langchain_openai OpenAIEmbeddings 不可用")
 
         settings = get_settings()
-        ai_config = ai_config_crud.get_config(db, team_id)
-        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
-        if ai_config is None or not api_key:
-            raise CustomerEmbeddingUnavailableError(f"团队 {team_id} 未配置 AI API Key")
+        api_key = settings.get_customer_evidence_embedding_api_key()
+        base_url = settings.get_customer_evidence_embedding_base_url()
+
+        if not api_key:
+            ai_config = ai_config_crud.get_config(db, team_id)
+            api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
+            base_url = base_url or (ai_config.api_host if ai_config is not None else "")
+
+        if not api_key:
+            raise CustomerEmbeddingUnavailableError("客户证据向量模型未配置 API Key")
+        if not base_url:
+            raise CustomerEmbeddingUnavailableError("客户证据向量模型未配置 API Host")
 
         embeddings = OpenAIEmbeddings(
             model=settings.CUSTOMER_EVIDENCE_EMBEDDING_MODEL,
             api_key=api_key,
-            base_url=settings.CUSTOMER_EVIDENCE_EMBEDDING_API_HOST or ai_config.api_host,
-            dimensions=settings.CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS,
+            base_url=base_url,
+            dimensions=settings.get_customer_evidence_embedding_dimensions(),
         )
         try:
             return embeddings.embed_query(text)

@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 class CustomerVectorIndexWriter(Protocol):
+    def ensure_collection(self) -> bool:
+        raise NotImplementedError
+
     def upsert_evidence(self, document: CustomerEvidenceDocument) -> None:
         raise NotImplementedError
 
@@ -59,6 +62,11 @@ class CustomerVectorSyncService:
     def sync_once(self, db: Session, limit: int | None = None) -> CustomerEvidenceSyncStats:
         settings = get_settings()
         batch_limit = limit or settings.CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE
+        collection_created_or_recreated = self.index_writer.ensure_collection()
+        if collection_created_or_recreated:
+            requeued = self.metadata_service.requeue_indexable_documents(db)
+            if requeued > 0:
+                logger.info("客户证据向量索引已重建, 历史证据重新入队: count=%s", requeued)
         candidates = self.metadata_service.list_sync_candidates(db, batch_limit)
 
         upserted = 0

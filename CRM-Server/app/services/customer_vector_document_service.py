@@ -25,6 +25,7 @@ class CustomerVectorDocumentService:
                 CustomerVectorDocument.sync_status.in_(
                     [
                         CustomerVectorDocumentSyncStatus.PENDING,
+                        CustomerVectorDocumentSyncStatus.FAILED,
                         CustomerVectorDocumentSyncStatus.DELETE_PENDING,
                     ]
                 )
@@ -33,6 +34,31 @@ class CustomerVectorDocumentService:
             .limit(limit)
             .all()
         )
+
+    def requeue_indexable_documents(self, db: Session, *, commit: bool = True) -> int:
+        documents = (
+            db.query(CustomerVectorDocument)
+            .filter(
+                CustomerVectorDocument.sync_status.in_(
+                    [
+                        CustomerVectorDocumentSyncStatus.SYNCED,
+                        CustomerVectorDocumentSyncStatus.FAILED,
+                    ]
+                )
+            )
+            .all()
+        )
+        for document in documents:
+            document.sync_status = CustomerVectorDocumentSyncStatus.PENDING
+            document.sync_error = None
+            document.synced_at = None
+            document.updated_time = datetime.now()
+        if documents:
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+        return len(documents)
 
     def list_stale_customer_profile_customers(
         self,
