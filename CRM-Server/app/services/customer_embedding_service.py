@@ -35,6 +35,7 @@ class CustomerEmbeddingService:
             model=settings.CUSTOMER_EVIDENCE_EMBEDDING_MODEL,
             api_key=api_key,
             base_url=settings.CUSTOMER_EVIDENCE_EMBEDDING_API_HOST or ai_config.api_host,
+            dimensions=settings.CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS,
         )
         try:
             return embeddings.embed_query(text)
