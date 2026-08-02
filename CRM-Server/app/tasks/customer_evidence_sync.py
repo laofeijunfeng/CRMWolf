@@ -42,6 +42,9 @@ class CustomerEvidenceSyncScheduler:
 
     def start(self) -> None:
         settings = get_settings()
+        if not settings.CUSTOMER_EVIDENCE_SYNC_ENABLED:
+            logger.info("客户证据向量同步未启用")
+            return
         if not settings.QDRANT_ENABLED:
             logger.info("Qdrant 未启用, 跳过客户证据向量同步调度")
             return
