@@ -60,7 +60,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("run_key", name="uq_customer_intelligence_run_key"),
         mysql_charset="utf8mb4",
-        mysql_collate="utf8mb4_unicode_ci",
+        mysql_collate="utf8mb4_general_ci",
         comment="客户智能 LangGraph 运行审计表",
     )
     op.create_index("ix_crm_customer_intelligence_runs_actor_id", "crm_customer_intelligence_runs", ["actor_id"])

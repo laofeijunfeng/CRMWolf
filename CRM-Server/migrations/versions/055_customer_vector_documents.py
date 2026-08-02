@@ -61,7 +61,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("qdrant_point_id"),
         sa.UniqueConstraint("team_id", "source_type", "source_object_id", name="uq_customer_vector_source"),
         mysql_charset="utf8mb4",
-        mysql_collate="utf8mb4_unicode_ci",
+        mysql_collate="utf8mb4_general_ci",
         comment="客户智能档案向量证据元数据表",
     )
     op.create_index("ix_crm_customer_vector_documents_customer_id", "crm_customer_vector_documents", ["customer_id"])

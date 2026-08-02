@@ -149,13 +149,13 @@
             <component
               :is="Component"
               v-if="currentRoute.meta['keepAlive'] === true"
-              :key="currentRoute.name ?? currentRoute.fullPath"
+              :key="getRouteViewKey(currentRoute)"
             />
           </KeepAlive>
           <component
             :is="Component"
             v-if="currentRoute.meta['keepAlive'] !== true"
-            :key="currentRoute.fullPath"
+            :key="getRouteViewKey(currentRoute)"
           />
         </router-view>
       </div>
@@ -200,6 +200,7 @@ import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import AppSidebar from '@/components/app-sidebar/AppSidebar.vue'
 import { TopBarTabs } from '@/components/crmwolf'
 import { logger } from '@/utils/logger'
+import type { RouteLocationNormalizedLoaded } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
@@ -236,6 +237,16 @@ const mainContentClass = computed(() => ({
   'main-content--contained': route.name === 'AgentChat' || route.path.startsWith('/agent'),
   'main-content--fixed': isFixedDashboardRoute.value,
 }))
+
+const getRouteViewKey = (currentRoute: RouteLocationNormalizedLoaded): string => {
+  const routeName = typeof currentRoute.name === 'string' ? currentRoute.name : currentRoute.path
+  const params = Object.entries(currentRoute.params)
+    .map(([key, value]) => `${key}:${Array.isArray(value) ? value.join(',') : String(value)}`)
+    .sort()
+    .join('|')
+
+  return params === '' ? routeName : `${routeName}|${params}`
+}
 
 /**
  * Map HeaderAction.type to shadcn-vue Button variant

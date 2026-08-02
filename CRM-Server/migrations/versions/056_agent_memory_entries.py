@@ -45,7 +45,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("namespace", "key", name="uq_agent_memory_namespace_key"),
         mysql_charset="utf8mb4",
-        mysql_collate="utf8mb4_unicode_ci",
+        mysql_collate="utf8mb4_general_ci",
         comment="CRM AI Agent LangGraph长期记忆表",
     )
     op.create_index("ix_crm_agent_memory_entries_expires_at", "crm_agent_memory_entries", ["expires_at"])

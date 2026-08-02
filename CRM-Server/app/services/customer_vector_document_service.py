@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import String, and_, cast
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.models.customer import Customer
@@ -47,7 +47,6 @@ class CustomerVectorDocumentService:
             CustomerVectorDocument.team_id == Customer.team_id,
             CustomerVectorDocument.customer_id == Customer.id,
             CustomerVectorDocument.source_type == CustomerVectorDocumentSourceType.CUSTOMER_PROFILE,
-            CustomerVectorDocument.source_object_id == cast(Customer.id, String),
         )
         query = (
             db.query(Customer)

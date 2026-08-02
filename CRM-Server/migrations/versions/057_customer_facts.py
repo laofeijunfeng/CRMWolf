@@ -61,7 +61,7 @@ def upgrade() -> None:
             sa.UniqueConstraint("fact_key"),
             sa.UniqueConstraint("team_id", "customer_id", "fact_type", "subject", name="uq_customer_fact_subject"),
             mysql_charset="utf8mb4",
-            mysql_collate="utf8mb4_unicode_ci",
+            mysql_collate="utf8mb4_general_ci",
             comment="客户智能事实表",
         )
         op.create_index("ix_crm_customer_facts_customer_id", "crm_customer_facts", ["customer_id"])
@@ -95,7 +95,7 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("fact_id", "source_type", "source_object_id", name="uq_customer_fact_source"),
             mysql_charset="utf8mb4",
-            mysql_collate="utf8mb4_unicode_ci",
+            mysql_collate="utf8mb4_general_ci",
             comment="客户智能事实来源表",
         )
         op.create_index("ix_crm_customer_fact_sources_evidence_id", "crm_customer_fact_sources", ["evidence_id"])
@@ -129,7 +129,7 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("fact_id", "version", name="uq_customer_fact_revision_version"),
             mysql_charset="utf8mb4",
-            mysql_collate="utf8mb4_unicode_ci",
+            mysql_collate="utf8mb4_general_ci",
             comment="客户智能事实版本审计表",
         )
         op.create_index("ix_crm_customer_fact_revisions_change_type", "crm_customer_fact_revisions", ["change_type"])
@@ -165,7 +165,7 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("review_key"),
             mysql_charset="utf8mb4",
-            mysql_collate="utf8mb4_unicode_ci",
+            mysql_collate="utf8mb4_general_ci",
             comment="客户智能事实人工复核审计表",
         )
         op.create_index("ix_crm_customer_fact_review_audits_review_key", "crm_customer_fact_review_audits", ["review_key"])
