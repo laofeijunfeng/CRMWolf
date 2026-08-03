@@ -20,6 +20,8 @@ from app.services.agent.state import (
     CreationDuplicateGraphResult,
     CreationDuplicateGraphState,
     CreationDuplicateRuntimeContext,
+    internal_graph_start_event,
+    visible_graph_events,
 )
 from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_registry
 from app.services.agent.tools.base import AgentToolContext
@@ -98,12 +100,14 @@ class CreationDuplicateGraphService:
             session_id=context.session_id,
         )
         try:
-            return await self._graph.ainvoke(checkpoint_state, config, context=context)
+            return _with_visible_events(await self._graph.ainvoke(checkpoint_state, config, context=context))
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
             fallback_context = _runtime_context_from_input(input_state)
-            result = await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
+            result = _with_visible_events(
+                await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
+            )
             return with_checkpoint_unavailable_fallback_event(
                 result,
                 runtime="crm_agent_creation_duplicates",
@@ -281,7 +285,7 @@ def _checkpoint_state_from_input(input_state: CreationDuplicateGraphInput) -> Cr
         "duplicate_skip_reason": None,
         "duplicate_search_payload": {},
         "creation_duplicate_candidates": {},
-        "events": [],
+        "events": [internal_graph_start_event("creation_duplicate_graph_invocation_started")],
     }
     semantic_result = input_state.get("semantic_result")
     if isinstance(semantic_result, AgentSemanticParseResult):
@@ -291,12 +295,18 @@ def _checkpoint_state_from_input(input_state: CreationDuplicateGraphInput) -> Cr
         state["parsed"] = parsed
     events = input_state.get("events")
     if isinstance(events, list):
-        state["events"] = [
+        state["events"].extend(
             coerce_json_dict(event)
             for event in events
             if isinstance(event, dict)
-        ]
+        )
     return state
+
+
+def _with_visible_events(result: CreationDuplicateGraphResult) -> CreationDuplicateGraphResult:
+    projected: CreationDuplicateGraphResult = dict(result)
+    projected["events"] = visible_graph_events(projected.get("events"))
+    return projected
 
 
 def _runtime_context_from_input(input_state: CreationDuplicateGraphInput) -> CreationDuplicateRuntimeContext:

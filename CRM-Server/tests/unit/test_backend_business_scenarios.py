@@ -271,6 +271,7 @@ def seed_customer(env, name="广州睿狐科技有限公司"):
 def seed_opportunity(env, customer):
     opp = Opportunity(
         team_id=1,
+        opportunity_number="OPP202608030001",
         opportunity_name=f"{customer.account_name}-CRM 项目",
         customer_id=customer.id,
         total_amount=Decimal("100000"),

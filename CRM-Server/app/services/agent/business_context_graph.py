@@ -19,6 +19,8 @@ from app.services.agent.state import (
     BusinessContextGraphResult,
     BusinessContextGraphState,
     BusinessContextRuntimeContext,
+    internal_graph_start_event,
+    visible_graph_events,
 )
 from app.services.agent.suggestion import (
     AgentSuggestionGenerator,
@@ -103,12 +105,14 @@ class BusinessContextGraphService:
             session_id=context.session_id,
         )
         try:
-            result = await self._graph.ainvoke(checkpoint_state, config, context=context)
+            result = _with_visible_events(await self._graph.ainvoke(checkpoint_state, config, context=context))
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
             fallback_context = _runtime_context_from_input(input_state)
-            result = await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
+            result = _with_visible_events(
+                await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
+            )
             result = with_checkpoint_unavailable_fallback_event(
                 result,
                 runtime="crm_agent_business_context",
@@ -227,7 +231,7 @@ def _checkpoint_state_from_input(input_state: BusinessContextGraphInput) -> Busi
         "business_context": {},
         "suggestion_metadata": {},
         "suggestion_error": None,
-        "events": [],
+        "events": [internal_graph_start_event("business_context_graph_invocation_started")],
     }
     current_date = input_state.get("current_date")
     if isinstance(current_date, str):
@@ -247,12 +251,18 @@ def _checkpoint_state_from_input(input_state: BusinessContextGraphInput) -> Busi
         state["business_context"] = business_context
     events = input_state.get("events")
     if isinstance(events, list):
-        state["events"] = [
+        state["events"].extend(
             coerce_json_dict(event)
             for event in events
             if isinstance(event, dict)
-        ]
+        )
     return state
+
+
+def _with_visible_events(result: BusinessContextGraphResult) -> BusinessContextGraphResult:
+    projected: BusinessContextGraphResult = dict(result)
+    projected["events"] = visible_graph_events(projected.get("events"))
+    return projected
 
 
 def _runtime_context_from_input(input_state: BusinessContextGraphInput) -> BusinessContextRuntimeContext:

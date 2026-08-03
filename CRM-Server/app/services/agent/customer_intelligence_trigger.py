@@ -57,7 +57,7 @@ class CustomerIntelligenceTriggerPolicy:
         intent = _first_intent(events)
         if intent != "CUSTOMER_QUERY":
             return None
-        customer_id = _first_customer_id(events)
+        customer_id = _latest_customer_id(events)
         if customer_id is None:
             return None
         return self.event_service.agent_customer_question(
@@ -250,8 +250,8 @@ def _first_intent(events: list[JSONDict]) -> str | None:
     return None
 
 
-def _first_customer_id(events: list[JSONDict]) -> int | None:
-    for event in events:
+def _latest_customer_id(events: list[JSONDict]) -> int | None:
+    for event in reversed(events):
         if event.get("event") != "business_context_loaded":
             continue
         customer_id = _positive_int(event.get("customer_id"))

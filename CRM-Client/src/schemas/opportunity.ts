@@ -60,6 +60,7 @@ export const OpportunityCurrentStageSnapshotSchema = z.object({
 
 export const OpportunityApiResponseSchema = z.object({
   id: z.number().int(),
+  opportunity_number: z.string(),
   opportunity_name: z.string(),
   customer_id: z.number().int(),
   customer_name: OptionalStringFromNullableSchema,
@@ -97,6 +98,7 @@ export const OpportunityApiResponseSchema = z.object({
 
 export const OpportunityListItemApiSchema = z.object({
   id: z.number().int(),
+  opportunity_number: z.string(),
   opportunity_name: z.string(),
   customer_id: z.number().int(),
   procurement_method_id: z.number().int().nullable(),

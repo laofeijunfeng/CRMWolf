@@ -25,6 +25,8 @@ from app.services.agent.state import (
     ConfirmedTaskGraphSideEffects,
     ConfirmedTaskGraphState,
     ConfirmedTaskRuntimeContext,
+    internal_graph_start_event,
+    visible_graph_events,
 )
 from app.services.agent.types import AgentRuntimeEventSink, JSONDict, coerce_json_dict, coerce_json_value
 
@@ -73,14 +75,14 @@ class ConfirmedTaskGraphService:
         )
         try:
             result = await self._graph.ainvoke(checkpoint_state, config, context=context)
-            return _merge_side_effects(result, side_effects)
+            return _with_visible_events(_merge_side_effects(result, side_effects))
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
             fallback_side_effects = ConfirmedTaskGraphSideEffects()
             fallback_context = _runtime_context_from_input(input_state, fallback_side_effects)
             result = await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
-            merged = _merge_side_effects(result, fallback_side_effects)
+            merged = _with_visible_events(_merge_side_effects(result, fallback_side_effects))
             fallback_event = checkpoint_unavailable_fallback_event(
                 runtime="crm_agent_confirmed_task",
                 graph=CONFIRMED_TASK_CHECKPOINT_NS,
@@ -278,13 +280,15 @@ async def execute_confirmed_task(
 
 def _checkpoint_state_from_input(input_state: ConfirmedTaskGraphInput) -> ConfirmedTaskGraphState:
     task = input_state.get("task")
-    return {
+    state: ConfirmedTaskGraphState = {
         "team_id": int(input_state.get("team_id") or 0),
         "user_id": int(input_state.get("user_id") or 0),
         "session_id": int(input_state.get("session_id") or 0),
         "task_projection": _task_projection(task),
-        "events": _events(input_state.get("events") or []),
+        "events": [internal_graph_start_event("confirmed_task_graph_invocation_started")],
     }
+    state["events"].extend(_events(input_state.get("events") or []))
+    return state
 
 
 def _runtime_context_from_input(
@@ -311,6 +315,12 @@ def _merge_side_effects(
     result: ConfirmedTaskGraphResult = dict(state)
     result["output_events"] = list(side_effects.output_events)
     return result
+
+
+def _with_visible_events(result: ConfirmedTaskGraphResult) -> ConfirmedTaskGraphResult:
+    projected: ConfirmedTaskGraphResult = dict(result)
+    projected["events"] = visible_graph_events(projected.get("events"))
+    return projected
 
 
 def _task_projection(task: object) -> JSONDict:

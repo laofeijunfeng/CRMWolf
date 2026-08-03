@@ -4,7 +4,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Annotated, TypedDict
-import operator
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -27,7 +26,7 @@ from app.services.agent.checkpointer import (
     is_checkpoint_storage_error,
 )
 from app.models.agent import AgentTaskStatus
-from app.services.agent.state import PendingTaskTurnResult
+from app.services.agent.state import PendingTaskTurnResult, internal_graph_start_event, merge_turn_scoped_events
 from app.services.agent.types import JSONDict, JSONValue, coerce_json_dict, coerce_json_value
 
 
@@ -48,7 +47,7 @@ class PendingInteractionGraphState(TypedDict, total=False):
     business_choice_result: JSONDict
     customer_choice_result: JSONDict
     result_projection: JSONDict
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class PendingInteractionGraphInput(TypedDict, total=False):
@@ -407,15 +406,17 @@ def build_pending_interaction_graph_config(
 
 
 def _checkpoint_state_from_input(input_state: PendingInteractionGraphInput) -> PendingInteractionGraphState:
-    return {
+    state: PendingInteractionGraphState = {
         "team_id": int(input_state.get("team_id") or 0),
         "user_id": int(input_state.get("user_id") or 0),
         "session_id": int(input_state.get("session_id") or 0),
         "task_projection": _task_projection(input_state.get("task")),
         "content": str(input_state.get("content") or ""),
         "interaction_metadata": coerce_json_dict(input_state.get("interaction_metadata")),
-        "events": _events(input_state.get("events") or []),
+        "events": [internal_graph_start_event("pending_interaction_graph_invocation_started")],
     }
+    state["events"].extend(_events(input_state.get("events") or []))
+    return state
 
 
 def _runtime_context_from_input(

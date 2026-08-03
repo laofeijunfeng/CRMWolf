@@ -40,6 +40,7 @@ from app.models.approval import (
 )
 from app.models.contract import Contract, ContractStatus
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceType
+from app.models.opportunity import Opportunity
 from app.models.payment import PaymentRecord, PaymentConfirmationStatus
 from app.models.user import User, UserStatus
 from app.models.role import Role
@@ -69,6 +70,42 @@ def db_session():
         ApprovalRecord.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""
+            CREATE TABLE crm_opportunities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                opportunity_number VARCHAR(50) NOT NULL,
+                opportunity_name VARCHAR(255) NOT NULL,
+                customer_id INTEGER NOT NULL,
+                procurement_method_id INTEGER,
+                current_stage_snapshot_id INTEGER,
+                current_stage_name VARCHAR(100),
+                current_win_probability INTEGER,
+                current_stage_entered_at DATETIME,
+                deal_journey_id INTEGER,
+                total_amount NUMERIC(12, 2) NOT NULL,
+                user_count INTEGER NOT NULL,
+                unit_price NUMERIC(10, 2) NOT NULL,
+                license_type VARCHAR(20) NOT NULL,
+                subscription_years INTEGER,
+                purchase_type VARCHAR(20) NOT NULL,
+                decision_maker_count INTEGER,
+                expected_closing_date DATE NOT NULL,
+                procurement_stage_id INTEGER,
+                win_probability INTEGER NOT NULL DEFAULT 0,
+                owner_id VARCHAR(100) NOT NULL,
+                status INTEGER NOT NULL DEFAULT 0,
+                approval_phase VARCHAR(20) NOT NULL DEFAULT 'draft',
+                loss_reason VARCHAR(500),
+                actual_amount NUMERIC(12, 2),
+                actual_closing_date DATE,
+                creator_id VARCHAR(100) NOT NULL,
+                created_time DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                last_modified_time DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1
+            )
+        """)
     Session = sessionmaker(bind=engine)
     session = Session()
     yield session
@@ -194,6 +231,27 @@ def _make_invoice(db_session, team_id=1, status=InvoiceApplicationStatus.DRAFT):
     db_session.add(inv)
     db_session.commit()
     return inv
+
+
+def _make_opportunity(db_session, team_id=1):
+    opp = Opportunity(
+        team_id=team_id,
+        opportunity_number=f"OPP20260803{db_session.query(Opportunity).count() + 1:04d}",
+        opportunity_name="统一编号商机",
+        customer_id=1,
+        total_amount=Decimal("66000"),
+        user_count=66,
+        unit_price=Decimal("1000"),
+        license_type="SUBSCRIPTION",
+        subscription_years=1,
+        purchase_type="NEW",
+        expected_closing_date=datetime.now().date(),
+        owner_id="1",
+        creator_id="1",
+    )
+    db_session.add(opp)
+    db_session.commit()
+    return opp
 
 
 def _make_approval(
@@ -567,3 +625,19 @@ def test_entity_summary_contract_join(
     assert item["application_number"] == "CON-2026-001"
     assert item["entity_name"] == "某合同"
     assert item["entity_amount"] == 88888.0
+
+
+def test_entity_summary_opportunity_uses_persisted_number(
+    client, db_session, seed_invoice_flow, seed_finance_role,
+):
+    """OPPORTUNITY 行的 application_number 来自 crm_opportunities.opportunity_number。"""
+    flow, node = seed_invoice_flow
+    opp = _make_opportunity(db_session, team_id=1)
+    _make_approval(db_session, BusinessType.OPPORTUNITY, opp.id, 1, node)
+
+    r = client.get("/v1/approvals?tab=pending")
+    assert r.status_code == 200, r.text
+    item = next(it for it in r.json()["items"] if it["business_type"] == "OPPORTUNITY")
+    assert item["application_number"] == opp.opportunity_number
+    assert item["entity_name"] == "统一编号商机"
+    assert item["entity_amount"] == 66000.0

@@ -35,7 +35,14 @@ from app.services.agent.schemas import (
 )
 from app.services.agent.semantic import AgentSemanticParser, AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.semantic_payload import parsed_from_semantic
-from app.services.agent.state import AgentGraphInput, AgentGraphResult, AgentGraphRuntimeContext, AgentGraphState
+from app.services.agent.state import (
+    AgentGraphInput,
+    AgentGraphResult,
+    AgentGraphRuntimeContext,
+    AgentGraphState,
+    internal_graph_start_event,
+    visible_graph_events,
+)
 from app.services.agent.suggestion import (
     AgentSuggestionGenerator,
     agent_suggestion_generator,
@@ -468,12 +475,12 @@ class CRMAgentGraphService:
             session_id=context.session_id,
         )
         try:
-            return await self._graph.ainvoke(checkpoint_state, config, context=context)
+            return _with_visible_events(await self._graph.ainvoke(checkpoint_state, config, context=context))
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
             fallback_context = _runtime_context_from_input(input_state)
-            result = await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
+            result = _with_visible_events(await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context))
             return with_checkpoint_unavailable_fallback_event(
                 result,
                 runtime="crm_agent_new_flow",
@@ -831,19 +838,25 @@ def _checkpoint_state_from_input(input_state: AgentGraphInput) -> AgentGraphStat
         "suggestion_error": None,
         "suppress_trace_events": False,
         "response": None,
-        "events": [],
+        "events": [internal_graph_start_event("agent_graph_invocation_started")],
     }
     current_datetime = input_state.get("current_datetime")
     if isinstance(current_datetime, datetime):
         state["current_date"] = current_datetime.date().isoformat()
     events = input_state.get("events")
     if isinstance(events, list):
-        state["events"] = [
+        state["events"].extend(
             coerce_json_dict(event)
             for event in events
             if isinstance(event, dict)
-        ]
+        )
     return state
+
+
+def _with_visible_events(result: AgentGraphResult) -> AgentGraphResult:
+    projected: AgentGraphResult = dict(result)
+    projected["events"] = visible_graph_events(projected.get("events"))
+    return projected
 
 
 def _runtime_context_from_input(input_state: AgentGraphInput) -> AgentGraphRuntimeContext:

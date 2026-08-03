@@ -301,6 +301,7 @@ def get_opportunities(
         
         opp_dict = {
             "id": opp.id,
+            "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
             "customer_id": opp.customer_id,
             "total_amount": float(opp.total_amount),
@@ -419,6 +420,7 @@ def get_available_opportunities_for_contract(
 
         result.append(OpportunityListResponse(**{
             "id": opp.id,
+            "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
             "customer_id": opp.customer_id,
             "customer_name": customer_info["account_name"] if customer_info else "",
@@ -525,6 +527,7 @@ def get_opportunity(
     
     result = {
         "id": opportunity.id,
+        "opportunity_number": opportunity.opportunity_number,
         "opportunity_name": opportunity.opportunity_name,
         "customer_id": opportunity.customer_id,
         "procurement_method_id": opportunity.procurement_method_id,
@@ -721,6 +724,7 @@ async def move_opportunity_stage(
     
     result = {
         "id": updated_opportunity.id,
+        "opportunity_number": updated_opportunity.opportunity_number,
         "opportunity_name": updated_opportunity.opportunity_name,
         "customer_id": updated_opportunity.customer_id,
         "total_amount": float(updated_opportunity.total_amount),

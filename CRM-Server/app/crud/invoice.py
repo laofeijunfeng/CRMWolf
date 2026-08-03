@@ -15,6 +15,7 @@ from app.schemas.invoice import (
     InvoiceTitleCreate,
     InvoiceTitleUpdate,
 )
+from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 
 
@@ -431,15 +432,7 @@ class InvoiceApplicationCRUD:
         return True
     
     def _generate_application_number(self, db: Session) -> str:
-        today = date.today()
-        date_str = today.strftime("%Y%m%d")
-        
-        count = db.query(InvoiceApplication).filter(
-            InvoiceApplication.application_number.like(f"INV-{date_str}-%")
-        ).count()
-        
-        sequence = count + 1
-        return f"INV-{date_str}-{sequence:04d}"
+        return BusinessNumberGenerator.generate('INV', db)
     
     def get_payment_plan_invoice_summary(self, db: Session, payment_plan_id: int) -> dict:
         applications = self.get_by_payment_plan(db, payment_plan_id)

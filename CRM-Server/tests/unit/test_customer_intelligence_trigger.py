@@ -77,6 +77,30 @@ def test_customer_intelligence_trigger_builds_agent_question_from_structured_new
     ]
 
 
+def test_customer_intelligence_trigger_uses_latest_loaded_customer_for_agent_question():
+    event_service = FakeEventService()
+    policy = CustomerIntelligenceTriggerPolicy(event_service=event_service)
+
+    event = policy.from_new_flow_events(
+        [
+            {"event": "intent", "intent": "CUSTOMER_QUERY"},
+            {"event": "business_context_loaded", "customer": {"id": 101, "account_name": "旧客户"}},
+            {"event": "business_context_loaded", "customer": {"id": 202, "account_name": "中国科学院信息工程研究所"}},
+        ],
+        turn=AgentCustomerIntelligenceTurn(
+            team_id=2,
+            user_id=9,
+            session_id=77,
+            message_id=88,
+            content="中科院现在是什么情况",
+        ),
+    )
+
+    assert event.event_key == "question-event"
+    assert event.customer_id == 202
+    assert event_service.question_calls[0]["customer_id"] == 202
+
+
 def test_customer_intelligence_trigger_ignores_non_customer_query_new_flow_events():
     event_service = FakeEventService()
     policy = CustomerIntelligenceTriggerPolicy(event_service=event_service)

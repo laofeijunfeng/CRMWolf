@@ -15,6 +15,7 @@ from app.models.customer import Customer
 from app.models.deployment import DeploymentInfo
 from app.models.contract import Contract
 from app.constants.business_types import BusinessType
+from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.license_application import (
     LicenseApplicationCreate,
@@ -95,7 +96,7 @@ class LicenseApplicationCRUD:
 
     def generate_application_number(self, db: Session) -> str:
         """
-        生成申请单号：LIC-YYYYMM-XXX
+        生成申请单号：LICYYYYMMDDXXXX
 
         Args:
             db: 数据库会话
@@ -103,20 +104,7 @@ class LicenseApplicationCRUD:
         Returns:
             str: 生成的申请单号
         """
-        today = date.today()
-        prefix = f"LIC-{today.strftime('%Y%m')}-"
-
-        # 查询当月最大序号
-        max_no = db.query(LicenseApplication.application_number).filter(
-            LicenseApplication.application_number.like(f"{prefix}%")
-        ).order_by(LicenseApplication.application_number.desc()).first()
-
-        if max_no:
-            seq = int(max_no[0].split('-')[-1]) + 1
-        else:
-            seq = 1
-
-        return f"{prefix}{seq:03d}"
+        return BusinessNumberGenerator.generate('LIC', db)
 
     def create(
         self,

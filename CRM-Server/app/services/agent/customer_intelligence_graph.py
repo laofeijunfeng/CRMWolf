@@ -28,6 +28,7 @@ from app.services.agent.checkpointer import (
     is_checkpoint_storage_error,
     with_checkpoint_unavailable_fallback_event,
 )
+from app.services.agent.state import internal_graph_start_event, merge_turn_scoped_events, visible_graph_events
 from app.services.agent.types import coerce_json_dict
 from app.services.customer_brief_service import customer_brief_service
 from app.services.customer_fact_extraction_service import (
@@ -99,7 +100,7 @@ class CustomerIntelligenceGraphState(TypedDict, total=False):
     refresh_plan: JSONDict
     route: CustomerIntelligenceRoute
     visible_trace: Annotated[list[JSONDict], operator.add]
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
     errors: Annotated[list[JSONDict], operator.add]
 
 
@@ -333,11 +334,11 @@ class CustomerIntelligenceGraphService:
             event_key=_event_key(checkpoint_state),
         )
         try:
-            return await self._graph.ainvoke(checkpoint_state, config, context=context)
+            return _with_visible_events(await self._graph.ainvoke(checkpoint_state, config, context=context))
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
-            result = await self._fallback_graph.ainvoke(checkpoint_state, config, context=context)
+            result = _with_visible_events(await self._fallback_graph.ainvoke(checkpoint_state, config, context=context))
             return with_checkpoint_unavailable_fallback_event(
                 result,
                 runtime="crm_agent_customer_intelligence",
@@ -422,6 +423,7 @@ class CustomerIntelligenceGraphService:
     ) -> AsyncGenerator[CustomerIntelligenceGraphStreamChunk, None]:
         if not hasattr(graph, "astream"):
             result = await graph.ainvoke(checkpoint_state, config, context=context)
+            result = _with_visible_events(result)
             for event in visible_trace_events(result):
                 yield {"kind": "event", "event": event}
             yield {"kind": "result", "result": result}
@@ -445,7 +447,7 @@ class CustomerIntelligenceGraphService:
                 emitted_trace_count += len(new_events)
 
         result = await self._final_stream_state(graph, config, state, stream_interrupts)
-        yield {"kind": "result", "result": result}
+        yield {"kind": "result", "result": _with_visible_events(result)}
 
     @staticmethod
     def _merge_stream_update(
@@ -1165,9 +1167,18 @@ def _checkpoint_state_from_input(input_state: CustomerIntelligenceGraphInput) ->
         "refresh_plan": {},
         "route": "skip",
         "visible_trace": [],
-        "events": [event for event in prior_events if isinstance(event, dict)],
+        "events": [
+            internal_graph_start_event("customer_intelligence_graph_invocation_started"),
+            *[coerce_json_dict(event) for event in prior_events if isinstance(event, dict)],
+        ],
         "errors": [],
     }
+
+
+def _with_visible_events(result: CustomerIntelligenceGraphResult) -> CustomerIntelligenceGraphResult:
+    projected: CustomerIntelligenceGraphResult = dict(result)
+    projected["events"] = visible_graph_events(projected.get("events"))
+    return projected
 
 
 def _merge_final_stream_state(

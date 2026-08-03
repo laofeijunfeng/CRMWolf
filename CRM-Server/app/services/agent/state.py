@@ -1,5 +1,4 @@
 """CRM AI Agent LangGraph state types."""
-import operator
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -36,6 +35,43 @@ def merge_runtime_events(left: list[JSONDict], right: list[JSONDict]) -> list[JS
     return [*left, *right]
 
 
+_GRAPH_EVENT_RESET_MARKERS = {
+    "agent_graph_invocation_started",
+    "customer_resolution_graph_invocation_started",
+    "creation_duplicate_graph_invocation_started",
+    "business_context_graph_invocation_started",
+    "follow_up_quality_graph_invocation_started",
+    "pending_task_graph_invocation_started",
+    "pending_preflight_graph_invocation_started",
+    "pending_interaction_graph_invocation_started",
+    "confirmed_task_graph_invocation_started",
+    "action_review_graph_invocation_started",
+    "customer_intelligence_graph_invocation_started",
+}
+
+
+def merge_turn_scoped_events(left: list[JSONDict], right: list[JSONDict]) -> list[JSONDict]:
+    """Keep checkpointed subgraph events scoped to the current invocation."""
+
+    if right and right[0].get("event") in _GRAPH_EVENT_RESET_MARKERS:
+        return list(right)
+    return [*left, *right]
+
+
+def internal_graph_start_event(event_name: str) -> JSONDict:
+    return {"event": event_name, "internal": True}
+
+
+def visible_graph_events(events: object) -> list[JSONDict]:
+    if not isinstance(events, list):
+        return []
+    return [
+        event for event in events
+        if isinstance(event, dict)
+        and event.get("event") not in _GRAPH_EVENT_RESET_MARKERS
+    ]
+
+
 def merge_action_planning_events(left: list[JSONDict], right: list[JSONDict]) -> list[JSONDict]:
     """Keep action-planning events scoped to one Agent turn."""
 
@@ -70,7 +106,7 @@ class AgentGraphState(TypedDict, total=False):
     suggestion_error: Optional[str]
     suppress_trace_events: bool
     response: Optional[str]
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class AgentGraphInput(TypedDict, total=False):
@@ -116,7 +152,7 @@ class CustomerResolutionGraphState(TypedDict, total=False):
     parsed: JSONDict
     customer_candidates: list[JSONDict]
     selected_customer: JSONDict
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class CustomerResolutionGraphInput(TypedDict, total=False):
@@ -154,7 +190,7 @@ class CreationDuplicateGraphState(TypedDict, total=False):
     duplicate_skip_reason: Optional[str]
     duplicate_search_payload: JSONDict
     creation_duplicate_candidates: JSONDict
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class CreationDuplicateGraphInput(TypedDict, total=False):
@@ -202,7 +238,7 @@ class BusinessContextGraphState(TypedDict, total=False):
     business_context: JSONDict
     suggestion_metadata: JSONDict
     suggestion_error: Optional[str]
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class BusinessContextGraphInput(TypedDict, total=False):
@@ -264,7 +300,7 @@ class FollowUpQualityGraphState(TypedDict, total=False):
     follow_up_quality: JSONDict
     follow_up_quality_metadata: JSONDict
     follow_up_quality_error: Optional[str]
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class FollowUpQualityGraphInput(TypedDict, total=False):
@@ -859,7 +895,7 @@ class PendingTaskGraphState(TypedDict, total=False):
     confirmation_decision: JSONDict
     preflight_result: JSONDict
     interaction_result: JSONDict
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class PendingTaskGraphInput(TypedDict, total=False):
@@ -939,7 +975,7 @@ class ConfirmedTaskGraphState(TypedDict, total=False):
     task_event: JSONDict
     execution_status: str
     assistant_content: Optional[str]
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class ConfirmedTaskGraphInput(TypedDict, total=False):
@@ -1023,7 +1059,7 @@ class ActionReviewGraphState(TypedDict, total=False):
     execution_confidence: float
     decision: ActionReviewDecision
     reason: str
-    events: Annotated[list[JSONDict], operator.add]
+    events: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class ActionReviewGraphInput(TypedDict, total=False):

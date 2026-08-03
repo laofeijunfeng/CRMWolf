@@ -60,6 +60,7 @@ class Opportunity(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
+    opportunity_number = Column(String(50), unique=True, nullable=False, comment="商机编号（系统自动生成）")
     opportunity_name = Column(String(255), nullable=False, comment="商机名称")
     customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
     procurement_method_id = Column(BigInteger, nullable=True, comment="采购方式ID")

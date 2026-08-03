@@ -36,6 +36,31 @@ class FakeToolRegistry:
         )
 
 
+class CustomerEchoToolRegistry:
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, tool_name, context, payload):
+        self.calls.append({
+            "tool_name": tool_name,
+            "context": context,
+            "payload": payload,
+        })
+        customer_id = payload["customer_id"]
+        customer_name = "中国科学院信息工程研究所" if customer_id == 202 else "越秀金融"
+        return AgentToolResult(
+            tool_name=tool_name,
+            success=True,
+            data={
+                "customer": {"id": customer_id, "account_name": customer_name},
+                "opportunities": {"items": []},
+                "contracts": {"items": []},
+                "payment_plans": {"items": []},
+            },
+            tool_call_id=customer_id,
+        )
+
+
 class FakeSuggestionGenerator:
     def __init__(self):
         self.calls = []
@@ -168,3 +193,49 @@ async def test_business_context_graph_does_not_generate_suggestions_for_customer
     assert "business_context" in result
     assert "suggestion_result" not in result
     assert "suggestion_metadata" not in result or result["suggestion_metadata"] == {}
+
+
+@pytest.mark.asyncio
+async def test_business_context_graph_scopes_checkpointed_events_to_current_invocation():
+    registry = CustomerEchoToolRegistry()
+    service = BusinessContextGraphService(
+        tool_registry=registry,
+        suggestion_generator=FakeSuggestionGenerator(),
+        checkpointer=InMemorySaver(),
+    )
+
+    first = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "content": "越秀金融现在是什么情况",
+        "authorization": "Bearer test",
+        "current_date": "2026-08-02",
+        "selected_customer": {"id": 101, "account_name": "越秀金融"},
+        "semantic_result": semantic_result(intent="CUSTOMER_QUERY"),
+        "events": [],
+    })
+    second = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "content": "中科院现在是什么情况",
+        "authorization": "Bearer test",
+        "current_date": "2026-08-02",
+        "selected_customer": {"id": 202, "account_name": "中国科学院信息工程研究所"},
+        "semantic_result": semantic_result(intent="CUSTOMER_QUERY"),
+        "events": [],
+    })
+
+    first_loaded = [
+        event for event in first["events"]
+        if event.get("event") == "business_context_loaded"
+    ]
+    second_loaded = [
+        event for event in second["events"]
+        if event.get("event") == "business_context_loaded"
+    ]
+    assert [event["customer"]["id"] for event in first_loaded] == [101]
+    assert [event["customer"]["id"] for event in second_loaded] == [202]

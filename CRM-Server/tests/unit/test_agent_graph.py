@@ -34,6 +34,24 @@ class FakeSemanticParser:
         return self.result
 
 
+class FakeSemanticParserSequence:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    async def parse(self, db, *, team_id, user_message, memory=None, current_date=None):
+        self.calls.append({
+            "db": db,
+            "team_id": team_id,
+            "user_message": user_message,
+            "memory": memory,
+            "current_date": current_date,
+        })
+        if not self.results:
+            raise AssertionError("FakeSemanticParserSequence exhausted")
+        return self.results.pop(0)
+
+
 class FakeMemoryService:
     def __init__(self, session_context=None):
         self.session_context = session_context or {}
@@ -103,6 +121,37 @@ class FakeToolService:
                 "payment_plans": {"items": []},
                 "follow_ups": {"items": []},
             },
+            tool_call_id=502,
+        )
+
+
+class FakeKeywordToolService(FakeToolService):
+    def __init__(self, keyword_items, customer_contexts):
+        super().__init__(items=[])
+        self.keyword_items = keyword_items
+        self.customer_contexts = customer_contexts
+
+    async def search_customers(self, context, keyword, limit=10):
+        self.searches.append({"context": context, "keyword": keyword, "limit": limit})
+        items = self.keyword_items.get(keyword, [])
+        return AgentToolResult(
+            tool_name="search_customers",
+            success=True,
+            data={"items": items, "total": len(items)},
+            tool_call_id=501,
+        )
+
+    async def get_customer_context(self, context, customer_id, query_text=None):
+        self.context_queries.append({"context": context, "customer_id": customer_id, "query_text": query_text})
+        return AgentToolResult(
+            tool_name="get_customer_context",
+            success=True,
+            data=self.customer_contexts.get(customer_id, {
+                "customer": {"id": customer_id, "account_name": f"客户{customer_id}"},
+                "contracts": {"items": []},
+                "payment_plans": {"items": []},
+                "follow_ups": {"items": []},
+            }),
             tool_call_id=502,
         )
 
@@ -421,6 +470,18 @@ def build_checkpointed_service(result, tool_service=None):
     )
 
 
+def build_checkpointed_service_with_parser(parser, tool_service=None):
+    return CRMAgentGraphService(
+        tool_service=tool_service or FakeToolService(),
+        semantic_parser=parser,
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
+        checkpointer=InMemorySaver(),
+    )
+
+
 def build_service_with_memory(result, tool_service=None, session_context=None):
     return CRMAgentGraphService(
         tool_service=tool_service or FakeToolService(),
@@ -653,6 +714,63 @@ async def test_agent_graph_streams_step_events_before_final_response():
     assert event_names.index("semantic_parsed") < event_names.index("final")
     assert event_names.index("tool_result") < event_names.index("final")
     assert event_names.index("business_suggestions") < event_names.index("final")
+
+
+@pytest.mark.asyncio
+async def test_checkpointed_agent_graph_scopes_runtime_state_to_current_turn():
+    tool_service = FakeKeywordToolService(
+        keyword_items={
+            "赤道科技": [{"id": 401, "account_name": "深圳市赤道科技有限公司"}],
+            "三一新能源": [{"id": 402, "account_name": "三一新能源投资有限公司"}],
+        },
+        customer_contexts={
+            401: {
+                "customer": {"id": 401, "account_name": "深圳市赤道科技有限公司"},
+                "contracts": {"items": []},
+                "payment_plans": {"items": []},
+                "follow_ups": {"items": [{"content": "赤道科技正在评估增购。"}]},
+            },
+            402: {
+                "customer": {"id": 402, "account_name": "三一新能源投资有限公司"},
+                "contracts": {"items": []},
+                "payment_plans": {"items": []},
+                "follow_ups": {"items": [{"content": "三一新能源正在推进 POC。"}]},
+            },
+        },
+    )
+    parser = FakeSemanticParserSequence([
+        semantic_result(
+            intent="CUSTOMER_QUERY",
+            customer={"name_text": "赤道科技", "confidence": 0.95},
+            follow_up={"content": None, "method": None},
+        ),
+        semantic_result(
+            intent="CUSTOMER_QUERY",
+            customer={"name_text": "三一新能源", "confidence": 0.95},
+            follow_up={"content": None, "method": None},
+        ),
+    ])
+    service = build_checkpointed_service_with_parser(parser, tool_service)
+
+    first_events = []
+    async for event in service.stream_events(input_state("赤道科技现在是什么情况")):
+        first_events.append(event)
+    second_events = []
+    async for event in service.stream_events(input_state("三一新能源现在是什么情况")):
+        second_events.append(event)
+
+    second_loaded_contexts = [
+        event for event in second_events
+        if event.get("event") == "business_context_loaded"
+    ]
+    assert [event.get("customer_id") for event in second_loaded_contexts] == [402]
+    assert all(
+        (event.get("customer") or {}).get("account_name") != "深圳市赤道科技有限公司"
+        for event in second_events
+        if isinstance(event.get("customer"), dict)
+    )
+    assert tool_service.context_queries[-1]["customer_id"] == 402
+    assert second_events[-1]["event"] == "final"
 
 
 @pytest.mark.asyncio

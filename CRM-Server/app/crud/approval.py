@@ -1170,7 +1170,7 @@ class ApprovalCRUD:
         - INVOICE: application_number / invoice_title_text / invoice_amount
         - PAYMENT: record_number 或 PAY-{id} / 合同名 / actual_amount
         - LICENSE: application_number / license_type / None
-        - OPPORTUNITY: OPP-{id} / opportunity_name / total_amount
+        - OPPORTUNITY: opportunity_number / opportunity_name / total_amount
         - customer_info: 四类业务统一返回关联客户/公司基础信息
 
         Returns:
@@ -1319,7 +1319,7 @@ class ApprovalCRUD:
             customers_by_id = fetch_customers([opp.customer_id for opp in opportunities])
             for opp in opportunities:
                 summaries[(BusinessType.OPPORTUNITY, opp.id)] = {
-                    "application_number": f"OPP-{opp.id}",
+                    "application_number": opp.opportunity_number or f"OPP-{opp.id}",
                     "entity_name": opp.opportunity_name,
                     "entity_amount": float(opp.total_amount) if opp.total_amount is not None else None,
                     "customer_info": customers_by_id.get(opp.customer_id),

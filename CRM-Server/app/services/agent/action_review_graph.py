@@ -18,6 +18,8 @@ from app.services.agent.state import (
     ActionReviewGraphState,
     ActionReviewRiskLevel,
     ActionReviewRuntimeContext,
+    internal_graph_start_event,
+    visible_graph_events,
 )
 from app.services.agent.types import JSONDict, coerce_json_dict
 
@@ -103,11 +105,11 @@ class ActionReviewGraphService:
         )
         try:
             graph = self._graph if self._checkpoint_enabled else self._fallback_graph
-            return await graph.ainvoke(state, config, context=context)
+            return _with_visible_events(await graph.ainvoke(state, config, context=context))
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
-            result = await self._fallback_graph.ainvoke(state, config, context=context)
+            result = _with_visible_events(await self._fallback_graph.ainvoke(state, config, context=context))
             return with_checkpoint_unavailable_fallback_event(
                 result,
                 runtime="crm_agent_action_review",
@@ -268,8 +270,17 @@ def _checkpoint_state_from_input(input_state: ActionReviewGraphInput) -> ActionR
         "user_id": input_state.get("user_id", 0),
         "session_id": input_state.get("session_id", 0),
         "event": coerce_json_dict(input_state.get("event")),
-        "events": list(input_state.get("events", [])),
+        "events": [
+            internal_graph_start_event("action_review_graph_invocation_started"),
+            *list(input_state.get("events", [])),
+        ],
     }
+
+
+def _with_visible_events(result: ActionReviewGraphResult) -> ActionReviewGraphResult:
+    projected: ActionReviewGraphResult = dict(result)
+    projected["events"] = visible_graph_events(projected.get("events"))
+    return projected
 
 
 def _base_confidence_for_action(action: str, payload: JSONDict) -> float:

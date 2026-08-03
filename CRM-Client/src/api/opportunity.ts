@@ -54,6 +54,7 @@ export interface SalesStageUpdate {
 
 export interface Opportunity {
   id: number
+  opportunity_number: string
   opportunity_name: string
   customer_id: number
   customer_name?: string
@@ -238,6 +239,7 @@ export interface StageDurationData {
 
 export interface OpportunityListResponse {
   id: number
+  opportunity_number: string
   opportunity_name: string
   customer_id: number
   procurement_method_id: number | null

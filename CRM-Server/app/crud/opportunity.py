@@ -6,6 +6,7 @@ from datetime import date, datetime
 from app.models.opportunity import Opportunity, OpportunityStage, OpportunityStatus
 from app.models.customer import Customer
 from app.constants.business_types import BusinessType
+from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.opportunity import (
     OpportunityStageCreate,
@@ -293,6 +294,7 @@ class OpportunityCRUD:
         
         # 3. 创建商机基础数据
         opportunity_data = {
+            'opportunity_number': BusinessNumberGenerator.generate('OPP', db),
             'opportunity_name': self._build_opportunity_name(obj_in, customer),
             'customer_id': obj_in.customer_id,
             'procurement_method_id': procurement_method_id,

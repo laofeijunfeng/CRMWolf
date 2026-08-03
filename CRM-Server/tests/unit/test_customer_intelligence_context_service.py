@@ -152,6 +152,7 @@ def _seed_customer_context(db: Session) -> Customer:
         Opportunity(
             id=301,
             team_id=2,
+            opportunity_number="OPP202608030001",
             opportunity_name="越秀金融采购项目",
             customer_id=101,
             current_stage_name="POC",

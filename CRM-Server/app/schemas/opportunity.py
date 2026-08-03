@@ -181,6 +181,7 @@ class OpportunityLose(BaseModel):
 
 class OpportunityResponse(BaseModel):
     id: int = Field(..., description="商机ID（主键）")
+    opportunity_number: str = Field(..., description="商机编号")
     opportunity_name: str = Field(..., description="商机名称（项目名称）")
     customer_id: int = Field(..., description="关联客户ID")
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID")

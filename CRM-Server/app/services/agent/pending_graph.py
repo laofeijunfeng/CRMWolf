@@ -29,12 +29,14 @@ from app.services.agent.pending_interaction_graph import (
 from app.services.agent.pending_preflight_graph import PendingPreflightGraphService, pending_preflight_graph_service
 from app.services.agent.schemas import AgentConfirmationIntentDecision
 from app.services.agent.state import (
+    internal_graph_start_event,
     PendingTaskGraphInput,
     PendingTaskGraphResult,
     PendingTaskGraphSideEffects,
     PendingTaskGraphState,
     PendingTaskRuntimeContext,
     PendingTaskTurnResult,
+    visible_graph_events,
 )
 from app.services.agent.types import JSONDict, coerce_json_dict, coerce_json_value
 
@@ -172,7 +174,7 @@ class PendingTaskGraphService:
             graph_input = checkpoint_state
         try:
             result = await self._graph.ainvoke(graph_input, config, context=context)
-            return _merge_side_effects(result)
+            return _with_visible_events(_merge_side_effects(result))
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
@@ -181,7 +183,7 @@ class PendingTaskGraphService:
                 fallback_side_effects.task = input_state.get("task")
             fallback_context = _runtime_context_from_input(input_state, fallback_side_effects)
             result = await self._fallback_graph.ainvoke(checkpoint_state, config, context=fallback_context)
-            merged = _merge_side_effects(result)
+            merged = _with_visible_events(_merge_side_effects(result))
             return with_checkpoint_unavailable_fallback_event(
                 merged,
                 runtime="crm_agent_pending_task",
@@ -210,7 +212,9 @@ class PendingTaskGraphService:
         else:
             graph_input = checkpoint_state
         try:
-            return await self._run_graph_with_trace(self._graph, graph_input, checkpoint_state, context, config)
+            return _with_visible_events(
+                await self._run_graph_with_trace(self._graph, graph_input, checkpoint_state, context, config)
+            )
         except SQLAlchemyError as exc:
             if not self._checkpoint_enabled or not is_checkpoint_storage_error(exc):
                 raise
@@ -226,7 +230,7 @@ class PendingTaskGraphService:
                 config,
             )
             return with_checkpoint_unavailable_fallback_event(
-                traced,
+                _with_visible_events(traced),
                 runtime="crm_agent_pending_task",
                 graph=PENDING_TASK_CHECKPOINT_NS,
             )
@@ -245,7 +249,7 @@ class PendingTaskGraphService:
             return _merge_side_effects(result)
 
         state: PendingTaskGraphState = dict(checkpoint_state)
-        trace_events: list[JSONDict] = _events(checkpoint_state.get("events"))
+        trace_events: list[JSONDict] = visible_graph_events(checkpoint_state.get("events"))
         async for chunk in astream(graph_input, config, context=context, stream_mode="updates"):
             if not isinstance(chunk, dict):
                 continue
@@ -871,8 +875,9 @@ def _checkpoint_state_from_input(input_state: PendingTaskGraphInput) -> PendingT
         "team_id": int(input_state.get("team_id") or 0),
         "user_id": int(input_state.get("user_id") or 0),
         "session_id": int(input_state.get("session_id") or 0),
-        "events": _events(input_state.get("events") or []),
+        "events": [internal_graph_start_event("pending_task_graph_invocation_started")],
     }
+    state["events"].extend(_events(input_state.get("events") or []))
     suspended_candidates = _suspended_candidates(input_state.get("suspended_candidates"))
     if suspended_candidates:
         state["suspended_candidates"] = suspended_candidates
@@ -922,6 +927,12 @@ def _runtime_context_from_input(
 
 def _merge_side_effects(state: PendingTaskGraphState) -> PendingTaskGraphResult:
     return dict(state)
+
+
+def _with_visible_events(result: PendingTaskGraphResult) -> PendingTaskGraphResult:
+    projected: PendingTaskGraphResult = dict(result)
+    projected["events"] = visible_graph_events(projected.get("events"))
+    return projected
 
 
 def _merge_stream_update(state: PendingTaskGraphState, update: JSONDict) -> None:

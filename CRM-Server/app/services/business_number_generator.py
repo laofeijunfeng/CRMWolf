@@ -22,6 +22,9 @@ class BusinessNumberGenerator:
         'CT': ('crm_contracts', 'contract_number'),
         'PAY': ('crm_payment_records', 'record_number'),
         'PP': ('crm_contract_payment_plans', 'plan_number'),
+        'INV': ('crm_invoice_applications', 'application_number'),
+        'LIC': ('crm_license_applications', 'application_number'),
+        'OPP': ('crm_opportunities', 'opportunity_number'),
     }
 
     @classmethod
@@ -30,7 +33,7 @@ class BusinessNumberGenerator:
         生成业务编号
 
         Args:
-            prefix: 业务前缀（CT/PAY 等）
+            prefix: 业务前缀（CT/PAY/PP/INV/LIC/OPP 等）
             db: 数据库会话
 
         Returns:
