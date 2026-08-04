@@ -1,6 +1,7 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Enum, Index
 from sqlalchemy.sql import func
 from app.core.database import Base
+from app.utils.public_id import generate_public_id
 import enum
 
 
@@ -41,6 +42,7 @@ class Lead(Base):
     __tablename__ = "crm_leads"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    public_id = Column(String(64), nullable=False, unique=True, index=True, default=lambda: generate_public_id("lead"), comment="对外线索ID")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     lead_name = Column(String(255), nullable=False, comment="线索名称")
     source = Column(Enum(LeadSource), nullable=False, comment="线索来源")
@@ -71,6 +73,7 @@ class Lead(Base):
         Index('idx_city', 'city'),
         Index('idx_created_time', 'created_time'),
         Index('idx_team_id', 'team_id'),
+        Index('idx_lead_public_id', 'public_id'),
         {'comment': '线索表'}
     )
 

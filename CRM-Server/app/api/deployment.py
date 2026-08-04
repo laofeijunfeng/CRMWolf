@@ -33,6 +33,25 @@ from app.services.customer_business_object_intelligence_service import (
 router = APIRouter(prefix="/v1/deployment-infos", tags=["部署信息管理"])
 
 
+def _deployment_response(deployment: DeploymentInfo) -> DeploymentInfoResponse:
+    if not deployment.customer:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="部署信息关联客户数据异常",
+        )
+    return DeploymentInfoResponse(**{
+        "id": deployment.id,
+        "customer_id": deployment.customer.public_id,
+        "team_id": deployment.team_id,
+        "deployment_name": deployment.deployment_name,
+        "server_address": deployment.server_address,
+        "authorized_users": deployment.authorized_users,
+        "is_default": deployment.is_default,
+        "created_time": deployment.created_time,
+        "last_modified_time": deployment.last_modified_time,
+    })
+
+
 def _enqueue_deployment_intelligence_refresh(
     db: Session,
     deployment: DeploymentInfo,
@@ -57,7 +76,8 @@ def create_deployment(
     db: Session = Depends(get_db)
 ):
     """创建部署信息"""
-    check_customer_edit_permission(deployment.customer_id, team_id, current_user, db)
+    customer = check_customer_edit_permission(deployment.customer_id, team_id, current_user, db)
+    deployment = deployment.model_copy(update={"customer_id": customer.id})
     created = create_deployment_info(db, team_id, deployment)
     _enqueue_deployment_intelligence_refresh(
         db,
@@ -65,19 +85,20 @@ def create_deployment(
         change_type="created",
         actor_id=str(current_user.id),
     )
-    return created
+    return _deployment_response(created)
 
 
 @router.get("/", response_model=List[DeploymentInfoResponse], summary="获取客户部署信息列表")
 def list_deployments(
-    customer_id: int = Query(..., description="客户ID"),
+    customer_id: str = Query(..., description="客户对外ID"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """获取客户的部署信息列表"""
-    check_customer_view_permission(customer_id, team_id, current_user, db)
-    return get_deployment_infos_by_customer(db, team_id, customer_id)
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
+    deployments = get_deployment_infos_by_customer(db, team_id, customer.id)
+    return [_deployment_response(deployment) for deployment in deployments]
 
 
 @router.get("/{deployment_id}", response_model=DeploymentInfoResponse, summary="获取部署信息详情")
@@ -95,7 +116,7 @@ def get_deployment(
             detail="部署信息不存在"
         )
     check_customer_view_permission(deployment.customer_id, team_id, current_user, db)
-    return deployment
+    return _deployment_response(deployment)
 
 
 @router.put("/{deployment_id}", response_model=DeploymentInfoResponse, summary="更新部署信息")
@@ -126,7 +147,7 @@ def update_deployment(
         change_type="updated",
         actor_id=str(current_user.id),
     )
-    return updated
+    return _deployment_response(updated)
 
 
 @router.delete("/{deployment_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除部署信息")
@@ -160,14 +181,14 @@ def delete_deployment(
 @router.patch("/{deployment_id}/set-default", response_model=DeploymentInfoResponse, summary="设置默认部署")
 def set_default_deployment(
     deployment_id: int,
-    customer_id: int = Query(..., description="客户ID"),
+    customer_id: str = Query(..., description="客户对外ID"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """设置默认部署信息"""
-    check_customer_edit_permission(customer_id, team_id, current_user, db)
-    deployment = set_default_deployment_info(db, team_id, customer_id, deployment_id)
+    customer = check_customer_edit_permission(customer_id, team_id, current_user, db)
+    deployment = set_default_deployment_info(db, team_id, customer.id, deployment_id)
     if not deployment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -179,4 +200,4 @@ def set_default_deployment(
         change_type="updated",
         actor_id=str(current_user.id),
     )
-    return deployment
+    return _deployment_response(deployment)

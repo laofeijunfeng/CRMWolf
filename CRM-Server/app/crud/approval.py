@@ -13,6 +13,7 @@ from app.schemas.approval import (
     ApprovalFlowCreate, ApprovalFlowUpdate,
     ApprovalSubmitRequest, ApprovalActionRequest
 )
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -804,7 +805,7 @@ class ApprovalCRUD:
                 if entity is not None:
                     # 切换 entity.approval_phase = APPROVED
                     if hasattr(entity, 'approval_phase'):
-                        entity.approval_phase = ApprovalPhase.APPROVED
+                        entity.approval_phase = ApprovalPhase.APPROVED.value
                     adapter.on_approved(db, entity)
 
         elif action_request.action.value == ApprovalAction.REJECT:
@@ -813,7 +814,7 @@ class ApprovalCRUD:
             if entity is not None:
                 # 切换 entity.approval_phase = REJECTED
                 if hasattr(entity, 'approval_phase'):
-                    entity.approval_phase = ApprovalPhase.REJECTED
+                    entity.approval_phase = ApprovalPhase.REJECTED.value
                 adapter.on_rejected(db, entity)
 
         db.commit()
@@ -838,7 +839,7 @@ class ApprovalCRUD:
         if entity is not None:
             # 切换 entity.approval_phase = DRAFT（允许重新提交）
             if hasattr(entity, 'approval_phase'):
-                entity.approval_phase = ApprovalPhase.DRAFT
+                entity.approval_phase = ApprovalPhase.DRAFT.value
             adapter.on_cancelled(db, entity)
 
         db.commit()
@@ -879,10 +880,11 @@ class ApprovalCRUD:
         Returns:
             Tuple[List[Dict], int]: 超时审批列表和总数
         """
-        from datetime import datetime, timedelta
+        from datetime import timedelta
 
         # 计算超时阈值时间点
-        threshold_time = datetime.now() - timedelta(hours=min_hours)
+        now = business_now()
+        threshold_time = now - timedelta(hours=min_hours)
 
         # 查询超时的审批实例（不再 INNER JOIN Contract——非合同审批
         # contract_id=NULL，INNER JOIN 会把它们排除在外）
@@ -913,7 +915,7 @@ class ApprovalCRUD:
         # 转换为字典列表并计算超时小时数
         overdue_list = []
         for row in results:
-            overdue_hours = int((datetime.now() - row.submit_time).total_seconds() / 3600)
+            overdue_hours = int((now - row.submit_time).total_seconds() / 3600)
 
             # 获取当前审批人姓名
             current_approver_name = None
@@ -1112,7 +1114,7 @@ class ApprovalCRUD:
             return True
 
         # ---- 组装列表项 + overdue_hours Python 计算 ----
-        now = datetime.now()
+        now = business_now()
         items: List[Dict[str, Any]] = []
         for ap in rows:
             sum_key = (ap.business_type, ap.business_id) if ap.business_id else None
@@ -1208,7 +1210,8 @@ class ApprovalCRUD:
             if not customer:
                 return None
             return {
-                "id": customer.id,
+                "id": customer.public_id,
+                "public_id": customer.public_id,
                 "account_name": customer.account_name,
                 "industry": customer.industry,
                 "city": customer.city,

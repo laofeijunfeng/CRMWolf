@@ -14,7 +14,7 @@
 4. 异常分支完整 - 覆盖未匹配、查询失败、通知失败等所有场景
 """
 
-from typing import Any, Optional, Tuple, Callable
+from typing import Any, Dict, Optional, Tuple, Callable
 from sqlalchemy.orm import Session
 import logging
 
@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 class ApprovalTransactionManager:
     """审批事务管理器"""
 
+    @staticmethod
+    def _approval_phase_value(phase: Any) -> Optional[str]:
+        if phase is None:
+            return None
+        return getattr(phase, "value", phase)
+
     def create_with_approval(
         self,
         db: Session,
@@ -43,7 +49,8 @@ class ApprovalTransactionManager:
         submitter_id: str,
         submitter_name: str,
         team_id: int,
-        rollback_on_no_flow: bool = False
+        rollback_on_no_flow: bool = False,
+        send_notification: bool = True
     ) -> Tuple[Any, Optional[Approval], Optional[str]]:
         """
         创建业务单据 + 自动提交审批（Contract/Payment 场景）
@@ -90,7 +97,7 @@ class ApprovalTransactionManager:
                     db.rollback()
                     logger.info(f"审批流程未匹配，已回滚业务单据创建（business_type={business_type}）")
                     return (None, None, err_msg or "请先配置审批流程")
-                entity.approval_phase = ApprovalPhase.DRAFT
+                entity.approval_phase = ApprovalPhase.DRAFT.value
                 db.commit()
                 logger.info(f"审批流程未匹配（business_type={business_type}, entity_id={entity.id}）")
                 return (entity, None, err_msg or "请先配置审批流程")
@@ -112,7 +119,7 @@ class ApprovalTransactionManager:
                 return (None, None, "系统异常：审批创建失败，请稍后重试")
 
             # 5. 切换 approval_phase = PENDING_REVIEW
-            entity.approval_phase = ApprovalPhase.PENDING_REVIEW
+            entity.approval_phase = ApprovalPhase.PENDING_REVIEW.value
 
             # 6. adapter.on_submit() 触发原有 status 联动
             adapter = get_adapter(business_type)
@@ -123,8 +130,9 @@ class ApprovalTransactionManager:
             db.refresh(entity)
             db.refresh(approval)
 
-            # 8. 异步发送通知（失败不阻断）
-            self._send_notification_async(db, approval, entity, team_id)
+            # 8. 发送通知（失败不阻断）
+            if send_notification:
+                self._send_notification_sync(db, approval, entity, team_id)
 
             logger.info(
                 f"create_with_approval 成功（business_type={business_type}, "
@@ -145,7 +153,8 @@ class ApprovalTransactionManager:
         entity_id: int,
         team_id: int,
         submitter_id: str,
-        submitter_name: str
+        submitter_name: str,
+        send_notification: bool = True
     ) -> Tuple[Optional[Approval], Optional[str]]:
         """
         手动提交审批（Invoice/License 场景）
@@ -175,14 +184,22 @@ class ApprovalTransactionManager:
 
             # 2. 验证 approval_phase 必须 = DRAFT 或 REJECTED
             if hasattr(entity, 'approval_phase'):
-                if entity.approval_phase not in [ApprovalPhase.DRAFT, ApprovalPhase.REJECTED]:
-                    return (None, f"单据状态不允许提交审批（当前状态：{entity.approval_phase})")
+                approval_phase = self._approval_phase_value(entity.approval_phase)
+                allowed_phases = {
+                    ApprovalPhase.DRAFT.value,
+                    ApprovalPhase.REJECTED.value,
+                }
+                if approval_phase not in allowed_phases:
+                    return (None, f"单据状态不允许提交审批（当前状态：{approval_phase})")
             else:
                 # 兼容旧模型（没有 approval_phase 字段）
                 logger.warning(f"业务单据缺少 approval_phase 字段（business_type={business_type}, entity_id={entity_id})")
 
             # 3. 如果 approval_phase = REJECTED，删除旧 Approval 实例
-            if hasattr(entity, 'approval_phase') and entity.approval_phase == ApprovalPhase.REJECTED:
+            if (
+                hasattr(entity, 'approval_phase')
+                and self._approval_phase_value(entity.approval_phase) == ApprovalPhase.REJECTED.value
+            ):
                 old_approval = approval_crud.get_by_entity(db, business_type, entity_id, team_id)
                 if old_approval:
                     db.delete(old_approval)
@@ -222,7 +239,7 @@ class ApprovalTransactionManager:
 
             # 6. 切换 approval_phase = PENDING_REVIEW
             if hasattr(entity, 'approval_phase'):
-                entity.approval_phase = ApprovalPhase.PENDING_REVIEW
+                entity.approval_phase = ApprovalPhase.PENDING_REVIEW.value
 
             # 7. adapter.on_submit() 触发原有 status 联动
             adapter.on_submit(db, entity)
@@ -231,8 +248,9 @@ class ApprovalTransactionManager:
             db.commit()
             db.refresh(approval)
 
-            # 9. 异步发送通知
-            self._send_notification_async(db, approval, entity, team_id)
+            # 9. 发送通知（失败不阻断）
+            if send_notification:
+                self._send_notification_sync(db, approval, entity, team_id)
 
             logger.info(
                 f"submit_for_approval 成功（business_type={business_type}, "
@@ -246,9 +264,71 @@ class ApprovalTransactionManager:
             db.rollback()
             return (None, f"系统异常：{str(e)}")
 
-    def _send_notification_async(self, db: Session, approval: Approval, entity: Any, team_id: int) -> None:
+    def _build_pending_notification_context(
+        self,
+        db: Session,
+        approval: Approval,
+        entity: Any,
+        team_id: int
+    ) -> Optional[Dict[str, Any]]:
+        from app.crud.role import role_crud
+
+        adapter = get_adapter(approval.business_type)
+        entity_name = adapter.get_name(entity)
+
+        current_node = approval.current_node
+        if not current_node or not current_node.approve_role:
+            logger.warning(
+                "审批通知跳过：当前节点未配置审批角色（approval_id=%s, business_type=%s, business_id=%s）",
+                approval.id,
+                approval.business_type,
+                approval.business_id,
+            )
+            return None
+
+        role = role_crud.get_by_code(db, current_node.approve_role)
+        if not role:
+            logger.warning(
+                "审批通知跳过：审批角色不存在（approval_id=%s, business_type=%s, business_id=%s, role=%s）",
+                approval.id,
+                approval.business_type,
+                approval.business_id,
+                current_node.approve_role,
+            )
+            return None
+
+        approvers = role_crud.get_role_users(db, role.id, team_id)
+        notify_user_ids = current_node.notify_user_ids or []
+        if notify_user_ids:
+            notify_id_set = {int(user_id) for user_id in notify_user_ids}
+            approvers = [user for user in approvers if int(user.id) in notify_id_set]
+        if not approvers:
+            logger.warning(
+                "审批通知跳过：审批角色无可通知成员（approval_id=%s, business_type=%s, business_id=%s, role=%s）",
+                approval.id,
+                approval.business_type,
+                approval.business_id,
+                current_node.approve_role,
+            )
+            return None
+
+        return {
+            "team_id": team_id,
+            "user_ids": [user.id for user in approvers],
+            "entity_type": approval.business_type,
+            "entity_name": entity_name,
+            "flow_name": approval.flow.flow_name if approval.flow else "",
+            "node_name": current_node.node_name,
+            "business_id": approval.business_id,
+            "submitter_name": approval.submitter_name,
+            "approval_type_name": get_approval_type_name(approval.business_type),
+            "customer_name": get_approval_customer_name(db, approval.business_type, entity),
+            "detail_fields": get_approval_card_fields(db, approval.business_type, entity),
+        }
+
+    async def send_notification(self, db: Session, approval: Approval, entity: Any, team_id: int) -> Dict[str, int]:
         """
-        异步发送审批通知（失败不阻断业务流程）
+        发送审批通知（失败不阻断业务流程）
 
         设计决策：
         1. 通知失败不阻断审批流程（业务数据已 commit）
@@ -261,63 +341,30 @@ class ApprovalTransactionManager:
             entity: 业务单据实例
             team_id: 团队ID
         """
-        import asyncio
-
         try:
             from app.services.feishu_notification import feishu_notification_service
-            from app.crud.role import role_crud
 
-            # 获取审批人信息
-            adapter = get_adapter(approval.business_type)
-            entity_name = adapter.get_name(entity)
+            context = self._build_pending_notification_context(db, approval, entity, team_id)
+            if context is None:
+                return {"success": 0, "failed": 0, "skipped": 1}
 
-            # 获取当前审批节点角色下的审批人
-            current_node = approval.current_node
-            if not current_node or not current_node.approve_role:
-                logger.warning(
-                    f"审批节点未配置审批角色（approval_id={approval.id}），跳过通知"
-                )
-                return
-
-            role = role_crud.get_by_code(db, current_node.approve_role)
-            if not role:
-                logger.warning(
-                    f"审批角色不存在（approval_id={approval.id}, role={current_node.approve_role}），跳过通知"
-                )
-                return
-
-            approvers = role_crud.get_role_users(db, role.id, team_id)
-            notify_user_ids = current_node.notify_user_ids or []
-            if notify_user_ids:
-                notify_id_set = {int(user_id) for user_id in notify_user_ids}
-                approvers = [user for user in approvers if int(user.id) in notify_id_set]
-            if not approvers:
-                logger.warning(
-                    f"审批角色无成员（approval_id={approval.id}, role={current_node.approve_role}），跳过通知"
-                )
-                return
-
-            asyncio.run(
-                feishu_notification_service.notify_approval_pending(
-                    db=db,
-                    team_id=team_id,
-                    user_ids=[user.id for user in approvers],
-                    entity_type=approval.business_type,
-                    entity_name=entity_name,
-                    flow_name=approval.flow.flow_name if approval.flow else "",
-                    node_name=current_node.node_name,
-                    business_id=approval.business_id,
-                    submitter_name=approval.submitter_name,
-                    approval_type_name=get_approval_type_name(approval.business_type),
-                    customer_name=get_approval_customer_name(db, approval.business_type, entity),
-                    detail_fields=get_approval_card_fields(db, approval.business_type, entity),
-                )
+            result = await feishu_notification_service.notify_approval_pending(
+                db=db,
+                **context,
             )
 
             logger.info(
-                f"审批通知发送成功（approval_id={approval.id}, "
-                f"business_type={approval.business_type}, approver_count={len(approvers)})"
+                "审批通知发送完成（approval_id=%s, business_type=%s, business_id=%s, "
+                "approver_ids=%s, success=%s, failed=%s, skipped=%s）",
+                approval.id,
+                approval.business_type,
+                approval.business_id,
+                context["user_ids"],
+                result.get("success", 0),
+                result.get("failed", 0),
+                result.get("skipped", 0),
             )
+            return result
 
         except Exception as e:
             # 记录日志，不阻断业务流程
@@ -326,6 +373,24 @@ class ApprovalTransactionManager:
                 f"entity_id={approval.business_id}）: {e}",
                 exc_info=True
             )
+            return {"success": 0, "failed": 1, "skipped": 0}
+
+    def _send_notification_sync(self, db: Session, approval: Approval, entity: Any, team_id: int) -> Dict[str, int]:
+        import asyncio
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.send_notification(db, approval, entity, team_id))
+
+        logger.error(
+            "审批通知发送跳过：同步事务入口运行在异步事件循环中，请在提交后 await send_notification "
+            "（approval_id=%s, business_type=%s, business_id=%s）",
+            approval.id,
+            approval.business_type,
+            approval.business_id,
+        )
+        return {"success": 0, "failed": 0, "skipped": 1}
 
     def resend_notification(self, db: Session, approval_id: int, team_id: int) -> Tuple[bool, Optional[str]]:
         """
@@ -353,8 +418,10 @@ class ApprovalTransactionManager:
             if entity is None:
                 return (False, "业务单据不存在")
 
-            self._send_notification_async(db, approval, entity, team_id)
-            return (True, None)
+            result = self._send_notification_sync(db, approval, entity, team_id)
+            if result.get("success", 0) > 0:
+                return (True, None)
+            return (False, "通知未发送成功，请检查审批人飞书绑定或通知配置")
 
         except Exception as e:
             logger.error(f"补发通知失败: {e}", exc_info=True)

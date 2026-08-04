@@ -21,7 +21,7 @@ class AgentToolContext:
     hitl_decision: Optional[str] = None
     confirmed_by_user: bool = False
     allowed_tool_names: Optional[List[str]] = None
-    allowed_customer_ids: Optional[List[int]] = None
+    allowed_customer_ids: Optional[List[str]] = None
 
 
 @dataclass

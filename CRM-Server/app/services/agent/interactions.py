@@ -131,14 +131,14 @@ def _opportunity_field_defaults(
     *,
     db: Optional[Session] = None,
     team_id: Optional[int] = None,
-    customer_id: Optional[int] = None,
+    customer_id: Optional[str] = None,
 ) -> dict[str, object]:
     default_procurement_method_id = _customer_default_procurement_method_id(customer)
     if default_procurement_method_id is None and db is not None and customer_id:
         try:
             row = (
                 db.query(Customer.default_procurement_method_id)
-                .filter(Customer.id == customer_id, Customer.team_id == team_id)
+                .filter(Customer.public_id == str(customer_id), Customer.team_id == team_id)
                 .first()
             )
             default_procurement_method_id = row[0] if row else None
@@ -319,7 +319,7 @@ def _interaction_for_event(
             default_values = {}
         if form_kinds[event_name] == "opportunity":
             payload_customer_id = payload.get("customer_id")
-            customer_id = payload_customer_id if isinstance(payload_customer_id, int) else None
+            customer_id = str(payload_customer_id) if isinstance(payload_customer_id, (str, int)) else None
             default_values = {
                 **_opportunity_field_defaults({}, db=db, team_id=team_id, customer_id=customer_id),
                 **default_values,

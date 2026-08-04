@@ -95,14 +95,14 @@ export interface CustomerIndustryOption {
 }
 
 export interface ConvertLeadToCustomer {
-  lead_id: number
+  lead_id: string
   account_name?: string | null
   address?: string | null
   default_procurement_method_id?: number | null
 }
 
 export interface ConvertResponse {
-  customer_id: number
+  customer_id: string
   contact_id: number
   message: string
 }
@@ -154,7 +154,8 @@ export interface CustomerIndustryInfo {
 }
 
 export interface CustomerResponse {
-  id: number
+  id: string
+  public_id: string
   account_name: string
   industry: string | null
   industry_info?: CustomerIndustryInfo | null
@@ -164,7 +165,7 @@ export interface CustomerResponse {
   source: string | null
   status: CustomerStatus
   owner_id: string | null
-  source_lead_id: number | null
+  source_lead_id: string | null
   default_procurement_method_id: number | null
   default_procurement_method_info?: ProcurementMethodInfo | null
   loss_reason: string | null
@@ -185,7 +186,7 @@ export interface CustomerResponse {
 
 export interface ContactResponse {
   id: number
-  customer_id: number
+  customer_id: string
   name: string
   gender: number | null
   position: string | null
@@ -210,7 +211,8 @@ export interface CustomerDefaultOpportunity {
 }
 
 export interface CustomerDetailResponse {
-  id: number
+  id: string
+  public_id: string
   account_name: string
   industry: string | null
   industry_info?: CustomerIndustryInfo | null
@@ -220,7 +222,7 @@ export interface CustomerDetailResponse {
   source: string | null
   status: CustomerStatus
   owner_id: string
-  source_lead_id: number | null
+  source_lead_id: string | null
   default_procurement_method_id: number | null
   default_procurement_method_info?: ProcurementMethodInfo | null
   default_opportunity?: CustomerDefaultOpportunity | null
@@ -327,7 +329,7 @@ export interface CustomerReturnRequest {
 }
 
 export interface CustomerReturnResponse {
-  customer_id: number
+  customer_id: string
   previous_owner: string
   returned_time: string
   return_reason: string
@@ -378,7 +380,7 @@ export interface CustomerMemberUserInfo {
 
 export interface CustomerMemberResponse {
   id: number
-  customer_id: number
+  customer_id: string
   user_id: string
   member_role: CustomerMemberRole
   access_level: CustomerMemberAccessLevel
@@ -419,7 +421,7 @@ export interface ContractListResponse {
   id: number
   contract_number: string
   contract_name: string
-  customer_id: number
+  customer_id: string
   opportunity_id: number | null
   signing_contact_id: number | null
   user_count: number
@@ -463,7 +465,7 @@ export interface PaymentPlanResponse {
 export interface InvoiceApplicationResponse {
   id: number
   application_number: string
-  customer_id: number
+  customer_id: string
   contract_id: number
   opportunity_id: number
   payment_plan_id: number
@@ -495,34 +497,34 @@ const customerApi = {
   getCustomers: (params?: CustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
     api.get<CustomerResponse[] | PaginatedResponse<CustomerResponse>>('/v1/customers/', { params }),
 
-  getCustomerDetail: (customerId: number): Promise<CustomerDetailResponse> =>
+  getCustomerDetail: (customerId: string): Promise<CustomerDetailResponse> =>
     api.get('/v1/customers/' + customerId, undefined, CustomerDetailResponseSchema),
 
-  regenerateCustomerBrief: (customerId: number): Promise<{ message: string }> =>
+  regenerateCustomerBrief: (customerId: string): Promise<{ message: string }> =>
     api.post('/v1/customers/' + customerId + '/regenerate-brief'),
 
-  regenerateCustomerIntelligence: (customerId: number, scope: 'full' | 'brief' = 'full'): Promise<{ message: string }> =>
+  regenerateCustomerIntelligence: (customerId: string, scope: 'full' | 'brief' = 'full'): Promise<{ message: string }> =>
     api.post('/v1/customers/' + customerId + '/regenerate-intelligence', { scope }),
 
-  updateCustomer: (customerId: number, data: CustomerUpdate): Promise<CustomerResponse> =>
+  updateCustomer: (customerId: string, data: CustomerUpdate): Promise<CustomerResponse> =>
     api.put('/v1/customers/' + customerId, data, undefined, CustomerResponseSchema),
 
-  updateCustomerStatus: (customerId: number, data: CustomerStatusUpdate): Promise<CustomerResponse> =>
+  updateCustomerStatus: (customerId: string, data: CustomerStatusUpdate): Promise<CustomerResponse> =>
     api.patch('/v1/customers/' + customerId + '/status', data, undefined, CustomerResponseSchema),
 
-  markAsLost: (customerId: number, data: CustomerLoseRequest): Promise<CustomerResponse> =>
+  markAsLost: (customerId: string, data: CustomerLoseRequest): Promise<CustomerResponse> =>
     api.patch('/v1/customers/' + customerId + '/lose', data, undefined, CustomerResponseSchema),
 
-  deleteCustomer: (customerId: number): Promise<{ message: string }> =>
+  deleteCustomer: (customerId: string): Promise<{ message: string }> =>
     api.delete('/v1/customers/' + customerId),
 
-  returnToPool: (customerId: number, data: CustomerReturnRequest): Promise<CustomerReturnResponse> =>
+  returnToPool: (customerId: string, data: CustomerReturnRequest): Promise<CustomerReturnResponse> =>
     api.post('/v1/customers/' + customerId + '/return-to-pool', data, undefined, CustomerReturnResponseSchema),
 
-  claimCustomer: (customerId: number, data: CustomerClaimRequest): Promise<CustomerResponse> =>
+  claimCustomer: (customerId: string, data: CustomerClaimRequest): Promise<CustomerResponse> =>
     api.post('/v1/customers/' + customerId + '/claim', data, undefined, CustomerResponseSchema),
 
-  assignCustomer: (customerId: number, data: CustomerAssignRequest): Promise<CustomerAssignResponse> =>
+  assignCustomer: (customerId: string, data: CustomerAssignRequest): Promise<CustomerAssignResponse> =>
     api.post<CustomerAssignResponse>('/v1/customers/' + customerId + '/assign', data),
 
   getPublicCustomers: (params?: PublicCustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
@@ -531,28 +533,28 @@ const customerApi = {
   getOwnerFilterOptions: (): Promise<OwnerFilterOptionsResponse> =>
     api.get<OwnerFilterOptionsResponse>('/v1/filter-options/owners', { params: { resource: 'customer' } }),
 
-  getCustomerMembers: (customerId: number): Promise<CustomerMemberResponse[]> =>
+  getCustomerMembers: (customerId: string): Promise<CustomerMemberResponse[]> =>
     api.get<CustomerMemberResponse[]>('/v1/customers/' + customerId + '/members'),
 
-  getCustomerMemberCandidates: (customerId: number): Promise<CustomerMemberCandidate[]> =>
+  getCustomerMemberCandidates: (customerId: string): Promise<CustomerMemberCandidate[]> =>
     api.get<CustomerMemberCandidate[]>('/v1/customers/' + customerId + '/member-candidates'),
 
-  addCustomerMember: (customerId: number, data: CustomerMemberPayload): Promise<CustomerMemberResponse> =>
+  addCustomerMember: (customerId: string, data: CustomerMemberPayload): Promise<CustomerMemberResponse> =>
     api.post<CustomerMemberResponse>('/v1/customers/' + customerId + '/members', data),
 
-  updateCustomerMember: (customerId: number, memberId: number, data: CustomerMemberPayload): Promise<CustomerMemberResponse> =>
+  updateCustomerMember: (customerId: string, memberId: number, data: CustomerMemberPayload): Promise<CustomerMemberResponse> =>
     api.put<CustomerMemberResponse>('/v1/customers/' + customerId + '/members/' + memberId, data),
 
-  removeCustomerMember: (customerId: number, memberId: number): Promise<{ message: string }> =>
+  removeCustomerMember: (customerId: string, memberId: number): Promise<{ message: string }> =>
     api.delete<{ message: string }>('/v1/customers/' + customerId + '/members/' + memberId),
 
   getIndustryOptions: (): Promise<CustomerIndustryOption[]> =>
     api.get<CustomerIndustryOption[]>('/v1/customers/industries'),
 
-  createContact: (customerId: number, data: ContactCreate): Promise<ContactResponse> =>
+  createContact: (customerId: string, data: ContactCreate): Promise<ContactResponse> =>
     api.post('/v1/customers/' + customerId + '/contacts', data, undefined, ContactResponseSchema),
 
-  getContacts: (customerId: number): Promise<ContactResponse[]> =>
+  getContacts: (customerId: string): Promise<ContactResponse[]> =>
     api.get<ContactResponse[]>('/v1/customers/' + customerId + '/contacts'),
 
   updateContact: (contactId: number, data: ContactUpdate): Promise<ContactResponse> =>
@@ -570,13 +572,13 @@ const customerApi = {
   getTrend: (days = 30): Promise<CustomerTrend[]> =>
     api.get<CustomerTrend[]>('/v1/customers/statistics/trend', { params: { days } }),
 
-  getContracts: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }): Promise<ContractListResponse[]> =>
+  getContracts: (customerId: string, params?: { status?: string | null; skip?: number; limit?: number }): Promise<ContractListResponse[]> =>
     api.get<ContractListResponse[]>('/v1/customers/' + customerId + '/contracts', { params }),
 
-  getPaymentPlans: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }): Promise<PaymentPlanResponse[]> =>
+  getPaymentPlans: (customerId: string, params?: { status?: string | null; skip?: number; limit?: number }): Promise<PaymentPlanResponse[]> =>
     api.get<PaymentPlanResponse[]>('/v1/customers/' + customerId + '/payment-plans', { params }),
 
-  getInvoices: (customerId: number, params?: { status?: string | null; skip?: number; limit?: number }): Promise<InvoiceApplicationResponse[]> =>
+  getInvoices: (customerId: string, params?: { status?: string | null; skip?: number; limit?: number }): Promise<InvoiceApplicationResponse[]> =>
     api.get<InvoiceApplicationResponse[]>('/v1/customers/' + customerId + '/invoices', { params })
 }
 

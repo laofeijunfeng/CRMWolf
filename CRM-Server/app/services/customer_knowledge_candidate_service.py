@@ -156,7 +156,7 @@ class CustomerKnowledgeCandidateService:
                 continue
             best_score = max(_bounded_score(hit.score) for hit in customer_hits)
             candidates.append({
-                "id": customer_id,
+                "id": customer.public_id,
                 "account_name": customer.account_name,
                 "city": customer.city,
                 "owner_info": None,

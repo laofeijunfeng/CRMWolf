@@ -18,7 +18,8 @@ import {
   TextareaField,
 } from '@/components/crmwolf'
 import SelectionSummary from '@/components/crmwolf/SelectionSummary.vue'
-import licenseApplicationApi, { type LicenseApplicationCreate, type LicenseType } from '@/api/licenseApplication'
+import licenseApplicationApi, { type LicenseType } from '@/api/licenseApplication'
+import type { LicenseApplicationCreate } from '@/schemas/licenseApplication'
 import type { ContractListResponse } from '@/api/contract'
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { handleApiError } from '@/utils/errorHandler'
@@ -27,7 +28,7 @@ const APPROVED_CONTRACT_STATUSES = ['SIGNED']
 
 interface Props {
   open: boolean
-  customerId: number
+  customerId: string
   deployments: DeploymentInfoResponse[]
   contracts: ContractListResponse[]
   defaultLicenseType?: LicenseType | null

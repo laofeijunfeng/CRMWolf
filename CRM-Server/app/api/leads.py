@@ -18,6 +18,7 @@ from app.schemas.lead import (
 from app.schemas.common import PaginatedResponse
 from app.models.lead import LeadStatus, LeadSource
 from app.models.user import User
+from app.utils.time import business_now
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
 
@@ -80,7 +81,8 @@ def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListRespons
     result = []
     for lead in leads:
         lead_dict = {
-            "id": lead.id,
+            "id": lead.public_id,
+            "public_id": lead.public_id,
             "lead_name": lead.lead_name,
             "source": lead.source,
             "city": lead.city,
@@ -243,13 +245,13 @@ def get_lead_statistics(
 
 @router.get("/{lead_id}", response_model=LeadDetailResponse, summary="获取线索详情", description="获取线索详情及跟进记录，返回负责人和创建人信息")
 def get_lead(
-    lead_id: int,
+    lead_id: str,
     lead = Depends(check_lead_access),
     db: Session = Depends(get_db)
 ):
     from sqlalchemy import text
 
-    follow_ups = lead_follow_up_crud.get_by_lead_id(db, lead_id)
+    follow_ups = lead_follow_up_crud.get_by_lead_id(db, lead.id)
 
     owner_info = None
     if lead.owner_id:
@@ -285,7 +287,7 @@ def get_lead(
     for follow_up in follow_ups:
         follow_up_dict = {
             "id": follow_up.id,
-            "lead_id": follow_up.lead_id,
+            "lead_id": lead.public_id,
             "content": follow_up.content,
             "method": follow_up.method,
             "next_follow_time": follow_up.next_follow_time,
@@ -321,7 +323,7 @@ def get_lead(
 
 @router.put("/{lead_id}", response_model=LeadResponse, summary="编辑线索", description="更新线索信息")
 def update_lead(
-    lead_id: int,
+    lead_id: str,
     lead_update: LeadUpdate,
     lead = Depends(check_lead_owner),
     db: Session = Depends(get_db)
@@ -331,12 +333,12 @@ def update_lead(
 
 @router.delete("/{lead_id}", response_model=LeadResponse, summary="删除线索", description="删除线索")
 def delete_lead(
-    lead_id: int,
+    lead_id: str,
     lead = Depends(check_lead_delete_permission),
     db: Session = Depends(get_db)
 ):
     try:
-        return lead_crud.delete(db, lead_id)
+        return lead_crud.delete(db, lead.id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -346,14 +348,14 @@ def delete_lead(
 
 @router.post("/{lead_id}/claim", response_model=LeadResponse, summary="领取线索", description="从公海领取线索")
 async def claim_lead(
-    lead_id: int,
+    lead_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from app.services.feishu import feishu_service
 
-    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    lead = lead_crud.get_by_public_id(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -366,7 +368,7 @@ async def claim_lead(
             detail="该线索已被领取"
         )
 
-    claimed_lead = lead_crud.claim(db, lead_id, str(current_user.id), team_id)
+    claimed_lead = lead_crud.claim(db, lead.id, str(current_user.id), team_id)
 
     await feishu_service.notify_lead_claimed(
         str(current_user.id),
@@ -378,7 +380,7 @@ async def claim_lead(
 
 @router.post("/{lead_id}/assign", response_model=LeadResponse, summary="分配线索", description="将线索分配给指定负责人")
 async def assign_lead(
-    lead_id: int,
+    lead_id: str,
     request: LeadAssignRequest,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -406,14 +408,14 @@ async def assign_lead(
             detail="目标用户不存在"
         )
 
-    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    lead = lead_crud.get_by_public_id(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="线索不存在或不属于当前团队"
         )
 
-    assigned_lead = lead_crud.assign(db, lead_id, request.owner_id)
+    assigned_lead = lead_crud.assign(db, lead.id, request.owner_id)
 
     await feishu_service.notify_lead_assigned(
         request.owner_id,
@@ -427,7 +429,7 @@ async def assign_lead(
 
 @router.post("/{lead_id}/return", response_model=LeadResponse, summary="退回线索", description="将线索退回公海")
 def return_lead(
-    lead_id: int,
+    lead_id: str,
     team_id: int = Depends(get_current_user_team),
     lead = Depends(check_lead_owner),
     db: Session = Depends(get_db)
@@ -438,35 +440,37 @@ def return_lead(
             detail="该线索已在公海中"
         )
 
-    return lead_crud.return_to_pool(db, lead_id, team_id)
+    return lead_crud.return_to_pool(db, lead.id, team_id)
 
 
 @router.post("/{lead_id}/follow-ups", response_model=LeadFollowUpResponse, status_code=status.HTTP_201_CREATED, summary="添加跟进记录", description="为线索添加跟进记录")
 def add_follow_up(
-    lead_id: int,
+    lead_id: str,
     follow_up: LeadFollowUpCreate,
     team_id: int = Depends(get_current_user_team),
     lead = Depends(check_lead_owner),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    return lead_follow_up_crud.create(db, follow_up, lead_id, str(current_user.id), team_id)
+    created = lead_follow_up_crud.create(db, follow_up, lead.id, str(current_user.id), team_id)
+    return LeadFollowUpResponse(**{**created.__dict__, "lead_id": lead.public_id})
 
 
 @router.get("/{lead_id}/follow-ups", response_model=List[LeadFollowUpResponse], summary="获取跟进记录", description="获取线索的跟进记录列表")
 def get_follow_ups(
-    lead_id: int,
+    lead_id: str,
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
     lead = Depends(check_lead_access),
     db: Session = Depends(get_db)
 ):
-    return lead_follow_up_crud.get_by_lead_id(db, lead_id, skip, limit)
+    follow_ups = lead_follow_up_crud.get_by_lead_id(db, lead.id, skip, limit)
+    return [LeadFollowUpResponse(**{**follow_up.__dict__, "lead_id": lead.public_id}) for follow_up in follow_ups]
 
 
 @router.delete("/{lead_id}/follow-ups/{follow_up_id}", summary="删除跟进记录", description="删除线索的跟进记录")
 def delete_follow_up(
-    lead_id: int,
+    lead_id: str,
     follow_up_id: int,
     lead = Depends(check_lead_access),
     current_user = Depends(get_current_active_user),
@@ -479,7 +483,7 @@ def delete_follow_up(
             detail="跟进记录不存在"
         )
 
-    if follow_up.lead_id != lead_id:
+    if follow_up.lead_id != lead.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="跟进记录不属于该线索"
@@ -497,7 +501,7 @@ def delete_follow_up(
 
 @router.post("/{lead_id}/convert", response_model=LeadResponse, summary="线索转化", description="将线索转化为客户")
 def convert_lead(
-    lead_id: int,
+    lead_id: str,
     request: LeadConvertRequest,
     lead = Depends(check_lead_owner),
     current_user = Depends(get_current_active_user),
@@ -509,14 +513,14 @@ def convert_lead(
             detail="该线索已转化"
         )
 
-    converted_lead = lead_crud.convert(db, lead_id)
+    converted_lead = lead_crud.convert(db, lead.id)
 
     return converted_lead
 
 
 @router.post("/{lead_id}/mark-invalid", response_model=LeadResponse, summary="标记无效", description="将线索标记为无效，必须记录无效原因")
 def mark_lead_invalid(
-    lead_id: int,
+    lead_id: str,
     request_data: LeadMarkInvalidRequest,
     team_id: int = Depends(get_current_user_team),
     lead = Depends(check_lead_owner),
@@ -529,7 +533,7 @@ def mark_lead_invalid(
             detail="该线索已标记为无效"
         )
 
-    return lead_crud.mark_invalid(db, lead_id, request_data.reason, str(current_user.id), current_user.name, team_id)
+    return lead_crud.mark_invalid(db, lead.id, request_data.reason, str(current_user.id), current_user.name, team_id)
 
 
 @router.get("/public/list", response_model=PaginatedResponse[LeadResponse], summary="公海线索", description="获取公海中的线索列表（团队公海池）")
@@ -575,7 +579,7 @@ def get_lead_trend(
     from sqlalchemy import func, extract
     from app.models.lead import Lead
 
-    start_date = datetime.now() - timedelta(days=days)
+    start_date = business_now() - timedelta(days=days)
 
     results = db.query(
         func.date(Lead.created_time).label('date'),

@@ -81,7 +81,7 @@ def _populate_record_info(db: Session, record: PaymentRecord) -> dict:
         "contract_id": contract.id if contract else None,
         "contract_name": contract.contract_name if contract else None,
         "stage_name": payment_plan.stage_name if payment_plan else None,
-        "customer_id": customer.id if customer else None,
+        "customer_id": customer.public_id if customer else None,
         "customer_name": customer.account_name if customer else None,
         "opportunity_id": opportunity.id if opportunity else None,
         "opportunity_name": opportunity.opportunity_name if opportunity else None
@@ -158,7 +158,7 @@ def get_receivables_aging_analysis(
             "days_overdue": days_overdue,
             "contract_id": contract.id if contract else None,
             "contract_name": contract.contract_name if contract else None,
-            "customer_id": customer.id if customer else None,
+            "customer_id": customer.public_id if customer else None,
             "customer_name": customer.account_name if customer else None
         })
     
@@ -248,7 +248,7 @@ def get_overdue_alerts(
             "remaining_amount": float(remaining_amount),
             "due_date": plan.due_date.isoformat(),
             "days_overdue": days_overdue,
-            "customer_id": customer.id if customer else None,
+            "customer_id": customer.public_id if customer else None,
             "customer_name": customer.account_name if customer else None,
             "opportunity_id": opportunity.id if opportunity else None,
             "opportunity_name": opportunity.opportunity_name if opportunity else None,
@@ -348,11 +348,11 @@ def _group_by_customer(contracts: List[Contract], db: Session) -> dict:
         if contract.customer_id:
             customer = db.query(Customer).filter(Customer.id == contract.customer_id).first()
         
-        key = str(contract.customer_id) if contract.customer_id else "unknown"
+        key = customer.public_id if customer else "unknown"
         
         if key not in groups:
             groups[key] = {
-                "customer_id": contract.customer_id,
+                "customer_id": customer.public_id if customer else None,
                 "customer_name": customer.account_name if customer else "未知客户",
                 "contract_count": 0,
                 "total_amount": Decimal(0),

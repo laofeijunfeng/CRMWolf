@@ -198,12 +198,15 @@ class OpportunityPlanningGraphService:
         opportunity = {**(state.get("opportunity") or {})}
         opportunity.pop("opportunity_name", None)
         opportunity["customer_id"] = customer.get("id")
+        field_defaults = business_rules.opportunity_field_defaults(customer)
+        for field_name, default_value in field_defaults.items():
+            if not opportunity.get(field_name):
+                opportunity[field_name] = default_value
         missing_fields = business_rules.missing_opportunity_fields(
             opportunity,
             require_procurement_method=business_rules.customer_requires_procurement_method(customer),
         )
         interaction_fields = business_rules.opportunity_interaction_fields(missing_fields)
-        field_defaults = business_rules.opportunity_field_defaults(customer)
         return {
             "opportunity": opportunity,
             "missing_fields": missing_fields,

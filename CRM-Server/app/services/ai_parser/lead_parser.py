@@ -5,11 +5,11 @@
 """
 from typing import Dict, Any
 from sqlalchemy.orm import Session
-from datetime import datetime
 
 from app.services.ai_parser.base_parser import EntityAIParserBase
 from app.services.ai_parser.constants import LEAD_SOURCE_ENUM_MAP, COMPANY_SCALE_ENUM_MAP
 from app.services.follow_up_parser import follow_up_parser_service
+from app.utils.time import business_now
 from app.crud.lead import lead_crud, lead_follow_up_crud
 from app.schemas.lead import LeadCreate, LeadFollowUpCreate
 from app.models.lead import LeadSource, CompanyScale, FollowUpMethod
@@ -159,7 +159,7 @@ class LeadAIParser(EntityAIParserBase):
         Returns:
             格式化后的系统提示词
         """
-        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_date = business_now().strftime("%Y-%m-%d")
         return PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE.format(current_date=current_date)
 
     def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
@@ -280,7 +280,7 @@ class LeadAIParser(EntityAIParserBase):
             if next_follow_time_str:
                 next_follow_time_dt = follow_up_parser_service.parse_relative_time(
                     next_follow_time_str,
-                    base_date=datetime.now()
+                    base_date=business_now()
                 )
 
             # 构建跟进内容

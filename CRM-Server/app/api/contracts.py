@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import date
+from decimal import Decimal
 from typing import List, Literal, Optional
 from urllib.parse import quote
 
@@ -93,12 +94,73 @@ def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
     }
 
 
-def _contract_response_base(contract) -> dict:
+def _get_customer_basic_info(db: Session, customer_id: Optional[int]) -> Optional[dict]:
+    if not customer_id:
+        return None
+    customer_data = db.execute(text("""
+        SELECT public_id, account_name
+        FROM crm_customers
+        WHERE id = :customer_id
+    """), {"customer_id": customer_id}).first()
+    if not customer_data:
+        return None
+    return {
+        "id": customer_data[0],
+        "public_id": customer_data[0],
+        "account_name": customer_data[1],
+    }
+
+
+def _get_opportunity_list_info(db: Session, opportunity_id: Optional[int]) -> Optional[dict]:
+    if not opportunity_id:
+        return None
+
+    opportunity_data = db.execute(text("""
+        SELECT id, opportunity_name, purchase_type
+        FROM crm_opportunities
+        WHERE id = :opportunity_id
+    """), {"opportunity_id": opportunity_id}).first()
+
+    if not opportunity_data:
+        return None
+
+    return {
+        "id": opportunity_data[0],
+        "opportunity_name": opportunity_data[1],
+        "purchase_type": opportunity_data[2],
+    }
+
+
+def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -> Optional[dict]:
+    if not contract_id:
+        return None
+
+    license_data = db.execute(text("""
+        SELECT authorized_users, expiry_date
+        FROM crm_license_applications
+        WHERE contract_id = :contract_id
+          AND license_type = 'OFFICIAL'
+          AND status = 'ISSUED'
+        ORDER BY last_modified_time DESC, id DESC
+        LIMIT 1
+    """), {"contract_id": contract_id}).first()
+
+    if not license_data:
+        return None
+
+    return {
+        "authorized_users": license_data[0],
+        "expiry_date": license_data[1],
+    }
+
+
+def _contract_response_base(db: Session, contract) -> dict:
+    customer_info = _get_customer_basic_info(db, contract.customer_id)
     return {
         "id": contract.id,
         "contract_number": contract.contract_number,
         "contract_name": contract.contract_name,
-        "customer_id": contract.customer_id,
+        "customer_id": customer_info["id"] if customer_info else None,
         "opportunity_id": contract.opportunity_id,
         "signing_contact_id": contract.signing_contact_id,
         "user_count": contract.user_count,
@@ -119,6 +181,45 @@ def _contract_response_base(contract) -> dict:
         "contract_file_size": contract.contract_file_size,
         "contract_file_mime_type": contract.contract_file_mime_type,
     }
+
+
+def _contract_list_response_dict(
+    db: Session,
+    contract,
+    *,
+    customer_info: Optional[dict] = None,
+    opportunity_info: Optional[dict] = None,
+) -> dict:
+    customer_info = customer_info if customer_info is not None else _get_customer_basic_info(db, contract.customer_id)
+    opportunity_info = (
+        opportunity_info
+        if opportunity_info is not None
+        else _get_opportunity_list_info(db, contract.opportunity_id)
+    )
+    latest_license = _get_latest_official_license_info(db, contract.id)
+
+    contract_dict = _contract_response_base(db, contract)
+    contract_dict.update({
+        "customer_name": customer_info["account_name"] if customer_info else None,
+        "opportunity_name": opportunity_info["opportunity_name"] if opportunity_info else None,
+        "purchase_type": opportunity_info["purchase_type"] if opportunity_info else None,
+        "license_authorized_users": (
+            latest_license["authorized_users"] if latest_license else contract.user_count
+        ),
+        "license_expiry_date": latest_license["expiry_date"] if latest_license else None,
+        "customer_info": customer_info,
+        "opportunity_info": (
+            {
+                "id": opportunity_info["id"],
+                "opportunity_name": opportunity_info["opportunity_name"],
+            }
+            if opportunity_info
+            else None
+        ),
+        "owner_info": _get_user_basic_info(db, contract.owner_id),
+        "creator_info": _get_user_basic_info(db, contract.creator_id),
+    })
+    return contract_dict
 
 
 def _parse_contract_payload(contract_payload: str) -> ContractCreate:
@@ -203,7 +304,8 @@ async def create_contract(
             detail="请上传合同邮件附件"
         )
 
-    check_customer_edit_permission(contract.customer_id, team_id, current_user, db)
+    customer = check_customer_edit_permission(contract.customer_id, team_id, current_user, db)
+    contract = contract.model_copy(update={"customer_id": customer.id})
 
     opportunity = opportunity_crud.get_by_id(db, contract.opportunity_id, team_id)
     if not opportunity:
@@ -293,7 +395,7 @@ async def create_contract(
                 # 通知失败不阻断业务流程
                 logger.error(f"合同审批通知发送失败（contract_id={db_contract.id}）: {notify_error}", exc_info=True)
 
-        return db_contract
+        return ContractResponse(**_contract_response_base(db, db_contract))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -465,7 +567,7 @@ async def create_contract_from_opportunity(
                 # 通知失败不阻断业务流程
                 logger.error(f"合同审批通知发送失败（contract_id={db_contract.id}）: {notify_error}", exc_info=True)
 
-        return db_contract
+        return ContractResponse(**_contract_response_base(db, db_contract))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -489,11 +591,19 @@ async def create_contract_from_opportunity(
 def get_contracts(
     skip: int = Query(0, ge=0, description="分页跳过记录数，从0开始，默认为0表示第一页"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数，默认100，最大100"),
-    customer_id: Optional[int] = Query(None, description="按客户ID筛选，传入客户ID后只返回该客户的合同"),
+    customer_id: Optional[str] = Query(None, description="按客户对外ID筛选，传入客户ID后只返回该客户的合同"),
     contract_status: Optional[str] = Query(None, alias="status", description="按合同状态筛选，多个值用逗号分隔"),
     status_exclude: Optional[str] = Query(None, description="排除的合同状态，多个值用逗号分隔"),
     license_type: Optional[str] = Query(None, description="按授权模式筛选，多个值用逗号分隔"),
     license_type_exclude: Optional[str] = Query(None, description="排除的授权模式，多个值用逗号分隔"),
+    purchase_type: Optional[str] = Query(None, description="按采购类型筛选，多个值用逗号分隔"),
+    purchase_type_exclude: Optional[str] = Query(None, description="排除的采购类型，多个值用逗号分隔"),
+    subscription_years: Optional[int] = Query(None, description="按采购年限筛选"),
+    subscription_years_exclude: Optional[int] = Query(None, description="排除的采购年限"),
+    license_authorized_users: Optional[int] = Query(None, description="按授权数量筛选，优先使用最新已签发正式 License 授权数量"),
+    license_authorized_users_exclude: Optional[int] = Query(None, description="排除的授权数量"),
+    standard_unit_price: Optional[Decimal] = Query(None, description="按客单价筛选"),
+    standard_unit_price_exclude: Optional[Decimal] = Query(None, description="排除的客单价"),
     contract_number: Optional[str] = Query(None, description="按合同编号模糊搜索，支持部分匹配"),
     keyword: Optional[str] = Query(None, description="关键词搜索，可搜索合同名称、合同编号等字段"),
     customer_keyword: Optional[str] = Query(None, description="客户名称关键词"),
@@ -506,6 +616,8 @@ def get_contracts(
     effective_date_end: Optional[date] = Query(None, description="生效日期结束"),
     expiry_date_start: Optional[date] = Query(None, description="到期日期起始"),
     expiry_date_end: Optional[date] = Query(None, description="到期日期结束"),
+    license_expiry_date_start: Optional[date] = Query(None, description="授权时间起始，按最新已签发正式 License 到期时间筛选"),
+    license_expiry_date_end: Optional[date] = Query(None, description="授权时间结束，按最新已签发正式 License 到期时间筛选"),
     order_by: Optional[str] = Query(None, description="排序字段"),
     order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
     team_id: int = Depends(get_current_user_team),
@@ -535,16 +647,29 @@ def get_contracts(
     if actual_owner_id is None and not has_view_all:
         actual_owner_id = str(current_user.id)
 
+    internal_customer_id = None
+    if customer_id:
+        customer = check_customer_view_permission(customer_id, team_id, current_user, db)
+        internal_customer_id = customer.id
+
     contracts, total = contract_crud.get_multi(
         db=db,
         team_id=team_id,
         skip=skip,
         limit=limit,
-        customer_id=customer_id,
+        customer_id=internal_customer_id,
         status=contract_status,
         status_exclude=status_exclude,
         license_type=license_type,
         license_type_exclude=license_type_exclude,
+        purchase_type=purchase_type,
+        purchase_type_exclude=purchase_type_exclude,
+        subscription_years=subscription_years,
+        subscription_years_exclude=subscription_years_exclude,
+        license_authorized_users=license_authorized_users,
+        license_authorized_users_exclude=license_authorized_users_exclude,
+        standard_unit_price=standard_unit_price,
+        standard_unit_price_exclude=standard_unit_price_exclude,
         contract_number=contract_number,
         keyword=keyword,
         customer_keyword=customer_keyword,
@@ -557,49 +682,15 @@ def get_contracts(
         effective_date_end=effective_date_end,
         expiry_date_start=expiry_date_start,
         expiry_date_end=expiry_date_end,
+        license_expiry_date_start=license_expiry_date_start,
+        license_expiry_date_end=license_expiry_date_end,
         order_by=order_by,
         order_dir=order_dir
     )
     
     result = []
     for contract in contracts:
-        customer_info = None
-        if contract.customer_id:
-            customer_data = db.execute(text("""
-                SELECT id, account_name
-                FROM crm_customers
-                WHERE id = :customer_id
-            """), {"customer_id": contract.customer_id}).first()
-            
-            if customer_data:
-                customer_info = {
-                    "id": customer_data[0],
-                    "account_name": customer_data[1]
-                }
-        
-        opportunity_info = None
-        if contract.opportunity_id:
-            opportunity_data = db.execute(text("""
-                SELECT id, opportunity_name
-                FROM crm_opportunities
-                WHERE id = :opportunity_id
-            """), {"opportunity_id": contract.opportunity_id}).first()
-            
-            if opportunity_data:
-                opportunity_info = {
-                    "id": opportunity_data[0],
-                    "opportunity_name": opportunity_data[1]
-                }
-        
-        contract_dict = _contract_response_base(contract)
-        contract_dict.update({
-            "customer_info": customer_info,
-            "opportunity_info": opportunity_info,
-            "owner_info": _get_user_basic_info(db, contract.owner_id),
-            "creator_info": _get_user_basic_info(db, contract.creator_id)
-        })
-        
-        result.append(ContractListResponse(**contract_dict))
+        result.append(ContractListResponse(**_contract_list_response_dict(db, contract)))
     
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
@@ -641,33 +732,18 @@ def get_contract_by_opportunity(
     if not contract:
         return None
     
-    customer_info = None
-    if contract.customer_id:
-        customer_data = db.execute(text("""
-            SELECT id, account_name
-            FROM crm_customers
-            WHERE id = :customer_id
-        """), {"customer_id": contract.customer_id}).first()
-        
-        if customer_data:
-            customer_info = {
-                "id": customer_data[0],
-                "account_name": customer_data[1]
-            }
-    
+    customer_info = _get_customer_basic_info(db, contract.customer_id)
     opportunity_info = {
         "id": opportunity.id,
-        "opportunity_name": opportunity.opportunity_name
+        "opportunity_name": opportunity.opportunity_name,
+        "purchase_type": opportunity.purchase_type,
     }
-    
-    contract_dict = _contract_response_base(contract)
-    contract_dict.update({
-        "customer_info": customer_info,
-        "opportunity_info": opportunity_info,
-        "owner_info": _get_user_basic_info(db, contract.owner_id),
-        "creator_info": _get_user_basic_info(db, contract.creator_id)
-    })
-    
+    contract_dict = _contract_list_response_dict(
+        db,
+        contract,
+        customer_info=customer_info,
+        opportunity_info=opportunity_info,
+    )
     return ContractListResponse(**contract_dict)
 
 
@@ -692,19 +768,7 @@ def get_contract(
 ):
     contract = check_contract_view_permission(contract_id, team_id, current_user, db)
     
-    customer_info = None
-    if contract.customer_id:
-        customer_data = db.execute(text("""
-            SELECT id, account_name
-            FROM crm_customers
-            WHERE id = :customer_id
-        """), {"customer_id": contract.customer_id}).first()
-        
-        if customer_data:
-            customer_info = {
-                "id": customer_data[0],
-                "account_name": customer_data[1]
-            }
+    customer_info = _get_customer_basic_info(db, contract.customer_id)
     
     opportunity_info = None
     if contract.opportunity_id:
@@ -735,7 +799,7 @@ def get_contract(
                 "mobile": contact_data[2]
             }
     
-    contract_dict = _contract_response_base(contract)
+    contract_dict = _contract_response_base(db, contract)
     contract_dict.update({
         "customer_info": customer_info,
         "opportunity_info": opportunity_info,
@@ -761,7 +825,7 @@ def get_contract(
 - 按状态查看客户的不同阶段合同
 """)
 def get_customer_contracts(
-    customer_id: int,
+    customer_id: str,
     skip: int = Query(0, ge=0, description="分页跳过记录数，从0开始"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数，默认100，最大100"),
     status: Optional[ContractStatusEnum] = Query(None, description="按合同状态筛选，可选值：DRAFT(草稿)、PENDING_REVIEW(待审核)、SIGNED(已签署)、EXPIRED(已到期)、TERMINATED(已终止)"),
@@ -773,7 +837,7 @@ def get_customer_contracts(
     
     contracts, total = contract_crud.get_by_customer_id(
         db=db,
-        customer_id=customer_id,
+        customer_id=customer.id,
         team_id=team_id,
         skip=skip,
         limit=limit,
@@ -783,33 +847,15 @@ def get_customer_contracts(
     result = []
     for contract in contracts:
         customer_info = {
-            "id": customer.id,
+            "id": customer.public_id,
+            "public_id": customer.public_id,
             "account_name": customer.account_name
         }
-        
-        opportunity_info = None
-        if contract.opportunity_id:
-            opportunity_data = db.execute(text("""
-                SELECT id, opportunity_name
-                FROM crm_opportunities
-                WHERE id = :opportunity_id
-            """), {"opportunity_id": contract.opportunity_id}).first()
-            
-            if opportunity_data:
-                opportunity_info = {
-                    "id": opportunity_data[0],
-                    "opportunity_name": opportunity_data[1]
-                }
-        
-        contract_dict = _contract_response_base(contract)
-        contract_dict.update({
-            "customer_info": customer_info,
-            "opportunity_info": opportunity_info,
-            "owner_info": _get_user_basic_info(db, contract.owner_id),
-            "creator_info": _get_user_basic_info(db, contract.creator_id)
-        })
-        
-        result.append(ContractListResponse(**contract_dict))
+        result.append(ContractListResponse(**_contract_list_response_dict(
+            db,
+            contract,
+            customer_info=customer_info,
+        )))
     
     return result
 
@@ -866,7 +912,7 @@ async def update_contract(
                 actor_id=str(current_user.id),
             ),
         )
-        return updated_contract
+        return ContractResponse(**_contract_response_base(db, updated_contract))
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

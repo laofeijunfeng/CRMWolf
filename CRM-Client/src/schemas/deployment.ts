@@ -9,7 +9,7 @@ import { z } from 'zod'
 // ===== 部署信息基础类型 =====
 export const DeploymentInfoSchema = z.object({
   id: z.number().int().positive(),
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   team_id: z.number().int().positive(),
   deployment_name: z.string().min(1, '部署名称不能为空').max(100, '部署名称长度不能超过100字符'),
   server_address: z.string()

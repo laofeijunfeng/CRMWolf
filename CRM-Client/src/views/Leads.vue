@@ -74,13 +74,13 @@ const ownerFilterOptions = ref<LeadOwnerFilterOption[]>([])
 
 // LeadDetailSheet 状态
 const sheetVisible = ref(false)
-const selectedLeadId = ref<number | undefined>(undefined)
+const selectedLeadId = ref<string | undefined>(undefined)
 const showLeadCreateDialog = ref(false)
 const showLeadEditDialog = ref(false)
 
 // 转化为客户弹窗状态
 const showConvertDialog = ref(false)
-const convertLeadId = ref<number | null>(null)
+const convertLeadId = ref<string | null>(null)
 
 const pagination = reactive({
   current: 1,

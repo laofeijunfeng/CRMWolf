@@ -1,7 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional, Tuple
-from datetime import datetime
 import json
 
 from app.models.procurement import (
@@ -12,6 +11,7 @@ from app.schemas.procurement import (
     ProcurementMethodCreate, ProcurementMethodUpdate,
     ProcurementStageTemplateCreate, ProcurementStageTemplateUpdate,
 )
+from app.utils.time import business_now
 
 
 class ProcurementMethodCRUD:
@@ -570,7 +570,7 @@ class ProcurementManagementToolCRUD:
                 ).first()
                 
                 if current_snapshot:
-                    current_snapshot.exited_at = datetime.utcnow()
+                    current_snapshot.exited_at = business_now()
                 
                 # 创建新的阶段快照
                 new_snapshot = OpportunityStageSnapshot(

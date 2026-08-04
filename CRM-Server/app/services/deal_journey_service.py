@@ -14,6 +14,7 @@ from app.models.deal_journey import (
     DealJourneyStatus,
 )
 from app.services.customer_intelligence_event_service import JsonObject
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class DealJourneyService:
         if not deal_journey_id:
             return None
 
-        normalized_event_time = self._as_datetime(event_time) or datetime.now()
+        normalized_event_time = self._as_datetime(event_time) or business_now()
         existing = db.query(CustomerDealJourneyEvent).filter(
             CustomerDealJourneyEvent.deal_journey_id == deal_journey_id,
             CustomerDealJourneyEvent.event_type == event_type,
@@ -164,7 +165,7 @@ class DealJourneyService:
             event_type=DealJourneyEventType.OPPORTUNITY_APPROVED,
             source_type=DealJourneySourceType.OPPORTUNITY,
             source_id=opportunity.id,
-            event_time=datetime.now(),
+            event_time=business_now(),
             actor_id=actor_id,
             summary=f"商机审批通过：{opportunity.opportunity_name}",
         )
@@ -201,7 +202,7 @@ class DealJourneyService:
             event_type=DealJourneyEventType.OPPORTUNITY_WON,
             source_type=DealJourneySourceType.OPPORTUNITY,
             source_id=opportunity.id,
-            event_time=self._closing_time(opportunity) or datetime.now(),
+            event_time=self._closing_time(opportunity) or business_now(),
             actor_id=actor_id,
             summary=f"商机赢单：{opportunity.opportunity_name}",
             metadata={"actual_amount": float(opportunity.actual_amount) if opportunity.actual_amount else None},
@@ -209,7 +210,7 @@ class DealJourneyService:
 
     def mark_lost(self, db: Session, opportunity, actor_id: Optional[str] = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
-        closed_at = datetime.now()
+        closed_at = business_now()
         journey.status = DealJourneyStatus.LOST
         journey.closed_at = closed_at
         self.record_event(
@@ -252,7 +253,7 @@ class DealJourneyService:
 
         if opportunity and opportunity.status == 2:
             journey.status = DealJourneyStatus.LOST
-            journey.closed_at = self._closing_time(opportunity) or datetime.now()
+            journey.closed_at = self._closing_time(opportunity) or business_now()
             return journey
 
         contracts = db.query(Contract).filter(
@@ -272,7 +273,7 @@ class DealJourneyService:
                 last_confirmed_at = self._as_datetime(last_payment_date)
 
             journey.status = DealJourneyStatus.COMPLETED
-            journey.closed_at = self._as_datetime(last_confirmed_at) or datetime.now()
+            journey.closed_at = self._as_datetime(last_confirmed_at) or business_now()
             return journey
 
         if opportunity and opportunity.status == 1:

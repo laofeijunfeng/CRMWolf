@@ -31,7 +31,7 @@ router = APIRouter(
 - 只有客户负责人或管理员可以设置
 """)
 def set_customer_default_procurement_method(
-    customer_id: int,
+    customer_id: str,
     procurement_method_id: int,
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
@@ -71,7 +71,7 @@ def set_customer_default_procurement_method(
 - 如果未设置，返回null
 """)
 def get_customer_default_procurement_method(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)

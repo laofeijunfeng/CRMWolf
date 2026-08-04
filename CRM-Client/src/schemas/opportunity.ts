@@ -62,7 +62,7 @@ export const OpportunityApiResponseSchema = z.object({
   id: z.number().int(),
   opportunity_number: z.string(),
   opportunity_name: z.string(),
-  customer_id: z.number().int(),
+  customer_id: z.string(),
   customer_name: OptionalStringFromNullableSchema,
   procurement_method_id: z.number().int().nullable(),
   procurement_method_info: OpportunityProcurementMethodInfoSchema.nullable().optional(),
@@ -91,7 +91,7 @@ export const OpportunityApiResponseSchema = z.object({
   updated_time: z.string(),
   version: z.number().int(),
   customer_info: z.object({
-    id: z.number().int(),
+    id: z.string(),
     account_name: z.string()
   }).passthrough().optional()
 }).passthrough()
@@ -100,7 +100,7 @@ export const OpportunityListItemApiSchema = z.object({
   id: z.number().int(),
   opportunity_number: z.string(),
   opportunity_name: z.string(),
-  customer_id: z.number().int(),
+  customer_id: z.string(),
   procurement_method_id: z.number().int().nullable(),
   procurement_method_info: OpportunityProcurementMethodInfoSchema.nullable(),
   total_amount: z.number(),
@@ -206,13 +206,13 @@ export const OpportunityStageMap: Record<string, string> = {
 export const OpportunityResponseSchema = z.object({
   id: z.number().int().positive(),
   opportunity_name: z.string().min(1).max(255),
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   expected_amount: z.number().positive().nullable(),
   expected_close_date: z.string().datetime().nullable(),
   stage: OpportunityStageSchema,
   probability: z.number().min(0).max(100).nullable(),
   owner_id: z.string().nullable(),
-  source_lead_id: z.number().int().nullable(),
+  source_lead_id: z.string().nullable(),
   lost_reason: z.string().nullable(),
   creator_id: z.string(),
   created_time: z.string().datetime(),
@@ -235,12 +235,12 @@ export type OpportunityListResponse = z.infer<typeof OpportunityListResponseSche
 // ===== 商机创建请求 =====
 export const OpportunityCreateSchema = z.object({
   opportunity_name: z.string().min(1).max(255).optional(),
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   expected_amount: z.number().positive().optional(),
   expected_close_date: z.string().datetime().optional(),
   stage: OpportunityStageSchema.optional().default('INITIAL_CONTACT'),
   probability: z.number().min(0).max(100).optional(),
-  source_lead_id: z.number().int().optional()
+  source_lead_id: z.string().optional()
 })
 
 export type OpportunityCreate = z.infer<typeof OpportunityCreateSchema>

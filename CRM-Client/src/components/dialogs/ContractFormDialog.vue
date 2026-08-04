@@ -44,10 +44,7 @@ import type { FileAttachmentItem } from '@/types/fileAttachment'
 // Zod schema for form validation - use coerce for number fields
 const schema = toTypedSchema(
   z.object({
-    customer_id: z.string().min(1, '请选择客户').refine((value) => {
-      const parsed = Number(value)
-      return Number.isInteger(parsed) && parsed > 0
-    }, '请选择客户'),
+    customer_id: z.string().min(1, '请选择客户'),
     contract_name: z.string().min(1, '请输入合同名称').max(100, '合同名称不能超过100字'),
     opportunity_id: z.coerce.number().min(1, '请选择商机'),
     signing_contact_id: z.coerce.number().min(1, '请选择签署联系人'),
@@ -61,7 +58,7 @@ const schema = toTypedSchema(
 )
 
 interface Props {
-  customerId?: number | undefined
+  customerId?: string | undefined
   customerName?: string | undefined
   customerLocked?: boolean
   fixedOpportunity?: ContractOpportunityOption | null
@@ -114,14 +111,14 @@ const lastGeneratedContractName = ref('')
 const selectedContractFile = ref<File | null>(null)
 
 interface CustomerOption {
-  id: number
+  id: string
   account_name: string
 }
 
 interface ContractOpportunityOption {
   id: number
   opportunity_name: string
-  customer_id: number
+  customer_id: string
   customer_name?: string
   total_amount: number
   user_count: number
@@ -193,7 +190,7 @@ const selectedOpportunity = computed<ContractOpportunityOption | null>(() => {
 })
 
 const selectedCustomerName = computed<string>(() => {
-  const customerId = Number(values.customer_id)
+  const customerId = String(values.customer_id ?? '')
   const selectedCustomer = customers.value.find((customer) => customer.id === customerId)
   const opportunityCustomerName = selectedOpportunity.value?.customer_name?.trim()
 
@@ -206,11 +203,11 @@ const selectedCustomerName = computed<string>(() => {
 
 const opportunitySelectDisabled = computed<boolean>(() => {
   if (hasFixedOpportunity.value) return true
-  return Number(values.customer_id) <= 0
+  return String(values.customer_id ?? '').trim() === ''
 })
 
 const opportunitySelectPlaceholder = computed<string>(() => {
-  if (Number(values.customer_id) <= 0) return '请先选择客户'
+  if (String(values.customer_id ?? '').trim() === '') return '请先选择客户'
   return loadingOpportunities.value ? '加载商机中...' : '请选择商机'
 })
 const customerSelectOptions = computed(() =>
@@ -236,7 +233,7 @@ const contactSelectOptions = computed(() =>
 )
 
 // Fetch available opportunities for this customer
-async function fetchOpportunities(customerId: number): Promise<void> {
+async function fetchOpportunities(customerId: string): Promise<void> {
   loadingOpportunities.value = true
   try {
     opportunities.value = await opportunityApi.getAvailableForContract(customerId)
@@ -254,7 +251,7 @@ async function fetchOpportunities(customerId: number): Promise<void> {
 }
 
 // Fetch contacts for this customer
-async function fetchContacts(customerId: number): Promise<void> {
+async function fetchContacts(customerId: string): Promise<void> {
   loadingContacts.value = true
   try {
     contacts.value = await customerApi.getContacts(customerId)
@@ -476,8 +473,8 @@ watch(() => props.open, async (newOpen) => {
 
 // Watch customer_id changes to fetch opportunities and contacts
 watch(() => values.customer_id, async (newCustomerId) => {
-  const customerId = Number(newCustomerId)
-  if (customerId > 0 && !props.customerLocked && !hasFixedOpportunity.value) {
+  const customerId = String(newCustomerId ?? '').trim()
+  if (customerId !== '' && !props.customerLocked && !hasFixedOpportunity.value) {
     // Clear previous selections
     setFieldValue('opportunity_id', undefined as unknown as number)
     setFieldValue('signing_contact_id', undefined as unknown as number)
@@ -516,7 +513,7 @@ const onSubmit = handleSubmit(async (formValues) => {
       // Create mode
       const data: ContractCreate = {
         contract_name: formValues['contract_name'],
-        customer_id: Number(formValues['customer_id']),
+        customer_id: formValues['customer_id'],
         opportunity_id: formValues['opportunity_id'],
         signing_contact_id: formValues['signing_contact_id'],
         user_count: formValues['user_count'],

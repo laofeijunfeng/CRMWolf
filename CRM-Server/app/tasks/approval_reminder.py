@@ -24,6 +24,7 @@ from app.crud.team import team_crud
 from app.crud.system_config import system_config_crud
 from app.services.approval_adapter import get_adapter
 from app.services.notification import NotificationService
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +51,12 @@ class ApprovalReminderScheduler:
         Returns:
             检查统计信息
         """
-        logger.info(f"[{datetime.now()}] 开始执行审批超时检查任务")
+        now = business_now()
+        logger.info(f"[{now}] 开始执行审批超时检查任务")
 
         db = SessionLocal()
         stats = {
-            "start_time": datetime.now(),
+            "start_time": now,
             "pending_approvals": 0,
             "light_reminders": 0,
             "medium_reminders": 0,
@@ -74,7 +76,7 @@ class ApprovalReminderScheduler:
             for approval in pending_approvals:
                 try:
                     # 计算等待时间（小时）
-                    waiting_hours = (datetime.now() - approval.created_time).total_seconds() / 3600
+                    waiting_hours = (business_now() - approval.created_time).total_seconds() / 3600
 
                     # 通过适配器按 business_type/business_id 取业务单据实体
                     # （泛化后回款/发票审批 contract_id=None，不能再按合同查；
@@ -156,11 +158,11 @@ class ApprovalReminderScheduler:
         finally:
             db.close()
 
-        stats["end_time"] = datetime.now()
+        stats["end_time"] = business_now()
         stats["duration_seconds"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
         logger.info(
-            f"[{datetime.now()}] 审批超时检查任务完成: "
+            f"[{business_now()}] 审批超时检查任务完成: "
             f"待审批={stats['pending_approvals']}, "
             f"轻度提醒={stats['light_reminders']}, "
             f"中度催办={stats['medium_reminders']}, "
@@ -261,7 +263,7 @@ class ApprovalReminderScheduler:
         if approval_key not in self._sent_reminders:
             self._sent_reminders[approval_key] = {}
 
-        self._sent_reminders[approval_key][threshold_hours] = datetime.now()
+        self._sent_reminders[approval_key][threshold_hours] = business_now()
 
     async def _send_light_reminder(
         self,
@@ -504,7 +506,7 @@ class ApprovalReminderScheduler:
     async def _run_hourly_scheduler(self):
         """每小时定时调度循环"""
         while self._running:
-            now = datetime.now()
+            now = business_now()
 
             # 每小时执行一次检查
             try:
@@ -520,7 +522,7 @@ class ApprovalReminderScheduler:
 
     def _cleanup_old_reminders(self):
         """清理过期的提醒记录（超过7天）"""
-        cutoff_time = datetime.now() - timedelta(days=7)
+        cutoff_time = business_now() - timedelta(days=7)
         keys_to_remove = []
 
         for approval_key, reminders in self._sent_reminders.items():

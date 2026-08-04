@@ -1,0 +1,181 @@
+[
+  {
+    "name": "grounded_customer_summary",
+    "execution": "fallback_answer",
+    "question": "总结一下这个客户现在什么情况",
+    "customer_context": {
+      "strong_context": {
+        "customer": {
+          "id": 101,
+          "account_name": "越秀金融",
+          "industry_name": "金融",
+          "city": "广州"
+        },
+        "customer_facts": [
+          {
+            "content": "客户已经进入 POC。",
+            "confidence": 0.91
+          }
+        ],
+        "opportunities": [
+          {
+            "name": "CRM 项目",
+            "stage": "POC",
+            "amount": "120000",
+            "procurement_method_id": 2
+          }
+        ],
+        "contracts": [],
+        "payment_plans": [],
+        "recent_activities": [
+          {
+            "content": "张总说本周开始 POC。",
+            "source_type": "customer_activity"
+          }
+        ]
+      },
+      "semantic_evidence": [
+        {
+          "evidence_id": "ev-grounded-1",
+          "score": 0.91,
+          "source_type": "follow_up",
+          "source_object_id": "801",
+          "title": "电话跟进",
+          "text": "张总说本周开始 POC。"
+        }
+      ],
+      "retrieval": {
+        "status": "ok",
+        "enabled": true,
+        "top_score": 0.91
+      }
+    },
+    "customer_memory": {
+      "summaries": [
+        {
+          "value": {
+            "summary": "客户正在 POC"
+          }
+        }
+      ]
+    },
+    "expected": {
+      "retrieval_status": "ok",
+      "allowed_answer_modes": ["grounded"],
+      "require_citations": true,
+      "min_confidence": 0.8,
+      "required_answer_terms": ["越秀金融", "POC"]
+    }
+  },
+  {
+    "name": "low_confidence_fallback",
+    "execution": "fallback_answer",
+    "question": "客户 POC 进展怎么样",
+    "customer_context": {
+      "strong_context": {
+        "customer": {
+          "account_name": "越秀金融",
+          "customer_brief_markdown": "## 客户概况\n客户正在推进 POC。"
+        },
+        "customer_facts": [],
+        "opportunities": [
+          {
+            "name": "CRM 项目",
+            "stage": "POC"
+          }
+        ],
+        "contracts": [],
+        "payment_plans": [],
+        "recent_activities": []
+      },
+      "semantic_evidence": [],
+      "retrieval": {
+        "status": "low_confidence",
+        "enabled": true,
+        "top_score": 0.21,
+        "min_score": 0.45
+      }
+    },
+    "customer_memory": {},
+    "expected": {
+      "retrieval_status": "low_confidence",
+      "allowed_answer_modes": ["fallback", "insufficient"],
+      "forbid_citations": true,
+      "min_confidence": 0.7,
+      "required_answer_terms": ["越秀金融", "POC"],
+      "required_missing_context_terms": ["高置信度语义证据"]
+    }
+  },
+  {
+    "name": "embedding_unavailable_profile_degraded",
+    "execution": "fallback_answer",
+    "question": "汇川技术现在是什么情况",
+    "customer_context": {
+      "strong_context": {
+        "customer": {
+          "account_name": "汇川技术",
+          "profile_status": "COMPLETED",
+          "company_background": "工业自动化控制与新能源领域的上市公司。",
+          "main_business": "主营工业自动化、新能源汽车电驱与轨道交通牵引系统。",
+          "project_background": "正在评估 CRM 用于规范大客户销售过程。",
+          "customer_brief_markdown": "## 客户概况\n客户重点关注销售过程管理和项目预测。"
+        },
+        "customer_facts": [],
+        "opportunities": [],
+        "contracts": [],
+        "payment_plans": [],
+        "recent_activities": []
+      },
+      "semantic_evidence": [],
+      "retrieval": {
+        "status": "embedding_unavailable",
+        "enabled": true
+      }
+    },
+    "customer_memory": {},
+    "expected": {
+      "retrieval_status": "embedding_unavailable",
+      "allowed_answer_modes": ["degraded"],
+      "forbid_citations": true,
+      "min_confidence": 0.6,
+      "required_answer_terms": ["汇川技术", "工业自动化", "销售过程管理"]
+    }
+  },
+  {
+    "name": "hallucinated_citation_downgraded",
+    "execution": "metadata_cleanup",
+    "model_result": {
+      "answer": "客户正在 POC。",
+      "confidence": 0.9,
+      "used_sections": ["customer", "evidence"],
+      "missing_context": [],
+      "answer_mode": "grounded",
+      "citations": [
+        {
+          "evidence_id": "fake-ev",
+          "score": 0.99
+        }
+      ]
+    },
+    "customer_context": {
+      "citations": [
+        {
+          "evidence_id": "real-ev",
+          "score": 0.88,
+          "text": "真实证据"
+        }
+      ],
+      "retrieval": {
+        "status": "ok"
+      }
+    },
+    "expected": {
+      "retrieval_status": "ok",
+      "allowed_answer_modes": ["fallback", "insufficient"],
+      "forbid_citations": true,
+      "min_confidence": 0.8,
+      "required_answer_terms": ["POC"],
+      "required_missing_context_terms": ["可验证的语义证据引用"]
+    }
+  }
+]

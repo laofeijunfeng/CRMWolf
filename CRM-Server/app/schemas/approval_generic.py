@@ -32,7 +32,8 @@ class GenericApprovalSubmitResponse(BaseModel):
 class ApprovalCustomerInfoResponse(BaseModel):
     """审批关联客户/公司基础信息。"""
 
-    id: int = Field(..., description="客户ID")
+    id: str = Field(..., description="客户对外ID")
+    public_id: Optional[str] = Field(None, description="客户对外ID")
     account_name: str = Field(..., description="客户公司名称")
     industry: Optional[str] = Field(None, description="所属行业")
     city: Optional[str] = Field(None, description="所在城市")

@@ -7,7 +7,6 @@ AI 解析客户信息接口
 """
 import json
 import logging
-from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -21,6 +20,7 @@ from app.core.deps import (
 )
 from app.models.user import User
 from app.api.customers import _ensure_customer_name_available
+from app.utils.time import business_now
 
 # 已有功能（MagicWand）
 from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest as CustomerActivityAICreateRequest
@@ -52,13 +52,13 @@ async def parse_customer_activity(
     - parsed: 解析完成，返回结构化信息
     - error: 错误信息
     """
-    check_customer_view_permission(request.customer_id, team_id, current_user, db)
+    customer = check_customer_view_permission(request.customer_id, team_id, current_user, db)
 
     async def generate_sse():
         db = SessionLocal()
         try:
             # 构建带客户上下文的消息
-            context_message = f"[客户：{request.customer_name}（ID：{request.customer_id}）]\n{request.content}"
+            context_message = f"[客户：{request.customer_name}（ID：{customer.public_id}）]\n{request.content}"
 
             async for event in follow_up_parser_service.parse_follow_up_info_stream(
                 db=db,
@@ -67,7 +67,7 @@ async def parse_customer_activity(
             ):
                 # 添加客户信息到 parsed 事件
                 if event["event"] == "parsed":
-                    event["customer_id"] = request.customer_id
+                    event["customer_id"] = customer.public_id
                     event["customer_name"] = request.customer_name
                 yield f"data: {json.dumps(event)}\n\n"
         finally:
@@ -109,7 +109,7 @@ async def create_customer_activity_from_ai(
     if request.next_follow_time:
         next_follow_time_dt = follow_up_parser_service.parse_relative_time(
             request.next_follow_time,
-            base_date=datetime.now()
+            base_date=business_now()
         )
 
     activity_create = CustomerActivityCreate(
@@ -123,7 +123,7 @@ async def create_customer_activity_from_ai(
     activity = customer_activity_crud.create(
         db=db,
         obj_in=activity_create,
-        customer_id=request.customer_id,
+        customer_id=customer.id,
         creator_id=str(current_user.id),
         team_id=customer.team_id,
         operator_name=current_user.name if hasattr(current_user, 'name') else None
@@ -132,7 +132,7 @@ async def create_customer_activity_from_ai(
 
     return {
         "id": activity.id,
-        "customer_id": request.customer_id,
+        "customer_id": customer.public_id,
         "source_content": request.content,
         "activity_kind": activity.activity_kind,
         "next_action": request.next_action,
@@ -225,7 +225,8 @@ async def create_customer_from_ai(
         )
         
         return {
-            "id": customer.id,
+            "id": customer.public_id,
+            "public_id": customer.public_id,
             "account_name": customer.account_name,
             "city": customer.city,
             "status": customer.status,

@@ -6,12 +6,12 @@
 """
 import asyncio
 import logging
-from datetime import datetime
 from typing import Optional
 
 from app.core.database import SessionLocal
 from app.services.score_service import score_service
 from app.crud.team import team_crud
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +29,12 @@ class ScoreScheduler:
         Returns:
             刷新统计信息
         """
-        logger.info(f"[{datetime.now()}] 开始执行热力值每日刷新任务")
+        now = business_now()
+        logger.info(f"[{now}] 开始执行热力值每日刷新任务")
 
         db = SessionLocal()
         stats = {
-            "start_time": datetime.now(),
+            "start_time": now,
             "teams_processed": 0,
             "leads_updated": 0,
             "customers_updated": 0,
@@ -69,11 +70,11 @@ class ScoreScheduler:
         finally:
             db.close()
 
-        stats["end_time"] = datetime.now()
+        stats["end_time"] = business_now()
         stats["duration_seconds"] = (stats["end_time"] - stats["start_time"]).total_seconds()
 
         logger.info(
-            f"[{datetime.now()}] 热力值每日刷新任务完成: "
+            f"[{business_now()}] 热力值每日刷新任务完成: "
             f"处理团队={stats['teams_processed']}, "
             f"更新线索={stats['leads_updated']}, "
             f"更新客户={stats['customers_updated']}, "
@@ -114,7 +115,7 @@ class ScoreScheduler:
     async def _run_daily_scheduler(self):
         """每日定时调度循环"""
         while self._running:
-            now = datetime.now()
+            now = business_now()
 
             # 每天凌晨 2 点执行
             if now.hour == 2 and now.minute == 0:

@@ -47,7 +47,7 @@ import {
 interface Props {
   open: boolean
   mode: 'create' | 'edit'
-  customerId?: number
+  customerId?: string
 }
 
 interface Emits {
@@ -148,7 +148,7 @@ function handleProcurementMethodChange(value: string, handleChange: (value: numb
 }
 
 // Load customer detail in edit mode
-watch([(): boolean => props.open, (): number | undefined => props.customerId], async ([open, customerId]): Promise<void> => {
+watch([(): boolean => props.open, (): string | undefined => props.customerId], async ([open, customerId]): Promise<void> => {
   if (open) {
     void fetchProcurementMethodOptions()
   }

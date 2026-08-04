@@ -13,12 +13,13 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { InputField } from '@/components/crmwolf'
-import deploymentApi, { type DeploymentInfoCreate } from '@/api/deployment'
+import deploymentApi from '@/api/deployment'
+import type { DeploymentInfoCreate } from '@/schemas/deployment'
 import { handleApiError } from '@/utils/errorHandler'
 
 interface Props {
   open: boolean
-  customerId: number
+  customerId: string
 }
 
 interface Emits {

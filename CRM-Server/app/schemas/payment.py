@@ -99,7 +99,7 @@ class PaymentPlanResponse(PaymentPlanBase):
     payment_records: List[PaymentRecordInfo] = Field(default_factory=list, description="回款记录列表")
     contract_name: Optional[str] = Field(None, description="合同名称")
     creator_id: Optional[str] = Field(None, description="合同创建人ID")
-    customer_id: Optional[int] = Field(None, description="客户ID")
+    customer_id: Optional[str] = Field(None, description="客户对外ID")
     customer_name: Optional[str] = Field(None, description="客户名称")
     opportunity_id: Optional[int] = Field(None, description="商机ID")
     opportunity_name: Optional[str] = Field(None, description="商机名称")
@@ -166,10 +166,13 @@ class PaymentRecordResponse(PaymentRecordBase):
     contract_id: Optional[int] = Field(None, description="合同ID")
     contract_name: Optional[str] = Field(None, description="合同名称")
     stage_name: Optional[str] = Field(None, description="回款阶段名称")
-    customer_id: Optional[int] = Field(None, description="客户ID")
+    customer_id: Optional[str] = Field(None, description="客户对外ID")
     customer_name: Optional[str] = Field(None, description="客户名称")
     opportunity_id: Optional[int] = Field(None, description="商机ID")
     opportunity_name: Optional[str] = Field(None, description="商机名称")
+    invoice_title_text: Optional[str] = Field(None, description="关联发票开票抬头")
+    owner_id: Optional[str] = Field(None, description="负责人用户ID")
+    owner_name: Optional[str] = Field(None, description="负责人姓名")
     commission_member_id: Optional[str] = Field(None, description="提成协作成员用户ID")
     commission_member_name: Optional[str] = Field(None, description="提成协作成员姓名")
 
@@ -187,7 +190,7 @@ class ContractPaymentSummary(BaseModel):
     completed_plans_count: int
     overdue_plans_count: int
     remaining_amount: float
-    customer_id: Optional[int] = Field(None, description="客户ID")
+    customer_id: Optional[str] = Field(None, description="客户对外ID")
     customer_name: Optional[str] = Field(None, description="客户名称")
     opportunity_id: Optional[int] = Field(None, description="商机ID")
     opportunity_name: Optional[str] = Field(None, description="商机名称")

@@ -34,7 +34,8 @@ export type ApproverStatus = z.infer<typeof ApproverStatusSchema>
 
 // ===== 关联客户/公司基础信息 =====
 export const ApprovalCustomerInfoSchema = z.object({
-  id: z.number().int().positive(),
+  id: z.string().min(1),
+  public_id: z.string().min(1).optional(),
   account_name: z.string().min(1),
   industry: z.string().nullable().optional(),
   city: z.string().nullable().optional(),

@@ -1,4 +1,6 @@
+/* eslint-disable crmwolf/require-zod-schema */
 import request from '@/utils/request'
+import { ApiResponseSchema } from '@/schemas/common'
 
 export interface ProcurementMethod {
   id: number
@@ -122,119 +124,137 @@ export interface ActiveOpportunitiesByStageResponse {
   count: number
 }
 
+const ProcurementMethodListResponseSchema = ApiResponseSchema<ProcurementMethodResponse[]>()
+const ProcurementMethodResponseSchema = ApiResponseSchema<ProcurementMethodResponse>()
+const ProcurementMethodWithStagesSchema = ApiResponseSchema<ProcurementMethodWithStages>()
+const ProcurementStageTemplateListResponseSchema = ApiResponseSchema<ProcurementStageTemplateResponse[]>()
+const ProcurementStageTemplateResponseSchema = ApiResponseSchema<ProcurementStageTemplateResponse>()
+const MessageResponseSchema = ApiResponseSchema<{ message: string }>()
+const TemplateChangeLogListSchema = ApiResponseSchema<StageTemplateChangeLog[]>()
+const TemplateChangeAssessmentSchema = ApiResponseSchema<{ opportunity_count: number; active_opportunity_count: number }>()
+const BatchMigrateResponseSchema = ApiResponseSchema<{ message: string; migrated_count: number; failed_count: number }>()
+const ActiveOpportunitiesByStageResponseSchema = ApiResponseSchema<ActiveOpportunitiesByStageResponse>()
+const OpportunityStageSnapshotSchema = ApiResponseSchema<OpportunityStageSnapshot>()
+const OpportunityStageSnapshotListSchema = ApiResponseSchema<OpportunityStageSnapshot[]>()
+const ProcurementStageTemplateListSchema = ApiResponseSchema<ProcurementStageTemplate[]>()
+const OpportunityProcurementStageInfoListSchema = ApiResponseSchema<OpportunityProcurementStageInfo[]>()
+const OpportunityMoveStageResponseSchema = ApiResponseSchema<Record<string, unknown>>()
+const ProcurementMethodOptionListSchema = ApiResponseSchema<ProcurementMethodOption[]>()
+const NullableProcurementMethodResponseSchema = ApiResponseSchema<ProcurementMethodResponse | null>()
+
 const procurementApi = {
-  getProcurementMethods: (params?: ProcurementMethodListParams) => {
-    return request.get<ProcurementMethodResponse[]>('/v1/procurement-methods/', { params })
+  getProcurementMethods: async (params?: ProcurementMethodListParams): Promise<ProcurementMethodResponse[]> => {
+    return ProcurementMethodListResponseSchema.parse(await request.get<ProcurementMethodResponse[]>('/v1/procurement-methods/', { params }))
   },
 
-  getProcurementMethod: (methodId: number) => {
-    return request.get<ProcurementMethodWithStages>(`/v1/procurement-methods/${methodId}`)
+  getProcurementMethod: async (methodId: number): Promise<ProcurementMethodWithStages> => {
+    return ProcurementMethodWithStagesSchema.parse(await request.get<ProcurementMethodWithStages>(`/v1/procurement-methods/${methodId}`))
   },
 
-  createProcurementMethod: (data: ProcurementMethodCreate) => {
-    return request.post<ProcurementMethodResponse>('/v1/procurement-methods/', data)
+  createProcurementMethod: async (data: ProcurementMethodCreate): Promise<ProcurementMethodResponse> => {
+    return ProcurementMethodResponseSchema.parse(await request.post<ProcurementMethodResponse>('/v1/procurement-methods/', data))
   },
 
-  updateProcurementMethod: (methodId: number, data: ProcurementMethodUpdate) => {
-    return request.put<ProcurementMethodResponse>(`/v1/procurement-methods/${methodId}`, data)
+  updateProcurementMethod: async (methodId: number, data: ProcurementMethodUpdate): Promise<ProcurementMethodResponse> => {
+    return ProcurementMethodResponseSchema.parse(await request.put<ProcurementMethodResponse>(`/v1/procurement-methods/${methodId}`, data))
   },
 
-  fullUpdateProcurementMethod: (methodId: number, data: ProcurementMethodWithStagesUpdate) => {
-    return request.put<ProcurementMethodWithStages>(`/v1/procurement-methods/${methodId}/full`, data)
+  fullUpdateProcurementMethod: async (methodId: number, data: ProcurementMethodWithStagesUpdate): Promise<ProcurementMethodWithStages> => {
+    return ProcurementMethodWithStagesSchema.parse(await request.put<ProcurementMethodWithStages>(`/v1/procurement-methods/${methodId}/full`, data))
   },
 
-  batchUpdateStages: (methodId: number, data: BatchUpdateStagesRequest) => {
-    return request.put<ProcurementStageTemplateResponse[]>(`/v1/procurement-methods/${methodId}/stages`, data)
+  batchUpdateStages: async (methodId: number, data: BatchUpdateStagesRequest): Promise<ProcurementStageTemplateResponse[]> => {
+    return ProcurementStageTemplateListResponseSchema.parse(await request.put<ProcurementStageTemplateResponse[]>(`/v1/procurement-methods/${methodId}/stages`, data))
   },
 
-  deleteProcurementMethod: (methodId: number) => {
-    return request.delete<{ message: string }>(`/v1/procurement-methods/${methodId}`)
+  deleteProcurementMethod: async (methodId: number): Promise<{ message: string }> => {
+    return MessageResponseSchema.parse(await request.delete<{ message: string }>(`/v1/procurement-methods/${methodId}`))
   },
 
-  getStageTemplates: (params: StageTemplateListParams) => {
-    return request.get<ProcurementStageTemplateResponse[]>('/v1/procurement-stage-templates/', { params })
+  getStageTemplates: async (params: StageTemplateListParams): Promise<ProcurementStageTemplateResponse[]> => {
+    return ProcurementStageTemplateListResponseSchema.parse(await request.get<ProcurementStageTemplateResponse[]>('/v1/procurement-stage-templates/', { params }))
   },
 
-  getStageTemplate: (templateId: number) => {
-    return request.get<ProcurementStageTemplateResponse>(`/v1/procurement-stage-templates/${templateId}`)
+  getStageTemplate: async (templateId: number): Promise<ProcurementStageTemplateResponse> => {
+    return ProcurementStageTemplateResponseSchema.parse(await request.get<ProcurementStageTemplateResponse>(`/v1/procurement-stage-templates/${templateId}`))
   },
 
-  createStageTemplate: (data: ProcurementStageTemplateCreate) => {
-    return request.post<ProcurementStageTemplateResponse>('/v1/procurement-stage-templates/', data)
+  createStageTemplate: async (data: ProcurementStageTemplateCreate): Promise<ProcurementStageTemplateResponse> => {
+    return ProcurementStageTemplateResponseSchema.parse(await request.post<ProcurementStageTemplateResponse>('/v1/procurement-stage-templates/', data))
   },
 
-  updateStageTemplate: (templateId: number, data: ProcurementStageTemplateUpdate) => {
-    return request.put<ProcurementStageTemplateResponse>(`/v1/procurement-stage-templates/${templateId}`, data)
+  updateStageTemplate: async (templateId: number, data: ProcurementStageTemplateUpdate): Promise<ProcurementStageTemplateResponse> => {
+    return ProcurementStageTemplateResponseSchema.parse(await request.put<ProcurementStageTemplateResponse>(`/v1/procurement-stage-templates/${templateId}`, data))
   },
 
-  deleteStageTemplate: (templateId: number) => {
-    return request.delete<{ message: string }>(`/v1/procurement-stage-templates/${templateId}`)
+  deleteStageTemplate: async (templateId: number): Promise<{ message: string }> => {
+    return MessageResponseSchema.parse(await request.delete<{ message: string }>(`/v1/procurement-stage-templates/${templateId}`))
   },
 
-  setOpportunityProcurementMethod: (opportunityId: number, procurementMethodId: number) => {
-    return request.post<{ message: string }>(`/v1/opportunities/${opportunityId}/set-procurement-method`, {
+  setOpportunityProcurementMethod: async (opportunityId: number, procurementMethodId: number): Promise<{ message: string }> => {
+    return MessageResponseSchema.parse(await request.post<{ message: string }>(`/v1/opportunities/${opportunityId}/set-procurement-method`, {
       procurement_method_id: procurementMethodId
-    })
+    }))
   },
 
-  getStageTemplateChangeLogs: (templateId: number) => {
-    return request.get<StageTemplateChangeLog[]>(`/v1/procurement-stage-templates/${templateId}/change-logs`)
+  getStageTemplateChangeLogs: async (templateId: number): Promise<StageTemplateChangeLog[]> => {
+    return TemplateChangeLogListSchema.parse(await request.get<StageTemplateChangeLog[]>(`/v1/procurement-stage-templates/${templateId}/change-logs`))
   },
 
-  setCustomerDefaultProcurementMethod: (customerId: number, procurementMethodId: number | null) => {
-    return request.post<{ message: string }>(`/v1/customers/${customerId}/set-default-procurement-method`, {
+  setCustomerDefaultProcurementMethod: async (customerId: string, procurementMethodId: number | null): Promise<{ message: string }> => {
+    return MessageResponseSchema.parse(await request.post<{ message: string }>(`/v1/customers/${customerId}/set-default-procurement-method`, {
       procurement_method_id: procurementMethodId
-    })
+    }))
   },
 
-  getCustomerDefaultProcurementMethod: (customerId: number) => {
-    return request.get<ProcurementMethodResponse | null>(`/v1/customers/${customerId}/default-procurement-method`)
+  getCustomerDefaultProcurementMethod: async (customerId: string): Promise<ProcurementMethodResponse | null> => {
+    return NullableProcurementMethodResponseSchema.parse(await request.get<ProcurementMethodResponse | null>(`/v1/customers/${customerId}/default-procurement-method`))
   },
 
-  assessTemplateChange: (templateId: number) => {
-    return request.get<{ opportunity_count: number; active_opportunity_count: number }>(`/v1/procurement-admin/assess-template-change/${templateId}`)
+  assessTemplateChange: async (templateId: number): Promise<{ opportunity_count: number; active_opportunity_count: number }> => {
+    return TemplateChangeAssessmentSchema.parse(await request.get<{ opportunity_count: number; active_opportunity_count: number }>(`/v1/procurement-admin/assess-template-change/${templateId}`))
   },
 
-  batchMigrateOpportunities: (sourceMethodId: number, targetMethodId: number, opportunityIds?: number[]) => {
-    return request.post<{ message: string; migrated_count: number; failed_count: number }>('/v1/procurement-admin/batch-migrate-opportunities', {
+  batchMigrateOpportunities: async (sourceMethodId: number, targetMethodId: number, opportunityIds?: number[]): Promise<{ message: string; migrated_count: number; failed_count: number }> => {
+    return BatchMigrateResponseSchema.parse(await request.post<{ message: string; migrated_count: number; failed_count: number }>('/v1/procurement-admin/batch-migrate-opportunities', {
       source_method_id: sourceMethodId,
       target_method_id: targetMethodId,
       opportunity_ids: opportunityIds
-    })
+    }))
   },
 
-  rollbackTemplate: (templateId: number, logId: number) => {
-    return request.post<{ message: string }>(`/v1/procurement-admin/rollback-template/${templateId}`, {
+  rollbackTemplate: async (templateId: number, logId: number): Promise<{ message: string }> => {
+    return MessageResponseSchema.parse(await request.post<{ message: string }>(`/v1/procurement-admin/rollback-template/${templateId}`, {
       log_id: logId
-    })
+    }))
   },
 
-  getActiveOpportunities: (stageTemplateId: number) => {
-    return request.get<ActiveOpportunitiesByStageResponse>(`/v1/procurement-admin/active-opportunities/${stageTemplateId}`)
+  getActiveOpportunities: async (stageTemplateId: number): Promise<ActiveOpportunitiesByStageResponse> => {
+    return ActiveOpportunitiesByStageResponseSchema.parse(await request.get<ActiveOpportunitiesByStageResponse>(`/v1/procurement-admin/active-opportunities/${stageTemplateId}`))
   },
 
-  getOpportunityCurrentStage: (opportunityId: number) => {
-    return request.get<OpportunityStageSnapshot>(`/v1/opportunities/${opportunityId}/current-stage`)
+  getOpportunityCurrentStage: async (opportunityId: number): Promise<OpportunityStageSnapshot> => {
+    return OpportunityStageSnapshotSchema.parse(await request.get<OpportunityStageSnapshot>(`/v1/opportunities/${opportunityId}/current-stage`))
   },
 
-  getOpportunityStageHistory: (opportunityId: number) => {
-    return request.get<OpportunityStageSnapshot[]>(`/v1/opportunities/${opportunityId}/stage-history`)
+  getOpportunityStageHistory: async (opportunityId: number): Promise<OpportunityStageSnapshot[]> => {
+    return OpportunityStageSnapshotListSchema.parse(await request.get<OpportunityStageSnapshot[]>(`/v1/opportunities/${opportunityId}/stage-history`))
   },
 
-  getAvailableStages: (opportunityId: number) => {
-    return request.get<ProcurementStageTemplate[]>(`/v1/opportunities/${opportunityId}/available-stages`)
+  getAvailableStages: async (opportunityId: number): Promise<ProcurementStageTemplate[]> => {
+    return ProcurementStageTemplateListSchema.parse(await request.get<ProcurementStageTemplate[]>(`/v1/opportunities/${opportunityId}/available-stages`))
   },
 
-  getOpportunityProcurementStages: (opportunityId: number) => {
-    return request.get<OpportunityProcurementStageInfo[]>(`/v1/opportunities/${opportunityId}/procurement-stages`)
+  getOpportunityProcurementStages: async (opportunityId: number): Promise<OpportunityProcurementStageInfo[]> => {
+    return OpportunityProcurementStageInfoListSchema.parse(await request.get<OpportunityProcurementStageInfo[]>(`/v1/opportunities/${opportunityId}/procurement-stages`))
   },
 
-  moveOpportunityStage: (opportunityId: number, data: OpportunityMoveStageRequest) => {
-    return request.post<Record<string, unknown>>(`/v1/opportunities/${opportunityId}/move-stage`, data)
+  moveOpportunityStage: async (opportunityId: number, data: OpportunityMoveStageRequest): Promise<Record<string, unknown>> => {
+    return OpportunityMoveStageResponseSchema.parse(await request.post<Record<string, unknown>>(`/v1/opportunities/${opportunityId}/move-stage`, data))
   },
 
-  getProcurementMethodOptions: () => {
-    return request.get<ProcurementMethodOption[]>('/v1/procurement-methods/options')
+  getProcurementMethodOptions: async (): Promise<ProcurementMethodOption[]> => {
+    return ProcurementMethodOptionListSchema.parse(await request.get<ProcurementMethodOption[]>('/v1/procurement-methods/options'))
   }
 }
 

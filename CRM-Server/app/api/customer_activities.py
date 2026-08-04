@@ -56,21 +56,31 @@ def _build_activity_response(db: Session, activity) -> CustomerActivityResponse:
     customer_info = None
     if activity.customer_id:
         customer_data = db.execute(text("""
-            SELECT id, account_name
+            SELECT public_id, account_name
             FROM crm_customers
             WHERE id = :customer_id
         """), {"customer_id": activity.customer_id}).first()
         if customer_data:
             customer_info = {
                 "id": customer_data[0],
+                "public_id": customer_data[0],
                 "account_name": customer_data[1],
             }
+
+    original_lead_public_id = None
+    if activity.original_lead_id:
+        lead_data = db.execute(text("""
+            SELECT public_id
+            FROM crm_leads
+            WHERE id = :lead_id
+        """), {"lead_id": activity.original_lead_id}).first()
+        original_lead_public_id = lead_data[0] if lead_data else None
 
     meta = get_activity_kind_meta(activity.activity_kind)
     return CustomerActivityResponse(**{
         "id": activity.id,
-        "customer_id": activity.customer_id,
-        "original_lead_id": activity.original_lead_id,
+        "customer_id": customer_info["id"] if customer_info else None,
+        "original_lead_id": original_lead_public_id,
         "deal_journey_id": activity.deal_journey_id,
         "activity_kind": activity.activity_kind,
         "activity_category": meta["category"],
@@ -108,17 +118,17 @@ def get_activity_kinds():
 
 @router.post("/{customer_id}", response_model=CustomerActivityResponse, status_code=status.HTTP_201_CREATED, summary="创建客户活动")
 async def create_activity(
-    customer_id: int,
+    customer_id: str,
     activity: CustomerActivityCreate,
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    check_customer_activity_permission(customer_id, team_id, current_user, db)
+    customer = check_customer_activity_permission(customer_id, team_id, current_user, db)
     created = customer_activity_crud.create(
         db=db,
         obj_in=activity,
-        customer_id=customer_id,
+        customer_id=customer.id,
         creator_id=str(current_user.id),
         team_id=team_id,
         operator_name=current_user.name,
@@ -129,17 +139,17 @@ async def create_activity(
 
 @router.get("/{customer_id}", response_model=List[CustomerActivityResponse], summary="查询客户活动列表")
 def get_activities(
-    customer_id: int,
+    customer_id: str,
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    check_customer_view_permission(customer_id, team_id, current_user, db)
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
     activities, _ = customer_activity_crud.get_by_customer_id(
         db=db,
-        customer_id=customer_id,
+        customer_id=customer.id,
         team_id=team_id,
         skip=skip,
         limit=limit,

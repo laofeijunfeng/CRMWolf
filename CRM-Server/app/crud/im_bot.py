@@ -1,5 +1,4 @@
 """CRUD helpers for IM bot integrations."""
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.agent import AgentSession
 from app.models.im_bot import AgentChannelSession, IMInboundEvent
 from app.schemas.agent import AgentSessionCreate
+from app.utils.time import business_now
 
 
 class AgentChannelSessionCRUD:
@@ -160,7 +160,7 @@ class IMInboundEventCRUD:
         db_obj.agent_task_id = agent_task_id
         db_obj.agent_interaction_type = agent_interaction_type
         db_obj.error_message = error_message
-        db_obj.processed_time = datetime.utcnow()
+        db_obj.processed_time = business_now()
         db.commit()
         db.refresh(db_obj)
         return db_obj

@@ -1,6 +1,7 @@
 """Action-planning domain subgraph for the CRM Agent."""
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Literal
 
@@ -408,7 +409,7 @@ class ActionPlanningGraphService:
             "user_id": state.get("user_id") or 0,
             "session_id": state.get("session_id") or 0,
             "parsed": parsed,
-            "customer_candidates": state.get("customer_candidates") or [],
+            "customer_candidates": _resolved_customer_candidates(state),
         })
         return {
             "response": result.get("response") or "",
@@ -460,7 +461,7 @@ class ActionPlanningGraphService:
             "user_id": state.get("user_id") or 0,
             "session_id": state.get("session_id") or 0,
             "parsed": parsed,
-            "customer_candidates": state.get("customer_candidates") or [],
+            "customer_candidates": _resolved_customer_candidates(state),
             "business_context": state.get("business_context") or {},
         })
         return {
@@ -479,7 +480,7 @@ class ActionPlanningGraphService:
             "user_id": state.get("user_id") or 0,
             "session_id": state.get("session_id") or 0,
             "parsed": parsed,
-            "customer_candidates": state.get("customer_candidates") or [],
+            "customer_candidates": _resolved_customer_candidates(state),
         })
         return {
             "response": result.get("response") or "",
@@ -497,7 +498,7 @@ class ActionPlanningGraphService:
             "user_id": state.get("user_id") or 0,
             "session_id": state.get("session_id") or 0,
             "parsed": parsed,
-            "customer_candidates": state.get("customer_candidates") or [],
+            "customer_candidates": _resolved_customer_candidates(state),
         })
         return {
             "response": result.get("response") or "",
@@ -515,7 +516,7 @@ class ActionPlanningGraphService:
             "user_id": state.get("user_id") or 0,
             "session_id": state.get("session_id") or 0,
             "parsed": parsed,
-            "customer_candidates": state.get("customer_candidates") or [],
+            "customer_candidates": _resolved_customer_candidates(state),
         })
         return {
             "response": result.get("response") or "",
@@ -533,7 +534,7 @@ class ActionPlanningGraphService:
             "user_id": state.get("user_id") or 0,
             "session_id": state.get("session_id") or 0,
             "parsed": parsed,
-            "customer_candidates": state.get("customer_candidates") or [],
+            "customer_candidates": _resolved_customer_candidates(state),
         })
         return {
             "response": result.get("response") or "",
@@ -551,7 +552,7 @@ class ActionPlanningGraphService:
             "user_id": state.get("user_id") or 0,
             "session_id": state.get("session_id") or 0,
             "parsed": parsed,
-            "customer_candidates": state.get("customer_candidates") or [],
+            "customer_candidates": _resolved_customer_candidates(state),
             "business_context": state.get("business_context") or {},
         })
         return {
@@ -698,8 +699,10 @@ class ActionPlanningGraphService:
         return update
 
     def _finalize_response(self, state: ActionPlanningGraphState) -> ActionPlanningGraphState:
+        content_format = "text"
         if state.get("intent") == "CUSTOMER_QUERY" and not coerce_json_dict(state.get("action")):
-            response = state.get("response") or _customer_query_unresolved_response(state)
+            response = state.get("response") or _customer_query_context_response(state)
+            content_format = "markdown"
         else:
             response = (
                 state.get("response")
@@ -711,9 +714,229 @@ class ActionPlanningGraphService:
                 "event": "final",
                 "intent": state.get("intent") or "UNKNOWN",
                 "content": response,
+                "content_format": content_format,
                 "tool_execution_enabled": False,
             }],
         }
+
+
+def _customer_query_context_response(state: ActionPlanningGraphState) -> str:
+    business_context = coerce_json_dict(state.get("business_context"))
+    if not business_context:
+        return _customer_query_unresolved_response(state)
+
+    customer = coerce_json_dict(business_context.get("customer")) or coerce_json_dict(state.get("selected_customer"))
+    customer_name = _display_text(customer.get("account_name")) or _display_text(customer.get("name")) or "该客户"
+    lines = [f"已读取「{customer_name}」的客户档案和业务上下文。", ""]
+
+    profile_parts = []
+    industry = _display_text(coerce_json_dict(customer.get("industry_info")).get("name")) or _display_text(customer.get("industry"))
+    city = _display_text(customer.get("city"))
+    company_scale = _display_text(customer.get("company_scale"))
+    source = _display_text(customer.get("source"))
+    if industry:
+        profile_parts.append(f"行业：{industry}")
+    if city:
+        profile_parts.append(f"城市：{city}")
+    if company_scale:
+        profile_parts.append(f"规模：{company_scale}")
+    if source:
+        profile_parts.append(f"来源：{source}")
+    if profile_parts:
+        lines.append(f"- **基础档案**：{'；'.join(profile_parts)}。")
+
+    brief = _customer_brief(customer)
+    background = (
+        _brief_content(brief, "overview", "enterprise_background")
+        or _display_text(customer.get("company_background"))
+        or _display_text(customer.get("main_business"))
+    )
+    if background:
+        lines.append(f"- **业务背景**：{_truncate_sentence(background, 120)}")
+
+    project_background = (
+        _brief_content(brief, "overview", "project_need_background")
+        or _display_text(customer.get("project_background"))
+    )
+    if project_background:
+        lines.append(f"- **需求背景**：{_truncate_sentence(project_background, 140)}")
+
+    contacts = _customer_contacts(customer)
+    if contacts:
+        contact_parts = []
+        for contact in contacts[:3]:
+            name = _display_text(contact.get("name")) or "未命名联系人"
+            role_parts = []
+            if contact.get("is_primary"):
+                role_parts.append("主联系人")
+            if contact.get("is_decision_maker"):
+                role_parts.append("决策人")
+            position = _display_text(contact.get("position"))
+            if position:
+                role_parts.append(position)
+            mobile = _display_text(contact.get("mobile"))
+            suffix = f"（{'，'.join(role_parts)}）" if role_parts else ""
+            phone = f"，电话 {mobile}" if mobile else ""
+            contact_parts.append(f"{name}{suffix}{phone}")
+        lines.append(f"- **联系人**：{'；'.join(contact_parts)}。")
+
+    opportunities = business_rules.context_items(business_context.get("opportunities"))
+    if opportunities:
+        opportunity_parts = []
+        for opportunity in opportunities[:3]:
+            name = _display_text(opportunity.get("opportunity_name")) or _display_text(opportunity.get("name")) or "未命名商机"
+            stage = _display_text(opportunity.get("stage_name")) or _display_text(opportunity.get("current_stage_name"))
+            amount = _display_amount(opportunity.get("expected_amount") or opportunity.get("amount"))
+            close_date = _display_text(opportunity.get("expected_close_date") or opportunity.get("expected_deal_date"))
+            detail = name
+            if stage:
+                detail += f"，阶段：{stage}"
+            if amount:
+                detail += f"，预计金额：{amount}"
+            if close_date:
+                detail += f"，预计成交：{close_date}"
+            opportunity_parts.append(detail)
+        lines.append(f"- **商机进展**：{'；'.join(opportunity_parts)}。")
+
+    lines.extend(_customer_query_record_sections(business_context, customer))
+
+    recent_progress = _brief_content(brief, "overview", "follow_up_progress") or _latest_activity_content(
+        business_context.get("customer_activities")
+    )
+    if recent_progress:
+        lines.append(f"- **最近进展**：{_truncate_sentence(recent_progress, 160)}")
+
+    next_step = _brief_content(brief, "next_best_actions", "summary") or _next_action_from_activities(
+        business_context.get("customer_activities")
+    )
+    if next_step:
+        lines.append(f"- **下一步建议**：{_truncate_sentence(next_step, 140)}")
+    else:
+        lines.append("- **下一步建议**：围绕最近跟进结论确认采购、技术或商务侧的明确推进节点，并同步更新客户活动。")
+
+    return "\n".join(lines)
+
+
+def _customer_query_record_sections(business_context: JSONDict, customer: JSONDict) -> list[str]:
+    return [
+        _contracts_line(business_context.get("contracts")),
+        _payment_plans_line(business_context.get("payment_plans")),
+        _invoice_titles_line(business_context.get("invoice_titles")),
+        _deployment_infos_line(business_context.get("deployment_infos")),
+        _license_line(customer, business_context.get("contracts")),
+    ]
+
+
+def _contracts_line(value: object) -> str:
+    error = _context_error(value)
+    if error:
+        return f"- **合同**：读取失败，原因：{_truncate_sentence(error, 80)}。"
+    contracts = _context_records(value)
+    if not contracts:
+        return "- **合同**：暂无已读取到的合同记录。"
+    parts = []
+    for contract in contracts[:3]:
+        name = _display_text(contract.get("contract_name")) or _display_text(contract.get("contract_number")) or "未命名合同"
+        status = _display_text(contract.get("status"))
+        amount = _display_amount(contract.get("total_amount"))
+        expiry = _display_text(contract.get("expiry_date"))
+        detail = name
+        if status:
+            detail += f"，状态：{status}"
+        if amount:
+            detail += f"，金额：{amount}"
+        if expiry:
+            detail += f"，到期：{expiry}"
+        parts.append(detail)
+    return f"- **合同**：{'；'.join(parts)}。"
+
+
+def _payment_plans_line(value: object) -> str:
+    error = _context_error(value)
+    if error:
+        return f"- **回款**：读取失败，原因：{_truncate_sentence(error, 80)}。"
+    plans = _context_records(value)
+    if not plans:
+        return "- **回款**：暂无已读取到的回款计划。"
+    parts = []
+    for plan in plans[:3]:
+        name = _display_text(plan.get("plan_name")) or _display_text(plan.get("payment_stage")) or "回款计划"
+        amount = _display_amount(plan.get("planned_amount") or plan.get("amount"))
+        date_text = _display_text(plan.get("planned_date") or plan.get("due_date"))
+        status = _display_text(plan.get("status"))
+        detail = name
+        if amount:
+            detail += f"，金额：{amount}"
+        if date_text:
+            detail += f"，计划日期：{date_text}"
+        if status:
+            detail += f"，状态：{status}"
+        parts.append(detail)
+    return f"- **回款**：{'；'.join(parts)}。"
+
+
+def _invoice_titles_line(value: object) -> str:
+    error = _context_error(value)
+    if error:
+        return f"- **发票**：读取失败，原因：{_truncate_sentence(error, 80)}。"
+    titles = _context_records(value)
+    if not titles:
+        return "- **发票**：暂无已读取到的发票抬头。"
+    parts = []
+    for title in titles[:3]:
+        name = _display_text(title.get("company_name")) or _display_text(title.get("title_name")) or "发票抬头"
+        tax_no = _display_text(title.get("tax_number") or title.get("tax_no"))
+        detail = name
+        if tax_no:
+            detail += f"，税号：{tax_no}"
+        parts.append(detail)
+    return f"- **发票**：{'；'.join(parts)}。"
+
+
+def _deployment_infos_line(value: object) -> str:
+    error = _context_error(value)
+    if error:
+        return f"- **部署**：读取失败，原因：{_truncate_sentence(error, 80)}。"
+    deployments = _context_records(value)
+    if not deployments:
+        return "- **部署**：暂无已读取到的部署信息。"
+    parts = []
+    for deployment in deployments[:3]:
+        name = _display_text(deployment.get("environment_name")) or _display_text(deployment.get("name")) or "部署信息"
+        url = _display_text(deployment.get("server_url") or deployment.get("access_url"))
+        detail = name
+        if url:
+            detail += f"，地址：{url}"
+        parts.append(detail)
+    return f"- **部署**：{'；'.join(parts)}。"
+
+
+def _license_line(customer: JSONDict, contracts_value: object) -> str:
+    license_type = _display_text(customer.get("license_type"))
+    license_expiry = _display_text(customer.get("license_expiry_date"))
+    if license_type or license_expiry:
+        parts = []
+        if license_type:
+            parts.append(f"类型：{license_type}")
+        if license_expiry:
+            parts.append(f"到期：{license_expiry}")
+        return f"- **License**：{'；'.join(parts)}。"
+    contracts = _context_records(contracts_value)
+    license_parts = []
+    for contract in contracts[:3]:
+        contract_license_type = _display_text(contract.get("license_type"))
+        contract_expiry = _display_text(contract.get("license_expiry_date") or contract.get("expiry_date"))
+        if contract_license_type or contract_expiry:
+            name = _display_text(contract.get("contract_name")) or _display_text(contract.get("contract_number")) or "合同"
+            detail = name
+            if contract_license_type:
+                detail += f"，类型：{contract_license_type}"
+            if contract_expiry:
+                detail += f"，到期：{contract_expiry}"
+            license_parts.append(detail)
+    if license_parts:
+        return f"- **License**：{'；'.join(license_parts)}。"
+    return "- **License**：暂无已读取到的 License 类型或到期信息。"
 
 
 def _response_route(
@@ -759,13 +982,133 @@ def _customer_query_unresolved_response(state: ActionPlanningGraphState) -> str:
     selected_customer = coerce_json_dict(state.get("selected_customer"))
     if selected_customer.get("id"):
         return ""
-    if _has_failed_customer_search(state.get("events") or []):
+    search_events = [
+        *(state.get("events") or []),
+        *(state.get("prior_events") or []),
+    ]
+    if _has_failed_customer_search(search_events):
         return "客户搜索暂时失败，当前无法读取客户情况。请稍后再试。"
     parsed = coerce_json_dict(state.get("parsed"))
     customer_name = parsed.get("customer_name")
     if isinstance(customer_name, str) and customer_name.strip():
         return f"我没能确定「{customer_name.strip()}」对应的客户。请补充客户全称或更多线索。"
     return "我没能确定你要查询的客户。请补充客户全称或更多线索。"
+
+
+def _resolved_customer_candidates(state: ActionPlanningGraphState) -> list[JSONDict]:
+    selected_customer = coerce_json_dict(state.get("selected_customer"))
+    if selected_customer.get("id"):
+        business_customer = coerce_json_dict(coerce_json_dict(state.get("business_context")).get("customer"))
+        if _same_customer_identity(selected_customer, business_customer):
+            return [{**business_customer, **selected_customer}]
+        return [selected_customer]
+    return _json_dict_list(state.get("customer_candidates"))
+
+
+def _same_customer_identity(left: JSONDict, right: JSONDict) -> bool:
+    if not left or not right:
+        return False
+    left_ids = {
+        str(value)
+        for value in (left.get("id"), left.get("public_id"))
+        if value not in (None, "")
+    }
+    right_ids = {
+        str(value)
+        for value in (right.get("id"), right.get("public_id"))
+        if value not in (None, "")
+    }
+    return bool(left_ids & right_ids)
+
+
+def _customer_brief(customer: JSONDict) -> JSONDict:
+    raw = customer.get("customer_brief_json")
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return coerce_json_dict(loaded)
+
+
+def _brief_content(brief: JSONDict, section: str, key: str) -> str | None:
+    value = coerce_json_dict(coerce_json_dict(brief.get(section)).get(key)).get("content")
+    return _display_text(value)
+
+
+def _customer_contacts(customer: JSONDict) -> list[JSONDict]:
+    contacts = customer.get("contacts")
+    if isinstance(contacts, list):
+        return [coerce_json_dict(contact) for contact in contacts if isinstance(contact, Mapping)]
+    return []
+
+
+def _latest_activity_content(value: object) -> str | None:
+    activities = business_rules.context_items(value)
+    if not activities and isinstance(value, list):
+        activities = [coerce_json_dict(item) for item in value if isinstance(item, Mapping)]
+    for activity in activities:
+        content = (
+            _display_text(activity.get("content"))
+            or _display_text(activity.get("summary"))
+            or _display_text(activity.get("title"))
+        )
+        if content:
+            return content
+    return None
+
+
+def _next_action_from_activities(value: object) -> str | None:
+    activities = business_rules.context_items(value)
+    if not activities and isinstance(value, list):
+        activities = [coerce_json_dict(item) for item in value if isinstance(item, Mapping)]
+    for activity in activities:
+        next_action = _display_text(activity.get("next_action"))
+        if next_action:
+            return next_action
+    return None
+
+
+def _context_records(value: object) -> list[JSONDict]:
+    if isinstance(value, list):
+        return [coerce_json_dict(item) for item in value if isinstance(item, Mapping)]
+    if isinstance(value, Mapping):
+        items = value.get("items")
+        if isinstance(items, list):
+            return [coerce_json_dict(item) for item in items if isinstance(item, Mapping)]
+    return []
+
+
+def _context_error(value: object) -> str | None:
+    if not isinstance(value, Mapping):
+        return None
+    error = value.get("error") or value.get("message")
+    return _display_text(error)
+
+
+def _display_text(value: object) -> str | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
+def _display_amount(value: object) -> str | None:
+    if isinstance(value, (int, float)):
+        return f"{value:g}"
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _truncate_sentence(value: str, limit: int) -> str:
+    stripped = " ".join(value.split())
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[:limit].rstrip("，。；,; ") + "..."
 
 
 def _has_failed_customer_search(events: list[JSONDict]) -> bool:

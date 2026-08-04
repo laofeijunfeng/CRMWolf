@@ -8,7 +8,8 @@ export interface OwnerInfo {
 }
 
 export interface CustomerBasicInfo {
-  id: number
+  id: string
+  public_id?: string
   account_name: string
 }
 
@@ -34,8 +35,8 @@ export interface CustomerActivityUpdate {
 
 export interface CustomerActivityResponse {
   id: number
-  customer_id: number | null
-  original_lead_id: number | null
+  customer_id: string | null
+  original_lead_id: string | null
   deal_journey_id?: number | null
   activity_kind: string
   activity_category: string
@@ -71,12 +72,12 @@ export interface NextActivityTimeUpdate {
 }
 
 const customerActivityApi = {
-  createActivity: (customerId: number, data: CustomerActivityCreate): Promise<CustomerActivityResponse> => {
+  createActivity: (customerId: string, data: CustomerActivityCreate): Promise<CustomerActivityResponse> => {
     return request.post<CustomerActivityResponse>(`/v1/customer-activities/${customerId}`, data)
       .then(normalizeActivity)
   },
 
-  getActivities: (customerId: number): Promise<CustomerActivityResponse[]> => {
+  getActivities: (customerId: string): Promise<CustomerActivityResponse[]> => {
     return request.get<CustomerActivityResponse[]>(`/v1/customer-activities/${customerId}`)
       .then((items) => items.map(normalizeActivity))
   },

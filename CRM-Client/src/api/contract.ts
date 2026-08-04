@@ -4,13 +4,14 @@ import { OptionalNullableStringSchema, OptionalStringFromNullableSchema } from '
 import { z } from 'zod'
 
 export type LicenseType = 'SUBSCRIPTION' | 'PERPETUAL'
+export type PurchaseType = 'NEW' | 'RENEWAL' | 'EXPANSION'
 
 export type ContractStatus = 'DRAFT' | 'PENDING_REVIEW' | 'SIGNED' | 'EFFECTIVE' | 'EXPIRED' | 'TERMINATED'
 export type ApprovalPhase = 'draft' | 'pending_review' | 'approved' | 'rejected'
 
 export interface ContractCreate {
   contract_name: string
-  customer_id: number
+  customer_id: string
   opportunity_id: number
   signing_contact_id: number
   user_count: number
@@ -42,15 +43,18 @@ export interface ContractListResponse {
   id: number
   contract_number: string
   contract_name: string
-  customer_id: number
+  customer_id: string
   customer_name?: string
   opportunity_id: number
   opportunity_name?: string
+  purchase_type?: PurchaseType | null
   signing_contact_id: number
   user_count: number
   total_amount: string
   license_type: LicenseType
   subscription_years: number | null
+  license_authorized_users?: number | null
+  license_expiry_date?: string | null
   standard_unit_price: string
   status: ContractStatus
   approval_phase?: ApprovalPhase | null
@@ -89,7 +93,8 @@ export interface OwnerFilterOptionsResponse {
 }
 
 export interface CustomerBasicInfo {
-  id: number
+  id: string
+  public_id?: string
   account_name: string
 }
 
@@ -109,7 +114,7 @@ export interface ContractResponse {
   id: number
   contract_number: string
   contract_name: string
-  customer_id: number
+  customer_id: string
   opportunity_id: number
   signing_contact_id: number
   user_count: number
@@ -144,11 +149,19 @@ export interface ContractResponse {
 export interface ContractQueryParams {
   skip?: number
   limit?: number
-  customer_id?: number | null
+  customer_id?: string | null
   status?: string | null
   status_exclude?: string | null
   license_type?: string | null
   license_type_exclude?: string | null
+  purchase_type?: string | null
+  purchase_type_exclude?: string | null
+  subscription_years?: number | null
+  subscription_years_exclude?: number | null
+  license_authorized_users?: number | null
+  license_authorized_users_exclude?: number | null
+  standard_unit_price?: number | null
+  standard_unit_price_exclude?: number | null
   contract_number?: string | null
   keyword?: string | null
   customer_keyword?: string | null
@@ -161,6 +174,8 @@ export interface ContractQueryParams {
   effective_date_end?: string
   expiry_date_start?: string
   expiry_date_end?: string
+  license_expiry_date_start?: string
+  license_expiry_date_end?: string
   order_by?: string
   order_dir?: 'asc' | 'desc'
 }
@@ -180,7 +195,8 @@ const CreatorBasicInfoSchema = z.object({
 })
 
 const CustomerBasicInfoSchema = z.object({
-  id: z.number(),
+  id: z.string(),
+  public_id: z.string().optional(),
   account_name: z.string()
 })
 
@@ -202,15 +218,18 @@ const ContractListItemSchema = z.object({
   id: z.number(),
   contract_number: z.string(),
   contract_name: z.string(),
-  customer_id: z.number(),
+  customer_id: z.string(),
   customer_name: OptionalStringFromNullableSchema,
   opportunity_id: z.number(),
   opportunity_name: OptionalStringFromNullableSchema,
+  purchase_type: z.enum(['NEW', 'RENEWAL', 'EXPANSION']).nullable().optional(),
   signing_contact_id: z.number(),
   user_count: z.number(),
   total_amount: AmountStringSchema,
   license_type: z.enum(['SUBSCRIPTION', 'PERPETUAL']),
   subscription_years: z.number().nullable(),
+  license_authorized_users: z.number().nullable().optional(),
+  license_expiry_date: z.string().nullable().optional(),
   standard_unit_price: AmountStringSchema,
   status: ContractStatusSchema,
   signing_date: z.string().nullable(),
@@ -317,7 +336,7 @@ const contractApi = {
     return z.union([ContractListItemSchema, z.null()]).parse(response) as ContractListResponse | null
   },
 
-  getCustomerContracts: async (customerId: number, params?: { skip?: number; limit?: number }): Promise<ContractListResponse[]> => {
+  getCustomerContracts: async (customerId: string, params?: { skip?: number; limit?: number }): Promise<ContractListResponse[]> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response: unknown = await request.get(`/v1/customers/${customerId}/contracts`, { params })
     return z.array(ContractListItemSchema).parse(response) as ContractListResponse[]

@@ -11,6 +11,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      TZ: Asia/Shanghai
       DB_PORT: 3306
       REDIS_PORT: 6379
       REDIS_DB: 5

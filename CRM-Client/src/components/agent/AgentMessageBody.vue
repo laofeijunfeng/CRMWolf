@@ -92,6 +92,14 @@ const normalizeMarkdownForDisplay = (content: string): string => {
   padding-left: $wolf-space-lg-v2;
 }
 
+.agent-message-body--markdown :deep(ul) {
+  list-style: disc;
+}
+
+.agent-message-body--markdown :deep(ol) {
+  list-style: decimal;
+}
+
 .agent-message-body--markdown :deep(li) {
   padding-left: $wolf-space-xs-v2;
 }

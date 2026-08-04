@@ -1,7 +1,5 @@
 """Persistence service for customer evidence metadata."""
 
-from datetime import datetime
-
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
@@ -15,6 +13,7 @@ from app.models.customer_vector_document import (
 from app.models.deal_journey import CustomerDealJourneyEvent
 from app.services.customer_evidence_builder import BuiltCustomerEvidence, customer_evidence_builder
 from app.services.industry_display_service import industry_display_service
+from app.utils.time import business_now
 
 
 class CustomerVectorDocumentService:
@@ -52,7 +51,7 @@ class CustomerVectorDocumentService:
             document.sync_status = CustomerVectorDocumentSyncStatus.PENDING
             document.sync_error = None
             document.synced_at = None
-            document.updated_time = datetime.now()
+            document.updated_time = business_now()
         if documents:
             if commit:
                 db.commit()
@@ -258,7 +257,7 @@ class CustomerVectorDocumentService:
         for document in documents:
             document.sync_status = CustomerVectorDocumentSyncStatus.DELETE_PENDING
             document.sync_error = None
-            document.updated_time = datetime.now()
+            document.updated_time = business_now()
         if documents:
             db.commit()
         return len(documents)
@@ -274,7 +273,7 @@ class CustomerVectorDocumentService:
     def mark_synced(self, db: Session, document: CustomerVectorDocument) -> CustomerVectorDocument:
         document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
         document.sync_error = None
-        document.synced_at = datetime.now()
+        document.synced_at = business_now()
         db.commit()
         db.refresh(document)
         return document
@@ -294,7 +293,7 @@ class CustomerVectorDocumentService:
     def mark_delete_synced(self, db: Session, document: CustomerVectorDocument) -> CustomerVectorDocument:
         document.sync_status = CustomerVectorDocumentSyncStatus.DELETED
         document.sync_error = None
-        document.synced_at = datetime.now()
+        document.synced_at = business_now()
         db.commit()
         db.refresh(document)
         return document

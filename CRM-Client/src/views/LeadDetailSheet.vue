@@ -64,7 +64,7 @@ import { formatLocalDate } from '@/utils/format'
 
 // ==================== Props & Emits ====================
 interface Props {
-  leadId: number | null
+  leadId: string | null
   visible: boolean
 }
 

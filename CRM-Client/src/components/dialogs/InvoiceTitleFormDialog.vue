@@ -63,7 +63,7 @@ const schema = toTypedSchema(
 
 // ==================== Props & Emits ====================
 interface Props {
-  customerId: number
+  customerId: string
   open: boolean
   invoiceTitle?: InvoiceTitleResponse | null
 }

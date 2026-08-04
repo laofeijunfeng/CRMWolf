@@ -19,7 +19,7 @@ import type { ContractListResponse, ContractStatus } from '@/api/contract'
 type ContractActionPredicate = (contract: ContractListResponse) => boolean
 
 interface Props {
-  customerId: number
+  customerId: string
   contracts: ContractListResponse[]
   loading?: boolean
   showAdd?: boolean

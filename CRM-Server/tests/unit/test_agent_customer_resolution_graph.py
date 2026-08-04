@@ -243,6 +243,104 @@ async def test_customer_resolution_graph_prefers_identity_match_over_raw_semanti
 
 
 @pytest.mark.asyncio
+async def test_customer_resolution_graph_selects_public_id_customer_from_hybrid_search_results():
+    registry = FakeToolRegistry(items=[
+        {
+            "id": "cus_604715b9dad2459c92595fcd4e12f9e9",
+            "account_name": "南京汇川技术有限公司",
+            "match": {
+                "source": "hybrid",
+                "score": 1.0,
+                "reason": "客户名称和常用称呼均匹配",
+                "evidence": [{"title": "常用称呼", "snippet": "南京汇川技术有限公司"}],
+            },
+        },
+        {
+            "id": "cus_badc00586aa4438aaef99cb5d28965d0",
+            "account_name": "广西时顺信息科技",
+            "match": {
+                "source": "customer_knowledge",
+                "score": 0.42,
+                "reason": "客户知识库语义匹配",
+                "evidence": [{"title": "客户档案", "snippet": "广西时顺信息科技"}],
+            },
+        },
+    ])
+    service = CustomerResolutionGraphService(
+        tool_registry=registry,
+        resource_resolution_graph=ResourceResolutionGraphService(checkpointer=InMemorySaver()),
+        checkpointer=InMemorySaver(),
+    )
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 35,
+        "content": "请总结一下南京汇川技术有限公司当前客户情况",
+        "authorization": "Bearer test",
+        "intent": "CUSTOMER_QUERY",
+        "semantic_result": semantic_result(
+            intent="CUSTOMER_QUERY",
+            customer={"name_text": "南京汇川技术有限公司", "confidence": 0.95},
+        ),
+        "parsed": {"customer_name": "南京汇川技术有限公司"},
+        "events": [],
+    })
+
+    assert result["selected_customer"]["id"] == "cus_604715b9dad2459c92595fcd4e12f9e9"
+    assert result["selected_customer"]["account_name"] == "南京汇川技术有限公司"
+
+
+@pytest.mark.asyncio
+async def test_customer_resolution_graph_selects_exact_numbered_customer_name():
+    registry = FakeToolRegistry(items=[
+        {
+            "id": "cus_base",
+            "account_name": "测试公司",
+            "match": {
+                "source": "customer_search",
+                "score": 0.78,
+                "reason": "客户名称包含匹配",
+            },
+        },
+        {
+            "id": "cus_2",
+            "account_name": "测试公司 2",
+            "match": {
+                "source": "customer_search",
+                "score": 1.0,
+                "reason": "客户名称精确匹配",
+            },
+        },
+    ])
+    service = CustomerResolutionGraphService(
+        tool_registry=registry,
+        resource_resolution_graph=ResourceResolutionGraphService(checkpointer=InMemorySaver()),
+        checkpointer=InMemorySaver(),
+    )
+
+    result = await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 36,
+        "content": "测试公司 2现在有哪些发票抬头？",
+        "authorization": "Bearer test",
+        "intent": "CUSTOMER_QUERY",
+        "semantic_result": semantic_result(
+            intent="CUSTOMER_QUERY",
+            customer={"name_text": "测试公司 2", "confidence": 0.95},
+        ),
+        "parsed": {"customer_name": "测试公司 2"},
+        "events": [],
+    })
+
+    assert result["selected_customer"]["id"] == "cus_2"
+    assert result["selected_customer"]["account_name"] == "测试公司 2"
+
+
+@pytest.mark.asyncio
 async def test_customer_resolution_graph_rejects_single_candidate_without_identity_support():
     registry = FakeToolRegistry(items=[{
         "id": 401,

@@ -216,6 +216,8 @@ class FakeCustomerContextAnswerService:
                 confidence=0.91,
                 used_sections=["customer", "opportunities", "evidence"],
                 missing_context=[],
+                answer_mode="grounded",
+                citations=[{"evidence_id": "ev-1", "score": 0.91}],
             ),
             answer_source="fake_answer_service",
             model="fake-model",
@@ -699,6 +701,11 @@ async def test_customer_intelligence_graph_answers_agent_question_without_refres
     assert result["customer_context_answer"]["answer"] == "越秀金融当前正在推进 CRM 项目，已进入 POC。"
     assert result["assistant_content"] == "越秀金融当前正在推进 CRM 项目，已进入 POC。"
     assert result["events"][-2]["event"] == "customer_context_answer_generated"
+    assert result["events"][-2]["answer_mode"] == "grounded"
+    assert result["events"][-2]["citations_count"] == 1
+    assert result["events"][-2]["retrieval_status"] == "ok"
+    assert result["events"][-2]["semantic_evidence_count"] == 1
+    assert result["customer_context_answer"]["citations"][0]["evidence_id"] == "ev-1"
     assert fact_extraction_service.calls == []
     assert "生成客户回答" in [step["title"] for step in result["visible_trace"]]
 

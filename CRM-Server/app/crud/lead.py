@@ -5,11 +5,18 @@ from datetime import datetime, timedelta, time
 from enum import Enum
 from app.models.lead import Lead, LeadFollowUp, LeadStatus, LeadSource, CompanyScale
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadFollowUpCreate
+from app.utils.time import business_now
 
 
 class LeadCRUD:
     def get_by_id(self, db: Session, lead_id: int, team_id: Optional[int] = None) -> Optional[Lead]:
         query = db.query(Lead).filter(Lead.id == lead_id)
+        if team_id is not None:
+            query = query.filter(Lead.team_id == team_id)
+        return query.first()
+
+    def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Lead]:
+        query = db.query(Lead).filter(Lead.public_id == public_id)
         if team_id is not None:
             query = query.filter(Lead.team_id == team_id)
         return query.first()
@@ -458,7 +465,7 @@ class LeadFollowUpCRUD:
         return obj
 
     def get_upcoming_follow_ups(self, db: Session, team_id: int, user_id: str, days: int = 7) -> List[LeadFollowUp]:
-        cutoff_date = datetime.now() + timedelta(days=days)
+        cutoff_date = business_now() + timedelta(days=days)
         return db.query(LeadFollowUp).join(Lead, Lead.id == LeadFollowUp.lead_id).filter(
             and_(
                 Lead.team_id == team_id,

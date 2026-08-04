@@ -18,6 +18,7 @@ from app.models.opportunity import Opportunity, OpportunityStatus
 from app.models.payment import PaymentConfirmationStatus, PaymentRecord
 from app.models.customer_activity import CustomerActivity
 from app.models.user import User
+from app.utils.time import business_now
 
 
 router = APIRouter(prefix="/v1/sales-dashboard", tags=["销售看板"])
@@ -107,7 +108,7 @@ def _resolve_scope(db: Session, user_id: int, team_id: int) -> DashboardScope:
 
 
 def _month_range() -> tuple[datetime, datetime, str]:
-    now = datetime.now()
+    now = business_now()
     start = datetime(now.year, now.month, 1)
     if now.month == 12:
         end = datetime(now.year + 1, 1, 1)

@@ -17,6 +17,7 @@ from app.schemas.invoice import (
 )
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
+from app.utils.time import business_now
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -384,7 +385,7 @@ class InvoiceApplicationCRUD:
         if invoice_number is not None:
             application.invoice_number = invoice_number
         application.status = InvoiceApplicationStatus.ISSUED
-        application.issued_time = datetime.now()
+        application.issued_time = business_now()
         db.commit()
         db.refresh(application)
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType

@@ -17,6 +17,7 @@ from app.services.customer_knowledge_candidate_service import CustomerVisibility
 @dataclass(frozen=True)
 class CustomerAliasMatch:
     customer_id: int
+    customer_public_id: str
     account_name: str
     city: str | None
     score: float
@@ -119,6 +120,7 @@ class CustomerAliasService:
                 continue
             matches.append(CustomerAliasMatch(
                 customer_id=int(customer.id),
+                customer_public_id=str(customer.public_id),
                 account_name=str(customer.account_name),
                 city=str(customer.city) if customer.city else None,
                 score=score,
@@ -157,6 +159,7 @@ class CustomerAliasService:
             score = 0.86 if any(_normalize_text(alias) == normalized_query for alias in matched) else 0.78
             matches.append(CustomerAliasMatch(
                 customer_id=int(customer.id),
+                customer_public_id=str(customer.public_id),
                 account_name=str(customer.account_name),
                 city=str(customer.city) if customer.city else None,
                 score=score,

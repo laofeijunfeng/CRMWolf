@@ -1,10 +1,10 @@
 """Structured contracts for CRM AI Agent reasoning."""
+
 from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
-
 
 AgentIntent = Literal[
     "CUSTOMER_ACTIVITY",
@@ -232,6 +232,8 @@ class CustomerContextAnswerResult(BaseModel):
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="回答基于现有上下文的可靠程度")
     used_sections: List[str] = Field(default_factory=list, max_length=8, description="回答参考的业务上下文分区")
     missing_context: List[str] = Field(default_factory=list, max_length=5, description="回答仍缺少的上下文")
+    answer_mode: str = Field("fallback", description="回答模式: grounded/fallback/degraded/insufficient")
+    citations: List[Dict[str, object]] = Field(default_factory=list, max_length=8, description="回答引用的证据来源")
 
 
 class AgentMemorySnapshot(BaseModel):

@@ -13,7 +13,7 @@ class OwnerInfo(BaseModel):
 
 
 class LeadBasicInfo(BaseModel):
-    id: int = Field(..., description="线索ID")
+    id: str = Field(..., description="线索对外ID")
     lead_name: str = Field(..., description="线索名称")
 
     class Config:
@@ -51,7 +51,7 @@ class LeadFollowUpUpdate(BaseModel):
 
 class LeadFollowUpResponse(BaseModel):
     id: int = Field(..., description="跟进记录ID")
-    lead_id: int = Field(..., description="线索ID")
+    lead_id: str = Field(..., description="线索对外ID")
     content: str = Field(..., description="跟进内容")
     method: str = Field(..., description="跟进方式")
     next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")

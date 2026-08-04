@@ -42,10 +42,7 @@ import { formatLocalDate } from '@/utils/format'
 // Zod schema for form validation
 const schema = toTypedSchema(
   z.object({
-    customer_id: z.string().min(1, '请选择客户').refine((value) => {
-      const parsed = Number(value)
-      return Number.isInteger(parsed) && parsed > 0
-    }, '请选择客户'),
+    customer_id: z.string().min(1, '请选择客户'),
     total_amount: z.coerce.number().gt(0, '商机金额必须大于0'),
     user_count: z.coerce.number().int('用户数必须为整数').min(1, '用户数至少为1'),
     license_type: z.nativeEnum(LicenseType, { errorMap: () => ({ message: '请选择授权类型' }) }),
@@ -65,11 +62,15 @@ const schema = toTypedSchema(
 )
 
 interface Props {
-  customerId?: number | undefined
+  customerId?: string | undefined
   customerName?: string | undefined
   customerLocked?: boolean
   opportunity?: Opportunity | null
   open: boolean
+  dialogTitle?: string | undefined
+  submitText?: string | undefined
+  submittingText?: string | undefined
+  successMessage?: string | null | undefined
 }
 
 interface Emits {
@@ -82,7 +83,11 @@ const props = withDefaults(defineProps<Props>(), {
   customerName: undefined,
   customerLocked: false,
   opportunity: null,
-  open: false
+  open: false,
+  dialogTitle: undefined,
+  submitText: undefined,
+  submittingText: undefined,
+  successMessage: undefined
 })
 const emit = defineEmits<Emits>()
 
@@ -126,6 +131,13 @@ const visible = computed({
 
 // Computed property for edit mode
 const isEdit = computed(() => !!props.opportunity)
+const resolvedDialogTitle = computed(() => props.dialogTitle ?? (isEdit.value ? '编辑商机' : '新建商机'))
+const resolvedSubmitText = computed(() => props.submitText ?? '确定')
+const resolvedSubmittingText = computed(() => props.submittingText ?? '提交中...')
+const resolvedSuccessMessage = computed(() => {
+  if (props.successMessage !== undefined) return props.successMessage
+  return isEdit.value ? '商机更新成功' : '商机创建成功'
+})
 
 // License type options
 const licenseTypeOptions = [
@@ -153,7 +165,7 @@ const procurementMethodOptions = computed(() =>
 )
 
 interface CustomerOption {
-  id: number
+  id: string
   account_name: string
 }
 
@@ -206,7 +218,7 @@ const selectedCustomerName = computed<string>(() => {
     if (lockedCustomer !== null) return lockedCustomer.account_name
   }
 
-  const customerId = Number(values.customer_id)
+  const customerId = String(values.customer_id ?? '')
   const selectedCustomer = customers.value.find((customer) => customer.id === customerId)
   if (selectedCustomer !== undefined) return selectedCustomer.account_name
 
@@ -370,7 +382,7 @@ const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
   try {
     const data: OpportunityCreate | OpportunityUpdate = {
-      customer_id: Number(formValues['customer_id']),
+      customer_id: formValues['customer_id'],
       total_amount: formValues['total_amount'],
       user_count: formValues['user_count'],
       license_type: formValues['license_type'],
@@ -382,10 +394,12 @@ const onSubmit = handleSubmit(async (formValues) => {
 
     if (isEdit.value && props.opportunity) {
       await opportunityApi.updateOpportunity(props.opportunity.id, data)
-      toast.success('商机更新成功')
     } else {
       await opportunityApi.createOpportunity(data as OpportunityCreate)
-      toast.success('商机创建成功')
+    }
+
+    if (resolvedSuccessMessage.value !== null && resolvedSuccessMessage.value !== '') {
+      toast.success(resolvedSuccessMessage.value)
     }
 
     isDirty.value = false
@@ -423,7 +437,7 @@ function continueEditing(): void {
   <Dialog v-model:open="visible">
     <DialogContent class="max-h-[90vh] overflow-y-auto">
       <DialogHeader>
-        <DialogTitle>{{ isEdit ? '编辑商机' : '新建商机' }}</DialogTitle>
+        <DialogTitle>{{ resolvedDialogTitle }}</DialogTitle>
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
@@ -584,7 +598,7 @@ function continueEditing(): void {
             取消
           </Button>
           <Button type="submit" :loading="submitting">
-            {{ submitting ? '提交中...' : '确定' }}
+            {{ submitting ? resolvedSubmittingText : resolvedSubmitText }}
           </Button>
         </DialogFooter>
       </form>

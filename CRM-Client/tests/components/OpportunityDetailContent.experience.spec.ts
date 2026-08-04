@@ -12,8 +12,27 @@ const opportunityApi = vi.hoisted(() => ({
 const contractApi = vi.hoisted(() => ({
   getContractByOpportunity: vi.fn(),
 }))
+const approvalGenericApi = vi.hoisted(() => ({
+  submitApproval: vi.fn(),
+}))
+const customerApi = vi.hoisted(() => ({
+  getCustomerDetail: vi.fn(),
+  getCustomerMembers: vi.fn(),
+}))
+const paymentApi = vi.hoisted(() => ({
+  getPaymentPlans: vi.fn(),
+}))
+const invoiceApi = vi.hoisted(() => ({
+  getInvoiceApplications: vi.fn(),
+}))
+const licenseApplicationApi = vi.hoisted(() => ({
+  list: vi.fn(),
+}))
+const deploymentApi = vi.hoisted(() => ({
+  list: vi.fn(),
+}))
 const handleApiError = vi.hoisted(() => vi.fn())
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
 
 vi.mock('vue-router', () => ({
   RouterLink: defineComponent({
@@ -30,10 +49,19 @@ vi.mock('@/api/opportunity', async (importOriginal) => {
   }
 })
 vi.mock('@/api/contract', () => ({ default: contractApi }))
+vi.mock('@/api/approvalGeneric', () => ({ default: approvalGenericApi }))
+vi.mock('@/api/customer', () => ({ default: customerApi }))
+vi.mock('@/api/payment', () => ({ default: paymentApi }))
+vi.mock('@/api/invoice', () => ({ default: invoiceApi }))
+vi.mock('@/api/licenseApplication', () => ({ default: licenseApplicationApi }))
+vi.mock('@/api/deployment', () => ({ default: deploymentApi }))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
 vi.mock('vue-sonner', () => ({ toast }))
 vi.mock('@/stores/permissions', () => ({
-  usePermissionStore: () => ({ hasAnyPermission: () => true }),
+  usePermissionStore: () => ({ hasAnyPermission: () => true, hasPermission: () => true }),
+}))
+vi.mock('@/stores/user', () => ({
+  useUserStore: () => ({ userInfo: { id: '9' } }),
 }))
 
 vi.mock('@/components/ui/card', () => {
@@ -70,11 +98,41 @@ vi.mock('@/components/ui/label', () => ({ Label: defineComponent({ name: 'Label'
 vi.mock('@/components/ui/textarea', () => ({ Textarea: defineComponent({ name: 'Textarea', setup: () => () => h('textarea') }) }))
 vi.mock('@/components/ui/date-picker', () => ({ DatePicker: defineComponent({ name: 'DatePicker', setup: () => () => h('input', { type: 'date' }) }) }))
 vi.mock('@/components/OpportunityStageStepper.vue', () => ({ default: defineComponent({ name: 'OpportunityStageStepper', setup: () => () => h('div', 'stage stepper') }) }))
+vi.mock('@/components/ApprovalProcessGeneric.vue', () => ({
+  default: defineComponent({
+    name: 'ApprovalProcessGeneric',
+    emits: ['resubmit'],
+    setup: (_, { emit }) => () => h('button', {
+      'data-testid': 'approval-resubmit',
+      onClick: () => emit('resubmit'),
+    }, '修改并重新提交'),
+  }),
+}))
+vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({
+  default: defineComponent({
+    name: 'OpportunityFormDialog',
+    props: {
+      open: Boolean,
+      dialogTitle: String,
+      submitText: String,
+    },
+    emits: ['update:open', 'success'],
+    setup: (props, { emit }) => () => props.open
+      ? h('button', {
+        'data-testid': 'opportunity-form-submit',
+        onClick: () => {
+          emit('update:open', false)
+          emit('success')
+        },
+      }, props.submitText ?? '确定')
+      : null,
+  }),
+}))
 
 const opportunityFixture = (): Opportunity => ({
   id: 88,
   opportunity_name: 'CRM 升级项目',
-  customer_id: 19,
+  customer_id: 'CUS-19',
   customer_name: '上海测试客户',
   procurement_method_id: null,
   total_amount: 320000,
@@ -95,7 +153,7 @@ const opportunityFixture = (): Opportunity => ({
   updated_time: '2026-07-15T00:00:00.000Z',
   version: 1,
   customer_info: {
-    id: 19,
+    id: 'CUS-19',
     account_name: '上海测试客户',
   },
 })
@@ -105,6 +163,17 @@ describe('OpportunityDetailContent experience states', () => {
     vi.clearAllMocks()
     opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture())
     contractApi.getContractByOpportunity.mockRejectedValue({ response: { status: 404 } })
+    approvalGenericApi.submitApproval.mockResolvedValue({ approval_id: 99 })
+    customerApi.getCustomerDetail.mockResolvedValue({
+      id: 'CUS-19',
+      account_name: '上海测试客户',
+      owner_id: '9',
+    })
+    customerApi.getCustomerMembers.mockResolvedValue([])
+    paymentApi.getPaymentPlans.mockResolvedValue([])
+    invoiceApi.getInvoiceApplications.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 })
+    licenseApplicationApi.list.mockResolvedValue([])
+    deploymentApi.list.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -117,7 +186,7 @@ describe('OpportunityDetailContent experience states', () => {
       props: {
         opportunityId: 88,
         embedded: true,
-        customerContext: { customerId: 19, customerName: '上海测试客户' },
+        customerContext: { customerId: 'CUS-19', customerName: '上海测试客户' },
       },
     })
 
@@ -165,5 +234,29 @@ describe('OpportunityDetailContent experience states', () => {
 
     expect(opportunityApi.getOpportunity).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('keeps resubmit intent when the form closes before emitting success', async () => {
+    opportunityApi.getOpportunity.mockResolvedValue({
+      ...opportunityFixture(),
+      approval_phase: 'rejected',
+    })
+
+    const wrapper = mount(OpportunityDetailContent, {
+      props: {
+        opportunityId: 88,
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('[data-testid="approval-resubmit"]').trigger('click')
+    await nextTick()
+
+    await wrapper.get('[data-testid="opportunity-form-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(approvalGenericApi.submitApproval).toHaveBeenCalledWith('OPPORTUNITY', 88)
+    expect(toast.success).toHaveBeenCalledWith('商机已重新提交审批')
   })
 })

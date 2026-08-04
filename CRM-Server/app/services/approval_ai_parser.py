@@ -7,7 +7,6 @@ import json
 import logging
 from typing import AsyncGenerator, Dict, Any, List
 from sqlalchemy.orm import Session
-from datetime import datetime
 import httpx
 
 from app.crud.ai_config import ai_config_crud
@@ -18,6 +17,7 @@ from app.schemas.approval_ai import (
     ApprovalAIParsedNode,
     ApprovalAIParseResponse
 )
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -387,7 +387,7 @@ class ApprovalAIParserService:
         注意：模板中使用双花括号 {{ }} 转义 JSON 示例中的花括号，
               只有 {current_date} 是真正的占位符
         """
-        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_date = business_now().strftime("%Y-%m-%d")
         return PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE.format(current_date=current_date)
 
     def _validate_roles(self, nodes: List[ApprovalAIParsedNode]) -> List[str]:

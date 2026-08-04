@@ -135,6 +135,22 @@ def test_resume_payload_maps_confirmation_text_to_edit_action():
     assert payload["task_projection_key"] == "task_12"
 
 
+def test_resume_payload_maps_confirm_execute_text_to_approve_action():
+    payload = resume_payload_from_turn_input(
+        AgentTurnInput.text("确认执行"),
+        current_interrupt={
+            "type": "confirm",
+            "allowed_resume_actions": ["approve", "edit", "reject", "cancel"],
+            "task_projection_id": 12,
+            "task_projection_key": "task_12",
+        },
+    )
+
+    assert payload["action"] == "approve"
+    assert payload["task_projection_id"] == 12
+    assert payload["task_projection_key"] == "task_12"
+
+
 def test_resume_payload_maps_choice_rejection_text_to_cancel_action():
     payload = resume_payload_from_turn_input(
         AgentTurnInput.text("先不处理"),

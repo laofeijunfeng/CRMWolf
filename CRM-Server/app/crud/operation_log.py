@@ -2,15 +2,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional, List, Tuple
 import uuid
-from datetime import datetime
 
 from app.models.operation_log import OperationLog
 from app.schemas.operation_log import OperationLogCreate
+from app.utils.time import business_now
 
 
 class OperationLogCRUD:
     def create(self, db: Session, obj_in: OperationLogCreate, team_id: Optional[int] = None) -> OperationLog:
-        event_id = f"evt_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        operated_at = business_now()
+        event_id = f"evt_{operated_at.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
 
         db_obj = OperationLog(
             event_id=event_id,
@@ -23,7 +24,7 @@ class OperationLogCRUD:
             operator_id=obj_in.operator_id,
             operator_name=obj_in.operator_name,
             team_id=team_id,
-            operated_at=datetime.now(),
+            operated_at=operated_at,
             content=obj_in.content,
             remark=obj_in.remark
         )

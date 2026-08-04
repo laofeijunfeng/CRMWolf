@@ -53,6 +53,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/invoice-titles", tags=["开票抬头管理"])
 
 
+def _invoice_title_response(db: Session, title, team_id: Optional[int] = None) -> InvoiceTitleResponse:
+    customer_query = db.query(Customer).filter(Customer.id == title.customer_id)
+    if team_id is not None:
+        customer_query = customer_query.filter(Customer.team_id == team_id)
+    customer = customer_query.first()
+    return InvoiceTitleResponse(**{
+        "id": title.id,
+        "customer_id": customer.public_id if customer else None,
+        "title_type": title.title_type,
+        "title": title.title,
+        "taxpayer_id": title.taxpayer_id,
+        "bank_name": title.bank_name,
+        "bank_account": title.bank_account,
+        "address": title.address,
+        "phone": title.phone,
+        "is_default": title.is_default,
+        "created_time": title.created_time,
+        "last_modified_time": title.last_modified_time,
+    })
+
+
 def _build_invoice_title_intelligence_change(
     title,
     *,
@@ -107,22 +128,22 @@ def _enqueue_invoice_application_intelligence_refresh(
 
 @router.post("", response_model=InvoiceTitleResponse, summary="添加开票抬头", description="为指定客户添加开票抬头信息")
 def create_invoice_title(
-    customer_id: int = Query(..., description="客户ID"),
+    customer_id: str = Query(..., description="客户对外ID"),
     title_data: InvoiceTitleCreate = None,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(require_permission("invoice:title:create")),
     db: Session = Depends(get_db)
 ):
-    check_customer_edit_permission(customer_id, team_id, current_user, db)
+    customer = check_customer_edit_permission(customer_id, team_id, current_user, db)
 
-    existing_title = invoice_title_crud.get_by_taxpayer_id(db, customer_id, title_data.taxpayer_id, team_id)
+    existing_title = invoice_title_crud.get_by_taxpayer_id(db, customer.id, title_data.taxpayer_id, team_id)
     if existing_title:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该纳税人识别号已存在"
         )
 
-    title = invoice_title_crud.create(db, customer_id, title_data, team_id)
+    title = invoice_title_crud.create(db, customer.id, title_data, team_id)
     _enqueue_invoice_business_object_intelligence_refresh(
         db,
         _build_invoice_title_intelligence_change(
@@ -131,19 +152,19 @@ def create_invoice_title(
             actor_id=str(current_user.id),
         ),
     )
-    return title
+    return _invoice_title_response(db, title, team_id)
 
 
 @router.get("", response_model=InvoiceTitleListResponse, summary="查询开票抬头列表", description="获取指定客户的所有开票抬头")
 def list_invoice_titles(
-    customer_id: int = Query(..., description="客户ID"),
+    customer_id: str = Query(..., description="客户对外ID"),
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    check_customer_view_permission(customer_id, team_id, current_user, db)
-    titles = invoice_title_crud.get_by_customer_id(db, customer_id, team_id)
-    return {"invoice_titles": titles}
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
+    titles = invoice_title_crud.get_by_customer_id(db, customer.id, team_id)
+    return {"invoice_titles": [_invoice_title_response(db, title, team_id) for title in titles]}
 
 
 @router.get("/{title_id}", response_model=InvoiceTitleResponse, summary="获取开票抬头详情", description="获取指定开票抬头的详细信息")
@@ -160,7 +181,7 @@ def get_invoice_title(
             detail="开票抬头不存在"
         )
     check_customer_view_permission(title.customer_id, team_id, current_user, db)
-    return title
+    return _invoice_title_response(db, title, team_id)
 
 
 @router.put("/{title_id}", response_model=InvoiceTitleResponse, summary="修改开票抬头", description="修改指定的开票抬头信息")
@@ -188,7 +209,7 @@ def update_invoice_title(
             actor_id=str(current_user.id),
         ),
     )
-    return updated_title
+    return _invoice_title_response(db, updated_title, team_id)
 
 
 @router.patch("/{title_id}/set-default", response_model=InvoiceTitleResponse, summary="设置默认抬头", description="设置指定的开票抬头为默认抬头，自动取消原默认抬头")
@@ -206,7 +227,7 @@ def set_default_invoice_title(
         )
     check_customer_edit_permission(title.customer_id, team_id, current_user, db)
 
-    updated_title = invoice_title_crud.set_default(db, title.customer_id, title_id, team_id)
+    updated_title = invoice_title_crud.set_default(db, title.customer_id, title_id)
     if not updated_title:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -220,7 +241,7 @@ def set_default_invoice_title(
             actor_id=str(current_user.id),
         ),
     )
-    return updated_title
+    return _invoice_title_response(db, updated_title, team_id)
 
 
 @router.delete("/{title_id}", response_model=MessageResponse, summary="删除开票抬头", description="删除指定的开票抬头")
@@ -288,7 +309,7 @@ def create_invoice_application(
 
 @invoice_router.get("", response_model=InvoiceApplicationListResponse, summary="查询发票申请列表", description="支持按客户、合同、状态等多条件筛选发票申请")
 def list_invoice_applications(
-    customer_id: Optional[int] = Query(None, description="客户ID"),
+    customer_id: Optional[str] = Query(None, description="客户对外ID"),
     contract_id: Optional[int] = Query(None, description="合同ID"),
     payment_plan_id: Optional[int] = Query(None, description="回款计划ID"),
     application_status: Optional[str] = Query(None, alias="status", description="申请状态，多个值用逗号分隔"),
@@ -342,12 +363,17 @@ def list_invoice_applications(
     effective_limit = page_size if page_size is not None else limit
     effective_skip = (page - 1) * effective_limit if page is not None else skip
 
+    internal_customer_id = None
+    if customer_id:
+        customer = check_customer_view_permission(customer_id, team_id, current_user, db)
+        internal_customer_id = customer.id
+
     applications, total = invoice_application_crud.list_applications(
         db,
         team_id=team_id,
         skip=effective_skip,
         limit=effective_limit,
-        customer_id=customer_id,
+        customer_id=internal_customer_id,
         contract_id=contract_id,
         payment_plan_id=payment_plan_id,
         status=application_status,
@@ -706,7 +732,7 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
     return InvoiceApplicationResponse(
         id=application.id,
         application_number=application.application_number,
-        customer_id=application.customer_id,
+        customer_id=customer.public_id if customer else None,
         contract_id=application.contract_id,
         opportunity_id=application.opportunity_id,
         payment_plan_id=application.payment_plan_id,

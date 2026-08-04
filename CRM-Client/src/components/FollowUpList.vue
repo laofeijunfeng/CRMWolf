@@ -214,9 +214,9 @@ import { confirmDelete } from '@/utils/confirmDialog'
 
 interface FollowUp {
   id: number
-  lead_id?: number
-  customer_id?: number | null
-  original_lead_id?: number | null
+  lead_id?: string
+  customer_id?: string | null
+  original_lead_id?: string | null
   activity_kind?: string
   activity_category?: string
   activity_label?: string
@@ -233,7 +233,7 @@ interface FollowUp {
   next_action?: string | null
   creator_id: string
   creator_info?: { id: string; name: string; avatar_url?: string | null }
-  customer_info?: { id: number; account_name: string }
+  customer_info?: { id: string; account_name: string }
   created_time: string
   effectiveness_score?: number | null
   effectiveness_is_valid?: boolean | null

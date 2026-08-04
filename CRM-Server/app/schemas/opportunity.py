@@ -125,7 +125,7 @@ class OpportunityBase(BaseModel):
 
 
 class OpportunityCreate(OpportunityBase):
-    customer_id: int = Field(..., description="关联客户ID（关联到 crm_customers 表）")
+    customer_id: str = Field(..., description="关联客户对外ID")
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID（关联到 crm_procurement_methods 表），如果不指定则使用客户的默认采购方式")
     stage_id: Optional[int] = Field(None, description="初始销售阶段ID（关联到 crm_procurement_stage_templates 表），如果不指定则使用采购方式的默认起始阶段")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID，如果不指定则默认为创建人")
@@ -183,7 +183,7 @@ class OpportunityResponse(BaseModel):
     id: int = Field(..., description="商机ID（主键）")
     opportunity_number: str = Field(..., description="商机编号")
     opportunity_name: str = Field(..., description="商机名称（项目名称）")
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     procurement_method_id: Optional[int] = Field(None, description="采购方式ID")
     procurement_method_info: Optional[ProcurementMethodInfo] = Field(None, description="采购方式详细信息")
     total_amount: float = Field(..., description="预计总金额（元）")
@@ -214,7 +214,8 @@ class OpportunityResponse(BaseModel):
 
 
 class CustomerInfo(BaseModel):
-    id: int = Field(..., description="客户ID")
+    id: str = Field(..., description="客户对外ID")
+    public_id: str = Field(..., description="客户对外ID")
     account_name: str = Field(..., description="客户公司名称")
     industry: Optional[str] = Field(None, description="所属行业")
     city: str = Field(..., description="所在城市")

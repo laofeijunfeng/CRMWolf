@@ -10,9 +10,9 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from datetime import datetime
 
 from app.models.score_weight import ScoreWeightConfig
+from app.utils.time import business_now
 
 
 class ScoreWeightCRUD:
@@ -234,7 +234,7 @@ class ScoreWeightCRUD:
             weight.condition_rules = condition_rules
 
         weight.updated_by = updated_by
-        weight.updated_time = datetime.now()
+        weight.updated_time = business_now()
 
         db.commit()
         db.refresh(weight)

@@ -75,6 +75,35 @@ class FakeQdrantIndexService:
         ]
 
 
+class LowScoreQdrantIndexService(FakeQdrantIndexService):
+    def search_customer_evidence(
+        self,
+        query_vector: list[float],
+        tenant_id: int,
+        team_id: int,
+        customer_id: int,
+        limit: int = 8,
+        source_types: tuple[SourceType, ...] | None = None,
+        business_object_type: str | None = None,
+    ) -> list[CustomerEvidenceSearchResult]:
+        self.searches.append((tenant_id, team_id, customer_id, query_vector, limit, source_types))
+        return [
+            CustomerEvidenceSearchResult(
+                id="weak-evidence",
+                score=0.21,
+                tenant_id=tenant_id,
+                team_id=team_id,
+                customer_id=customer_id,
+                source_type="follow_up",
+                source_object_id="9002",
+                business_object_type="customer_activity",
+                business_object_id="9002",
+                title="弱相关跟进",
+                text="客户提到另一个不相关项目。",
+            )
+        ]
+
+
 def _session():
     engine = create_engine("sqlite:///:memory:")
 
@@ -133,6 +162,8 @@ def _seed_customer_context(db: Session) -> Customer:
         company_background="地方金融控股集团。",
         main_business="金融控股与投资管理。",
         project_background="希望规范合同和采购流程。",
+        customer_brief_status="COMPLETED",
+        customer_brief_markdown="## 客户概况\n客户正在推进 POC，并关注合同与采购流程规范。",
     )
     db.add(customer)
     db.flush()
@@ -272,11 +303,23 @@ def test_customer_intelligence_context_combines_strong_facts_and_semantic_eviden
         payload = context.to_agent_payload()
 
         assert payload["strong_context"]["customer"]["account_name"] == "越秀金融"
+        assert payload["strong_context"]["customer"]["company_background"] == "地方金融控股集团。"
+        assert payload["strong_context"]["customer"]["main_business"] == "金融控股与投资管理。"
+        assert payload["strong_context"]["customer"]["project_background"] == "希望规范合同和采购流程。"
+        assert payload["strong_context"]["customer"]["customer_brief_markdown"] == (
+            "## 客户概况\n客户正在推进 POC，并关注合同与采购流程规范。"
+        )
         assert payload["strong_context"]["customer_facts"][0]["content"] == "客户已经进入 POC，需要准备试用环境。"
         assert payload["strong_context"]["opportunities"][0]["stage"] == "POC"
         assert payload["strong_context"]["payment_records"][0]["actual_amount"] == "30000.00"
         assert payload["semantic_evidence"][0]["text"] == "张总确认本周开始 POC。"
         assert payload["retrieval"]["status"] == "ok"
+        assert payload["retrieval"]["returned_count"] == 1
+        assert payload["retrieval"]["top_score"] == 0.91
+        assert payload["retrieval"]["min_score"] == 0.45
+        assert payload["citations"][0]["evidence_id"] == "evidence-1"
+        assert payload["usage_policy"]["memory_source"] == "langgraph_store"
+        assert payload["usage_policy"]["grounding"]["ok"] == "可基于 citations 输出 grounded 回答。"
         assert embedding_service.queries == ["张总说今天开始 POC"]
         assert qdrant_index_service.searches[0][:4] == (2, 2, 101, [0.1, 0.2, 0.3])
     finally:
@@ -305,6 +348,36 @@ def test_customer_intelligence_context_keeps_strong_facts_when_evidence_retrieva
         assert payload["semantic_evidence"] == []
         assert payload["retrieval"]["status"] == "failed"
         assert payload["retrieval"]["enabled"] is True
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_customer_intelligence_context_marks_low_confidence_evidence() -> None:
+    engine, db = _session()
+    service = CustomerIntelligenceContextService(
+        embedding_service=FakeEmbeddingService(),
+        qdrant_index_service=LowScoreQdrantIndexService(),
+    )
+    try:
+        _seed_customer_context(db)
+
+        context = service.build_context(
+            db,
+            team_id=2,
+            customer_id=101,
+            query_text="查一下客户 POC 进展",
+        )
+        payload = context.to_agent_payload()
+
+        assert payload["semantic_evidence"] == []
+        assert payload["citations"] == []
+        assert payload["retrieval"]["status"] == "low_confidence"
+        assert payload["usage_policy"]["grounding"]["low_confidence"].startswith("只能基于 strong_context")
+        assert payload["retrieval"]["raw_count"] == 1
+        assert payload["retrieval"]["returned_count"] == 0
+        assert payload["retrieval"]["dropped_count"] == 1
+        assert payload["retrieval"]["top_score"] == 0.21
     finally:
         db.close()
         engine.dispose()

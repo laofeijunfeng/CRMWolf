@@ -20,7 +20,7 @@ const deploymentApi = {
   },
 
   // 获取部署信息列表（别名）
-  async list(customerId: number): Promise<DeploymentInfoResponse[]> {
+  async list(customerId: string): Promise<DeploymentInfoResponse[]> {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<DeploymentInfoResponse[]>('/v1/deployment-infos/', {
       params: { customer_id: customerId }
@@ -35,7 +35,7 @@ const deploymentApi = {
     return DeploymentInfoSchema.parse(response)
   },
 
-  async getDeployments(customerId: number): Promise<DeploymentInfoResponse[]> {
+  async getDeployments(customerId: string): Promise<DeploymentInfoResponse[]> {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<DeploymentInfoResponse[]>('/v1/deployment-infos/', {
       params: { customer_id: customerId }
@@ -61,7 +61,7 @@ const deploymentApi = {
     return z.unknown().parse(response)
   },
 
-  async setDefaultDeployment(deploymentId: number, customerId: number): Promise<DeploymentInfoResponse> {
+  async setDefaultDeployment(deploymentId: number, customerId: string): Promise<DeploymentInfoResponse> {
     const response = await request.patch<DeploymentInfoResponse>(
       `/v1/deployment-infos/${deploymentId}/set-default`,
       null,

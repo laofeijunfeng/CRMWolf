@@ -261,10 +261,10 @@ async function handleCustomerSearch(keyword: string | number): Promise<void> {
   await fetchCustomers(normalizedKeyword || undefined)
 }
 
-async function fetchContracts(customerId?: number): Promise<void> {
+async function fetchContracts(customerId?: string): Promise<void> {
   if (!isCreateMode.value || hasFixedContract.value) return
 
-  if (customerId === undefined || !Number.isFinite(customerId) || customerId <= 0) {
+  if (customerId === undefined || customerId.trim() === '') {
     contracts.value = []
     return
   }
@@ -295,8 +295,8 @@ function handleCustomerChange(value: unknown): void {
   form.plannedAmount = ''
   contracts.value = []
 
-  const customerId = Number(form.customerId)
-  if (Number.isFinite(customerId) && customerId > 0) {
+  const customerId = form.customerId.trim()
+  if (customerId !== '') {
     void fetchContracts(customerId)
   }
 }
@@ -365,8 +365,8 @@ watch(
       customerSearchKeyword.value = ''
       resetForm()
       void fetchCustomers(customerSearchKeyword.value)
-      const customerId = Number(form.customerId)
-      if (Number.isFinite(customerId) && customerId > 0) {
+      const customerId = form.customerId.trim()
+      if (customerId !== '') {
         void fetchContracts(customerId)
       }
     } else {

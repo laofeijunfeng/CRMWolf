@@ -37,7 +37,7 @@ import { leadSchema, type LeadForm } from '@/schemas/lead-form'
 interface Props {
   open: boolean
   mode: 'create' | 'edit'
-  leadId?: number | undefined
+  leadId?: string | undefined
 }
 
 interface Emits {
@@ -86,7 +86,7 @@ watch(initialValues, (): void => {
 }, { deep: true })
 
 // 编辑模式：加载线索详情
-watch([(): boolean => props.open, (): number | undefined => props.leadId], async ([open, leadId]): Promise<void> => {
+watch([(): boolean => props.open, (): string | undefined => props.leadId], async ([open, leadId]): Promise<void> => {
   if (open && props.mode === 'edit' && leadId !== undefined && leadId !== null) {
     loading.value = true
     try {

@@ -15,7 +15,7 @@ import type { InvoiceApplicationResponse, InvoiceApplicationStatus, InvoiceTitle
 
 // ==================== Props & Emits ====================
 interface Props {
-  customerId: number
+  customerId: string
   invoiceTitles: InvoiceTitleResponse[]
   invoiceApplications: InvoiceApplicationResponse[]
   downloadingApplicationId?: number | null

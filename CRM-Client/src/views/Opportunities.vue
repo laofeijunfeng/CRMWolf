@@ -377,7 +377,7 @@ const handlePageSizeChange = (pageSize: number): void => {
   fetchOpportunities()
 }
 
-const handleViewCustomer = (customerId: number): void => {
+const handleViewCustomer = (customerId: string): void => {
   router.push(`/customers/${customerId}`)
 }
 

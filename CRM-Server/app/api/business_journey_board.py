@@ -81,7 +81,7 @@ class BusinessJourneyInvoiceSummary(BaseModel):
 class BusinessJourneyBoardCard(BaseModel):
     journey_id: int
     journey_name: str
-    customer_id: int
+    customer_id: str
     customer_name: str | None = None
     owner: BusinessJourneyBoardOwner | None = None
     status: str
@@ -315,11 +315,16 @@ def get_business_journey_board(
 
         owner_id_value = _owner_id_for(journey, customer, opportunity)
         owner = owner_map.get(owner_id_value) if owner_id_value else None
+        if not customer:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="业务旅程关联客户数据异常",
+            )
         card = BusinessJourneyBoardCard(
             journey_id=journey.id,
             journey_name=journey.name,
-            customer_id=journey.customer_id,
-            customer_name=customer.account_name if customer else None,
+            customer_id=customer.public_id,
+            customer_name=customer.account_name,
             owner=owner,
             status=journey.status,
             current_board_stage=stage_key,

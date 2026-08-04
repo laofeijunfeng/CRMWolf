@@ -17,7 +17,7 @@ class AgentToolExecutionPolicy:
 
     hitl_decision: Optional[str] = None
     allowed_tool_names: List[str] = field(default_factory=list)
-    allowed_customer_ids: List[int] = field(default_factory=list)
+    allowed_customer_ids: List[str] = field(default_factory=list)
 
 
 class AgentToolGuardrails:
@@ -51,7 +51,7 @@ class AgentToolGuardrails:
             customer_id = payload["deployment_info"].get("customer_id")
         if customer_id is None and isinstance(payload.get("opportunity"), dict):
             customer_id = payload["opportunity"].get("customer_id")
-        if customer_id is not None and allowed_customer_ids and int(customer_id) not in allowed_customer_ids:
+        if customer_id is not None and allowed_customer_ids and str(customer_id) not in allowed_customer_ids:
             raise AgentToolGuardrailError("tool payload 中的客户 ID 不在当前确认上下文内。")
 
 

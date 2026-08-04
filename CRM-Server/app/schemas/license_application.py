@@ -44,7 +44,7 @@ class LicenseType(str, Enum):
 
 class LicenseApplicationBase(BaseModel):
     """License 申请基础模型"""
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     license_type: LicenseType = Field(..., description="License 类型")
     authorized_users: int = Field(..., gt=0, description="本次申请使用人数")
@@ -113,7 +113,7 @@ class LicenseApplicationResponse(BaseModel):
     id: int = Field(..., description="申请ID")
     team_id: int = Field(..., description="团队ID")
     application_number: str = Field(..., description="申请单号")
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     contract_id: Optional[int] = Field(None, description="关联合同ID")
     expiry_date: date = Field(..., description="到期时间")

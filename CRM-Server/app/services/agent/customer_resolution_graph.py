@@ -361,7 +361,7 @@ async def _rank_customer_candidates_by_search_match(state: CustomerResolutionGra
         if not isinstance(candidate, dict):
             continue
         customer_id = candidate.get("id")
-        if not isinstance(customer_id, int):
+        if not isinstance(customer_id, (str, int)) or not str(customer_id):
             continue
         match = coerce_json_dict(candidate.get("match"))
         score = _customer_identity_score(candidate, match=match, target_name=target_name, content=content)

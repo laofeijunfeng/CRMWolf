@@ -73,7 +73,7 @@ const emit = defineEmits<{
   refresh: []
   'record-click': [record: PaymentRecordInfo]
   'view-approval': [record: PaymentRecordInfo]
-  'view-customer': [customerId: number, plan: PaymentPlanResponse]
+  'view-customer': [customerId: string, plan: PaymentPlanResponse]
   'view-contract': [contractId: number, plan: PaymentPlanResponse]
 }>()
 
@@ -312,7 +312,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 const handleViewCustomer = (): void => {
   const plan = paymentPlan.value
   const customerId = plan?.customer_id
-  if (plan === null || typeof customerId !== 'number') return
+  if (plan === null || typeof customerId !== 'string' || customerId.trim() === '') return
   emit('view-customer', customerId, plan)
 }
 
@@ -366,7 +366,8 @@ const getApprovalStatusLabel = (status: ApprovalStatus): string => {
   const statusMap: Record<ApprovalStatus, string> = {
     PENDING: '审批中',
     APPROVED: '已通过',
-    REJECTED: '已驳回'
+    REJECTED: '已驳回',
+    CANCELLED: '已撤回'
   }
   return statusMap[status]
 }
@@ -375,7 +376,8 @@ const getApprovalBadgeClass = (status: ApprovalStatus): string => {
   const statusMap: Record<ApprovalStatus, string> = {
     PENDING: 'approval-status-warning',
     APPROVED: 'approval-status-success',
-    REJECTED: 'approval-status-danger'
+    REJECTED: 'approval-status-danger',
+    CANCELLED: 'approval-status-muted'
   }
   return statusMap[status]
 }
@@ -503,7 +505,7 @@ watch(
                   <div class="attribute-item">
                     <span class="attribute-label">客户名称</span>
                     <Button
-                      v-if="typeof paymentPlan.customer_id === 'number'"
+                      v-if="paymentPlan.customer_id !== null && paymentPlan.customer_id !== undefined && paymentPlan.customer_id !== ''"
                       variant="link"
                       type="button"
                       class="attribute-link"
@@ -948,6 +950,12 @@ $payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 .approval-status-danger {
   background: $wolf-danger-bg-v2;
   color: $wolf-danger-text-v2;
+  border-color: transparent;
+}
+
+.approval-status-muted {
+  background: rgba(#64748B, 0.1);
+  color: $wolf-disabled-text-v2;
   border-color: transparent;
 }
 

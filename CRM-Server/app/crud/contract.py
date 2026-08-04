@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from typing import Optional, List, Tuple
 from decimal import Decimal
 from datetime import date, datetime
@@ -7,12 +7,14 @@ import logging
 
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Customer
+from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
 from app.constants.business_types import BusinessType
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.contract import ContractCreate, ContractUpdate
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.services.contract import ContractPricingService
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +168,14 @@ class ContractCRUD:
         contract_number: Optional[str] = None,
         license_type: Optional[str] = None,
         license_type_exclude: Optional[str] = None,
+        purchase_type: Optional[str] = None,
+        purchase_type_exclude: Optional[str] = None,
+        subscription_years: Optional[int] = None,
+        subscription_years_exclude: Optional[int] = None,
+        license_authorized_users: Optional[int] = None,
+        license_authorized_users_exclude: Optional[int] = None,
+        standard_unit_price: Optional[Decimal] = None,
+        standard_unit_price_exclude: Optional[Decimal] = None,
         keyword: Optional[str] = None,
         customer_keyword: Optional[str] = None,
         opportunity_keyword: Optional[str] = None,
@@ -177,6 +187,8 @@ class ContractCRUD:
         effective_date_end: Optional[date] = None,
         expiry_date_start: Optional[date] = None,
         expiry_date_end: Optional[date] = None,
+        license_expiry_date_start: Optional[date] = None,
+        license_expiry_date_end: Optional[date] = None,
         order_by: Optional[str] = None,
         order_dir: Optional[str] = None,
         include_deleted: bool = False
@@ -204,6 +216,53 @@ class ContractCRUD:
         """
         query = db.query(Contract).filter(Contract.team_id == team_id)
 
+        latest_license_authorized_users = (
+            db.query(LicenseApplication.authorized_users)
+            .filter(
+                LicenseApplication.contract_id == Contract.id,
+                LicenseApplication.license_type == 'OFFICIAL',
+                LicenseApplication.status == 'ISSUED'
+            )
+            .order_by(LicenseApplication.last_modified_time.desc(), LicenseApplication.id.desc())
+            .limit(1)
+            .correlate(Contract)
+            .scalar_subquery()
+        )
+        latest_license_expiry_date = (
+            db.query(LicenseApplication.expiry_date)
+            .filter(
+                LicenseApplication.contract_id == Contract.id,
+                LicenseApplication.license_type == 'OFFICIAL',
+                LicenseApplication.status == 'ISSUED'
+            )
+            .order_by(LicenseApplication.last_modified_time.desc(), LicenseApplication.id.desc())
+            .limit(1)
+            .correlate(Contract)
+            .scalar_subquery()
+        )
+        displayed_authorized_users = func.coalesce(latest_license_authorized_users, Contract.user_count)
+        customer_name_sort = (
+            db.query(Customer.account_name)
+            .filter(Customer.id == Contract.customer_id)
+            .limit(1)
+            .correlate(Contract)
+            .scalar_subquery()
+        )
+        opportunity_name_sort = (
+            db.query(Opportunity.opportunity_name)
+            .filter(Opportunity.id == Contract.opportunity_id)
+            .limit(1)
+            .correlate(Contract)
+            .scalar_subquery()
+        )
+        purchase_type_sort = (
+            db.query(Opportunity.purchase_type)
+            .filter(Opportunity.id == Contract.opportunity_id)
+            .limit(1)
+            .correlate(Contract)
+            .scalar_subquery()
+        )
+
         # 默认不包含已删除的合同
         if not include_deleted:
             query = query.filter(Contract.deleted_at.is_(None))
@@ -223,6 +282,23 @@ class ContractCRUD:
             query = query.filter(Contract.license_type.in_(_split_csv(license_type)))
         if license_type_exclude:
             query = query.filter(Contract.license_type.notin_(_split_csv(license_type_exclude)))
+
+        if purchase_type:
+            query = query.filter(Contract.opportunity.has(Opportunity.purchase_type.in_(_split_csv(purchase_type))))
+        if purchase_type_exclude:
+            query = query.filter(Contract.opportunity.has(Opportunity.purchase_type.notin_(_split_csv(purchase_type_exclude))))
+        if subscription_years is not None:
+            query = query.filter(Contract.subscription_years == subscription_years)
+        if subscription_years_exclude is not None:
+            query = query.filter(Contract.subscription_years != subscription_years_exclude)
+        if license_authorized_users is not None:
+            query = query.filter(displayed_authorized_users == license_authorized_users)
+        if license_authorized_users_exclude is not None:
+            query = query.filter(displayed_authorized_users != license_authorized_users_exclude)
+        if standard_unit_price is not None:
+            query = query.filter(Contract.standard_unit_price == standard_unit_price)
+        if standard_unit_price_exclude is not None:
+            query = query.filter(Contract.standard_unit_price != standard_unit_price_exclude)
 
         if keyword:
             query = query.filter(Contract.contract_name.like(f"%{keyword}%"))
@@ -250,12 +326,33 @@ class ContractCRUD:
             query = query.filter(Contract.expiry_date >= expiry_date_start)
         if expiry_date_end:
             query = query.filter(Contract.expiry_date <= expiry_date_end)
+        if license_expiry_date_start:
+            query = query.filter(latest_license_expiry_date >= license_expiry_date_start)
+        if license_expiry_date_end:
+            query = query.filter(latest_license_expiry_date <= license_expiry_date_end)
 
         total = query.count()
 
-        allowed_sort_fields = ['created_time', 'contract_name', 'total_amount', 'license_type', 'status', 'signing_date', 'effective_date', 'expiry_date']
-        if order_by and order_dir and order_by in allowed_sort_fields:
-            order_column = getattr(Contract, order_by)
+        sort_columns = {
+            'contract_number': Contract.contract_number,
+            'contract_name': Contract.contract_name,
+            'customer_name': customer_name_sort,
+            'opportunity_name': opportunity_name_sort,
+            'total_amount': Contract.total_amount,
+            'license_type': Contract.license_type,
+            'purchase_type': purchase_type_sort,
+            'subscription_years': Contract.subscription_years,
+            'license_authorized_users': displayed_authorized_users,
+            'standard_unit_price': Contract.standard_unit_price,
+            'license_expiry_date': latest_license_expiry_date,
+            'status': Contract.status,
+            'signing_date': Contract.signing_date,
+            'effective_date': Contract.effective_date,
+            'expiry_date': Contract.expiry_date,
+            'created_time': Contract.created_time,
+        }
+        if order_by and order_dir and order_by in sort_columns:
+            order_column = sort_columns[order_by]
             if order_dir.lower() == 'desc':
                 query = query.order_by(order_column.desc())
             else:
@@ -534,7 +631,7 @@ class ContractCRUD:
             raise ValueError("只有草稿状态的合同可以删除")
 
         # 软删除：设置 deleted_at 时间戳
-        contract.deleted_at = datetime.now()
+        contract.deleted_at = business_now()
         contract.status = ContractStatus.DRAFT  # 合同状态回到草稿
 
         db.commit()

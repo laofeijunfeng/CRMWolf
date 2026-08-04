@@ -1,8 +1,9 @@
 """通用业务编号生成器"""
-from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import threading
+
+from app.utils.time import business_now
 
 
 class BusinessNumberGenerator:
@@ -48,7 +49,7 @@ class BusinessNumberGenerator:
         table_name, number_field = cls.TABLE_MAPPING[prefix]
 
         with cls._lock:
-            today = datetime.now()
+            today = business_now()
             date_str = today.strftime("%Y%m%d")
 
             result = db.execute(text(f"""

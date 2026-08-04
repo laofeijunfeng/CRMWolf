@@ -21,7 +21,7 @@ import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { OpportunityListResponse, OpportunityStatus } from '@/api/opportunity'
 
 interface Props {
-  customerId: number
+  customerId: string
   opportunities: OpportunityListResponse[]
   showAdd?: boolean
 }

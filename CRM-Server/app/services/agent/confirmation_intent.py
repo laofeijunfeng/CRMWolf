@@ -27,7 +27,23 @@ class AgentConfirmationIntentService:
     context, not inside a channel gateway.
     """
 
-    direct_confirmation_texts = {"是", "确认", "可以", "执行", "好的", "好", "yes", "y", "ok"}
+    direct_confirmation_texts = {
+        "是",
+        "确认",
+        "确认执行",
+        "确认创建",
+        "确认新增",
+        "确定",
+        "确定执行",
+        "可以",
+        "执行",
+        "继续执行",
+        "好的",
+        "好",
+        "yes",
+        "y",
+        "ok",
+    }
     direct_rejection_texts = {"否", "不", "不用", "不要", "取消", "先不处理", "no", "n"}
     confidence_threshold = 0.82
 

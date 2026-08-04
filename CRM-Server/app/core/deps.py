@@ -31,6 +31,22 @@ def _user_has_team_role(db: Session, team_id: int, user_id: int, role_code: str)
     return role_code in {r.code for r in user_roles}
 
 
+def _get_customer_by_identifier(db: Session, customer_identifier, team_id: int):
+    from app.crud.customer import customer_crud
+
+    if isinstance(customer_identifier, int):
+        return customer_crud.get_by_id(db, customer_identifier, team_id)
+    return customer_crud.get_by_public_id(db, str(customer_identifier), team_id)
+
+
+def _get_lead_by_identifier(db: Session, lead_identifier, team_id: int):
+    from app.crud.lead import lead_crud
+
+    if isinstance(lead_identifier, int):
+        return lead_crud.get_by_id(db, lead_identifier, team_id)
+    return lead_crud.get_by_public_id(db, str(lead_identifier), team_id)
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
@@ -214,7 +230,7 @@ def require_role(role_code: str):
 
 
 def check_lead_access(
-    lead_id: int,
+    lead_id: str,
     current_user = Depends(get_current_active_user),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
@@ -222,7 +238,7 @@ def check_lead_access(
     from app.crud.lead import lead_crud
     from app.crud.role import role_crud
 
-    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    lead = _get_lead_by_identifier(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -247,7 +263,7 @@ def check_lead_access(
 
 
 def check_lead_owner(
-    lead_id: int,
+    lead_id: str,
     current_user = Depends(get_current_active_user),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
@@ -255,7 +271,7 @@ def check_lead_owner(
     from app.crud.lead import lead_crud
     from app.crud.role import role_crud
 
-    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    lead = _get_lead_by_identifier(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -279,7 +295,7 @@ def check_lead_owner(
 
 
 def check_lead_delete_permission(
-    lead_id: int,
+    lead_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -293,7 +309,7 @@ def check_lead_delete_permission(
     """
     from app.crud.lead import lead_crud
 
-    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    lead = _get_lead_by_identifier(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -325,7 +341,7 @@ def check_lead_delete_permission(
 
 
 def check_lead_edit_permission(
-    lead_id: int,
+    lead_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -339,7 +355,7 @@ def check_lead_edit_permission(
     """
     from app.crud.lead import lead_crud
 
-    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    lead = _get_lead_by_identifier(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -371,7 +387,7 @@ def check_lead_edit_permission(
 
 
 def check_customer_delete_permission(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -385,7 +401,7 @@ def check_customer_delete_permission(
     """
     from app.crud.customer import customer_crud
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -417,7 +433,7 @@ def check_customer_delete_permission(
 
 
 def check_customer_edit_permission(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -432,7 +448,7 @@ def check_customer_edit_permission(
     """
     from app.crud.customer import customer_crud
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -653,7 +669,7 @@ def check_contract_edit_permission(
 # ===== View Permission Checkers =====
 
 def check_lead_view_permission(
-    lead_id: int,
+    lead_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -667,7 +683,7 @@ def check_lead_view_permission(
     """
     from app.crud.lead import lead_crud
 
-    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    lead = _get_lead_by_identifier(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -698,7 +714,7 @@ def check_lead_view_permission(
 
 
 def check_customer_view_permission(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -713,7 +729,7 @@ def check_customer_view_permission(
     """
     from app.crud.customer import customer_crud
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -747,14 +763,14 @@ def check_customer_view_permission(
 
 
 def check_customer_activity_permission(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from app.crud.customer import customer_crud
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -783,14 +799,14 @@ def check_customer_activity_permission(
     )
 
 def check_customer_member_manage_permission(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from app.crud.customer import customer_crud
 
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

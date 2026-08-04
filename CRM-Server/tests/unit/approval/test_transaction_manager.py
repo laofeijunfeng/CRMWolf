@@ -14,6 +14,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from sqlalchemy.orm import Session
 
+import app.services.approval_transaction_manager as transaction_manager_module
 from app.services.approval_transaction_manager import ApprovalTransactionManager
 from app.constants.approval_phase import ApprovalPhase
 from app.models.approval import Approval, ApprovalStatus, ApprovalFlow
@@ -106,6 +107,55 @@ class TestApprovalTransactionManager:
         # TODO: 实现测试逻辑
         pass
 
+    @pytest.mark.asyncio
+    async def test_send_notification_awaits_pending_notification_service(self, transaction_manager, mock_db):
+        approval = Mock()
+        approval.id = 86
+        approval.business_type = BusinessType.OPPORTUNITY
+        approval.business_id = 30
+        approval.submitter_name = "张三"
+        approval.flow = Mock(flow_name="商机审批")
+        approval.current_node = Mock(
+            approve_role="SALES_MANAGER",
+            node_name="销售经理审批",
+            notify_user_ids=["11"],
+        )
+        entity = Mock()
+
+        sent_payload = {}
+
+        class FakeAdapter:
+            def get_name(self, entity):
+                return "企业版采购"
+
+        async def fake_notify_approval_pending(**kwargs):
+            sent_payload.update(kwargs)
+            return {"success": 1, "failed": 0, "skipped": 0}
+
+        with patch.object(transaction_manager_module, "get_adapter", return_value=FakeAdapter()), \
+            patch.object(transaction_manager_module, "get_approval_type_name", return_value="商机"), \
+            patch.object(transaction_manager_module, "get_approval_customer_name", return_value="测试客户"), \
+            patch.object(transaction_manager_module, "get_approval_card_fields", return_value={"商机": "企业版采购"}), \
+            patch("app.crud.role.role_crud.get_by_code", return_value=Mock(id=7)), \
+            patch(
+                "app.crud.role.role_crud.get_role_users",
+                return_value=[Mock(id=11), Mock(id=12)],
+            ), \
+            patch(
+                "app.services.feishu_notification.feishu_notification_service.notify_approval_pending",
+                side_effect=fake_notify_approval_pending,
+            ):
+            result = await transaction_manager.send_notification(mock_db, approval, entity, team_id=2)
+
+        assert result == {"success": 1, "failed": 0, "skipped": 0}
+        assert sent_payload["db"] is mock_db
+        assert sent_payload["team_id"] == 2
+        assert sent_payload["user_ids"] == [11]
+        assert sent_payload["entity_type"] == BusinessType.OPPORTUNITY
+        assert sent_payload["entity_name"] == "企业版采购"
+        assert sent_payload["flow_name"] == "商机审批"
+        assert sent_payload["node_name"] == "销售经理审批"
+
     # ========================================================================
     # submit_for_approval 测试用例
     # ========================================================================
@@ -133,8 +183,79 @@ class TestApprovalTransactionManager:
         - 新 Approval 实例被创建
         - 事务正确 commit
         """
-        # TODO: 实现测试逻辑
-        pass
+        entity = Mock()
+        entity.id = 30
+        entity.approval_phase = ApprovalPhase.REJECTED.value
+
+        old_approval = Mock()
+        old_approval.id = 88
+
+        new_approval = Mock(spec=Approval)
+        new_approval.id = 89
+
+        class FakeAdapter:
+            def get_entity(self, db, entity_id, team_id):
+                assert db is mock_db
+                assert entity_id == 30
+                assert team_id == 2
+                return entity
+
+            def match_kwargs(self, entity):
+                return {"amount": 1000, "license_type": None}
+
+            def on_submit(self, db, entity):
+                entity.on_submit_called = True
+
+        with patch.object(transaction_manager_module, "get_adapter", return_value=FakeAdapter()), \
+            patch.object(
+                transaction_manager_module.approval_crud,
+                "get_by_entity",
+                return_value=old_approval,
+            ) as mock_get_old, \
+            patch.object(
+                transaction_manager_module.approval_flow_crud,
+                "match_flow_generic",
+                return_value=(mock_flow, None),
+            ) as mock_match_flow, \
+            patch.object(
+                transaction_manager_module.approval_crud,
+                "create_approval_only",
+                return_value=new_approval,
+            ) as mock_create_approval:
+            approval, error = transaction_manager.submit_for_approval(
+                mock_db,
+                business_type=BusinessType.OPPORTUNITY,
+                entity_id=30,
+                team_id=2,
+                submitter_id="user-1",
+                submitter_name="张三",
+                send_notification=False,
+            )
+
+        assert error is None
+        assert approval is new_approval
+        mock_get_old.assert_called_once_with(mock_db, BusinessType.OPPORTUNITY, 30, 2)
+        mock_db.delete.assert_called_once_with(old_approval)
+        mock_match_flow.assert_called_once_with(
+            mock_db,
+            BusinessType.OPPORTUNITY,
+            2,
+            1000,
+            None,
+        )
+        mock_create_approval.assert_called_once_with(
+            mock_db,
+            business_type=BusinessType.OPPORTUNITY,
+            business_id=30,
+            team_id=2,
+            flow=mock_flow,
+            submitter_id="user-1",
+            submitter_name="张三",
+        )
+        assert entity.approval_phase == ApprovalPhase.PENDING_REVIEW.value
+        assert entity.on_submit_called is True
+        mock_db.commit.assert_called_once()
+        mock_db.refresh.assert_called_once_with(new_approval)
 
     def test_submit_for_approval_invalid_phase(self, transaction_manager, mock_db):
         """

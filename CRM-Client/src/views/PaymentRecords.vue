@@ -39,7 +39,7 @@ import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
 import { serializeListSorts } from '@/utils/listSorts'
 
 // 自动从 route.meta.title 设置页面标题
@@ -82,7 +82,27 @@ const activeTab = ref('all')
 
 // ==================== DataTable 筛选配置 ====================
 const filterFields: ListFilterField[] = [
-  { key: 'keyword', type: 'text', label: '客户/合同/阶段' },
+  { key: 'keyword', type: 'text', label: '全局关键词' },
+  { key: 'record_number', type: 'text', label: '回款编号' },
+  { key: 'customer_name', type: 'text', label: '客户名称' },
+  { key: 'actual_payer_name', type: 'text', label: '实际付款方' },
+  { key: 'invoice_title_text', type: 'text', label: '发票抬头' },
+  { key: 'contract_name', type: 'text', label: '合同名称' },
+  { key: 'actual_amount', type: 'number', label: '回款金额' },
+  { key: 'owner_name', type: 'text', label: '负责人' },
+  { key: 'commission_member_name', type: 'text', label: '团队成员' },
+  { key: 'payment_date', type: 'date', label: '回款日期' },
+  {
+    key: 'confirmation_status',
+    type: 'enum',
+    label: '状态',
+    options: [
+      { value: 'PENDING', label: '待确认' },
+      { value: 'CONFIRMED', label: '已确认' },
+      { value: 'DISPUTED', label: '有争议' }
+    ]
+  },
+  { key: 'created_time', type: 'date', label: '创建时间' },
   {
     key: 'approval_status',
     type: 'enum',
@@ -93,16 +113,18 @@ const filterFields: ListFilterField[] = [
       { value: 'rejected', label: '已驳回' },
       { value: 'approved', label: '已确认' }
     ]
-  },
-  { key: 'payment_date', type: 'date', label: '回款日期' }
+  }
 ]
 
 const sortFields: ListSortField[] = [
-  { key: 'record_number', type: 'text', label: '记录编号' },
+  { key: 'record_number', type: 'text', label: '回款编号' },
   { key: 'customer_name', type: 'text', label: '客户名称' },
   { key: 'actual_payer_name', type: 'text', label: '实际付款方' },
+  { key: 'invoice_title_text', type: 'text', label: '发票抬头' },
   { key: 'contract_name', type: 'text', label: '合同名称' },
   { key: 'actual_amount', type: 'number', label: '回款金额' },
+  { key: 'owner_name', type: 'text', label: '负责人' },
+  { key: 'commission_member_name', type: 'text', label: '团队成员' },
   { key: 'payment_date', type: 'date', label: '回款日期' },
   {
     key: 'confirmation_status',
@@ -119,13 +141,17 @@ const sortFields: ListSortField[] = [
 
 // ==================== DataTable 配置 ====================
 const columns = [
-  { key: 'record_number', title: '记录编号', width: '150px' },
-  { key: 'customer_name', title: '客户名称' },
-  { key: 'actual_payer_name', title: '实际付款方' },
-  { key: 'contract_name', title: '合同名称' },
-  { key: 'actual_amount', title: '回款金额', align: 'right' as const },
-  { key: 'payment_date', title: '回款日期' },
-  { key: 'confirmation_status', title: '状态', align: 'center' as const },
+  { key: 'record_number', title: '回款编号', width: '180px' },
+  { key: 'customer_name', title: '客户名称', width: '180px' },
+  { key: 'actual_payer_name', title: '实际付款方', width: '180px' },
+  { key: 'invoice_title_text', title: '发票抬头', width: '200px' },
+  { key: 'contract_name', title: '合同名称', width: '220px' },
+  { key: 'actual_amount', title: '回款金额', align: 'right' as const, width: '140px' },
+  { key: 'owner_name', title: '负责人', width: '110px' },
+  { key: 'commission_member_name', title: '团队成员', width: '110px' },
+  { key: 'payment_date', title: '回款日期', width: '120px' },
+  { key: 'confirmation_status', title: '状态', align: 'center' as const, width: '110px' },
+  { key: 'created_time', title: '创建时间', width: '160px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
 ]
 
@@ -171,6 +197,63 @@ const fetchPaymentRecords = async (): Promise<void> => {
     }
     if (paymentDateBounds.end !== undefined) {
       params.payment_date_end = paymentDateBounds.end
+    }
+
+    const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
+    if (createdTimeBounds.start !== undefined) {
+      params.created_time_start = createdTimeBounds.start
+    }
+    if (createdTimeBounds.end !== undefined) {
+      params.created_time_end = createdTimeBounds.end
+    }
+
+    const actualAmount = getNumericFilterValue(activeFilters.value, 'actual_amount')
+    if (actualAmount !== null) {
+      params.actual_amount = actualAmount
+    }
+
+    const recordNumber = getFilterValue(activeFilters.value, 'record_number')
+    const recordNumberExclude = getFilterValue(activeFilters.value, 'record_number', ['neq', 'not_contains'])
+    if (recordNumber !== null && recordNumber.length > 0) params.record_number = recordNumber
+    if (recordNumberExclude !== null && recordNumberExclude.length > 0) params.record_number_exclude = recordNumberExclude
+
+    const customerName = getFilterValue(activeFilters.value, 'customer_name')
+    const customerNameExclude = getFilterValue(activeFilters.value, 'customer_name', ['neq', 'not_contains'])
+    if (customerName !== null && customerName.length > 0) params.customer_name = customerName
+    if (customerNameExclude !== null && customerNameExclude.length > 0) params.customer_name_exclude = customerNameExclude
+
+    const actualPayerName = getFilterValue(activeFilters.value, 'actual_payer_name')
+    const actualPayerNameExclude = getFilterValue(activeFilters.value, 'actual_payer_name', ['neq', 'not_contains'])
+    if (actualPayerName !== null && actualPayerName.length > 0) params.actual_payer_name = actualPayerName
+    if (actualPayerNameExclude !== null && actualPayerNameExclude.length > 0) params.actual_payer_name_exclude = actualPayerNameExclude
+
+    const invoiceTitleText = getFilterValue(activeFilters.value, 'invoice_title_text')
+    const invoiceTitleTextExclude = getFilterValue(activeFilters.value, 'invoice_title_text', ['neq', 'not_contains'])
+    if (invoiceTitleText !== null && invoiceTitleText.length > 0) params.invoice_title_text = invoiceTitleText
+    if (invoiceTitleTextExclude !== null && invoiceTitleTextExclude.length > 0) params.invoice_title_text_exclude = invoiceTitleTextExclude
+
+    const contractName = getFilterValue(activeFilters.value, 'contract_name')
+    const contractNameExclude = getFilterValue(activeFilters.value, 'contract_name', ['neq', 'not_contains'])
+    if (contractName !== null && contractName.length > 0) params.contract_name = contractName
+    if (contractNameExclude !== null && contractNameExclude.length > 0) params.contract_name_exclude = contractNameExclude
+
+    const ownerName = getFilterValue(activeFilters.value, 'owner_name')
+    const ownerNameExclude = getFilterValue(activeFilters.value, 'owner_name', ['neq', 'not_contains'])
+    if (ownerName !== null && ownerName.length > 0) params.owner_name = ownerName
+    if (ownerNameExclude !== null && ownerNameExclude.length > 0) params.owner_name_exclude = ownerNameExclude
+
+    const commissionMemberName = getFilterValue(activeFilters.value, 'commission_member_name')
+    const commissionMemberNameExclude = getFilterValue(activeFilters.value, 'commission_member_name', ['neq', 'not_contains'])
+    if (commissionMemberName !== null && commissionMemberName.length > 0) params.commission_member_name = commissionMemberName
+    if (commissionMemberNameExclude !== null && commissionMemberNameExclude.length > 0) params.commission_member_name_exclude = commissionMemberNameExclude
+
+    const confirmationStatus = getDelimitedFilterValues(activeFilters.value, 'confirmation_status')
+    const confirmationStatusExclude = getDelimitedFilterValues(activeFilters.value, 'confirmation_status', ['neq', 'not_contains'])
+    if (confirmationStatus !== null) {
+      params.confirmation_status = confirmationStatus
+    }
+    if (confirmationStatusExclude !== null) {
+      params.confirmation_status_exclude = confirmationStatusExclude
     }
 
     if (activeTab.value === 'pending_submit' || activeTab.value === 'pending_approval' || activeTab.value === 'rejected') {
@@ -470,7 +553,7 @@ watchEffect(() => {
       mobile-title-key="record_number"
       mobile-subtitle-key="customer_name"
       mobile-status-key="confirmation_status"
-      :mobile-meta-keys="['contract_name', 'actual_payer_name', 'payment_date']"
+      :mobile-meta-keys="['actual_payer_name', 'invoice_title_text', 'contract_name', 'owner_name', 'commission_member_name', 'payment_date']"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @filter-apply="handleFilterApply"
@@ -499,6 +582,9 @@ watchEffect(() => {
         <AmountText class="payment-record-mobile-card-amount" :value="row.actual_amount" size="lg" />
         <div class="payment-record-mobile-card-meta">
           <span>付款方：{{ row.actual_payer_name || '-' }}</span>
+          <span>发票抬头：{{ row.invoice_title_text || '-' }}</span>
+          <span>负责人：{{ row.owner_name || '-' }}</span>
+          <span>团队成员：{{ row.commission_member_name || '-' }}</span>
           <span>回款：{{ row.payment_date || '-' }}</span>
         </div>
       </template>
@@ -527,12 +613,12 @@ watchEffect(() => {
         />
       </template>
 
-      <!-- 记录编号 -->
+      <!-- 回款编号 -->
       <template #cell-record_number="{ row }">
         <button
           type="button"
           class="record-number-cell record-number-link"
-          :aria-label="`查看回款记录 ${row.record_number || row.id}`"
+          :aria-label="`查看回款 ${row.record_number || row.id}`"
           @click.stop="handleViewDetail(row as PaymentRecordWithDetails)"
         >
           {{ row.record_number || '-' }}
@@ -548,9 +634,25 @@ watchEffect(() => {
         <span>{{ row.actual_payer_name || '-' }}</span>
       </template>
 
+      <template #cell-invoice_title_text="{ row }">
+        <span>{{ row.invoice_title_text || '-' }}</span>
+      </template>
+
+      <template #cell-owner_name="{ row }">
+        <span>{{ row.owner_name || '-' }}</span>
+      </template>
+
+      <template #cell-commission_member_name="{ row }">
+        <span>{{ row.commission_member_name || '-' }}</span>
+      </template>
+
       <!-- 回款金额 -->
       <template #cell-actual_amount="{ row }">
         <AmountText :value="row.actual_amount" />
+      </template>
+
+      <template #cell-created_time="{ row }">
+        <span>{{ row.created_time ? row.created_time.slice(0, 10) : '-' }}</span>
       </template>
 
       <!-- 状态 -->

@@ -25,7 +25,7 @@ const licenseApplicationApi = {
   },
 
   // 获取申请列表（别名）
-  async list(customerId: number): Promise<LicenseApplicationResponse[]> {
+  async list(customerId: string): Promise<LicenseApplicationResponse[]> {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<LicenseApplicationResponse[]>('/v1/license-applications/', {
       params: { customer_id: customerId }
@@ -40,7 +40,7 @@ const licenseApplicationApi = {
     return LicenseApplicationSchema.parse(response)
   },
 
-  async getApplications(customerId: number): Promise<LicenseApplicationResponse[]> {
+  async getApplications(customerId: string): Promise<LicenseApplicationResponse[]> {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<LicenseApplicationResponse[]>('/v1/license-applications/', {
       params: { customer_id: customerId }

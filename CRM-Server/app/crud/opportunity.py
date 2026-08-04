@@ -8,6 +8,7 @@ from app.models.customer import Customer
 from app.constants.business_types import BusinessType
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
+from app.utils.time import business_now
 from app.schemas.opportunity import (
     OpportunityStageCreate,
     OpportunityStageUpdate,
@@ -265,7 +266,6 @@ class OpportunityCRUD:
         from app.services.pricing import pricing_service
         from app.services.deal_journey_service import deal_journey_service
         from app.models.procurement import OpportunityStageSnapshot
-        from datetime import datetime
         
         customer = db.query(Customer).filter(Customer.id == obj_in.customer_id).first()
         if not customer:
@@ -336,7 +336,7 @@ class OpportunityCRUD:
             template_sort_order=stage.sort_order,
             template_code=stage.template_code,
             snapshot_version=stage.version,
-            entered_at=datetime.now()
+            entered_at=business_now()
         )
         db.add(snapshot)
         db.flush()
@@ -431,7 +431,6 @@ class OpportunityCRUD:
         """推进商机到新阶段"""
         from app.crud.procurement import procurement_stage_template_crud
         from app.models.procurement import OpportunityStageSnapshot
-        from datetime import datetime
         from app.services.operation_log_service import operation_log_service
         from app.crud.user import user_crud
         
@@ -474,7 +473,7 @@ class OpportunityCRUD:
                 raise ValueError("商机起始阶段只能设置为采购流程的默认起始阶段")
         
         if current_snapshot:
-            current_snapshot.exited_at = datetime.now()
+            current_snapshot.exited_at = business_now()
 
         new_snapshot = OpportunityStageSnapshot(
             team_id=opportunity.team_id,
@@ -485,7 +484,7 @@ class OpportunityCRUD:
             template_sort_order=target_stage.sort_order,
             template_code=target_stage.template_code,
             snapshot_version=target_stage.version,
-            entered_at=datetime.now()
+            entered_at=business_now()
         )
         db.add(new_snapshot)
         db.flush()

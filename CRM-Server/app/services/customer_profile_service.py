@@ -6,7 +6,6 @@
 """
 import json
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.database import SessionLocal
@@ -22,6 +21,7 @@ from app.services.customer_intelligence_context_service import (
     customer_intelligence_context_service,
 )
 from app.services.customer_vector_document_service import customer_vector_document_service
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,7 @@ class CustomerProfileService:
                             "similar_customers": json.dumps(profile_data.get("similar_customers", [])),
                             "project_background": profile_data.get("project_background"),
                             "profile_status": "COMPLETED",
-                            "profile_generated_time": datetime.now()
+                            "profile_generated_time": business_now()
                         }
                     )
                     updated_customer = db.query(Customer).filter(Customer.id == customer_id).first()

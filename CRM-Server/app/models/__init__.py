@@ -8,6 +8,7 @@ from app.models.lead import Lead, LeadFollowUp, LeadSource, LeadStatus, CompanyS
 from app.models.customer import Customer, Contact, CustomerMember
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_fact import CustomerFact, CustomerFactReviewAudit, CustomerFactReviewDecision, CustomerFactRevision, CustomerFactRevisionType, CustomerFactSource, CustomerFactStatus
+from app.models.customer_context_answer_telemetry import CustomerContextAnswerTelemetry
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.models.customer_vector_document import (
     CustomerVectorDocument,
@@ -51,6 +52,7 @@ __all__ = [
     "Customer", "Contact", "CustomerMember",
     "CustomerActivity",
     "CustomerFact", "CustomerFactReviewAudit", "CustomerFactReviewDecision", "CustomerFactRevision", "CustomerFactRevisionType", "CustomerFactSource", "CustomerFactStatus",
+    "CustomerContextAnswerTelemetry",
     "CustomerIntelligenceRun", "CustomerIntelligenceRunStatus",
     "CustomerVectorDocument", "CustomerVectorDocumentSourceType", "CustomerVectorDocumentSyncStatus",
     "CustomerDealJourney", "CustomerDealJourneyEvent", "DealJourneyStatus", "DealJourneyEventType", "DealJourneySourceType",

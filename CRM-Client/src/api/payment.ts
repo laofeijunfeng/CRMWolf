@@ -84,7 +84,7 @@ export interface PaymentPlanResponse {
   remaining_amount?: number
   payment_records: PaymentRecordInfo[]
   contract_name?: string
-  customer_id?: number | null
+  customer_id?: string | null
   customer_name?: string
   opportunity_id?: number
   opportunity_name?: string
@@ -143,6 +143,9 @@ export interface PaymentRecordResponse {
   creator_id?: string
   creator_name?: string
   approval_phase?: 'draft' | 'pending_review' | 'approved' | 'rejected'
+  invoice_title_text?: string | null
+  owner_id?: string | null
+  owner_name?: string | null
   created_time: string
   last_modified_time: string
 }
@@ -202,8 +205,27 @@ export interface PaymentRecordListParams {
   payment_date_start?: string
   payment_date_end?: string
   min_amount?: number
+  actual_amount?: number
   creator_id?: string
   keyword?: string
+  record_number?: string
+  record_number_exclude?: string
+  customer_name?: string
+  customer_name_exclude?: string
+  actual_payer_name?: string
+  actual_payer_name_exclude?: string
+  invoice_title_text?: string
+  invoice_title_text_exclude?: string
+  contract_name?: string
+  contract_name_exclude?: string
+  owner_name?: string
+  owner_name_exclude?: string
+  commission_member_name?: string
+  commission_member_name_exclude?: string
+  confirmation_status?: string
+  confirmation_status_exclude?: string
+  created_time_start?: string
+  created_time_end?: string
   approval_status?: string
   approval_status_exclude?: string
   me?: boolean

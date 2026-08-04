@@ -474,6 +474,25 @@ class FakeStreamingCustomerIntelligenceGraphService:
         }
 
 
+class FakeEmptyAnswerCustomerIntelligenceGraphService:
+    def __init__(self):
+        self.run_calls = []
+
+    async def run(self, input_state):
+        self.run_calls.append(input_state)
+        event = input_state["event"]
+        return {
+            "event": {"event_key": event.event_key, "customer_id": event.customer_id},
+            "route": "answer_context",
+            "customer_context_answer": {},
+            "visible_trace": [
+                {"title": "读取客户上下文", "content": "已读取客户智能上下文"},
+                {"title": "生成客户回答", "content": "客户资料不足，暂时无法整理回答"},
+            ],
+            "events": [{"event": "customer_context_answer_empty"}],
+        }
+
+
 class FakeCustomerIntelligenceTriggerPolicy:
     def __init__(self, event=None):
         self.event = event
@@ -650,6 +669,54 @@ async def test_root_runtime_routes_customer_query_to_customer_intelligence_graph
         if event.get("event") == "final"
     ] == [("越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。", "markdown")]
     assert output.assistant_content == "越秀金融当前正在推进 CRM 项目，商机处于 POC 阶段。"
+
+
+@pytest.mark.asyncio
+async def test_root_runtime_does_not_reuse_new_flow_completion_when_customer_answer_is_empty():
+    customer_intelligence_event = SimpleNamespace(
+        event_key="agent-question-empty-1",
+        customer_id=101,
+    )
+    customer_intelligence_graph_service = FakeEmptyAnswerCustomerIntelligenceGraphService()
+    trigger_policy = FakeCustomerIntelligenceTriggerPolicy(customer_intelligence_event)
+    side_effects = AgentRootRuntimeSideEffects()
+    runtime = AgentRootRuntime(
+        checkpointer=InMemorySaver(),
+        new_flow_graph_service=FakeNewFlowGraphService(),
+        customer_intelligence_graph_service=customer_intelligence_graph_service,
+        customer_intelligence_trigger_policy=trigger_policy,
+    )
+
+    state = await runtime.checkpoint_turn_start({
+        "team_id": 2,
+        "user_id": 3,
+        "session_id": 4,
+        "session_key": "abc",
+        "channel": "web",
+        "content": "汇川技术现在是什么情况",
+        "turn_kind": "text",
+    }, context=AgentRuntimeContext(
+        db=object(),
+        session=SimpleNamespace(id=4, context_json={}),
+        content="汇川技术现在是什么情况",
+        team_id=2,
+        user_id=3,
+        session_id=4,
+        user_message_id=88,
+        authorization="Bearer test",
+        side_effects=side_effects,
+    ))
+
+    output = project_turn_output(state, side_effects)
+    final_contents = [
+        event.get("content")
+        for event in output.events
+        if event.get("event") == "final"
+    ]
+    assert output.assistant_content == "客户资料不足，暂时无法整理回答。"
+    assert final_contents == ["客户资料不足，暂时无法整理回答。"]
+    assert "已处理新流程" not in final_contents
+    assert side_effects.new_flow_assistant_content == "已处理新流程"
 
 
 @pytest.mark.asyncio

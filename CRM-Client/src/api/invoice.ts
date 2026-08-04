@@ -1,4 +1,6 @@
+/* eslint-disable crmwolf/require-zod-schema */
 import request from '@/utils/request'
+import { ApiResponseSchema } from '@/schemas/common'
 
 export type TitleType = 'COMPANY' | 'PERSONAL'
 
@@ -28,7 +30,7 @@ export interface InvoiceTitleUpdate {
 
 export interface InvoiceTitleResponse {
   id: number
-  customer_id: number
+  customer_id: string
   title_type: TitleType
   title: string
   taxpayer_id: string
@@ -64,7 +66,7 @@ export type InvoiceType = 'VAT_SPECIAL' | 'VAT_NORMAL'
 export interface InvoiceApplicationResponse {
   id: number
   application_number: string
-  customer_id: number
+  customer_id: string
   contract_id: number | null
   opportunity_id: number | null
   payment_plan_id: number | null
@@ -108,7 +110,7 @@ export interface InvoiceApplicationListResponse {
 }
 
 export interface InvoiceApplicationQueryParams {
-  customer_id?: number
+  customer_id?: string
   contract_id?: number
   payment_plan_id?: number
   status?: string
@@ -129,63 +131,70 @@ export interface FinanceApprovalRequest {
   remark?: string
 }
 
+const InvoiceTitleResponseSchema = ApiResponseSchema<InvoiceTitleResponse>()
+const InvoiceTitleListResponseSchema = ApiResponseSchema<InvoiceTitleListResponse>()
+const InvoiceApplicationResponseSchema = ApiResponseSchema<InvoiceApplicationResponse>()
+const InvoiceApplicationListResponseSchema = ApiResponseSchema<InvoiceApplicationListResponse>()
+const DeleteResponseSchema = ApiResponseSchema<{ message: string }>()
+const InvoiceApplicationArraySchema = ApiResponseSchema<InvoiceApplicationResponse[]>()
+
 const invoiceApi = {
-  createInvoiceTitle: (customerId: number, data: InvoiceTitleCreate) => {
-    return request.post<InvoiceTitleResponse>('/v1/invoice-titles', data, {
+  createInvoiceTitle: async (customerId: string, data: InvoiceTitleCreate): Promise<InvoiceTitleResponse> => {
+    return InvoiceTitleResponseSchema.parse(await request.post<InvoiceTitleResponse>('/v1/invoice-titles', data, {
       params: { customer_id: customerId }
-    })
+    }))
   },
 
-  getInvoiceTitles: (customerId: number) => {
-    return request.get<InvoiceTitleListResponse>('/v1/invoice-titles', {
+  getInvoiceTitles: async (customerId: string): Promise<InvoiceTitleListResponse> => {
+    return InvoiceTitleListResponseSchema.parse(await request.get<InvoiceTitleListResponse>('/v1/invoice-titles', {
       params: { customer_id: customerId }
-    })
+    }))
   },
 
-  getInvoiceTitle: (titleId: number) => {
-    return request.get<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}`)
+  getInvoiceTitle: async (titleId: number): Promise<InvoiceTitleResponse> => {
+    return InvoiceTitleResponseSchema.parse(await request.get<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}`))
   },
 
-  updateInvoiceTitle: (titleId: number, data: InvoiceTitleUpdate) => {
-    return request.put<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}`, data)
+  updateInvoiceTitle: async (titleId: number, data: InvoiceTitleUpdate): Promise<InvoiceTitleResponse> => {
+    return InvoiceTitleResponseSchema.parse(await request.put<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}`, data))
   },
 
-  deleteInvoiceTitle: (titleId: number) => {
-    return request.delete<{ message: string }>(`/v1/invoice-titles/${titleId}`)
+  deleteInvoiceTitle: async (titleId: number): Promise<{ message: string }> => {
+    return DeleteResponseSchema.parse(await request.delete<{ message: string }>(`/v1/invoice-titles/${titleId}`))
   },
 
-  setDefaultInvoiceTitle: (titleId: number) => {
-    return request.patch<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}/set-default`)
+  setDefaultInvoiceTitle: async (titleId: number): Promise<InvoiceTitleResponse> => {
+    return InvoiceTitleResponseSchema.parse(await request.patch<InvoiceTitleResponse>(`/v1/invoice-titles/${titleId}/set-default`))
   },
 
-  createInvoiceApplication: (data: InvoiceApplicationCreate) => {
-    return request.post<InvoiceApplicationResponse>('/v1/invoice-applications', data)
+  createInvoiceApplication: async (data: InvoiceApplicationCreate): Promise<InvoiceApplicationResponse> => {
+    return InvoiceApplicationResponseSchema.parse(await request.post<InvoiceApplicationResponse>('/v1/invoice-applications', data))
   },
 
-  getInvoiceApplications: (params?: InvoiceApplicationQueryParams) => {
-    return request.get<InvoiceApplicationListResponse>('/v1/invoice-applications', { params })
+  getInvoiceApplications: async (params?: InvoiceApplicationQueryParams): Promise<InvoiceApplicationListResponse> => {
+    return InvoiceApplicationListResponseSchema.parse(await request.get<InvoiceApplicationListResponse>('/v1/invoice-applications', { params }))
   },
 
-  getInvoiceApplication: (applicationId: number) => {
-    return request.get<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}`)
+  getInvoiceApplication: async (applicationId: number): Promise<InvoiceApplicationResponse> => {
+    return InvoiceApplicationResponseSchema.parse(await request.get<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}`))
   },
 
-  updateInvoiceApplication: (applicationId: number, data: InvoiceApplicationUpdate) => {
-    return request.put<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}`, data)
+  updateInvoiceApplication: async (applicationId: number, data: InvoiceApplicationUpdate): Promise<InvoiceApplicationResponse> => {
+    return InvoiceApplicationResponseSchema.parse(await request.put<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}`, data))
   },
 
-  deleteInvoiceApplication: (applicationId: number) => {
-    return request.delete<{ message: string }>(`/v1/invoice-applications/${applicationId}`)
+  deleteInvoiceApplication: async (applicationId: number): Promise<{ message: string }> => {
+    return DeleteResponseSchema.parse(await request.delete<{ message: string }>(`/v1/invoice-applications/${applicationId}`))
   },
 
-  financeApprovalInvoiceApplication: (applicationId: number, data: FinanceApprovalRequest) => {
-    return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/finance-approval`, data)
+  financeApprovalInvoiceApplication: async (applicationId: number, data: FinanceApprovalRequest): Promise<InvoiceApplicationResponse> => {
+    return InvoiceApplicationResponseSchema.parse(await request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/finance-approval`, data))
   },
 
-  markAsInvoiced: (applicationId: number, invoiceNumber: string) => {
-    return request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/mark-invoiced`, {
+  markAsInvoiced: async (applicationId: number, invoiceNumber: string): Promise<InvoiceApplicationResponse> => {
+    return InvoiceApplicationResponseSchema.parse(await request.post<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}/mark-invoiced`, {
       invoice_number: invoiceNumber
-    })
+    }))
   },
 
   /**
@@ -198,10 +207,10 @@ const invoiceApi = {
     invoice_number?: string
   }): Promise<InvoiceApplicationResponse> => {
     const formData = new FormData()
-    if (data.file) {
+    if (data.file !== undefined) {
       formData.append('file', data.file)
     }
-    if (data.invoice_number) {
+    if (data.invoice_number !== undefined && data.invoice_number !== '') {
       formData.append('invoice_number', data.invoice_number)
     }
     return request.post<InvoiceApplicationResponse>(
@@ -210,11 +219,11 @@ const invoiceApi = {
       {
         headers: { 'Content-Type': 'multipart/form-data' }
       }
-    )
+    ).then((response) => InvoiceApplicationResponseSchema.parse(response))
   },
 
-  getPaymentPlanInvoices: (paymentPlanId: number) => {
-    return request.get<InvoiceApplicationResponse[]>(`/v1/payment-plans/${paymentPlanId}/invoices`)
+  getPaymentPlanInvoices: async (paymentPlanId: number): Promise<InvoiceApplicationResponse[]> => {
+    return InvoiceApplicationArraySchema.parse(await request.get<InvoiceApplicationResponse[]>(`/v1/payment-plans/${paymentPlanId}/invoices`))
   }
 }
 

@@ -1,9 +1,11 @@
+/* eslint-disable crmwolf/require-zod-schema */
 /**
  * 热力值 API 接口
  *
  * 提供热力值查询和权重配置管理的接口
  */
 import request from '@/utils/request'
+import { ApiResponseSchema } from '@/schemas/common'
 
 // ============== 热力值查询接口 ==============
 
@@ -41,43 +43,61 @@ export interface ScoreLevelInfo {
   color: string
 }
 
+const ScoreResponseSchema = ApiResponseSchema<ScoreResponse>()
+const BatchRefreshTeamScoresResponseSchema = ApiResponseSchema<{
+  message: string
+  leads_updated: number
+  customers_updated: number
+}>()
+const WeightConfigListResponseSchema = ApiResponseSchema<WeightConfigListResponse>()
+const WeightConfigSchema = ApiResponseSchema<WeightConfig>()
+const CopyFromSystemResponseSchema = ApiResponseSchema<{
+  message: string
+  count: number
+  module_types: string[]
+}>()
+const DeleteTeamWeightsResponseSchema = ApiResponseSchema<{
+  message: string
+  deleted_count: number
+}>()
+
 /**
  * 获取线索热力值
  */
-export function getLeadScore(leadId: number): Promise<ScoreResponse> {
-  return request.get(`/v1/scores/lead/${leadId}`)
+export async function getLeadScore(leadId: string): Promise<ScoreResponse> {
+  return ScoreResponseSchema.parse(await request.get(`/v1/scores/lead/${leadId}`))
 }
 
 /**
  * 获取客户热力值
  */
-export function getCustomerScore(customerId: number): Promise<ScoreResponse> {
-  return request.get(`/v1/scores/customer/${customerId}`)
+export async function getCustomerScore(customerId: string): Promise<ScoreResponse> {
+  return ScoreResponseSchema.parse(await request.get(`/v1/scores/customer/${customerId}`))
 }
 
 /**
  * 刷新线索热力值
  */
-export function refreshLeadScore(leadId: number): Promise<ScoreResponse> {
-  return request.post(`/v1/scores/lead/${leadId}/refresh`)
+export async function refreshLeadScore(leadId: string): Promise<ScoreResponse> {
+  return ScoreResponseSchema.parse(await request.post(`/v1/scores/lead/${leadId}/refresh`))
 }
 
 /**
  * 刷新客户热力值
  */
-export function refreshCustomerScore(customerId: number): Promise<ScoreResponse> {
-  return request.post(`/v1/scores/customer/${customerId}/refresh`)
+export async function refreshCustomerScore(customerId: string): Promise<ScoreResponse> {
+  return ScoreResponseSchema.parse(await request.post(`/v1/scores/customer/${customerId}/refresh`))
 }
 
 /**
  * 批量刷新团队热力值
  */
-export function batchRefreshTeamScores(): Promise<{
+export async function batchRefreshTeamScores(): Promise<{
   message: string
   leads_updated: number
   customers_updated: number
 }> {
-  return request.post('/v1/scores/batch-refresh/team')
+  return BatchRefreshTeamScoresResponseSchema.parse(await request.post('/v1/scores/batch-refresh/team'))
 }
 
 // ============== 权重配置接口 ==============
@@ -122,44 +142,44 @@ export interface WeightConfigUpdateRequest {
 /**
  * 获取权重配置列表
  */
-export function getWeightConfigs(moduleType: 'LEAD' | 'CUSTOMER'): Promise<WeightConfigListResponse> {
-  return request.get(`/v1/score-weights/${moduleType}`)
+export async function getWeightConfigs(moduleType: 'LEAD' | 'CUSTOMER'): Promise<WeightConfigListResponse> {
+  return WeightConfigListResponseSchema.parse(await request.get(`/v1/score-weights/${moduleType}`))
 }
 
 /**
  * 更新权重配置
  */
-export function updateWeightConfig(
+export async function updateWeightConfig(
   weightId: number,
   data: WeightConfigUpdateRequest
 ): Promise<WeightConfig> {
-  return request.put(`/v1/score-weights/${weightId}`, data)
+  return WeightConfigSchema.parse(await request.put(`/v1/score-weights/${weightId}`, data))
 }
 
 /**
  * 复制系统默认配置到团队
  */
-export function copyFromSystem(
+export async function copyFromSystem(
   moduleType?: 'LEAD' | 'CUSTOMER'
 ): Promise<{
   message: string
   count: number
   module_types: string[]
 }> {
-  const params = moduleType ? { module_type: moduleType } : {}
-  return request.post('/v1/score-weights/copy-from-system', null, { params })
+  const params = moduleType === undefined ? {} : { module_type: moduleType }
+  return CopyFromSystemResponseSchema.parse(await request.post('/v1/score-weights/copy-from-system', null, { params }))
 }
 
 /**
  * 删除团队权重配置（恢复使用系统默认）
  */
-export function deleteTeamWeights(
+export async function deleteTeamWeights(
   moduleType: 'LEAD' | 'CUSTOMER'
 ): Promise<{
   message: string
   deleted_count: number
 }> {
-  return request.delete(`/v1/score-weights/${moduleType}`)
+  return DeleteTeamWeightsResponseSchema.parse(await request.delete(`/v1/score-weights/${moduleType}`))
 }
 
 // ============== 工具函数 ==============
@@ -213,13 +233,13 @@ export function getScoreLevelInfo(score: number | null): ScoreLevelInfo {
  * 格式化热力值明细为提示文字
  */
 export function formatScoreDetails(details: ScoreDetail[]): string {
-  if (!details || details.length === 0) {
+  if (details.length === 0) {
     return '暂无计算明细'
   }
 
   const lines = details.map((d) => {
     const sign = d.score_change >= 0 ? '+' : ''
-    return `${d.factor_name}: ${sign}${d.score_change}分 (${d.reason || ''})`
+    return `${d.factor_name}: ${sign}${d.score_change}分 (${d.reason ?? ''})`
   })
 
   return lines.join('\n')

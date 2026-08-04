@@ -31,6 +31,9 @@ from app.services.agent.checkpointer import (
 from app.services.agent.state import internal_graph_start_event, merge_turn_scoped_events, visible_graph_events
 from app.services.agent.types import coerce_json_dict
 from app.services.customer_brief_service import customer_brief_service
+from app.services.customer_context_answer_service import (
+    customer_context_answer_service,
+)
 from app.services.customer_fact_extraction_service import (
     CustomerFactExtractionResult,
     CustomerFactExtractionService,
@@ -51,9 +54,6 @@ from app.services.customer_intelligence_context_service import (
 )
 from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 from app.services.customer_intelligence_trace_service import visible_trace_events
-from app.services.customer_context_answer_service import (
-    customer_context_answer_service,
-)
 from app.services.customer_memory_store_service import (
     CUSTOMER_MEMORY_FACTS,
     CUSTOMER_MEMORY_RETRIEVAL,
@@ -681,12 +681,18 @@ class CustomerIntelligenceGraphService:
             "confidence": result.get("confidence") if isinstance(result.get("confidence"), int | float) else 0.0,
             "used_sections": _json_list(result.get("used_sections")),
             "missing_context": _json_list(result.get("missing_context")),
+            "answer_mode": str(result.get("answer_mode") or "fallback"),
+            "citations": _json_object_list(result.get("citations")),
             "source": str(getattr(envelope, "answer_source", "") or ""),
             "model": str(getattr(envelope, "model", "") or ""),
         }
+        retrieval = coerce_json_dict(customer_context.get("retrieval"))
+        if retrieval:
+            answer_payload["retrieval"] = retrieval
         fallback_reason = getattr(envelope, "fallback_reason", None)
         if isinstance(fallback_reason, str) and fallback_reason:
             answer_payload["fallback_reason"] = fallback_reason
+        citations_count = len(answer_payload["citations"]) if isinstance(answer_payload["citations"], list) else 0
         return {
             "customer_context_answer": answer_payload,
             "assistant_content": answer,
@@ -694,8 +700,13 @@ class CustomerIntelligenceGraphService:
             "events": [{
                 "event": "customer_context_answer_generated",
                 "confidence": answer_payload["confidence"],
+                "answer_mode": answer_payload["answer_mode"],
                 "source": answer_payload["source"],
                 "used_sections": answer_payload["used_sections"],
+                "citations_count": citations_count,
+                "retrieval_status": retrieval.get("status"),
+                "retrieval_top_score": retrieval.get("top_score"),
+                "semantic_evidence_count": _json_list_len(customer_context.get("semantic_evidence")),
             }],
         }
 
@@ -1393,9 +1404,16 @@ def _refresh_plan_label(refresh_plan: JSONDict) -> str:
 
 def _context_answer_label(answer_payload: JSONDict) -> str:
     confidence = _float_value(answer_payload.get("confidence"))
-    used_sections = _json_list(answer_payload.get("used_sections"))
-    if used_sections:
+    answer_mode = str(answer_payload.get("answer_mode") or "")
+    citations = _json_list(answer_payload.get("citations"))
+    retrieval = coerce_json_dict(answer_payload.get("retrieval"))
+    retrieval_status = retrieval.get("status")
+    if answer_mode == "grounded" and citations:
         return f"已基于客户档案、业务上下文和检索证据整理回答，置信度 {confidence:.0%}"
+    if answer_mode == "degraded":
+        return f"已基于客户强事实降级整理回答，检索状态 {retrieval_status or '不可用'}，置信度 {confidence:.0%}"
+    if answer_mode == "insufficient":
+        return f"客户资料不足，已标记缺失上下文，置信度 {confidence:.0%}"
     return f"已整理客户回答，置信度 {confidence:.0%}"
 
 
@@ -1529,6 +1547,12 @@ def _json_list(value: object) -> list[JSONValue]:
     if not isinstance(value, list):
         return []
     return [item if isinstance(item, str | int | float | bool) or item is None else str(item) for item in value]
+
+
+def _json_object_list(value: object) -> list[JSONDict]:
+    if not isinstance(value, list):
+        return []
+    return [coerce_json_dict(item) for item in value if isinstance(item, dict)]
 
 
 def _json_list_len(value: object) -> int:

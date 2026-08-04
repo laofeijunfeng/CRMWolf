@@ -76,7 +76,7 @@ import { confirmDelete } from '@/utils/confirmDialog'
 
 // ==================== Props & Emits ====================
 interface Props {
-  customerId: number | null
+  customerId: string | null
   visible: boolean
 }
 
@@ -127,7 +127,7 @@ const restoreFocusOpportunityId = ref<number | null>(null)
 interface ContractOpportunityContext {
   id: number
   opportunity_name: string
-  customer_id: number
+  customer_id: string
   customer_name?: string
   total_amount: number
   user_count: number
@@ -137,7 +137,7 @@ interface ContractOpportunityContext {
 
 interface CreateContractPayload {
   opportunityId: number
-  customerId: number
+  customerId: string
   customerName: string
   opportunityName: string
   totalAmount: number
@@ -583,7 +583,7 @@ const canCreateOpportunityForCustomer = computed(() => (
 ))
 
 // ==================== Data Loading ====================
-const loadAllData = async (customerId: number): Promise<void> => {
+const loadAllData = async (customerId: string): Promise<void> => {
   const loadRequestId = latestLoadRequestId + 1
   latestLoadRequestId = loadRequestId
   loading.value = true
@@ -1103,7 +1103,7 @@ const handlePaymentPlanDetailViewContract = (contractId: number): void => {
   handleViewContract(contractId)
 }
 
-const handlePaymentPlanDetailViewCustomer = (customerId: number): void => {
+const handlePaymentPlanDetailViewCustomer = (customerId: string): void => {
   // If same customer, close nested sheets and return focus to current customer
   if (customerId === props.customerId) {
     planSheetVisible.value = false
@@ -1169,7 +1169,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
         :opportunity-id="selectedOpportunityId"
         embedded
         :customer-context="{
-          customerId: customerId ?? 0,
+          customerId: customerId ?? '',
           customerName: customer?.account_name
         }"
         :can-edit-customer-context="canEditCurrentCustomer"
@@ -1484,7 +1484,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               </Card>
 
               <ContactsPanel
-                :customer-id="customerId ?? 0"
+                :customer-id="customerId ?? ''"
                 :contacts="customer?.contacts ?? []"
                 :show-add="canCreateContact"
                 :can-edit="canEditContact"
@@ -1497,7 +1497,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               />
 
               <InvoicesPanel
-                :customer-id="customerId ?? 0"
+                :customer-id="customerId ?? ''"
                 :invoice-titles="invoiceTitles"
                 :invoice-applications="[]"
                 :show-invoice-applications="false"
@@ -1513,7 +1513,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               />
 
               <LicensePanel
-                :customer-id="customerId ?? 0"
+                :customer-id="customerId ?? ''"
                 :customer-name="customer?.account_name ?? null"
                 :license-applications="[]"
                 :deployments="deployments"
@@ -1523,7 +1523,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
               />
 
               <CustomerMembersPanel
-                :customer-id="customerId ?? 0"
+                :customer-id="customerId ?? ''"
                 :members="customerMembers"
                 :can-manage-members="canManageCustomerMembers"
                 @refresh="refreshCustomerMembers"
@@ -1544,7 +1544,7 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
 
             <OpportunitiesPanel
               v-if="activePanel === 'opportunities'"
-              :customer-id="customerId ?? 0"
+              :customer-id="customerId ?? ''"
               :opportunities="opportunities"
               :highlighted-opportunity-id="highlightedOpportunityId ?? undefined"
               :restore-focus-opportunity-id="restoreFocusOpportunityId ?? undefined"

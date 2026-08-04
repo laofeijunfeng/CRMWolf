@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func, text, case
+from sqlalchemy import and_, or_, func, text, case, cast, Integer, inspect
 from sqlalchemy.orm import joinedload
 from typing import Optional, List, Tuple
 from datetime import date, datetime
@@ -14,6 +14,7 @@ from app.schemas.payment import (
     PaymentRecordCreate, PaymentRecordUpdate
 )
 from app.services.business_number_generator import BusinessNumberGenerator
+from app.utils.time import business_now
 
 
 def _is_approved_payment_record(record: PaymentRecord) -> bool:
@@ -416,8 +417,27 @@ class PaymentRecordCRUD:
         payment_date_start: Optional[date] = None,
         payment_date_end: Optional[date] = None,
         min_amount: Optional[float] = None,
+        actual_amount: Optional[float] = None,
         creator_id: Optional[str] = None,
         keyword: Optional[str] = None,
+        record_number: Optional[str] = None,
+        record_number_exclude: Optional[str] = None,
+        customer_name: Optional[str] = None,
+        customer_name_exclude: Optional[str] = None,
+        actual_payer_name: Optional[str] = None,
+        actual_payer_name_exclude: Optional[str] = None,
+        invoice_title_text: Optional[str] = None,
+        invoice_title_text_exclude: Optional[str] = None,
+        contract_name: Optional[str] = None,
+        contract_name_exclude: Optional[str] = None,
+        owner_name: Optional[str] = None,
+        owner_name_exclude: Optional[str] = None,
+        commission_member_name: Optional[str] = None,
+        commission_member_name_exclude: Optional[str] = None,
+        confirmation_status: Optional[str] = None,
+        confirmation_status_exclude: Optional[str] = None,
+        created_time_start: Optional[date] = None,
+        created_time_end: Optional[date] = None,
         current_user_id: Optional[str] = None,
         approval_status: Optional[str] = None,
         approval_status_exclude: Optional[str] = None,
@@ -429,22 +449,46 @@ class PaymentRecordCRUD:
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
         from app.models.approval import Approval, ApprovalStatus
+        from app.models.invoice import InvoiceApplication
+        from app.models.user import User
         from app.constants.business_types import BusinessType
         from sqlalchemy.orm import contains_eager, joinedload
 
         # Query with eager loading for customer_name, contract_name, stage_name, approval info
+        owner_id_expr = func.coalesce(Opportunity.owner_id, Contract.owner_id)
+        has_invoice_application_table = inspect(db.bind).has_table(InvoiceApplication.__tablename__) if db.bind else True
+        latest_invoice_title_expr = None
+        if has_invoice_application_table:
+            latest_invoice_title_expr = db.query(InvoiceApplication.invoice_title_text).filter(
+                InvoiceApplication.payment_record_id == PaymentRecord.id,
+                InvoiceApplication.team_id == team_id,
+            ).order_by(
+                InvoiceApplication.created_time.desc(),
+                InvoiceApplication.id.desc(),
+            ).limit(1).correlate(PaymentRecord).scalar_subquery()
+        owner_name_expr = db.query(User.name).filter(
+            User.id == cast(owner_id_expr, Integer)
+        ).limit(1).correlate(Contract, Opportunity).scalar_subquery()
+
         records_query = db.query(PaymentRecord).join(
             PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id
         ).join(
             Contract, PaymentPlan.contract_id == Contract.id
         ).outerjoin(
             Customer, Contract.customer_id == Customer.id
+        ).outerjoin(
+            Opportunity, Contract.opportunity_id == Opportunity.id
         ).options(
             # Eager load payment_plan (contains_eager since we joined)
             contains_eager(PaymentRecord.payment_plan).contains_eager(
                 PaymentPlan.contract
             ).contains_eager(
                 Contract.customer
+            ),
+            contains_eager(PaymentRecord.payment_plan).contains_eager(
+                PaymentPlan.contract
+            ).contains_eager(
+                Contract.opportunity
             ),
             # Eager load approval for current_approver_name
             joinedload(PaymentRecord.approval)
@@ -495,6 +539,9 @@ class PaymentRecordCRUD:
         
         if min_amount:
             records_query = records_query.filter(PaymentRecord.actual_amount >= min_amount)
+
+        if actual_amount is not None:
+            records_query = records_query.filter(PaymentRecord.actual_amount == actual_amount)
         
         if creator_id:
             records_query = records_query.filter(PaymentRecord.creator_id == creator_id)
@@ -504,13 +551,46 @@ class PaymentRecordCRUD:
 
         if keyword and keyword.strip():
             like_keyword = f"%{keyword.strip()}%"
-            records_query = records_query.filter(
-                or_(
-                    PaymentPlan.stage_name.ilike(like_keyword),
-                    Contract.contract_name.ilike(like_keyword),
-                    Customer.account_name.ilike(like_keyword),
-                )
-            )
+            keyword_predicates = [
+                PaymentRecord.record_number.ilike(like_keyword),
+                PaymentPlan.stage_name.ilike(like_keyword),
+                Contract.contract_name.ilike(like_keyword),
+                Customer.account_name.ilike(like_keyword),
+                PaymentRecord.actual_payer_name.ilike(like_keyword),
+                owner_name_expr.ilike(like_keyword),
+                PaymentRecord.commission_member_name.ilike(like_keyword),
+            ]
+            if latest_invoice_title_expr is not None:
+                keyword_predicates.append(latest_invoice_title_expr.ilike(like_keyword))
+            records_query = records_query.filter(or_(*keyword_predicates))
+
+        def apply_text_filter(query, expression, include_value: Optional[str], exclude_value: Optional[str]):
+            if include_value and include_value.strip():
+                query = query.filter(expression.ilike(f"%{include_value.strip()}%"))
+            if exclude_value and exclude_value.strip():
+                query = query.filter(or_(expression.is_(None), ~expression.ilike(f"%{exclude_value.strip()}%")))
+            return query
+
+        records_query = apply_text_filter(records_query, PaymentRecord.record_number, record_number, record_number_exclude)
+        records_query = apply_text_filter(records_query, Customer.account_name, customer_name, customer_name_exclude)
+        records_query = apply_text_filter(records_query, PaymentRecord.actual_payer_name, actual_payer_name, actual_payer_name_exclude)
+        if latest_invoice_title_expr is not None:
+            records_query = apply_text_filter(records_query, latest_invoice_title_expr, invoice_title_text, invoice_title_text_exclude)
+        records_query = apply_text_filter(records_query, Contract.contract_name, contract_name, contract_name_exclude)
+        records_query = apply_text_filter(records_query, owner_name_expr, owner_name, owner_name_exclude)
+        records_query = apply_text_filter(records_query, PaymentRecord.commission_member_name, commission_member_name, commission_member_name_exclude)
+
+        confirmation_status_values = _split_csv(confirmation_status)
+        confirmation_status_exclude_values = _split_csv(confirmation_status_exclude)
+        if confirmation_status_values:
+            records_query = records_query.filter(PaymentRecord.confirmation_status.in_(confirmation_status_values))
+        if confirmation_status_exclude_values:
+            records_query = records_query.filter(PaymentRecord.confirmation_status.notin_(confirmation_status_exclude_values))
+
+        if created_time_start:
+            records_query = records_query.filter(PaymentRecord.created_time >= datetime.combine(created_time_start, datetime.min.time()))
+        if created_time_end:
+            records_query = records_query.filter(PaymentRecord.created_time <= datetime.combine(created_time_end, datetime.max.time()))
         
         total = records_query.count()
 
@@ -527,10 +607,14 @@ class PaymentRecordCRUD:
             "actual_payer_name": PaymentRecord.actual_payer_name,
             "stage_name": PaymentPlan.stage_name,
             "actual_amount": PaymentRecord.actual_amount,
+            "owner_name": owner_name_expr,
+            "commission_member_name": PaymentRecord.commission_member_name,
             "payment_date": PaymentRecord.payment_date,
             "confirmation_status": confirmation_status_order,
             "created_time": PaymentRecord.created_time,
         }
+        if latest_invoice_title_expr is not None:
+            allowed_sort_fields["invoice_title_text"] = latest_invoice_title_expr
         order_clauses = []
         used_sort_fields = set()
         for field, direction in _parse_sort(sort, order_by, order_dir):
@@ -754,7 +838,7 @@ class PaymentRecordCRUD:
 
         record.confirmed_by = confirmer_id
         record.confirmed_by_name = confirmer_name
-        record.confirmed_time = datetime.now()
+        record.confirmed_time = business_now()
         record.confirmation_notes = notes
 
         if invoice_application_ids:

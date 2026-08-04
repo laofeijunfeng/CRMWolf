@@ -13,6 +13,7 @@ from app.models.customer_intelligence_run import CustomerIntelligenceRun, Custom
 from app.services.agent.types import coerce_json_dict
 from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 from app.services.customer_intelligence_trace_service import visible_trace_events
+from app.utils.time import business_now
 
 JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
@@ -88,7 +89,7 @@ class CustomerIntelligenceRunService:
         run = self.ensure_pending(db, run_input)
         run.status = CustomerIntelligenceRunStatus.RUNNING
         run.attempt_count = int(run.attempt_count or 0) + 1
-        run.started_time = started_at or datetime.now()
+        run.started_time = started_at or business_now()
         run.finished_time = None
         run.next_retry_at = None
         run.error_message = None
@@ -104,7 +105,7 @@ class CustomerIntelligenceRunService:
         finished_at: datetime | None = None,
     ) -> CustomerIntelligenceRun:
         run = self.ensure_pending(db, run_input)
-        completed_at = finished_at or datetime.now()
+        completed_at = finished_at or business_now()
         run.status = CustomerIntelligenceRunStatus.SUCCESS
         run.finished_time = completed_at
         run.last_duration_ms = _duration_ms(run.started_time, completed_at)
@@ -125,7 +126,7 @@ class CustomerIntelligenceRunService:
         finished_at: datetime | None = None,
     ) -> CustomerIntelligenceRun:
         run = self.ensure_pending(db, run_input)
-        completed_at = finished_at or datetime.now()
+        completed_at = finished_at or business_now()
         attempts = int(run.attempt_count or 0)
         retryable = attempts < int(run.max_attempts or 1)
         run.status = (
@@ -148,7 +149,7 @@ class CustomerIntelligenceRunService:
         team_id: int | None = None,
         limit: int = 50,
     ) -> list[CustomerIntelligenceRun]:
-        current_time = now or datetime.now()
+        current_time = now or business_now()
         query = db.query(CustomerIntelligenceRun).filter(
             CustomerIntelligenceRun.status == CustomerIntelligenceRunStatus.RETRY_PENDING,
             CustomerIntelligenceRun.next_retry_at <= current_time,
@@ -169,7 +170,7 @@ class CustomerIntelligenceRunService:
         team_id: int | None = None,
         limit: int = 50,
     ) -> list[CustomerIntelligenceRun]:
-        current_time = now or datetime.now()
+        current_time = now or business_now()
         stale_running_started_before = current_time - STALE_RUNNING_AFTER
         query = db.query(CustomerIntelligenceRun).filter(
             (

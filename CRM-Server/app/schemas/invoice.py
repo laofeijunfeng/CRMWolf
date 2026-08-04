@@ -77,7 +77,7 @@ class InvoiceTitleUpdate(BaseModel):
 
 class InvoiceTitleResponse(InvoiceTitleBase):
     id: int = Field(..., description="开票抬头ID")
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     is_default: bool = Field(..., description="是否默认抬头")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
@@ -108,7 +108,7 @@ class InvoiceApplicationUpdate(BaseModel):
 class InvoiceApplicationResponse(InvoiceApplicationBase):
     id: int = Field(..., description="发票申请ID")
     application_number: str = Field(..., description="申请单号")
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     contract_id: int = Field(..., description="关联合同ID")
     opportunity_id: int = Field(..., description="关联商机ID")
     status: InvoiceApplicationStatusEnum = Field(..., description="申请状态")

@@ -35,7 +35,8 @@ export type ProcurementMethodInfo = z.infer<typeof ProcurementMethodInfoSchema>
 
 // ===== 客户基础类型 =====
 export const CustomerResponseSchema = z.object({
-  id: z.number().int().positive(),
+  id: z.string().min(1),
+  public_id: z.string().min(1),
   account_name: z.string().min(1).max(255),
   industry: z.string().max(100).nullable(),
   city: z.string().min(1).max(100),
@@ -44,7 +45,7 @@ export const CustomerResponseSchema = z.object({
   source: z.string().max(100).nullable(),
   status: CustomerStatusSchema,
   owner_id: z.string().nullable(),
-  source_lead_id: z.number().int().nullable(),
+  source_lead_id: z.string().nullable(),
   default_procurement_method_id: z.number().int().nullable(),
   return_reason: z.string().nullable(),
   returned_time: z.string().nullable(), // 放宽日期格式验证
@@ -96,7 +97,7 @@ export const CustomerDetailResponseSchema = CustomerResponseSchema.extend({
   // 联系人列表（完整字段）
   contacts: z.array(z.object({
     id: z.number().int(),
-    customer_id: z.number().int(),
+    customer_id: z.string(),
     name: z.string(),
     gender: z.number().int().nullable().optional(),
     position: z.string().nullable(),
@@ -155,7 +156,7 @@ export type CustomerUpdate = z.infer<typeof CustomerUpdateSchema>
 
 // ===== 线索转换响应 =====
 export const ConvertResponseSchema = z.object({
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   contact_id: z.number().int().positive(),
   message: z.string()
 })
@@ -164,7 +165,7 @@ export type ConvertResponse = z.infer<typeof ConvertResponseSchema>
 
 // ===== 客户退回响应 =====
 export const CustomerReturnResponseSchema = z.object({
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   previous_owner: z.string(),
   returned_time: z.string(),
   return_reason: z.string(),
@@ -181,7 +182,7 @@ const NullableEmailSchema = z.preprocess(
 // ===== 联系人响应 =====
 export const ContactResponseSchema = z.object({
   id: z.number().int().positive(),
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   name: z.string().min(1),
   gender: z.number().int().nullable(),
   position: z.string().nullable(),
@@ -246,7 +247,7 @@ export const ContractListResponseSchema = z.object({
   id: z.number().int().positive(),
   contract_number: z.string().min(1),
   contract_name: z.string().min(1),
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   opportunity_id: z.number().int().nullable(),
   signing_contact_id: z.number().int().nullable(),
   user_count: z.number().int().nonnegative(),
@@ -299,7 +300,7 @@ export type PaymentPlanResponse = z.infer<typeof PaymentPlanResponseSchema>
 export const InvoiceApplicationResponseSchema = z.object({
   id: z.number().int().positive(),
   application_number: z.string().min(1),
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   contract_id: z.number().int().positive(),
   opportunity_id: z.number().int().positive(),
   payment_plan_id: z.number().int().positive(),

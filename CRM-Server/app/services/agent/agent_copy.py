@@ -12,6 +12,10 @@ def generic_completed() -> str:
     return "好嘞，已处理完成。"
 
 
+def customer_context_answer_unavailable() -> str:
+    return "客户资料不足，暂时无法整理回答。"
+
+
 def follow_up_created() -> str:
     return "好嘞，跟进已记录。"
 

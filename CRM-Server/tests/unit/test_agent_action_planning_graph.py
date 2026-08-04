@@ -69,12 +69,32 @@ async def test_action_planning_graph_routes_customer_activity_through_domain_sub
             {"id": 101, "account_name": "越秀金融"},
             {"id": 102, "account_name": "越秀金融科技"},
         ],
+        selected_customer=None,
     ))
 
     choice_events = [event for event in result["events"] if event["event"] == "customer_selection_required"]
     assert result["business_action_route"] == "customer_activity"
     assert choice_events[0]["action"] == "select_customer_for_activity"
     assert choice_events[0]["customers"][1]["id"] == 102
+
+
+@pytest.mark.asyncio
+async def test_action_planning_graph_uses_selected_customer_before_candidate_list():
+    service = ActionPlanningGraphService(checkpointer=InMemorySaver())
+
+    result = await service.run(action_input(
+        customer_candidates=[
+            {"id": 101, "account_name": "越秀金融"},
+            {"id": 102, "account_name": "越秀金融科技"},
+        ],
+        selected_customer={"id": 101, "account_name": "越秀金融"},
+    ))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    choice_events = [event for event in result["events"] if event["event"] == "customer_selection_required"]
+    assert choice_events == []
+    assert confirmation_events[0]["action"] == "create_customer_activity"
+    assert confirmation_events[0]["payload"]["customer_id"] == 101
 
 
 @pytest.mark.asyncio
@@ -122,7 +142,45 @@ async def test_action_planning_graph_routes_create_customer_through_domain_subgr
 
 
 @pytest.mark.asyncio
-async def test_action_planning_graph_leaves_customer_query_answer_to_customer_intelligence_graph():
+async def test_action_planning_graph_passes_customer_context_defaults_to_opportunity_subgraph():
+    service = ActionPlanningGraphService(checkpointer=InMemorySaver())
+    semantic = opportunity_semantic_result()
+
+    result = await service.run(action_input(
+        semantic_result=semantic,
+        intent="CREATE_OPPORTUNITY",
+        parsed={
+            "customer_name": "测试公司",
+            "opportunity": {
+                "total_amount": 50000,
+                "user_count": 50,
+                "license_type": "SUBSCRIPTION",
+                "subscription_years": 1,
+                "purchase_type": "NEW",
+                "expected_closing_date": "2026-09-30",
+            },
+            "missing_opportunity_fields": [],
+        },
+        selected_customer={"id": "cus_test", "account_name": "测试公司"},
+        customer_candidates=[{"id": "cus_test", "account_name": "测试公司"}],
+        business_context={
+            "customer": {
+                "id": "cus_test",
+                "public_id": "cus_test",
+                "account_name": "测试公司",
+                "default_procurement_method_id": 1,
+            },
+        },
+    ))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert result["business_action_route"] == "create_opportunity"
+    assert confirmation_events[0]["action"] == "create_opportunity"
+    assert confirmation_events[0]["payload"]["opportunity"]["procurement_method_id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_action_planning_graph_answers_customer_query_from_loaded_context():
     service = ActionPlanningGraphService(checkpointer=InMemorySaver())
     semantic = semantic_result(intent="CUSTOMER_QUERY")
 
@@ -130,14 +188,37 @@ async def test_action_planning_graph_leaves_customer_query_answer_to_customer_in
         semantic_result=semantic,
         intent="CUSTOMER_QUERY",
         parsed={"customer_name": "越秀金融"},
-        business_context={"customer": {"id": 101, "account_name": "越秀金融"}},
+        business_context={
+            "customer": {
+                "id": 101,
+                "account_name": "越秀金融",
+                "industry_info": {"name": "金融"},
+                "city": "广州",
+                "company_scale": "201-500人",
+                "company_background": "越秀金融正在推进 API 协作平台私有化建设。",
+                "project_background": "客户希望统一研发团队 API 文档和调试流程。",
+                "contacts": [{"name": "张总", "is_primary": True, "is_decision_maker": True, "mobile": "13800000000"}],
+            },
+            "opportunities": {"items": [{
+                "opportunity_name": "私有化 CRM 项目",
+                "stage_name": "需求确认",
+                "expected_amount": 50000,
+                "expected_close_date": "2026-09-30",
+            }]},
+            "customer_activities": [{"content": "最近通过微信确认采购侧会在月底对接。", "next_action": "下周三确认采购联系人"}],
+        },
     ))
 
     assert result["business_action_route"] == "customer_query"
     assert result["action"] == {}
-    assert result["response"] == ""
+    assert "越秀金融" in result["response"]
+    assert "联系人" in result["response"]
+    assert "张总" in result["response"]
+    assert "下一步建议" in result["response"]
     final_events = [event for event in result["events"] if event["event"] == "final"]
-    assert final_events[-1]["content"] == ""
+    assert final_events[-1]["content"] == result["response"]
+    assert final_events[-1]["content_format"] == "markdown"
+    assert f"已读取「越秀金融」的客户档案和业务上下文。\n\n- **基础档案**" in result["response"]
 
 
 @pytest.mark.asyncio
@@ -156,6 +237,8 @@ async def test_action_planning_graph_explains_unresolved_customer_query_without_
 
     assert result["action"] == {}
     assert result["response"] == "我没能确定「中科院」对应的客户。请补充客户全称或更多线索。"
+    final_events = [event for event in result["events"] if event["event"] == "final"]
+    assert final_events[-1]["content_format"] == "markdown"
 
 
 @pytest.mark.asyncio
@@ -178,10 +261,11 @@ async def test_action_planning_graph_explains_customer_search_failure_for_custom
     ))
 
     assert result["action"] == {}
+    assert result["response"] == "客户搜索暂时失败，当前无法读取客户情况。请稍后再试。"
 
 
 @pytest.mark.asyncio
-async def test_action_planning_graph_does_not_turn_customer_query_suggestions_into_answer_or_action():
+async def test_action_planning_graph_does_not_turn_customer_query_suggestions_into_action():
     service = ActionPlanningGraphService(checkpointer=InMemorySaver())
     suggestion_result = AgentSuggestionResult.model_validate({
         "summary": "建议查看客户状态。",
@@ -209,8 +293,8 @@ async def test_action_planning_graph_does_not_turn_customer_query_suggestions_in
     ))
 
     assert result["action"] == {}
-    assert result["response"] == ""
-    assert "基于客户上下文" not in result["events"][-1]["content"]
+    assert "中国科学院信息工程研究所" in result["response"]
+    assert "建议查看客户状态" not in result["events"][-1]["content"]
 
 
 @pytest.mark.asyncio

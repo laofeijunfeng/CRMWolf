@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from app.core.logging import get_logger
 from app.schemas.frontend_log import FrontendLogEntry
+from app.utils.time import business_now
 
 logger = get_logger(__name__)
 
@@ -130,7 +131,7 @@ class FrontendLogService:
 
     def _get_log_file(self) -> Path:
         """获取当日日志文件路径"""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = business_now().strftime("%Y-%m-%d")
         return LOG_DIR / f"frontend-{today}.log"
 
     async def _cleanup_old_logs(self):
@@ -142,7 +143,7 @@ class FrontendLogService:
         self._last_cleanup_time = now
 
         try:
-            retention_date = datetime.now() - timedelta(days=LOG_RETENTION_DAYS)
+            retention_date = business_now() - timedelta(days=LOG_RETENTION_DAYS)
 
             for log_file in LOG_DIR.glob("frontend-*.log"):
                 # 解析日期

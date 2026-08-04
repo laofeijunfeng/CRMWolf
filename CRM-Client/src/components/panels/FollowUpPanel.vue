@@ -15,8 +15,8 @@ import FollowUpList from '@/components/FollowUpList.vue'
 // ==================== Props & Emits ====================
 interface FollowUp {
   id: number
-  customer_id?: number | null
-  original_lead_id?: number | null
+  customer_id?: string | null
+  original_lead_id?: string | null
   processing_status?: string | null
   content: string
   method: string
@@ -24,7 +24,7 @@ interface FollowUp {
   next_action?: string | null
   creator_id: string
   creator_info?: { id: string; name: string; avatar_url?: string | null }
-  customer_info?: { id: number; account_name: string }
+  customer_info?: { id: string; account_name: string }
   created_time: string
   effectiveness_score?: number | null
   effectiveness_is_valid?: boolean | null
@@ -110,7 +110,7 @@ const handleProcess = (followUp: FollowUp): void => {
       <FollowUpList
         :follow-ups="props.followUps"
         :loading="props.loading"
-        :current-user-id="props.currentUserId"
+        v-bind="props.currentUserId !== undefined ? { currentUserId: props.currentUserId } : {}"
         record-label="客户活动"
         allow-process
         @delete="handleDelete"

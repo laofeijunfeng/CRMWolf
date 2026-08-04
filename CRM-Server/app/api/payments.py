@@ -3,6 +3,7 @@ from datetime import date
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
@@ -31,6 +32,7 @@ from app.schemas.payment import (
     PaymentPlanResponse,
     PaymentPlanUpdate,
     PaymentRecordCreate,
+    PaymentRecordInfo,
     PaymentRecordListItem,
     PaymentRecordListResponse,
     PaymentRecordResponse,
@@ -104,6 +106,93 @@ async def _trigger_payment_record_intelligence_refresh(
         db,
         change,
     )
+
+
+def _customer_public_id(customer) -> Optional[str]:
+    return customer.public_id if customer else None
+
+
+def _payment_plan_response(plan: PaymentPlan) -> PaymentPlanResponse:
+    contract = plan.contract
+    customer = contract.customer if contract and getattr(contract, "customer", None) else None
+    opportunity = contract.opportunity if contract and getattr(contract, "opportunity", None) else None
+    return PaymentPlanResponse(**{
+        "id": plan.id,
+        "contract_id": plan.contract_id,
+        "plan_number": plan.plan_number,
+        "stage_name": plan.stage_name,
+        "planned_amount": float(plan.planned_amount),
+        "due_date": plan.due_date,
+        "notes": plan.notes,
+        "status": plan.status.value if hasattr(plan.status, "value") else plan.status,
+        "created_time": plan.created_time,
+        "last_modified_time": plan.last_modified_time,
+        "paid_amount": float(plan.paid_amount),
+        "remaining_amount": float(plan.remaining_amount),
+        "payment_records": [
+            PaymentRecordInfo(**{
+                "id": record.id,
+                "actual_amount": float(record.actual_amount),
+                "actual_payer_name": getattr(record, "actual_payer_name", None),
+                "payment_date": record.payment_date,
+                "proof_attachment": record.proof_attachment,
+                "commission_member_id": record.commission_member_id,
+                "commission_member_name": record.commission_member_name,
+                "creator_id": record.creator_id,
+                "creator_name": record.creator_name,
+                "notes": record.notes,
+                "confirmation_status": record.confirmation_status.value if hasattr(record.confirmation_status, "value") else record.confirmation_status,
+                "approval_phase": record.approval_phase.value if hasattr(record.approval_phase, "value") else record.approval_phase,
+                "approval_id": record.approval_id,
+                "created_time": record.created_time,
+            })
+            for record in getattr(plan, "payment_records", []) or []
+        ],
+        "contract_name": contract.contract_name if contract else None,
+        "creator_id": contract.creator_id if contract else None,
+        "customer_id": _customer_public_id(customer),
+        "customer_name": customer.account_name if customer else None,
+        "opportunity_id": contract.opportunity_id if contract else None,
+        "opportunity_name": opportunity.opportunity_name if opportunity else None,
+        "owner_id": opportunity.owner_id if opportunity else (contract.owner_id if contract else None),
+        "owner_name": getattr(plan, "owner_name", None),
+        "is_invoiced": plan.invoice_count > 0,
+        "invoice_count": plan.invoice_count,
+        "invoiced_amount": float(plan.invoiced_amount),
+    })
+
+
+def _payment_record_response(record: PaymentRecord) -> PaymentRecordResponse:
+    plan = record.payment_plan
+    contract = plan.contract if plan else None
+    customer = contract.customer if contract and getattr(contract, "customer", None) else None
+    opportunity = contract.opportunity if contract and getattr(contract, "opportunity", None) else None
+    return PaymentRecordResponse(**{
+        "id": record.id,
+        "payment_plan_id": record.payment_plan_id,
+        "record_number": record.record_number,
+        "actual_amount": float(record.actual_amount),
+        "actual_payer_name": getattr(record, "actual_payer_name", None),
+        "payment_date": record.payment_date,
+        "proof_attachment": record.proof_attachment,
+        "notes": record.notes,
+        "creator_id": record.creator_id,
+        "creator_name": record.creator_name,
+        "approval_phase": record.approval_phase.value if hasattr(record.approval_phase, "value") else record.approval_phase,
+        "created_time": record.created_time,
+        "contract_id": contract.id if contract else None,
+        "contract_name": contract.contract_name if contract else None,
+        "stage_name": plan.stage_name if plan else None,
+        "customer_id": _customer_public_id(customer),
+        "customer_name": customer.account_name if customer else None,
+        "opportunity_id": opportunity.id if opportunity else None,
+        "opportunity_name": opportunity.opportunity_name if opportunity else None,
+        "invoice_title_text": getattr(record, "invoice_title_text", None),
+        "owner_id": opportunity.owner_id if opportunity else (contract.owner_id if contract else None),
+        "owner_name": getattr(record, "owner_name", None),
+        "commission_member_id": record.commission_member_id,
+        "commission_member_name": record.commission_member_name,
+    })
 
 
 def _get_current_approver_names(db: Session, approval: Approval, team_id: int) -> Optional[str]:
@@ -229,7 +318,7 @@ async def create_payment_plans(
                     actor_id=str(current_user.id),
                 ),
             )
-        return plans
+        return [_payment_plan_response(plan) for plan in plans]
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -273,13 +362,13 @@ def get_payment_plans(
             plan.contract = contract
             plan.contract_name = contract.contract_name
             plan.creator_id = contract.creator_id
-            plan.customer_id = contract.customer_id
+            plan.customer_id = customer.public_id if customer else None
             plan.customer_name = customer.account_name if customer else None
             plan.opportunity_id = contract.opportunity_id
             plan.opportunity_name = opportunity.opportunity_name if opportunity else None
             plan.owner_id = contract.owner_id
 
-    return plans
+    return [_payment_plan_response(plan) for plan in plans]
 
 
 @router.get("/payment-plans", response_model=PaginatedResponse[PaymentPlanResponse], summary="查询回款计划列表", description="支持按状态、负责人、日期范围等条件筛选并分页查询回款计划。返回计划详情及关联的客户、商机、合同信息。可用于前端表格渲染和数据筛选。")
@@ -363,13 +452,13 @@ def list_payment_plans(
                     owner = user_crud.get_by_id(db, int(plan.contract.opportunity.owner_id)) if plan.contract.opportunity.owner_id else None
                     plan.owner_name = owner.name if owner else None
                 if hasattr(plan.contract, 'customer') and plan.contract.customer:
-                    plan.customer_id = plan.contract.customer.id
+                    plan.customer_id = plan.contract.customer.public_id
                     plan.customer_name = plan.contract.customer.account_name
         
         total_pages = (total + page_size - 1) // page_size if total > 0 else 0
         
         return PaginatedResponse[PaymentPlanResponse](
-            items=plans,
+            items=[_payment_plan_response(plan) for plan in plans],
             total=total,
             page=page,
             page_size=page_size,
@@ -506,7 +595,7 @@ def get_payment_summary(
     if contract.customer_id:
         customer = db.query(Customer).filter(Customer.id == contract.customer_id).first()
         if customer:
-            customer_id = customer.id
+            customer_id = customer.public_id
             customer_name = customer.account_name
     
     if contract.opportunity_id:
@@ -561,14 +650,15 @@ def get_payment_plan_detail(
     if plan.contract:
         contract_name = plan.contract.contract_name
         creator_id = plan.contract.creator_id
-        customer_id = plan.contract.customer_id
+        internal_customer_id = plan.contract.customer_id
         opportunity_id = plan.contract.opportunity_id
 
         # 手动查询 customer（Contract 没有 customer relationship）
-        if customer_id:
+        if internal_customer_id:
             from app.crud.customer import customer_crud
-            customer = customer_crud.get_by_id(db, customer_id)
+            customer = customer_crud.get_by_id(db, internal_customer_id)
             if customer:
+                customer_id = customer.public_id
                 customer_name = customer.account_name
 
         # 手动查询 opportunity（Contract 没有 opportunity relationship）
@@ -758,7 +848,7 @@ async def update_payment_plan(
             ),
         )
         # Task 1.2: Computed fields are properties on the model, no need to set them
-        return updated_plan
+        return _payment_plan_response(updated_plan)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -886,7 +976,7 @@ async def create_payment_record(
                         f"approval_id={record.approval_id}, error={str(notify_error)}"
                     )
 
-        return record
+        return _payment_record_response(record)
 
     except ValueError as e:
         db.rollback()
@@ -912,7 +1002,7 @@ def get_payment_records(
 ):
     check_payment_view_permission(plan_id, team_id, current_user, db)
     
-    return payment_record_crud.get_by_plan_id(db, plan_id)
+    return [_payment_record_response(record) for record in payment_record_crud.get_by_plan_id(db, plan_id)]
 
 
 @router.put("/payment-records/{record_id}", response_model=PaymentRecordResponse, summary="更新回款记录", description="更新指定的回款记录。更新后会自动重新计算相关金额、计划状态和合同回款状态。支持修改回款金额、回款日期、凭证附件和备注信息。")
@@ -991,7 +1081,7 @@ async def update_payment_record(
                 actor_id=str(current_user.id),
             ),
         )
-        return updated_record
+        return _payment_record_response(updated_record)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1045,8 +1135,27 @@ def list_payment_records(
     payment_date_start: Optional[date] = Query(None, description="回款日期起始（YYYY-MM-DD）"),
     payment_date_end: Optional[date] = Query(None, description="回款日期结束（YYYY-MM-DD）"),
     min_amount: Optional[float] = Query(None, ge=0, description="最小回款金额"),
+    actual_amount: Optional[float] = Query(None, ge=0, description="回款金额"),
     creator_id: Optional[str] = Query(None, description="登记人飞书ID"),
-    keyword: Optional[str] = Query(None, description="关键词，支持客户、合同、阶段名称"),
+    keyword: Optional[str] = Query(None, description="关键词，支持回款编号、客户、合同、阶段、付款方、发票抬头、负责人、团队成员"),
+    record_number: Optional[str] = Query(None, description="回款编号"),
+    record_number_exclude: Optional[str] = Query(None, description="排除的回款编号关键词"),
+    customer_name: Optional[str] = Query(None, description="客户名称"),
+    customer_name_exclude: Optional[str] = Query(None, description="排除的客户名称关键词"),
+    actual_payer_name: Optional[str] = Query(None, description="实际付款方"),
+    actual_payer_name_exclude: Optional[str] = Query(None, description="排除的实际付款方关键词"),
+    invoice_title_text: Optional[str] = Query(None, description="发票抬头"),
+    invoice_title_text_exclude: Optional[str] = Query(None, description="排除的发票抬头关键词"),
+    contract_name: Optional[str] = Query(None, description="合同名称"),
+    contract_name_exclude: Optional[str] = Query(None, description="排除的合同名称关键词"),
+    owner_name: Optional[str] = Query(None, description="负责人姓名"),
+    owner_name_exclude: Optional[str] = Query(None, description="排除的负责人姓名关键词"),
+    commission_member_name: Optional[str] = Query(None, description="团队成员姓名"),
+    commission_member_name_exclude: Optional[str] = Query(None, description="排除的团队成员姓名关键词"),
+    confirmation_status: Optional[str] = Query(None, description="确认状态：PENDING, CONFIRMED, DISPUTED，多个值用逗号分隔"),
+    confirmation_status_exclude: Optional[str] = Query(None, description="排除的确认状态，多个值用逗号分隔"),
+    created_time_start: Optional[date] = Query(None, description="创建时间起始（YYYY-MM-DD）"),
+    created_time_end: Optional[date] = Query(None, description="创建时间结束（YYYY-MM-DD）"),
     me: bool = Query(False, description="是否只查询当前用户登记的记录"),
     approval_status: Optional[str] = Query(None, description="审批状态筛选: pending_submit(待提交), pending_approval(审批中), rejected(已驳回), approved(已通过)，多个值用逗号分隔"),
     approval_status_exclude: Optional[str] = Query(None, description="排除的审批状态，多个值用逗号分隔"),
@@ -1101,8 +1210,27 @@ def list_payment_records(
             payment_date_start=payment_date_start,
             payment_date_end=payment_date_end,
             min_amount=min_amount,
+            actual_amount=actual_amount,
             creator_id=creator_id,
             keyword=keyword,
+            record_number=record_number,
+            record_number_exclude=record_number_exclude,
+            customer_name=customer_name,
+            customer_name_exclude=customer_name_exclude,
+            actual_payer_name=actual_payer_name,
+            actual_payer_name_exclude=actual_payer_name_exclude,
+            invoice_title_text=invoice_title_text,
+            invoice_title_text_exclude=invoice_title_text_exclude,
+            contract_name=contract_name,
+            contract_name_exclude=contract_name_exclude,
+            owner_name=owner_name,
+            owner_name_exclude=owner_name_exclude,
+            commission_member_name=commission_member_name,
+            commission_member_name_exclude=commission_member_name_exclude,
+            confirmation_status=confirmation_status,
+            confirmation_status_exclude=confirmation_status_exclude,
+            created_time_start=created_time_start,
+            created_time_end=created_time_end,
             current_user_id=current_user_id,
             approval_status=approval_status,
             approval_status_exclude=approval_status_exclude,
@@ -1117,6 +1245,46 @@ def list_payment_records(
         pending_approval_me_count = query_pending_approval_me(db, team_id, user_roles)
 
         # Build response with approval info
+        from app.models.invoice import InvoiceApplication
+        from app.models.user import User
+
+        record_ids = [record.id for record in records]
+        latest_invoice_title_by_record: dict[int, str] = {}
+        has_invoice_application_table = inspect(db.bind).has_table(InvoiceApplication.__tablename__) if db.bind else True
+        if record_ids and has_invoice_application_table:
+            invoice_rows = db.query(
+                InvoiceApplication.payment_record_id,
+                InvoiceApplication.invoice_title_text,
+            ).filter(
+                InvoiceApplication.team_id == team_id,
+                InvoiceApplication.payment_record_id.in_(record_ids),
+            ).order_by(
+                InvoiceApplication.payment_record_id,
+                InvoiceApplication.created_time.desc(),
+                InvoiceApplication.id.desc(),
+            ).all()
+            for payment_record_id, invoice_title_text_value in invoice_rows:
+                if payment_record_id not in latest_invoice_title_by_record:
+                    latest_invoice_title_by_record[payment_record_id] = invoice_title_text_value
+
+        owner_id_by_record: dict[int, str] = {}
+        for record in records:
+            contract = record.payment_plan.contract if record.payment_plan and record.payment_plan.contract else None
+            opportunity = contract.opportunity if contract and getattr(contract, "opportunity", None) else None
+            owner_id_value = opportunity.owner_id if opportunity else (contract.owner_id if contract else None)
+            if owner_id_value:
+                owner_id_by_record[record.id] = str(owner_id_value)
+
+        numeric_owner_ids = sorted({
+            int(owner_id_value)
+            for owner_id_value in owner_id_by_record.values()
+            if str(owner_id_value).isdigit()
+        })
+        owner_name_by_id = {
+            str(user.id): user.name
+            for user in db.query(User).filter(User.id.in_(numeric_owner_ids)).all()
+        } if numeric_owner_ids else {}
+
         items = []
         for record in records:
             # Enrich with contract/customer info
@@ -1127,13 +1295,16 @@ def list_payment_records(
             record.opportunity_id = None
             record.opportunity_name = None
             record.stage_name = None
+            record.invoice_title_text = latest_invoice_title_by_record.get(record.id)
+            record.owner_id = owner_id_by_record.get(record.id)
+            record.owner_name = owner_name_by_id.get(record.owner_id) if record.owner_id else None
 
             if hasattr(record, 'payment_plan') and record.payment_plan:
                 record.contract_id = record.payment_plan.contract_id
                 if hasattr(record.payment_plan, 'contract') and record.payment_plan.contract:
                     record.contract_name = record.payment_plan.contract.contract_name
                     if hasattr(record.payment_plan.contract, 'customer') and record.payment_plan.contract.customer:
-                        record.customer_id = record.payment_plan.contract.customer.id
+                        record.customer_id = record.payment_plan.contract.customer.public_id
                         record.customer_name = record.payment_plan.contract.customer.account_name
                     if hasattr(record.payment_plan.contract, 'opportunity') and record.payment_plan.contract.opportunity:
                         record.opportunity_id = record.payment_plan.contract.opportunity.id
@@ -1146,15 +1317,15 @@ def list_payment_records(
                 "payment_plan_id": record.payment_plan_id,
                 "record_number": record.record_number,
                 "actual_amount": float(record.actual_amount),
-                "actual_payer_name": record.actual_payer_name,
+                "actual_payer_name": getattr(record, "actual_payer_name", None),
                 "payment_date": record.payment_date.isoformat(),
-                "proof_attachment": record.proof_attachment,
-                "commission_member_id": record.commission_member_id,
-                "commission_member_name": record.commission_member_name,
-                "notes": record.notes,
-                "creator_id": record.creator_id,
-                "creator_name": record.creator_name,
-                "approval_phase": record.approval_phase.value if hasattr(record.approval_phase, 'value') else record.approval_phase,
+                "proof_attachment": getattr(record, "proof_attachment", None),
+                "commission_member_id": getattr(record, "commission_member_id", None),
+                "commission_member_name": getattr(record, "commission_member_name", None),
+                "notes": getattr(record, "notes", None),
+                "creator_id": getattr(record, "creator_id", None),
+                "creator_name": getattr(record, "creator_name", None),
+                "approval_phase": record.approval_phase.value if hasattr(getattr(record, "approval_phase", None), 'value') else getattr(record, "approval_phase", None),
                 "confirmation_status": record.confirmation_status,
                 "created_time": record.created_time.isoformat(),
                 "contract_id": record.contract_id,
@@ -1164,6 +1335,9 @@ def list_payment_records(
                 "customer_name": record.customer_name,
                 "opportunity_id": record.opportunity_id,
                 "opportunity_name": record.opportunity_name,
+                "invoice_title_text": record.invoice_title_text,
+                "owner_id": record.owner_id,
+                "owner_name": record.owner_name,
                 "approval_id": record.approval_id,
             }
 

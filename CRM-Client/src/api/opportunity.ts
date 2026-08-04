@@ -56,7 +56,7 @@ export interface Opportunity {
   id: number
   opportunity_number: string
   opportunity_name: string
-  customer_id: number
+  customer_id: string
   customer_name?: string
   procurement_method_id: number | null
   procurement_method_info?: {
@@ -111,7 +111,7 @@ export interface Opportunity {
   updated_time: string
   version: number
   customer_info?: {
-    id: number
+    id: string
     account_name: string
   }
 }
@@ -146,7 +146,7 @@ export interface SalesStageDetail {
 
 export interface OpportunityCreate {
   opportunity_name?: string
-  customer_id: number
+  customer_id: string
   total_amount: number
   user_count: number
   license_type: LicenseType
@@ -197,7 +197,7 @@ export interface OpportunityListParams {
   procurement_stage_id?: number | null
   owner_id?: string | null
   owner_id_exclude?: string | null
-  customer_id?: number | null
+  customer_id?: string | null
   keyword?: string | null
   customer_keyword?: string | null
   license_type?: string | null
@@ -241,7 +241,7 @@ export interface OpportunityListResponse {
   id: number
   opportunity_number: string
   opportunity_name: string
-  customer_id: number
+  customer_id: string
   procurement_method_id: number | null
   procurement_method_info: {
     id: number
@@ -370,7 +370,7 @@ export const opportunityApi = {
     return z.array(StageDurationDataSchema).parse(response) as StageDurationData[]
   },
 
-  getAvailableForContract: async (customerId: number): Promise<OpportunityListResponse[]> => {
+  getAvailableForContract: async (customerId: string): Promise<OpportunityListResponse[]> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<OpportunityListResponse[]>(`/v1/opportunities/available-for-contract`, {
       params: { customer_id: customerId }

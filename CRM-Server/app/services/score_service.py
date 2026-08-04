@@ -21,6 +21,7 @@ from app.models.opportunity import Opportunity, OpportunityStatus
 from app.models.contract import Contract
 from app.models.score_weight import ScoreWeightConfig, ScoreDetail
 from app.crud.score_weight import score_weight_crud
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class ScoreService:
 
         # 更新线索分数
         lead.score = final_score
-        lead.score_updated_at = datetime.now()
+        lead.score_updated_at = business_now()
 
         # 清除旧的明细记录（保留最近10次）
         self._clear_old_details(db, 'LEAD', lead_id, keep=10)
@@ -216,7 +217,7 @@ class ScoreService:
         if not latest_follow_up:
             return (-10, "无跟进", "无跟进记录")
 
-        days = (datetime.now() - latest_follow_up.created_time).days
+        days = (business_now() - latest_follow_up.created_time).days
 
         if weight.condition_rules:
             try:
@@ -322,7 +323,7 @@ class ScoreService:
 
         # 更新客户分数
         customer.score = final_score
-        customer.score_updated_at = datetime.now()
+        customer.score_updated_at = business_now()
 
         # 清除旧的明细记录
         self._clear_old_details(db, 'CUSTOMER', customer_id, keep=10)

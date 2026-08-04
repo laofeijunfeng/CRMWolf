@@ -5,10 +5,10 @@
 from docx import Document
 from docx.oxml.ns import qn
 from docx.shared import Pt
-from datetime import datetime
 import tempfile
 
 from app.models.license_application import LicenseApplication, LicenseType
+from app.utils.time import business_now
 
 
 LICENSE_DOCUMENT_FONT = "黑体"
@@ -92,7 +92,7 @@ def export_license_document(application: LicenseApplication) -> str:
         doc.add_paragraph("未填写")
 
     # 文件名：私有化部署License-{客户名称}_{当前日期}.docx
-    current_date = datetime.now().strftime('%Y%m%d')
+    current_date = business_now().strftime('%Y%m%d')
     safe_customer_name = application.customer.account_name.translate(str.maketrans('', '', '\\/:*?"<>|\r\n'))
     file_name = f"私有化部署License-{safe_customer_name}_{current_date}.docx"
     file_path = tempfile.mktemp(suffix='.docx', prefix=file_name)

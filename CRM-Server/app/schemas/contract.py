@@ -58,7 +58,8 @@ class LicenseTypeEnum(str, Enum):
 
 
 class CustomerBasicInfo(BaseModel):
-    id: int = Field(..., description="客户ID")
+    id: str = Field(..., description="客户对外ID")
+    public_id: str = Field(..., description="客户对外ID")
     account_name: str = Field(..., description="客户公司名称")
     
     class Config:
@@ -100,7 +101,7 @@ class OwnerBasicInfo(CreatorBasicInfo):
 
 class ContractBase(BaseModel):
     contract_name: str = Field(..., min_length=1, max_length=255, description="合同名称")
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     opportunity_id: int = Field(..., description="关联商机ID")
     signing_contact_id: int = Field(..., description="客户签约人ID")
     user_count: int = Field(..., gt=0, description="采购用户数")
@@ -144,7 +145,7 @@ class ContractResponse(BaseModel):
     id: int = Field(..., description="合同ID")
     contract_number: str = Field(..., description="合同编号")
     contract_name: str = Field(..., description="合同名称")
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     opportunity_id: int = Field(..., description="关联商机ID")
     signing_contact_id: int = Field(..., description="客户签约人ID")
     user_count: int = Field(..., description="采购用户数")
@@ -171,6 +172,11 @@ class ContractResponse(BaseModel):
 
 
 class ContractListResponse(ContractResponse):
+    customer_name: Optional[str] = Field(None, description="客户名称")
+    opportunity_name: Optional[str] = Field(None, description="商机名称")
+    purchase_type: Optional[str] = Field(None, description="采购类型：NEW/RENEWAL/EXPANSION")
+    license_authorized_users: Optional[int] = Field(None, description="最新正式 License 授权数量；无 License 时回退合同采购用户数")
+    license_expiry_date: Optional[date] = Field(None, description="最新正式 License 到期日期")
     customer_info: Optional[CustomerBasicInfo] = Field(None, description="客户基本信息")
     opportunity_info: Optional[OpportunityBasicInfo] = Field(None, description="商机基本信息")
     owner_info: Optional[OwnerBasicInfo] = Field(None, description="负责人信息")

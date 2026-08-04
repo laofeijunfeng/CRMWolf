@@ -25,7 +25,33 @@ def test_extract_customer_candidates_limits_and_normalizes_items():
         "account_name": "客户0",
         "owner_info": {"id": 100},
         "collaborator_infos": [],
+        "match": {},
     }
+
+
+def test_extract_customer_candidates_ignores_semantic_related_customers() -> None:
+    data = {
+        "items": [{
+            "id": "cus_exact",
+            "account_name": "深圳矽递科技股份有限公司",
+            "match": {"source": "hybrid", "score": 1.0},
+        }],
+        "semantic_related_customers": [{
+            "id": "cus_noise",
+            "account_name": "中国科学院信息工程研究所",
+            "match": {"source": "customer_knowledge", "score": 0.46},
+        }],
+    }
+
+    candidates = business_rules.extract_customer_candidates(data)
+
+    assert candidates == [{
+        "id": "cus_exact",
+        "account_name": "深圳矽递科技股份有限公司",
+        "owner_info": None,
+        "collaborator_infos": [],
+        "match": {"source": "hybrid", "score": 1.0},
+    }]
 
 
 def test_creation_duplicate_keywords_deduplicates_normalized_name():

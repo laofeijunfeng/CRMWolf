@@ -123,7 +123,7 @@ class PaymentRecord(Base):
     approval_phase = Column(
         String(20),
         nullable=False,
-        default=ApprovalPhase.DRAFT,
+        default=ApprovalPhase.DRAFT.value,
         comment="审批流程状态：draft/pending_review/approved/rejected"
     )
     confirmed_by = Column(String(100), comment="确认人（财务人员）系统用户ID")

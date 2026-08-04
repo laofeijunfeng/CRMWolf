@@ -1,6 +1,5 @@
 """License 申请管理 API 端点"""
 import os
-from datetime import datetime
 from typing import List
 from urllib.parse import quote
 
@@ -18,6 +17,7 @@ from app.core.deps import (
     require_permission,
 )
 from app.core.logging import get_logger
+from app.utils.time import business_now
 from app.crud.approval import approval_crud
 from app.crud.crud_license_application import (
     create_license_application,
@@ -61,8 +61,46 @@ def _sanitize_filename_part(value: str) -> str:
 def _export_filename(application) -> str:
     customer_name = application.customer.account_name if application.customer else "客户"
     safe_customer_name = _sanitize_filename_part(customer_name) or "客户"
-    current_date = datetime.now().strftime("%Y%m%d")
+    current_date = business_now().strftime("%Y%m%d")
     return f"私有化部署License-{safe_customer_name}_{current_date}.docx"
+
+
+def _license_application_response(application: LicenseApplication) -> LicenseApplicationResponse:
+    if not application.customer:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="License 申请关联客户数据异常",
+        )
+    return LicenseApplicationResponse(**{
+        "id": application.id,
+        "team_id": application.team_id,
+        "application_number": application.application_number,
+        "customer_id": application.customer.public_id,
+        "deployment_info_id": application.deployment_info_id,
+        "contract_id": application.contract_id,
+        "expiry_date": application.expiry_date,
+        "license_type": application.license_type,
+        "authorized_users": application.authorized_users,
+        "enterprise_id": application.enterprise_id,
+        "supported_modules": application.supported_modules,
+        "server_license_code": application.server_license_code,
+        "client_license_code": application.client_license_code,
+        "remark": application.remark,
+        "license_code": application.license_code,
+        "status": application.status,
+        "approval_phase": application.approval_phase,
+        "applicant_id": application.applicant_id,
+        "approver_id": application.approver_id,
+        "approved_time": application.approved_time,
+        "approval_id": application.approval_id,
+        "created_time": application.created_time,
+        "last_modified_time": application.last_modified_time,
+        "customer_name": application.customer.account_name if application.customer else None,
+        "deployment_name": application.deployment_info.deployment_name if application.deployment_info else None,
+        "contract_name": application.contract.contract_name if application.contract else None,
+        "applicant_name": None,
+        "approver_name": None,
+    })
 
 
 def _enqueue_license_application_intelligence_refresh(
@@ -89,7 +127,8 @@ def create_application(
     db: Session = Depends(get_db)
 ):
     """创建 License 申请（草稿状态）"""
-    check_customer_edit_permission(application.customer_id, team_id, current_user, db)
+    customer = check_customer_edit_permission(application.customer_id, team_id, current_user, db)
+    application = application.model_copy(update={"customer_id": customer.id})
     created = create_license_application(db, team_id, application, current_user.id)
     _enqueue_license_application_intelligence_refresh(
         db,
@@ -97,20 +136,20 @@ def create_application(
         change_type="created",
         actor_id=str(current_user.id),
     )
-    return created
+    return _license_application_response(created)
 
 
 @router.get("/", response_model=List[LicenseApplicationResponse], summary="获取客户License申请列表")
 def list_applications(
-    customer_id: int = Query(..., description="客户ID"),
+    customer_id: str = Query(..., description="客户对外ID"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """获取客户的 License 申请列表"""
-    check_customer_view_permission(customer_id, team_id, current_user, db)
-    applications, _ = get_license_applications_by_customer(db, team_id, customer_id)
-    return applications
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
+    applications, _ = get_license_applications_by_customer(db, team_id, customer.id)
+    return [_license_application_response(application) for application in applications]
 
 
 @router.get("/{application_id}", response_model=LicenseApplicationResponse, summary="获取License申请详情")
@@ -128,7 +167,7 @@ def get_application(
             detail="License申请不存在"
         )
     check_customer_view_permission(application.customer_id, team_id, current_user, db)
-    return application
+    return _license_application_response(application)
 
 
 @router.put("/{application_id}", response_model=LicenseApplicationResponse, summary="更新License申请")
@@ -164,7 +203,7 @@ def update_application(
         change_type="updated",
         actor_id=str(current_user.id),
     )
-    return updated
+    return _license_application_response(updated)
 
 
 @router.delete("/{application_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除License申请")
@@ -245,7 +284,7 @@ def submit_application(
             change_type="updated",
             actor_id=str(current_user.id),
         )
-        return application
+        return _license_application_response(application)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -344,7 +383,7 @@ async def issue_application(
                 logger.error(
                     f"[License] Issue notification failed: application_id={application_id}, error={str(notify_error)}"
                 )
-        return issued
+        return _license_application_response(issued)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

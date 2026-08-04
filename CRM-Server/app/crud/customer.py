@@ -15,6 +15,7 @@ from app.schemas.customer import (
     ContactUpdate
 )
 from app.crud.operation_log import operation_log_crud
+from app.utils.time import business_now
 
 
 def _split_csv(value: Optional[str]) -> List[str]:
@@ -36,6 +37,12 @@ def _split_int_csv(value: Optional[str]) -> List[int]:
 class CustomerCRUD:
     def get_by_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[Customer]:
         query = db.query(Customer).filter(Customer.id == customer_id)
+        if team_id is not None:
+            query = query.filter(Customer.team_id == team_id)
+        return query.first()
+
+    def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Customer]:
+        query = db.query(Customer).filter(Customer.public_id == public_id)
         if team_id is not None:
             query = query.filter(Customer.team_id == team_id)
         return query.first()
@@ -252,7 +259,7 @@ class CustomerCRUD:
         if status == "FAILED" and error_message:
             customer.profile_error_message = error_message
         if status == "COMPLETED":
-            customer.profile_generated_time = datetime.now()
+            customer.profile_generated_time = business_now()
 
         customer.version += 1
         db.commit()
@@ -297,7 +304,7 @@ class CustomerCRUD:
         if status == "FAILED" and error_message:
             customer.customer_brief_error_message = error_message
         if status == "COMPLETED":
-            customer.customer_brief_generated_time = datetime.now()
+            customer.customer_brief_generated_time = business_now()
 
         customer.version += 1
         db.commit()
@@ -503,7 +510,8 @@ class CustomerCRUD:
         days: int = 30,
         owner_id: Optional[str] = None
     ) -> List[dict]:
-        start_date = datetime.now() - timedelta(days=days)
+        now = business_now()
+        start_date = now - timedelta(days=days)
 
         query = db.query(Customer).filter(
             Customer.team_id == team_id,
@@ -522,7 +530,7 @@ class CustomerCRUD:
         
         result = []
         for i in range(days):
-            date_str = (datetime.now() - timedelta(days=days - 1 - i)).strftime('%Y-%m-%d')
+            date_str = (now - timedelta(days=days - 1 - i)).strftime('%Y-%m-%d')
             result.append({
                 "date": date_str,
                 "count": trend_data.get(date_str, 0)
@@ -542,7 +550,7 @@ class CustomerCRUD:
         customer.return_reason = return_reason
         if detailed_reason:
             customer.return_reason = f"{return_reason}: {detailed_reason}"
-        customer.returned_time = datetime.now()
+        customer.returned_time = business_now()
         customer.version += 1
 
         db.commit()

@@ -108,7 +108,7 @@ const errors = reactive<PaymentRecordErrors>({
 })
 
 const loadingCommissionMembers = ref(false)
-const paymentCustomerId = ref<number | null>(null)
+const paymentCustomerId = ref<string | null>(null)
 const commissionMemberOptions = ref<CommissionMemberOption[]>([])
 const commissionMemberSelectOptions = computed(() =>
   commissionMemberOptions.value.map((member) => ({

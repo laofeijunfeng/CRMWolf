@@ -7,7 +7,6 @@ that can help Agent reasoning and customer profile summarization.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -20,21 +19,15 @@ from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
-from app.services.customer_embedding_service import (
-    CustomerEmbeddingService,
-    CustomerEmbeddingUnavailableError,
-    customer_embedding_service,
+from app.services.customer_evidence_retriever import (
+    CustomerEvidenceHit,
+    CustomerEvidenceRetriever,
+    EvidenceRetrievalState,
+    customer_evidence_retriever,
 )
-from app.services.industry_display_service import industry_display_service
 from app.services.customer_fact_service import CustomerFactService, customer_fact_service
-from app.services.customer_qdrant_index_service import (
-    CustomerEvidenceSearchResult,
-    CustomerQdrantIndexService,
-    SourceType,
-    customer_qdrant_index_service,
-)
-
-logger = logging.getLogger(__name__)
+from app.services.customer_qdrant_index_service import SourceType
+from app.services.industry_display_service import industry_display_service
 
 JsonScalar = str | int | float | bool | None
 JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -44,6 +37,7 @@ JsonObject = dict[str, JsonValue]
 @dataclass(frozen=True)
 class CustomerFact:
     id: int
+    public_id: str
     account_name: str
     industry_code: str | None
     industry_name: str | None
@@ -61,10 +55,13 @@ class CustomerFact:
     main_business: str | None
     project_background: str | None
     similar_customers: str | None
+    customer_brief_status: str | None
+    customer_brief_markdown: str | None
 
     def to_dict(self) -> JsonObject:
         return {
             "id": self.id,
+            "public_id": self.public_id,
             "account_name": self.account_name,
             "industry_code": self.industry_code,
             "industry_name": self.industry_name,
@@ -82,6 +79,8 @@ class CustomerFact:
             "main_business": self.main_business,
             "project_background": self.project_background,
             "similar_customers": self.similar_customers,
+            "customer_brief_status": self.customer_brief_status,
+            "customer_brief_markdown": self.customer_brief_markdown,
         }
 
 
@@ -258,44 +257,6 @@ class ActivityFact:
 
 
 @dataclass(frozen=True)
-class CustomerEvidenceHit:
-    evidence_id: str
-    score: float
-    source_type: str | None
-    source_object_id: str | None
-    business_object_type: str | None
-    business_object_id: str | None
-    title: str | None
-    text: str | None
-
-    def to_dict(self) -> JsonObject:
-        return {
-            "evidence_id": self.evidence_id,
-            "score": round(self.score, 4),
-            "source_type": self.source_type,
-            "source_object_id": self.source_object_id,
-            "business_object_type": self.business_object_type,
-            "business_object_id": self.business_object_id,
-            "title": self.title,
-            "text": self.text,
-        }
-
-
-@dataclass(frozen=True)
-class EvidenceRetrievalState:
-    status: str
-    enabled: bool
-    error_message: str | None = None
-
-    def to_dict(self) -> JsonObject:
-        return {
-            "status": self.status,
-            "enabled": self.enabled,
-            "error_message": self.error_message,
-        }
-
-
-@dataclass(frozen=True)
 class CustomerStrongContext:
     customer: CustomerFact
     customer_facts: list[JsonObject]
@@ -339,20 +300,36 @@ class CustomerIntelligenceContext:
         payload["usage_policy"] = {
             "strong_facts_source": "mysql",
             "semantic_evidence_source": "qdrant",
+            "memory_source": "langgraph_store",
             "rule": "强业务事实以 strong_context 为准, semantic_evidence 只作为可引用证据和语义线索。",
+            "grounding": {
+                "ok": "可基于 citations 输出 grounded 回答。",
+                "low_confidence": "只能基于 strong_context 和 customer_memory 回答, 并标记缺少高置信度语义证据。",
+                "empty": "只能基于 strong_context 和 customer_memory 回答, 不得声称已使用语义证据。",
+                "unavailable": "检索不可用时降级回答, 需要暴露 degraded answer_mode 给系统侧观测。",
+            },
         }
+        payload["citations"] = [item.to_citation() for item in self.evidence_hits]
         return payload
 
 
 class CustomerIntelligenceContextService:
     def __init__(
         self,
-        embedding_service: CustomerEmbeddingService | None = None,
-        qdrant_index_service: CustomerQdrantIndexService | None = None,
+        embedding_service: object | None = None,
+        qdrant_index_service: object | None = None,
+        evidence_retriever: CustomerEvidenceRetriever | None = None,
         fact_service: CustomerFactService | None = None,
     ) -> None:
-        self.embedding_service = embedding_service or customer_embedding_service
-        self.qdrant_index_service = qdrant_index_service or customer_qdrant_index_service
+        if evidence_retriever is not None:
+            self.evidence_retriever = evidence_retriever
+        elif embedding_service is not None or qdrant_index_service is not None:
+            self.evidence_retriever = CustomerEvidenceRetriever(
+                embedding_service=embedding_service,  # type: ignore[arg-type]
+                qdrant_index_service=qdrant_index_service,  # type: ignore[arg-type]
+            )
+        else:
+            self.evidence_retriever = customer_evidence_retriever
         self.fact_service = fact_service or customer_fact_service
 
     def build_context(
@@ -374,7 +351,7 @@ class CustomerIntelligenceContextService:
             raise ValueError("客户不存在或无权访问")
 
         strong_context = self._build_strong_context(db, customer=customer, team_id=team_id)
-        evidence_hits, retrieval_state = self._retrieve_evidence(
+        retrieval_result = self.evidence_retriever.retrieve_customer_evidence(
             db=db,
             team_id=team_id,
             customer_id=customer_id,
@@ -384,8 +361,8 @@ class CustomerIntelligenceContextService:
         )
         return CustomerIntelligenceContext(
             strong_context=strong_context,
-            evidence_hits=evidence_hits,
-            retrieval_state=retrieval_state,
+            evidence_hits=retrieval_result.hits,
+            retrieval_state=retrieval_result.state,
         )
 
     def _build_strong_context(self, db: Session, *, customer: Customer, team_id: int) -> CustomerStrongContext:
@@ -438,7 +415,12 @@ class CustomerIntelligenceContextService:
 
         return CustomerStrongContext(
             customer=self._customer_fact(db, customer),
-            customer_facts=self.fact_service.to_context_payload(db, team_id=team_id, customer_id=int(customer.id), limit=50),
+            customer_facts=self.fact_service.to_context_payload(
+                db,
+                team_id=team_id,
+                customer_id=int(customer.id),
+                limit=50,
+            ),
             contacts=[self._contact_fact(item) for item in contacts],
             opportunities=[self._opportunity_fact(item) for item in opportunities],
             contracts=[self._contract_fact(item) for item in contracts],
@@ -448,43 +430,10 @@ class CustomerIntelligenceContextService:
             same_industry_customers=[str(row[0]) for row in same_industry_rows],
         )
 
-    def _retrieve_evidence(
-        self,
-        *,
-        db: Session,
-        team_id: int,
-        customer_id: int,
-        query_text: str | None,
-        evidence_limit: int,
-        source_types: list[SourceType] | None,
-    ) -> tuple[list[CustomerEvidenceHit], EvidenceRetrievalState]:
-        if not self.qdrant_index_service.enabled:
-            return [], EvidenceRetrievalState(status="disabled", enabled=False)
-        if not query_text or not query_text.strip():
-            return [], EvidenceRetrievalState(status="skipped_empty_query", enabled=True)
-
-        try:
-            vector = self.embedding_service.embed_query(db, team_id, query_text)
-            results = self.qdrant_index_service.search_customer_evidence(
-                query_vector=vector,
-                tenant_id=team_id,
-                team_id=team_id,
-                customer_id=customer_id,
-                limit=evidence_limit,
-                source_types=source_types,
-            )
-        except CustomerEmbeddingUnavailableError as exc:
-            logger.info("客户智能证据检索跳过: %s", exc)
-            return [], EvidenceRetrievalState(status="embedding_unavailable", enabled=True, error_message=str(exc))
-        except Exception as exc:
-            logger.exception("客户智能证据检索失败: customer_id=%s", customer_id)
-            return [], EvidenceRetrievalState(status="failed", enabled=True, error_message=str(exc))
-
-        return [self._evidence_hit(item) for item in results], EvidenceRetrievalState(status="ok", enabled=True)
-
     def _customer_fact(self, db: Session, customer: Customer) -> CustomerFact:
         return CustomerFact(
             id=int(customer.id),
+            public_id=customer.public_id,
             account_name=customer.account_name,
             industry_code=customer.industry,
             industry_name=industry_display_service.display_name(db, customer.industry),
@@ -502,6 +451,8 @@ class CustomerIntelligenceContextService:
             main_business=customer.main_business,
             project_background=customer.project_background,
             similar_customers=customer.similar_customers,
+            customer_brief_status=customer.customer_brief_status,
+            customer_brief_markdown=customer.customer_brief_markdown,
         )
 
     def _contact_fact(self, contact: Contact) -> ContactFact:
@@ -588,18 +539,6 @@ class CustomerIntelligenceContextService:
             next_action=activity.next_action,
             next_follow_time=self._datetime(activity.next_follow_time),
             occurred_at=self._datetime(activity.occurred_at),
-        )
-
-    def _evidence_hit(self, result: CustomerEvidenceSearchResult) -> CustomerEvidenceHit:
-        return CustomerEvidenceHit(
-            evidence_id=result.id,
-            score=result.score,
-            source_type=result.source_type,
-            source_object_id=result.source_object_id,
-            business_object_type=result.business_object_type,
-            business_object_id=result.business_object_id,
-            title=result.title,
-            text=result.text,
         )
 
     @staticmethod

@@ -1583,7 +1583,7 @@ def _customer_intelligence_assistant_content(result: object) -> str | None:
         assistant_content = result.get("assistant_content")
         if isinstance(assistant_content, str) and assistant_content.strip():
             return assistant_content.strip()
-        return None
+        return agent_copy.customer_context_answer_unavailable()
     persisted_refs = result.get("persisted_customer_fact_refs")
     if isinstance(persisted_refs, list) and persisted_refs:
         return f"客户智能档案已更新，沉淀了 {len(persisted_refs)} 条客户事实。"

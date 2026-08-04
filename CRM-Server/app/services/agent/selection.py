@@ -35,6 +35,7 @@ from app.services.agent.schemas import (
 )
 from app.services.agent.semantic import AgentSemanticParserError, agent_semantic_parser
 from app.services.agent.state import ResourceResolutionGraphState
+from app.services.agent.task_factory import _task_target_id
 from app.services.agent.temporal import agent_temporal_resolver
 from app.services.agent.tools.api_client import CRMAPIClientError
 from app.services.agent.tool_registry import AgentToolRegistry
@@ -182,7 +183,7 @@ async def _load_member_candidates_for_customer(
     user_id: int,
     session_id: int,
     authorization: str,
-    customer_id: int,
+    customer_id: str,
 ):
     context = AgentToolContext(
         db=db,
@@ -191,7 +192,7 @@ async def _load_member_candidates_for_customer(
         session_id=session_id,
         authorization=authorization,
         allowed_tool_names=["get_customer_context"],
-        allowed_customer_ids=[customer_id],
+        allowed_customer_ids=[str(customer_id)],
     )
     try:
         return await CRMAgentToolService().api_client.request(
@@ -389,7 +390,12 @@ async def _apply_customer_selection(
             task,
             AgentTaskUpdate(
                 status=AgentTaskStatus.COMPLETED,
-                target_id=customer.get("id"),
+                target_id=_task_target_id(
+                    db,
+                    team_id=team_id,
+                    target_type="customer",
+                    target_id=customer.get("id"),
+                ),
                 summary="已选择回款客户，等待重新发送回款信息",
                 state_json={**state, "customer": customer},
             ),
@@ -422,7 +428,12 @@ async def _apply_customer_selection(
         db,
         task,
         AgentTaskUpdate(
-            target_id=customer.get("id"),
+            target_id=_task_target_id(
+                db,
+                team_id=team_id,
+                target_type="customer",
+                target_id=customer.get("id"),
+            ),
             summary=message if "_" not in message else task_display.readable_action_label(next_action) or "等待确认业务操作",
             input_json=payload,
             state_json=new_state,

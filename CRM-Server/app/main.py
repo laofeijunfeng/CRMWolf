@@ -61,6 +61,8 @@ from app.core.exceptions import (
     sqlalchemy_exception_handler,
     validation_exception_handler,
 )
+from app.core.database import SessionLocal
+from app.services.customer_intelligence_health_service import customer_intelligence_health_service
 
 # 导入初始化服务
 from app.services.init_service import init_roles_permissions
@@ -200,3 +202,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/health/customer-intelligence")
+async def customer_intelligence_health_check():
+    db = SessionLocal()
+    try:
+        return customer_intelligence_health_service.check(db)
+    finally:
+        db.close()

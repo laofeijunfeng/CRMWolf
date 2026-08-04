@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime
 from typing import Callable, List, Optional
 
 from sqlalchemy import or_
@@ -33,6 +32,10 @@ from app.services.customer_knowledge_candidate_service import (
     CustomerVisibilityPredicate,
     customer_knowledge_candidate_service,
 )
+from app.utils.time import business_now
+
+
+CUSTOMER_KNOWLEDGE_IDENTITY_MIN_SCORE = 0.62
 
 
 class CRMAgentToolService:
@@ -93,7 +96,7 @@ class CRMAgentToolService:
         lexical_payload = lexical_data if isinstance(lexical_data, dict) else {}
         lexical_items = [
             item for item in lexical_payload.get("items", [])
-            if isinstance(item, dict) and isinstance(item.get("id"), int)
+            if isinstance(item, dict) and isinstance(item.get("id"), (str, int)) and str(item.get("id"))
         ]
         visibility_predicate = self._customer_visibility_predicate(context)
         retrieval: JsonDict = {
@@ -120,15 +123,19 @@ class CRMAgentToolService:
             knowledge_result = self._search_accessible_customers_by_evidence(context, keyword, limit=limit)
             semantic_candidates = knowledge_result.candidates
             retrieval.update(_semantic_retrieval_metadata(knowledge_result.retrieval_event))
-        items = self._merge_customer_candidates(
+        items, semantic_related_customers = self._merge_customer_candidates(
             lexical_items=lexical_items,
             alias_items=alias_candidates,
             semantic_items=semantic_candidates,
             limit=limit,
         )
+        if semantic_related_customers:
+            retrieval["semantic_related_customer_count"] = len(semantic_related_customers)
+            retrieval["semantic_candidate_role"] = "related_evidence"
         return {
             **lexical_payload,
             "items": items,
+            "semantic_related_customers": semantic_related_customers,
             "total": len(items),
             "retrieval": retrieval,
         }
@@ -166,43 +173,49 @@ class CRMAgentToolService:
         alias_items: list[JsonDict],
         semantic_items: list[JsonDict],
         limit: int,
-    ) -> list[JsonDict]:
-        merged: dict[int, JsonDict] = {}
-        order: list[int] = []
+    ) -> tuple[list[JsonDict], list[JsonDict]]:
+        merged: dict[str, JsonDict] = {}
+        order: list[str] = []
         for item in [*lexical_items, *alias_items]:
             customer_id = item.get("id")
-            if not isinstance(customer_id, int):
+            if not isinstance(customer_id, (str, int)) or not str(customer_id):
                 continue
+            customer_key = str(customer_id)
             candidate = dict(item)
             candidate.setdefault(
                 "match",
                 {"source": "customer_search", "score": 1.0, "reason": "客户名称匹配"},
             )
-            if customer_id in merged:
-                merged[customer_id] = _combine_customer_candidate_matches(
-                    merged[customer_id],
+            if customer_key in merged:
+                merged[customer_key] = _combine_customer_candidate_matches(
+                    merged[customer_key],
                     candidate,
                     source="hybrid",
                     reason="客户名称和常用称呼均匹配",
                 )
             else:
-                merged[customer_id] = candidate
-                order.append(customer_id)
+                merged[customer_key] = candidate
+                order.append(customer_key)
+        has_identity_candidates = bool(order)
+        semantic_related_customers: list[JsonDict] = []
         for item in semantic_items:
             customer_id = item.get("id")
-            if not isinstance(customer_id, int):
+            if not isinstance(customer_id, (str, int)) or not str(customer_id):
                 continue
-            if customer_id in merged:
-                merged[customer_id] = _combine_customer_candidate_matches(
-                    merged[customer_id],
+            customer_key = str(customer_id)
+            if customer_key in merged:
+                merged[customer_key] = _combine_customer_candidate_matches(
+                    merged[customer_key],
                     item,
                     source="hybrid",
                     reason="客户名称、常用称呼或客户知识库匹配",
                 )
+            elif has_identity_candidates or _customer_candidate_score(item) < CUSTOMER_KNOWLEDGE_IDENTITY_MIN_SCORE:
+                semantic_related_customers.append(item)
             else:
-                merged[customer_id] = item
-                order.append(customer_id)
-        return [merged[customer_id] for customer_id in order[:limit]]
+                merged[customer_key] = item
+                order.append(customer_key)
+        return [merged[customer_id] for customer_id in order[:limit]], semantic_related_customers[:limit]
 
     def _customer_visibility_predicate(self, context: AgentToolContext) -> CustomerVisibilityPredicate:
         user_id = str(context.user_id)
@@ -282,7 +295,7 @@ class CRMAgentToolService:
         for customer in customers:
             if self._can_view_customer(context, customer, user_id, customer_view_all, customer_view_own):
                 visible_customers.append({
-                    "id": customer.id,
+                    "id": customer.public_id,
                     "account_name": customer.account_name,
                     "visible": True,
                 })
@@ -294,7 +307,7 @@ class CRMAgentToolService:
         for lead in leads:
             if lead_view_all or (lead_view_own and (lead.owner_id == user_id or lead.creator_id == user_id)):
                 visible_leads.append({
-                    "id": lead.id,
+                    "id": lead.public_id,
                     "lead_name": lead.lead_name,
                     "contact_name": lead.contact_name,
                     "contact_phone": lead.contact_phone,
@@ -398,29 +411,41 @@ class CRMAgentToolService:
     async def get_customer_context(
         self,
         context: AgentToolContext,
-        customer_id: int,
+        customer_id: str,
         query_text: Optional[str] = None,
     ) -> AgentToolResult:
-        payload = {"customer_id": customer_id, "query_text": query_text}
+        customer_public_id = str(customer_id)
+        payload = {"customer_id": customer_public_id, "query_text": query_text}
 
         async def call_api():
             detail = await self.api_client.request(
                 "GET",
-                f"/v1/customers/{customer_id}",
+                f"/v1/customers/{customer_public_id}",
                 context.authorization,
             )
-            related = await self._get_customer_related_context(context, customer_id)
+            related = await self._get_customer_related_context(context, customer_public_id)
             return {
                 "customer": detail,
                 **related,
                 "customer_intelligence": self._get_customer_intelligence_payload(
                     context,
-                    customer_id=customer_id,
+                    customer_id=self._customer_internal_id(context, customer_public_id),
                     query_text=query_text,
                 ),
             }
 
         return await self._run_read_tool(context, "get_customer_context", payload, call_api)
+
+    @staticmethod
+    def _customer_internal_id(context: AgentToolContext, customer_public_id: str) -> int:
+        customer = (
+            context.db.query(Customer)
+            .filter(Customer.team_id == context.team_id, Customer.public_id == customer_public_id)
+            .first()
+        )
+        if customer is None:
+            raise ValueError("客户不存在")
+        return int(customer.id)
 
     def _get_customer_intelligence_payload(
         self,
@@ -454,7 +479,7 @@ class CRMAgentToolService:
     async def create_customer_activity(
         self,
         context: AgentToolContext,
-        customer_id: int,
+        customer_id: str,
         activity_kind: str,
         source_content: str,
         customer_name: Optional[str] = None,
@@ -463,8 +488,9 @@ class CRMAgentToolService:
         next_follow_time: Optional[str] = None,
         idempotency_suffix: Optional[str] = None,
     ) -> AgentToolResult:
+        customer_public_id = str(customer_id)
         payload = {
-            "customer_id": customer_id,
+            "customer_id": customer_public_id,
             "customer_name": customer_name,
             "activity_kind": activity_kind,
             "source_content": source_content,
@@ -477,7 +503,7 @@ class CRMAgentToolService:
         async def call_api():
             return await self.api_client.request(
                 "POST",
-                f"/v1/customer-activities/{customer_id}",
+                f"/v1/customer-activities/{customer_public_id}",
                 context.authorization,
                 json={
                     "activity_kind": activity_kind,
@@ -532,7 +558,7 @@ class CRMAgentToolService:
     async def create_lead_follow_up(
         self,
         context: AgentToolContext,
-        lead_id: int,
+        lead_id: str,
         content: str,
         method: str = "其他",
         next_action: Optional[str] = None,
@@ -563,7 +589,7 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_lead_follow_up", payload, action_key, call_api)
 
-    async def create_contact(self, context: AgentToolContext, customer_id: int, contact: JsonDict) -> AgentToolResult:
+    async def create_contact(self, context: AgentToolContext, customer_id: str, contact: JsonDict) -> AgentToolResult:
         payload = {"customer_id": customer_id, "contact": contact}
         action_key = self._action_key("create_contact", context, payload, None)
 
@@ -580,7 +606,7 @@ class CRMAgentToolService:
     async def create_invoice_title(
         self,
         context: AgentToolContext,
-        customer_id: int,
+        customer_id: str,
         invoice_title: JsonDict,
         set_default: bool = False,
     ) -> AgentToolResult:
@@ -631,7 +657,7 @@ class CRMAgentToolService:
     async def create_customer_member(
         self,
         context: AgentToolContext,
-        customer_id: int,
+        customer_id: str,
         member: JsonDict,
     ) -> AgentToolResult:
         payload = {"customer_id": customer_id, "member": member}
@@ -670,7 +696,7 @@ class CRMAgentToolService:
     async def list_customer_opportunities(
         self,
         context: AgentToolContext,
-        customer_id: int,
+        customer_id: str,
         status: Optional[str] = None,
         limit: int = 20,
     ) -> AgentToolResult:
@@ -800,7 +826,7 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_payment_record", payload, action_key, call_api)
 
-    async def _get_customer_related_context(self, context: AgentToolContext, customer_id: int) -> JsonDict:
+    async def _get_customer_related_context(self, context: AgentToolContext, customer_id: str) -> JsonDict:
         related_paths = {
             "opportunities": f"/v1/opportunities/?customer_id={customer_id}",
             "contracts": f"/v1/customers/{customer_id}/contracts",
@@ -885,14 +911,14 @@ class CRMAgentToolService:
                 AgentToolCallUpdate(
                     status=AgentToolCallStatus.SUCCESS,
                     response_json={"data": data},
-                    finished_time=datetime.now(),
+                    finished_time=business_now(),
                 ),
             )
             return AgentToolResult(tool_name=tool_name, success=True, data=data, tool_call_id=tool_call.id)
         except CRMAPIClientError as exc:
             return self._mark_tool_failed(context, tool_call, tool_name, exc.message, exc.status_code, exc.response_json)
         except Exception as exc:
-            return self._mark_tool_failed(context, tool_call, tool_name, str(exc), None, None)
+            return self._mark_tool_failed(context, tool_call, tool_name, _exception_message(exc), None, None)
 
     async def _run_write_tool(
         self,
@@ -967,7 +993,7 @@ class CRMAgentToolService:
                 status=AgentToolCallStatus.FAILED,
                 response_json={"data": response_json} if response_json is not None else None,
                 error_message=message,
-                finished_time=datetime.now(),
+                finished_time=business_now(),
             ),
         )
         return AgentToolResult(
@@ -989,6 +1015,13 @@ class CRMAgentToolService:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _exception_message(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message:
+        return message
+    return exc.__class__.__name__
+
+
 def _compact_text(value: str | None, *, limit: int) -> str | None:
     if not value:
         return None
@@ -1000,7 +1033,7 @@ def _compact_text(value: str | None, *, limit: int) -> str | None:
 
 def _alias_match_item(match: CustomerAliasMatch) -> JsonDict:
     return {
-        "id": match.customer_id,
+        "id": match.customer_public_id,
         "account_name": match.account_name,
         "city": match.city,
         "owner_info": None,
@@ -1054,6 +1087,13 @@ def _float_score(value: object) -> float:
         except ValueError:
             return 0.0
     return 0.0
+
+
+def _customer_candidate_score(item: JsonDict) -> float:
+    match = item.get("match")
+    if not isinstance(match, dict):
+        return 0.0
+    return _float_score(match.get("score"))
 
 
 def _semantic_retrieval_metadata(event: JsonDict) -> JsonDict:

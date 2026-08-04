@@ -54,6 +54,7 @@ import PaymentsPanel from '@/components/panels/PaymentsPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
+import approvalGenericApi from '@/api/approvalGeneric'
 import customerApi, { type CustomerDetailResponse, type CustomerMemberResponse } from '@/api/customer'
 import contractApi, { type ContractListResponse, type ContractStatus } from '@/api/contract'
 import paymentApi, { type PaymentPlanResponse, type PaymentRecordCreate } from '@/api/payment'
@@ -65,7 +66,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 
 interface CustomerContext {
-  customerId: number
+  customerId: string
   customerName?: string | undefined
 }
 
@@ -93,7 +94,7 @@ const emit = defineEmits<{
   'delete-contract': [contract: ContractListResponse]
   'create-contract': [{
     opportunityId: number
-    customerId: number
+    customerId: string
     customerName: string
     opportunityName: string
     totalAmount: number
@@ -141,6 +142,9 @@ const licenseApplicationDialogOpen = ref(false)
 
 // 编辑弹窗状态
 const editDialogOpen = ref(false)
+const editMode = ref<'normal' | 'resubmit'>('normal')
+const pendingResubmitAfterEdit = ref(false)
+const approvalProcessReloadKey = ref(0)
 
 const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
 const isOwner = computed(() =>
@@ -185,6 +189,7 @@ const isActive = computed(() => opportunity.value?.status === 0)
 const approvalPhase = computed(() => opportunity.value?.approval_phase)
 const isApprovalPending = computed(() => approvalPhase.value === 'pending_review')
 const isApprovalApproved = computed(() => approvalPhase.value === 'approved')
+const isApprovalRejected = computed(() => approvalPhase.value === 'rejected')
 const isApprovalSubmitter = computed(() =>
   opportunity.value?.creator_id === String(userStore.userInfo?.id)
 )
@@ -194,6 +199,9 @@ const canSubmitApproval = computed(() => {
   return permissionStore.hasPermission('opportunity:edit:own')
     && opportunity.value?.owner_id === currentUserId.value
 })
+const canShowFooterEdit = computed(() =>
+  canEditOpportunity.value && !isApprovalPending.value && !isApprovalRejected.value
+)
 
 const relatedContracts = computed<ContractListResponse[]>(() =>
   relatedContract.value === null ? [] : [relatedContract.value]
@@ -396,7 +404,7 @@ async function fetchRelatedBusinessData(opportunityData: Opportunity): Promise<v
   }
 }
 
-async function fetchCustomerPermissionContext(customerId: number): Promise<{
+async function fetchCustomerPermissionContext(customerId: string): Promise<{
   detail: CustomerDetailResponse | null
   members: CustomerMemberResponse[]
 }> {
@@ -418,13 +426,54 @@ function handleEdit(): void {
     toast.error('你没有编辑该商机的权限')
     return
   }
+  editMode.value = 'normal'
+  pendingResubmitAfterEdit.value = false
   editDialogOpen.value = true
 }
 
+function handleResubmitEdit(): void {
+  if (!opportunity.value) return
+  if (!isApprovalRejected.value) {
+    toast.warning('当前商机不需要重新提交审批')
+    return
+  }
+  if (!canSubmitApproval.value) {
+    toast.error('你没有重新提交该商机审批的权限')
+    return
+  }
+  if (!canEditOpportunity.value) {
+    toast.error('你没有编辑该商机的权限')
+    return
+  }
+  editMode.value = 'resubmit'
+  pendingResubmitAfterEdit.value = true
+  editDialogOpen.value = true
+}
+
+function handleEditDialogOpenChange(open: boolean): void {
+  editDialogOpen.value = open
+  if (!open) editMode.value = 'normal'
+}
+
 // 编辑成功回调
-function handleEditSuccess(): void {
+async function handleEditSuccess(): Promise<void> {
+  const shouldResubmit = pendingResubmitAfterEdit.value
+  const savedOpportunityId = opportunity.value?.id
   editDialogOpen.value = false
-  fetchOpportunityDetail()
+  editMode.value = 'normal'
+  pendingResubmitAfterEdit.value = false
+
+  if (shouldResubmit && savedOpportunityId !== undefined) {
+    try {
+      await approvalGenericApi.submitApproval('OPPORTUNITY', savedOpportunityId)
+      toast.success('商机已重新提交审批')
+    } catch (error) {
+      handleApiError(error, '重新提交商机审批')
+    }
+  }
+
+  await fetchOpportunityDetail()
+  approvalProcessReloadKey.value += 1
   emit('refresh')
 }
 
@@ -1010,6 +1059,7 @@ watch(approvalPhase, phase => {
               </AccordionTrigger>
               <AccordionContent class="px-4 pb-4">
                 <ApprovalProcessGeneric
+                  :key="`${opportunity.id}-${approvalProcessReloadKey}`"
                   entity-type="OPPORTUNITY"
                   :entity-id="opportunity.id"
                   :is-submitter="canSubmitApproval"
@@ -1017,7 +1067,7 @@ watch(approvalPhase, phase => {
                   @approved="fetchOpportunityDetail"
                   @rejected="fetchOpportunityDetail"
                   @withdrawn="fetchOpportunityDetail"
-                  @resubmit="handleEdit"
+                  @resubmit="handleResubmitEdit"
                 />
               </AccordionContent>
             </AccordionItem>
@@ -1139,7 +1189,7 @@ watch(approvalPhase, phase => {
         输单
       </Button>
       <Button
-        v-if="canEditOpportunity && !isApprovalPending"
+        v-if="canShowFooterEdit"
         variant="outline"
         @click="handleEdit"
       >
@@ -1169,8 +1219,12 @@ watch(approvalPhase, phase => {
       v-if="opportunity"
       :open="editDialogOpen"
       :opportunity="opportunity"
+      :dialog-title="editMode === 'resubmit' ? '修改并重新提交商机' : undefined"
+      :submit-text="editMode === 'resubmit' ? '重新提交审批' : undefined"
+      :submitting-text="editMode === 'resubmit' ? '提交中...' : undefined"
+      :success-message="editMode === 'resubmit' ? null : undefined"
       customer-locked
-      @update:open="editDialogOpen = $event"
+      @update:open="handleEditDialogOpenChange"
       @success="handleEditSuccess"
     />
 

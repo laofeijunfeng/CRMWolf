@@ -68,7 +68,11 @@ def _approval_phase_value(opportunity) -> Optional[str]:
 
 def _resolve_opportunity_approval_phase(db: Session, opportunity, team_id: Optional[int]) -> str:
     phase = _approval_phase_value(opportunity)
-    if phase in {ApprovalPhase.PENDING_REVIEW.value, ApprovalPhase.APPROVED.value}:
+    if phase in {
+        ApprovalPhase.PENDING_REVIEW.value,
+        ApprovalPhase.APPROVED.value,
+        ApprovalPhase.REJECTED.value,
+    }:
         return phase
 
     from app.crud.approval import approval_crud
@@ -99,6 +103,63 @@ def _ensure_opportunity_approved(db: Session, opportunity, team_id: Optional[int
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="商机审批通过后才能进行该操作"
         )
+
+
+def _customer_public_id(db: Session, customer_id: Optional[int], team_id: Optional[int]) -> Optional[str]:
+    if customer_id is None:
+        return None
+    customer = customer_crud.get_by_id(db, customer_id, team_id)
+    return customer.public_id if customer else None
+
+
+def _customer_info_dict(customer) -> Optional[dict]:
+    if not customer:
+        return None
+    return {
+        "id": customer.public_id,
+        "public_id": customer.public_id,
+        "account_name": customer.account_name,
+        "industry": customer.industry,
+        "city": customer.city,
+        "address": customer.address,
+        "company_scale": customer.company_scale,
+        "status": customer.status,
+        "owner_id": customer.owner_id,
+    }
+
+
+def _opportunity_response_dict(db: Session, opportunity, team_id: Optional[int]) -> dict:
+    return {
+        "id": opportunity.id,
+        "opportunity_number": opportunity.opportunity_number,
+        "opportunity_name": opportunity.opportunity_name,
+        "customer_id": _customer_public_id(db, opportunity.customer_id, team_id),
+        "procurement_method_id": opportunity.procurement_method_id,
+        "procurement_method_info": None,
+        "total_amount": float(opportunity.total_amount),
+        "user_count": opportunity.user_count,
+        "unit_price": float(opportunity.unit_price),
+        "license_type": opportunity.license_type,
+        "subscription_years": opportunity.subscription_years,
+        "purchase_type": opportunity.purchase_type,
+        "decision_maker_count": opportunity.decision_maker_count,
+        "expected_closing_date": opportunity.expected_closing_date,
+        "stage_id": opportunity.procurement_stage_id,
+        "procurement_stage_id": opportunity.procurement_stage_id,
+        "win_probability": opportunity.win_probability,
+        "owner_id": opportunity.owner_id,
+        "status": opportunity.status,
+        "approval_phase": _resolve_opportunity_approval_phase(db, opportunity, team_id),
+        "loss_reason": opportunity.loss_reason,
+        "actual_amount": float(opportunity.actual_amount) if opportunity.actual_amount else None,
+        "actual_closing_date": opportunity.actual_closing_date,
+        "creator_id": opportunity.creator_id,
+        "created_time": opportunity.created_time,
+        "last_modified_time": opportunity.last_modified_time,
+        "updated_time": opportunity.last_modified_time,
+        "version": opportunity.version,
+        "current_stage_snapshot": None,
+    }
 
 
 def _build_opportunity_intelligence_change(
@@ -138,7 +199,8 @@ async def create_opportunity(
     current_user = Depends(require_permission("opportunity:create")),
     db: Session = Depends(get_db)
 ):
-    check_customer_edit_permission(opportunity.customer_id, team_id, current_user, db)
+    customer = check_customer_edit_permission(opportunity.customer_id, team_id, current_user, db)
+    opportunity.customer_id = customer.id
 
     from app.crud.user import user_crud
 
@@ -162,7 +224,8 @@ async def create_opportunity(
         submitter_id=submitter_id,
         submitter_name=submitter_name,
         team_id=team_id,
-        rollback_on_no_flow=True
+        rollback_on_no_flow=True,
+        send_notification=False
     )
 
     if entity is None:
@@ -172,6 +235,8 @@ async def create_opportunity(
         )
 
     opportunity_crud.log_created(db, entity, submitter_id, team_id)
+    if approval is not None:
+        await approval_transaction_manager.send_notification(db, approval, entity, team_id)
     await _trigger_opportunity_intelligence_refresh(
         db,
         _build_opportunity_intelligence_change(
@@ -180,7 +245,7 @@ async def create_opportunity(
             actor_id=submitter_id,
         ),
     )
-    return entity
+    return OpportunityResponse(**_opportunity_response_dict(db, entity, team_id))
 
 
 @router.get("/", response_model=PaginatedResponse[OpportunityListResponse], summary="查询商机列表", description="支持分页、按状态/阶段/负责人等多条件筛选和动态排序，返回客户名称、采购阶段、负责人信息")
@@ -192,7 +257,7 @@ def get_opportunities(
     stage_id: int = Query(None, description="采购阶段ID（已废弃，保留用于兼容）"),
     owner_id: str = Query(None, description="负责人ID"),
     owner_id_exclude: Optional[str] = Query(None, description="排除的负责人ID，多个值用逗号分隔"),
-    customer_id: int = Query(None, description="客户ID"),
+    customer_id: Optional[str] = Query(None, description="客户对外ID"),
     keyword: str = Query(None, description="关键词搜索"),
     customer_keyword: str = Query(None, description="客户名称关键词"),
     license_type: str = Query(None, description="授权模式"),
@@ -229,8 +294,10 @@ def get_opportunities(
                 detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据"
             )
 
-    if customer_id is not None and not has_view_all:
-        check_customer_view_permission(customer_id, team_id, current_user, db)
+    internal_customer_id = None
+    if customer_id is not None:
+        customer = check_customer_view_permission(customer_id, team_id, current_user, db)
+        internal_customer_id = customer.id
         actual_owner_id = None
 
     # 如果前端未指定 owner_id 且没有 view:all 权限，也不是按可访问客户查询，则限制为只看自己的商机
@@ -247,7 +314,7 @@ def get_opportunities(
         stage_id=stage_id,
         owner_id=actual_owner_id,
         owner_id_exclude=owner_id_exclude,
-        customer_id=customer_id,
+        customer_id=internal_customer_id,
         keyword=keyword,
         customer_keyword=customer_keyword,
         license_type=license_type,
@@ -303,7 +370,7 @@ def get_opportunities(
             "id": opp.id,
             "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
-            "customer_id": opp.customer_id,
+            "customer_id": customer.public_id if customer else None,
             "total_amount": float(opp.total_amount),
             "user_count": opp.user_count,
             "unit_price": float(opp.unit_price),
@@ -376,14 +443,14 @@ def get_opportunities(
 - 负责人信息：负责人姓名
 """)
 def get_available_opportunities_for_contract(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    check_customer_view_permission(customer_id, team_id, current_user, db)
+    customer = check_customer_view_permission(customer_id, team_id, current_user, db)
 
-    opportunities = opportunity_crud.get_available_for_contract(db, customer_id, team_id)
+    opportunities = opportunity_crud.get_available_for_contract(db, customer.id, team_id)
     
     result = []
     for opp in opportunities:
@@ -392,7 +459,8 @@ def get_available_opportunities_for_contract(
             customer = customer_crud.get_by_id(db, opp.customer_id, team_id)
             if customer:
                 customer_info = {
-                    "id": customer.id,
+                    "id": customer.public_id,
+                    "public_id": customer.public_id,
                     "account_name": customer.account_name
                 }
         
@@ -422,7 +490,7 @@ def get_available_opportunities_for_contract(
             "id": opp.id,
             "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
-            "customer_id": opp.customer_id,
+            "customer_id": customer_info["id"] if customer_info else None,
             "customer_name": customer_info["account_name"] if customer_info else "",
             "procurement_method_id": opp.procurement_method_id,
             "total_amount": float(opp.total_amount),
@@ -529,7 +597,7 @@ def get_opportunity(
         "id": opportunity.id,
         "opportunity_number": opportunity.opportunity_number,
         "opportunity_name": opportunity.opportunity_name,
-        "customer_id": opportunity.customer_id,
+        "customer_id": customer.public_id if customer else None,
         "procurement_method_id": opportunity.procurement_method_id,
         "procurement_method_info": None,
         "total_amount": float(opportunity.total_amount),
@@ -557,16 +625,7 @@ def get_opportunity(
         "current_stage_snapshot": procurement_stage_info,
         "procurement_stages": None,
         'customer_name': customer.account_name if customer else None,
-        'customer_info': {
-            "id": customer.id,
-            "account_name": customer.account_name,
-            "industry": customer.industry,
-            "city": customer.city,
-            "address": customer.address,
-            "company_scale": customer.company_scale,
-            "status": customer.status,
-            "owner_id": customer.owner_id
-        } if customer else None,
+        'customer_info': _customer_info_dict(customer),
         'owner_info': {
             "id": str(owner_info[0]),
             "name": owner_info[1],
@@ -646,7 +705,7 @@ async def update_opportunity(
             actor_id=str(current_user.id),
         ),
     )
-    return updated_opportunity
+    return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, db_opportunity.team_id))
 
 
 @router.post("/{opportunity_id}/move-stage", response_model=OpportunityDetailResponse, summary="推进商机阶段", description="推进商机到下一阶段，使用新的采购阶段模板系统，创建阶段快照")
@@ -726,7 +785,7 @@ async def move_opportunity_stage(
         "id": updated_opportunity.id,
         "opportunity_number": updated_opportunity.opportunity_number,
         "opportunity_name": updated_opportunity.opportunity_name,
-        "customer_id": updated_opportunity.customer_id,
+        "customer_id": _customer_public_id(db, updated_opportunity.customer_id, updated_opportunity.team_id),
         "total_amount": float(updated_opportunity.total_amount),
         "user_count": updated_opportunity.user_count,
         "unit_price": float(updated_opportunity.unit_price),
@@ -792,7 +851,7 @@ async def mark_opportunity_as_won(
         customer.account_name if customer else None
     )
     
-    return updated_opportunity
+    return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, team_id))
 
 
 @router.patch("/{opportunity_id}/lose", response_model=OpportunityResponse, summary="标记输单", description="状态改为已输单，必须记录输单原因")
@@ -825,7 +884,7 @@ async def mark_opportunity_as_lost(
         customer.account_name if customer else None
     )
     
-    return updated_opportunity
+    return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, team_id))
 
 
 @router.delete("/{opportunity_id}", response_model=MessageResponse, summary="删除商机", description="删除商机")

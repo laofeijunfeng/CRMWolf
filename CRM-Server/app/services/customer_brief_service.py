@@ -25,6 +25,7 @@ from app.services.customer_intelligence_context_service import (
     customer_intelligence_context_service,
 )
 from app.services.customer_vector_document_service import customer_vector_document_service
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class CustomerBriefService:
                             "customer_brief_markdown": markdown,
                             "customer_brief_citations": json.dumps(citation_map, ensure_ascii=False),
                             "customer_brief_status": "COMPLETED",
-                            "customer_brief_generated_time": datetime.now(),
+                            "customer_brief_generated_time": business_now(),
                             "customer_brief_error_message": None,
                         },
                     )
@@ -358,7 +359,8 @@ class CustomerBriefService:
             "retrieval": intelligence_context.retrieval_state.to_dict(),
             "customer": {
                 "source_id": customer_source,
-                "id": customer.id,
+                "id": customer.public_id,
+                "public_id": customer.public_id,
                 "account_name": customer.account_name,
                 "industry_code": customer.industry_code,
                 "industry_name": industry_name,
@@ -614,7 +616,7 @@ JSON 结构：
                     "customer_brief_markdown": markdown,
                     "customer_brief_citations": json.dumps(citation_map, ensure_ascii=False),
                     "customer_brief_status": "COMPLETED",
-                    "customer_brief_generated_time": datetime.now(),
+                    "customer_brief_generated_time": business_now(),
                     "customer_brief_error_message": f"AI 增强暂不可用，已先生成基础概况：{error_message[:500]}",
                 },
             )

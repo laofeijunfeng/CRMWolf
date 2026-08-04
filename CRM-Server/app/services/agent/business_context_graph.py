@@ -128,7 +128,7 @@ class BusinessContextGraphService:
     ) -> BusinessContextGraphState:
         context = runtime.context
         customer = state.get("selected_customer") or {}
-        customer_id = _customer_id_from_state(customer.get("id"))
+        customer_id = _customer_identifier_from_state(customer)
         if customer_id is None or not context.authorization or not context.db:
             return {}
 
@@ -280,10 +280,20 @@ def _runtime_context_from_input(input_state: BusinessContextGraphInput) -> Busin
 business_context_graph_service = BusinessContextGraphService(checkpointer=agent_checkpoint_saver)
 
 
-def _customer_id_from_state(value: object) -> int | None:
+def _customer_identifier_from_state(customer: dict[str, object]) -> int | str | None:
+    public_id = _non_empty_string(customer.get("public_id"))
+    if public_id is not None:
+        return public_id
+    value = customer.get("id")
     if isinstance(value, int):
         return value if value > 0 else None
     if isinstance(value, str) and value.strip().isdigit():
         customer_id = int(value.strip())
         return customer_id if customer_id > 0 else None
+    return _non_empty_string(value)
+
+
+def _non_empty_string(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
     return None

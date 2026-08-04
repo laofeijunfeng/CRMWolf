@@ -45,7 +45,7 @@ class Contract(Base):
     approval_phase = Column(
         String(20),
         nullable=False,
-        default=ApprovalPhase.DRAFT,
+        default=ApprovalPhase.DRAFT.value,
         comment="审批流程状态：draft/pending_review/approved/rejected"
     )
     signing_date = Column(Date, nullable=True, comment="签署日期")

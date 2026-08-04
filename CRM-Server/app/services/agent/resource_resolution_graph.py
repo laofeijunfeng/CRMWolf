@@ -161,6 +161,13 @@ class ResourceResolutionGraphService:
                 "resolution_status": "selected",
                 "resolution_reason": "唯一候选资源",
             }
+        exact = _unique_exact_target_candidate(state, ranked)
+        if exact:
+            return {
+                "selected_candidate": exact,
+                "resolution_status": "selected",
+                "resolution_reason": "候选资源名称与目标名称精确匹配",
+            }
         top_confidence = _float_value(top.get("confidence"))
         second_confidence = _float_value(ranked[1].get("confidence"))
         if top_confidence >= AUTO_SELECT_CONFIDENCE and top_confidence - second_confidence >= AUTO_SELECT_MARGIN:
@@ -209,15 +216,15 @@ def _candidate_list(value: object) -> list[JSONDict]:
 
 
 def _merge_rankings(candidates: list[JSONDict], rankings: list[JSONDict]) -> list[JSONDict]:
-    candidate_by_id: dict[int, JSONDict] = {}
+    candidate_by_id: dict[str, JSONDict] = {}
     for candidate in candidates:
-        candidate_id = _int_value(candidate.get("id"))
+        candidate_id = _resource_id_value(candidate.get("id"))
         if candidate_id is not None:
             candidate_by_id[candidate_id] = candidate
     merged: list[JSONDict] = []
-    used_ids: set[int] = set()
+    used_ids: set[str] = set()
     for ranking in rankings:
-        resource_id = _int_value(ranking.get("resource_id"))
+        resource_id = _resource_id_value(ranking.get("resource_id"))
         if resource_id is None or resource_id not in candidate_by_id or resource_id in used_ids:
             continue
         candidate = dict(candidate_by_id[resource_id])
@@ -227,7 +234,7 @@ def _merge_rankings(candidates: list[JSONDict], rankings: list[JSONDict]) -> lis
         merged.append(candidate)
         used_ids.add(resource_id)
     for candidate in candidates:
-        resource_id = _int_value(candidate.get("id"))
+        resource_id = _resource_id_value(candidate.get("id"))
         if resource_id is None or resource_id in used_ids:
             continue
         fallback = dict(candidate)
@@ -270,13 +277,41 @@ def _heuristic_rank_candidates(*, content: str, target: JSONDict, candidates: li
 
 
 def _candidate_names(candidate: JSONDict) -> list[str]:
-    fields = ["name", "opportunity_name", "contract_name", "payment_plan_name", "deployment_name", "display_name"]
+    fields = [
+        "account_name",
+        "customer_name",
+        "name",
+        "opportunity_name",
+        "contract_name",
+        "payment_plan_name",
+        "deployment_name",
+        "display_name",
+    ]
     names: list[str] = []
     for field in fields:
         value = candidate.get(field)
         if isinstance(value, str) and value.strip():
             names.append(value.strip())
     return list(dict.fromkeys(names))
+
+
+def _unique_exact_target_candidate(state: ResourceResolutionGraphState, ranked: list[JSONDict]) -> JSONDict:
+    target = coerce_json_dict(state.get("target"))
+    target_name = str(target.get("target_name") or target.get("target_stage_name") or "").strip()
+    normalized_target = _normalize(target_name)
+    if not normalized_target:
+        return {}
+    exact_matches = [
+        candidate for candidate in ranked
+        if any(_normalize(name) == normalized_target for name in _candidate_names(candidate))
+    ]
+    if len(exact_matches) != 1:
+        return {}
+    selected = dict(exact_matches[0])
+    evidence = _string_list(selected.get("evidence"))
+    evidence.insert(0, f"资源名称精确匹配「{target_name}」")
+    selected["evidence"] = list(dict.fromkeys(evidence))
+    return selected
 
 
 def _step_count(candidate: JSONDict) -> int:
@@ -299,6 +334,14 @@ def _int_value(value: object) -> int | None:
         return value
     if isinstance(value, str) and value.isdigit():
         return int(value)
+    return None
+
+
+def _resource_id_value(value: object) -> str | None:
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
     return None
 
 

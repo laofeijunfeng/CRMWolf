@@ -58,7 +58,7 @@ const schema = toTypedSchema(
 )
 
 interface Props {
-  customerId: number
+  customerId: string
   open: boolean
   contact?: ContactResponse | null
   availableContacts?: ContactResponse[] // For reports_to field

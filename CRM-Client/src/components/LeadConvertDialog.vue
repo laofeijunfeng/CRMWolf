@@ -27,10 +27,11 @@ import {
 import { leadApi, type LeadDetail } from '@/api/lead'
 import customerApi from '@/api/customer'
 import procurementApi from '@/api/procurement'
+import { handleApiError } from '@/utils/errorHandler'
 
 interface Props {
   open: boolean
-  leadId: number | null
+  leadId: string | null
 }
 
 interface Emits {
@@ -130,8 +131,8 @@ const handleSubmit = async (): Promise<void> => {
     visible.value = false
     emit('success')
     // 不跳转，留在线索管理页面，通过 emit('success') 触发列表刷新
-  } catch {
-    toast.error('转化线索失败')
+  } catch (error) {
+    handleApiError(error, '转化线索')
   } finally {
     submitting.value = false
   }

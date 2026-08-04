@@ -38,7 +38,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { normalizePaginatedResponse } from '@/types/pagination'
-import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
+import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
@@ -78,8 +78,8 @@ const tabs = [
 const baseFilterFields: ListFilterField[] = [
   { key: 'contract_name', type: 'text', label: '合同名称' },
   { key: 'contract_number', type: 'text', label: '合同编号' },
-  { key: 'customer_name', type: 'text', label: '关联客户' },
-  { key: 'opportunity_name', type: 'text', label: '关联商机' },
+  { key: 'customer_name', type: 'text', label: '客户名称' },
+  { key: 'opportunity_name', type: 'text', label: '商机名称' },
   {
     key: 'status',
     type: 'enum',
@@ -101,6 +101,20 @@ const baseFilterFields: ListFilterField[] = [
       { value: 'PERPETUAL', label: '买断' }
     ]
   },
+  {
+    key: 'purchase_type',
+    type: 'enum',
+    label: '采购类型',
+    options: [
+      { value: 'NEW', label: '新购' },
+      { value: 'RENEWAL', label: '续购' },
+      { value: 'EXPANSION', label: '增购' }
+    ]
+  },
+  { key: 'subscription_years', type: 'number', label: '采购年限' },
+  { key: 'license_authorized_users', type: 'number', label: '授权数量' },
+  { key: 'standard_unit_price', type: 'number', label: '客单价' },
+  { key: 'license_expiry_date', type: 'date', label: '授权时间' },
   { key: 'signing_date', type: 'date', label: '签署日期' },
   { key: 'effective_date', type: 'date', label: '生效日期' },
   { key: 'expiry_date', type: 'date', label: '到期日期' }
@@ -127,8 +141,11 @@ const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 
 const sortFields: ListSortField[] = [
+  { key: 'contract_number', type: 'text', label: '合同编号' },
   { key: 'contract_name', type: 'text', label: '合同名称' },
-  { key: 'total_amount', type: 'number', label: '总金额' },
+  { key: 'customer_name', type: 'text', label: '客户名称' },
+  { key: 'opportunity_name', type: 'text', label: '商机名称' },
+  { key: 'total_amount', type: 'number', label: '合同金额' },
   {
     key: 'license_type',
     type: 'enum',
@@ -138,6 +155,20 @@ const sortFields: ListSortField[] = [
       { value: 'PERPETUAL', label: '买断' }
     ]
   },
+  {
+    key: 'purchase_type',
+    type: 'enum',
+    label: '采购类型',
+    options: [
+      { value: 'NEW', label: '新购' },
+      { value: 'RENEWAL', label: '续购' },
+      { value: 'EXPANSION', label: '增购' }
+    ]
+  },
+  { key: 'subscription_years', type: 'number', label: '采购年限' },
+  { key: 'license_authorized_users', type: 'number', label: '授权数量' },
+  { key: 'standard_unit_price', type: 'number', label: '客单价' },
+  { key: 'license_expiry_date', type: 'date', label: '授权时间' },
   {
     key: 'status',
     type: 'enum',
@@ -160,13 +191,17 @@ const sortFields: ListSortField[] = [
 const columns = [
   { key: 'contract_number', title: '合同编号', width: '180px' },
   { key: 'contract_name', title: '合同名称', width: '220px' },
-  { key: 'customer', title: '关联客户', width: '160px' },
-  { key: 'opportunity', title: '关联商机', width: '160px' },
-  { key: 'total_amount', title: '总金额', align: 'right' as const, width: '140px' },
-  { key: 'license_type', title: '授权模式', align: 'center' as const, width: '100px' },
-  { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
-  { key: 'creator', title: '创建人', width: '100px' },
+  { key: 'customer_name', title: '客户名称', width: '180px' },
+  { key: 'opportunity_name', title: '商机名称', width: '180px' },
+  { key: 'total_amount', title: '合同金额', align: 'right' as const, width: '140px' },
+  { key: 'license_type', title: '授权模式', align: 'center' as const, width: '110px' },
+  { key: 'purchase_type', title: '采购类型', align: 'center' as const, width: '110px' },
+  { key: 'subscription_years', title: '采购年限', align: 'center' as const, width: '100px' },
+  { key: 'license_authorized_users', title: '授权数量', align: 'right' as const, width: '100px' },
+  { key: 'standard_unit_price', title: '客单价', align: 'right' as const, width: '130px' },
+  { key: 'license_expiry_date', title: '授权时间', width: '120px' },
   { key: 'signing_date', title: '签署日期', width: '120px' },
+  { key: 'created_time', title: '创建时间', width: '160px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
 ]
 
@@ -220,6 +255,7 @@ const fetchContractList = async (): Promise<void> => {
     const signingDateBounds = getDateBounds(activeFilters.value, 'signing_date')
     const effectiveDateBounds = getDateBounds(activeFilters.value, 'effective_date')
     const expiryDateBounds = getDateBounds(activeFilters.value, 'expiry_date')
+    const licenseExpiryDateBounds = getDateBounds(activeFilters.value, 'license_expiry_date')
 
     const params: Record<string, unknown> = {
       skip: (pagination.current - 1) * pagination.pageSize,
@@ -232,6 +268,14 @@ const fetchContractList = async (): Promise<void> => {
       status_exclude: getDelimitedFilterValues(activeFilters.value, 'status', ['neq', 'not_contains']),
       license_type: getDelimitedFilterValues(activeFilters.value, 'license_type'),
       license_type_exclude: getDelimitedFilterValues(activeFilters.value, 'license_type', ['neq', 'not_contains']),
+      purchase_type: getDelimitedFilterValues(activeFilters.value, 'purchase_type'),
+      purchase_type_exclude: getDelimitedFilterValues(activeFilters.value, 'purchase_type', ['neq', 'not_contains']),
+      subscription_years: getNumericFilterValue(activeFilters.value, 'subscription_years'),
+      subscription_years_exclude: getNumericFilterValue(activeFilters.value, 'subscription_years', ['neq']),
+      license_authorized_users: getNumericFilterValue(activeFilters.value, 'license_authorized_users'),
+      license_authorized_users_exclude: getNumericFilterValue(activeFilters.value, 'license_authorized_users', ['neq']),
+      standard_unit_price: getNumericFilterValue(activeFilters.value, 'standard_unit_price'),
+      standard_unit_price_exclude: getNumericFilterValue(activeFilters.value, 'standard_unit_price', ['neq']),
       owner_id: getDelimitedFilterValues(activeFilters.value, 'owner_id'),
       owner_id_exclude: getDelimitedFilterValues(activeFilters.value, 'owner_id', ['neq', 'not_contains']),
       signing_date_start: signingDateBounds.start,
@@ -240,6 +284,8 @@ const fetchContractList = async (): Promise<void> => {
       effective_date_end: effectiveDateBounds.end,
       expiry_date_start: expiryDateBounds.start,
       expiry_date_end: expiryDateBounds.end,
+      license_expiry_date_start: licenseExpiryDateBounds.start,
+      license_expiry_date_end: licenseExpiryDateBounds.end,
       ...getPrimarySort(activeSorts.value)
     }
 
@@ -429,12 +475,31 @@ const mapContractStatus = (status: string): 'draft' | 'pending_review' | 'signed
   return map[status] || 'draft'
 }
 
-const getLicenseTypeText = (type: string): string => {
-  return type === 'SUBSCRIPTION' ? '订阅' : '买断'
+const getPurchaseYearsText = (row: ContractListResponse): string => {
+  if (row.license_type === 'PERPETUAL') return '-'
+  return row.subscription_years !== null && row.subscription_years !== undefined
+    ? `${row.subscription_years}年`
+    : '-'
 }
 
-const getLicenseTypeClass = (type: string): string => {
-  return type === 'SUBSCRIPTION' ? 'status-info' : 'status-default'
+const formatDate = (dateStr?: string | null): string => {
+  if (dateStr === null || dateStr === undefined || dateStr === '') return '-'
+  const datePart = dateStr.split('T')[0]
+  return datePart === undefined || datePart === '' ? '-' : datePart
+}
+
+const formatDateTime = (dateStr?: string | null): string => {
+  if (dateStr === null || dateStr === undefined || dateStr === '') return '-'
+  const date = new Date(dateStr)
+  if (Number.isNaN(date.getTime())) return dateStr
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
 }
 
 // ==================== Lifecycle ====================
@@ -496,9 +561,9 @@ watchEffect(() => {
       empty-title="暂无合同"
       row-interactive
       mobile-title-key="contract_name"
-      mobile-subtitle-key="customer"
+      mobile-subtitle-key="customer_name"
       mobile-status-key="status"
-      :mobile-meta-keys="['contract_number', 'creator', 'signing_date']"
+      :mobile-meta-keys="['contract_number', 'opportunity_name', 'license_expiry_date']"
       v-model:filters="activeFilters"
       :filter-fields="filterFields"
       :sort-fields="sortFields"
@@ -533,13 +598,27 @@ watchEffect(() => {
           {{ row.contract_number || '-' }}
         </div>
         <div class="contract-mobile-card-customer">
-          {{ row.customer_info?.account_name || '-' }}
+          {{ row.customer_name || row.customer_info?.account_name || '-' }}
         </div>
         <AmountText class="contract-mobile-card-amount" :value="row.total_amount" size="lg" />
+        <div class="contract-mobile-card-badges">
+          <StatusBadge
+            v-if="row.license_type"
+            :status="row.license_type"
+            type="authorizationMode"
+          />
+          <StatusBadge
+            v-if="row.purchase_type"
+            :status="row.purchase_type"
+            type="procurementType"
+          />
+        </div>
         <div class="contract-mobile-card-meta">
-          <span>{{ getLicenseTypeText(row.license_type) }}</span>
-          <span>创建人：{{ row.creator_info?.name || '-' }}</span>
-          <span>签署：{{ row.signing_date || '-' }}</span>
+          <span>商机：{{ row.opportunity_name || row.opportunity_info?.opportunity_name || '-' }}</span>
+          <span>年限：{{ getPurchaseYearsText(row) }}</span>
+          <span>授权：{{ row.license_authorized_users ?? row.user_count ?? '-' }}</span>
+          <span>客单价：<AmountText :value="row.standard_unit_price" size="sm" /></span>
+          <span>授权时间：{{ formatDate(row.license_expiry_date) }}</span>
         </div>
       </template>
 
@@ -561,14 +640,14 @@ watchEffect(() => {
         </span>
       </template>
 
-      <!-- 关联客户 -->
-      <template #cell-customer="{ row }">
-        {{ row.customer_info?.account_name || '-' }}
+      <!-- 客户名称 -->
+      <template #cell-customer_name="{ row }">
+        {{ row.customer_name || row.customer_info?.account_name || '-' }}
       </template>
 
-      <!-- 关联商机 -->
-      <template #cell-opportunity="{ row }">
-        {{ row.opportunity_info?.opportunity_name || '-' }}
+      <!-- 商机名称 -->
+      <template #cell-opportunity_name="{ row }">
+        {{ row.opportunity_name || row.opportunity_info?.opportunity_name || '-' }}
       </template>
 
       <!-- 总金额 -->
@@ -578,24 +657,52 @@ watchEffect(() => {
 
       <!-- 授权模式 -->
       <template #cell-license_type="{ row }">
-        <span :class="['status-badge', getLicenseTypeClass(row.license_type)]">
-          {{ getLicenseTypeText(row.license_type) }}
-        </span>
+        <StatusBadge
+          v-if="row.license_type"
+          :status="row.license_type"
+          type="authorizationMode"
+        />
+        <span v-else class="text-muted-foreground">-</span>
       </template>
 
-      <!-- 状态 -->
-      <template #cell-status="{ row }">
-        <StatusBadge :status="mapContractStatus(row.status)" type="contract" />
+      <!-- 采购类型 -->
+      <template #cell-purchase_type="{ row }">
+        <StatusBadge
+          v-if="row.purchase_type"
+          :status="row.purchase_type"
+          type="procurementType"
+        />
+        <span v-else class="text-muted-foreground">-</span>
       </template>
 
-      <!-- 创建人 -->
-      <template #cell-creator="{ row }">
-        {{ row.creator_info?.name || '-' }}
+      <!-- 采购年限 -->
+      <template #cell-subscription_years="{ row }">
+        {{ getPurchaseYearsText(row) }}
+      </template>
+
+      <!-- 授权数量 -->
+      <template #cell-license_authorized_users="{ row }">
+        {{ row.license_authorized_users ?? row.user_count ?? '-' }}
+      </template>
+
+      <!-- 客单价 -->
+      <template #cell-standard_unit_price="{ row }">
+        <AmountText :value="row.standard_unit_price" />
+      </template>
+
+      <!-- 授权时间 -->
+      <template #cell-license_expiry_date="{ row }">
+        {{ formatDate(row.license_expiry_date) }}
       </template>
 
       <!-- 签署日期 -->
       <template #cell-signing_date="{ row }">
-        {{ row.signing_date || '-' }}
+        {{ formatDate(row.signing_date) }}
+      </template>
+
+      <!-- 创建时间 -->
+      <template #cell-created_time="{ row }">
+        {{ formatDateTime(row.created_time) }}
       </template>
 
       <!-- 操作 -->
@@ -687,6 +794,13 @@ watchEffect(() => {
 }
 
 .contract-mobile-card-amount {
+  margin-top: $wolf-space-sm-v2;
+}
+
+.contract-mobile-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2;
   margin-top: $wolf-space-sm-v2;
 }
 

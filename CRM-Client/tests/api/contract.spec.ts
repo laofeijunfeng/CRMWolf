@@ -29,13 +29,18 @@ describe('contract API', () => {
         id: 1,
         contract_number: 'CT202607260001',
         contract_name: '测试合同',
-        customer_id: 10,
+        customer_id: 'CUS202607260001',
+        customer_name: '测试客户',
         opportunity_id: 20,
+        opportunity_name: '测试商机',
+        purchase_type: 'RENEWAL',
         signing_contact_id: 30,
         user_count: 5,
         total_amount: 10000,
         license_type: 'SUBSCRIPTION',
         subscription_years: 1,
+        license_authorized_users: 8,
+        license_expiry_date: '2027-07-26',
         standard_unit_price: 2000,
         status: 'EFFECTIVE',
         signing_date: null,
@@ -56,12 +61,15 @@ describe('contract API', () => {
       },
     ])
 
-    const result = await contractApi.getCustomerContracts(10, { skip: 0, limit: 100 })
+    const result = await contractApi.getCustomerContracts('CUS202607260001', { skip: 0, limit: 100 })
 
-    expect(requestMock.get).toHaveBeenCalledWith('/v1/customers/10/contracts', {
+    expect(requestMock.get).toHaveBeenCalledWith('/v1/customers/CUS202607260001/contracts', {
       params: { skip: 0, limit: 100 },
     })
     expect(result[0].customer_info).toBeNull()
     expect(result[0].total_amount).toBe('10000')
+    expect(result[0].purchase_type).toBe('RENEWAL')
+    expect(result[0].license_authorized_users).toBe(8)
+    expect(result[0].license_expiry_date).toBe('2027-07-26')
   })
 })

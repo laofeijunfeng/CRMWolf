@@ -3,7 +3,6 @@
 
 实现客户创建的 AI 解析功能，含行业识别和档案生成
 """
-from datetime import datetime
 from typing import Any, Dict
 
 from sqlalchemy.orm import Session
@@ -16,6 +15,7 @@ from app.services.ai_parser.base_parser import EntityAIParserBase
 from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP, CUSTOMER_SOURCE_ENUM_MAP
 from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 from app.services.follow_up_parser import follow_up_parser_service
+from app.utils.time import business_now
 
 
 def _resolve_customer_source(value: str | None) -> CustomerSource | None:
@@ -170,7 +170,7 @@ class CustomerAIParser(EntityAIParserBase):
         Returns:
             格式化后的系统提示词
         """
-        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_date = business_now().strftime("%Y-%m-%d")
         return PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE.replace("{current_date}", current_date)
 
     def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
@@ -353,7 +353,7 @@ class CustomerAIParser(EntityAIParserBase):
             if next_follow_time_str:
                 next_follow_time_dt = follow_up_parser_service.parse_relative_time(
                     next_follow_time_str,
-                    base_date=datetime.now()
+                    base_date=business_now()
                 )
 
             source_content_parts = []

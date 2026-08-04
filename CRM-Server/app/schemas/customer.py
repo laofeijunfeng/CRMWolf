@@ -175,7 +175,7 @@ class ContactUpdate(BaseModel):
 
 class ContactResponse(BaseModel):
     id: int = Field(..., description="联系人ID")
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     name: str = Field(..., description="联系人姓名")
     gender: Optional[int] = Field(None, description="性别：0:未知, 1:男, 2:女")
     position: Optional[str] = Field(None, description="职务")
@@ -249,14 +249,15 @@ class CustomerStatusUpdate(BaseModel):
 
 
 class ConvertLeadToCustomer(BaseModel):
-    lead_id: int = Field(..., description="线索ID")
+    lead_id: str = Field(..., description="线索对外ID")
     account_name: Optional[str] = Field(None, min_length=1, max_length=255, description="客户公司名称（可覆盖）")
     address: Optional[str] = Field(None, max_length=500, description="公司地址")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
 
 
 class CustomerResponse(BaseModel):
-    id: int = Field(..., description="客户ID（主键）")
+    id: str = Field(..., validation_alias="public_id", description="客户对外ID")
+    public_id: str = Field(..., description="客户对外ID")
     account_name: str = Field(..., description="客户公司名称")
     industry: Optional[str] = Field(None, description="所属行业（AI自动匹配）")
     city: str = Field(..., description="所在城市")
@@ -265,7 +266,7 @@ class CustomerResponse(BaseModel):
     source: Optional[str] = Field(None, description="客户来源")
     status: int = Field(..., description="客户状态：0:跟进中, 1:已成交, 2:已输单, 3:已沉寂（公海）")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID（status=3时为空）")
-    source_lead_id: Optional[int] = Field(None, description="来源线索ID（从线索转化而来时记录）")
+    source_lead_id: Optional[str] = Field(None, description="来源线索对外ID（从线索转化而来时记录）")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
     loss_reason: Optional[str] = Field(None, description="输单原因（status=2时有值）")
     return_reason: Optional[str] = Field(None, description="退回公海原因（status=3时有值）")
@@ -343,7 +344,7 @@ class CustomerMemberUserInfo(BaseModel):
 
 class CustomerMemberResponse(BaseModel):
     id: int = Field(..., description="成员记录ID")
-    customer_id: int = Field(..., description="客户ID")
+    customer_id: str = Field(..., description="客户对外ID")
     user_id: str = Field(..., description="成员系统用户ID")
     member_role: str = Field(..., description="成员角色")
     access_level: str = Field(..., description="访问级别")
@@ -374,7 +375,8 @@ class CustomerListResponse(CustomerResponse):
 
 
 class CustomerDetailResponse(BaseModel):
-    id: int
+    id: str = Field(..., validation_alias="public_id")
+    public_id: str
     account_name: str
     industry: Optional[str] = None
     industry_info: Optional[CustomerIndustryInfo] = Field(None, description="行业信息")
@@ -384,7 +386,7 @@ class CustomerDetailResponse(BaseModel):
     source: Optional[str] = None
     status: int
     owner_id: Optional[str] = None
-    source_lead_id: Optional[int] = None
+    source_lead_id: Optional[str] = None
     default_procurement_method_id: Optional[int] = None
     default_procurement_method_info: Optional[ProcurementMethodInfo] = Field(None, description="默认采购方式信息")
     loss_reason: Optional[str] = None
@@ -425,7 +427,7 @@ class CustomerDetailResponse(BaseModel):
 
 
 class ConvertResponse(BaseModel):
-    customer_id: int = Field(..., description="创建的客户ID")
+    customer_id: str = Field(..., description="创建的客户对外ID")
     contact_id: int = Field(..., description="创建的联系人ID")
     message: str = Field(..., description="响应消息")
 
@@ -436,7 +438,7 @@ class MessageResponse(BaseModel):
 
 class CustomerIntelligenceBatchRebuildRequest(BaseModel):
     scope: Literal["full", "brief"] = Field("full", description="重建范围：full=客户档案和客户概况，brief=客户概况")
-    customer_ids: Optional[List[int]] = Field(None, description="指定客户ID；为空时按团队批量重建")
+    customer_ids: Optional[List[str]] = Field(None, description="指定客户对外ID；为空时按团队批量重建")
     limit: int = Field(100, ge=1, le=500, description="本次最多调度的客户数")
 
 
@@ -450,13 +452,13 @@ class CustomerIntelligenceBatchRebuildResponse(BaseModel):
     scope: Literal["full", "brief"] = Field(..., description="重建范围")
     total: int = Field(..., description="匹配客户数")
     scheduled: int = Field(..., description="已调度客户数")
-    customer_ids: List[int] = Field(..., description="已调度的客户ID")
+    customer_ids: List[str] = Field(..., description="已调度的客户对外ID")
 
 
 class CustomerIntelligenceRunDiagnosticResponse(BaseModel):
     id: int = Field(..., description="运行记录ID")
     request_id: str = Field(..., description="请求ID")
-    customer_id: int = Field(..., description="客户ID")
+    customer_id: str = Field(..., description="客户对外ID")
     actor_id: Optional[str] = Field(None, description="触发人ID")
     trigger_type: str = Field(..., description="触发类型")
     scope: str = Field(..., description="刷新范围")
@@ -515,7 +517,7 @@ class CustomerReturnRequest(BaseModel):
 
 
 class CustomerReturnResponse(BaseModel):
-    customer_id: int = Field(..., description="客户ID")
+    customer_id: str = Field(..., description="客户对外ID")
     previous_owner: str = Field(..., description="原负责人姓名")
     returned_time: datetime = Field(..., description="退回时间")
     return_reason: str = Field(..., description="退回原因")

@@ -19,7 +19,7 @@ import { handleApiError } from '@/utils/errorHandler'
 
 // ==================== Props & Emits ====================
 interface Props {
-  customerId: number
+  customerId: string
   customerName?: string | null
   licenseApplications: LicenseApplicationResponse[]
   deployments: DeploymentInfoResponse[]

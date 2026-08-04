@@ -13,7 +13,7 @@ from app.services.agent.schemas import AgentHITLPolicy, AgentMemorySnapshot, Age
 from app.services.agent.semantic import AgentSemanticParserError
 from app.services.agent.temporal import agent_temporal_resolver
 from app.services.agent.field_common import _drop_empty_values, _parse_task_field_supplement
-from app.services.agent.task_factory import _new_task_key
+from app.services.agent.task_factory import _new_task_key, _task_target_id
 from app.services.customer_activity_kinds import (
     infer_activity_kind,
 )
@@ -121,7 +121,7 @@ async def _evaluate_lead_follow_up_quality(db: Session, task, follow_up: dict):
         current_date=agent_temporal_resolver.now().date(),
     )
 
-def _lead_follow_up_create_payload(lead_id: int, follow_up: dict, quality: object = None) -> dict:
+def _lead_follow_up_create_payload(lead_id: str, follow_up: dict, quality: object = None) -> dict:
     return {
         "lead_id": lead_id,
         "content": _follow_up_content_for_create(follow_up, quality),
@@ -172,7 +172,7 @@ async def _evaluate_customer_activity_quality(db: Session, task, customer: dict,
         current_date=agent_temporal_resolver.now().date(),
     )
 
-def _customer_activity_create_payload(customer_id: int, activity: dict, quality: object = None) -> dict:
+def _customer_activity_create_payload(customer_id: str, activity: dict, quality: object = None) -> dict:
     method = activity.get("method") or "AI录入"
     content = activity.get("content") or ""
     raw_source_content = activity.get("source_content") or activity.get("original_content") or content
@@ -214,7 +214,7 @@ def _create_customer_activity_task(
             intent="CUSTOMER_ACTIVITY",
             status=AgentTaskStatus.WAITING_USER,
             target_type="customer",
-            target_id=customer_id,
+            target_id=_task_target_id(db, team_id=team_id, target_type="customer", target_id=customer_id),
             summary=summary,
             input_json=payload,
             state_json={
@@ -296,7 +296,7 @@ def _create_lead_follow_up_task(
     *,
     team_id: int,
     user_id: int,
-    lead_id: int,
+    lead_id: str,
     follow_up: dict,
     action: str,
     summary: str,
@@ -315,7 +315,7 @@ def _create_lead_follow_up_task(
             intent="CREATE_LEAD",
             status=AgentTaskStatus.WAITING_USER,
             target_type="lead",
-            target_id=lead_id,
+            target_id=_task_target_id(db, team_id=team_id, target_type="lead", target_id=lead_id),
             summary=summary,
             input_json=payload,
             state_json={
@@ -337,7 +337,7 @@ async def _stage_lead_follow_up_after_create(
     *,
     team_id: int,
     user_id: int,
-    lead_id: int,
+    lead_id: str,
     follow_up: dict,
 ) -> tuple[str, object | None]:
     try:

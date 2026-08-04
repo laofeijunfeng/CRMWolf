@@ -46,7 +46,7 @@ from app.services.agent.follow_up_fields import (
     _stage_lead_follow_up_after_create,
 )
 from app.services.agent.task_actions import _tool_name_for_action, _tool_payload_for_action
-from app.services.agent.task_factory import _new_task_key
+from app.services.agent.task_factory import _new_task_key, _task_target_id
 
 
 @dataclass(frozen=True)
@@ -107,7 +107,7 @@ async def _execute_waiting_task(
             policy=AgentToolExecutionPolicy(
                 hitl_decision="approve",
                 allowed_tool_names=[tool_name],
-                allowed_customer_ids=[customer["id"]] if customer.get("id") else [],
+                allowed_customer_ids=[str(customer["id"])] if customer.get("id") else [],
             ),
         )
 
@@ -136,7 +136,12 @@ async def _execute_waiting_task(
                         intent="PAYMENT_RECORD",
                         status=AgentTaskStatus.WAITING_USER,
                         target_type="customer",
-                        target_id=customer.get("id"),
+                        target_id=_task_target_id(
+                            db,
+                            team_id=team_id,
+                            target_type="customer",
+                            target_id=customer.get("id"),
+                        ),
                         summary="登记本次回款",
                         input_json=next_payload,
                         state_json={
@@ -228,10 +233,15 @@ async def _execute_waiting_task(
                     user_id=user_id,
                     session_id=session.id,
                     intent="CUSTOMER_ACTIVITY",
-                    status=AgentTaskStatus.WAITING_USER,
-                    target_type="customer",
-                    target_id=next_payload.get("customer_id") or customer.get("id"),
-                    summary=next_summary,
+                        status=AgentTaskStatus.WAITING_USER,
+                        target_type="customer",
+                        target_id=_task_target_id(
+                            db,
+                            team_id=team_id,
+                            target_type="customer",
+                            target_id=next_payload.get("customer_id") or customer.get("id"),
+                        ),
+                        summary=next_summary,
                     input_json=next_payload,
                     state_json={
                         "action": next_action.get("action"),
@@ -311,7 +321,7 @@ async def _execute_opportunity_stage_move_plan(
             policy=AgentToolExecutionPolicy(
                 hitl_decision="approve",
                 allowed_tool_names=["move_opportunity_stage"],
-                allowed_customer_ids=[int(payload["customer_id"])] if payload.get("customer_id") else [],
+                allowed_customer_ids=[str(payload["customer_id"])] if payload.get("customer_id") else [],
             ),
         )
         if not last_result.success:

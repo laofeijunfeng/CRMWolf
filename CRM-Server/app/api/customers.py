@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from typing import List, Literal, Optional
 
@@ -65,8 +66,10 @@ from app.schemas.payment import PaymentPlanResponse
 from app.services.customer_intelligence_event_service import CustomerIntelligenceEvent
 from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
+from app.api.invoices import _invoice_title_response, _populate_application_info
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
+logger = logging.getLogger(__name__)
 
 
 def _customer_name_conflict_error(
@@ -103,14 +106,20 @@ def _ensure_customer_name_available(
         allowed_source_lead_id=allowed_source_lead_id,
     )
     if error:
+        logger.warning(
+            "客户名称校验失败: team_id=%s account_name=%s reason=%s",
+            team_id,
+            account_name,
+            error,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error,
         )
 
 
-def _get_customer_or_404(db: Session, customer_id: int, team_id: int):
-    customer = customer_crud.get_by_id(db, customer_id, team_id)
+def _get_customer_or_404(db: Session, customer_public_id: str, team_id: int):
+    customer = customer_crud.get_by_public_id(db, customer_public_id, team_id)
     if not customer:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -119,12 +128,12 @@ def _get_customer_or_404(db: Session, customer_id: int, team_id: int):
     return customer
 
 
-def _get_viewable_customer(db: Session, customer_id: int, team_id: int, current_user):
-    return check_customer_view_permission(customer_id, team_id, current_user, db)
+def _get_viewable_customer(db: Session, customer_public_id: str, team_id: int, current_user):
+    return check_customer_view_permission(customer_public_id, team_id, current_user, db)
 
 
-def _get_editable_customer(db: Session, customer_id: int, team_id: int, current_user):
-    return check_customer_edit_permission(customer_id, team_id, current_user, db)
+def _get_editable_customer(db: Session, customer_public_id: str, team_id: int, current_user):
+    return check_customer_edit_permission(customer_public_id, team_id, current_user, db)
 
 
 async def _schedule_contact_intelligence_refresh(
@@ -186,11 +195,16 @@ def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
 
 
 def _contract_response_base(contract) -> dict:
+    if not getattr(contract, "customer", None):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="合同关联客户数据异常",
+        )
     return {
         "id": contract.id,
         "contract_number": contract.contract_number,
         "contract_name": contract.contract_name,
-        "customer_id": contract.customer_id,
+        "customer_id": contract.customer.public_id,
         "opportunity_id": contract.opportunity_id,
         "signing_contact_id": contract.signing_contact_id,
         "user_count": contract.user_count,
@@ -229,15 +243,82 @@ def _contract_status_info(status_value) -> Optional[dict]:
     }
 
 
+def _contact_response(contact: Contact, customer_public_id: str) -> ContactResponse:
+    return ContactResponse(
+        id=contact.id,
+        customer_id=customer_public_id,
+        name=contact.name,
+        gender=contact.gender,
+        position=contact.position,
+        is_decision_maker=bool(contact.is_decision_maker),
+        mobile=contact.mobile,
+        email=contact.email,
+        wechat_id=contact.wechat_id,
+        remark=contact.remark,
+        reports_to=contact.reports_to,
+        is_primary=bool(contact.is_primary),
+        created_time=contact.created_time,
+    )
+
+
+def _customer_response(db: Session, customer) -> CustomerResponse:
+    source_lead_public_id = None
+    if customer.source_lead_id:
+        source_lead = lead_crud.get_by_id(db, customer.source_lead_id, customer.team_id)
+        source_lead_public_id = source_lead.public_id if source_lead else None
+
+    return CustomerResponse(**{
+        "id": customer.public_id,
+        "public_id": customer.public_id,
+        "account_name": customer.account_name,
+        "industry": customer.industry,
+        "city": customer.city,
+        "address": customer.address,
+        "company_scale": customer.company_scale,
+        "source": customer.source,
+        "status": customer.status,
+        "owner_id": customer.owner_id,
+        "source_lead_id": source_lead_public_id,
+        "default_procurement_method_id": customer.default_procurement_method_id,
+        "loss_reason": customer.loss_reason,
+        "return_reason": customer.return_reason,
+        "returned_time": customer.returned_time,
+        "creator_id": customer.creator_id,
+        "created_time": customer.created_time,
+        "last_modified_time": customer.last_modified_time,
+        "version": customer.version,
+        "company_background": customer.company_background,
+        "company_website": customer.company_website,
+        "main_business": customer.main_business,
+        "similar_customers": customer.similar_customers,
+        "project_background": customer.project_background,
+        "profile_status": customer.profile_status,
+        "profile_generated_time": customer.profile_generated_time,
+        "profile_error_message": customer.profile_error_message,
+        "score": customer.score,
+        "score_updated_at": customer.score_updated_at,
+        "license_expiry_date": customer.license_expiry_date,
+        "license_type": customer.license_type,
+    })
+
+
 def _customer_intelligence_run_response(
+    db: Session,
+    team_id: int,
     diagnostic: CustomerIntelligenceRunDiagnostic,
 ) -> CustomerIntelligenceRunDiagnosticResponse:
     result_summary = dict(diagnostic.result)
     result_summary.pop("route", None)
+    customer = customer_crud.get_by_id(db, diagnostic.customer_id, team_id)
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="客户智能任务关联客户数据异常",
+        )
     return CustomerIntelligenceRunDiagnosticResponse(
         id=diagnostic.id,
         request_id=diagnostic.request_id,
-        customer_id=diagnostic.customer_id,
+        customer_id=customer.public_id,
         actor_id=diagnostic.actor_id,
         trigger_type=diagnostic.trigger_type,
         scope=diagnostic.scope,
@@ -299,7 +380,7 @@ async def convert_from_lead(
     from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
     from app.services.feishu import feishu_service
 
-    source_lead = lead_crud.get_by_id(db, data.lead_id, team_id)
+    source_lead = lead_crud.get_by_public_id(db, data.lead_id, team_id)
     if not source_lead:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -309,13 +390,13 @@ async def convert_from_lead(
         db,
         data.account_name or source_lead.lead_name,
         team_id,
-        allowed_source_lead_id=data.lead_id,
+        allowed_source_lead_id=source_lead.id,
     )
 
     try:
         customer, contact = customer_crud.convert_from_lead(
             db=db,
-            lead_id=data.lead_id,
+            lead_id=source_lead.id,
             account_name=data.account_name,
             address=data.address,
             default_procurement_method_id=data.default_procurement_method_id,
@@ -333,7 +414,7 @@ async def convert_from_lead(
             team_id=team_id,
             customer_id=customer.id,
             actor_id=str(current_user.id),
-            source_lead_id=data.lead_id,
+            source_lead_id=source_lead.id,
         )
 
         await feishu_service.notify_account_created(
@@ -343,7 +424,7 @@ async def convert_from_lead(
         )
 
         return ConvertResponse(
-            customer_id=customer.id,
+            customer_id=customer.public_id,
             contact_id=contact.id,
             message="转化成功，客户智能档案正在整理"
         )
@@ -383,7 +464,7 @@ async def convert_from_lead(
 - 负责人信息：负责人姓名
 """)
 def get_customer_contracts(
-    customer_id: int,
+    customer_id: str,
     status: Optional[str] = Query(None, description="合同状态筛选"),
     skip: int = Query(0, ge=0, description="分页跳过记录数"),
     limit: int = Query(20, ge=1, le=100, description="每页记录数"),
@@ -394,13 +475,14 @@ def get_customer_contracts(
     from app.models.contract import ContractStatus
 
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
+    internal_customer_id = customer.id
 
     contracts, total = contract_crud.get_multi(
         db=db,
         team_id=team_id,
         skip=skip,
         limit=limit,
-        customer_id=customer_id,
+        customer_id=internal_customer_id,
         status=ContractStatus[status] if status else None
     )
 
@@ -423,7 +505,8 @@ def get_customer_contracts(
         contract_dict = _contract_response_base(contract)
         contract_dict.update({
             "customer_info": {
-                "id": customer.id,
+                "id": customer.public_id,
+                "public_id": customer.public_id,
                 "account_name": customer.account_name,
             },
             "opportunity_info": opportunity_info,
@@ -468,7 +551,7 @@ def get_customer_contracts(
 - 客户信息：customer_name、opportunity_name
 """)
 def get_customer_payment_plans(
-    customer_id: int,
+    customer_id: str,
     status: Optional[str] = Query(None, description="回款状态筛选"),
     skip: int = Query(0, ge=0, description="分页跳过记录数"),
     limit: int = Query(20, ge=1, le=100, description="每页记录数"),
@@ -479,6 +562,7 @@ def get_customer_payment_plans(
     from app.models.payment import PaymentPlanStatus
 
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
+    internal_customer_id = customer.id
     
     status_map = {
         PaymentPlanStatus.PENDING: "待回款",
@@ -532,7 +616,7 @@ def get_customer_payment_plans(
     
     plans_result = db.execute(
         plans_query,
-        {"customer_id": customer_id, "team_id": team_id, "status": status}
+        {"customer_id": internal_customer_id, "team_id": team_id, "status": status}
     ).fetchall()
     
     plans = []
@@ -559,6 +643,7 @@ def get_customer_payment_plans(
         plan_dict['remaining_amount'] = float(plan_dict['planned_amount']) - paid_amount
         plan_dict['payment_records'] = payment_records
         plan_dict['contract_name'] = plan_dict.get('contract_name')
+        plan_dict['customer_id'] = customer.public_id
         plan_dict['customer_name'] = customer.account_name
         plan_dict['opportunity_name'] = plan_dict.get('opportunity_name')
         plan_dict['status_name'] = status_map.get(plan_dict['status'], plan_dict['status'])
@@ -613,7 +698,7 @@ def get_customer_payment_plans(
 - 审批状态：status、approval_status
 """)
 def get_customer_invoices(
-    customer_id: int,
+    customer_id: str,
     status: Optional[str] = Query(None, description="发票状态筛选"),
     skip: int = Query(0, ge=0, description="分页跳过记录数"),
     limit: int = Query(20, ge=1, le=100, description="每页记录数"),
@@ -621,17 +706,18 @@ def get_customer_invoices(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    _get_viewable_customer(db, customer_id, team_id, current_user)
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
     invoices, total = invoice_application_crud.list_applications(
         db=db,
         team_id=team_id,
-        customer_id=customer_id,
+        customer_id=customer.id,
         status=status,
         skip=skip,
         limit=limit
     )
     
+    populated_invoices = []
     for invoice in invoices:
         if hasattr(invoice, 'contract') and invoice.contract:
             invoice.contract_name = invoice.contract.contract_name
@@ -641,8 +727,9 @@ def get_customer_invoices(
             invoice.planned_amount = float(invoice.payment_plan.planned_amount)
         if hasattr(invoice, 'applicant') and invoice.applicant:
             invoice.applicant_name = invoice.applicant.name
+        populated_invoices.append(_populate_application_info(db, invoice, team_id))
     
-    return invoices
+    return populated_invoices
 
 
 @router.get("/{customer_id}/invoice-titles", response_model=List[InvoiceTitleResponse], summary="获取客户发票抬头列表", description="""
@@ -669,15 +756,15 @@ def get_customer_invoices(
 - 默认标识：is_default
 """)
 def get_customer_invoice_titles(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    _get_viewable_customer(db, customer_id, team_id, current_user)
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
-    invoice_titles = invoice_title_crud.get_by_customer_id(db, customer_id, team_id)
-    return invoice_titles
+    invoice_titles = invoice_title_crud.get_by_customer_id(db, customer.id, team_id)
+    return [_invoice_title_response(db, invoice_title, team_id) for invoice_title in invoice_titles]
 
 
 @router.post("/", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED, summary="创建客户", description="手动创建客户，AI自动生成档案")
@@ -719,7 +806,7 @@ async def create_customer(
         source_lead_id=None,
     )
 
-    return new_customer
+    return _customer_response(db, new_customer)
 
 
 @router.get("/", response_model=PaginatedResponse[CustomerListResponse], summary="查询客户列表", description="支持分页、按客户名称/行业/城市/状态/负责人等多条件筛选，支持动态排序，返回负责人和创建人信息")
@@ -817,6 +904,7 @@ def get_customers(
     owner_ids = set(c.owner_id for c in customers if c.owner_id)
     creator_ids = set(c.creator_id for c in customers if c.creator_id)
     customer_ids = [c.id for c in customers]
+    source_lead_ids = [c.source_lead_id for c in customers if c.source_lead_id]
     procurement_method_ids = set(c.default_procurement_method_id for c in customers if c.default_procurement_method_id)
     
     users_info = {}
@@ -881,6 +969,18 @@ def get_customers(
         user_info = collaborator_users_info.get(str(user_id))
         if user_info:
             collaborators_by_customer.setdefault(customer_id, []).append(user_info)
+
+    source_lead_public_ids = {}
+    if source_lead_ids:
+        placeholders = ','.join(':lead_id_' + str(i) for i in range(len(source_lead_ids)))
+        source_leads_query = text(f"""
+            SELECT id, public_id
+            FROM crm_leads
+            WHERE id IN ({placeholders})
+        """)
+        params = {f'lead_id_{i}': lead_id for i, lead_id in enumerate(source_lead_ids)}
+        source_leads_result = db.execute(source_leads_query, params).fetchall()
+        source_lead_public_ids = {row[0]: row[1] for row in source_leads_result}
     
     procurement_methods_info = {}
     if procurement_method_ids:
@@ -926,7 +1026,8 @@ def get_customers(
     
     for customer in customers:
         customer_dict = {
-            'id': customer.id,
+            'id': customer.public_id,
+            'public_id': customer.public_id,
             'account_name': customer.account_name,
             'industry': customer.industry,
             'industry_info': industries_info.get(customer.industry),
@@ -936,7 +1037,7 @@ def get_customers(
             'source': customer.source,
             'status': customer.status,
             'owner_id': customer.owner_id,
-            'source_lead_id': customer.source_lead_id,
+            'source_lead_id': source_lead_public_ids.get(customer.source_lead_id),
             'default_procurement_method_id': customer.default_procurement_method_id,
             'return_reason': customer.return_reason,
             'returned_time': customer.returned_time,
@@ -981,7 +1082,7 @@ def _can_manage_customer_members(db: Session, customer, team_id: int, current_us
     return "TEAM_ADMIN" in role_codes
 
 
-def _build_customer_member_response(db: Session, member, can_manage: bool) -> CustomerMemberResponse:
+def _build_customer_member_response(db: Session, member, customer_public_id: str, can_manage: bool) -> CustomerMemberResponse:
     user_info = None
     if member.user_id:
         row = db.execute(text("""
@@ -998,7 +1099,7 @@ def _build_customer_member_response(db: Session, member, can_manage: bool) -> Cu
 
     return CustomerMemberResponse(
         id=member.id,
-        customer_id=member.customer_id,
+        customer_id=customer_public_id,
         user_id=member.user_id,
         member_role=member.member_role,
         access_level=member.access_level,
@@ -1013,31 +1114,31 @@ def _build_customer_member_response(db: Session, member, can_manage: bool) -> Cu
 
 @router.get("/{customer_id}/members", response_model=List[CustomerMemberResponse], summary="查询客户团队成员")
 def get_customer_members(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     customer = check_customer_view_permission(customer_id, team_id, current_user, db)
     can_manage = _can_manage_customer_members(db, customer, team_id, current_user)
-    members = customer_member_crud.get_by_customer(db, team_id, customer_id)
-    return [_build_customer_member_response(db, member, can_manage) for member in members]
+    members = customer_member_crud.get_by_customer(db, team_id, customer.id)
+    return [_build_customer_member_response(db, member, customer.public_id, can_manage) for member in members]
 
 
 @router.get("/{customer_id}/member-candidates", response_model=List[CustomerMemberCandidate], summary="查询客户团队成员候选人")
 def get_customer_member_candidates(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    check_customer_member_manage_permission(customer_id, team_id, current_user, db)
-    return customer_member_crud.get_candidates(db, team_id, customer_id)
+    customer = check_customer_member_manage_permission(customer_id, team_id, current_user, db)
+    return customer_member_crud.get_candidates(db, team_id, customer.id)
 
 
 @router.post("/{customer_id}/members", response_model=CustomerMemberResponse, status_code=status.HTTP_201_CREATED, summary="添加客户团队成员")
 def add_customer_member(
-    customer_id: int,
+    customer_id: str,
     member_in: CustomerMemberCreate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1058,44 +1159,44 @@ def add_customer_member(
     member = customer_member_crud.create_or_restore(
         db=db,
         team_id=team_id,
-        customer_id=customer_id,
+        customer_id=customer.id,
         obj_in=member_in,
         created_by=str(current_user.id),
     )
-    return _build_customer_member_response(db, member, True)
+    return _build_customer_member_response(db, member, customer.public_id, True)
 
 
 @router.put("/{customer_id}/members/{member_id}", response_model=CustomerMemberResponse, summary="更新客户团队成员")
 def update_customer_member(
-    customer_id: int,
+    customer_id: str,
     member_id: int,
     member_in: CustomerMemberUpdate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    check_customer_member_manage_permission(customer_id, team_id, current_user, db)
+    customer = check_customer_member_manage_permission(customer_id, team_id, current_user, db)
     member = customer_member_crud.get_by_id(db, member_id, team_id)
-    if not member or member.customer_id != customer_id:
+    if not member or member.customer_id != customer.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户团队成员不存在"
         )
     updated = customer_member_crud.update(db, member, member_in)
-    return _build_customer_member_response(db, updated, True)
+    return _build_customer_member_response(db, updated, customer.public_id, True)
 
 
 @router.delete("/{customer_id}/members/{member_id}", response_model=MessageResponse, summary="移除客户团队成员")
 def remove_customer_member(
-    customer_id: int,
+    customer_id: str,
     member_id: int,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    check_customer_member_manage_permission(customer_id, team_id, current_user, db)
+    customer = check_customer_member_manage_permission(customer_id, team_id, current_user, db)
     member = customer_member_crud.get_by_id(db, member_id, team_id)
-    if not member or member.customer_id != customer_id:
+    if not member or member.customer_id != customer.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户团队成员不存在"
@@ -1106,14 +1207,14 @@ def remove_customer_member(
 
 @router.get("/{customer_id}", response_model=CustomerDetailResponse, summary="获取客户详情", description="返回客户信息及其所有联系人列表")
 def get_customer(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
-    contacts = contact_crud.get_by_customer_id(db, customer_id, team_id)
+    contacts = contact_crud.get_by_customer_id(db, customer.id, team_id)
     
     owner_info = None
     if customer.owner_id:
@@ -1174,6 +1275,9 @@ def get_customer(
     
     customer_payload = {
         **customer.__dict__,
+        "id": customer.public_id,
+        "public_id": customer.public_id,
+        "source_lead_id": source_lead.public_id if (source_lead := lead_crud.get_by_id(db, customer.source_lead_id, team_id)) else None,
         "customer_brief_markdown": industry_display_service.sanitize_markdown(
             db,
             customer.customer_brief_markdown,
@@ -1183,14 +1287,14 @@ def get_customer(
 
     return CustomerDetailResponse(
         **customer_payload,
-        contacts=contacts,
+        contacts=[_contact_response(contact, customer.public_id) for contact in contacts],
         owner_info=owner_info,
         creator_info=creator_info,
         default_procurement_method_info=procurement_method_info,
         industry_info=industry_info,
         customer_intelligence_has_inputs=customer_intelligence_refresh_service.has_customer_business_data(
             db,
-            customer_id=customer_id,
+            customer_id=customer.id,
             team_id=team_id,
         ),
     )
@@ -1198,7 +1302,7 @@ def get_customer(
 
 @router.put("/{customer_id}", response_model=CustomerResponse, summary="编辑客户", description="更新客户信息")
 def update_customer(
-    customer_id: int,
+    customer_id: str,
     customer_update: CustomerUpdate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1207,14 +1311,14 @@ def update_customer(
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     if customer_update.account_name:
-        _ensure_customer_name_available(db, customer_update.account_name, team_id, exclude_customer_id=customer_id)
+        _ensure_customer_name_available(db, customer_update.account_name, team_id, exclude_customer_id=customer.id)
 
-    return customer_crud.update(db, customer, customer_update)
+    return _customer_response(db, customer_crud.update(db, customer, customer_update))
 
 
 @router.patch("/{customer_id}/status", response_model=CustomerResponse, summary="更新客户状态", description="用于标记赢单、输单等关键状态变更")
 async def update_customer_status(
-    customer_id: int,
+    customer_id: str,
     status_update: CustomerStatusUpdate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1238,12 +1342,12 @@ async def update_customer_status(
             customer.account_name
         )
 
-    return updated_customer
+    return _customer_response(db, updated_customer)
 
 
 @router.patch("/{customer_id}/lose", response_model=CustomerResponse, summary="标记输单", description="将客户标记为输单，必须记录输单原因")
 async def mark_customer_as_lost(
-    customer_id: int,
+    customer_id: str,
     lose_data: CustomerLoseRequest,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1268,12 +1372,12 @@ async def mark_customer_as_lost(
         customer.account_name
     )
 
-    return updated_customer
+    return _customer_response(db, updated_customer)
 
 
 @router.delete("/{customer_id}", response_model=MessageResponse, summary="删除客户", description="逻辑删除，需校验权限")
 def delete_customer(
-    customer_id: int,
+    customer_id: str,
     customer = Depends(check_customer_delete_permission),
     db: Session = Depends(get_db)
 ):
@@ -1289,34 +1393,34 @@ def delete_customer(
 
 @router.post("/{customer_id}/contacts", response_model=ContactResponse, status_code=status.HTTP_201_CREATED, summary="添加联系人", description="为指定客户添加新联系人")
 async def create_contact(
-    customer_id: int,
+    customer_id: str,
     contact: ContactCreate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    _get_editable_customer(db, customer_id, team_id, current_user)
+    customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
-    created_contact = contact_crud.create(db, contact, customer_id, team_id)
+    created_contact = contact_crud.create(db, contact, customer.id, team_id)
     await _schedule_contact_intelligence_refresh(
         db,
         created_contact,
         trigger_type="customer_contact_created",
         actor_id=str(current_user.id),
     )
-    return created_contact
+    return _contact_response(created_contact, customer.public_id)
 
 
 @router.get("/{customer_id}/contacts", response_model=List[ContactResponse], summary="查询联系人列表", description="获取指定客户下的全部联系人")
 def get_contacts(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    _get_viewable_customer(db, customer_id, team_id, current_user)
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
-    return contact_crud.get_by_customer_id(db, customer_id, team_id)
+    return [_contact_response(contact, customer.public_id) for contact in contact_crud.get_by_customer_id(db, customer.id, team_id)]
 
 
 @router.put("/contacts/{contact_id}", response_model=ContactResponse, summary="编辑联系人", description="更新联系人信息")
@@ -1333,7 +1437,7 @@ async def update_contact(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="联系人不存在"
         )
-    _get_editable_customer(db, contact.customer_id, team_id, current_user)
+    customer = _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
     updated_contact = contact_crud.update(db, contact, contact_update)
     await _schedule_contact_intelligence_refresh(
@@ -1342,7 +1446,7 @@ async def update_contact(
         trigger_type="customer_contact_updated",
         actor_id=str(current_user.id),
     )
-    return updated_contact
+    return _contact_response(updated_contact, customer.public_id)
 
 
 @router.patch("/contacts/{contact_id}/set-primary", response_model=ContactResponse, summary="设置主联系人", description="设置某联系人为主联系人")
@@ -1358,7 +1462,7 @@ async def set_primary_contact(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="联系人不存在"
         )
-    _get_editable_customer(db, contact.customer_id, team_id, current_user)
+    customer = _get_editable_customer(db, contact.customer_id, team_id, current_user)
 
     updated_contact = contact_crud.set_primary(db, contact, team_id)
     await _schedule_contact_intelligence_refresh(
@@ -1367,7 +1471,7 @@ async def set_primary_contact(
         trigger_type="customer_contact_updated",
         actor_id=str(current_user.id),
     )
-    return updated_contact
+    return _contact_response(updated_contact, customer.public_id)
 
 
 @router.delete("/contacts/{contact_id}", response_model=MessageResponse, summary="删除联系人", description="删除联系人")
@@ -1428,7 +1532,7 @@ def get_trend(
 
 @router.post("/{customer_id}/return-to-pool", response_model=CustomerReturnResponse, summary="客户退回公海", description="将客户退回到公海池，解除与负责人的绑定")
 async def return_customer_to_pool(
-    customer_id: int,
+    customer_id: str,
     return_data: CustomerReturnRequest,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1472,7 +1576,7 @@ async def return_customer_to_pool(
         print(f"飞书通知发送失败: {e}")
 
     return CustomerReturnResponse(
-        customer_id=customer_id,
+        customer_id=updated_customer.public_id,
         previous_owner=previous_owner,
         returned_time=updated_customer.returned_time,
         return_reason=updated_customer.return_reason,
@@ -1501,7 +1605,7 @@ def get_public_customers(
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
     return PaginatedResponse[CustomerResponse](
-        items=customers,
+        items=[_customer_response(db, customer) for customer in customers],
         total=total,
         page=page,
         page_size=limit,
@@ -1511,7 +1615,7 @@ def get_public_customers(
 
 @router.post("/{customer_id}/claim", response_model=CustomerResponse, summary="领取客户", description="从公海池中领取客户")
 def claim_customer(
-    customer_id: int,
+    customer_id: str,
     claim_data: CustomerClaimRequest,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1523,7 +1627,7 @@ def claim_customer(
         updated_customer = customer_crud.claim_customer(
             db, customer, claim_data.owner_id, team_id
         )
-        return updated_customer
+        return _customer_response(db, updated_customer)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1533,7 +1637,7 @@ def claim_customer(
 
 @router.post("/{customer_id}/assign", response_model=CustomerAssignResponse, summary="移交客户", description="有 customer:assign 权限的用户可移交客户，并可选择同步移交关联商机及其合同")
 def assign_customer(
-    customer_id: int,
+    customer_id: str,
     assign_data: CustomerAssignRequest,
     team_id: int = Depends(get_current_user_team),
     _current_user = Depends(require_permission("customer:assign")),
@@ -1579,18 +1683,18 @@ def assign_customer(
 
 @router.post("/{customer_id}/regenerate-brief", response_model=MessageResponse, summary="重新生成客户概况", description="AI重新生成销售侧客户概况")
 async def regenerate_customer_brief(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 
-    _get_viewable_customer(db, customer_id, team_id, current_user)
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
     await customer_intelligence_refresh_service.trigger_manual_refresh(
         db,
         team_id=team_id,
-        customer_id=customer_id,
+        customer_id=customer.id,
         actor_id=str(current_user.id),
         scope="brief",
     )
@@ -1605,7 +1709,7 @@ async def regenerate_customer_brief(
     description="AI重新生成客户档案和客户概况",
 )
 async def regenerate_customer_intelligence(
-    customer_id: int,
+    customer_id: str,
     payload: CustomerIntelligenceRegenerateRequest,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -1613,11 +1717,11 @@ async def regenerate_customer_intelligence(
 ):
     from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 
-    _get_viewable_customer(db, customer_id, team_id, current_user)
+    customer = _get_viewable_customer(db, customer_id, team_id, current_user)
     await customer_intelligence_refresh_service.trigger_manual_refresh(
         db,
         team_id=team_id,
-        customer_id=customer_id,
+        customer_id=customer.id,
         actor_id=str(current_user.id),
         scope=payload.scope,
     )
@@ -1639,21 +1743,33 @@ async def rebuild_customer_intelligence_batch(
 ):
     from app.services.customer_intelligence_refresh_service import customer_intelligence_refresh_service
 
+    customer_ids = None
+    if payload.customer_ids is not None:
+        customers = [
+            _get_customer_or_404(db, customer_public_id, team_id)
+            for customer_public_id in payload.customer_ids
+        ]
+        customer_ids = [customer.id for customer in customers]
+
     result = await customer_intelligence_refresh_service.trigger_batch_rebuild(
         db,
         team_id=team_id,
         actor_id=str(current_user.id),
         scope=payload.scope,
-        customer_ids=payload.customer_ids,
+        customer_ids=customer_ids,
         limit=payload.limit,
     )
+    result_customers = [
+        customer_crud.get_by_id(db, customer_id, team_id)
+        for customer_id in result.customer_ids
+    ]
     return CustomerIntelligenceBatchRebuildResponse(
         message="客户智能档案批量重建已开始",
         request_id=result.request_id,
         scope=result.scope,
         total=result.total,
         scheduled=result.scheduled,
-        customer_ids=result.customer_ids,
+        customer_ids=[customer.public_id for customer in result_customers if customer],
     )
 
 
@@ -1664,7 +1780,7 @@ async def rebuild_customer_intelligence_batch(
     description="查询客户智能 LangGraph 运行审计和用户可见执行轨迹",
 )
 def list_customer_intelligence_runs(
-    customer_id: Optional[int] = Query(None, ge=1, description="客户ID"),
+    customer_id: Optional[str] = Query(None, description="客户对外ID"),
     request_id: Optional[str] = Query(None, min_length=1, max_length=120, description="请求ID"),
     run_status: Optional[str] = Query(None, alias="status", min_length=1, max_length=30, description="运行状态"),
     limit: int = Query(20, ge=1, le=100, description="返回记录数"),
@@ -1674,16 +1790,17 @@ def list_customer_intelligence_runs(
 ):
     from app.services.customer_intelligence_run_service import customer_intelligence_run_service
 
+    customer = _get_customer_or_404(db, customer_id, team_id) if customer_id else None
     diagnostics = customer_intelligence_run_service.list_diagnostics(
         db,
         team_id=team_id,
-        customer_id=customer_id,
+        customer_id=customer.id if customer else None,
         request_id=request_id,
         status=run_status,
         limit=limit,
     )
     return CustomerIntelligenceRunDiagnosticListResponse(
-        items=[_customer_intelligence_run_response(diagnostic) for diagnostic in diagnostics],
+        items=[_customer_intelligence_run_response(db, team_id, diagnostic) for diagnostic in diagnostics],
         total=len(diagnostics),
         limit=limit,
     )
@@ -1713,7 +1830,7 @@ def get_customer_intelligence_run(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="客户智能运行记录不存在",
         )
-    return _customer_intelligence_run_response(diagnostic)
+    return _customer_intelligence_run_response(db, team_id, diagnostic)
 
 
 @router.post(

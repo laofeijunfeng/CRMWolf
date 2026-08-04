@@ -311,7 +311,7 @@ def _payload_confidence(payload: JSONDict) -> float:
 
 def _has_customer_id(payload: JSONDict) -> bool:
     customer_id = payload.get("customer_id")
-    return isinstance(customer_id, int) or (isinstance(customer_id, str) and customer_id.strip().isdigit())
+    return isinstance(customer_id, (str, int)) and str(customer_id).strip() != ""
 
 
 def _has_follow_up_content(payload: JSONDict) -> bool:

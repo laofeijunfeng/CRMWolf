@@ -9,7 +9,8 @@ import { UserInfoSchema, LeadStatusSchema, LeadSourceSchema, CompanyScaleSchema,
 
 // ===== 线索基础类型 =====
 export const LeadResponseSchema = z.object({
-  id: z.number().int().positive(),
+  id: z.string().min(1),
+  public_id: z.string().min(1),
   lead_name: z.string().min(1).max(255),
   source: LeadSourceSchema,
   city: z.string().min(1).max(100),
@@ -39,7 +40,7 @@ export type LeadListResponse = z.infer<typeof LeadListResponseSchema>
 // ===== 线索跟进记录 =====
 export const LeadFollowUpResponseSchema = z.object({
   id: z.number().int().positive(),
-  lead_id: z.number().int().positive(),
+  lead_id: z.string().min(1),
   content: z.string().min(1),
   method: z.enum(['PHONE', 'EMAIL', 'MEETING', 'WECHAT', 'OTHER']),
   next_follow_time: z.string().datetime().nullable(),

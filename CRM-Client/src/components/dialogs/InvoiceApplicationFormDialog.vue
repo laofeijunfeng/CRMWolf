@@ -33,7 +33,7 @@ import {
 } from '@/components/crmwolf'
 
 interface FixedCustomer {
-  id: number
+  id: string
   account_name: string
 }
 
@@ -299,7 +299,7 @@ async function handleCustomerSearch(keyword: string | number): Promise<void> {
   await fetchCustomers(normalizedKeyword || undefined)
 }
 
-async function fetchCustomerRelatedData(customerId: number): Promise<void> {
+async function fetchCustomerRelatedData(customerId: string): Promise<void> {
   loadingContracts.value = true
   loadingInvoiceTitles.value = true
   try {
@@ -348,8 +348,8 @@ function handleCustomerChange(value: unknown): void {
   paymentPlans.value = []
   invoiceTitles.value = []
 
-  const customerId = Number(form.customerId)
-  if (Number.isFinite(customerId) && customerId > 0) {
+  const customerId = form.customerId.trim()
+  if (customerId !== '') {
     void fetchCustomerRelatedData(customerId)
   }
 }
@@ -465,8 +465,8 @@ watch(
     resetForm(previousValues?.[0] === true)
     void fetchCustomers(customerSearchKeyword.value)
 
-    const customerId = Number(form.customerId)
-    if (Number.isFinite(customerId) && customerId > 0) {
+    const customerId = form.customerId.trim()
+    if (customerId !== '') {
       void fetchCustomerRelatedData(customerId).then(() => {
         const contractId = Number(form.contractId)
         if (Number.isFinite(contractId) && contractId > 0) {

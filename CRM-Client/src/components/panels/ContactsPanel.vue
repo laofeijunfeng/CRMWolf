@@ -13,7 +13,7 @@ import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { ContactResponse } from '@/api/customer'
 
 interface Props {
-  customerId: number
+  customerId: string
   contacts: ContactResponse[]
   showAdd?: boolean
   canEdit?: boolean

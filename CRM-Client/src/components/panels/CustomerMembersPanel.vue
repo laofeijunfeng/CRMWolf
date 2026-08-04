@@ -37,7 +37,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog } from '@/utils/confirmDialog'
 
 interface Props {
-  customerId: number
+  customerId: string
   members: CustomerMemberResponse[]
   canManageMembers?: boolean
 }

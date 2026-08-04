@@ -8,7 +8,8 @@ export interface OwnerInfo {
 }
 
 export interface Lead {
-  id: number
+  id: string
+  public_id: string
   lead_name: string
   source: string
   city: string
@@ -28,7 +29,8 @@ export interface Lead {
 }
 
 export interface LeadDetail {
-  id: number
+  id: string
+  public_id: string
   lead_name: string
   source: string
   city: string
@@ -81,7 +83,7 @@ export interface LeadListParams {
 
 export interface LeadFollowUp {
   id: number
-  lead_id: number
+  lead_id: string
   content: string
   method: string
   next_follow_time?: string
@@ -154,52 +156,52 @@ export const leadApi = {
     return request.get<Lead[] | PaginatedResponse<Lead>>('/v1/leads/', { params })
   },
 
-  getLeadDetail: (id: number): Promise<LeadDetail> => {
+  getLeadDetail: (id: string): Promise<LeadDetail> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<LeadDetail>(`/v1/leads/${id}`)
   },
 
-  updateLead: (id: number, data: LeadUpdate): Promise<Lead> => {
+  updateLead: (id: string, data: LeadUpdate): Promise<Lead> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.put<Lead>(`/v1/leads/${id}`, data)
   },
 
-  deleteLead: (id: number): Promise<Lead> => {
+  deleteLead: (id: string): Promise<Lead> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.delete<Lead>(`/v1/leads/${id}`)
   },
 
-  claimLead: (id: number): Promise<Lead> => {
+  claimLead: (id: string): Promise<Lead> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>(`/v1/leads/${id}/claim`)
   },
 
-  assignLead: (id: number, data: LeadAssignRequest): Promise<Lead> => {
+  assignLead: (id: string, data: LeadAssignRequest): Promise<Lead> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>(`/v1/leads/${id}/assign`, data)
   },
 
-  returnLead: (id: number): Promise<Lead> => {
+  returnLead: (id: string): Promise<Lead> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>(`/v1/leads/${id}/return`)
   },
 
-  getFollowUps: (id: number, params?: { skip?: number; limit?: number }): Promise<LeadFollowUp[]> => {
+  getFollowUps: (id: string, params?: { skip?: number; limit?: number }): Promise<LeadFollowUp[]> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.get<LeadFollowUp[]>(`/v1/leads/${id}/follow-ups`, { params })
   },
 
-  addFollowUp: (id: number, data: LeadFollowUpCreate): Promise<LeadFollowUp> => {
+  addFollowUp: (id: string, data: LeadFollowUpCreate): Promise<LeadFollowUp> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<LeadFollowUp>(`/v1/leads/${id}/follow-ups`, data)
   },
 
-  deleteFollowUp: (leadId: number, followUpId: number): Promise<unknown> => {
+  deleteFollowUp: (leadId: string, followUpId: number): Promise<unknown> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.delete(`/v1/leads/${leadId}/follow-ups/${followUpId}`)
   },
 
-  markInvalid: (id: number, data: LeadMarkInvalidRequest): Promise<Lead> => {
+  markInvalid: (id: string, data: LeadMarkInvalidRequest): Promise<Lead> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     return request.post<Lead>(`/v1/leads/${id}/mark-invalid`, data)
   },

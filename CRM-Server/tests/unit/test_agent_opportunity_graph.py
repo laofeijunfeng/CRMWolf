@@ -76,6 +76,28 @@ async def test_opportunity_graph_routes_missing_fields_to_form_action():
 
 
 @pytest.mark.asyncio
+async def test_opportunity_graph_applies_customer_default_procurement_method():
+    service = OpportunityPlanningGraphService()
+
+    result = await service.run(opportunity_input(parsed={
+        "customer_name": "越秀金融",
+        "opportunity": {
+            "total_amount": 50000,
+            "user_count": 100,
+            "license_type": "SUBSCRIPTION",
+            "subscription_years": 1,
+            "purchase_type": "NEW",
+            "expected_closing_date": "2026-08-31",
+        },
+        "missing_opportunity_fields": [],
+    }))
+
+    assert result["opportunity_route"] == "confirm_create"
+    assert result["action"]["action"] == "create_opportunity"
+    assert result["action"]["payload"]["opportunity"]["procurement_method_id"] == 9
+
+
+@pytest.mark.asyncio
 async def test_opportunity_graph_routes_multiple_customers_to_choice_action():
     service = OpportunityPlanningGraphService()
 

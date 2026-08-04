@@ -26,13 +26,13 @@ from app.schemas.score_weight import ScoreResponse, ScoreDetailResponse, get_sco
 router = APIRouter(prefix="/v1/scores", tags=["热力值查询"])
 
 
-def check_lead_access(db: Session, lead_id: int, team_id: int, user_id: str) -> Lead:
+def check_lead_access(db: Session, lead_id: str, team_id: int, user_id: str) -> Lead:
     """检查线索访问权限
 
     - 普通用户只能查看自己负责的线索
     - 管理员/总监可以查看所有线索
     """
-    lead = lead_crud.get_by_id(db, lead_id, team_id)
+    lead = lead_crud.get_by_public_id(db, lead_id, team_id)
     if not lead:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -46,7 +46,7 @@ def check_lead_access(db: Session, lead_id: int, team_id: int, user_id: str) -> 
 
 @router.get("/lead/{lead_id}", response_model=ScoreResponse, summary="获取线索热力值")
 def get_lead_score(
-    lead_id: int,
+    lead_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -62,7 +62,7 @@ def get_lead_score(
     lead = check_lead_access(db, lead_id, team_id, str(current_user.id))
 
     # 获取最近一次计算的明细
-    details = score_detail_crud.get_latest_details(db, 'LEAD', lead_id)
+    details = score_detail_crud.get_latest_details(db, 'LEAD', lead.id)
 
     # 构建响应
     level_info = get_score_level_info(lead.score)
@@ -77,7 +77,7 @@ def get_lead_score(
 
 @router.get("/customer/{customer_id}", response_model=ScoreResponse, summary="获取客户热力值")
 def get_customer_score(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -93,7 +93,7 @@ def get_customer_score(
     customer = check_customer_view_permission(customer_id, team_id, current_user, db)
 
     # 获取最近一次计算的明细
-    details = score_detail_crud.get_latest_details(db, 'CUSTOMER', customer_id)
+    details = score_detail_crud.get_latest_details(db, 'CUSTOMER', customer.id)
 
     # 构建响应
     level_info = get_score_level_info(customer.score)
@@ -108,7 +108,7 @@ def get_customer_score(
 
 @router.post("/lead/{lead_id}/refresh", response_model=ScoreResponse, summary="刷新线索热力值")
 def refresh_lead_score(
-    lead_id: int,
+    lead_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -121,10 +121,10 @@ def refresh_lead_score(
     lead = check_lead_access(db, lead_id, team_id, str(current_user.id))
 
     from app.services.score_service import score_service
-    score_service.calculate_lead_score(db, lead_id, team_id)
+    score_service.calculate_lead_score(db, lead.id, team_id)
 
     # 获取最新明细
-    details = score_detail_crud.get_latest_details(db, 'LEAD', lead_id)
+    details = score_detail_crud.get_latest_details(db, 'LEAD', lead.id)
     level_info = get_score_level_info(lead.score)
 
     return {
@@ -137,7 +137,7 @@ def refresh_lead_score(
 
 @router.post("/customer/{customer_id}/refresh", response_model=ScoreResponse, summary="刷新客户热力值")
 def refresh_customer_score(
-    customer_id: int,
+    customer_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -150,10 +150,10 @@ def refresh_customer_score(
     customer = check_customer_edit_permission(customer_id, team_id, current_user, db)
 
     from app.services.score_service import score_service
-    score_service.calculate_customer_score(db, customer_id, team_id)
+    score_service.calculate_customer_score(db, customer.id, team_id)
 
     # 获取最新明细
-    details = score_detail_crud.get_latest_details(db, 'CUSTOMER', customer_id)
+    details = score_detail_crud.get_latest_details(db, 'CUSTOMER', customer.id)
     level_info = get_score_level_info(customer.score)
 
     return {

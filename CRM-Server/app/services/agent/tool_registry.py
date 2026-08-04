@@ -65,7 +65,7 @@ class AgentInvoiceTitlePayload(AgentStrictPayload):
 
 
 class AgentDeploymentInfoPayload(AgentStrictPayload):
-    customer_id: int = Field(..., ge=1)
+    customer_id: str = Field(..., min_length=1)
     deployment_name: str = Field(..., min_length=1, max_length=100)
     server_address: str = Field(..., min_length=1, max_length=500)
     authorized_users: Optional[int] = Field(None, gt=0)
@@ -80,7 +80,7 @@ class AgentCustomerMemberPayload(AgentStrictPayload):
 
 
 class AgentOpportunityPayload(AgentStrictPayload):
-    customer_id: int = Field(..., ge=1)
+    customer_id: str = Field(..., min_length=1)
     total_amount: float = Field(..., gt=0)
     user_count: int = Field(..., gt=0)
     license_type: Literal["SUBSCRIPTION", "PERPETUAL"]
@@ -114,12 +114,12 @@ class SearchCreationDuplicatesInput(BaseModel):
 
 
 class GetCustomerContextInput(BaseModel):
-    customer_id: int = Field(..., ge=1)
+    customer_id: str = Field(..., min_length=1)
     query_text: Optional[str] = None
 
 
 class CreateCustomerActivityInput(BaseModel):
-    customer_id: int = Field(..., ge=1)
+    customer_id: str = Field(..., min_length=1)
     customer_name: Optional[str] = None
     activity_kind: str = "OTHER_FOLLOW_UP"
     source_content: str = Field(..., min_length=1)
@@ -140,7 +140,7 @@ class CreateCustomerInput(BaseModel):
 
 
 class CreateLeadFollowUpInput(BaseModel):
-    lead_id: int = Field(..., ge=1)
+    lead_id: str = Field(..., min_length=1)
     content: str = Field(..., min_length=1)
     method: str = "其他"
     next_action: Optional[str] = None
@@ -149,12 +149,12 @@ class CreateLeadFollowUpInput(BaseModel):
 
 
 class CreateContactInput(BaseModel):
-    customer_id: int = Field(..., ge=1)
+    customer_id: str = Field(..., min_length=1)
     contact: AgentContactPayload
 
 
 class CreateInvoiceTitleInput(BaseModel):
-    customer_id: int = Field(..., ge=1)
+    customer_id: str = Field(..., min_length=1)
     invoice_title: AgentInvoiceTitlePayload
     set_default: bool = False
 
@@ -164,7 +164,7 @@ class CreateDeploymentInfoInput(BaseModel):
 
 
 class CreateCustomerMemberInput(BaseModel):
-    customer_id: int = Field(..., ge=1)
+    customer_id: str = Field(..., min_length=1)
     member: AgentCustomerMemberPayload
 
 
@@ -174,7 +174,7 @@ class CreateOpportunityInput(BaseModel):
 
 
 class ListCustomerOpportunitiesInput(BaseModel):
-    customer_id: int = Field(..., ge=1)
+    customer_id: str = Field(..., min_length=1)
     status: Optional[str] = None
     limit: int = Field(20, ge=1, le=100)
 

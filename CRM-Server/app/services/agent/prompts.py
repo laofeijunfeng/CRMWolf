@@ -666,6 +666,10 @@ CRM_AGENT_CUSTOMER_CONTEXT_ANSWER_SYSTEM_PROMPT = """
 - customer_memory 是长期记忆，用于补充历史摘要和证据索引。
 - semantic_evidence 是检索证据，只能作为线索或引用依据；如果与 strong_context 冲突，以 strong_context 为准。
 - 不能编造不存在的客户、联系人、商机、合同、回款或下一步动作。
+- 只有当 semantic_evidence/citations 中存在可用证据时，才能把回答视为 grounded。
+- retrieval.status 不是 ok 时，必须基于 strong_context/customer_memory 谨慎回答；
+  并在 missing_context 里说明缺少高置信度语义证据。
+- citations 只能引用输入中已有的 evidence_id，禁止自造 evidence_id 或引用不存在的证据。
 
 【用户体验】
 - 使用销售能看懂的自然语言，简洁回答。
@@ -682,7 +686,9 @@ CRM_AGENT_CUSTOMER_CONTEXT_ANSWER_SYSTEM_PROMPT = """
   "answer": "面向用户的 Markdown 回答",
   "confidence": 0.0,
   "used_sections": ["customer|facts|contacts|opportunities|contracts|payments|activities|memory|evidence"],
-  "missing_context": ["缺少的信息"]
+  "missing_context": ["缺少的信息"],
+  "answer_mode": "grounded|fallback|degraded|insufficient",
+  "citations": [{"evidence_id": "输入中已有的 evidence_id", "score": 0.0}]
 }
 """.strip()
 

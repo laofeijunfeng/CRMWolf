@@ -3,7 +3,6 @@
 This module only manages Agent-owned state. CRM business actions must go
 through existing API endpoints in the tool layer.
 """
-from datetime import datetime
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -27,6 +26,7 @@ from app.schemas.agent import (
     AgentToolCallCreate,
     AgentToolCallUpdate,
 )
+from app.utils.time import business_now
 
 
 class AgentSessionCRUD:
@@ -111,7 +111,7 @@ class AgentMessageCRUD:
         db.add(db_obj)
         session = db.query(AgentSession).filter(AgentSession.id == obj_in.session_id).first()
         if session is not None:
-            session.last_modified_time = datetime.utcnow()
+            session.last_modified_time = business_now()
         db.commit()
         db.refresh(db_obj)
         return db_obj
@@ -237,7 +237,7 @@ class AgentToolCallCRUD:
         return db_obj
 
     def mark_started(self, db: Session, db_obj: AgentToolCall) -> AgentToolCall:
-        db_obj.started_time = datetime.now()
+        db_obj.started_time = business_now()
         db.commit()
         db.refresh(db_obj)
         return db_obj

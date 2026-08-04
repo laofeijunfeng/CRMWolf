@@ -9,6 +9,7 @@ from app.models.customer_activity import CustomerActivity
 from app.models.lead import LeadFollowUp
 from app.schemas.customer_activity import CustomerActivityCreate, CustomerActivityUpdate
 from app.services.customer_activity_kinds import FOLLOW_UP_METHOD_TO_KIND, CustomerActivityKind, get_activity_kind_meta
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ class CustomerActivityCRUD:
         data["customer_id"] = customer_id
         data["creator_id"] = creator_id
         data["team_id"] = team_id
-        data["occurred_at"] = data.get("occurred_at") or datetime.now()
+        data["occurred_at"] = data.get("occurred_at") or business_now()
         if data.get("next_follow_time") is not None and not data.get("next_follow_time_source"):
             data["next_follow_time_source"] = "USER"
         if original_lead_id:
@@ -222,7 +223,7 @@ class CustomerActivityCRUD:
                 next_follow_time=lead_follow_up.next_follow_time,
                 next_follow_time_source="MIGRATED" if lead_follow_up.next_follow_time else None,
                 next_action=lead_follow_up.next_action,
-                occurred_at=lead_follow_up.created_time or datetime.now(),
+                occurred_at=lead_follow_up.created_time or business_now(),
                 creator_id=lead_follow_up.creator_id,
                 created_time=lead_follow_up.created_time,
             )
@@ -277,7 +278,7 @@ class CustomerActivityCRUD:
         activity.processing_status = status
         activity.processing_error = error_message
         if status == "COMPLETED":
-            activity.processed_at = datetime.now()
+            activity.processed_at = business_now()
         db.commit()
         db.refresh(activity)
         _upsert_customer_activity_evidence(db, activity)
@@ -308,7 +309,7 @@ class CustomerActivityCRUD:
             activity.next_follow_time_source = next_follow_time_source or "AI_EXTRACTED"
         activity.processing_status = "COMPLETED"
         activity.processing_error = None
-        activity.processed_at = datetime.now()
+        activity.processed_at = business_now()
         db.commit()
         db.refresh(activity)
         _upsert_customer_activity_evidence(db, activity)
@@ -333,7 +334,7 @@ class CustomerActivityCRUD:
             activity.effectiveness_detail_json = None
             activity.effectiveness_evaluated_time = None
         elif status == "FAILED":
-            activity.effectiveness_evaluated_time = datetime.now()
+            activity.effectiveness_evaluated_time = business_now()
         db.commit()
         db.refresh(activity)
         return activity
@@ -355,7 +356,7 @@ class CustomerActivityCRUD:
         activity.effectiveness_reason = reason
         activity.effectiveness_detail_json = detail_json
         activity.effectiveness_status = "COMPLETED"
-        activity.effectiveness_evaluated_time = datetime.now()
+        activity.effectiveness_evaluated_time = business_now()
         activity.effectiveness_error_message = None
         db.commit()
         db.refresh(activity)

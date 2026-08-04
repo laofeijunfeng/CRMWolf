@@ -13,7 +13,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Protocol, Any, Optional
 
-from sqlalchemy import func, inspect
+from sqlalchemy import inspect
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,7 @@ from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
 from app.models.opportunity import Opportunity
 from app.models.customer import Customer
+from app.utils.time import business_now
 
 
 _BUSINESS_TYPE_DISPLAY_NAMES = {
@@ -82,7 +83,7 @@ class ContractAdapter:
             event_type=DealJourneyEventType.CONTRACT_SIGNED,
             source_type=DealJourneySourceType.CONTRACT,
             source_id=entity.id,
-            event_time=entity.signing_date or datetime.now(),
+            event_time=entity.signing_date or business_now(),
             actor_id=entity.creator_id,
             summary=f"合同签署：{entity.contract_name}",
         )
@@ -126,7 +127,7 @@ class PaymentRecordAdapter:
         # 审批通过即确认入账
         entity.confirmation_status = PaymentConfirmationStatus.CONFIRMED
         if entity.confirmed_time is None:
-            entity.confirmed_time = datetime.now()
+            entity.confirmed_time = business_now()
         self._refresh_payment_status(db, entity)
         if not self._payment_plan_table_available(db):
             return
@@ -220,19 +221,19 @@ class InvoiceApplicationAdapter:
         if entity is None: return  # E4 守卫
         # 引擎终态回写快照，InvoiceDetail.vue 仍读这三字段，见决策 2(c)
         entity.status = InvoiceApplicationStatus.APPROVED
-        entity.reviewed_time = func.now()
+        entity.reviewed_time = business_now()
 
     def on_approved_with_file(self, db, entity, file_path: str, invoice_number: str | None = None):
         if entity is None: return  # E4 守卫
         entity.status = InvoiceApplicationStatus.ISSUED
         entity.invoice_file_path = file_path
         entity.invoice_number = invoice_number
-        entity.issued_time = func.now()
+        entity.issued_time = business_now()
 
     def on_rejected(self, db, entity):
         if entity is None: return  # E4 守卫
         entity.status = InvoiceApplicationStatus.REJECTED
-        entity.reviewed_time = func.now()
+        entity.reviewed_time = business_now()
 
     def on_cancelled(self, db, entity):
         if entity is None: return  # E4 守卫

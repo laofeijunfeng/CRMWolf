@@ -19,7 +19,8 @@ class OwnerInfo(BaseModel):
 
 
 class CustomerBasicInfo(BaseModel):
-    id: int = Field(..., description="客户ID")
+    id: str = Field(..., description="客户对外ID")
+    public_id: Optional[str] = Field(None, description="客户对外ID")
     account_name: str = Field(..., description="客户公司名称")
 
     class Config:
@@ -105,8 +106,8 @@ class CustomerActivityUpdate(BaseModel):
 
 class CustomerActivityResponse(BaseModel):
     id: int = Field(..., description="活动ID")
-    customer_id: Optional[int] = Field(None, description="客户ID")
-    original_lead_id: Optional[int] = Field(None, description="原始线索ID")
+    customer_id: Optional[str] = Field(None, description="客户对外ID")
+    original_lead_id: Optional[str] = Field(None, description="原始线索对外ID")
     deal_journey_id: Optional[int] = Field(None, description="成交旅程ID")
     activity_kind: str = Field(..., description="活动分类")
     activity_category: str = Field(..., description="活动大类")

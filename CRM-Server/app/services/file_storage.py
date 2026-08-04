@@ -3,9 +3,9 @@
 import os
 import hashlib
 from typing import Optional
-from datetime import datetime
 
 from app.core.config import get_settings
+from app.utils.time import business_now
 
 class FileStorageError(Exception):
     """文件存储错误"""
@@ -67,7 +67,7 @@ class FileStorageService:
         格式：{invoice_id}_{timestamp}_{hash}.{ext}
         """
         ext = os.path.splitext(original_filename)[1].lower()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = business_now().strftime("%Y%m%d_%H%M%S")
         # 用实体 ID + timestamp 作为 hash 输入，避免文件名冲突
         hash_input = f"{entity_id}_{timestamp}_{original_filename}"
         hash_suffix = hashlib.md5(hash_input.encode()).hexdigest()[:8]

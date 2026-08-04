@@ -15,6 +15,10 @@ from app.services.agent.prompts import build_customer_context_answer_messages
 from app.services.agent.schemas import CustomerContextAnswerResult
 from app.services.agent.types import coerce_json_dict
 from app.services.ai_service import ai_service
+from app.services.customer_context_answer_telemetry_service import (
+    CustomerContextAnswerTelemetryService,
+    customer_context_answer_telemetry_service,
+)
 
 if TYPE_CHECKING:
     from datetime import date
@@ -73,8 +77,10 @@ class CustomerContextAnswerService:
         ai_client: CustomerAnswerAIClient = ai_service,
         agent_factory: AgentFactory | None = None,
         chat_model_factory: ChatModelFactory | None = None,
+        telemetry_service: CustomerContextAnswerTelemetryService | None = None,
     ) -> None:
         self.ai_client = ai_client
+        self.telemetry_service = telemetry_service or customer_context_answer_telemetry_service
         self.langchain_runtime = AgentLangChainRuntime(
             agent_factory=agent_factory,
             chat_model_factory=chat_model_factory,
@@ -97,7 +103,11 @@ class CustomerContextAnswerService:
         )
         config = ai_config_crud.get_config(db, team_id)
         if not config:
-            return CustomerContextAnswerEnvelope(
+            return self._record_and_envelope(
+                db,
+                team_id=team_id,
+                question=question,
+                customer_context=customer_context,
                 result=fallback,
                 answer_source="deterministic_context_fallback",
                 fallback_reason="ai_config_missing",
@@ -105,7 +115,11 @@ class CustomerContextAnswerService:
 
         api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
-            return CustomerContextAnswerEnvelope(
+            return self._record_and_envelope(
+                db,
+                team_id=team_id,
+                question=question,
+                customer_context=customer_context,
                 result=fallback,
                 answer_source="deterministic_context_fallback",
                 model=config.model_name,
@@ -142,9 +156,13 @@ class CustomerContextAnswerService:
             fallback_error = f"{exc.__class__.__name__}: {exc!s}"
 
         if result is not None:
-            cleaned = self._clean_result(result)
+            cleaned = self._with_answer_metadata(self._clean_result(result), customer_context)
             if cleaned.answer:
-                return CustomerContextAnswerEnvelope(
+                return self._record_and_envelope(
+                    db,
+                    team_id=team_id,
+                    question=question,
+                    customer_context=customer_context,
                     result=cleaned,
                     answer_source="langchain_structured_output",
                     model=config.model_name,
@@ -161,9 +179,13 @@ class CustomerContextAnswerService:
                 response_format={"type": "json_object"},
             )
             parsed = CustomerContextAnswerResult.model_validate(json.loads(_clean_json(raw)))
-            cleaned = self._clean_result(parsed)
+            cleaned = self._with_answer_metadata(self._clean_result(parsed), customer_context)
             if cleaned.answer:
-                return CustomerContextAnswerEnvelope(
+                return self._record_and_envelope(
+                    db,
+                    team_id=team_id,
+                    question=question,
+                    customer_context=customer_context,
                     result=cleaned,
                     answer_source="system_ai_json_object",
                     model=config.model_name,
@@ -171,7 +193,11 @@ class CustomerContextAnswerService:
                     fallback_error=fallback_error,
                 )
         except (json.JSONDecodeError, ValidationError, RuntimeError) as exc:
-            return CustomerContextAnswerEnvelope(
+            return self._record_and_envelope(
+                db,
+                team_id=team_id,
+                question=question,
+                customer_context=customer_context,
                 result=fallback,
                 answer_source="deterministic_context_fallback",
                 model=config.model_name,
@@ -179,11 +205,47 @@ class CustomerContextAnswerService:
                 fallback_error=f"{exc.__class__.__name__}: {exc!s}",
             )
 
-        return CustomerContextAnswerEnvelope(
+        return self._record_and_envelope(
+            db,
+            team_id=team_id,
+            question=question,
+            customer_context=customer_context,
             result=fallback,
             answer_source="deterministic_context_fallback",
             model=config.model_name,
             fallback_reason="empty_ai_answer",
+            fallback_error=fallback_error,
+        )
+
+    def _record_and_envelope(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        question: str,
+        customer_context: JsonObject,
+        result: CustomerContextAnswerResult,
+        answer_source: str,
+        model: str | None = None,
+        fallback_reason: str | None = None,
+        fallback_error: str | None = None,
+    ) -> CustomerContextAnswerEnvelope:
+        self.telemetry_service.record_answer(
+            db,
+            team_id=team_id,
+            question=question,
+            customer_context=customer_context,
+            result=result,
+            answer_source=answer_source,
+            model=model,
+            fallback_reason=fallback_reason,
+            fallback_error=fallback_error,
+        )
+        return CustomerContextAnswerEnvelope(
+            result=result,
+            answer_source=answer_source,
+            model=model,
+            fallback_reason=fallback_reason,
             fallback_error=fallback_error,
         )
 
@@ -215,6 +277,16 @@ class CustomerContextAnswerService:
         if profile_line:
             parts.append(f"- **基础信息**：{profile_line}。")
 
+        profile_details = _profile_detail_line(customer)
+        if profile_details:
+            used_sections.append("profile")
+            parts.append(f"- **客户档案**：{profile_details}。")
+
+        brief = _brief_line(customer)
+        if brief:
+            used_sections.append("customer_brief")
+            parts.append(f"- **客户概况**：{brief}。")
+
         facts = _object_list(strong_context.get("customer_facts"))
         if facts:
             used_sections.append("facts")
@@ -226,7 +298,8 @@ class CustomerContextAnswerService:
         opportunities = _object_list(strong_context.get("opportunities"))
         if opportunities:
             used_sections.append("opportunities")
-            parts.append("- **推进中的商机**：" + "; ".join(_opportunity_line(item) for item in opportunities[:3]) + "。")
+            opportunity_lines = "; ".join(_opportunity_line(item) for item in opportunities[:3])
+            parts.append(f"- **推进中的商机**：{opportunity_lines}。")
 
         contracts = _object_list(strong_context.get("contracts"))
         if contracts:
@@ -251,6 +324,7 @@ class CustomerContextAnswerService:
                 parts.append(f"- **长期记忆**：{memory_text}。")
 
         evidence_items = _object_list(customer_context.get("semantic_evidence"))
+        citations = _citations_from_context(customer_context)
         if evidence_items:
             used_sections.append("evidence")
             evidence_text = _text(evidence_items[0].get("text"))
@@ -261,19 +335,84 @@ class CustomerContextAnswerService:
             parts.append("- 目前系统里还没有足够的客户业务资料。")
 
         answer = cls._normalize_markdown_answer(cls._remove_technical_tokens("\n".join(parts)))
-        missing_context = [] if len(parts) > 2 else ["客户近期跟进、商机、合同或回款资料"]
-        confidence = 0.82 if len(parts) > 2 else 0.45
+        has_business_context = len(parts) > 2 or any(
+            section in used_sections
+            for section in ("profile", "customer_brief")
+        )
+        missing_context = [] if has_business_context else ["客户近期跟进、商机、合同或回款资料"]
+        retrieval = coerce_json_dict(customer_context.get("retrieval"))
+        retrieval_status = _text(retrieval.get("status"))
+        has_grounding = bool(citations) and retrieval_status == "ok"
+        degraded = retrieval_status in {"embedding_unavailable", "failed", "disabled"}
+        retrieval_weak = retrieval_status in {"low_confidence", "empty", "skipped_empty_query"}
+        if has_grounding:
+            answer_mode = "grounded"
+            confidence = 0.86
+        elif degraded and has_business_context:
+            answer_mode = "degraded"
+            confidence = 0.72
+        elif retrieval_weak and has_business_context:
+            answer_mode = "fallback"
+            confidence = 0.74
+            missing_context = _unique_texts([*missing_context, "可引用的高置信度语义证据"])
+        elif has_business_context:
+            answer_mode = "fallback"
+            confidence = 0.82
+        else:
+            answer_mode = "insufficient"
+            confidence = 0.45
         return CustomerContextAnswerResult(
             answer=answer,
             confidence=confidence,
             used_sections=_unique_texts(used_sections),
             missing_context=missing_context,
+            answer_mode=answer_mode,
+            citations=citations,
         )
 
     @classmethod
     def _clean_result(cls, result: CustomerContextAnswerResult) -> CustomerContextAnswerResult:
         answer = cls._normalize_markdown_answer(cls._remove_technical_tokens(result.answer))
         return result.model_copy(update={"answer": answer})
+
+    @classmethod
+    def _with_answer_metadata(
+        cls,
+        result: CustomerContextAnswerResult,
+        customer_context: JsonObject,
+    ) -> CustomerContextAnswerResult:
+        context_citations = _citations_from_context(customer_context)
+        retrieval = coerce_json_dict(customer_context.get("retrieval"))
+        retrieval_status = _text(retrieval.get("status"))
+        candidate_citations = _object_list(result.citations)
+        citations = (
+            _validated_citations(candidate_citations, context_citations)
+            if candidate_citations
+            else context_citations
+        )
+        if retrieval_status != "ok":
+            citations = []
+        answer_mode = result.answer_mode
+        if citations and retrieval_status == "ok":
+            answer_mode = "grounded"
+        elif retrieval_status == "ok" and result.answer.strip():
+            answer_mode = "fallback"
+        elif retrieval_status in {"embedding_unavailable", "failed", "disabled"}:
+            answer_mode = "degraded"
+        elif retrieval_status in {"low_confidence", "empty", "skipped_empty_query"}:
+            answer_mode = "fallback" if result.answer.strip() else "insufficient"
+        elif not result.answer.strip():
+            answer_mode = "insufficient"
+        missing_context = list(result.missing_context or [])
+        if answer_mode == "fallback" and retrieval_status in {"low_confidence", "empty", "skipped_empty_query"}:
+            missing_context = _unique_texts([*missing_context, "可引用的高置信度语义证据"])
+        if answer_mode == "fallback" and retrieval_status == "ok" and not citations:
+            missing_context = _unique_texts([*missing_context, "可验证的语义证据引用"])
+        return result.model_copy(update={
+            "answer_mode": answer_mode,
+            "citations": citations,
+            "missing_context": missing_context,
+        })
 
     @staticmethod
     def _remove_technical_tokens(text: str) -> str:
@@ -347,6 +486,64 @@ def _text(value: object) -> str:
     return str(value).strip()
 
 
+def _citations_from_context(customer_context: JsonObject) -> list[JsonObject]:
+    raw_citations = _object_list(customer_context.get("citations"))
+    if not raw_citations:
+        raw_citations = _object_list(customer_context.get("semantic_evidence"))
+
+    citations: list[JsonObject] = []
+    seen: set[str] = set()
+    for item in raw_citations[:8]:
+        evidence_id = _text(item.get("evidence_id"))
+        source_type = _text(item.get("source_type"))
+        source_object_id = _text(item.get("source_object_id"))
+        title = _text(item.get("title"))
+        text = _text(item.get("text"))
+        key = evidence_id or f"{source_type}:{source_object_id}:{title}"
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        citation: JsonObject = {
+            "evidence_id": evidence_id or None,
+            "source_type": source_type or None,
+            "source_object_id": source_object_id or None,
+            "business_object_type": _text(item.get("business_object_type")) or None,
+            "business_object_id": _text(item.get("business_object_id")) or None,
+            "title": title or None,
+            "text": text[:500] if text else None,
+        }
+        score = item.get("score")
+        if isinstance(score, int | float):
+            citation["score"] = round(float(score), 4)
+        citations.append(citation)
+    return citations
+
+
+def _validated_citations(
+    candidate_citations: list[JsonObject],
+    context_citations: list[JsonObject],
+) -> list[JsonObject]:
+    if not candidate_citations or not context_citations:
+        return []
+    by_evidence_id = {
+        _text(item.get("evidence_id")): item
+        for item in context_citations
+        if _text(item.get("evidence_id"))
+    }
+    validated: list[JsonObject] = []
+    seen: set[str] = set()
+    for item in candidate_citations:
+        evidence_id = _text(item.get("evidence_id"))
+        if not evidence_id or evidence_id in seen:
+            continue
+        citation = by_evidence_id.get(evidence_id)
+        if citation is None:
+            continue
+        seen.add(evidence_id)
+        validated.append(citation)
+    return validated
+
+
 def _label_value(label: str, value: object) -> str:
     text = _text(value)
     return f"{label}: {text}" if text else ""
@@ -416,6 +613,25 @@ def _memory_line(item: JsonObject) -> str:
             return summary.strip()
         return json.dumps(value, ensure_ascii=False, default=str)
     return _text(value)
+
+
+def _profile_detail_line(customer: JsonObject) -> str:
+    fields = [
+        _label_value("企业背景", customer.get("company_background")),
+        _label_value("主营业务", customer.get("main_business")),
+        _label_value("项目背景", customer.get("project_background")),
+        _label_value("同行客户参考", customer.get("similar_customers")),
+    ]
+    return "; ".join(item for item in fields if item)
+
+
+def _brief_line(customer: JsonObject) -> str:
+    brief = _text(customer.get("customer_brief_markdown"))
+    if not brief:
+        return ""
+    without_headings = re.sub(r"^#{1,6}\s*", "", brief, flags=re.MULTILINE)
+    compact = re.sub(r"\s+", " ", without_headings).strip()
+    return compact[:500].rstrip()
 
 
 def _unique_texts(values: list[str]) -> list[str]:

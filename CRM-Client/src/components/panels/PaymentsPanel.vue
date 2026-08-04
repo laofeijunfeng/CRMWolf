@@ -19,7 +19,7 @@ import type { PaymentPlanResponse } from '@/api/payment'
 type PaymentPlanActionPredicate = (plan: PaymentPlanResponse) => boolean
 
 interface Props {
-  customerId: number
+  customerId: string
   payments: PaymentPlanResponse[]
   loading?: boolean
   showAdd?: boolean

@@ -42,7 +42,7 @@ export const LicenseApplicationSchema = z.object({
   id: z.number().int().positive(),
   team_id: z.number().int().positive(),
   application_number: z.string().min(1, '申请单号不能为空'),
-  customer_id: z.number().int().positive(),
+  customer_id: z.string().min(1),
   deployment_info_id: z.number().int().nullable(),
   contract_id: z.number().int().nullable(),
   authorized_users: z.number().int().positive('使用人数必须大于0'),

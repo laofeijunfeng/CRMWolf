@@ -16,6 +16,7 @@ import httpx
 
 from app.crud.ai_config import ai_config_crud
 from app.schemas.lead_parse import LeadFollowUpParseInfo
+from app.utils.time import business_now
 
 
 # 系统提示词：用于从文本中提取跟进信息
@@ -152,7 +153,7 @@ class FollowUpParserService:
         if not time_text:
             return None
 
-        base_date = base_date or datetime.now()
+        base_date = base_date or business_now()
         time_text = time_text.strip().lower()
 
         # 先尝试标准日期格式
@@ -228,7 +229,7 @@ class FollowUpParserService:
         if month_day_match:
             month = int(month_day_match.group(1))
             day = int(month_day_match.group(2))
-            year = datetime.now().year
+            year = business_now().year
             try:
                 return datetime(year, month, day)
             except ValueError:
@@ -265,7 +266,7 @@ class FollowUpParserService:
         Returns:
             格式化后的系统提示词
         """
-        current_date = datetime.now()
+        current_date = business_now()
         next_week_example = (current_date + timedelta(days=7)).strftime("%Y-%m-%d")
 
         return PARSE_FOLLOW_UP_SYSTEM_PROMPT_TEMPLATE.format(
@@ -376,7 +377,7 @@ class FollowUpParserService:
                         if next_follow_time_raw:
                             next_follow_time_dt = self.parse_relative_time(
                                 next_follow_time_raw,
-                                base_date=datetime.now()
+                                base_date=business_now()
                             )
 
                         # 如果能转换成功，使用具体日期；否则保留原始表述

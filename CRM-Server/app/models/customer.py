@@ -5,6 +5,7 @@ from app.core.database import Base
 import enum
 
 from app.utils.name_normalizer import normalize_corp_name  # R-ST-02
+from app.utils.public_id import generate_public_id
 
 
 class CustomerIndustry(str, enum.Enum):
@@ -63,6 +64,7 @@ class Customer(Base):
     __tablename__ = "crm_customers"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    public_id = Column(String(64), nullable=False, unique=True, index=True, default=lambda: generate_public_id("cus"), comment="对外客户ID")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     account_name = Column(String(255), nullable=False, comment="客户公司名称")
     account_name_norm = Column(String(255), nullable=True, comment="归一化客户名称（去后缀/括号）")  # R-ST-02
@@ -129,6 +131,7 @@ class Customer(Base):
         Index('idx_source_lead_id', 'source_lead_id'),
         Index('idx_created_time', 'created_time'),
         Index('idx_team_id', 'team_id'),
+        Index('idx_customer_public_id', 'public_id'),
         {'comment': '客户/公司表'}
     )
 

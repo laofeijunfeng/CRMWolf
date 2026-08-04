@@ -14,6 +14,7 @@ from app.crud.agent import agent_session_crud, agent_task_crud
 from app.crud.procurement import procurement_method_crud
 from app.models.agent import AgentTaskStatus
 from app.models.customer import Customer
+from app.models.lead import Lead
 from app.schemas.agent import (
     AgentCreateSessionRequest,
     AgentSessionCreate,
@@ -60,6 +61,40 @@ WAITING_TASK_EVENT_TYPES = frozenset({
 
 def _new_task_key() -> str:
     return f"task_{uuid.uuid4().hex}"
+
+
+def _task_target_id(db: Session, *, team_id: int, target_type: str | None, target_id: object) -> int | None:
+    """Return the internal integer id stored on crm_agent_tasks.
+
+    Agent tool payloads use public ids such as ``cus_...`` and ``lead_...``.
+    The task table keeps an integer target_id for historical audit/indexing, so
+    task creation/update must normalize at that boundary only.
+    """
+    if target_id is None:
+        return None
+    if isinstance(target_id, int):
+        return target_id
+    if isinstance(target_id, str):
+        value = target_id.strip()
+        if not value:
+            return None
+        if value.isdigit():
+            return int(value)
+        if target_type == "customer":
+            customer = (
+                db.query(Customer.id)
+                .filter(Customer.team_id == team_id, Customer.public_id == value)
+                .first()
+            )
+            return int(customer[0]) if customer else None
+        if target_type == "lead":
+            lead = (
+                db.query(Lead.id)
+                .filter(Lead.team_id == team_id, Lead.public_id == value)
+                .first()
+            )
+            return int(lead[0]) if lead else None
+    return None
 
 
 def _is_waiting_task_event(event: dict[str, object]) -> bool:
@@ -111,6 +146,7 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
         required_for_tools=[_tool_name_for_action(action)] if _tool_name_for_action(action) else [],
         confirmation_summary=confirmation_summary,
     )
+    target_type = "lead" if intent == "CREATE_LEAD" else "customer"
     task = agent_task_crud.create(
         db,
         AgentTaskCreate(
@@ -120,8 +156,13 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
             session_id=session.id,
             intent=intent,
             status=AgentTaskStatus.WAITING_USER,
-            target_type="lead" if intent == "CREATE_LEAD" else "customer",
-            target_id=payload.get("customer_id"),
+            target_type=target_type,
+            target_id=_task_target_id(
+                db,
+                team_id=team_id,
+                target_type=target_type,
+                target_id=payload.get("lead_id") if target_type == "lead" else payload.get("customer_id"),
+            ),
             summary=confirmation_summary,
             input_json=payload,
             state_json={

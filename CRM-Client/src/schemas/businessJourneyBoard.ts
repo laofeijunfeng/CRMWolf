@@ -54,7 +54,7 @@ export const BusinessJourneyInvoiceSummarySchema = z.object({
 export const BusinessJourneyBoardCardSchema = z.object({
   journey_id: z.number(),
   journey_name: z.string(),
-  customer_id: z.number(),
+  customer_id: z.string(),
   customer_name: z.string().nullable().optional(),
   owner: BusinessJourneyBoardOwnerSchema.nullable().optional(),
   status: z.string(),

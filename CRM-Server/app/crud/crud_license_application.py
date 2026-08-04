@@ -23,6 +23,7 @@ from app.schemas.license_application import (
     LicenseApplicationApprove,
     LicenseApplicationApproveFull
 )
+from app.utils.time import business_now
 
 
 def parse_license_info(license_text: str) -> Dict[str, str]:
@@ -521,7 +522,7 @@ class LicenseApplicationCRUD:
         application.status = LicenseApplicationStatus.ISSUED
         application.license_code = issue_data.license_code
         application.approver_id = issuer_id
-        application.approved_time = datetime.now()
+        application.approved_time = business_now()
 
         db.commit()
         db.refresh(application)
@@ -551,7 +552,7 @@ class LicenseApplicationCRUD:
         application.server_license_code = parsed_data.get('server_license_code')
         application.client_license_code = parsed_data.get('client_license_code')
         application.approver_id = issuer_id
-        application.approved_time = datetime.now()
+        application.approved_time = business_now()
 
         db.commit()
         db.refresh(application)

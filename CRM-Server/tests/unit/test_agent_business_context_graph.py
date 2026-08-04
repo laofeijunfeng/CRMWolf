@@ -166,6 +166,69 @@ async def test_business_context_graph_accepts_numeric_string_customer_id():
 
 
 @pytest.mark.asyncio
+async def test_business_context_graph_accepts_public_customer_id():
+    registry = FakeToolRegistry()
+    service = BusinessContextGraphService(
+        tool_registry=registry,
+        suggestion_generator=FakeSuggestionGenerator(),
+        checkpointer=InMemorySaver(),
+    )
+
+    await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "content": "南京汇川技术有限公司现在是什么情况",
+        "authorization": "Bearer test",
+        "current_date": "2026-08-04",
+        "selected_customer": {
+            "id": "cus_cf52651d705449f09430c9ce1eb46fc4",
+            "account_name": "南京汇川技术有限公司",
+        },
+        "semantic_result": semantic_result(intent="CUSTOMER_QUERY"),
+        "events": [],
+    })
+
+    assert registry.calls[0]["payload"] == {
+        "customer_id": "cus_cf52651d705449f09430c9ce1eb46fc4",
+        "query_text": "南京汇川技术有限公司现在是什么情况",
+    }
+
+
+@pytest.mark.asyncio
+async def test_business_context_graph_prefers_public_id_when_numeric_internal_id_is_present():
+    registry = FakeToolRegistry()
+    service = BusinessContextGraphService(
+        tool_registry=registry,
+        suggestion_generator=FakeSuggestionGenerator(),
+        checkpointer=InMemorySaver(),
+    )
+
+    await service.run({
+        "db": object(),
+        "team_id": 1,
+        "user_id": 2,
+        "session_id": 3,
+        "content": "南京汇川技术有限公司联系人是谁",
+        "authorization": "Bearer test",
+        "current_date": "2026-08-04",
+        "selected_customer": {
+            "id": 101,
+            "public_id": "cus_cf52651d705449f09430c9ce1eb46fc4",
+            "account_name": "南京汇川技术有限公司",
+        },
+        "semantic_result": semantic_result(intent="CUSTOMER_QUERY"),
+        "events": [],
+    })
+
+    assert registry.calls[0]["payload"] == {
+        "customer_id": "cus_cf52651d705449f09430c9ce1eb46fc4",
+        "query_text": "南京汇川技术有限公司联系人是谁",
+    }
+
+
+@pytest.mark.asyncio
 async def test_business_context_graph_does_not_generate_suggestions_for_customer_query():
     registry = FakeToolRegistry()
     suggestion_generator = FakeSuggestionGenerator()

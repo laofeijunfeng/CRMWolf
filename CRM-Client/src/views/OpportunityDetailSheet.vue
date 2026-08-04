@@ -20,7 +20,7 @@ import { confirmDelete } from '@/utils/confirmDialog'
 
 interface CreateContractPayload {
   opportunityId: number
-  customerId: number
+  customerId: string
   customerName: string
   opportunityName: string
   totalAmount: number
@@ -32,7 +32,7 @@ interface CreateContractPayload {
 interface ContractOpportunityContext {
   id: number
   opportunity_name: string
-  customer_id: number
+  customer_id: string
   customer_name?: string
   total_amount: number
   user_count: number
@@ -58,7 +58,7 @@ const emit = defineEmits<{
 // Contract dialog state
 const showContractDialog = ref(false)
 const opportunityDetailContentRef = ref<OpportunityDetailContentExpose | null>(null)
-const contractDialogCustomerId = ref<number | undefined>(undefined)
+const contractDialogCustomerId = ref<string | undefined>(undefined)
 const contractDialogCustomerName = ref<string | undefined>(undefined)
 const contractDialogOpportunity = ref<ContractOpportunityContext | null>(null)
 const editingContract = ref<ContractResponse | null>(null)

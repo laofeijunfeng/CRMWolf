@@ -523,7 +523,24 @@ def _selection_id_from_text(content: str) -> str | None:
 
 
 def _is_confirmation_text(content: str) -> bool:
-    return content.strip().lower() in {"确认", "确定", "是", "好的", "好", "可以", "执行", "继续", "yes", "y", "ok"}
+    return content.strip().lower() in {
+        "确认",
+        "确认执行",
+        "确认创建",
+        "确认新增",
+        "确定",
+        "确定执行",
+        "是",
+        "好的",
+        "好",
+        "可以",
+        "执行",
+        "继续",
+        "继续执行",
+        "yes",
+        "y",
+        "ok",
+    }
 
 
 def _is_rejection_text(content: str) -> bool:

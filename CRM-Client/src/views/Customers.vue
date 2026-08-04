@@ -72,7 +72,7 @@ const selectedCustomer = ref<CustomerResponse | null>(null)
 const transferCustomer = ref<CustomerResponse | null>(null)
 const transferDialogOpen = ref(false)
 const showCustomerForm = ref(false)
-const editingCustomerId = ref<number | null>(null)
+const editingCustomerId = ref<string | null>(null)
 
 // CustomerDetailSheet URL query 状态
 const customerDetailQueryKeys = ['customerId', 'tab', 'opportunityId'] as const
@@ -86,12 +86,6 @@ const getSingleQueryValue = (query: LocationQuery, key: string): string | null =
     return value.find((item): item is string => typeof item === 'string' && item.trim() !== '') ?? null
   }
   return null
-}
-
-const parsePositiveIntegerQueryValue = (value: string | null): number | null => {
-  if (value === null) return null
-  const parsed = Number(value)
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
 const copyQueryWithoutCustomerDetailKeys = (query: LocationQuery): LocationQueryRaw => {
@@ -112,7 +106,7 @@ const copyQueryWithoutCustomerDetailKeys = (query: LocationQuery): LocationQuery
   return nextQuery
 }
 
-const openCustomerDetail = (customerId: number): void => {
+const openCustomerDetail = (customerId: string): void => {
   const query = copyQueryWithoutCustomerDetailKeys(route.query)
   query['customerId'] = String(customerId)
   router.push({ path: route.path, query })
@@ -125,7 +119,7 @@ const closeCustomerDetail = (): void => {
   })
 }
 
-const selectedCustomerId = computed(() => parsePositiveIntegerQueryValue(getSingleQueryValue(route.query, 'customerId')))
+const selectedCustomerId = computed(() => getSingleQueryValue(route.query, 'customerId'))
 const sheetVisible = computed({
   get: () => selectedCustomerId.value !== null,
   set: (visible: boolean) => {
@@ -137,7 +131,7 @@ const sheetVisible = computed({
 
 // 商机弹窗状态
 const opportunityDialogOpen = ref(false)
-const opportunityCustomerId = ref<number | null>(null)
+const opportunityCustomerId = ref<string | null>(null)
 const opportunityCustomerName = ref('')
 
 const pagination = reactive({
@@ -369,7 +363,7 @@ const getIndustryBadgeStatus = (row: CustomerResponse): string => {
 const isCustomerResponse = (row: unknown): row is CustomerResponse => {
   if (typeof row !== 'object' || row === null) return false
   const record = row as Record<string, unknown>
-  return typeof record['id'] === 'number' &&
+  return typeof record['id'] === 'string' &&
     typeof record['account_name'] === 'string' &&
     typeof record['city'] === 'string' &&
     typeof record['status'] === 'number'

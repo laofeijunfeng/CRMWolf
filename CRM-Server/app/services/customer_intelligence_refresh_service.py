@@ -50,6 +50,7 @@ from app.services.customer_vector_document_service import (
     CustomerVectorDocumentService,
     customer_vector_document_service,
 )
+from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +180,7 @@ class CustomerIntelligenceRefreshService:
             change_id=uuid4().hex,
             summary=summary,
             payload=payload,
-            occurred_at=datetime.now(),
+            occurred_at=business_now(),
         )
         return await self.trigger_committed_event_refresh(
             db,
@@ -211,7 +212,7 @@ class CustomerIntelligenceRefreshService:
             change_id=uuid4().hex,
             summary=summary,
             payload=payload,
-            occurred_at=datetime.now(),
+            occurred_at=business_now(),
         )
         return self.enqueue_committed_event_refresh(
             db,
@@ -542,7 +543,7 @@ class CustomerIntelligenceRefreshService:
                 "pending_customers": 0,
                 "failed_customers": 0,
             }
-        current_time = datetime.now()
+        current_time = business_now()
         obsolete_historical_runs = self._close_obsolete_historical_backfill_runs(
             db,
             team_id=team_id,
@@ -699,7 +700,7 @@ class CustomerIntelligenceRefreshService:
         return updated
 
     def _build_event(self, request: CustomerIntelligenceRefreshRequest) -> CustomerIntelligenceEvent:
-        occurred_at = datetime.now()
+        occurred_at = business_now()
         if request.trigger_type == "manual_refresh_requested":
             return self.event_service.manual_refresh_requested(
                 team_id=request.team_id,

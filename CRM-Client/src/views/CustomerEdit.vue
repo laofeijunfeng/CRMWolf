@@ -46,7 +46,7 @@ const loading = ref(false)
 const submitting = ref(false)
 const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
 
-const customerId = computed(() => Number(route.params['id']))
+const customerId = computed(() => String(route.params['id'] ?? ''))
 const isEdit = computed(() => !!customerId.value)
 
 // VeeValidate form setup

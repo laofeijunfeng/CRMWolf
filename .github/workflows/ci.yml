@@ -118,6 +118,12 @@ jobs:
           DATABASE_URL: mysql+pymysql://root:test@localhost:3306/crm_test
           REDIS_URL: redis://localhost:6379
 
+      - name: Run CRM Agent golden eval
+        run: cd CRM-Server && python scripts/run_customer_context_answer_eval.py
+        env:
+          DATABASE_URL: mysql+pymysql://root:test@localhost:3306/crm_test
+          REDIS_URL: redis://localhost:6379
+
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:

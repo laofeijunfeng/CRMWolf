@@ -6,7 +6,7 @@ import { z } from 'zod'
 
 export interface CustomerAIParseRequest {
   content: string
-  customer_id: number
+  customer_id: string
   customer_name: string
 }
 
@@ -21,13 +21,13 @@ export interface CustomerAIParseSSEEvent {
   event: 'status' | 'content' | 'parsed' | 'error'
   message?: string
   content?: string
-  customer_id?: number
+  customer_id?: string
   customer_name?: string
   follow_up_info?: CustomerAIActivityInfo
 }
 
 export interface CustomerAICreateRequest {
-  customer_id: number
+  customer_id: string
   customer_name: string
   content: string
   method?: string | undefined
@@ -37,7 +37,7 @@ export interface CustomerAICreateRequest {
 
 const CustomerAICreateResponseSchema = z.object({
   id: z.number(),
-  customer_id: z.number(),
+  customer_id: z.string(),
   source_content: z.string(),
   activity_kind: z.string()
 })

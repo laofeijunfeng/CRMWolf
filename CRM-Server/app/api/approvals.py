@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType, is_valid_business_type
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
@@ -49,6 +48,7 @@ from app.services.approval_adapter import (
     get_approval_customer_name,
     get_approval_type_name,
 )
+from app.services.approval_transaction_manager import approval_transaction_manager
 from app.services.customer_approval_intelligence_service import (
     CustomerApprovalChangeRefreshInput,
     customer_approval_intelligence_service,
@@ -1740,9 +1740,8 @@ async def bulk_approve(
 
 **功能说明：**
 - 按 entity_type 走对应适配器取实体；不存在 → 404
-- match_flow_generic 匹配审批流程；未匹配统一报错并提示配置审批流程
-- 创建审批实例（create_approval_generic），状态置 PENDING
-- 通知由 Task A8 泛化，本端点暂不发送
+- 统一通过 ApprovalTransactionManager 提交审批，覆盖驳回重提、状态流转、审批实例创建
+- 通知在提交事务 commit 后发送，失败不阻断业务流程
 
 **路径参数：**
 - entity_type: CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY
@@ -1767,50 +1766,25 @@ async def submit_generic_approval(
             detail="业务单据不存在",
         )
 
-    if hasattr(entity, "approval_phase"):
-        allowed_phases = {
-            ApprovalPhase.DRAFT,
-            ApprovalPhase.REJECTED,
-            ApprovalPhase.DRAFT.value,
-            ApprovalPhase.REJECTED.value,
-        }
-        if entity.approval_phase not in allowed_phases:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"单据状态不允许提交审批（当前状态：{entity.approval_phase})",
-            )
-
-    flow, err = approval_flow_crud.match_flow_generic(
-        db, entity_type, team_id, **adapter.match_kwargs(entity)
+    ap, error_msg = approval_transaction_manager.submit_for_approval(
+        db=db,
+        business_type=entity_type,
+        entity_id=entity_id,
+        team_id=team_id,
+        submitter_id=str(current_user.id),
+        submitter_name=current_user.name,
+        send_notification=False,
     )
-    if flow is None:
+    if ap is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=err or "未找到匹配的审批流程，请联系管理员创建或完善审批流程",
-        )
-
-    submitter_id = str(current_user.id)
-    submitter_name = current_user.name
-
-    try:
-        ap = approval_crud.create_approval_generic(
-            db, entity_type, entity_id, team_id, flow,
-            submitter_id, submitter_name,
-        )
-        if hasattr(entity, "approval_phase"):
-            entity.approval_phase = ApprovalPhase.PENDING_REVIEW
-            db.commit()
-            db.refresh(ap)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+            detail=error_msg or "提交审批失败",
         )
 
     log_approval_operation(
         operation="Submit",
         approval_id=ap.id,
-        flow_name=flow.flow_name,
+        flow_name=ap.flow.flow_name if ap.flow else None,
         node_name=ap.current_node.node_name if ap.current_node else None,
         operator=current_user.name,
         flow_direction="submitted",
@@ -1818,41 +1792,21 @@ async def submit_generic_approval(
         business_id=entity_id,
     )
 
-    # 通知泛化（A8）：按 entity_type 走适配器取展示名，分发给当前节点审批人
-    notification_status = "skipped"
+    notification_result = await approval_transaction_manager.send_notification(
+        db,
+        ap,
+        adapter.get_entity(db, entity_id, team_id) or entity,
+        team_id,
+    )
     if ap.current_node:
-        try:
-            entity_name = adapter.get_name(entity)
-            notify_users = get_notification_users_for_node(db, ap.current_node, team_id)
-            result = await feishu_notification_service.notify_approval_pending(
-                db=db,
-                team_id=team_id,
-                user_ids=[user.id for user in notify_users],
-                entity_type=entity_type,
-                entity_name=entity_name,
-                flow_name=flow.flow_name,
-                node_name=ap.current_node.node_name,
-                business_id=entity_id,
-                submitter_name=current_user.name,
-                approval_type_name=get_approval_type_name(entity_type),
-                customer_name=get_approval_customer_name(db, entity_type, entity),
-                detail_fields=get_approval_card_fields(db, entity_type, entity),
-            )
-            notification_status = _feishu_notification_status(result)
-        except Exception as notify_error:
-            notification_status = "failed"
-            logger.error(
-                f"[Approval] Submit notification failed: entity_type={entity_type}, "
-                f"business_id={entity_id}, error={str(notify_error)}"
-            )
         log_approval_operation(
             operation="Submit",
             approval_id=ap.id,
-            flow_name=flow.flow_name,
+            flow_name=ap.flow.flow_name if ap.flow else None,
             node_name=ap.current_node.node_name,
             operator=current_user.name,
             flow_direction="submitted",
-            notification_status=notification_status,
+            notification_status=_feishu_notification_status(notification_result),
             business_type=entity_type,
             business_id=entity_id,
         )

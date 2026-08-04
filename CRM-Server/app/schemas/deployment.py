@@ -30,7 +30,7 @@ class DeploymentInfoBase(BaseModel):
 
 class DeploymentInfoCreate(DeploymentInfoBase):
     """创建部署信息请求模型"""
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
 
 
 class DeploymentInfoUpdate(BaseModel):
@@ -64,7 +64,7 @@ class DeploymentInfoUpdate(BaseModel):
 class DeploymentInfoResponse(DeploymentInfoBase):
     """部署信息响应模型"""
     id: int = Field(..., description="部署信息ID")
-    customer_id: int = Field(..., description="关联客户ID")
+    customer_id: str = Field(..., description="关联客户对外ID")
     team_id: int = Field(..., description="团队ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")

@@ -32,6 +32,7 @@ from app.services.customer_activity_ai.structuring_agent import (
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.follow_up_parser import follow_up_parser_service
 from app.services.industry_display_service import industry_display_service
+from app.utils.time import business_now
 
 
 logger = logging.getLogger(__name__)
@@ -237,7 +238,8 @@ class CustomerActivityAIWorkflow:
         return {
             "current_activity": self._activity_to_dict(activity),
             "customer": {
-                "id": customer.id,
+                "id": customer.public_id,
+                "public_id": customer.public_id,
                 "account_name": customer.account_name,
                 "industry_code": customer.industry,
                 "industry_name": industry_display_service.display_name(db, customer.industry),
@@ -300,7 +302,7 @@ class CustomerActivityAIWorkflow:
             return None
         return follow_up_parser_service.parse_relative_time(
             next_follow_time_text,
-            base_date=activity.occurred_at or datetime.now(),
+            base_date=activity.occurred_at or business_now(),
         )
 
     def _can_ai_update_next_follow_time(self, activity: CustomerActivity) -> bool:

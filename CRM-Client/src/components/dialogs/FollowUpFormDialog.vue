@@ -54,7 +54,7 @@ const schema = toTypedSchema(
 )
 
 interface Props {
-  customerId: number
+  customerId: string
   open: boolean
 }
 

@@ -50,7 +50,7 @@ class LicenseApplication(Base):
     approval_phase = Column(
         String(20),
         nullable=False,
-        default=ApprovalPhase.DRAFT,
+        default=ApprovalPhase.DRAFT.value,
         comment="审批流程状态：draft/pending_review/approved/rejected"
     )
     applicant_id = Column(String(100), nullable=False, comment="申请人系统用户ID")
