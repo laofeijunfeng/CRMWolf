@@ -290,6 +290,7 @@ class PaymentPlanCRUD:
             secondary_resource_id=contract_id,
             operator_id=creator_id,
             operator_name=operator_name,
+            team_id=team_id,
             content={
                 "contractNumber": contract.contract_number,
                 "contractName": contract.contract_name,

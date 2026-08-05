@@ -710,6 +710,7 @@ class CustomerCRUD:
             resource_id=customer.id,
             operator_id=operator_id or "system",
             operator_name=operator_name,
+            team_id=customer.team_id,
             content={
                 "customerName": customer.account_name,
                 "lossReason": loss_reason
