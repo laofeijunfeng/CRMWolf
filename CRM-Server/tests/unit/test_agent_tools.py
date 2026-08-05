@@ -854,6 +854,51 @@ async def test_agent_tool_search_customers_uses_persisted_identity_term():
 
 
 @pytest.mark.asyncio
+async def test_agent_tool_search_customers_resolves_short_core_customer_name():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+        CustomerIdentityTerm.__table__,
+    ])
+    from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
+
+    service = CRMAgentToolService(
+        api_client=EmptyCustomerSearchCRMAPIClient(),
+        knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
+        identity_resolution_service=CustomerIdentityResolutionService(),
+    )
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
+        db.add(Customer(
+            id=609,
+            team_id=1,
+            account_name="华米（北京）信息科技有限公司",
+            city="北京",
+            status=0,
+            creator_id="2",
+        ))
+        db.commit()
+        service.identity_resolution_service.rebuild_customer_identity_terms(db, team_id=1, customer_id=609)
+        db.commit()
+
+        result = await service.search_customers(_context(db), "华米", limit=5)
+
+        assert result.success is True
+        assert result.data["items"][0]["account_name"] == "华米（北京）信息科技有限公司"
+        assert result.data["items"][0]["match"]["source"] in {"customer_identity_term", "hybrid_identity"}
+        assert result.data["items"][0]["match"]["score"] >= 0.9
+        assert result.data["retrieval"]["identity_decision"] == "auto_select"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_search_customers_marks_close_identity_matches_ambiguous():
     engine, db = _db_session([
         User.__table__,

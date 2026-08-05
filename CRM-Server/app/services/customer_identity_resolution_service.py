@@ -514,6 +514,8 @@ def _score_identity_text(*, query: str, term: str, term_type: str, confidence: f
     if normalized_query == normalized_term:
         base = 0.98 if term_type in {"alias", "full_name", "normalized_name"} else 0.94
         return min(1.0, max(base, bounded_confidence + 0.08)), "客户身份匹配词精确匹配"
+    if len(normalized_query) == 2 and normalized_term.startswith(normalized_query):
+        return max(0.9, min(0.94, bounded_confidence + 0.04)), "客户核心简称前缀匹配"
     if normalized_query in normalized_term and len(normalized_query) >= 3:
         return max(0.88, min(0.94, bounded_confidence + 0.04)), "客户名称包含匹配"
     if normalized_term in normalized_query and len(normalized_term) >= 3:
