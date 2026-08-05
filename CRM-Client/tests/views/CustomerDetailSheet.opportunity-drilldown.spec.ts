@@ -23,7 +23,6 @@ const opportunityApi = vi.hoisted(() => ({ getOpportunities: vi.fn() }))
 const contractApi = vi.hoisted(() => ({ getCustomerContracts: vi.fn() }))
 const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn() }))
 const deploymentApi = vi.hoisted(() => ({ list: vi.fn() }))
-const getCustomerScore = vi.hoisted(() => vi.fn())
 const handleApiError = vi.hoisted(() => vi.fn())
 const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn() }))
 
@@ -58,7 +57,6 @@ vi.mock('@/api/opportunity', () => ({ opportunityApi }))
 vi.mock('@/api/contract', () => ({ default: contractApi }))
 vi.mock('@/api/invoice', () => ({ default: invoiceApi }))
 vi.mock('@/api/deployment', () => ({ default: deploymentApi }))
-vi.mock('@/api/score', () => ({ getCustomerScore }))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
 vi.mock('vue-sonner', () => ({ toast }))
 
@@ -116,7 +114,6 @@ vi.mock('@/components/ui/accordion', () => ({
   AccordionContent: defineComponent({ name: 'AccordionContent', setup: (_, { slots }) => () => h('div', slots.default?.()) }),
 }))
 
-vi.mock('@/components/ScoreIndicator.vue', () => ({ default: defineComponent({ name: 'ScoreIndicator', setup: () => () => h('div') }) }))
 vi.mock('@/components/panels/FollowUpPanel.vue', () => ({ default: defineComponent({ name: 'FollowUpPanel', setup: () => () => h('div', 'followup') }) }))
 vi.mock('@/components/panels/ContactsPanel.vue', () => ({ default: defineComponent({ name: 'ContactsPanel', setup: () => () => h('div', 'contacts') }) }))
 vi.mock('@/components/panels/OpportunitiesPanel.vue', () => ({
@@ -233,7 +230,6 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     routeState.path = '/customers'
     routeState.query = {}
     customerApi.getCustomerDetail.mockResolvedValue(customerFixture())
-    getCustomerScore.mockResolvedValue(null)
     customerActivityApi.getActivities.mockResolvedValue([])
     opportunityApi.getOpportunities.mockResolvedValue([opportunityFixture()])
     contractApi.getCustomerContracts.mockResolvedValue([])
@@ -323,7 +319,6 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await flushPromises()
 
     customerApi.getCustomerDetail.mockClear()
-    getCustomerScore.mockClear()
     customerActivityApi.getActivities.mockClear()
     opportunityApi.getOpportunities.mockClear()
     contractApi.getCustomerContracts.mockClear()
@@ -335,7 +330,6 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await flushPromises()
 
     expect(customerApi.getCustomerDetail).toHaveBeenCalledWith(42)
-    expect(getCustomerScore).toHaveBeenCalledWith(42)
     expect(customerActivityApi.getActivities).toHaveBeenCalledWith(42)
     expect(opportunityApi.getOpportunities).toHaveBeenCalledWith({ customer_id: 42 })
     expect(contractApi.getCustomerContracts).toHaveBeenCalledWith(42)

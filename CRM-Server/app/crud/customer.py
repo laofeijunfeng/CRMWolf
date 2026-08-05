@@ -206,10 +206,6 @@ class CustomerCRUD:
             team_id=team_id  # ✅ 必须传递 team_id（团队隔离）
         )
 
-        # 触发热力值初始计算
-        from app.triggers.score_triggers import score_trigger
-        score_trigger.on_customer_created(db, db_obj.id, team_id)
-
         return db_obj
 
     def update(self, db: Session, db_obj: Customer, obj_in: CustomerUpdate) -> Customer:
@@ -481,10 +477,6 @@ class CustomerCRUD:
             customer_id=customer.id
         )
 
-        # 触发客户热力值初始计算
-        from app.triggers.score_triggers import score_trigger
-        score_trigger.on_customer_created(db, customer.id, team_id)
-
         return customer, contact
 
     def get_statistics(self, db: Session, team_id: int, owner_id: Optional[str] = None) -> dict:
@@ -556,10 +548,6 @@ class CustomerCRUD:
         db.commit()
         db.refresh(customer)
 
-        # 触发客户热力值更新（公海操作）
-        from app.triggers.score_triggers import score_trigger
-        score_trigger.on_customer_pool_operation(db, customer.id, team_id)
-
         return customer
 
     def get_public_customers(
@@ -624,10 +612,6 @@ class CustomerCRUD:
 
         db.commit()
         db.refresh(customer)
-
-        # 触发客户热力值更新（公海操作）
-        from app.triggers.score_triggers import score_trigger
-        score_trigger.on_customer_pool_operation(db, customer.id, team_id)
 
         return customer
     

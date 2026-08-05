@@ -103,9 +103,6 @@ class LeadResponse(LeadBase):
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
-    score: Optional[int] = Field(None, description="热力值分数（0-100）")
-    score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
-
     class Config:
         from_attributes = True
 

@@ -39,18 +39,6 @@ class TeamCRUD:
         db.commit()
         db.refresh(db_obj)
 
-        # 自动复制系统默认权重配置到新团队
-        from app.crud.score_weight import score_weight_crud
-        try:
-            score_weight_crud.create_team_weights_from_system(
-                db, db_obj.id, None, str(owner_id)  # 复制所有模块的权重配置
-            )
-        except Exception as e:
-            # 权重配置复制失败不影响团队创建
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"复制权重配置到新团队失败: team_id={db_obj.id}, error={str(e)}")
-
         return db_obj
 
     def update(self, db: Session, db_obj: Team, obj_in: TeamUpdate) -> Team:

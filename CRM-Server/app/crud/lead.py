@@ -95,7 +95,6 @@ class LeadCRUD:
             "owner_id": (Lead.owner_id, "text"),
             "created_time": (Lead.created_time, "date"),
             "last_modified_time": (Lead.last_modified_time, "date"),
-            "score": (Lead.score, "number"),
         }
 
         for condition in filters:
@@ -215,10 +214,6 @@ class LeadCRUD:
         db.commit()
         db.refresh(db_obj)
 
-        # 触发热力值初始计算
-        from app.triggers.score_triggers import score_trigger
-        score_trigger.on_lead_created(db, db_obj.id, team_id)
-
         return db_obj
 
     def update(self, db: Session, db_obj: Lead, obj_in: LeadUpdate) -> Lead:
@@ -277,10 +272,6 @@ class LeadCRUD:
             db.commit()
             db.refresh(lead)
 
-            # 触发热力值更新（公海操作）
-            from app.triggers.score_triggers import score_trigger
-            score_trigger.on_lead_pool_operation(db, lead_id, team_id)
-
         return lead
 
     def return_to_pool(self, db: Session, lead_id: int, team_id: int) -> Optional[Lead]:
@@ -291,10 +282,6 @@ class LeadCRUD:
             lead.version += 1
             db.commit()
             db.refresh(lead)
-
-            # 触发热力值更新（公海操作）
-            from app.triggers.score_triggers import score_trigger
-            score_trigger.on_lead_pool_operation(db, lead_id, team_id)
 
         return lead
         return lead
@@ -372,7 +359,6 @@ class LeadCRUD:
             'company_scale',
             'owner_id',
             'status',
-            'score',
             'last_modified_time',
         ]
         if order_by and order_dir and order_by in allowed_sort_fields:
@@ -450,10 +436,6 @@ class LeadFollowUpCRUD:
             team_id=team_id,
             follow_up_id=db_obj.id
         )
-
-        # 触发热力值更新（跟进记录创建）
-        from app.triggers.score_triggers import score_trigger
-        score_trigger.on_lead_follow_up_created(db, lead_id, team_id)
 
         return db_obj
 

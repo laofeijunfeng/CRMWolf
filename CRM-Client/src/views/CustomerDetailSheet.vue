@@ -19,7 +19,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Progress } from '@/components/ui/progress'
 import { ContextTabs, HoverInfo } from '@/components/crmwolf'
 import {
   Empty,
@@ -55,7 +54,6 @@ import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 
 import { Plus, Pencil, RefreshCw, Loader2, Sparkles } from 'lucide-vue-next'
-import ScoreIndicator from '@/components/ScoreIndicator.vue'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
@@ -66,7 +64,6 @@ import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfo
 import paymentApi from '@/api/payment'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
-import { getCustomerScore, type ScoreResponse } from '@/api/score'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
@@ -156,7 +153,6 @@ const opportunityDetailContentRef = ref<OpportunityDetailContentExpose | null>(n
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
-const score = ref<ScoreResponse | null>(null)
 const followUps = ref<CustomerActivityResponse[]>([])
 const opportunities = ref<OpportunityListResponse[]>([])
 const contracts = ref<ContractListResponse[]>([])
@@ -592,7 +588,6 @@ const loadAllData = async (customerId: string): Promise<void> => {
   try {
     const [
       customerDetail,
-      scoreData,
       followUpsData,
       opportunitiesData,
       contractsData,
@@ -601,7 +596,6 @@ const loadAllData = async (customerId: string): Promise<void> => {
       customerMembersData
     ] = await Promise.all([
       customerApi.getCustomerDetail(customerId),
-      getCustomerScore(customerId).catch(() => null),
       customerActivityApi.getActivities(customerId).catch(() => []),
       opportunityApi.getOpportunities({ customer_id: customerId }).catch(() => []),
       contractApi.getCustomerContracts(customerId).catch(() => []),
@@ -615,7 +609,6 @@ const loadAllData = async (customerId: string): Promise<void> => {
     }
 
     customer.value = customerDetail
-    score.value = scoreData
     followUps.value = followUpsData
     opportunities.value = normalizePaginatedResponse(opportunitiesData).items
     contracts.value = contractsData
@@ -656,19 +649,6 @@ const refreshCustomerMembers = async (): Promise<void> => {
     handleApiError(error, '刷新客户团队成员')
   }
 }
-
-// ==================== Score Helpers ====================
-// 获取分数对应颜色（用于 Progress 组件的 CSS variable）
-// 颜色映射与 Leads.vue 保持一致
-const getScoreColorValue = (scoreValue: number | null): string => {
-  if (scoreValue === null) return '#94A3B8' // gray-400
-  if (scoreValue >= 80) return '#DC2626'    // danger (高/热)
-  if (scoreValue >= 60) return '#F59E0B'    // warning
-  if (scoreValue >= 40) return '#10B981'    // success
-  return '#94A3B8'                           // gray-400 (低/未知)
-}
-
-const scoreDetailsDialogOpen = ref(false)
 
 const handleRegenerateBrief = async (): Promise<void> => {
   if (props.customerId === null) return
@@ -1131,7 +1111,6 @@ watch(() => props.visible, (visible): void => {
     // 清理状态
     activePanel.value = 'customer-brief'
     customer.value = null
-    score.value = null
     followUps.value = []
     opportunities.value = []
     contracts.value = []
@@ -1435,49 +1414,6 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
                       <div class="attribute-item">
                         <div class="attribute-label">最后修改</div>
                         <div class="attribute-value">{{ customer?.last_modified_time ? formatDate(customer.last_modified_time) : '-' }}</div>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <!-- 热力值卡片 -->
-              <Card v-if="score" class="score-card">
-                <CardContent class="p-0">
-                  <div class="p-4 border-b border-wolf-border-light-v2">
-                    <h3 class="text-sm font-semibold text-wolf-text-primary-v2">热力值</h3>
-                  </div>
-                  <div class="p-4">
-                    <div class="flex items-center gap-4">
-                      <div class="flex-shrink-0">
-                        <ScoreIndicator :score="score.score" mode="card" show-level />
-                      </div>
-                      <div class="flex-1">
-                        <Progress
-                          :model-value="score.score || 0"
-                          class="h-2"
-                          :style="{ '--progress-background': getScoreColorValue(score.score) }"
-                        />
-                        <div class="flex items-center gap-2 mt-3 text-xs text-wolf-text-tertiary-v2">
-                          <template v-for="(detail, idx) in score.details?.slice(0, 2)" :key="detail.id">
-                            <span>
-                              {{ detail.factor_name }}:
-                              <span :class="detail.score_change >= 0 ? 'text-wolf-success-text-v2' : 'text-wolf-danger-text-v2'">
-                                {{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}
-                              </span>
-                            </span>
-                            <span v-if="idx < 1 && score.details?.length > 1">·</span>
-                          </template>
-                          <Button
-                            v-if="score.details?.length > 0"
-                            variant="link"
-                            size="sm"
-                            class="h-auto p-0 text-xs"
-                            @click="scoreDetailsDialogOpen = true"
-                          >
-                            详情
-                          </Button>
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -1973,10 +1909,4 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   color: $wolf-text-secondary-v2;
 }
 
-// Score card styles
-.score-card {
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  background: $wolf-bg-card-v2;
-}
 </style>

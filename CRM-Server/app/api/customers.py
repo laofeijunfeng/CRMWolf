@@ -295,8 +295,6 @@ def _customer_response(db: Session, customer) -> CustomerResponse:
         "profile_status": customer.profile_status,
         "profile_generated_time": customer.profile_generated_time,
         "profile_error_message": customer.profile_error_message,
-        "score": customer.score,
-        "score_updated_at": customer.score_updated_at,
         "license_expiry_date": customer.license_expiry_date,
         "license_type": customer.license_type,
     })
@@ -1045,8 +1043,6 @@ def get_customers(
             'created_time': customer.created_time,
             'last_modified_time': customer.last_modified_time,
             'version': customer.version,
-            'score': customer.score,
-            'score_updated_at': customer.score_updated_at,
             'license_expiry_date': customer.license_expiry_date,
             'license_type': customer.license_type,
             'owner_info': users_info.get(customer.owner_id) if customer.owner_id else None,

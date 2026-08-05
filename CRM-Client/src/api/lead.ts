@@ -24,8 +24,6 @@ export interface Lead {
   created_time: string
   last_modified_time: string
   version: number
-  score?: number | null
-  score_updated_at?: string | null
 }
 
 export interface LeadDetail {

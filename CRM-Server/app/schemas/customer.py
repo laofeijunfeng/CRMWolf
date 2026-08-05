@@ -284,9 +284,6 @@ class CustomerResponse(BaseModel):
     profile_status: Optional[str] = Field(None, description="档案生成状态")
     profile_generated_time: Optional[datetime] = Field(None, description="档案生成完成时间")
     profile_error_message: Optional[str] = Field(None, description="档案生成失败原因")
-    # 热力值字段
-    score: Optional[int] = Field(None, description="热力值分数（0-100）")
-    score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
@@ -416,9 +413,6 @@ class CustomerDetailResponse(BaseModel):
     customer_brief_generated_time: Optional[datetime] = None
     customer_brief_error_message: Optional[str] = None
     customer_intelligence_has_inputs: bool = Field(False, description="是否存在可用于整理客户智能档案的业务输入")
-    # 热力值字段
-    score: Optional[int] = Field(None, description="热力值分数（0-100）")
-    score_updated_at: Optional[datetime] = Field(None, description="热力值最后更新时间")
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")

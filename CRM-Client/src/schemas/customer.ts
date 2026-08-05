@@ -126,9 +126,6 @@ export const CustomerDetailResponseSchema = CustomerResponseSchema.extend({
   customer_brief_generated_time: z.string().nullable().optional(),
   customer_brief_error_message: z.string().nullable().optional(),
   customer_intelligence_has_inputs: z.boolean().optional(),
-  // 热力值字段
-  score: z.number().int().nullable().optional(),
-  score_updated_at: z.string().nullable().optional(),
   // 输单原因
   loss_reason: z.string().nullable()
 })

@@ -104,10 +104,6 @@ ALL_PERMISSIONS = [
     {"name": "查看团队销售看板", "code": "sales_dashboard:view:team", "resource": "sales_dashboard", "action": "view", "scope": "team"},
     {"name": "查看全部销售看板", "code": "sales_dashboard:view:all", "resource": "sales_dashboard", "action": "view", "scope": "all"},
 
-    # 热力值权限
-    {"name": "查看热力值配置", "code": "score:config:view", "resource": "score", "action": "config", "scope": "view"},
-    {"name": "编辑热力值配置", "code": "score:config:edit", "resource": "score", "action": "config", "scope": "edit"},
-
     # ===== 补充缺失的权限定义 =====
 
     # 客户 - 补充 delete:all
@@ -199,7 +195,6 @@ ROLE_PERMISSIONS_MAPPING = {
         "payment:approve:own",  # ← 审自己提交的回款
         "payment:plan:create", "payment:plan:edit", "payment:plan:delete", "payment:plan:view:all",
         "statistics:view", "report:view:own", "report:view:team", "sales_dashboard:view:team",
-        "score:config:view", "score:config:edit",
     ],
     "SALES_MEMBER": [
         "customer:view:own", "customer:create", "customer:edit:own",
@@ -222,7 +217,7 @@ ROLE_PERMISSIONS_MAPPING = {
         "invoice:title:create", "invoice:title:edit", "invoice:title:delete", "invoice:title:set_default",
         "payment:view:own", "payment:register",
         "payment:plan:view:all", "payment:plan:create", "payment:plan:edit", "payment:plan:delete",
-        "statistics:view", "score:config:view", "report:view:own", "sales_dashboard:view:own",
+        "statistics:view", "report:view:own", "sales_dashboard:view:own",
     ],
     "FINANCE": [
         "invoice:view:all", "invoice:view:own", "invoice:create",

@@ -61,10 +61,6 @@ class Lead(Base):
     last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
     version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
 
-    # 热力值字段
-    score = Column(Integer, nullable=True, default=None, comment="热力值分数（0-100）")
-    score_updated_at = Column(DateTime, nullable=True, comment="热力值最后更新时间")
-
     __table_args__ = (
         Index('uq_lead_team_lead_name', 'team_id', 'lead_name', unique=True),
         Index('idx_owner_id', 'owner_id'),

@@ -9,16 +9,14 @@
  *
  * 包含：
  * - 基本信息卡片
- * - 热力值卡片（线性进度条）
  * - 跟进记录列表
  * - 添加跟进记录 Dialog
  * - 编辑线索 Dialog
- * - 热力值明细 Dialog
  */
-import { ref, reactive, watch, computed } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil, TrendingUp, CheckCircle, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
+import { Plus, Pencil } from 'lucide-vue-next'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 import {
@@ -33,7 +31,6 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Progress } from '@/components/ui/progress'
 import {
   Dialog,
   DialogContent,
@@ -42,7 +39,6 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog'
-import { Table, TableHeader, TableRow, TableCell } from '@/components/ui/table'
 import {
   Empty,
   EmptyHeader,
@@ -58,7 +54,6 @@ import {
 } from '@/components/crmwolf'
 import FollowUpList from '@/components/FollowUpList.vue'
 import { leadApi, type LeadDetail, type LeadFollowUp, type LeadFollowUpCreate } from '@/api/lead'
-import { getLeadScore, getScoreLevel, type ScoreDetail } from '@/api/score'
 import { useUserStore } from '@/stores/user'
 import { formatLocalDate } from '@/utils/format'
 
@@ -80,7 +75,6 @@ const userStore = useUserStore()
 const loading = ref(false)
 const leadData = ref<LeadDetail | null>(null)
 const followUps = ref<LeadFollowUp[]>([])
-const scoreDetails = ref<ScoreDetail[]>([])
 
 // 添加跟进弹窗
 const followUpDialogOpen = ref(false)
@@ -112,9 +106,6 @@ const handleEditSuccess = (): void => {
   emit('refresh')
 }
 
-// 热力值明细弹窗
-const scoreDetailsDialogOpen = ref(false)
-
 // ==================== Methods ====================
 const fetchLeadDetail = async (): Promise<void> => {
   const leadId = props.leadId
@@ -125,14 +116,6 @@ const fetchLeadDetail = async (): Promise<void> => {
     const res = await leadApi.getLeadDetail(leadId)
     leadData.value = res
     followUps.value = [...(res.follow_ups ?? [])].reverse()
-
-    // 获取热力值明细（使用 score 参数或默认值）
-    try {
-      const scoreRes = await getLeadScore(leadId)
-      scoreDetails.value = scoreRes.details ?? []
-    } catch {
-      scoreDetails.value = []
-    }
   } catch (error) {
     handleApiError(error, '获取线索详情')
   } finally {
@@ -213,13 +196,6 @@ const closeSheet = (): void => {
   emit('update:visible', false)
 }
 
-// ==================== 辅助属性 ====================
-// score 属性（LeadDetail 类型已包含 score 字段）
-const leadScore = computed<number | undefined>(() => {
-  const score = (leadData.value as (LeadDetail & { score?: number | null }) | null)?.score
-  return typeof score === 'number' ? score : undefined
-})
-
 // ==================== 格式化函数 ====================
 const formatDate = (dateStr: string | undefined): string => {
   if (dateStr == null || dateStr.length === 0) return '-'
@@ -254,24 +230,6 @@ const getStatusClass = (status: number | undefined): string => {
     3: 'status-danger'
   }
   return map[status] ?? 'status-default'
-}
-
-// 热力值颜色 - 使用 V2 设计令牌语义
-const getScoreColorClass = (score: number | undefined | null): string => {
-  if (score === undefined || score === null) return 'score-unknown'
-  if (score >= 80) return 'score-high'
-  if (score >= 60) return 'score-medium-high'
-  if (score >= 40) return 'score-medium'
-  return 'score-low'
-}
-
-// 热力值图标 - 使用 Lucide SVG 图标，遵循设计规范（禁止 emoji）
-const getScoreIconComponent = (score: number | undefined | null): typeof Flame => {
-  if (score === undefined || score === null) return HelpCircle
-  if (score >= 80) return Flame       // 高分/火爆
-  if (score >= 60) return Zap          // 中高分/潜力
-  if (score >= 40) return CheckCircle  // 中分/稳定
-  return Thermometer                   // 低分/冷淡
 }
 
 // ==================== Watch ====================
@@ -363,56 +321,6 @@ watch(() => props.visible, (visible): void => {
                     <div class="attribute-item">
                       <div class="attribute-label">创建人</div>
                       <div class="attribute-value">{{ leadData.creator_info?.name || '-' }}</div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <!-- 热力值卡片 -->
-            <Card class="score-card">
-              <CardContent class="p-4">
-                <div class="flex items-center gap-4">
-                  <div class="flex-shrink-0">
-                    <component
-                      :is="getScoreIconComponent(leadScore)"
-                      :class="['w-6 h-6', getScoreColorClass(leadScore)]"
-                    />
-                  </div>
-                  <div class="flex-1">
-                    <div class="flex items-center gap-2 mb-2">
-                      <span class="text-2xl font-bold text-wolf-text-primary-v2">
-                        {{ leadScore ?? '--' }}
-                      </span>
-                      <span class="text-sm text-wolf-text-tertiary-v2 bg-wolf-bg-muted-v2 px-2 py-0.5 rounded">
-                        {{ getScoreLevel(leadScore ?? null) }}
-                      </span>
-                    </div>
-                    <div :class="['progress-wrapper', getScoreColorClass(leadScore)]">
-                      <Progress
-                        :model-value="leadScore ?? 0"
-                        class="h-2"
-                      />
-                    </div>
-                    <div class="flex items-center gap-2 mt-2 text-xs text-wolf-text-tertiary-v2">
-                      <template v-for="(detail, idx) in scoreDetails.slice(0, 2)" :key="detail.id">
-                        <span>
-                          {{ detail.factor_name }}:
-                          <span :class="detail.score_change >= 0 ? 'text-wolf-success-text-v2' : 'text-wolf-danger-text-v2'">
-                            {{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}
-                          </span>
-                        </span>
-                        <span v-if="idx < 1 && scoreDetails.length > 1">·</span>
-                      </template>
-                      <Button
-                        v-if="scoreDetails.length > 0"
-                        variant="link"
-                        size="sm"
-                        class="h-auto p-0 text-xs"
-                        @click="scoreDetailsDialogOpen = true"
-                      >
-                        详情
-                      </Button>
                     </div>
                   </div>
                 </div>
@@ -539,51 +447,6 @@ watch(() => props.visible, (visible): void => {
     @success="handleEditSuccess"
   />
 
-  <!-- 热力值明细弹窗 -->
-  <Dialog v-model:open="scoreDetailsDialogOpen">
-    <DialogContent class="sm:max-w-[600px]">
-      <DialogHeader>
-        <DialogTitle>热力值计算明细</DialogTitle>
-        <DialogDescription>了解热力值的计算依据</DialogDescription>
-      </DialogHeader>
-
-      <Table v-if="scoreDetails.length > 0">
-        <TableRow>
-          <TableHeader>因子</TableHeader>
-          <TableHeader>实际值</TableHeader>
-          <TableHeader>权重</TableHeader>
-          <TableHeader>分数变化</TableHeader>
-          <TableHeader>原因说明</TableHeader>
-        </TableRow>
-        <TableRow v-for="detail in scoreDetails" :key="detail.id">
-          <TableCell>{{ detail.factor_name }}</TableCell>
-          <TableCell>{{ detail.actual_value || '-' }}</TableCell>
-          <TableCell>{{ detail.weight_value }}</TableCell>
-          <TableCell>
-            <span :class="detail.score_change >= 0 ? 'text-wolf-success-text-v2' : 'text-wolf-danger-text-v2'">
-              {{ detail.score_change >= 0 ? '+' : '' }}{{ detail.score_change }}
-            </span>
-          </TableCell>
-          <TableCell>{{ detail.reason || '-' }}</TableCell>
-        </TableRow>
-      </Table>
-
-      <Empty v-else class="py-8">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <TrendingUp class="w-10 h-10" />
-          </EmptyMedia>
-        </EmptyHeader>
-        <EmptyTitle>暂无明细数据</EmptyTitle>
-        <EmptyDescription>查看计算明细，了解评分依据</EmptyDescription>
-      </Empty>
-
-      <DialogFooter>
-        <Button @click="scoreDetailsDialogOpen = false">关闭</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-
   <!-- 转化为客户弹窗 -->
   <LeadConvertDialog
     v-model:open="showConvertDialog"
@@ -679,42 +542,6 @@ watch(() => props.visible, (visible): void => {
     padding: 0;
     background: transparent;
   }
-}
-
-// 热力值进度条颜色 - 使用 V2 设计令牌
-.progress-wrapper {
-  &.score-high {
-    --progress-background: #{$wolf-danger-v2};     // 高分(≥80): 危险红
-  }
-  &.score-medium-high {
-    --progress-background: #{$wolf-warning-v2};    // 中高分(≥60): 警告橙
-  }
-  &.score-medium {
-    --progress-background: #{$wolf-success-v2};    // 中分(≥40): 成功绿
-  }
-  &.score-low,
-  &.score-unknown {
-    --progress-background: #{$wolf-text-tertiary-v2}; // 低分/未知: 中性灰
-  }
-
-  :deep([role="progressbar"]) {
-    background: var(--progress-background);
-  }
-}
-
-// 热力值图标颜色 - 使用 V2 设计令牌
-.score-high {
-  color: $wolf-danger-v2;           // 高分(≥80): 危险红
-}
-.score-medium-high {
-  color: $wolf-warning-v2;          // 中高分(≥60): 警告橙
-}
-.score-medium {
-  color: $wolf-success-v2;          // 中分(≥40): 成功绿
-}
-.score-low,
-.score-unknown {
-  color: $wolf-text-tertiary-v2;    // 低分/未知: 中性灰
 }
 
 // Reduced Motion 支持

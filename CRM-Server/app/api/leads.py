@@ -111,8 +111,6 @@ def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListRespons
             "created_time": lead.created_time,
             "last_modified_time": lead.last_modified_time,
             "version": lead.version,
-            "score": lead.score,
-            "score_updated_at": lead.score_updated_at,
             "owner_info": users_info.get(lead.owner_id) if lead.owner_id else None,
         }
         result.append(LeadListResponse(**lead_dict))

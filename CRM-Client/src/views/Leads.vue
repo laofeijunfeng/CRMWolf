@@ -20,7 +20,7 @@
 import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { Plus, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus, Flame, Zap, Thermometer, HelpCircle } from 'lucide-vue-next'
+import { Plus, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus } from 'lucide-vue-next'
 import { DataTable, TableRowActions } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition, ListSortField } from '@/components/crmwolf/listSortTypes'
@@ -148,14 +148,13 @@ const baseFilterFields: ListFilterField[] = [
       { value: '1000人以上', label: '1000人以上' }
     ]
   },
-  { key: 'created_time', type: 'date', label: '创建时间' },
-  { key: 'score', type: 'number', label: '热力值' }
+  { key: 'created_time', type: 'date', label: '创建时间' }
 ]
 
 const filterFields = computed<ListFilterField[]>(() => {
   const fields: ListFilterField[] = baseFilterFields.slice()
   if (ownerFilterOptions.value.length > 0) {
-    fields.splice(fields.length - 2, 0, {
+    fields.splice(fields.length - 1, 0, {
       key: 'owner_id',
       type: 'enum',
       label: '负责人',
@@ -189,7 +188,6 @@ const columns = [
   { key: 'city', title: '城市', width: '100px' },
   { key: 'company_scale', title: '规模', width: '120px' },
   { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
-  { key: 'score', title: '热力值', align: 'center' as const, width: '100px' },
   { key: 'created_time', title: '创建时间', width: '160px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
 ]
@@ -488,28 +486,6 @@ const mapLeadStatus = (status: number): 'new' | 'following' | 'converted' | 'inv
   return map[status] || 'new'
 }
 
-// 热力值图标 - 使用 Lucide SVG 图标，遵循设计规范（禁止 emoji）
-const getScoreIcon = (score: number | null | undefined): typeof Flame => {
-  if (score == null) return HelpCircle
-  if (score >= 80) return Flame      // 高分/火爆
-  if (score >= 60) return Zap        // 中高分/潜力
-  if (score >= 40) return CircleCheck // 中分/稳定
-  return Thermometer                  // 低分/冷淡
-}
-
-// 热力值颜色 - 使用 V2 设计令牌语义
-// 高分(≥80): 危险/火爆红 → $wolf-danger-v2
-// 中高分(≥60): 警告/潜力橙 → $wolf-warning-v2
-// 中分(≥40): 成功/稳定绿 → $wolf-success-v2
-// 低分(<40): 中性/冷淡灰 → $wolf-text-tertiary-v2
-const getScoreColorClass = (score: number | null | undefined): string => {
-  if (score == null) return 'score-unknown'
-  if (score >= 80) return 'score-high'
-  if (score >= 60) return 'score-medium-high'
-  if (score >= 40) return 'score-medium'
-  return 'score-low'
-}
-
 // ==================== Lifecycle ====================
 onMounted(() => {
   void customFilterViews.loadCustomViews()
@@ -603,12 +579,6 @@ watchEffect(() => {
         <div class="lead-mobile-card-contact">
           <span>{{ row.contact_name || '-' }}</span>
           <span>{{ row.contact_phone || '-' }}</span>
-        </div>
-        <div class="lead-mobile-card-score">
-          <span :class="['score-icon', getScoreColorClass(row.score)]">
-            <component :is="getScoreIcon(row.score)" class="w-4 h-4" />
-          </span>
-          <span class="score-number">{{ row.score ?? '--' }}</span>
         </div>
         <div class="lead-mobile-card-meta">
           <span>{{ row.source || '-' }}</span>
@@ -727,16 +697,6 @@ watchEffect(() => {
       <!-- 状态 -->
       <template #cell-status="{ row }">
         <StatusBadge :status="mapLeadStatus(row.status)" type="lead" />
-      </template>
-
-      <!-- 热力值 -->
-      <template #cell-score="{ row }">
-        <div class="score-cell">
-          <span :class="['score-icon', getScoreColorClass(row.score)]">
-            <component :is="getScoreIcon(row.score)" class="w-4 h-4" />
-          </span>
-          <span class="score-number">{{ row.score ?? '--' }}</span>
-        </div>
       </template>
 
       <!-- 负责人 -->
@@ -936,38 +896,6 @@ watchEffect(() => {
   }
 }
 
-// 热力值单元格
-.score-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-
-.score-icon {
-  font-size: 16px;
-
-  // 热力值颜色 - 使用 V2 设计令牌
-  &.score-high {
-    color: $wolf-danger-v2;           // 高分(≥80): 危险红
-  }
-  &.score-medium-high {
-    color: $wolf-warning-v2;          // 中高分(≥60): 警告橙
-  }
-  &.score-medium {
-    color: $wolf-success-v2;          // 中分(≥40): 成功绿
-  }
-  &.score-low,
-  &.score-unknown {
-    color: $wolf-text-tertiary-v2;    // 低分/未知: 中性灰
-  }
-}
-
-.score-number {
-  font-weight: $wolf-font-weight-medium-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
-}
-
 .lead-mobile-card-header {
   display: flex;
   align-items: flex-start;
@@ -991,13 +919,6 @@ watchEffect(() => {
   margin-top: $wolf-space-sm-v2;
   font-size: $wolf-font-size-body-v2;
   color: $wolf-text-secondary-v2;
-}
-
-.lead-mobile-card-score {
-  display: inline-flex;
-  align-items: center;
-  gap: $wolf-space-xs-v2;
-  margin-top: $wolf-space-sm-v2;
 }
 
 .lead-mobile-card-meta {

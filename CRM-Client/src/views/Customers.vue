@@ -33,7 +33,6 @@ import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import ScoreIndicator from '@/components/ScoreIndicator.vue'
 import customerApi, {
   type CustomerResponse,
   type CustomerStatus,
@@ -248,7 +247,6 @@ const columns = computed(() => [
     sortType: 'enum' as const,
     sortOptions: customerStatusFilterOptions
   },
-  { key: 'score', title: '热力值', align: 'center' as const, width: '100px' },
   { key: 'license_status', title: '授权状态', align: 'center' as const, width: '100px' },
   { key: 'license_expiry_date', title: '授权到期', width: '120px' },
   { key: 'default_procurement_method', title: '默认采购方式', width: '140px' },
@@ -868,9 +866,6 @@ watchEffect(() => {
             {{ getLicenseStatusLabel(row) }}
           </span>
         </div>
-        <div class="customer-mobile-card-score">
-          <ScoreIndicator :score="row.score ?? null" mode="badge" />
-        </div>
         <div class="customer-mobile-card-meta">
           <span>{{ row.city || '-' }}</span>
           <span>{{ row.company_scale || '-' }}</span>
@@ -996,11 +991,6 @@ watchEffect(() => {
       <!-- 状态 -->
       <template #cell-status="{ row }">
         <StatusBadge :status="mapCustomerStatus(row.status)" type="customer" />
-      </template>
-
-      <!-- 热力值 -->
-      <template #cell-score="{ row }">
-        <ScoreIndicator :score="row.score ?? null" mode="badge" />
       </template>
 
       <!-- 授权状态 -->
@@ -1292,10 +1282,6 @@ watchEffect(() => {
   display: flex;
   flex-wrap: wrap;
   gap: $wolf-space-xs-v2;
-  margin-top: $wolf-space-sm-v2;
-}
-
-.customer-mobile-card-score {
   margin-top: $wolf-space-sm-v2;
 }
 

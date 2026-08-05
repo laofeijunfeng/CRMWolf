@@ -92,9 +92,6 @@ app.add_exception_handler(Exception, generic_exception_handler)
 # ========================================
 from fastapi import APIRouter
 
-from app.api.score_weights import router as score_weights_router
-from app.api.scores import router as scores_router
-
 # 创建主 API 路由
 api_router = APIRouter()
 
@@ -142,8 +139,6 @@ api_router.include_router(ai_config_router)
 api_router.include_router(agent_router)
 api_router.include_router(im_bots_router)
 api_router.include_router(frontend_logs_router)
-api_router.include_router(score_weights_router)
-api_router.include_router(scores_router)
 
 # 注册主 API 路由到 app（添加统一的 /api 前缀）
 app.include_router(api_router, prefix="/api")
@@ -154,11 +149,6 @@ async def startup_event():
     """应用启动时初始化角色权限和定时任务"""
     logger.info("应用启动，开始初始化角色权限...")
     init_roles_permissions()
-
-    # 启动热力值定时刷新任务
-    logger.info("启动热力值定时刷新任务...")
-    from app.tasks.score_scheduler import start_score_scheduler
-    start_score_scheduler()
 
     logger.info("恢复未完成客户活动 AI workflow...")
     from app.services.customer_activity_processing_service import customer_activity_processing_service
@@ -186,12 +176,10 @@ async def shutdown_event():
     from app.tasks.customer_evidence_sync import stop_customer_evidence_sync_scheduler
     from app.tasks.customer_intelligence_backfill import stop_customer_intelligence_backfill_scheduler
     from app.tasks.customer_intelligence_refresh_retry import stop_customer_intelligence_refresh_retry_scheduler
-    from app.tasks.score_scheduler import stop_score_scheduler
 
     stop_customer_intelligence_backfill_scheduler()
     stop_customer_intelligence_refresh_retry_scheduler()
     stop_customer_evidence_sync_scheduler()
-    stop_score_scheduler()
 
 
 @app.get("/")
