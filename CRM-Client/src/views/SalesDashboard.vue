@@ -180,13 +180,21 @@ const hasText = (value: string | null | undefined): value is string => {
 }
 
 const getMetricDescription = (metric: SalesDashboardMetric): string => {
-  if (!hasText(metric.secondary_label)) return '-'
+  if (!hasText(metric.secondary_label)) return ''
   return `${metric.secondary_label}：`
 }
 
 const getMetricFooter = (metric: SalesDashboardMetric): string => {
-  if (!hasText(metric.rate_label)) return '-'
+  if (!hasText(metric.rate_label)) return ''
   return `${metric.rate_label}：${formatPercent(metric.rate)}`
+}
+
+const getMetricExtraFooter = (metric: SalesDashboardMetric): string => {
+  if (!hasText(metric.extra_secondary_label)) return ''
+  const value = metric.extra_secondary_type === 'amount'
+    ? ''
+    : formatCount(metric.extra_secondary_value)
+  return `${metric.extra_secondary_label}：${value}`
 }
 
 const loadDashboard = async (): Promise<void> => {
@@ -300,7 +308,23 @@ onMounted(() => {
                   tone="success"
                   size="sm"
                 />
-                <strong v-else class="metric-secondary-value">{{ formatCount(metric.secondary_value) }}</strong>
+                <strong v-else-if="hasText(metric.secondary_label)" class="metric-secondary-value">
+                  {{ formatCount(metric.secondary_value) }}
+                </strong>
+              </template>
+              <template #footer>
+                <strong
+                  v-if="hasText(metric.extra_secondary_label)"
+                  class="metric-footer-title"
+                >
+                  {{ getMetricExtraFooter(metric) }}
+                </strong>
+                <strong
+                  v-else-if="hasText(metric.rate_label)"
+                  class="metric-footer-title"
+                >
+                  {{ getMetricFooter(metric) }}
+                </strong>
               </template>
             </MetricCard>
           </template>
@@ -443,6 +467,12 @@ onMounted(() => {
   font-family: $wolf-font-mono-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   font-variant-numeric: tabular-nums;
+}
+
+.metric-footer-title {
+  min-width: 0;
+  color: #0f172a;
+  font-weight: $wolf-font-weight-semibold-v2;
 }
 
 :global(.sales-follow-tooltip__member) {

@@ -205,7 +205,7 @@ class AgentSuggestionGenerator:
         payment_plan_ids = {int(item["id"]) for item in open_payment_plans if item.get("id") is not None}
         approved_opportunities = [item for item in opportunities if cls._is_approved_opportunity(item)]
         approved_contracts = [item for item in contracts if cls._is_approved_contract(item)]
-        approved_opportunity_ids = {int(item["id"]) for item in approved_opportunities if item.get("id") is not None}
+        approved_opportunity_ids = {str(item["id"]) for item in approved_opportunities if item.get("id") is not None}
         approved_contract_ids = {int(item["id"]) for item in approved_contracts if item.get("id") is not None}
         active_stage_context = cls._context_items(customer_context.get("active_opportunity_stage_context"))
 
@@ -471,7 +471,7 @@ class AgentSuggestionGenerator:
     @staticmethod
     def _guard_license_application_suggestion(
         suggestion: AgentBusinessSuggestion,
-        approved_opportunity_ids: set[int],
+        approved_opportunity_ids: set[str],
         approved_contract_ids: set[int],
         approved_opportunities: list[dict[str, object]],
         approved_contracts: list[dict[str, object]],
@@ -482,10 +482,10 @@ class AgentSuggestionGenerator:
         related_type = suggestion.related_object_type
         related_id = suggestion.related_object_id
         if related_type == "opportunity":
-            if related_id is not None and int(related_id) in approved_opportunity_ids:
+            if related_id is not None and str(related_id) in approved_opportunity_ids:
                 return suggestion
             if related_id is None and len(approved_opportunities) == 1 and approved_opportunities[0].get("id") is not None:
-                return suggestion.model_copy(update={"related_object_id": int(approved_opportunities[0]["id"])})
+                return suggestion.model_copy(update={"related_object_id": approved_opportunities[0]["id"]})
             return None
         if related_type == "contract":
             if related_id is not None and int(related_id) in approved_contract_ids:

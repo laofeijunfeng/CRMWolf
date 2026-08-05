@@ -167,7 +167,7 @@ class CustomerResolutionGraphService:
             not customer_name
             or not context.authorization
             or not context.db
-            or self._requires_clarification(semantic_result)
+            or self._customer_resolution_clarification_blocks(semantic_result, parsed)
         ):
             return {}
 
@@ -240,8 +240,9 @@ class CustomerResolutionGraphService:
             bool(state.get("has_authorization"))
             and bool(state.get("has_db"))
             and bool(parsed.get("customer_name"))
-            and not self._requires_clarification(
+            and not self._customer_resolution_clarification_blocks(
                 semantic_result,
+                parsed,
                 has_memory_customer=bool(memory_customer),
             )
             and not self._should_use_memory_customer(semantic_result, parsed, memory_customer)
@@ -267,6 +268,25 @@ class CustomerResolutionGraphService:
                 and not customer_from_memory
                 and semantic_result.customer.confidence < 0.7
             )
+        )
+
+    @staticmethod
+    def _customer_resolution_clarification_blocks(
+        semantic_result: Optional[AgentSemanticParseResult],
+        parsed: dict[str, object],
+        *,
+        has_memory_customer: bool = False,
+    ) -> bool:
+        if semantic_result is None:
+            return False
+        if semantic_result.intent == "UNKNOWN" or semantic_result.intent_confidence < 0.75:
+            return True
+        customer_name = parsed.get("customer_name")
+        if isinstance(customer_name, str) and customer_name.strip():
+            return False
+        return CustomerResolutionGraphService._requires_clarification(
+            semantic_result,
+            has_memory_customer=has_memory_customer,
         )
 
     @staticmethod

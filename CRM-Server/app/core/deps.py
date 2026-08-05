@@ -8,6 +8,7 @@ from app.crud.user import user_crud
 from app.crud.permission import permission_crud
 from app.crud.team import team_crud, user_team_crud
 from app.models.team import UserTeam
+from app.utils.public_id import is_opportunity_public_id
 
 security = HTTPBearer()
 
@@ -45,6 +46,15 @@ def _get_lead_by_identifier(db: Session, lead_identifier, team_id: int):
     if isinstance(lead_identifier, int):
         return lead_crud.get_by_id(db, lead_identifier, team_id)
     return lead_crud.get_by_public_id(db, str(lead_identifier), team_id)
+
+
+def _get_opportunity_by_public_id(db: Session, opportunity_identifier, team_id: int):
+    from app.crud.opportunity import opportunity_crud
+
+    public_id = str(opportunity_identifier)
+    if not is_opportunity_public_id(public_id):
+        return None
+    return opportunity_crud.get_by_public_id(db, public_id, team_id)
 
 
 async def get_current_user(
@@ -483,7 +493,7 @@ def check_customer_edit_permission(
 
 
 def check_opportunity_delete_permission(
-    opportunity_id: int,
+    opportunity_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -497,7 +507,7 @@ def check_opportunity_delete_permission(
     """
     from app.crud.opportunity import opportunity_crud
 
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
+    opportunity = _get_opportunity_by_public_id(db, opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -529,7 +539,7 @@ def check_opportunity_delete_permission(
 
 
 def check_opportunity_edit_permission(
-    opportunity_id: int,
+    opportunity_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -543,7 +553,7 @@ def check_opportunity_edit_permission(
     """
     from app.crud.opportunity import opportunity_crud
 
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
+    opportunity = _get_opportunity_by_public_id(db, opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -830,7 +840,7 @@ def check_customer_member_manage_permission(
 
 
 def check_opportunity_view_permission(
-    opportunity_id: int,
+    opportunity_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -845,7 +855,7 @@ def check_opportunity_view_permission(
     """
     from app.crud.opportunity import opportunity_crud
 
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
+    opportunity = _get_opportunity_by_public_id(db, opportunity_id, team_id)
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

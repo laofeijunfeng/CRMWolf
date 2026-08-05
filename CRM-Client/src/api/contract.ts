@@ -12,7 +12,7 @@ export type ApprovalPhase = 'draft' | 'pending_review' | 'approved' | 'rejected'
 export interface ContractCreate {
   contract_name: string
   customer_id: string
-  opportunity_id: number
+  opportunity_id: string
   signing_contact_id: number
   user_count: number
   total_amount: number
@@ -45,7 +45,7 @@ export interface ContractListResponse {
   contract_name: string
   customer_id: string
   customer_name?: string
-  opportunity_id: number
+  opportunity_id: string | null
   opportunity_name?: string
   purchase_type?: PurchaseType | null
   signing_contact_id: number
@@ -99,7 +99,7 @@ export interface CustomerBasicInfo {
 }
 
 export interface OpportunityBasicInfo {
-  id: number
+  id: string
   opportunity_name: string
 }
 
@@ -115,7 +115,7 @@ export interface ContractResponse {
   contract_number: string
   contract_name: string
   customer_id: string
-  opportunity_id: number
+  opportunity_id: string | null
   signing_contact_id: number
   user_count: number
   total_amount: string
@@ -201,7 +201,7 @@ const CustomerBasicInfoSchema = z.object({
 })
 
 const OpportunityBasicInfoSchema = z.object({
-  id: z.number(),
+  id: z.string(),
   opportunity_name: z.string()
 })
 
@@ -220,7 +220,7 @@ const ContractListItemSchema = z.object({
   contract_name: z.string(),
   customer_id: z.string(),
   customer_name: OptionalStringFromNullableSchema,
-  opportunity_id: z.number(),
+  opportunity_id: z.string().nullable(),
   opportunity_name: OptionalStringFromNullableSchema,
   purchase_type: z.enum(['NEW', 'RENEWAL', 'EXPANSION']).nullable().optional(),
   signing_contact_id: z.number(),
@@ -317,7 +317,7 @@ const contractApi = {
     return z.object({ message: z.string() }).parse(response)
   },
 
-  createContractFromOpportunity: async (opportunityId: number, params: ContractFromOpportunityParams): Promise<ContractResponse> => {
+  createContractFromOpportunity: async (opportunityId: string, params: ContractFromOpportunityParams): Promise<ContractResponse> => {
     const formData = new FormData()
     formData.append('contract_name', params.contract_name)
     formData.append('signing_contact_id', String(params.signing_contact_id))
@@ -328,7 +328,7 @@ const contractApi = {
     return ContractResponseSchema.parse(response) as ContractResponse
   },
 
-  getContractByOpportunity: async (opportunityId: number): Promise<ContractListResponse | null> => {
+  getContractByOpportunity: async (opportunityId: string): Promise<ContractListResponse | null> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response: unknown = await request.get(`/v1/contracts/opportunity/${opportunityId}`, {
       skipErrorNotification: true

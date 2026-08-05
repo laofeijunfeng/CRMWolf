@@ -104,7 +104,7 @@ class ProcurementStageTemplateResponse(BaseModel):
 class OpportunityStageSnapshotResponse(BaseModel):
     """商机阶段快照响应模型"""
     id: int = Field(..., description="快照ID（主键）")
-    opportunity_id: int = Field(..., description="商机ID（关联到crm_opportunities表）")
+    opportunity_id: str = Field(..., description="商机对外ID")
     procurement_stage_template_id: int = Field(..., description="阶段模板ID（关联到crm_procurement_stage_templates表）")
     stage_name: str = Field(..., description="阶段名称（快照时保存）")
     win_probability: int = Field(..., description="阶段赢率（快照时保存，0-100）")

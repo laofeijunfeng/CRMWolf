@@ -39,6 +39,7 @@ import {
 
 // 乐观锁时间戳映射：{ str(business_id): iso8601 }，键为 id 字符串形式
 export type UpdatedTimesMap = Record<string, string>
+export type ApprovalEntityId = number | string
 
 /**
  * 提交审批（通用）
@@ -46,7 +47,7 @@ export type UpdatedTimesMap = Record<string, string>
  */
 function submitApproval(
   entityType: EntityType,
-  entityId: number,
+  entityId: ApprovalEntityId,
   comment?: string
 ): Promise<ApprovalSubmitResponse> {
   return request.post<ApprovalSubmitResponse>(
@@ -61,7 +62,7 @@ function submitApproval(
  */
 function approveEntity(
   entityType: EntityType,
-  entityId: number,
+  entityId: ApprovalEntityId,
   action: ApprovalAction,
   comment: string,
   updatedTime?: string
@@ -85,7 +86,7 @@ function approveEntity(
  */
 function cancelApproval(
   entityType: EntityType,
-  entityId: number
+  entityId: ApprovalEntityId
 ): Promise<MessageResponse> {
   return request.post<MessageResponse>(
     `/v1/approvals/${entityType}/${entityId}/cancel`,
@@ -98,7 +99,7 @@ function cancelApproval(
  */
 function remindApproval(
   entityType: EntityType,
-  entityId: number
+  entityId: ApprovalEntityId
 ): Promise<MessageResponse> {
   return request.post<MessageResponse>(
     `/v1/approvals/${entityType}/${entityId}/remind`,
@@ -111,7 +112,7 @@ function remindApproval(
  */
 function getApprovalDetail(
   entityType: EntityType,
-  entityId: number
+  entityId: ApprovalEntityId
 ): Promise<ApprovalDetail> {
   return request.get<ApprovalDetail>(
     `/v1/approvals/${entityType}/${entityId}/detail`
@@ -158,12 +159,12 @@ function listApprovals(query: ApprovalListQuery): Promise<ApprovalListResponse> 
   return request.get<ApprovalListResponse>('/v1/approvals', { params: query })
 }
 
-const getApprovalAttachmentPath = (entityType: EntityType, entityId: number): string =>
+const getApprovalAttachmentPath = (entityType: EntityType, entityId: ApprovalEntityId): string =>
   `/v1/approvals/${entityType}/${entityId}/file`
 
 async function createApprovalAttachmentObjectUrl(
   entityType: EntityType,
-  entityId: number
+  entityId: ApprovalEntityId
 ): Promise<string> {
   const response = await request.get<Blob>(getApprovalAttachmentPath(entityType, entityId), {
     responseType: 'blob'
@@ -174,7 +175,7 @@ async function createApprovalAttachmentObjectUrl(
 
 async function downloadApprovalAttachment(
   entityType: EntityType,
-  entityId: number,
+  entityId: ApprovalEntityId,
   fileName?: string
 ): Promise<void> {
   const response = await request.get<Blob>(getApprovalAttachmentPath(entityType, entityId), {

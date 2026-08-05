@@ -33,6 +33,7 @@ import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
@@ -59,7 +60,7 @@ const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 
 // 抽屉状态
 const sheetVisible = ref(false)
-const selectedOpportunityId = ref<number | null>(null)
+const selectedOpportunityId = ref<string | null>(null)
 
 // 新建商机弹窗状态
 const opportunityDialogOpen = ref(false)
@@ -70,11 +71,11 @@ const editingOpportunity = ref<Opportunity | null>(null)
 
 // 赢单弹窗
 const winDialogOpen = ref(false)
-const selectedOpportunityIdForWin = ref<number | null>(null)
+const selectedOpportunityIdForWin = ref<string | null>(null)
 
 // 输单弹窗
 const loseDialogOpen = ref(false)
-const selectedOpportunityIdForLose = ref<number | null>(null)
+const selectedOpportunityIdForLose = ref<string | null>(null)
 
 const pagination = reactive({
   current: 1,
@@ -383,7 +384,7 @@ const handleViewCustomer = (customerId: string): void => {
 }
 
 // 打开商机详情抽屉
-const openOpportunitySheet = (id: number): void => {
+const openOpportunitySheet = (id: string): void => {
   selectedOpportunityId.value = id
   sheetVisible.value = true
 }
@@ -393,8 +394,8 @@ const handleViewDetail = (row: OpportunityListResponse): void => {
 }
 
 const openOpportunityFromRoute = (): void => {
-  const opportunityId = Number(route.query['opportunityId'])
-  if (Number.isFinite(opportunityId) && opportunityId > 0) {
+  const opportunityId = typeof route.query['opportunityId'] === 'string' ? route.query['opportunityId'] : ''
+  if (isOpportunityPublicId(opportunityId)) {
     openOpportunitySheet(opportunityId)
   }
 }

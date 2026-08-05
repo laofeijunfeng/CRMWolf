@@ -1,7 +1,7 @@
 """Pure business rules used by the CRM agent."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from app.services.agent import agent_copy
 from app.utils.name_normalizer import normalize_corp_name
@@ -19,6 +19,10 @@ def context_items(value: object) -> List[Dict[str, object]]:
         if isinstance(items, list):
             return [item for item in items if isinstance(item, dict)]
     return []
+
+
+def _ids_match(left: object, right: object) -> bool:
+    return left is not None and right is not None and str(left) == str(right)
 
 
 def extract_customer_candidates(data: object) -> List[Dict[str, object]]:
@@ -215,8 +219,8 @@ def stage_move_action_from_suggestions(
     if not opportunity_id or not stage_template_id:
         return None
 
-    opportunity = find_opportunity_in_context(business_context, int(opportunity_id))
-    stage_target = resolve_stage_move_plan(business_context, int(opportunity_id), int(stage_template_id))
+    opportunity = find_opportunity_in_context(business_context, opportunity_id)
+    stage_target = resolve_stage_move_plan(business_context, opportunity_id, int(stage_template_id))
     if not stage_target:
         if context_items(business_context.get("active_opportunity_stage_context")):
             return None
@@ -236,7 +240,7 @@ def stage_move_action_from_suggestions(
         "content": content,
         "payload": {
             "customer_id": customer.get("id"),
-            "opportunity_id": int(opportunity_id),
+            "opportunity_id": opportunity_id,
             "stage_template_id": int(stage_target["stage_template_id"]),
             "opportunity_name": opportunity_name,
             "target_stage_name": stage_target.get("target_stage_name"),
@@ -318,7 +322,7 @@ def stage_move_action_from_candidate(
         "content": build_stage_move_confirmation_content(opportunity_name, stage_target),
         "payload": {
             "customer_id": customer.get("id"),
-            "opportunity_id": int(opportunity_id),
+            "opportunity_id": opportunity_id,
             "stage_template_id": int(stage_template_id),
             "opportunity_name": opportunity_name,
             "target_stage_name": target_stage_name,
@@ -352,7 +356,7 @@ def stage_move_candidates(
         if opportunity_id is None:
             continue
         candidates.append({
-            "id": int(opportunity_id),
+            "id": opportunity_id,
             "opportunity_name": opportunity.get("opportunity_name") or opportunity.get("name") or f"商机 {opportunity_id}",
             "current_stage_name": current_stage.get("stage_name") if current_stage else None,
             "target_stage_template_id": int(stage_template_id),
@@ -364,12 +368,12 @@ def stage_move_candidates(
 
 def resolve_stage_move_plan(
     business_context: Dict[str, object],
-    opportunity_id: int,
+    opportunity_id: Union[str, int],
     target_stage_template_id: int,
 ) -> Optional[Dict[str, object]]:
     for item in context_items(business_context.get("active_opportunity_stage_context")):
         opportunity = item.get("opportunity") if isinstance(item.get("opportunity"), dict) else {}
-        if opportunity.get("id") is None or int(opportunity["id"]) != int(opportunity_id):
+        if not _ids_match(opportunity.get("id"), opportunity_id):
             continue
         stages = [stage for stage in item.get("procurement_stages") or [] if isinstance(stage, dict)]
         current_stage = next((stage for stage in stages if stage.get("is_current")), None)
@@ -500,13 +504,13 @@ def _is_backward_stage_move(current_stage: object, target_stage: Dict[str, objec
         return True
 
 
-def find_opportunity_in_context(business_context: Dict[str, object], opportunity_id: int) -> Dict[str, object]:
+def find_opportunity_in_context(business_context: Dict[str, object], opportunity_id: Union[str, int]) -> Dict[str, object]:
     for opportunity in context_items(business_context.get("opportunities")):
-        if opportunity.get("id") is not None and int(opportunity["id"]) == opportunity_id:
+        if _ids_match(opportunity.get("id"), opportunity_id):
             return opportunity
     for item in context_items(business_context.get("active_opportunity_stage_context")):
         opportunity = item.get("opportunity") or {}
-        if opportunity.get("id") is not None and int(opportunity["id"]) == opportunity_id:
+        if _ids_match(opportunity.get("id"), opportunity_id):
             return opportunity
     return {"id": opportunity_id}
 

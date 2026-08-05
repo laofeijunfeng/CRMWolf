@@ -32,7 +32,7 @@ import procurementApi, {
 } from '@/api/procurement'
 
 interface Props {
-  opportunityId: number
+  opportunityId: string
   embedded?: boolean
   canAdvance?: boolean
 }

@@ -11,6 +11,9 @@ export const SalesDashboardMetricSchema = z.object({
   secondary_label: z.string().nullable().optional(),
   secondary_value: z.number().nullable().optional(),
   secondary_type: SalesDashboardMetricValueTypeSchema.nullable().optional(),
+  extra_secondary_label: z.string().nullable().optional(),
+  extra_secondary_value: z.number().nullable().optional(),
+  extra_secondary_type: SalesDashboardMetricValueTypeSchema.nullable().optional(),
   rate_label: z.string().nullable().optional(),
   rate: z.number().nullable().optional()
 })

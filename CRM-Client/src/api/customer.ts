@@ -420,7 +420,7 @@ export interface ContractListResponse {
   contract_number: string
   contract_name: string
   customer_id: string
-  opportunity_id: number | null
+  opportunity_id: string | null
   signing_contact_id: number | null
   user_count: number
   total_amount: string

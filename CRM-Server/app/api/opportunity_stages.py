@@ -13,9 +13,40 @@ from app.crud.procurement import opportunity_stage_snapshot_crud
 from app.crud.opportunity import opportunity_crud
 from app.crud.procurement import procurement_stage_template_crud
 from app.models.procurement import ProcurementMethod
+from app.utils.public_id import is_opportunity_public_id
 
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机阶段管理"])
+
+
+def _get_opportunity_or_404(db: Session, opportunity_id: str, team_id: int):
+    if not is_opportunity_public_id(opportunity_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="商机不存在或不属于当前团队"
+        )
+    opportunity = opportunity_crud.get_by_public_id(db, opportunity_id, team_id)
+    if not opportunity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="商机不存在或不属于当前团队"
+        )
+    return opportunity
+
+
+def _snapshot_response(snapshot, opportunity_public_id: str) -> dict:
+    return {
+        "id": snapshot.id,
+        "opportunity_id": opportunity_public_id,
+        "procurement_stage_template_id": snapshot.procurement_stage_template_id,
+        "stage_name": snapshot.stage_name,
+        "win_probability": snapshot.win_probability,
+        "template_sort_order": snapshot.template_sort_order,
+        "template_code": snapshot.template_code,
+        "snapshot_version": snapshot.snapshot_version,
+        "entered_at": snapshot.entered_at,
+        "exited_at": snapshot.exited_at,
+    }
 
 
 @router.get("/{opportunity_id}/current-stage", response_model=OpportunityStageSnapshotResponse, summary="获取商机当前阶段", description="""
@@ -26,26 +57,20 @@ router = APIRouter(prefix="/v1/opportunities", tags=["商机阶段管理"])
 - 包含阶段名称、赢率、进入时间等信息
 """)
 def get_opportunity_current_stage(
-    opportunity_id: int = Path(..., description="商机ID（路径参数）"),
+    opportunity_id: str = Path(..., description="商机对外ID（路径参数）"),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # 验证商机归属
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"商机 {opportunity_id} 不存在或不属于当前团队"
-        )
+    opportunity = _get_opportunity_or_404(db, opportunity_id, team_id)
 
-    snapshot = opportunity_stage_snapshot_crud.get_current(db, opportunity_id)
+    snapshot = opportunity_stage_snapshot_crud.get_current(db, opportunity.id)
     if not snapshot:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"商机 {opportunity_id} 没有当前阶段"
         )
-    return snapshot
+    return _snapshot_response(snapshot, opportunity.public_id)
 
 
 @router.get("/{opportunity_id}/stage-history", response_model=List[OpportunityStageSnapshotResponse], summary="获取商机阶段历史", description="""
@@ -57,21 +82,15 @@ def get_opportunity_current_stage(
 - 显示每个阶段的停留时间
 """)
 def get_opportunity_stage_history(
-    opportunity_id: int = Path(..., description="商机ID（路径参数）"),
+    opportunity_id: str = Path(..., description="商机对外ID（路径参数）"),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # 验证商机归属
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"商机 {opportunity_id} 不存在或不属于当前团队"
-        )
+    opportunity = _get_opportunity_or_404(db, opportunity_id, team_id)
 
-    history = opportunity_stage_snapshot_crud.get_history(db, opportunity_id)
-    return history
+    history = opportunity_stage_snapshot_crud.get_history(db, opportunity.id)
+    return [_snapshot_response(snapshot, opportunity.public_id) for snapshot in history]
 
 
 @router.get("/{opportunity_id}/available-stages", response_model=List[ProcurementStageTemplateResponse], summary="获取可推进到的阶段", description="""
@@ -83,21 +102,15 @@ def get_opportunity_stage_history(
 - 按sort_order排序
 """)
 def get_available_stages(
-    opportunity_id: int = Path(..., description="商机ID（路径参数）"),
+    opportunity_id: str = Path(..., description="商机对外ID（路径参数）"),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # 检查商机是否存在并验证团队归属
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"商机 {opportunity_id} 不存在或不属于当前团队"
-        )
+    opportunity = _get_opportunity_or_404(db, opportunity_id, team_id)
 
     # 获取可用的阶段
-    available = opportunity_stage_snapshot_crud.get_available_stages(db, opportunity_id)
+    available = opportunity_stage_snapshot_crud.get_available_stages(db, opportunity.id)
     return available
 
 
@@ -114,19 +127,13 @@ def get_available_stages(
 - 需要修改商机的采购方式
 """)
 def set_opportunity_procurement_method(
-    opportunity_id: int,
+    opportunity_id: str,
     procurement_method_id: int,
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # 检查商机是否存在并验证团队归属
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"商机 {opportunity_id} 不存在或不属于当前团队"
-        )
+    opportunity = _get_opportunity_or_404(db, opportunity_id, team_id)
 
     # 权限校验
     if opportunity.owner_id != str(current_user.id) and not current_user.is_admin:
@@ -145,7 +152,7 @@ def set_opportunity_procurement_method(
         )
 
     # 检查是否已有阶段
-    existing_snapshot = opportunity_stage_snapshot_crud.get_current(db, opportunity_id)
+    existing_snapshot = opportunity_stage_snapshot_crud.get_current(db, opportunity.id)
     if existing_snapshot:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -164,7 +171,7 @@ def set_opportunity_procurement_method(
 
     # 创建阶段快照
     new_snapshot = opportunity_stage_snapshot_crud.create(
-        db, opportunity_id, default_stage
+        db, opportunity.id, default_stage
     )
 
     # 更新商机
@@ -177,4 +184,4 @@ def set_opportunity_procurement_method(
     db.commit()
     db.refresh(new_snapshot)
 
-    return new_snapshot
+    return _snapshot_response(new_snapshot, opportunity.public_id)

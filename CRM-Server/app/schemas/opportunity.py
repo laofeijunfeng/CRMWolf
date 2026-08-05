@@ -180,7 +180,8 @@ class OpportunityLose(BaseModel):
 
 
 class OpportunityResponse(BaseModel):
-    id: int = Field(..., description="商机ID（主键）")
+    id: str = Field(..., description="商机对外ID")
+    public_id: str = Field(..., description="商机对外ID")
     opportunity_number: str = Field(..., description="商机编号")
     opportunity_name: str = Field(..., description="商机名称（项目名称）")
     customer_id: str = Field(..., description="关联客户对外ID")

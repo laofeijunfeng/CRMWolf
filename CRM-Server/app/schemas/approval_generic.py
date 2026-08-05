@@ -61,6 +61,7 @@ class ApprovalListItemResponse(BaseModel):
     id: int = Field(..., description="审批实例ID")
     business_type: str = Field(..., description="业务单据类型：CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY")
     business_id: int = Field(..., description="业务单据ID")
+    business_public_id: Optional[str] = Field(None, description="业务单据对外ID；商机审批返回商机对外ID")
     application_number: str = Field(..., description="单号（合同 contract_number / 发票 application_number / 回款合成 PAY-{id}）")
     entity_name: Optional[str] = Field(None, description="客户/实体摘要（合同 contract_name / 发票 invoice_title_text；回款暂为 None）")
     entity_amount: Optional[float] = Field(None, description="单据金额（合同 total_amount / 发票 invoice_amount / 回款 actual_amount）")

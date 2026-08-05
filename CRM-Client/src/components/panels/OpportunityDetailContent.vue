@@ -71,7 +71,7 @@ interface CustomerContext {
 }
 
 interface Props {
-  opportunityId: number
+  opportunityId: string
   embedded?: boolean
   customerContext?: CustomerContext | null
   canEditCustomerContext?: boolean | null
@@ -87,13 +87,13 @@ const emit = defineEmits<{
   'back': []
   'close': []
   'refresh': []
-  'edit': [opportunityId: number]
+  'edit': [opportunityId: string]
   'edit-contract': [contract: ContractListResponse]
   'submit-contract-approval': [contract: ContractListResponse]
   'withdraw-contract-approval': [contract: ContractListResponse]
   'delete-contract': [contract: ContractListResponse]
   'create-contract': [{
-    opportunityId: number
+    opportunityId: string
     customerId: string
     customerName: string
     opportunityName: string
@@ -337,7 +337,7 @@ async function fetchOpportunityDetail(): Promise<void> {
   }
 }
 
-async function fetchRelatedContract(opportunityId: number): Promise<void> {
+async function fetchRelatedContract(opportunityId: string): Promise<void> {
   contractLoading.value = true
   try {
     relatedContract.value = await contractApi.getContractByOpportunity(opportunityId)

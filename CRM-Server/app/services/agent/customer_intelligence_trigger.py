@@ -20,11 +20,13 @@ from app.models.deal_journey import (
     DealJourneyEventType,
     DealJourneySourceType,
 )
+from app.models.opportunity import Opportunity
 from app.services.customer_intelligence_event_service import (
     CustomerIntelligenceEvent,
     CustomerIntelligenceEventService,
     customer_intelligence_event_service,
 )
+from app.utils.public_id import is_opportunity_public_id
 
 from .types import JSONDict, coerce_json_dict
 
@@ -129,7 +131,7 @@ class CustomerIntelligenceTriggerPolicy:
         *,
         team_id: int,
     ) -> CustomerIntelligenceEvent | None:
-        selector = _deal_journey_event_selector(tool_result)
+        selector = _deal_journey_event_selector(db, team_id=team_id, tool_result=tool_result)
         if selector is None:
             return None
         event = _find_deal_journey_event(db, team_id=team_id, selector=selector)
@@ -146,11 +148,11 @@ class DealJourneyEventSelector:
     event_type: str | None = None
 
 
-def _deal_journey_event_selector(tool_result: JSONDict) -> DealJourneyEventSelector | None:
+def _deal_journey_event_selector(db: Session, *, team_id: int, tool_result: JSONDict) -> DealJourneyEventSelector | None:
     tool_name = tool_result.get("tool_name")
     data = coerce_json_dict(tool_result.get("data"))
     if tool_name == "create_opportunity":
-        opportunity_id = _positive_int(data.get("id"))
+        opportunity_id = _resolve_opportunity_db_id(db, team_id=team_id, value=data.get("id"))
         if opportunity_id is None:
             return None
         return DealJourneyEventSelector(
@@ -168,7 +170,7 @@ def _deal_journey_event_selector(tool_result: JSONDict) -> DealJourneyEventSelec
             event_type=DealJourneyEventType.CONTRACT_CREATED,
         )
     if tool_name == "move_opportunity_stage":
-        opportunity_id = _positive_int(data.get("id"))
+        opportunity_id = _resolve_opportunity_db_id(db, team_id=team_id, value=data.get("id"))
         if opportunity_id is None:
             return None
         return DealJourneyEventSelector(
@@ -239,6 +241,20 @@ def _find_deal_journey_event(
             CustomerDealJourney.id == CustomerDealJourneyEvent.deal_journey_id,
         ).filter(CustomerDealJourney.primary_opportunity_id == selector.opportunity_id)
     return query.order_by(CustomerDealJourneyEvent.event_time.desc(), CustomerDealJourneyEvent.id.desc()).first()
+
+
+def _resolve_opportunity_db_id(db: Session, *, team_id: int, value: object) -> int | None:
+    opportunity_id = _positive_int(value)
+    if opportunity_id is not None:
+        return opportunity_id
+    if not is_opportunity_public_id(value):
+        return None
+    opportunity = (
+        db.query(Opportunity.id)
+        .filter(Opportunity.public_id == value, Opportunity.team_id == team_id)
+        .first()
+    )
+    return int(opportunity.id) if opportunity is not None else None
 
 
 def _first_intent(events: list[JSONDict]) -> str | None:

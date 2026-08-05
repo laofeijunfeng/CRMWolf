@@ -191,7 +191,7 @@ const procurementApi = {
     return MessageResponseSchema.parse(await request.delete<{ message: string }>(`/v1/procurement-stage-templates/${templateId}`))
   },
 
-  setOpportunityProcurementMethod: async (opportunityId: number, procurementMethodId: number): Promise<{ message: string }> => {
+  setOpportunityProcurementMethod: async (opportunityId: string, procurementMethodId: number): Promise<{ message: string }> => {
     return MessageResponseSchema.parse(await request.post<{ message: string }>(`/v1/opportunities/${opportunityId}/set-procurement-method`, {
       procurement_method_id: procurementMethodId
     }))
@@ -233,23 +233,23 @@ const procurementApi = {
     return ActiveOpportunitiesByStageResponseSchema.parse(await request.get<ActiveOpportunitiesByStageResponse>(`/v1/procurement-admin/active-opportunities/${stageTemplateId}`))
   },
 
-  getOpportunityCurrentStage: async (opportunityId: number): Promise<OpportunityStageSnapshot> => {
+  getOpportunityCurrentStage: async (opportunityId: string): Promise<OpportunityStageSnapshot> => {
     return OpportunityStageSnapshotSchema.parse(await request.get<OpportunityStageSnapshot>(`/v1/opportunities/${opportunityId}/current-stage`))
   },
 
-  getOpportunityStageHistory: async (opportunityId: number): Promise<OpportunityStageSnapshot[]> => {
+  getOpportunityStageHistory: async (opportunityId: string): Promise<OpportunityStageSnapshot[]> => {
     return OpportunityStageSnapshotListSchema.parse(await request.get<OpportunityStageSnapshot[]>(`/v1/opportunities/${opportunityId}/stage-history`))
   },
 
-  getAvailableStages: async (opportunityId: number): Promise<ProcurementStageTemplate[]> => {
+  getAvailableStages: async (opportunityId: string): Promise<ProcurementStageTemplate[]> => {
     return ProcurementStageTemplateListSchema.parse(await request.get<ProcurementStageTemplate[]>(`/v1/opportunities/${opportunityId}/available-stages`))
   },
 
-  getOpportunityProcurementStages: async (opportunityId: number): Promise<OpportunityProcurementStageInfo[]> => {
+  getOpportunityProcurementStages: async (opportunityId: string): Promise<OpportunityProcurementStageInfo[]> => {
     return OpportunityProcurementStageInfoListSchema.parse(await request.get<OpportunityProcurementStageInfo[]>(`/v1/opportunities/${opportunityId}/procurement-stages`))
   },
 
-  moveOpportunityStage: async (opportunityId: number, data: OpportunityMoveStageRequest): Promise<Record<string, unknown>> => {
+  moveOpportunityStage: async (opportunityId: string, data: OpportunityMoveStageRequest): Promise<Record<string, unknown>> => {
     return OpportunityMoveStageResponseSchema.parse(await request.post<Record<string, unknown>>(`/v1/opportunities/${opportunityId}/move-stage`, data))
   },
 
@@ -260,7 +260,7 @@ const procurementApi = {
 
 export interface OpportunityStageSnapshot {
   id: number
-  opportunity_id: number
+  opportunity_id: string
   procurement_stage_template_id: number
   stage_code: string
   stage_name: string

@@ -146,6 +146,7 @@ export const ApprovalListItemSchema = z.object({
   id: z.number().int().positive(),
   business_type: EntityTypeSchema,
   business_id: z.number().int().positive(),
+  business_public_id: z.string().min(1).nullable().optional(),
   application_number: z.string().min(1),
   entity_name: z.string().nullable(),
   entity_amount: z.number().nullable(),

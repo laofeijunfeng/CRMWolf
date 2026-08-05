@@ -53,7 +53,8 @@ export interface SalesStageUpdate {
 }
 
 export interface Opportunity {
-  id: number
+  id: string
+  public_id: string
   opportunity_number: string
   opportunity_name: string
   customer_id: string
@@ -238,7 +239,8 @@ export interface StageDurationData {
 }
 
 export interface OpportunityListResponse {
-  id: number
+  id: string
+  public_id: string
   opportunity_number: string
   opportunity_name: string
   customer_id: string
@@ -312,13 +314,13 @@ export const opportunityApi = {
     return OpportunityListApiResponseSchema.parse(response) as OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>
   },
 
-  getOpportunity: async (opportunityId: number): Promise<Opportunity> => {
+  getOpportunity: async (opportunityId: string): Promise<Opportunity> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
     return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
-  getOpportunityDetail: async (opportunityId: number): Promise<Opportunity> => {
+  getOpportunityDetail: async (opportunityId: string): Promise<Opportunity> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<Opportunity>(`/v1/opportunities/${opportunityId}`)
     return OpportunityApiResponseSchema.parse(response) as Opportunity
@@ -330,29 +332,29 @@ export const opportunityApi = {
     return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
-  updateOpportunity: async (opportunityId: number, data: OpportunityUpdate): Promise<Opportunity> => {
+  updateOpportunity: async (opportunityId: string, data: OpportunityUpdate): Promise<Opportunity> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.put<Opportunity>(`/v1/opportunities/${opportunityId}`, data)
     return OpportunityApiResponseSchema.parse(response) as Opportunity
   },
 
-  moveOpportunityStage: async (opportunityId: number, data: OpportunityMoveStageRequest): Promise<null> => {
+  moveOpportunityStage: async (opportunityId: string, data: OpportunityMoveStageRequest): Promise<null> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.post<null>(`/v1/opportunities/${opportunityId}/move-stage`, data)
     return z.null().parse(response)
   },
 
-  markAsWon: async (opportunityId: number, data: OpportunityWinRequest): Promise<null> => {
+  markAsWon: async (opportunityId: string, data: OpportunityWinRequest): Promise<null> => {
     const response = await request.patch<null>(`/v1/opportunities/${opportunityId}/win`, data)
     return z.null().parse(response)
   },
 
-  markAsLost: async (opportunityId: number, data: OpportunityLossRequest): Promise<null> => {
+  markAsLost: async (opportunityId: string, data: OpportunityLossRequest): Promise<null> => {
     const response = await request.patch<null>(`/v1/opportunities/${opportunityId}/lose`, data)
     return z.null().parse(response)
   },
 
-  deleteOpportunity: async (opportunityId: number): Promise<MessageResponse> => {
+  deleteOpportunity: async (opportunityId: string): Promise<MessageResponse> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.delete<MessageResponse>(`/v1/opportunities/${opportunityId}`)
     return MessageResponseSchema.parse(response)

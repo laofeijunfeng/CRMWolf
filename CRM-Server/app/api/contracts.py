@@ -41,6 +41,7 @@ from app.services.customer_business_object_intelligence_service import (
 )
 from app.services.feishu_notification import feishu_notification_service
 from app.services.file_storage import FileStorageError, file_storage_service
+from app.utils.public_id import is_opportunity_public_id
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ def _get_opportunity_list_info(db: Session, opportunity_id: Optional[int]) -> Op
         return None
 
     opportunity_data = db.execute(text("""
-        SELECT id, opportunity_name, purchase_type
+        SELECT public_id, opportunity_name, purchase_type
         FROM crm_opportunities
         WHERE id = :opportunity_id
     """), {"opportunity_id": opportunity_id}).first()
@@ -129,6 +130,22 @@ def _get_opportunity_list_info(db: Session, opportunity_id: Optional[int]) -> Op
         "opportunity_name": opportunity_data[1],
         "purchase_type": opportunity_data[2],
     }
+
+
+def _get_opportunity_by_public_id_or_404(db: Session, opportunity_id: str, team_id: int):
+    if not is_opportunity_public_id(opportunity_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="商机不存在"
+        )
+
+    opportunity = opportunity_crud.get_by_public_id(db, opportunity_id, team_id)
+    if not opportunity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="商机不存在"
+        )
+    return opportunity
 
 
 def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -> Optional[dict]:
@@ -156,12 +173,13 @@ def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -
 
 def _contract_response_base(db: Session, contract) -> dict:
     customer_info = _get_customer_basic_info(db, contract.customer_id)
+    opportunity_info = _get_opportunity_list_info(db, contract.opportunity_id)
     return {
         "id": contract.id,
         "contract_number": contract.contract_number,
         "contract_name": contract.contract_name,
         "customer_id": customer_info["id"] if customer_info else None,
-        "opportunity_id": contract.opportunity_id,
+        "opportunity_id": opportunity_info["id"] if opportunity_info else None,
         "signing_contact_id": contract.signing_contact_id,
         "user_count": contract.user_count,
         "total_amount": float(contract.total_amount),
@@ -307,12 +325,8 @@ async def create_contract(
     customer = check_customer_edit_permission(contract.customer_id, team_id, current_user, db)
     contract = contract.model_copy(update={"customer_id": customer.id})
 
-    opportunity = opportunity_crud.get_by_id(db, contract.opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
+    opportunity = _get_opportunity_by_public_id_or_404(db, contract.opportunity_id, team_id)
+    contract = contract.model_copy(update={"opportunity_id": opportunity.id})
 
     contact = contact_crud.get_by_id(db, contract.signing_contact_id, team_id)
     if not contact:
@@ -459,7 +473,7 @@ async def download_contract_file(
 - 减少手动创建合同的工作量
 """)
 async def create_contract_from_opportunity(
-    opportunity_id: int,
+    opportunity_id: str,
     contract_name: str = Form(..., description="合同名称，如：XX公司软件采购合同"),
     signing_contact_id: int = Form(..., description="签约联系人ID，必须是该商机的客户下的联系人"),
     file: UploadFile = File(..., description="合同邮件附件（PDF/DOCX，必传）"),
@@ -469,12 +483,7 @@ async def create_contract_from_opportunity(
 ):
     from app.models.opportunity import OpportunityStatus
 
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
+    opportunity = _get_opportunity_by_public_id_or_404(db, opportunity_id, team_id)
 
     if opportunity.status != OpportunityStatus.WON.value:
         raise HTTPException(
@@ -505,7 +514,7 @@ async def create_contract_from_opportunity(
     try:
         db_contract = contract_crud.create_from_opportunity(
             db=db,
-            opportunity_id=opportunity_id,
+            opportunity_id=opportunity.id,
             customer_id=opportunity.customer_id,
             signing_contact_id=signing_contact_id,
             contract_name=contract_name,
@@ -707,7 +716,7 @@ def get_contracts(
 获取指定商机关联的合同信息。
 
 **功能说明：**
-- 根据商机ID查询其关联的合同
+- 根据商机对外ID查询其关联的合同
 - 返回合同的完整列表信息
 
 **业务场景：**
@@ -716,25 +725,20 @@ def get_contracts(
 - 了解商机的合同转化情况
 """)
 def get_contract_by_opportunity(
-    opportunity_id: int,
+    opportunity_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
-    if not opportunity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="商机不存在"
-        )
+    opportunity = _get_opportunity_by_public_id_or_404(db, opportunity_id, team_id)
 
-    contract = contract_crud.get_by_opportunity_id(db, opportunity_id, team_id)
+    contract = contract_crud.get_by_opportunity_id(db, opportunity.id, team_id)
     if not contract:
         return None
     
     customer_info = _get_customer_basic_info(db, contract.customer_id)
     opportunity_info = {
-        "id": opportunity.id,
+        "id": opportunity.public_id,
         "opportunity_name": opportunity.opportunity_name,
         "purchase_type": opportunity.purchase_type,
     }
@@ -773,7 +777,7 @@ def get_contract(
     opportunity_info = None
     if contract.opportunity_id:
         opportunity_data = db.execute(text("""
-            SELECT id, opportunity_name
+            SELECT public_id, opportunity_name
             FROM crm_opportunities
             WHERE id = :opportunity_id
         """), {"opportunity_id": contract.opportunity_id}).first()

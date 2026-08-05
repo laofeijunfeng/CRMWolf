@@ -40,7 +40,7 @@ export const ContractResponseSchema = z.object({
   contract_number: z.string().min(1).max(100),
   contract_name: z.string().min(1).max(255),
   customer_id: z.string().min(1),
-  opportunity_id: z.number().int().nullable(),
+  opportunity_id: z.string().nullable(),
   contract_amount: z.number().positive(),
   signed_date: BusinessDateStringSchema.nullable(),
   start_date: BusinessDateStringSchema.nullable(),
@@ -71,7 +71,7 @@ export type ContractListResponse = z.infer<typeof ContractListResponseSchema>
 export const ContractCreateSchema = z.object({
   contract_name: z.string().min(1).max(255),
   customer_id: z.string().min(1),
-  opportunity_id: z.number().int().optional(),
+  opportunity_id: z.string().optional(),
   contract_amount: z.number().positive(),
   signed_date: BusinessDateStringSchema.optional(),
   start_date: BusinessDateStringSchema.optional(),

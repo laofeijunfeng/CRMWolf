@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -202,7 +202,7 @@ class AgentBusinessSuggestion(BaseModel):
     requires_confirmation: bool = Field(True, description="执行前是否需要用户确认")
     missing_fields: List[str] = Field(default_factory=list, description="执行动作前仍需补充的字段")
     related_object_type: Optional[str] = Field(None, description="依赖对象类型，例如 contract/payment_plan/deployment_info")
-    related_object_id: Optional[int] = Field(None, description="依赖对象 ID")
+    related_object_id: Optional[Union[str, int]] = Field(None, description="依赖对象标识；商机使用对外ID")
     execution_payload: Dict[str, object] = Field(default_factory=dict, description="建议执行所需的结构化参数，仍需代码校验和用户确认")
     risk_notes: List[str] = Field(default_factory=list, description="不确定性或风险提示")
     confidence: float = Field(0.0, ge=0.0, le=1.0)

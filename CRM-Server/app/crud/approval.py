@@ -1128,6 +1128,7 @@ class ApprovalCRUD:
                 "id": ap.id,
                 "business_type": ap.business_type,
                 "business_id": ap.business_id if ap.business_id is not None else 0,
+                "business_public_id": summary.get("business_public_id") if summary else None,
                 "application_number": summary["application_number"] if summary else f"{ap.business_type}-{ap.business_id}",
                 "entity_name": summary["entity_name"] if summary else None,
                 "entity_amount": summary["entity_amount"] if summary else None,
@@ -1323,6 +1324,7 @@ class ApprovalCRUD:
             for opp in opportunities:
                 summaries[(BusinessType.OPPORTUNITY, opp.id)] = {
                     "application_number": opp.opportunity_number or f"OPP-{opp.id}",
+                    "business_public_id": opp.public_id,
                     "entity_name": opp.opportunity_name,
                     "entity_amount": float(opp.total_amount) if opp.total_amount is not None else None,
                     "customer_info": customers_by_id.get(opp.customer_id),

@@ -39,7 +39,7 @@ const schema = toTypedSchema(
 )
 
 interface Props {
-  opportunityId: number | null
+  opportunityId: string | null
   open: boolean
 }
 

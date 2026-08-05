@@ -2,6 +2,7 @@ from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Inde
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
 from app.core.database import Base
+from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 from app.constants.approval_phase import ApprovalPhase
 
@@ -60,6 +61,7 @@ class Opportunity(Base):
     __tablename__ = "crm_opportunities"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    public_id = Column(String(64), nullable=False, unique=True, index=True, default=lambda: generate_public_id("opp"), comment="对外商机ID")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     opportunity_number = Column(String(50), unique=True, nullable=False, comment="商机编号（系统自动生成）")
     opportunity_name = Column(String(255), nullable=False, comment="商机名称")
@@ -109,6 +111,7 @@ class Opportunity(Base):
         Index('idx_expected_closing_date', 'expected_closing_date'),
         Index('idx_created_time', 'created_time'),
         Index('idx_team_id', 'team_id'),
+        Index('idx_opportunity_public_id', 'public_id'),
         Index('idx_opportunity_deal_journey_id', 'deal_journey_id'),
         {'comment': '商机表'}
     )

@@ -32,7 +32,7 @@ withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'add': []
-  'view': [opportunityId: number]
+  'view': [opportunityId: string]
 }>()
 
 const handleAdd = (): void => {

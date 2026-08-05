@@ -402,9 +402,9 @@
 
             <!-- 审批流程组件（内部处理加载/错误/空态） -->
             <ApprovalProcessGeneric
-              v-if="selectedApproval"
+              v-if="selectedApproval && selectedApprovalEntityId !== null"
               :entity-type="selectedApproval.business_type"
-              :entity-id="selectedApproval.business_id"
+              :entity-id="selectedApprovalEntityId"
               :can-approve="activeTab === 'pending'"
               :is-submitter="activeTab === 'submitted'"
               :show-invoice-upload-action="false"
@@ -622,6 +622,25 @@ const activeApprovalDetail = computed<ApprovalDetail | null>(() => {
   return detail.business_type === selected.business_type && detail.business_id === selected.business_id
     ? detail
     : null
+})
+
+const approvalEntityRouteId = (row: ApprovalListItem): number | string | null => {
+  if (row.business_type !== 'OPPORTUNITY') return row.business_id
+  return row.business_public_id ?? null
+}
+
+const requireApprovalEntityRouteId = (row: ApprovalListItem): number | string | null => {
+  const entityId = approvalEntityRouteId(row)
+  if (entityId === null) {
+    toast.error('商机审批缺少对外ID，请刷新后重试')
+  }
+  return entityId
+}
+
+const selectedApprovalEntityId = computed<number | string | null>(() => {
+  const selected = selectedApproval.value
+  if (selected == null) return null
+  return approvalEntityRouteId(selected)
 })
 
 const showInvoiceUploadFooter = computed<boolean>(() =>
@@ -1265,7 +1284,9 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
       LICENSE: row.customer_info?.id !== undefined
         ? customerDetailRoute(row.customer_info.id, { tab: 'license-management' })
         : '/customers',
-      OPPORTUNITY: `/opportunities?opportunityId=${row.business_id}`
+      OPPORTUNITY: row.business_public_id !== undefined && row.business_public_id !== null
+        ? `/opportunities?opportunityId=${row.business_public_id}`
+        : '/opportunities'
     }
     const target = route[row.business_type as Exclude<EntityType, 'CONTRACT'>]
     await router.push(target)
@@ -1299,9 +1320,12 @@ const handleContractEditSuccess = (): void => {
 }
 
 const handleRemind = async (row: ApprovalListItem): Promise<void> => {
+  const entityId = requireApprovalEntityRouteId(row)
+  if (entityId === null) return
+
   remindPendingId.value = row.id
   try {
-    const res = await store.remindEntity(row.business_type, row.business_id)
+    const res = await store.remindEntity(row.business_type, entityId)
     toast.success(res.message)
   } catch (error) {
     handleApiError(error, '催办')
@@ -1312,6 +1336,9 @@ const handleRemind = async (row: ApprovalListItem): Promise<void> => {
 
 const handlePreviewAttachment = async (row: ApprovalListItem): Promise<void> => {
   if (!hasAttachment(row)) return
+  const entityId = requireApprovalEntityRouteId(row)
+  if (entityId === null) return
+
   attachmentPreviewPendingId.value = row.id
   attachmentPreviewRow.value = row
   attachmentPreviewVisible.value = true
@@ -1319,7 +1346,7 @@ const handlePreviewAttachment = async (row: ApprovalListItem): Promise<void> => 
   try {
     attachmentPreviewUrl.value = await approvalGenericApi.createApprovalAttachmentObjectUrl(
       row.business_type,
-      row.business_id
+      entityId
     )
   } catch (error) {
     attachmentPreviewVisible.value = false
@@ -1333,10 +1360,13 @@ const handlePreviewAttachment = async (row: ApprovalListItem): Promise<void> => 
 const handleDownloadAttachment = async (): Promise<void> => {
   const row = attachmentPreviewRow.value
   if (!row) return
+  const entityId = requireApprovalEntityRouteId(row)
+  if (entityId === null) return
+
   try {
     await approvalGenericApi.downloadApprovalAttachment(
       row.business_type,
-      row.business_id,
+      entityId,
       getAttachmentFileName(row)
     )
   } catch (error) {
@@ -1347,6 +1377,9 @@ const handleDownloadAttachment = async (): Promise<void> => {
 // 移动端快速审批：同意（单条，无抽屉）
 const handleQuickApprove = async (row: ApprovalListItem): Promise<void> => {
   try {
+    const entityId = requireApprovalEntityRouteId(row)
+    if (entityId === null) return
+
     const confirmed = await createConfirmDialog({
       title: '快速审批',
       message: '确定同意该审批？',
@@ -1358,7 +1391,7 @@ const handleQuickApprove = async (row: ApprovalListItem): Promise<void> => {
     // 调 store.approveEntity（单条审批，updated_time 用当前行）
     await store.approveEntity(
       row.business_type,
-      row.business_id,
+      entityId,
       'APPROVE',
       '审批通过',
       row.updated_time
@@ -1385,10 +1418,13 @@ const confirmQuickReject = async (): Promise<void> => {
     return
   }
   if (!quickRejectRow.value) return
+  const entityId = requireApprovalEntityRouteId(quickRejectRow.value)
+  if (entityId === null) return
+
   try {
     await store.approveEntity(
       quickRejectRow.value.business_type,
-      quickRejectRow.value.business_id,
+      entityId,
       'REJECT',
       reason,
       quickRejectRow.value.updated_time

@@ -41,6 +41,9 @@ class SalesDashboardMetric(BaseModel):
     secondary_label: str | None = None
     secondary_value: int | float | None = None
     secondary_type: Literal["count", "amount"] | None = None
+    extra_secondary_label: str | None = None
+    extra_secondary_value: int | float | None = None
+    extra_secondary_type: Literal["count", "amount"] | None = None
     rate_label: str | None = None
     rate: float | None = None
 
@@ -172,6 +175,10 @@ def get_sales_dashboard_funnel(
     lead_query = db.query(
         func.count(Lead.id).label("total"),
         func.sum(case((Lead.status == LeadStatus.CONVERTED, 1), else_=0)).label("converted"),
+        func.sum(case((
+            (Lead.created_time >= month_start) & (Lead.created_time < month_end),
+            1
+        ), else_=0)).label("new_current_month"),
     ).filter(Lead.team_id == team_id)
     customer_query = db.query(
         func.count(Customer.id).label("total"),
@@ -235,6 +242,7 @@ def get_sales_dashboard_funnel(
 
     lead_count = int(lead_stats.total or 0)
     converted_lead_count = int(lead_stats.converted or 0)
+    new_lead_count = int(lead_stats.new_current_month or 0)
     customer_count = int(customer_stats.total or 0)
     new_customer_count = int(customer_stats.new_current_month or 0)
     opportunity_count = int(opportunity_stats.total or 0)
@@ -259,9 +267,12 @@ def get_sales_dashboard_funnel(
                 key="leads",
                 label="线索",
                 count=lead_count,
-                secondary_label="已转化",
-                secondary_value=converted_lead_count,
+                secondary_label="筛选期新增" if has_date_filter else "本月新增",
+                secondary_value=lead_count if has_date_filter else new_lead_count,
                 secondary_type="count",
+                extra_secondary_label="已转化",
+                extra_secondary_value=converted_lead_count,
+                extra_secondary_type="count",
             ),
             SalesDashboardMetric(
                 key="customers",

@@ -3,7 +3,7 @@
  *
  * 嵌入业务详情页的审批区。Props：
  *   entityType : 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' | 'OPPORTUNITY'
- *   entityId   : number
+ *   entityId   : number | string（OPPORTUNITY 使用 opp_ public_id）
  *   canApprove : 是否对当前节点具备审批权（控制同意/驳回按钮显隐）
  *   isSubmitter: 是否为提交人（控制撤回 + 草稿态"提交审批"CTA 显隐）
  *
@@ -37,6 +37,7 @@ import type {
   ApprovalDetail,
   ApprovalRecord
 } from '@/schemas/approvalGeneric'
+import type { ApprovalEntityId } from '@/api/approvalGeneric'
 import { FileAttachment } from '@/components/crmwolf'
 import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
 import ApprovalProcessStepper from './ApprovalProcessStepper.vue'
@@ -94,7 +95,7 @@ const props = defineProps({
     required: true
   },
   entityId: {
-    type: Number,
+    type: [Number, String] as PropType<ApprovalEntityId>,
     required: true
   },
   canApprove: {
@@ -243,6 +244,13 @@ const isAxiosStatus = (err: unknown, code: number): boolean => {
   return typeof r?.status === 'number' && r.status === code
 }
 
+const numericEntityId = (): number | null => {
+  const entityId = typeof props.entityId === 'number' ? props.entityId : Number(props.entityId)
+  return Number.isFinite(entityId) ? entityId : null
+}
+
+const numericEntityIdValue = computed<number | null>(() => numericEntityId())
+
 const revokeInvoiceFilePreviewUrl = (): void => {
   if (invoiceFilePreviewUrl.value.length === 0) return
   window.URL.revokeObjectURL(invoiceFilePreviewUrl.value)
@@ -267,7 +275,9 @@ const loadInvoiceFilePreviewUrl = async (showError = false): Promise<void> => {
 
   invoiceFilePreviewLoading.value = true
   try {
-    const objectUrl = await createInvoiceFileObjectUrl(props.entityId)
+    const invoiceId = numericEntityId()
+    if (invoiceId === null) return
+    const objectUrl = await createInvoiceFileObjectUrl(invoiceId)
     if (requestId === invoiceFilePreviewRequestId.value && hasInvoiceFile.value) {
       invoiceFilePreviewUrl.value = objectUrl
     } else {
@@ -297,7 +307,9 @@ const loadContractFilePreviewUrl = async (showError = false): Promise<void> => {
 
   contractFilePreviewLoading.value = true
   try {
-    const objectUrl = await createContractFileObjectUrl(props.entityId)
+    const contractId = numericEntityId()
+    if (contractId === null) return
+    const objectUrl = await createContractFileObjectUrl(contractId)
     if (requestId === contractFilePreviewRequestId.value && hasContractFile.value) {
       contractFilePreviewUrl.value = objectUrl
     } else {
@@ -460,8 +472,10 @@ const handleResubmitAction = (): void => {
 // 发票文件下载 - 使用 invoice API 的下载接口
 const downloadInvoiceFile = async (): Promise<void> => {
   if (detail.value == null || props.entityType !== 'INVOICE') return
+  const invoiceId = numericEntityId()
+  if (invoiceId === null) return
   try {
-    await downloadInvoiceFileApi(props.entityId)
+    await downloadInvoiceFileApi(invoiceId)
   } catch {
     toast.error('文件下载失败')
   }
@@ -469,8 +483,10 @@ const downloadInvoiceFile = async (): Promise<void> => {
 
 const downloadContractFile = async (): Promise<void> => {
   if (detail.value == null || props.entityType !== 'CONTRACT') return
+  const contractId = numericEntityId()
+  if (contractId === null) return
   try {
-    await downloadContractFileApi(props.entityId, detail.value.contract_file_name ?? undefined)
+    await downloadContractFileApi(contractId, detail.value.contract_file_name ?? undefined)
   } catch {
     toast.error('合同附件下载失败')
   }
@@ -514,7 +530,7 @@ const onIssueSuccess = (): void => {
 
 // ===== 生命周期 =====
 watch(
-  [(): EntityType => props.entityType, (): number => props.entityId],
+  [(): EntityType => props.entityType, (): ApprovalEntityId => props.entityId],
   (): void => {
     void loadDetail()
   },
@@ -522,7 +538,7 @@ watch(
 )
 
 watch(
-  [hasInvoiceFile, (): number => props.entityId],
+  [hasInvoiceFile, (): ApprovalEntityId => props.entityId],
   (): void => {
     void loadInvoiceFilePreviewUrl()
   },
@@ -530,7 +546,7 @@ watch(
 )
 
 watch(
-  [hasContractFile, (): number => props.entityId],
+  [hasContractFile, (): ApprovalEntityId => props.entityId],
   (): void => {
     void loadContractFilePreviewUrl()
   },
@@ -771,15 +787,17 @@ onBeforeUnmount((): void => {
 
       <!-- 发票开票对话框 -->
       <InvoiceMarkIssuedDialog
+        v-if="numericEntityIdValue !== null"
         v-model:open="markIssuedDialogVisible"
-        :application-id="entityId"
+        :application-id="numericEntityIdValue"
         @issued="onMarkIssuedSuccess"
       />
 
       <!-- License 发放对话框 -->
       <LicenseIssueDialog
+        v-if="numericEntityIdValue !== null"
         v-model:open="issueLicenseDialogVisible"
-        :application-id="entityId"
+        :application-id="numericEntityIdValue"
         @issued="onIssueSuccess"
       />
     </div>

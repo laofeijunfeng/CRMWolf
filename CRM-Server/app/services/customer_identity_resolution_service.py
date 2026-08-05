@@ -21,6 +21,7 @@ from app.services.customer_knowledge_candidate_service import CustomerVisibility
 IDENTITY_AUTO_SELECT_SCORE = 0.86
 IDENTITY_AMBIGUITY_GAP = 0.08
 IDENTITY_GENERATED_SCAN_LIMIT = 1000
+SEMANTIC_IDENTITY_PROMOTION_SCORE = IDENTITY_AUTO_SELECT_SCORE
 
 
 @dataclass(frozen=True)
@@ -150,7 +151,11 @@ class CustomerIdentityResolutionService:
             semantic_items=semantic_items,
             limit=limit,
         )
-        if not identity_items and semantic_related and _candidate_score(semantic_related[0]) >= 0.62:
+        if (
+            not identity_items
+            and semantic_related
+            and _candidate_score(semantic_related[0]) >= SEMANTIC_IDENTITY_PROMOTION_SCORE
+        ):
             promoted = dict(semantic_related.pop(0))
             match = dict(promoted.get("match") or {})
             match.setdefault("source", "customer_knowledge")
@@ -446,6 +451,7 @@ class CustomerIdentityResolutionService:
                 existing = by_id[key]
                 existing_match = dict(existing.get("match") or {})
                 semantic_match = dict(semantic.get("match") or {})
+                existing_source = existing_match.get("source")
                 evidence = [
                     item for item in [
                         *(existing_match.get("evidence") or []),
@@ -455,7 +461,7 @@ class CustomerIdentityResolutionService:
                 ]
                 existing_match["source"] = "hybrid_identity"
                 existing_match["sources"] = _dedupe_non_empty([
-                    *(existing_match.get("sources") or [existing_match.get("source")]),
+                    *(existing_match.get("sources") or [existing_source]),
                     semantic_match.get("source") or "customer_knowledge",
                 ])
                 existing_match["score"] = round(max(_candidate_score(existing), _candidate_score(semantic)), 4)
@@ -483,6 +489,8 @@ def generated_identity_terms_for_customer_name(account_name: str) -> list[tuple[
         terms.append((no_parenthetical, "generated_short_name"))
     for term in _parenthetical_short_terms(stripped or name):
         terms.append((term, "generated_short_name"))
+    for term in _organization_short_terms(stripped or name):
+        terms.append((term, "generated_short_name"))
     return [
         (term, term_type)
         for term, term_type in _dedupe_term_pairs(terms)
@@ -503,6 +511,49 @@ def _parenthetical_short_terms(name: str) -> list[str]:
     if tail and tail != suffix:
         terms.append(f"{prefix}{tail}")
     return terms
+
+
+def _organization_short_terms(name: str) -> list[str]:
+    normalized = _normalize_text(name)
+    if not normalized:
+        return []
+    terms: list[str] = []
+    prefix, body = _split_known_institution_prefix(normalized)
+    if prefix:
+        terms.append(prefix)
+    body_short = _abbreviate_organization_body(body or normalized)
+    if body_short:
+        terms.append(body_short)
+    if prefix and body_short:
+        terms.append(f"{prefix}{body_short}")
+    return terms
+
+
+def _split_known_institution_prefix(normalized_name: str) -> tuple[str, str]:
+    for prefix, short in _INSTITUTION_PREFIX_ABBREVIATIONS:
+        if normalized_name.startswith(prefix) and len(normalized_name) > len(prefix):
+            return short, normalized_name[len(prefix):]
+    return "", normalized_name
+
+
+def _abbreviate_organization_body(value: str) -> str:
+    text, suffix_short = _strip_organization_suffix(value)
+    if len(text) < 4:
+        return ""
+    segments = [segment for segment in re.split(r"(信息|工程|技术|网络|软件|系统|集成|研究|设计|开发|数据|智能)", text) if segment]
+    if len(segments) >= 2:
+        short = "".join(segment[0] for segment in segments if segment) + suffix_short
+        if 2 <= len(short) <= 6:
+            return short
+    return ""
+
+
+def _strip_organization_suffix(value: str) -> tuple[str, str]:
+    compact = _clean_text(value)
+    for suffix, suffix_short in _ORGANIZATION_SUFFIXES:
+        if compact.endswith(suffix) and len(compact) > len(suffix) + 1:
+            return compact[: -len(suffix)], suffix_short
+    return compact, ""
 
 
 def _score_identity_text(*, query: str, term: str, term_type: str, confidence: float = 0.86) -> tuple[float, str]:
@@ -687,6 +738,26 @@ _LEGAL_SUFFIXES: tuple[str, ...] = (
     "股份公司",
     "集团",
     "公司",
+)
+
+_ORGANIZATION_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("研究所", "所"),
+    ("研究院", "院"),
+    ("科学院", "院"),
+    ("工程院", "院"),
+    ("实验室", "室"),
+    ("中心", "中心"),
+    ("大学", "大学"),
+    ("学院", "学院"),
+)
+
+_INSTITUTION_PREFIX_ABBREVIATIONS: tuple[tuple[str, str], ...] = (
+    ("中国科学院大学", "国科大"),
+    ("中国科学院", "中科院"),
+    ("中国工程院", "工程院"),
+    ("中国医学科学院", "医科院"),
+    ("中国社会科学院", "社科院"),
+    ("中国农业科学院", "农科院"),
 )
 
 

@@ -613,8 +613,9 @@ class CRMAgentGraphService:
             and bool(state.get("has_authorization"))
             and bool(state.get("has_db"))
             and bool(parsed.get("customer_name"))
-            and not self._requires_clarification(
+            and not self._customer_resolution_clarification_blocks(
                 semantic_result,
+                parsed,
                 has_memory_customer=bool(memory_customer),
             )
             and not self._should_use_memory_customer(semantic_result, parsed, memory_customer)
@@ -632,8 +633,9 @@ class CRMAgentGraphService:
             not self._follow_up_quality_blocks(state)
             and bool(state.get("has_authorization"))
             and bool(state.get("has_db"))
-            and not self._requires_clarification(
+            and not self._customer_resolution_clarification_blocks(
                 semantic_result,
+                parsed,
                 has_memory_customer=bool(memory_customer),
             )
             and self._should_use_memory_customer(semantic_result, parsed, memory_customer)
@@ -748,6 +750,25 @@ class CRMAgentGraphService:
         )
 
     @staticmethod
+    def _customer_resolution_clarification_blocks(
+        semantic_result: Optional[AgentSemanticParseResult],
+        parsed: Dict[str, object],
+        *,
+        has_memory_customer: bool = False,
+    ) -> bool:
+        if semantic_result is None:
+            return False
+        if semantic_result.intent == "UNKNOWN" or semantic_result.intent_confidence < 0.75:
+            return True
+        customer_name = parsed.get("customer_name")
+        if isinstance(customer_name, str) and customer_name.strip():
+            return False
+        return CRMAgentGraphService._requires_clarification(
+            semantic_result,
+            has_memory_customer=has_memory_customer,
+        )
+
+    @staticmethod
     def _current_date(state: AgentGraphState) -> date | None:
         current_date = state.get("current_date")
         if isinstance(current_date, str):
@@ -792,7 +813,7 @@ class CRMAgentGraphService:
     ) -> Dict[str, object]:
         if semantic_result.customer.resolution_source == "EXPLICIT":
             return parsed
-        if semantic_result.intent in {"UNKNOWN", "CUSTOMER_QUERY", "CREATE_LEAD", "CREATE_CUSTOMER"}:
+        if semantic_result.intent in {"UNKNOWN", "CREATE_LEAD", "CREATE_CUSTOMER"}:
             return parsed
 
         memory_customer = CRMAgentGraphService._memory_current_customer(memory)
@@ -801,6 +822,17 @@ class CRMAgentGraphService:
             memory_customer_name=(memory_customer or {}).get("account_name"),
         )
         if not hint:
+            return parsed
+        parsed_customer_name = parsed.get("customer_name")
+        if (
+            isinstance(parsed_customer_name, str)
+            and parsed_customer_name.strip()
+            and (
+                parsed_customer_name.strip() == hint
+                or parsed_customer_name.strip() in hint
+            )
+            and semantic_result.customer.confidence >= 0.7
+        ):
             return parsed
         return {
             **parsed,

@@ -130,7 +130,8 @@ def _customer_info_dict(customer) -> Optional[dict]:
 
 def _opportunity_response_dict(db: Session, opportunity, team_id: Optional[int]) -> dict:
     return {
-        "id": opportunity.id,
+        "id": opportunity.public_id,
+        "public_id": opportunity.public_id,
         "opportunity_number": opportunity.opportunity_number,
         "opportunity_name": opportunity.opportunity_name,
         "customer_id": _customer_public_id(db, opportunity.customer_id, team_id),
@@ -367,7 +368,8 @@ def get_opportunities(
                 }
         
         opp_dict = {
-            "id": opp.id,
+            "id": opp.public_id,
+            "public_id": opp.public_id,
             "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
             "customer_id": customer.public_id if customer else None,
@@ -429,7 +431,7 @@ def get_opportunities(
 - 避免重复创建合同
 
 **路径参数：**
-- customer_id: 客户ID（必填）
+- customer_id: 客户对外ID（必填）
 
 **业务规则：**
 - 只返回已赢单（status=1）的商机
@@ -437,7 +439,7 @@ def get_opportunities(
 - 不需要分页，返回所有符合条件的商机
 
 **返回字段：**
-- 商机基本信息：ID、名称、实际金额等
+- 商机基本信息：对外ID、名称、实际金额等
 - 当前阶段信息：阶段名称、赢率
 - 客户信息：客户名称
 - 负责人信息：负责人姓名
@@ -487,7 +489,8 @@ def get_available_opportunities_for_contract(
                 }
 
         result.append(OpportunityListResponse(**{
-            "id": opp.id,
+            "id": opp.public_id,
+            "public_id": opp.public_id,
             "opportunity_number": opp.opportunity_number,
             "opportunity_name": opp.opportunity_name,
             "customer_id": customer_info["id"] if customer_info else None,
@@ -525,7 +528,7 @@ def get_available_opportunities_for_contract(
 
 @router.get("/{opportunity_id}", response_model=OpportunityDetailResponse, summary="获取商机详情", description="返回商机完整信息及关联的客户、负责人、创建人等信息")
 def get_opportunity(
-    opportunity_id: int,
+    opportunity_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -594,7 +597,8 @@ def get_opportunity(
             )
     
     result = {
-        "id": opportunity.id,
+        "id": opportunity.public_id,
+        "public_id": opportunity.public_id,
         "opportunity_number": opportunity.opportunity_number,
         "opportunity_name": opportunity.opportunity_name,
         "customer_id": customer.public_id if customer else None,
@@ -645,7 +649,7 @@ def get_opportunity(
 
 @router.get("/{opportunity_id}/procurement-stages", response_model=List[OpportunityProcurementStageInfo], summary="获取商机采购阶段", description="获取商机对应的采购方式的所有阶段，标注当前商机的阶段")
 def get_opportunity_procurement_stages(
-    opportunity_id: int,
+    opportunity_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -689,7 +693,7 @@ def get_opportunity_procurement_stages(
 
 @router.put("/{opportunity_id}", response_model=OpportunityResponse, summary="编辑商机", description="更新商机基础信息")
 async def update_opportunity(
-    opportunity_id: int,
+    opportunity_id: str,
     opportunity: OpportunityUpdate,
     db_opportunity = Depends(check_opportunity_edit_permission),
     current_user = Depends(get_current_active_user),
@@ -710,7 +714,7 @@ async def update_opportunity(
 
 @router.post("/{opportunity_id}/move-stage", response_model=OpportunityDetailResponse, summary="推进商机阶段", description="推进商机到下一阶段，使用新的采购阶段模板系统，创建阶段快照")
 async def move_opportunity_stage(
-    opportunity_id: int,
+    opportunity_id: str,
     stage_move: OpportunityMoveToStage,
     db_opportunity = Depends(check_opportunity_edit_permission),
     current_user = Depends(get_current_active_user),
@@ -725,7 +729,7 @@ async def move_opportunity_stage(
 
     updated_opportunity = opportunity_crud.move_to_stage(
         db=db,
-        opportunity_id=opportunity_id,
+        opportunity_id=db_opportunity.id,
         target_stage_template_id=stage_move.stage_template_id,
         operator_id=str(current_user.id)
     )
@@ -782,7 +786,8 @@ async def move_opportunity_stage(
             )
     
     result = {
-        "id": updated_opportunity.id,
+        "id": updated_opportunity.public_id,
+        "public_id": updated_opportunity.public_id,
         "opportunity_number": updated_opportunity.opportunity_number,
         "opportunity_name": updated_opportunity.opportunity_name,
         "customer_id": _customer_public_id(db, updated_opportunity.customer_id, updated_opportunity.team_id),
@@ -823,7 +828,7 @@ async def move_opportunity_stage(
 
 @router.patch("/{opportunity_id}/win", response_model=OpportunityResponse, summary="标记赢单", description="状态改为已赢单，记录实际成交金额")
 async def mark_opportunity_as_won(
-    opportunity_id: int,
+    opportunity_id: str,
     win_data: OpportunityWin,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("opportunity:win")),
@@ -856,7 +861,7 @@ async def mark_opportunity_as_won(
 
 @router.patch("/{opportunity_id}/lose", response_model=OpportunityResponse, summary="标记输单", description="状态改为已输单，必须记录输单原因")
 async def mark_opportunity_as_lost(
-    opportunity_id: int,
+    opportunity_id: str,
     lose_data: OpportunityLose,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(require_permission("opportunity:lose")),
@@ -889,7 +894,7 @@ async def mark_opportunity_as_lost(
 
 @router.delete("/{opportunity_id}", response_model=MessageResponse, summary="删除商机", description="删除商机")
 async def delete_opportunity(
-    opportunity_id: int,
+    opportunity_id: str,
     db_opportunity = Depends(check_opportunity_delete_permission),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -900,7 +905,7 @@ async def delete_opportunity(
             change_type="deleted",
             actor_id=str(current_user.id),
         )
-        opportunity_crud.delete(db, opportunity_id)
+        opportunity_crud.delete(db, db_opportunity.id)
         await _trigger_opportunity_intelligence_refresh(
             db,
             change,

@@ -26,3 +26,21 @@ def test_customer_hint_does_not_treat_field_supplement_as_customer():
     )
 
     assert hint is None
+
+
+def test_customer_hint_extracts_lookup_target_without_company_marker():
+    hint = explicit_customer_hint_from_message(
+        "搜索客户 南银法巴",
+        memory_customer_name=None,
+    )
+
+    assert hint == "南银法巴"
+
+
+def test_customer_hint_does_not_extract_generic_lookup_region():
+    hint = explicit_customer_hint_from_message(
+        "搜索客户 上海",
+        memory_customer_name=None,
+    )
+
+    assert hint is None

@@ -280,16 +280,16 @@ def _runtime_context_from_input(input_state: BusinessContextGraphInput) -> Busin
 business_context_graph_service = BusinessContextGraphService(checkpointer=agent_checkpoint_saver)
 
 
-def _customer_identifier_from_state(customer: dict[str, object]) -> int | str | None:
+def _customer_identifier_from_state(customer: dict[str, object]) -> str | None:
     public_id = _non_empty_string(customer.get("public_id"))
     if public_id is not None:
         return public_id
     value = customer.get("id")
     if isinstance(value, int):
-        return value if value > 0 else None
+        return str(value) if value > 0 else None
     if isinstance(value, str) and value.strip().isdigit():
         customer_id = int(value.strip())
-        return customer_id if customer_id > 0 else None
+        return str(customer_id) if customer_id > 0 else None
     return _non_empty_string(value)
 
 

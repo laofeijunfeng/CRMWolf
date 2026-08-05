@@ -735,12 +735,13 @@ class FeishuService:
         frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
         if not frontend_url or business_id is None:
             return None
+        if entity_type == BusinessType.OPPORTUNITY:
+            return f"{frontend_url}/opportunities"
         path_map = {
             BusinessType.CONTRACT: "contracts",
             BusinessType.PAYMENT: "payments",
             BusinessType.INVOICE: "invoices",
             BusinessType.LICENSE: "license-applications",
-            BusinessType.OPPORTUNITY: "opportunities",
         }
         segment = path_map.get(entity_type, "contracts")
         return f"{frontend_url}/{segment}/{business_id}"

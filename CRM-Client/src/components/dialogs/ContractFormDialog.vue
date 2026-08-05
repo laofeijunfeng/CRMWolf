@@ -46,7 +46,7 @@ const schema = toTypedSchema(
   z.object({
     customer_id: z.string().min(1, '请选择客户'),
     contract_name: z.string().min(1, '请输入合同名称').max(100, '合同名称不能超过100字'),
-    opportunity_id: z.coerce.number().min(1, '请选择商机'),
+    opportunity_id: z.string().min(1, '请选择商机'),
     signing_contact_id: z.coerce.number().min(1, '请选择签署联系人'),
     user_count: z.coerce.number().int('用户数必须为整数').min(1, '用户数至少为1'),
     total_amount: z.coerce.number().min(0, '金额不能为负数'),
@@ -116,7 +116,7 @@ interface CustomerOption {
 }
 
 interface ContractOpportunityOption {
-  id: number
+  id: string
   opportunity_name: string
   customer_id: string
   customer_name?: string
@@ -183,8 +183,8 @@ const licenseTypeOptions = [
 const selectedOpportunity = computed<ContractOpportunityOption | null>(() => {
   if (props.fixedOpportunity !== null) return props.fixedOpportunity
 
-  const opportunityId = Number(values.opportunity_id)
-  if (!Number.isFinite(opportunityId) || opportunityId <= 0) return null
+  const opportunityId = String(values.opportunity_id ?? '')
+  if (opportunityId === '') return null
 
   return opportunities.value.find((opportunity) => opportunity.id === opportunityId) ?? null
 })
@@ -370,8 +370,8 @@ function applyOpportunityDefaults(opportunity: ContractOpportunityOption, option
 }
 
 function handleOpportunityChange(value: unknown): void {
-  const opportunityId = Number(value)
-  if (!Number.isFinite(opportunityId) || opportunityId <= 0) return
+  const opportunityId = String(value ?? '')
+  if (opportunityId === '') return
   setFieldValue('opportunity_id', opportunityId)
 
   const opportunity = opportunities.value.find((item) => item.id === opportunityId)
@@ -391,7 +391,7 @@ watch(() => props.open, async (newOpen) => {
       setValues({
         customer_id: props.contract.customer_id.toString(),
         contract_name: props.contract.contract_name,
-        opportunity_id: props.contract.opportunity_id,
+        opportunity_id: props.contract.opportunity_id ?? '',
         signing_contact_id: props.contract.signing_contact_id,
         user_count: props.contract.user_count,
         total_amount: parseFloat(props.contract.total_amount),
@@ -476,7 +476,7 @@ watch(() => values.customer_id, async (newCustomerId) => {
   const customerId = String(newCustomerId ?? '').trim()
   if (customerId !== '' && !props.customerLocked && !hasFixedOpportunity.value) {
     // Clear previous selections
-    setFieldValue('opportunity_id', undefined as unknown as number)
+    setFieldValue('opportunity_id', undefined as unknown as string)
     setFieldValue('signing_contact_id', undefined as unknown as number)
     opportunities.value = []
 

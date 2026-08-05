@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, List, Literal, Optional
+from typing import Awaitable, Callable, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -180,15 +180,15 @@ class ListCustomerOpportunitiesInput(BaseModel):
 
 
 class GetOpportunityDetailInput(BaseModel):
-    opportunity_id: int = Field(..., ge=1)
+    opportunity_id: Union[str, int] = Field(..., description="商机对外ID（opp_...）；兼容内部任务中的数据库ID")
 
 
 class GetOpportunityProcurementStagesInput(BaseModel):
-    opportunity_id: int = Field(..., ge=1)
+    opportunity_id: Union[str, int] = Field(..., description="商机对外ID（opp_...）；兼容内部任务中的数据库ID")
 
 
 class MoveOpportunityStageInput(BaseModel):
-    opportunity_id: int = Field(..., ge=1)
+    opportunity_id: Union[str, int] = Field(..., description="商机对外ID（opp_...）；兼容内部任务中的数据库ID")
     stage_template_id: int = Field(..., ge=1)
     idempotency_suffix: Optional[str] = None
 

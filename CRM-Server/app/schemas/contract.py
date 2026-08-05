@@ -67,7 +67,7 @@ class CustomerBasicInfo(BaseModel):
 
 
 class OpportunityBasicInfo(BaseModel):
-    id: int = Field(..., description="商机ID")
+    id: str = Field(..., description="商机对外ID")
     opportunity_name: str = Field(..., description="商机名称")
     
     class Config:
@@ -102,7 +102,7 @@ class OwnerBasicInfo(CreatorBasicInfo):
 class ContractBase(BaseModel):
     contract_name: str = Field(..., min_length=1, max_length=255, description="合同名称")
     customer_id: str = Field(..., description="关联客户对外ID")
-    opportunity_id: int = Field(..., description="关联商机ID")
+    opportunity_id: str = Field(..., description="关联商机对外ID")
     signing_contact_id: int = Field(..., description="客户签约人ID")
     user_count: int = Field(..., gt=0, description="采购用户数")
     total_amount: Decimal = Field(..., gt=0, description="合同总金额（元）")
@@ -146,7 +146,7 @@ class ContractResponse(BaseModel):
     contract_number: str = Field(..., description="合同编号")
     contract_name: str = Field(..., description="合同名称")
     customer_id: str = Field(..., description="关联客户对外ID")
-    opportunity_id: int = Field(..., description="关联商机ID")
+    opportunity_id: Optional[str] = Field(None, description="关联商机对外ID，可为空")
     signing_contact_id: int = Field(..., description="客户签约人ID")
     user_count: int = Field(..., description="采购用户数")
     total_amount: Decimal = Field(..., description="合同总金额（元）")

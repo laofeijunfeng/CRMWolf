@@ -71,6 +71,7 @@ import { useApprovalStore } from '@/stores/approval'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { confirmDelete } from '@/utils/confirmDialog'
 import { customerDetailRoute } from '@/utils/customerRoutes'
+import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -118,12 +119,12 @@ const recordSheetVisible = ref(false)
 const recordEditDialogOpen = ref(false)
 const recordEditSubmitting = ref(false)
 const isRecordResubmitMode = ref(false)
-const selectedOpportunityId = ref<number | null>(null)
-const highlightedOpportunityId = ref<number | null>(null)
-const restoreFocusOpportunityId = ref<number | null>(null)
+const selectedOpportunityId = ref<string | null>(null)
+const highlightedOpportunityId = ref<string | null>(null)
+const restoreFocusOpportunityId = ref<string | null>(null)
 
 interface ContractOpportunityContext {
-  id: number
+  id: string
   opportunity_name: string
   customer_id: string
   customer_name?: string
@@ -134,7 +135,7 @@ interface ContractOpportunityContext {
 }
 
 interface CreateContractPayload {
-  opportunityId: number
+  opportunityId: string
   customerId: string
   customerName: string
   opportunityName: string
@@ -409,11 +410,10 @@ const getSingleQueryValue = (value: unknown): string | undefined => {
   return undefined
 }
 
-const parsePositiveInteger = (value: unknown): number | null => {
+const parseOpportunityPublicId = (value: unknown): string | null => {
   const rawValue = getSingleQueryValue(value)
   if (rawValue === undefined || rawValue.trim() === '') return null
-  const parsed = Number.parseInt(rawValue, 10)
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  return isOpportunityPublicId(rawValue) ? rawValue : null
 }
 
 const getCustomerRouteQuery = (extra: Record<string, string | undefined> = {}): Record<string, string> => {
@@ -453,7 +453,7 @@ const restorePanelFromRoute = (): void => {
   activePanel.value = navTabs.some(tab => tab.key === routeTab) ? routeTab as string : 'customer-brief'
 
   const routeOpportunityId = activePanel.value === 'opportunities'
-    ? parsePositiveInteger(route.query['opportunityId'])
+    ? parseOpportunityPublicId(route.query['opportunityId'])
     : null
   selectedOpportunityId.value = routeOpportunityId
   highlightedOpportunityId.value = null
@@ -780,7 +780,7 @@ const handleOpportunitySuccess = (): void => {
   }
 }
 
-const handleViewOpportunity = (opportunityId: number): void => {
+const handleViewOpportunity = (opportunityId: string): void => {
   activePanel.value = 'opportunities'
   selectedOpportunityId.value = opportunityId
   highlightedOpportunityId.value = null

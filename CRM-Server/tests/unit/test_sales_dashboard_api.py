@@ -235,3 +235,79 @@ def test_follow_up_trend_requires_sales_dashboard_permission(
     )
 
     assert response.status_code == 403
+
+
+class _FakeFunnelQuery:
+    def __init__(self, result):
+        self.result = result
+
+    def filter(self, *args, **kwargs):  # noqa: ARG002
+        return self
+
+    def one(self):
+        return self.result
+
+
+class _FakeFunnelDb:
+    def __init__(self):
+        self.results = iter([
+            SimpleNamespace(total=10, converted=3, new_current_month=4),
+            SimpleNamespace(total=8, new_current_month=2),
+            SimpleNamespace(total=5, amount=1000, won=2),
+            SimpleNamespace(total=2, amount=800),
+            SimpleNamespace(total=1, amount=300),
+            SimpleNamespace(total=1, amount=200),
+        ])
+
+    def query(self, *args, **kwargs):  # noqa: ARG002
+        return _FakeFunnelQuery(next(self.results))
+
+
+def test_funnel_lead_metric_shows_current_month_before_converted(monkeypatch):
+    monkeypatch.setattr(sales_dashboard, "_resolve_scope", lambda db, user_id, team_id: "all")
+    monkeypatch.setattr(
+        sales_dashboard,
+        "business_now",
+        lambda: datetime(2026, 7, 15, 9, 0, 0),
+    )
+
+    response = sales_dashboard.get_sales_dashboard_funnel(
+        start_date=None,
+        end_date=None,
+        owner_id=None,
+        team_id=1,
+        current_user=SimpleNamespace(id=1),
+        db=_FakeFunnelDb(),
+    )
+
+    lead_metric = response.metrics[0]
+    assert lead_metric.key == "leads"
+    assert lead_metric.count == 10
+    assert lead_metric.secondary_label == "本月新增"
+    assert lead_metric.secondary_value == 4
+    assert lead_metric.extra_secondary_label == "已转化"
+    assert lead_metric.extra_secondary_value == 3
+    assert lead_metric.rate_label is None
+
+
+def test_funnel_lead_metric_uses_filter_period_label_when_date_filtered(monkeypatch):
+    monkeypatch.setattr(sales_dashboard, "_resolve_scope", lambda db, user_id, team_id: "all")
+    monkeypatch.setattr(
+        sales_dashboard,
+        "business_now",
+        lambda: datetime(2026, 7, 15, 9, 0, 0),
+    )
+
+    response = sales_dashboard.get_sales_dashboard_funnel(
+        start_date=datetime(2026, 6, 1).date(),
+        end_date=datetime(2026, 6, 30).date(),
+        owner_id=None,
+        team_id=1,
+        current_user=SimpleNamespace(id=1),
+        db=_FakeFunnelDb(),
+    )
+
+    lead_metric = response.metrics[0]
+    assert lead_metric.secondary_label == "筛选期新增"
+    assert lead_metric.secondary_value == 10
+    assert lead_metric.extra_secondary_label == "已转化"

@@ -200,12 +200,13 @@ def _contract_response_base(contract) -> dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="合同关联客户数据异常",
         )
+    opportunity = getattr(contract, "opportunity", None)
     return {
         "id": contract.id,
         "contract_number": contract.contract_number,
         "contract_name": contract.contract_name,
         "customer_id": contract.customer.public_id,
-        "opportunity_id": contract.opportunity_id,
+        "opportunity_id": opportunity.public_id if opportunity else None,
         "signing_contact_id": contract.signing_contact_id,
         "user_count": contract.user_count,
         "total_amount": contract.total_amount,
@@ -448,7 +449,7 @@ async def convert_from_lead(
 - 客户详情页展示合同列表
 
 **路径参数：**
-- customer_id: 客户ID
+- customer_id: 客户对外ID
 
 **查询参数：**
 - status: 合同状态筛选（可选）
@@ -489,7 +490,7 @@ def get_customer_contracts(
         opportunity_info = None
         if contract.opportunity_id:
             opportunity_data = db.execute(text("""
-                SELECT id, opportunity_name
+                SELECT public_id, opportunity_name
                 FROM crm_opportunities
                 WHERE id = :opportunity_id
             """), {"opportunity_id": contract.opportunity_id}).first()
@@ -533,7 +534,7 @@ def get_customer_contracts(
 - 客户详情页展示回款计划
 
 **路径参数：**
-- customer_id: 客户ID
+- customer_id: 客户对外ID
 
 **查询参数：**
 - status: 回款状态筛选（可选）：PENDING待回款、OVERDUE已逾期、PARTIAL部分回款、COMPLETED已登记
@@ -681,7 +682,7 @@ def get_customer_payment_plans(
 - 客户详情页展示发票列表
 
 **路径参数：**
-- customer_id: 客户ID
+- customer_id: 客户对外ID
 
 **查询参数：**
 - status: 发票状态筛选（可选）
@@ -744,7 +745,7 @@ def get_customer_invoices(
 - 客户详情页展示抬头列表
 
 **路径参数：**
-- customer_id: 客户ID
+- customer_id: 客户对外ID
 
 **返回字段：**
 - 抬头基本信息：ID、抬头名称、纳税人识别号

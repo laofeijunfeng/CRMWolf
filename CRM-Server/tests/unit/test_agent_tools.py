@@ -1,4 +1,6 @@
 """CRM AI Agent tool adapter tests."""
+from datetime import date
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
@@ -20,6 +22,7 @@ from app.models.customer import Customer, CustomerMember
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
 from app.models.customer_identity_term import CustomerIdentityTerm
 from app.models.lead import Lead, LeadSource, LeadStatus
+from app.models.opportunity import Opportunity
 from app.models.permission import Permission
 from app.models.role import Role
 from app.models.role_permission import RolePermission
@@ -37,6 +40,7 @@ from app.services.customer_qdrant_index_service import CustomerEvidenceSearchRes
 
 CUSTOMER_PUBLIC_ID = "cus_test_101"
 LEAD_PUBLIC_ID = "lead_test_8101"
+OPPORTUNITY_PUBLIC_ID = "opp_00000000000000000000000000001bbd"
 
 
 @compiles(BigInteger, "sqlite")
@@ -83,34 +87,34 @@ class FakeCRMAPIClient:
         if method == "POST" and path == f"/v1/customers/{CUSTOMER_PUBLIC_ID}/members":
             return {"id": 6201, "customer_id": CUSTOMER_PUBLIC_ID, **json}
         if method == "POST" and path == "/v1/opportunities/":
-            return {"id": 7101, **json, "approval_phase": "pending_review"}
+            return {"id": OPPORTUNITY_PUBLIC_ID, **json, "approval_phase": "pending_review"}
         if method == "GET" and (path == "/v1/opportunities/" or path.startswith("/v1/opportunities/?customer_id=")):
             customer_id = params["customer_id"] if params else path.rsplit("=", 1)[1]
             return {
                 "items": [{
-                    "id": 7101,
+                    "id": OPPORTUNITY_PUBLIC_ID,
                     "customer_id": customer_id,
                     "status": 0,
                     "approval_phase": "approved",
                 }],
                 "total": 1,
             }
-        if method == "GET" and path == "/v1/opportunities/7101":
+        if method == "GET" and path == f"/v1/opportunities/{OPPORTUNITY_PUBLIC_ID}":
             return {
-                "id": 7101,
+                "id": OPPORTUNITY_PUBLIC_ID,
                 "customer_id": CUSTOMER_PUBLIC_ID,
                 "status": 0,
                 "approval_phase": "approved",
                 "current_stage_snapshot": {"procurement_stage_template_id": 11, "stage_name": "立项"},
             }
-        if method == "GET" and path == "/v1/opportunities/7101/procurement-stages":
+        if method == "GET" and path == f"/v1/opportunities/{OPPORTUNITY_PUBLIC_ID}/procurement-stages":
             return [
                 {"id": 11, "stage_name": "立项", "sort_order": 1, "is_current": True, "can_skip": False},
                 {"id": 12, "stage_name": "招标准备", "sort_order": 2, "is_current": False, "can_skip": False},
             ]
-        if method == "POST" and path == "/v1/opportunities/7101/move-stage":
+        if method == "POST" and path == f"/v1/opportunities/{OPPORTUNITY_PUBLIC_ID}/move-stage":
             return {
-                "id": 7101,
+                "id": OPPORTUNITY_PUBLIC_ID,
                 "current_stage_snapshot": {"procurement_stage_template_id": json["stage_template_id"], "stage_name": "招标准备"},
             }
         if method == "POST" and path == "/v1/payments/contracts/201/payment-plans":
@@ -354,7 +358,9 @@ async def test_agent_tool_search_customers_uses_customer_knowledge_when_keyword_
 
         assert result.success is True
         assert result.data["items"][0]["account_name"] == "中国科学院信息工程研究所"
-        assert result.data["items"][0]["match"]["source"] == "customer_knowledge"
+        match = result.data["items"][0]["match"]
+        assert match["source"] == "hybrid_identity"
+        assert set(match["sources"]) == {"generated_match_term", "customer_knowledge"}
         assert result.data["retrieval"]["identity_decision"] == "auto_select"
         assert result.data["retrieval"]["semantic_status"] == "completed"
         assert embedding_service.queries == ["中科院"]
@@ -512,6 +518,63 @@ async def test_agent_tool_search_customers_does_not_promote_low_score_semantic_h
         assert result.data["items"] == []
         assert result.data["semantic_related_customers"][0]["account_name"] == "上海叠纸互娱网络科技有限公司"
         assert result.data["retrieval"]["semantic_related_customer_count"] == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_search_customers_does_not_promote_medium_semantic_hits_to_identity():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+    ])
+    qdrant_service = FakeCustomerQdrantIndexService([
+        CustomerEvidenceSearchResult(
+            id="evidence-404",
+            score=0.7,
+            tenant_id=1,
+            team_id=1,
+            customer_id=404,
+            source_type="follow_up",
+            source_object_id="activity_404",
+            business_object_type=None,
+            business_object_id=None,
+            title="跟进记录",
+            text="内容语义相关，但没有客户名称身份证据。",
+        )
+    ])
+    service = CRMAgentToolService(
+        api_client=EmptyCustomerSearchCRMAPIClient(),
+        knowledge_candidate_service=CustomerKnowledgeCandidateService(
+            embedding_service=FakeCustomerEmbeddingService(),
+            qdrant_index_service=qdrant_service,
+        ),
+    )
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
+        db.add(Customer(
+            id=404,
+            public_id="cus_medium_score",
+            team_id=1,
+            account_name="上海叠纸互娱网络科技有限公司",
+            city="上海",
+            status=0,
+            creator_id="2",
+        ))
+        db.commit()
+
+        result = await service.search_customers(_context(db), "矽递科技", limit=10)
+
+        assert result.success is True
+        assert result.data["items"] == []
+        assert result.data["semantic_related_customers"][0]["account_name"] == "上海叠纸互娱网络科技有限公司"
+        assert result.data["retrieval"]["identity_decision"] == "semantic_related_only"
     finally:
         db.close()
         engine.dispose()
@@ -731,6 +794,17 @@ def test_generated_identity_terms_include_parenthetical_company_short_name():
     assert "华米信息科技" in terms
 
 
+def test_generated_identity_terms_include_institution_short_names():
+    terms = {
+        term
+        for term, _term_type in generated_identity_terms_for_customer_name("中国科学院信息工程研究所")
+    }
+
+    assert "中科院" in terms
+    assert "信工所" in terms
+    assert "中科院信工所" in terms
+
+
 def test_customer_identity_rebuild_persists_generated_terms():
     from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
 
@@ -848,6 +922,51 @@ async def test_agent_tool_search_customers_uses_persisted_identity_term():
         assert result.data["items"][0]["account_name"] == "华米（北京）信息科技有限公司"
         assert result.data["items"][0]["match"]["source"] in {"customer_identity_term", "hybrid_identity"}
         assert "customer_identity_term" in result.data["retrieval"]["identity_source_counts"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_search_customers_uses_persisted_institution_identity_terms():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+        CustomerIdentityTerm.__table__,
+    ])
+    from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
+
+    service = CRMAgentToolService(
+        api_client=EmptyCustomerSearchCRMAPIClient(),
+        knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
+        identity_resolution_service=CustomerIdentityResolutionService(),
+    )
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
+        db.add(Customer(
+            id=610,
+            team_id=1,
+            account_name="中国科学院信息工程研究所",
+            city="北京",
+            status=0,
+            creator_id="2",
+        ))
+        db.commit()
+        service.identity_resolution_service.rebuild_customer_identity_terms(db, team_id=1, customer_id=610)
+        db.commit()
+
+        for keyword in ["中科院", "信工所", "中科院信工所"]:
+            result = await service.search_customers(_context(db), keyword, limit=5)
+
+            assert result.success is True
+            assert result.data["items"][0]["account_name"] == "中国科学院信息工程研究所"
+            assert result.data["items"][0]["match"]["source"] in {"customer_identity_term", "hybrid_identity"}
+            assert result.data["retrieval"]["identity_decision"] == "auto_select"
     finally:
         db.close()
         engine.dispose()
@@ -1171,7 +1290,7 @@ async def test_agent_tool_get_customer_context_fetches_opportunities_through_api
         assert result.data["customer"]["id"] == CUSTOMER_PUBLIC_ID
         paths = [call["path"] for call in fake_client.calls]
         assert f"/v1/opportunities/?customer_id={CUSTOMER_PUBLIC_ID}" in paths
-        assert "/v1/opportunities/7101/procurement-stages" in paths
+        assert f"/v1/opportunities/{OPPORTUNITY_PUBLIC_ID}/procurement-stages" in paths
         assert f"/v1/customers/{CUSTOMER_PUBLIC_ID}/contracts" in paths
         assert result.data["active_opportunity_stage_context"][0]["procurement_stages"][1]["id"] == 12
         assert db.query(AgentToolCall).one().tool_name == "get_customer_context"
@@ -1182,10 +1301,30 @@ async def test_agent_tool_get_customer_context_fetches_opportunities_through_api
 
 @pytest.mark.asyncio
 async def test_agent_tool_move_opportunity_stage_calls_existing_api():
-    engine, db = _db_session()
+    engine, db = _db_session([Opportunity.__table__])
     fake_client = FakeCRMAPIClient()
     service = CRMAgentToolService(api_client=fake_client)
     try:
+        db.add(Opportunity(
+            id=7101,
+            public_id=OPPORTUNITY_PUBLIC_ID,
+            team_id=1,
+            opportunity_number="OPP-7101",
+            opportunity_name="越秀金融扩容",
+            customer_id=101,
+            total_amount=100000,
+            user_count=100,
+            unit_price=1000,
+            license_type="SUBSCRIPTION",
+            subscription_years=1,
+            purchase_type="NEW",
+            expected_closing_date=date(2026, 8, 31),
+            win_probability=20,
+            owner_id="2",
+            creator_id="2",
+        ))
+        db.commit()
+
         result = await service.move_opportunity_stage(
             _confirmed_context_for(db, "move_opportunity_stage"),
             opportunity_id=7101,
@@ -1196,7 +1335,7 @@ async def test_agent_tool_move_opportunity_stage_calls_existing_api():
         assert result.success is True
         assert fake_client.calls[0] == {
             "method": "POST",
-            "path": "/v1/opportunities/7101/move-stage",
+            "path": f"/v1/opportunities/{OPPORTUNITY_PUBLIC_ID}/move-stage",
             "authorization": "Bearer test-token",
             "params": None,
             "json": {"stage_template_id": 12},

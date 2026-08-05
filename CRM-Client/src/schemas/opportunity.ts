@@ -61,7 +61,8 @@ export const OpportunityCurrentStageSnapshotSchema = z.object({
 }).passthrough()
 
 export const OpportunityApiResponseSchema = z.object({
-  id: z.number().int(),
+  id: z.string().min(1),
+  public_id: z.string().min(1),
   opportunity_number: z.string(),
   opportunity_name: z.string(),
   customer_id: z.string(),
@@ -99,7 +100,8 @@ export const OpportunityApiResponseSchema = z.object({
 }).passthrough()
 
 export const OpportunityListItemApiSchema = z.object({
-  id: z.number().int(),
+  id: z.string().min(1),
+  public_id: z.string().min(1),
   opportunity_number: z.string(),
   opportunity_name: z.string(),
   customer_id: z.string(),
@@ -206,7 +208,8 @@ export const OpportunityStageMap: Record<string, string> = {
 
 // ===== 商机基础类型 =====
 export const OpportunityResponseSchema = z.object({
-  id: z.number().int().positive(),
+  id: z.string().min(1),
+  public_id: z.string().min(1),
   opportunity_name: z.string().min(1).max(255),
   customer_id: z.string().min(1),
   expected_amount: z.number().positive().nullable(),

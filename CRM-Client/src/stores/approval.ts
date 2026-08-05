@@ -15,6 +15,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import approvalGenericApi, {
+  type ApprovalEntityId,
   type UpdatedTimesMap
 } from '@/api/approvalGeneric'
 import {
@@ -50,7 +51,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
    * 拉取并校验审批详情，落入 currentApprovalDetail。
    * Zod 校验失败抛错，detail 不被污染。
    */
-  const fetchDetail = async (entityType: EntityType, entityId: number): Promise<ApprovalDetail> => {
+  const fetchDetail = async (entityType: EntityType, entityId: ApprovalEntityId): Promise<ApprovalDetail> => {
     loading.value = true
     try {
       const raw = await approvalGenericApi.getApprovalDetail(entityType, entityId)
@@ -67,7 +68,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
    */
   const submitEntity = async (
     entityType: EntityType,
-    entityId: number,
+    entityId: ApprovalEntityId,
     comment?: string
   ): Promise<ApprovalSubmitResponse> => {
     loading.value = true
@@ -85,7 +86,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
    */
   const approveEntity = async (
     entityType: EntityType,
-    entityId: number,
+    entityId: ApprovalEntityId,
     action: ApprovalAction,
     comment: string,
     updatedTime?: string
@@ -108,7 +109,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
    */
   const cancelEntity = async (
     entityType: EntityType,
-    entityId: number
+    entityId: ApprovalEntityId
   ): Promise<MessageResponse> => {
     loading.value = true
     try {
@@ -126,7 +127,7 @@ export const useApprovalStore = defineStore('approvalGeneric', () => {
    */
   const remindEntity = async (
     entityType: EntityType,
-    entityId: number
+    entityId: ApprovalEntityId
   ): Promise<MessageResponse> => {
     loading.value = true
     try {

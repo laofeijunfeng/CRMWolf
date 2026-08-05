@@ -106,6 +106,12 @@ class OpportunityCRUD:
             query = query.filter(Opportunity.team_id == team_id)
         return query.first()
 
+    def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Opportunity]:
+        query = db.query(Opportunity).filter(Opportunity.public_id == public_id)
+        if team_id is not None:
+            query = query.filter(Opportunity.team_id == team_id)
+        return query.first()
+
     def get_by_customer_id(
         self,
         db: Session,

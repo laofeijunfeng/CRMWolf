@@ -15,6 +15,7 @@ from app.core.deps import get_current_active_user, get_current_user_team, requir
 from app.core.logging import get_logger, log_with_fields
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.contract import contract_crud
+from app.crud.opportunity import opportunity_crud
 from app.crud.role import role_crud
 from app.models.approval import Approval, ApprovalAction, ApprovalRecord, ApprovalStatus
 from app.models.contract import ContractStatus
@@ -55,6 +56,7 @@ from app.services.customer_approval_intelligence_service import (
 )
 from app.services.feishu_notification import feishu_notification_service
 from app.services.file_storage import FileStorageError, file_storage_service
+from app.utils.public_id import is_opportunity_public_id
 
 router = APIRouter(prefix="/v1/approvals", tags=["审批管理"])
 
@@ -71,6 +73,37 @@ class BulkApproveRequest(BaseModel):
         None,
         description="按业务单据 ID 传入的审批实例更新时间，用于乐观锁",
     )
+
+
+def _resolve_generic_entity_id(
+    db: Session,
+    *,
+    entity_type: str,
+    entity_ref: str,
+    team_id: int,
+) -> int:
+    """将对外路由标识解析为内部业务单据数据库 ID。"""
+    if entity_type == BusinessType.OPPORTUNITY:
+        if not is_opportunity_public_id(entity_ref):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="商机不存在",
+            )
+        opportunity = opportunity_crud.get_by_public_id(db, entity_ref, team_id)
+        if opportunity is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="商机不存在",
+            )
+        return opportunity.id
+
+    try:
+        return int(entity_ref)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="业务单据不存在",
+        )
 
 
 def _approval_file_content_type(file_path: str, fallback: Optional[str] = None) -> str:
@@ -1745,21 +1778,24 @@ async def bulk_approve(
 
 **路径参数：**
 - entity_type: CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY
-- entity_id: 业务单据 ID
+- entity_id: 业务单据标识；OPPORTUNITY 必须传商机对外 ID（opp_...）
 """,
 )
 async def submit_generic_approval(
     entity_type: str,
-    entity_id: int,
+    entity_id: str,
     submit_data: GenericApprovalSubmitRequest,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
 ):
     _validate_entity_type(entity_type)
+    resolved_entity_id = _resolve_generic_entity_id(
+        db, entity_type=entity_type, entity_ref=entity_id, team_id=team_id
+    )
 
     adapter = get_adapter(entity_type)
-    entity = adapter.get_entity(db, entity_id, team_id)
+    entity = adapter.get_entity(db, resolved_entity_id, team_id)
     if entity is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1769,7 +1805,7 @@ async def submit_generic_approval(
     ap, error_msg = approval_transaction_manager.submit_for_approval(
         db=db,
         business_type=entity_type,
-        entity_id=entity_id,
+        entity_id=resolved_entity_id,
         team_id=team_id,
         submitter_id=str(current_user.id),
         submitter_name=current_user.name,
@@ -1789,13 +1825,13 @@ async def submit_generic_approval(
         operator=current_user.name,
         flow_direction="submitted",
         business_type=entity_type,
-        business_id=entity_id,
+        business_id=resolved_entity_id,
     )
 
     notification_result = await approval_transaction_manager.send_notification(
         db,
         ap,
-        adapter.get_entity(db, entity_id, team_id) or entity,
+        adapter.get_entity(db, resolved_entity_id, team_id) or entity,
         team_id,
     )
     if ap.current_node:
@@ -1808,7 +1844,7 @@ async def submit_generic_approval(
             flow_direction="submitted",
             notification_status=_feishu_notification_status(notification_result),
             business_type=entity_type,
-            business_id=entity_id,
+            business_id=resolved_entity_id,
         )
 
     return GenericApprovalSubmitResponse(approval_id=ap.id, status=ap.status)
@@ -1822,6 +1858,7 @@ async def submit_generic_approval(
 
 **功能说明：**
 - get_by_entity 取审批实例；不存在 → 404
+- OPPORTUNITY 路由参数必须传商机对外 ID（opp_...），接口内部解析为数据库 ID
 - 复用既有 :611-619 角色校验：current_node.approve_role 不在用户角色集 → 403
 - approval_crud.approve(...) 内部已调适配器 on_approved/on_rejected 切单据状态
   （INVOICE 写 status / reviewed_time；PAYMENT 写 confirmation_status；CONTRACT/LICENSE 写 status）
@@ -1832,15 +1869,18 @@ async def submit_generic_approval(
 )
 async def approve_generic_approval(
     entity_type: str,
-    entity_id: int,
+    entity_id: str,
     action_request: ApprovalActionRequest,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
 ):
     _validate_entity_type(entity_type)
+    resolved_entity_id = _resolve_generic_entity_id(
+        db, entity_type=entity_type, entity_ref=entity_id, team_id=team_id
+    )
 
-    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
+    approval = approval_crud.get_by_entity(db, entity_type, resolved_entity_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1855,7 +1895,7 @@ async def approve_generic_approval(
     # 角色校验 + CONTRACT 自审追加权限校验（与既有 approve_contract 共用 helper）
     _check_approve_permissions(
         db, approval, current_user, team_id,
-        entity_type=entity_type, entity_id=entity_id,
+        entity_type=entity_type, entity_id=resolved_entity_id,
     )
 
     # APPROVE 时检查下一节点是否有审批人（与既有 approve_contract 共用 helper）
@@ -1863,7 +1903,7 @@ async def approve_generic_approval(
         _check_next_node_has_approvers(
             db, approval, team_id,
             detail_suffix="无成员",
-            log_extra={"business_type": entity_type, "business_id": entity_id},
+            log_extra={"business_type": entity_type, "business_id": resolved_entity_id},
         )
 
     current_node_name = approval.current_node.node_name if approval.current_node else ""
@@ -1883,7 +1923,7 @@ async def approve_generic_approval(
                 operation="Approve",
                 approval_id=approval.id,
                 business_type=entity_type,
-                business_id=entity_id,
+                business_id=resolved_entity_id,
                 operator=current_user.name,
                 reason="乐观锁冲突：审批已被其他用户处理",
                 level=40,
@@ -1925,7 +1965,7 @@ async def approve_generic_approval(
     notification_status = "skipped"
     adapter = get_adapter(entity_type)
     entity = adapter.get_entity(db, approval.business_id, approval.team_id)
-    entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{entity_id}"
+    entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{resolved_entity_id}"
     if entity is not None:
         _enqueue_customer_approval_intelligence(
             db,
@@ -1946,7 +1986,7 @@ async def approve_generic_approval(
                     user_id=int(approval.submitter_id),
                     entity_type=entity_type,
                     entity_name=entity_name,
-                    business_id=entity_id,
+                    business_id=resolved_entity_id,
                     detail_fields=get_approval_card_fields(db, entity_type, entity),
                     button_path=get_approval_action_path(entity_type),
                 )
@@ -1962,7 +2002,7 @@ async def approve_generic_approval(
                     entity_name=entity_name,
                     flow_name=approval.flow.flow_name if approval.flow else "",
                     node_name=approval.current_node.node_name,
-                    business_id=entity_id,
+                    business_id=resolved_entity_id,
                     submitter_name=approval.submitter_name,
                     approval_type_name=get_approval_type_name(entity_type),
                     customer_name=get_approval_customer_name(db, entity_type, entity),
@@ -1977,7 +2017,7 @@ async def approve_generic_approval(
                 entity_type=entity_type,
                 entity_name=entity_name,
                 reject_reason=action_request.comment or "无",
-                business_id=entity_id,
+                business_id=resolved_entity_id,
                 detail_fields=get_approval_card_fields(db, entity_type, entity),
                 button_path=get_approval_action_path(entity_type),
             )
@@ -1986,7 +2026,7 @@ async def approve_generic_approval(
         notification_status = "failed"
         logger.error(
             f"[Approval] Generic notification failed: entity_type={entity_type}, "
-            f"business_id={entity_id}, error={str(notify_error)}"
+            f"business_id={resolved_entity_id}, error={str(notify_error)}"
         )
 
     log_approval_operation(
@@ -1998,7 +2038,7 @@ async def approve_generic_approval(
         flow_direction=flow_direction_str,
         notification_status=notification_status,
         business_type=entity_type,
-        business_id=entity_id,
+        business_id=resolved_entity_id,
     )
 
     db.refresh(approval)
@@ -2011,18 +2051,22 @@ async def approve_generic_approval(
     summary="撤回审批（通用）",
     description="""
 撤回审批中的业务单据审批流程。只有提交人本人可撤回，且仅限 PENDING 状态。
+OPPORTUNITY 路由参数必须传商机对外 ID（opp_...），接口内部解析为数据库 ID。
 """,
 )
 async def cancel_generic_approval(
     entity_type: str,
-    entity_id: int,
+    entity_id: str,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
 ):
     _validate_entity_type(entity_type)
+    resolved_entity_id = _resolve_generic_entity_id(
+        db, entity_type=entity_type, entity_ref=entity_id, team_id=team_id
+    )
 
-    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
+    approval = approval_crud.get_by_entity(db, entity_type, resolved_entity_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2033,8 +2077,8 @@ async def cancel_generic_approval(
     flow_name = approval.flow.flow_name if approval.flow else ""
     current_node = approval.current_node
     adapter = get_adapter(entity_type)
-    entity = adapter.get_entity(db, entity_id, team_id)
-    entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{entity_id}"
+    entity = adapter.get_entity(db, resolved_entity_id, team_id)
+    entity_name = adapter.get_name(entity) if entity is not None else f"{entity_type}#{resolved_entity_id}"
     notify_user_ids = []
     if current_node:
         notify_user_ids = [user.id for user in get_notification_users_for_node(db, current_node, team_id)]
@@ -2046,7 +2090,7 @@ async def cancel_generic_approval(
             operation="Cancel",
             approval_id=approval.id,
             business_type=entity_type,
-            business_id=entity_id,
+            business_id=resolved_entity_id,
             operator=current_user.name,
             reason=str(e),
             level=40,
@@ -2055,7 +2099,7 @@ async def cancel_generic_approval(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-    entity = adapter.get_entity(db, entity_id, team_id)
+    entity = adapter.get_entity(db, resolved_entity_id, team_id)
     if entity is not None:
         _enqueue_customer_approval_intelligence(
             db,
@@ -2084,7 +2128,7 @@ async def cancel_generic_approval(
             notification_status = "failed"
             logger.error(
                 f"[Approval] Generic cancel notification failed: entity_type={entity_type}, "
-                f"business_id={entity_id}, error={str(notify_error)}"
+                f"business_id={resolved_entity_id}, error={str(notify_error)}"
             )
 
     log_approval_operation(
@@ -2096,7 +2140,7 @@ async def cancel_generic_approval(
         flow_direction="cancelled",
         notification_status=notification_status,
         business_type=entity_type,
-        business_id=entity_id,
+        business_id=resolved_entity_id,
     )
     return MessageResponse(message="审批已撤回")
 
@@ -2105,18 +2149,21 @@ async def cancel_generic_approval(
     "/{entity_type}/{entity_id}/remind",
     response_model=MessageResponse,
     summary="手动催办审批（通用）",
-    description="提交人可对自己提交且仍在审批中的单据手动发送催办通知给当前节点审批人。",
+    description="提交人可对自己提交且仍在审批中的单据手动发送催办通知给当前节点审批人。OPPORTUNITY 路由参数必须传商机对外 ID（opp_...）。",
 )
 async def remind_generic_approval(
     entity_type: str,
-    entity_id: int,
+    entity_id: str,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
 ):
     _validate_entity_type(entity_type)
+    resolved_entity_id = _resolve_generic_entity_id(
+        db, entity_type=entity_type, entity_ref=entity_id, team_id=team_id
+    )
 
-    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
+    approval = approval_crud.get_by_entity(db, entity_type, resolved_entity_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2139,7 +2186,7 @@ async def remind_generic_approval(
         )
 
     adapter = get_adapter(entity_type)
-    entity = adapter.get_entity(db, entity_id, team_id)
+    entity = adapter.get_entity(db, resolved_entity_id, team_id)
     if entity is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2163,7 +2210,7 @@ async def remind_generic_approval(
             entity_type=entity_type,
             entity_name=entity_name,
             node_name=approval.current_node.node_name,
-            business_id=entity_id,
+            business_id=resolved_entity_id,
             submitter_name=current_user.name,
             approval_type_name=get_approval_type_name(entity_type),
             detail_fields=get_approval_card_fields(db, entity_type, entity),
@@ -2173,7 +2220,7 @@ async def remind_generic_approval(
         notification_status = "failed"
         logger.error(
             f"[Approval] Manual reminder failed: entity_type={entity_type}, "
-            f"business_id={entity_id}, error={str(notify_error)}"
+            f"business_id={resolved_entity_id}, error={str(notify_error)}"
         )
 
     log_approval_operation(
@@ -2185,7 +2232,7 @@ async def remind_generic_approval(
         flow_direction="manual_reminder",
         notification_status=notification_status,
         business_type=entity_type,
-        business_id=entity_id,
+        business_id=resolved_entity_id,
     )
 
     if notification_status == "failed":
@@ -2203,18 +2250,22 @@ async def remind_generic_approval(
     summary="获取审批详情（通用）",
     description="""
 按业务单据类型+ID 查询最新一条审批实例的完整详情，包括所有审批记录和当前状态。
+OPPORTUNITY 路由参数必须传商机对外 ID（opp_...），接口内部解析为数据库 ID。
 """,
 )
 def detail_generic_approval(
     entity_type: str,
-    entity_id: int,
+    entity_id: str,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
 ):
     _validate_entity_type(entity_type)
+    resolved_entity_id = _resolve_generic_entity_id(
+        db, entity_type=entity_type, entity_ref=entity_id, team_id=team_id
+    )
 
-    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
+    approval = approval_crud.get_by_entity(db, entity_type, resolved_entity_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2231,14 +2282,17 @@ def detail_generic_approval(
 )
 def download_generic_approval_file(
     entity_type: str,
-    entity_id: int,
+    entity_id: str,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
 ):
     _validate_entity_type(entity_type)
+    resolved_entity_id = _resolve_generic_entity_id(
+        db, entity_type=entity_type, entity_ref=entity_id, team_id=team_id
+    )
 
-    approval = approval_crud.get_by_entity(db, entity_type, entity_id, team_id)
+    approval = approval_crud.get_by_entity(db, entity_type, resolved_entity_id, team_id)
     if not approval:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2254,7 +2308,7 @@ def download_generic_approval_file(
         from app.models.contract import Contract
 
         contract = db.query(Contract).filter(
-            Contract.id == entity_id,
+            Contract.id == resolved_entity_id,
             Contract.team_id == team_id,
         ).first()
         if contract:
@@ -2265,13 +2319,13 @@ def download_generic_approval_file(
         from app.models.invoice import InvoiceApplication
 
         invoice = db.query(InvoiceApplication).filter(
-            InvoiceApplication.id == entity_id,
+            InvoiceApplication.id == resolved_entity_id,
             InvoiceApplication.team_id == team_id,
         ).first()
         if invoice:
             file_path = invoice.invoice_file_path
             extension = os.path.splitext(invoice.invoice_file_path or "")[1].lower()
-            file_name = f"{invoice.invoice_number or invoice.application_number or f'invoice_{entity_id}'}{extension}"
+            file_name = f"{invoice.invoice_number or invoice.application_number or f'invoice_{resolved_entity_id}'}{extension}"
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2301,7 +2355,7 @@ def download_generic_approval_file(
     with open(full_path, "rb") as f:
         content = f.read()
 
-    filename = file_name or f"{entity_type.lower()}_{entity_id}{os.path.splitext(file_path)[1].lower()}"
+    filename = file_name or f"{entity_type.lower()}_{resolved_entity_id}{os.path.splitext(file_path)[1].lower()}"
     return Response(
         content=content,
         media_type=_approval_file_content_type(file_path, mime_type),

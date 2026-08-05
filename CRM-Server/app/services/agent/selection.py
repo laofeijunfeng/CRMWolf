@@ -513,7 +513,7 @@ async def _apply_business_selection(
         target_stage_name = opportunity.get("target_stage_name") or payload.get("target_stage_name")
         next_payload = {
             "customer_id": payload.get("customer_id") or customer.get("id"),
-            "opportunity_id": int(opportunity_id),
+            "opportunity_id": opportunity_id,
             "stage_template_id": int(stage_template_id),
             "opportunity_name": opportunity.get("opportunity_name") or opportunity.get("name"),
             "target_stage_name": target_stage_name,

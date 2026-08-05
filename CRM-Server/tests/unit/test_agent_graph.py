@@ -607,8 +607,8 @@ async def test_agent_graph_loads_customer_context_and_generates_ai_suggestions()
 
     result = await service.run(input_state())
 
-    assert tool_service.context_queries[0]["customer_id"] == 101
-    assert suggestion_generator.calls[0]["customer_context"]["customer"]["id"] == 101
+    assert tool_service.context_queries[0]["customer_id"] == "101"
+    assert suggestion_generator.calls[0]["customer_context"]["customer"]["id"] == "101"
     suggestion_events = [event for event in result["events"] if event["event"] == "business_suggestions"]
     assert suggestion_events[0]["suggestion_source"] == "test_suggestion_generator"
     assert suggestion_events[0]["suggestions"][0]["action"] == "CREATE_OPPORTUNITY"
@@ -763,13 +763,13 @@ async def test_checkpointed_agent_graph_scopes_runtime_state_to_current_turn():
         event for event in second_events
         if event.get("event") == "business_context_loaded"
     ]
-    assert [event.get("customer_id") for event in second_loaded_contexts] == [402]
+    assert [event.get("customer_id") for event in second_loaded_contexts] == ["402"]
     assert all(
         (event.get("customer") or {}).get("account_name") != "深圳市赤道科技有限公司"
         for event in second_events
         if isinstance(event.get("customer"), dict)
     )
-    assert tool_service.context_queries[-1]["customer_id"] == 402
+    assert tool_service.context_queries[-1]["customer_id"] == "402"
     assert second_events[-1]["event"] == "final"
 
 
@@ -786,6 +786,23 @@ async def test_agent_graph_requires_clarification_when_ai_confidence_is_low():
     assert result["response"] == "请确认客户全称是哪一个？"
     assert not result.get("customer_candidates")
     assert any(event["event"] == "clarification_required" for event in result["events"])
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_searches_customer_before_follow_up_field_clarification_when_name_exists():
+    tool_service = FakeToolService()
+    result = await build_service(semantic_result(
+        intent="CUSTOMER_ACTIVITY",
+        intent_confidence=0.95,
+        customer={"name_text": "华米科技", "confidence": 0.95},
+        follow_up={"content": None, "method": "未指定"},
+        missing_fields=["follow_up.content"],
+        need_clarification=True,
+        clarification_question="请补充跟进详情。",
+    ), tool_service).run(input_state("这是我跟华米科技的对话记录，帮我写一下跟进详情"))
+
+    assert tool_service.searches[0]["keyword"] == "华米科技"
+    assert result["customer_candidates"]
 
 
 @pytest.mark.asyncio
@@ -1166,7 +1183,7 @@ async def test_agent_graph_inherits_current_customer_from_structured_memory():
     ).run(input_state("那帮我创建一个商机，5 万 100 人使用，订阅 1 年"))
 
     assert tool_service.searches == []
-    assert tool_service.context_queries[0]["customer_id"] == 101
+    assert tool_service.context_queries[0]["customer_id"] == "101"
     assert result["selected_customer"]["account_name"] == "广州睿狐科技有限公司"
     assert result["parsed"]["customer_name"] == "广州睿狐科技有限公司"
     field_events = [event for event in result["events"] if event["event"] == "opportunity_fields_required"]
@@ -1277,6 +1294,32 @@ async def test_agent_graph_explicit_customer_overrides_current_customer_memory()
     assert tool_service.searches[0]["keyword"] == "汇川技术"
     assert result["selected_customer"]["account_name"] == "汇川技术"
     assert result["parsed"]["customer_name"] == "汇川技术"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_customer_query_uses_lookup_text_hint_when_parser_misses_customer():
+    tool_service = FakeToolService(items=[{"id": 303, "account_name": "南银法巴消费金融有限公司"}])
+    service = CRMAgentGraphService(
+        tool_service=tool_service,
+        semantic_parser=FakeSemanticParser(semantic_result(
+            intent="CUSTOMER_QUERY",
+            customer={"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+            follow_up={"content": None, "method": None},
+            business_signals=[],
+            requested_actions=[],
+        )),
+        memory_service=FakeMemoryService(),
+        temporal_resolver=FakeTemporalResolver(),
+        suggestion_generator=FakeSuggestionGenerator(),
+        follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
+    )
+
+    result = await service.run(input_state("搜索客户 南银法巴"))
+
+    assert tool_service.searches[0]["keyword"] == "南银法巴"
+    assert result["selected_customer"]["account_name"] == "南银法巴消费金融有限公司"
+    assert result["parsed"]["customer_name"] == "南银法巴"
+    assert result["parsed"]["_customer_name_source"] == "EXPLICIT_TEXT_HINT"
 
 
 @pytest.mark.asyncio
@@ -1395,10 +1438,10 @@ async def test_agent_graph_requires_customer_selection_when_multiple_candidates(
     ])
     result = await build_service(semantic_result(), tool_service).run(input_state())
 
-    selection_events = [event for event in result["events"] if event["event"] == "customer_selection_required"]
-    assert selection_events[0]["action"] == "select_customer_for_activity"
-    assert selection_events[0]["customers"][1]["id"] == 102
-    assert "请告诉我要记录到哪一个客户" in result["response"]
+    resolution_events = [event for event in result["events"] if event["event"] == "resource_resolution"]
+    assert resolution_events[0]["status"] == "selected"
+    assert resolution_events[0]["selected_resource_id"] == 101
+    assert result["selected_customer"]["account_name"] == "越秀金融"
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Union
 
 from sqlalchemy import or_
 
@@ -13,6 +13,7 @@ from app.crud.permission import permission_crud
 from app.models.agent import AgentIdempotencyStatus, AgentToolCallStatus
 from app.models.customer import Contact, Customer, CustomerMember
 from app.models.lead import Lead, LeadStatus
+from app.models.opportunity import Opportunity
 from app.schemas.agent import (
     AgentIdempotencyKeyCreate,
     AgentIdempotencyKeyUpdate,
@@ -36,6 +37,7 @@ from app.services.customer_knowledge_candidate_service import (
     CustomerVisibilityPredicate,
     customer_knowledge_candidate_service,
 )
+from app.utils.public_id import is_opportunity_public_id
 from app.utils.time import business_now
 
 
@@ -661,13 +663,14 @@ class CRMAgentToolService:
 
         return await self._run_read_tool(context, "list_customer_opportunities", payload, call_api)
 
-    async def get_opportunity_detail(self, context: AgentToolContext, opportunity_id: int) -> AgentToolResult:
+    async def get_opportunity_detail(self, context: AgentToolContext, opportunity_id: Union[str, int]) -> AgentToolResult:
         payload = {"opportunity_id": opportunity_id}
 
         async def call_api():
+            opportunity_public_id = self._resolve_opportunity_public_id(context, opportunity_id)
             return await self.api_client.request(
                 "GET",
-                f"/v1/opportunities/{opportunity_id}",
+                f"/v1/opportunities/{opportunity_public_id}",
                 context.authorization,
             )
 
@@ -676,14 +679,15 @@ class CRMAgentToolService:
     async def get_opportunity_procurement_stages(
         self,
         context: AgentToolContext,
-        opportunity_id: int,
+        opportunity_id: Union[str, int],
     ) -> AgentToolResult:
         payload = {"opportunity_id": opportunity_id}
 
         async def call_api():
+            opportunity_public_id = self._resolve_opportunity_public_id(context, opportunity_id)
             return await self.api_client.request(
                 "GET",
-                f"/v1/opportunities/{opportunity_id}/procurement-stages",
+                f"/v1/opportunities/{opportunity_public_id}/procurement-stages",
                 context.authorization,
             )
 
@@ -692,7 +696,7 @@ class CRMAgentToolService:
     async def move_opportunity_stage(
         self,
         context: AgentToolContext,
-        opportunity_id: int,
+        opportunity_id: Union[str, int],
         stage_template_id: int,
         idempotency_suffix: Optional[str] = None,
     ) -> AgentToolResult:
@@ -700,9 +704,10 @@ class CRMAgentToolService:
         action_key = self._action_key("move_opportunity_stage", context, payload, idempotency_suffix)
 
         async def call_api():
+            opportunity_public_id = self._resolve_opportunity_public_id(context, opportunity_id)
             return await self.api_client.request(
                 "POST",
-                f"/v1/opportunities/{opportunity_id}/move-stage",
+                f"/v1/opportunities/{opportunity_public_id}/move-stage",
                 context.authorization,
                 json={"stage_template_id": stage_template_id},
             )
@@ -808,14 +813,15 @@ class CRMAgentToolService:
             if not opportunity_id:
                 continue
             try:
+                opportunity_public_id = self._resolve_opportunity_public_id(context, opportunity_id)
                 detail = await self.api_client.request(
                     "GET",
-                    f"/v1/opportunities/{opportunity_id}",
+                    f"/v1/opportunities/{opportunity_public_id}",
                     context.authorization,
                 )
                 stages = await self.api_client.request(
                     "GET",
-                    f"/v1/opportunities/{opportunity_id}/procurement-stages",
+                    f"/v1/opportunities/{opportunity_public_id}/procurement-stages",
                     context.authorization,
                 )
                 stage_context.append({
@@ -829,6 +835,29 @@ class CRMAgentToolService:
                     "status_code": exc.status_code,
                 })
         return stage_context
+
+    @staticmethod
+    def _resolve_opportunity_public_id(context: AgentToolContext, opportunity_id: Union[str, int]) -> str:
+        if is_opportunity_public_id(opportunity_id):
+            return str(opportunity_id)
+
+        numeric_id: Optional[int] = None
+        if isinstance(opportunity_id, int):
+            numeric_id = opportunity_id
+        elif isinstance(opportunity_id, str) and opportunity_id.isdecimal():
+            numeric_id = int(opportunity_id)
+
+        if numeric_id is None or numeric_id <= 0:
+            raise CRMAPIClientError("商机对外ID格式不正确", status_code=404)
+
+        opportunity = (
+            context.db.query(Opportunity)
+            .filter(Opportunity.id == numeric_id, Opportunity.team_id == context.team_id)
+            .first()
+        )
+        if opportunity is None:
+            raise CRMAPIClientError("商机不存在或无权限访问", status_code=404)
+        return opportunity.public_id
 
     @staticmethod
     def _extract_items(value: object) -> list[JsonDict]:

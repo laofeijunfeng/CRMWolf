@@ -19,7 +19,7 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import { confirmDelete } from '@/utils/confirmDialog'
 
 interface CreateContractPayload {
-  opportunityId: number
+  opportunityId: string
   customerId: string
   customerName: string
   opportunityName: string
@@ -30,7 +30,7 @@ interface CreateContractPayload {
 }
 
 interface ContractOpportunityContext {
-  id: number
+  id: string
   opportunity_name: string
   customer_id: string
   customer_name?: string
@@ -45,7 +45,7 @@ interface OpportunityDetailContentExpose {
 }
 
 interface Props {
-  opportunityId: number | null
+  opportunityId: string | null
   visible: boolean
 }
 
