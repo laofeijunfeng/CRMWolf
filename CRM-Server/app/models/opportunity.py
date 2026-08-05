@@ -1,7 +1,8 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, func, Index, ForeignKey, Numeric
+from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Index, ForeignKey, Numeric
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
 from app.core.database import Base
+from app.utils.time import business_now
 from app.constants.approval_phase import ApprovalPhase
 
 
@@ -42,8 +43,8 @@ class OpportunityStage(Base):
     is_default_start = Column(Integer, nullable=False, default=0, comment="是否默认起始阶段：0:否, 1:是")
     can_skip = Column(Integer, nullable=False, default=0, comment="是否可跳过：0:否, 1:是")
 
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
     __table_args__ = (
         Index('idx_stage_code', 'stage_code'),
@@ -87,8 +88,8 @@ class Opportunity(Base):
     actual_closing_date = Column(Date, nullable=True, comment="实际成交日期")
 
     creator_id = Column(String(100), nullable=False, comment="创建人")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
     version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
 
     contracts = relationship("Contract", back_populates="opportunity", cascade="all, delete-orphan")

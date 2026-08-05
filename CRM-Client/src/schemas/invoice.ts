@@ -5,7 +5,12 @@
  */
 
 import { z } from 'zod'
-import { UserInfoSchema, PaginatedResponseSchema, OptionalStringFromNullableSchema } from './common'
+import {
+  BusinessDateTimeStringSchema,
+  UserInfoSchema,
+  PaginatedResponseSchema,
+  OptionalStringFromNullableSchema
+} from './common'
 
 // ===== 发票状态枚举 =====
 export const InvoiceStatusSchema = z.enum([
@@ -47,11 +52,11 @@ export const InvoiceResponseSchema = z.object({
   bank_name: z.string().max(100).nullable(),
   bank_account: z.string().max(50).nullable(),
   status: InvoiceStatusSchema,
-  issued_date: z.string().datetime().nullable(),
+  issued_date: BusinessDateTimeStringSchema.nullable(),
   remark: z.string().nullable(),
   creator_id: z.string(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: BusinessDateTimeStringSchema,
+  last_modified_time: BusinessDateTimeStringSchema,
   version: z.number().int().nonnegative()
 })
 

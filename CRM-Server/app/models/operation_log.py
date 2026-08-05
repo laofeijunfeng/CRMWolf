@@ -1,6 +1,6 @@
 from sqlalchemy import Column, BigInteger, String, DateTime, Text, JSON, Index, Boolean, Integer
-from sqlalchemy.sql import func
 from app.core.database import Base
+from app.utils.time import business_now
 import enum
 
 
@@ -46,7 +46,7 @@ class OperationLog(Base):
     operator_id = Column(String(100), nullable=False, comment="操作人ID")
     operator_name = Column(String(100), nullable=True, comment="操作人姓名")
     
-    operated_at = Column(DateTime, nullable=False, default=func.now(), comment="操作时间")
+    operated_at = Column(DateTime, nullable=False, default=business_now, comment="操作时间")
     
     content = Column(JSON, nullable=False, comment="事件内容")
     remark = Column(String(500), nullable=True, comment="备注")

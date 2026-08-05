@@ -46,6 +46,10 @@ from app.services.customer_intelligence_run_service import (
     CustomerIntelligenceRunService,
     customer_intelligence_run_service,
 )
+from app.services.customer_identity_resolution_service import (
+    CustomerIdentityResolutionService,
+    customer_identity_resolution_service,
+)
 from app.services.customer_vector_document_service import (
     CustomerVectorDocumentService,
     customer_vector_document_service,
@@ -107,6 +111,8 @@ class CustomerIntelligenceHistoricalBackfillResult:
     customer_ids: list[int]
     profile_vector_reindexed: int = 0
     profile_vector_customer_ids: tuple[int, ...] = ()
+    identity_terms_reindexed: int = 0
+    identity_term_customer_ids: tuple[int, ...] = ()
 
 
 class CustomerIntelligenceRefreshService:
@@ -117,11 +123,13 @@ class CustomerIntelligenceRefreshService:
         event_service: CustomerIntelligenceEventService | None = None,
         run_service: CustomerIntelligenceRunService | None = None,
         vector_document_service: CustomerVectorDocumentService | None = None,
+        identity_resolution_service: CustomerIdentityResolutionService | None = None,
     ) -> None:
         self.graph_service = graph_service or customer_intelligence_graph_service
         self.event_service = event_service or customer_intelligence_event_service
         self.run_service = run_service or customer_intelligence_run_service
         self.vector_document_service = vector_document_service or customer_vector_document_service
+        self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
 
     async def trigger_committed_event_refresh(
         self,
@@ -278,6 +286,11 @@ class CustomerIntelligenceRefreshService:
             trigger_type=trigger_type,
             source_lead_id=source_lead_id,
         )
+        self.identity_resolution_service.rebuild_customer_identity_terms(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+        )
         self._mark_pending(db, request)
         self._ensure_pending_run(db, request)
         self._commit_pending_schedule(db, request)
@@ -348,6 +361,11 @@ class CustomerIntelligenceRefreshService:
             limit=limit,
             commit=False,
         )
+        identity_term_customer_ids = self.identity_resolution_service.rebuild_team_identity_terms(
+            db,
+            team_id=team_id,
+            limit=limit,
+        )
         target_customer_ids = self._select_missing_historical_customer_ids(
             db,
             team_id=team_id,
@@ -382,6 +400,8 @@ class CustomerIntelligenceRefreshService:
             customer_ids=[request.customer_id for request in requests],
             profile_vector_reindexed=len(profile_vector_customer_ids),
             profile_vector_customer_ids=tuple(profile_vector_customer_ids),
+            identity_terms_reindexed=len(identity_term_customer_ids),
+            identity_term_customer_ids=tuple(identity_term_customer_ids),
         )
 
     async def run_refresh(self, request: CustomerIntelligenceRefreshRequest) -> JSONDict:

@@ -1,7 +1,7 @@
 from sqlalchemy import BigInteger, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class CustomerFactStatus:
@@ -45,9 +45,9 @@ class CustomerFact(Base):
     status = Column(String(20), nullable=False, default=CustomerFactStatus.ACTIVE, index=True, comment="事实状态")
     version = Column(Integer, nullable=False, default=1, comment="事实版本号")
     occurred_at = Column(DateTime, nullable=True, index=True, comment="事实发生时间")
-    extracted_at = Column(DateTime, nullable=False, default=func.now(), comment="事实提取时间")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    extracted_at = Column(DateTime, nullable=False, default=business_now, comment="事实提取时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         UniqueConstraint("team_id", "customer_id", "fact_type", "subject", name="uq_customer_fact_subject"),
@@ -76,7 +76,7 @@ class CustomerFactSource(Base):
     business_object_id = Column(String(100), nullable=True, comment="业务对象ID")
     evidence_id = Column(String(64), nullable=True, index=True, comment="向量证据ID")
     quote = Column(Text, nullable=True, comment="引用片段")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
     __table_args__ = (
         UniqueConstraint("fact_id", "source_type", "source_object_id", name="uq_customer_fact_source"),
@@ -114,7 +114,7 @@ class CustomerFactRevision(Base):
     business_object_id = Column(String(100), nullable=True, comment="业务对象ID")
     evidence_id = Column(String(64), nullable=True, index=True, comment="向量证据ID")
     quote = Column(Text, nullable=True, comment="引用片段")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
     __table_args__ = (
         UniqueConstraint("fact_id", "version", name="uq_customer_fact_revision_version"),
@@ -147,8 +147,8 @@ class CustomerFactReviewAudit(Base):
     reason = Column(Text, nullable=True, comment="复核原因")
     conflict_reason = Column(Text, nullable=True, comment="冲突原因")
     evidence_quote = Column(Text, nullable=True, comment="引用片段")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         Index("idx_customer_fact_review_customer", "team_id", "customer_id", "created_time"),

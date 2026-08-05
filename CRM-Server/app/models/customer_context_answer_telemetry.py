@@ -1,7 +1,7 @@
 from sqlalchemy import JSON, BigInteger, Column, DateTime, Float, Index, Integer, String, Text
-from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class CustomerContextAnswerTelemetry(Base):
@@ -32,7 +32,7 @@ class CustomerContextAnswerTelemetry(Base):
     missing_context_json = Column(JSON, nullable=True, comment="缺失上下文")
     citations_json = Column(JSON, nullable=True, comment="回答引用")
     retrieval_json = Column(JSON, nullable=True, comment="检索状态快照")
-    created_time = Column(DateTime, nullable=False, default=func.now(), index=True, comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")
 
     __table_args__ = (
         Index("idx_customer_context_answer_customer_time", "team_id", "customer_id", "created_time"),

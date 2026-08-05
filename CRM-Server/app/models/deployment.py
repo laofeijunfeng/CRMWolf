@@ -1,7 +1,7 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Boolean, ForeignKey, Index
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class DeploymentInfo(Base):
@@ -17,8 +17,8 @@ class DeploymentInfo(Base):
     authorized_users = Column(Integer, nullable=True, comment="历史授权人数（新申请人数记录在 License 申请）")
     is_default = Column(Boolean, nullable=False, default=False, comment="是否默认部署")
 
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
     customer = relationship("Customer", back_populates="deployment_infos")
     license_applications = relationship("LicenseApplication", back_populates="deployment_info")

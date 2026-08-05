@@ -1,7 +1,7 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Numeric, Text, ForeignKey, Index, Boolean
-from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class ProcurementMethod(Base):
@@ -22,8 +22,8 @@ class ProcurementMethod(Base):
 
     created_by = Column(String(100), nullable=False, comment="创建人系统用户ID")
     updated_by = Column(String(100), nullable=True, comment="最后更新人系统用户ID")
-    created_time = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
-    updated_time = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="最后更新时间")
+    created_time = Column(DateTime, default=business_now, nullable=False, comment="创建时间")
+    updated_time = Column(DateTime, default=business_now, onupdate=business_now, nullable=False, comment="最后更新时间")
 
     stage_templates = relationship("ProcurementStageTemplate", back_populates="procurement_method", cascade="all, delete-orphan")
 
@@ -59,8 +59,8 @@ class ProcurementStageTemplate(Base):
 
     created_by = Column(String(100), nullable=False, comment="创建人系统用户ID")
     updated_by = Column(String(100), nullable=True, comment="最后更新人系统用户ID")
-    created_time = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
-    updated_time = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="最后更新时间")
+    created_time = Column(DateTime, default=business_now, nullable=False, comment="创建时间")
+    updated_time = Column(DateTime, default=business_now, onupdate=business_now, nullable=False, comment="最后更新时间")
 
     procurement_method = relationship("ProcurementMethod", back_populates="stage_templates")
 
@@ -86,7 +86,7 @@ class OpportunityStageSnapshot(Base):
     template_code = Column(String(50), nullable=False, comment="快照：阶段编码，记录进入时模板的编码")
     snapshot_version = Column(Integer, nullable=False, comment="快照版本，对应模板版本")
 
-    entered_at = Column(DateTime, default=func.now(), nullable=False, comment="进入该阶段的时间")
+    entered_at = Column(DateTime, default=business_now, nullable=False, comment="进入该阶段的时间")
     exited_at = Column(DateTime, nullable=True, comment="离开该阶段的时间，NULL表示当前阶段")
 
     __table_args__ = (
@@ -109,7 +109,7 @@ class StageTemplateChangeLog(Base):
     new_data = Column(Text, nullable=True, comment="变更后数据，新值的JSON快照")
 
     changed_by = Column(String(100), nullable=False, comment="变更人系统用户ID")
-    changed_at = Column(DateTime, default=func.now(), nullable=False, comment="变更时间")
+    changed_at = Column(DateTime, default=business_now, nullable=False, comment="变更时间")
     reason = Column(String(500), nullable=True, comment="变更原因")
 
     __table_args__ = (

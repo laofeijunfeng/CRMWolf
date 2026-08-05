@@ -1,7 +1,8 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, func, Index, ForeignKey, Text, event, Boolean
+from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Index, ForeignKey, Text, event, Boolean
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
 from app.core.database import Base
+from app.utils.time import business_now
 import enum
 
 from app.utils.name_normalizer import normalize_corp_name  # R-ST-02
@@ -83,8 +84,8 @@ class Customer(Base):
     returned_time = Column(DateTime, nullable=True, comment="退回公海时间")
 
     creator_id = Column(String(100), nullable=False, comment="创建人")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
     version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
 
     # 热力值字段
@@ -163,7 +164,7 @@ class Contact(Base):
     remark = Column(Text, nullable=True, comment="备注")
     reports_to = Column(BigInteger, nullable=True, comment="汇报对象联系人ID")
     is_primary = Column(Integer, nullable=False, default=0, comment="是否主联系人：0:否, 1:是")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
     customer = relationship("Customer", back_populates="contacts")
 
@@ -188,8 +189,8 @@ class CustomerMember(Base):
     access_level = Column(String(20), nullable=False, default="VIEW", comment="访问级别：VIEW/FOLLOW_UP/EDIT")
     remark = Column(String(500), nullable=True, comment="备注")
     created_by = Column(String(100), nullable=False, comment="创建人")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
     is_active = Column(Boolean, nullable=False, default=True, comment="是否有效")
 
     customer = relationship("Customer", back_populates="members")

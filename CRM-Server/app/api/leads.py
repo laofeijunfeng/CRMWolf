@@ -23,6 +23,20 @@ from app.utils.time import business_now
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
 
 
+def _build_lead_follow_up_response(follow_up, lead_public_id: str, creator_info=None) -> LeadFollowUpResponse:
+    return LeadFollowUpResponse(
+        id=follow_up.id,
+        lead_id=lead_public_id,
+        content=follow_up.content,
+        method=follow_up.method,
+        next_follow_time=follow_up.next_follow_time,
+        next_action=follow_up.next_action,
+        creator_id=follow_up.creator_id,
+        created_time=follow_up.created_time,
+        creator_info=creator_info,
+    )
+
+
 def _lead_name_conflict_error(db: Session, lead_name: str, team_id: int) -> Optional[str]:
     if lead_crud.get_by_name(db, lead_name, team_id):
         return "线索名称已存在"
@@ -453,7 +467,7 @@ def add_follow_up(
     db: Session = Depends(get_db)
 ):
     created = lead_follow_up_crud.create(db, follow_up, lead.id, str(current_user.id), team_id)
-    return LeadFollowUpResponse(**{**created.__dict__, "lead_id": lead.public_id})
+    return _build_lead_follow_up_response(created, lead.public_id)
 
 
 @router.get("/{lead_id}/follow-ups", response_model=List[LeadFollowUpResponse], summary="获取跟进记录", description="获取线索的跟进记录列表")
@@ -465,7 +479,7 @@ def get_follow_ups(
     db: Session = Depends(get_db)
 ):
     follow_ups = lead_follow_up_crud.get_by_lead_id(db, lead.id, skip, limit)
-    return [LeadFollowUpResponse(**{**follow_up.__dict__, "lead_id": lead.public_id}) for follow_up in follow_ups]
+    return [_build_lead_follow_up_response(follow_up, lead.public_id) for follow_up in follow_ups]
 
 
 @router.delete("/{lead_id}/follow-ups/{follow_up_id}", summary="删除跟进记录", description="删除线索的跟进记录")

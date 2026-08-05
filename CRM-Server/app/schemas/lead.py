@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import date, datetime, time
 from app.models.lead import LeadSource, LeadStatus, CompanyScale, FollowUpMethod
 
 
@@ -138,6 +138,20 @@ class LeadFollowUpBase(BaseModel):
         if not v or not v.strip():
             raise ValueError('跟进内容不能为空')
         return v.strip()
+
+    @field_validator('next_follow_time', mode='before')
+    @classmethod
+    def parse_next_follow_time(cls, v):
+        if v is None or isinstance(v, datetime):
+            return v
+        if isinstance(v, date):
+            return datetime.combine(v, time.min)
+        if isinstance(v, str) and len(v.strip()) == 10:
+            try:
+                return datetime.combine(date.fromisoformat(v.strip()), time.min)
+            except ValueError:
+                return v
+        return v
 
 
 class LeadFollowUpCreate(LeadFollowUpBase):

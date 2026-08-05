@@ -5,7 +5,14 @@
  */
 
 import { z } from 'zod'
-import { UserInfoSchema, LeadStatusSchema, LeadSourceSchema, CompanyScaleSchema, PaginatedResponseSchema } from './common'
+import {
+  BusinessDateTimeStringSchema,
+  UserInfoSchema,
+  LeadStatusSchema,
+  LeadSourceSchema,
+  CompanyScaleSchema,
+  PaginatedResponseSchema
+} from './common'
 
 // ===== 线索基础类型 =====
 export const LeadResponseSchema = z.object({
@@ -21,8 +28,8 @@ export const LeadResponseSchema = z.object({
   status: LeadStatusSchema,
   pool_id: z.number().int().nullable(),
   creator_id: z.string(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: BusinessDateTimeStringSchema,
+  last_modified_time: BusinessDateTimeStringSchema,
   version: z.number().int().nonnegative()
 })
 
@@ -43,9 +50,9 @@ export const LeadFollowUpResponseSchema = z.object({
   lead_id: z.string().min(1),
   content: z.string().min(1),
   method: z.enum(['PHONE', 'EMAIL', 'MEETING', 'WECHAT', 'OTHER']),
-  next_follow_time: z.string().datetime().nullable(),
+  next_follow_time: BusinessDateTimeStringSchema.nullable(),
   creator_id: z.string(),
-  created_time: z.string().datetime(),
+  created_time: BusinessDateTimeStringSchema,
   creator_info: UserInfoSchema.nullable()
 })
 

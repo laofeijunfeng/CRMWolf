@@ -1,6 +1,6 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Enum, Index
-from sqlalchemy.sql import func
 from app.core.database import Base
+from app.utils.time import business_now
 from app.utils.public_id import generate_public_id
 import enum
 
@@ -57,8 +57,8 @@ class Lead(Base):
     pool_id = Column(BigInteger, nullable=True, comment="所属线索池ID")
 
     creator_id = Column(String(100), nullable=False, comment="创建人系统用户ID")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
     version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
 
     # 热力值字段
@@ -90,7 +90,7 @@ class LeadFollowUp(Base):
     next_action = Column(Text, nullable=True, comment="下一步动作内容")
 
     creator_id = Column(String(100), nullable=False, comment="创建人系统用户ID")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
     __table_args__ = (
         Index('idx_lead_id', 'lead_id'),

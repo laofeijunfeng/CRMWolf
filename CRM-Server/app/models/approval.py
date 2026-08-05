@@ -1,8 +1,8 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Numeric, ForeignKey, Index
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from app.core.database import Base
+from app.utils.time import business_now
 from app.constants.business_types import BusinessType
 
 
@@ -43,8 +43,8 @@ class ApprovalFlow(Base):
 
     is_active = Column(Integer, nullable=False, default=1, comment="是否启用：0:否, 1:是")
 
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
     nodes = relationship("ApprovalNode", back_populates="flow", order_by="ApprovalNode.node_order")
     approvals = relationship("Approval", back_populates="flow")
@@ -79,7 +79,7 @@ class ApprovalNode(Base):
     notify_user_ids = Column(JSON().with_variant(Text(), "sqlite"), nullable=True, comment="通知对象用户ID列表")
     is_required = Column(Integer, nullable=False, default=1, comment="是否必须审批：0:否, 1:是")
 
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
     flow = relationship("ApprovalFlow", back_populates="nodes")
     records = relationship("ApprovalRecord", back_populates="node")
@@ -108,8 +108,8 @@ class Approval(Base):
     submitter_id = Column(String(100), nullable=False, comment="提交人系统用户ID")
     submitter_name = Column(String(100), nullable=True, comment="提交人姓名")
     
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后更新时间")
     
     contract = relationship("Contract", foreign_keys=[contract_id])
     flow = relationship("ApprovalFlow", back_populates="approvals")
@@ -139,7 +139,7 @@ class ApprovalRecord(Base):
     action = Column(String(20), nullable=False, comment="操作：SUBMIT, APPROVE, REJECT, ROLLBACK")
     comment = Column(Text, nullable=True, comment="审批意见")
 
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="操作时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="操作时间")
 
     approval = relationship("Approval", back_populates="records")
     node = relationship("ApprovalNode", back_populates="records")

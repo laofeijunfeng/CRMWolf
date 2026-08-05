@@ -1,7 +1,7 @@
 from sqlalchemy import JSON, BigInteger, Column, DateTime, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class CustomerIntelligenceRunStatus:
@@ -40,8 +40,8 @@ class CustomerIntelligenceRun(Base):
     result_json = Column(JSON, nullable=True, comment="Graph 结果摘要")
     visible_trace_json = Column(JSON, nullable=True, comment="用户可见执行轨迹")
     error_message = Column(Text, nullable=True, comment="错误信息")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         UniqueConstraint("run_key", name="uq_customer_intelligence_run_key"),

@@ -1,7 +1,7 @@
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class CustomerActivity(Base):
@@ -23,10 +23,10 @@ class CustomerActivity(Base):
     next_follow_time = Column(DateTime, nullable=True, comment="计划下次跟进时间")
     next_follow_time_source = Column(String(30), nullable=True, comment="下次跟进时间来源：UI_DEFAULT/USER/AI_EXTRACTED/AGENT/MIGRATED")
     next_action = Column(Text, nullable=True, comment="下一步动作内容")
-    occurred_at = Column(DateTime, nullable=False, default=func.now(), comment="活动发生时间")
+    occurred_at = Column(DateTime, nullable=False, default=business_now, comment="活动发生时间")
     creator_id = Column(String(100), nullable=False, comment="记录创建人")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="记录创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="记录创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
     effectiveness_score = Column(Integer, nullable=True, comment="AI评估活动有效性得分，满分100")
     effectiveness_is_valid = Column(Boolean, nullable=True, comment="AI评估是否有效")
     effectiveness_reason = Column(Text, nullable=True, comment="AI评估原因摘要")

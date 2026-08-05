@@ -17,6 +17,11 @@ export const OptionalStringFromNullableSchema = z.preprocess(
   z.string().optional()
 )
 
+// 后端业务 DateTime 使用无时区 Asia/Shanghai 本地时间，FastAPI 序列化形如
+// `2026-07-01T10:00:00`，不能使用 z.string().datetime() 强制要求 Z/offset。
+export const BusinessDateTimeStringSchema = z.string().min(1)
+export const BusinessDateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+
 // ===== 分页类型 =====
 export const PaginationParamsSchema = z.object({
   page: z.number().int().positive().default(1),

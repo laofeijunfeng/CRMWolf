@@ -18,6 +18,7 @@ from app.models.agent import (
 )
 from app.models.customer import Customer, CustomerMember
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
+from app.models.customer_identity_term import CustomerIdentityTerm
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.permission import Permission
 from app.models.role import Role
@@ -29,6 +30,7 @@ from app.services.agent.middleware import build_langchain_hitl_middleware
 from app.services.agent.tool_registry import AgentToolRegistry
 from app.services.agent.tools.service import CRMAgentToolService
 from app.services.customer_fact_service import CustomerFactInput, customer_fact_service
+from app.services.customer_identity_resolution_service import generated_identity_terms_for_customer_name
 from app.services.customer_knowledge_candidate_service import CustomerKnowledgeCandidateService
 from app.services.customer_qdrant_index_service import CustomerEvidenceSearchResult
 
@@ -352,7 +354,8 @@ async def test_agent_tool_search_customers_uses_customer_knowledge_when_keyword_
 
         assert result.success is True
         assert result.data["items"][0]["account_name"] == "中国科学院信息工程研究所"
-        assert result.data["items"][0]["match"]["source"] == "hybrid"
+        assert result.data["items"][0]["match"]["source"] == "customer_knowledge"
+        assert result.data["retrieval"]["identity_decision"] == "auto_select"
         assert result.data["retrieval"]["semantic_status"] == "completed"
         assert embedding_service.queries == ["中科院"]
         assert qdrant_service.team_queries[0]["tenant_id"] == 1
@@ -617,8 +620,8 @@ async def test_agent_tool_search_customers_uses_customer_alias_fact_when_keyword
 
         assert result.success is True
         assert result.data["items"][0]["account_name"] == "中国科学院信息工程研究所"
-        assert result.data["items"][0]["match"]["source"] == "customer_alias"
-        assert result.data["items"][0]["match"]["reason"] == "客户智能档案中的常用称呼匹配"
+        assert result.data["items"][0]["match"]["source"] == "customer_alias_fact"
+        assert result.data["items"][0]["match"]["score"] >= 0.86
         assert result.data["retrieval"]["alias_status"] == "completed"
         assert result.data["retrieval"]["alias_candidate_count"] == 1
     finally:
@@ -711,8 +714,192 @@ async def test_agent_tool_search_customers_uses_generated_customer_name_alias_wh
 
         assert result.success is True
         assert result.data["items"][0]["account_name"] == "中国科学院信息工程研究所"
-        assert result.data["items"][0]["match"]["source"] == "customer_alias"
-        assert result.data["items"][0]["match"]["reason"] == "客户名称的常用简称匹配"
+        assert result.data["items"][0]["match"]["source"] == "generated_match_term"
+        assert result.data["items"][0]["match"]["score"] >= 0.8
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_generated_identity_terms_include_parenthetical_company_short_name():
+    terms = {
+        term
+        for term, _term_type in generated_identity_terms_for_customer_name("华米（北京）信息科技有限公司")
+    }
+
+    assert "华米科技" in terms
+    assert "华米信息科技" in terms
+
+
+def test_customer_identity_rebuild_persists_generated_terms():
+    from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
+
+    engine, db = _db_session([
+        Customer.__table__,
+        CustomerIdentityTerm.__table__,
+    ])
+    service = CustomerIdentityResolutionService()
+    try:
+        db.add(Customer(
+            id=607,
+            team_id=1,
+            account_name="华米（北京）信息科技有限公司",
+            city="北京",
+            status=0,
+            creator_id="2",
+        ))
+        db.commit()
+
+        created = service.rebuild_customer_identity_terms(db, team_id=1, customer_id=607)
+        db.commit()
+
+        terms = {
+            row.term
+            for row in db.query(CustomerIdentityTerm)
+            .filter(CustomerIdentityTerm.customer_id == 607)
+            .all()
+        }
+        assert created > 0
+        assert "华米科技" in terms
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_search_customers_resolves_parenthetical_company_short_name():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+        CustomerFact.__table__,
+        CustomerFactSource.__table__,
+        CustomerFactRevision.__table__,
+        CustomerIdentityTerm.__table__,
+    ])
+    service = CRMAgentToolService(
+        api_client=EmptyCustomerSearchCRMAPIClient(),
+        knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
+    )
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
+        db.add(Customer(
+            id=604,
+            team_id=1,
+            account_name="华米（北京）信息科技有限公司",
+            city="北京",
+            status=0,
+            creator_id="2",
+        ))
+        db.commit()
+
+        result = await service.search_customers(_context(db), "华米科技", limit=5)
+
+        assert result.success is True
+        assert result.data["items"][0]["account_name"] == "华米（北京）信息科技有限公司"
+        assert result.data["items"][0]["match"]["source"] == "generated_match_term"
+        assert result.data["items"][0]["match"]["score"] >= 0.86
+        assert result.data["retrieval"]["identity_decision"] == "auto_select"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_search_customers_uses_persisted_identity_term():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+        CustomerIdentityTerm.__table__,
+    ])
+    from app.services.customer_identity_resolution_service import CustomerIdentityResolutionService
+
+    service = CRMAgentToolService(
+        api_client=EmptyCustomerSearchCRMAPIClient(),
+        knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
+        identity_resolution_service=CustomerIdentityResolutionService(),
+    )
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
+        db.add(Customer(
+            id=608,
+            team_id=1,
+            account_name="华米（北京）信息科技有限公司",
+            city="北京",
+            status=0,
+            creator_id="2",
+        ))
+        db.commit()
+        service.identity_resolution_service.rebuild_customer_identity_terms(db, team_id=1, customer_id=608)
+        db.commit()
+
+        result = await service.search_customers(_context(db), "华米科技", limit=5)
+
+        assert result.success is True
+        assert result.data["items"][0]["account_name"] == "华米（北京）信息科技有限公司"
+        assert result.data["items"][0]["match"]["source"] in {"customer_identity_term", "hybrid_identity"}
+        assert "customer_identity_term" in result.data["retrieval"]["identity_source_counts"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_search_customers_marks_close_identity_matches_ambiguous():
+    engine, db = _db_session([
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+        CustomerIdentityTerm.__table__,
+    ])
+    service = CRMAgentToolService(
+        api_client=EmptyCustomerSearchCRMAPIClient(),
+        knowledge_candidate_service=DisabledCustomerKnowledgeCandidateService(),
+    )
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:all"])
+        db.add_all([
+            Customer(
+                id=605,
+                team_id=1,
+                account_name="华米（北京）信息科技有限公司",
+                city="北京",
+                status=0,
+                creator_id="2",
+            ),
+            Customer(
+                id=606,
+                team_id=1,
+                account_name="华米科技股份有限公司",
+                city="合肥",
+                status=0,
+                creator_id="2",
+            ),
+        ])
+        db.commit()
+
+        result = await service.search_customers(_context(db), "华米科技", limit=5)
+
+        assert result.success is True
+        assert [item["account_name"] for item in result.data["items"]] == [
+            "华米科技股份有限公司",
+            "华米（北京）信息科技有限公司",
+        ]
+        assert result.data["retrieval"]["identity_decision"] == "requires_confirmation"
+        assert result.data["retrieval"]["identity_conflict_count"] == 2
     finally:
         db.close()
         engine.dispose()

@@ -397,6 +397,12 @@ def _customer_identity_score(candidate: JSONDict, *, match: JSONDict, target_nam
         return min(0.94, max(raw_score, 0.93))
     if identity_support >= 0.78:
         return min(0.86, max(raw_score, 0.78))
+    sources = match.get("sources")
+    source_set = {str(item) for item in sources} if isinstance(sources, list) else {source}
+    if source in {"customer_identity_term", "generated_match_term", "customer_alias_fact", "hybrid_identity"}:
+        return min(0.94, max(raw_score, 0.86))
+    if source_set & {"customer_identity_term", "generated_match_term", "customer_alias_fact"}:
+        return min(0.96, max(raw_score, 0.88))
     if source == "customer_knowledge":
         return min(raw_score, 0.68)
     if source == "customer_alias":
@@ -438,6 +444,9 @@ def _customer_candidate_names(candidate: JSONDict, match: JSONDict) -> list[str]
     aliases = match.get("matched_aliases")
     if isinstance(aliases, list):
         names.extend(alias.strip() for alias in aliases if isinstance(alias, str) and alias.strip())
+    terms = match.get("matched_terms")
+    if isinstance(terms, list):
+        names.extend(term.strip() for term in terms if isinstance(term, str) and term.strip())
     return list(dict.fromkeys(names))
 
 
@@ -465,6 +474,8 @@ def _candidate_match_score(match: JSONDict) -> float:
         return 0.88
     if source == "hybrid":
         return 0.94
+    if source in {"hybrid_identity", "customer_identity_term", "generated_match_term", "customer_alias_fact"}:
+        return 0.9
     if source == "customer_knowledge":
         return 0.84
     return 0.5

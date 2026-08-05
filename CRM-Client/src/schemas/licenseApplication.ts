@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod'
-import { OptionalNullableStringSchema } from './common'
+import { BusinessDateTimeStringSchema, OptionalNullableStringSchema } from './common'
 
 // ===== License 申请状态枚举 =====
 export const LicenseApplicationStatusSchema = z.enum([
@@ -65,9 +65,9 @@ export const LicenseApplicationSchema = z.object({
   status: LicenseApplicationStatusSchema,
   applicant_id: z.string(),
   approver_id: z.string().nullable(),
-  approved_time: z.string().datetime().nullable(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  approved_time: BusinessDateTimeStringSchema.nullable(),
+  created_time: BusinessDateTimeStringSchema,
+  last_modified_time: BusinessDateTimeStringSchema,
   // 关联信息（用于前端展示）
   customer_name: OptionalNullableStringSchema,
   deployment_name: OptionalNullableStringSchema,

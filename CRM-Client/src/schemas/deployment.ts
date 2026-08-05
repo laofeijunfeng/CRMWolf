@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod'
+import { BusinessDateTimeStringSchema } from './common'
 
 // ===== 部署信息基础类型 =====
 export const DeploymentInfoSchema = z.object({
@@ -21,8 +22,8 @@ export const DeploymentInfoSchema = z.object({
     ),
   authorized_users: z.number().int().positive('授权人数必须大于0').nullable().optional(),
   is_default: z.boolean(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime()
+  created_time: BusinessDateTimeStringSchema,
+  last_modified_time: BusinessDateTimeStringSchema
 })
 
 export type DeploymentInfo = z.infer<typeof DeploymentInfoSchema>

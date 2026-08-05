@@ -21,10 +21,14 @@ from app.schemas.agent import (
 )
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult, JsonDict
-from app.services.customer_alias_service import CustomerAliasMatch, CustomerAliasService, customer_alias_service
+from app.services.customer_alias_service import CustomerAliasService, customer_alias_service
 from app.services.customer_intelligence_context_service import (
     CustomerIntelligenceContextService,
     customer_intelligence_context_service,
+)
+from app.services.customer_identity_resolution_service import (
+    CustomerIdentityResolutionService,
+    customer_identity_resolution_service,
 )
 from app.services.customer_knowledge_candidate_service import (
     CustomerKnowledgeCandidateResult,
@@ -33,9 +37,6 @@ from app.services.customer_knowledge_candidate_service import (
     customer_knowledge_candidate_service,
 )
 from app.utils.time import business_now
-
-
-CUSTOMER_KNOWLEDGE_IDENTITY_MIN_SCORE = 0.62
 
 
 class CRMAgentToolService:
@@ -52,11 +53,13 @@ class CRMAgentToolService:
         intelligence_context_service: Optional[CustomerIntelligenceContextService] = None,
         knowledge_candidate_service: Optional[CustomerKnowledgeCandidateService] = None,
         alias_service: Optional[CustomerAliasService] = None,
+        identity_resolution_service: Optional[CustomerIdentityResolutionService] = None,
     ) -> None:
         self.api_client = api_client or InternalCRMAPIClient()
         self.intelligence_context_service = intelligence_context_service or customer_intelligence_context_service
         self.knowledge_candidate_service = knowledge_candidate_service or customer_knowledge_candidate_service
         self.alias_service = alias_service or customer_alias_service
+        self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
 
     async def search_customers(self, context: AgentToolContext, keyword: str, limit: int = 10) -> AgentToolResult:
         clean_keyword = keyword.strip()
@@ -102,33 +105,27 @@ class CRMAgentToolService:
         retrieval: JsonDict = {
             "mode": "hybrid",
             "lexical_status": "completed",
-            "alias_status": "not_attempted",
+            "alias_status": "completed" if keyword else "skipped",
             "semantic_status": "not_attempted",
             "semantic_source": "customer_evidence",
         }
-        alias_candidates: list[JsonDict] = []
-        if keyword:
-            alias_matches = self.alias_service.recall(
-                context.db,
-                team_id=context.team_id,
-                query_text=keyword,
-                limit=limit,
-                visibility_predicate=visibility_predicate,
-            )
-            alias_candidates = [_alias_match_item(match) for match in alias_matches]
-            retrieval["alias_status"] = "completed"
-            retrieval["alias_candidate_count"] = len(alias_candidates)
         semantic_candidates: list[JsonDict] = []
         if keyword:
             knowledge_result = self._search_accessible_customers_by_evidence(context, keyword, limit=limit)
             semantic_candidates = knowledge_result.candidates
             retrieval.update(_semantic_retrieval_metadata(knowledge_result.retrieval_event))
-        items, semantic_related_customers = self._merge_customer_candidates(
+        resolution = self.identity_resolution_service.resolve(
+            context.db,
+            team_id=context.team_id,
+            query_text=keyword,
             lexical_items=lexical_items,
-            alias_items=alias_candidates,
             semantic_items=semantic_candidates,
             limit=limit,
+            visibility_predicate=visibility_predicate,
         )
+        items = resolution.items
+        semantic_related_customers = resolution.related_customers
+        retrieval.update(resolution.metadata)
         if semantic_related_customers:
             retrieval["semantic_related_customer_count"] = len(semantic_related_customers)
             retrieval["semantic_candidate_role"] = "related_evidence"
@@ -165,57 +162,6 @@ class CRMAgentToolService:
             ],
             visibility_predicate=self._customer_visibility_predicate(context),
         )
-
-    @staticmethod
-    def _merge_customer_candidates(
-        *,
-        lexical_items: list[JsonDict],
-        alias_items: list[JsonDict],
-        semantic_items: list[JsonDict],
-        limit: int,
-    ) -> tuple[list[JsonDict], list[JsonDict]]:
-        merged: dict[str, JsonDict] = {}
-        order: list[str] = []
-        for item in [*lexical_items, *alias_items]:
-            customer_id = item.get("id")
-            if not isinstance(customer_id, (str, int)) or not str(customer_id):
-                continue
-            customer_key = str(customer_id)
-            candidate = dict(item)
-            candidate.setdefault(
-                "match",
-                {"source": "customer_search", "score": 1.0, "reason": "客户名称匹配"},
-            )
-            if customer_key in merged:
-                merged[customer_key] = _combine_customer_candidate_matches(
-                    merged[customer_key],
-                    candidate,
-                    source="hybrid",
-                    reason="客户名称和常用称呼均匹配",
-                )
-            else:
-                merged[customer_key] = candidate
-                order.append(customer_key)
-        has_identity_candidates = bool(order)
-        semantic_related_customers: list[JsonDict] = []
-        for item in semantic_items:
-            customer_id = item.get("id")
-            if not isinstance(customer_id, (str, int)) or not str(customer_id):
-                continue
-            customer_key = str(customer_id)
-            if customer_key in merged:
-                merged[customer_key] = _combine_customer_candidate_matches(
-                    merged[customer_key],
-                    item,
-                    source="hybrid",
-                    reason="客户名称、常用称呼或客户知识库匹配",
-                )
-            elif has_identity_candidates or _customer_candidate_score(item) < CUSTOMER_KNOWLEDGE_IDENTITY_MIN_SCORE:
-                semantic_related_customers.append(item)
-            else:
-                merged[customer_key] = item
-                order.append(customer_key)
-        return [merged[customer_id] for customer_id in order[:limit]], semantic_related_customers[:limit]
 
     def _customer_visibility_predicate(self, context: AgentToolContext) -> CustomerVisibilityPredicate:
         user_id = str(context.user_id)
@@ -1029,71 +975,6 @@ def _compact_text(value: str | None, *, limit: int) -> str | None:
     if len(compacted) <= limit:
         return compacted
     return f"{compacted[:limit - 1]}..."
-
-
-def _alias_match_item(match: CustomerAliasMatch) -> JsonDict:
-    return {
-        "id": match.customer_public_id,
-        "account_name": match.account_name,
-        "city": match.city,
-        "owner_info": None,
-        "collaborator_infos": [],
-        "match": {
-            "source": "customer_alias",
-            "score": match.score,
-            "reason": match.reason,
-            "evidence": [
-                {"title": "常用称呼", "snippet": alias, "score": match.score}
-                for alias in match.matched_aliases[:3]
-            ],
-        },
-    }
-
-
-def _combine_customer_candidate_matches(
-    existing_item: JsonDict,
-    new_item: JsonDict,
-    *,
-    source: str,
-    reason: str,
-) -> JsonDict:
-    existing = dict(existing_item)
-    existing_match = existing.get("match") if isinstance(existing.get("match"), dict) else {}
-    new_match = new_item.get("match") if isinstance(new_item.get("match"), dict) else {}
-    existing["match"] = {
-        "source": source,
-        "score": max(_float_score(existing_match.get("score")), _float_score(new_match.get("score"))),
-        "reason": reason,
-        "evidence": [
-            *(_json_dict_list(existing_match.get("evidence"))),
-            *(_json_dict_list(new_match.get("evidence"))),
-        ][:5],
-    }
-    return existing
-
-
-def _json_dict_list(value: object) -> list[JsonDict]:
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, dict)]
-
-
-def _float_score(value: object) -> float:
-    if isinstance(value, int | float):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return 0.0
-    return 0.0
-
-
-def _customer_candidate_score(item: JsonDict) -> float:
-    match = item.get("match")
-    if not isinstance(match, dict):
-        return 0.0
-    return _float_score(match.get("score"))
 
 
 def _semantic_retrieval_metadata(event: JsonDict) -> JsonDict:

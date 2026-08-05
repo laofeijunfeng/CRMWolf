@@ -1,8 +1,8 @@
 """IM channel models for Agent conversations."""
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint
-from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class IMBotProvider:
@@ -37,8 +37,8 @@ class AgentChannelSession(Base):
     agent_session_id = Column(BigInteger, ForeignKey("crm_agent_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     last_message_id = Column(String(128), nullable=True, comment="最近处理的外部消息ID")
     status = Column(String(20), nullable=False, default="active", index=True, comment="状态")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         UniqueConstraint(
@@ -72,7 +72,7 @@ class IMInboundEvent(Base):
     agent_interaction_type = Column(String(80), nullable=True, comment="回复绑定的Agent交互事件类型")
     error_message = Column(Text, nullable=True, comment="错误信息")
     raw_event = Column(JSON, nullable=True, comment="必要事件快照")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
     processed_time = Column(DateTime, nullable=True, comment="处理时间")
 
     __table_args__ = (

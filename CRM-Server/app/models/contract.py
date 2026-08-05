@@ -1,7 +1,7 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Numeric, Index, ForeignKey
-from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.utils.time import business_now
 from app.constants.approval_phase import ApprovalPhase
 
 
@@ -59,10 +59,10 @@ class Contract(Base):
     contract_file_size = Column(BigInteger, nullable=True, comment="合同附件大小（字节）")
     contract_file_mime_type = Column(String(100), nullable=True, comment="合同附件 MIME 类型")
 
-    created_time = Column(DateTime, default=func.now(), nullable=False, comment="创建时间")
+    created_time = Column(DateTime, default=business_now, nullable=False, comment="创建时间")
     owner_id = Column(String(100), nullable=False, comment="合同负责人系统用户ID")
     creator_id = Column(String(100), nullable=False, comment="创建人系统用户ID")
-    last_modified_time = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False, comment="最后修改时间")
+    last_modified_time = Column(DateTime, default=business_now, onupdate=business_now, nullable=False, comment="最后修改时间")
     deleted_at = Column(DateTime, nullable=True, comment="删除时间（软删除标记）")
 
     payment_plans = relationship("PaymentPlan", back_populates="contract", cascade="all, delete-orphan")

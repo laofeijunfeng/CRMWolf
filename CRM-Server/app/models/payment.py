@@ -1,9 +1,10 @@
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Date, Numeric, ForeignKey, func, Index
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, Date, Numeric, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.utils.time import business_now
 from app.models.invoice import InvoiceApplicationStatus
 from app.constants.approval_phase import ApprovalPhase
 
@@ -37,8 +38,8 @@ class PaymentPlan(Base):
     due_date = Column(Date, nullable=False, comment="计划回款日期")
     status = Column(String(20), nullable=False, default=PaymentPlanStatus.PENDING, comment="回款状态：PENDING, OVERDUE, PARTIAL, COMPLETED")
     notes = Column(Text, comment="备注")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
     contract = relationship("Contract", back_populates="payment_plans")
     payment_records = relationship("PaymentRecord", back_populates="payment_plan", cascade="all, delete-orphan")
@@ -130,7 +131,7 @@ class PaymentRecord(Base):
     confirmed_by_name = Column(String(100), comment="确认人姓名")
     confirmed_time = Column(DateTime, comment="确认入账时间")
     confirmation_notes = Column(Text, comment="确认备注")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
     # 审批关联
     approval_id = Column(BigInteger, ForeignKey('crm_contract_approvals.id', ondelete='SET NULL'), nullable=True, comment="审批实例ID")

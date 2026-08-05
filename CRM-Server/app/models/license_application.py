@@ -1,8 +1,8 @@
 from sqlalchemy import Column, BigInteger, Integer, String, DateTime, Date, Text, ForeignKey, Index
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from app.core.database import Base
 from app.constants.approval_phase import ApprovalPhase
+from app.utils.time import business_now
 
 
 class LicenseApplicationStatus:
@@ -60,8 +60,8 @@ class LicenseApplication(Base):
     # 审批关联字段（支持审批引擎）
     approval_id = Column(BigInteger, ForeignKey('crm_contract_approvals.id', ondelete='SET NULL'), nullable=True, comment="审批实例ID")
 
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
     customer = relationship("Customer", back_populates="license_applications")
     deployment_info = relationship("DeploymentInfo", back_populates="license_applications")

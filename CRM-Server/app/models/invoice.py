@@ -1,6 +1,7 @@
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Numeric, Boolean, ForeignKey, func, Index
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, Numeric, Boolean, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.utils.time import business_now
 from app.constants.approval_phase import ApprovalPhase
 
 
@@ -36,8 +37,8 @@ class InvoiceTitle(Base):
     address = Column(String(500), comment="开票地址")
     phone = Column(String(50), comment="电话")
     is_default = Column(Boolean, nullable=False, default=False, comment="是否默认抬头：0:否, 1:是")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
     customer = relationship("Customer", back_populates="invoice_titles")
     invoice_applications = relationship("InvoiceApplication", back_populates="invoice_title")
@@ -90,8 +91,8 @@ class InvoiceApplication(Base):
     invoice_number = Column(String(100), comment="发票号码（可选，便于后续查询）")
     issued_time = Column(DateTime, comment="开票时间（上传发票文件时间）")
 
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="最后修改时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
     customer = relationship("Customer", back_populates="invoice_applications")
     contract = relationship("Contract", back_populates="invoice_applications")

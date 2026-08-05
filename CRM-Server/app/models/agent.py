@@ -5,9 +5,9 @@ must still be created or changed through existing CRM APIs.
 """
 from sqlalchemy import JSON, BigInteger, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class AgentSessionStatus:
@@ -60,8 +60,8 @@ class AgentMemoryEntry(Base):
     value_json = Column(JSON, nullable=False, comment="JSON可序列化记忆内容")
     version = Column(BigInteger, nullable=False, default=1, comment="记忆版本")
     expires_at = Column(DateTime, nullable=True, index=True, comment="过期时间")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         UniqueConstraint("namespace", "key", name="uq_agent_memory_namespace_key"),
@@ -84,12 +84,12 @@ class AgentSession(Base):
     status = Column(String(20), nullable=False, default=AgentSessionStatus.ACTIVE, index=True, comment="会话状态")
     summary = Column(Text, nullable=True, comment="会话摘要")
     context_json = Column(JSON, nullable=True, comment="会话上下文快照")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
     last_modified_time = Column(
         DateTime,
         nullable=False,
-        default=func.now(),
-        onupdate=func.now(),
+        default=business_now,
+        onupdate=business_now,
         comment="最后修改时间",
     )
 
@@ -122,7 +122,7 @@ class AgentMessage(Base):
     event_type = Column(String(50), nullable=True, index=True, comment="SSE或业务事件类型")
     content = Column(Text, nullable=True, comment="消息正文")
     payload_json = Column(JSON, nullable=True, comment="结构化消息载荷")
-    created_time = Column(DateTime, nullable=False, default=func.now(), index=True, comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")
 
     session = relationship("AgentSession", back_populates="messages")
 
@@ -158,12 +158,12 @@ class AgentTask(Base):
     state_json = Column(JSON, nullable=True, comment="LangGraph状态快照")
     result_json = Column(JSON, nullable=True, comment="任务结果快照")
     error_message = Column(Text, nullable=True, comment="错误信息")
-    created_time = Column(DateTime, nullable=False, default=func.now(), index=True, comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")
     last_modified_time = Column(
         DateTime,
         nullable=False,
-        default=func.now(),
-        onupdate=func.now(),
+        default=business_now,
+        onupdate=business_now,
         comment="最后修改时间",
     )
 
@@ -207,12 +207,12 @@ class AgentToolCall(Base):
     error_message = Column(Text, nullable=True, comment="错误信息")
     started_time = Column(DateTime, nullable=True, comment="开始时间")
     finished_time = Column(DateTime, nullable=True, comment="结束时间")
-    created_time = Column(DateTime, nullable=False, default=func.now(), index=True, comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")
     last_modified_time = Column(
         DateTime,
         nullable=False,
-        default=func.now(),
-        onupdate=func.now(),
+        default=business_now,
+        onupdate=business_now,
         comment="最后修改时间",
     )
 
@@ -259,12 +259,12 @@ class AgentIdempotencyKey(Base):
     request_hash = Column(String(64), nullable=True, comment="请求内容Hash")
     result_json = Column(JSON, nullable=True, comment="执行结果快照")
     error_message = Column(Text, nullable=True, comment="错误信息")
-    created_time = Column(DateTime, nullable=False, default=func.now(), index=True, comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")
     last_modified_time = Column(
         DateTime,
         nullable=False,
-        default=func.now(),
-        onupdate=func.now(),
+        default=business_now,
+        onupdate=business_now,
         comment="最后修改时间",
     )
 

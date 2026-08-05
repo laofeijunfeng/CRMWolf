@@ -6,6 +6,8 @@
 
 import { z } from 'zod'
 import {
+  BusinessDateStringSchema,
+  BusinessDateTimeStringSchema,
   UserInfoSchema,
   PaginatedResponseSchema,
   NullableStringSchema,
@@ -208,15 +210,15 @@ export const OpportunityResponseSchema = z.object({
   opportunity_name: z.string().min(1).max(255),
   customer_id: z.string().min(1),
   expected_amount: z.number().positive().nullable(),
-  expected_close_date: z.string().datetime().nullable(),
+  expected_close_date: BusinessDateStringSchema.nullable(),
   stage: OpportunityStageSchema,
   probability: z.number().min(0).max(100).nullable(),
   owner_id: z.string().nullable(),
   source_lead_id: z.string().nullable(),
   lost_reason: z.string().nullable(),
   creator_id: z.string(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: BusinessDateTimeStringSchema,
+  last_modified_time: BusinessDateTimeStringSchema,
   version: z.number().int().nonnegative()
 })
 
@@ -237,7 +239,7 @@ export const OpportunityCreateSchema = z.object({
   opportunity_name: z.string().min(1).max(255).optional(),
   customer_id: z.string().min(1),
   expected_amount: z.number().positive().optional(),
-  expected_close_date: z.string().datetime().optional(),
+  expected_close_date: BusinessDateStringSchema.optional(),
   stage: OpportunityStageSchema.optional().default('INITIAL_CONTACT'),
   probability: z.number().min(0).max(100).optional(),
   source_lead_id: z.string().optional()
@@ -249,7 +251,7 @@ export type OpportunityCreate = z.infer<typeof OpportunityCreateSchema>
 export const OpportunityUpdateSchema = z.object({
   opportunity_name: z.string().min(1).max(255).optional(),
   expected_amount: z.number().positive().optional(),
-  expected_close_date: z.string().datetime().optional(),
+  expected_close_date: BusinessDateStringSchema.optional(),
   stage: OpportunityStageSchema.optional(),
   probability: z.number().min(0).max(100).optional(),
   lost_reason: z.string().optional()

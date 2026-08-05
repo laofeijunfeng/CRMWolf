@@ -1,7 +1,7 @@
 from sqlalchemy import BigInteger, Column, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint
-from sqlalchemy.sql import func
 
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class CustomerVectorDocumentSourceType:
@@ -62,8 +62,8 @@ class CustomerVectorDocument(Base):
     )
     sync_error = Column(Text, nullable=True, comment="向量同步失败原因")
     synced_at = Column(DateTime, nullable=True, comment="向量同步时间")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         UniqueConstraint("team_id", "source_type", "source_object_id", name="uq_customer_vector_source"),

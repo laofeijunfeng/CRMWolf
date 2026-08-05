@@ -1,6 +1,7 @@
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Index, ForeignKey, func
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, Index, ForeignKey
 
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class DealJourneyStatus:
@@ -51,8 +52,8 @@ class CustomerDealJourney(Base):
     started_at = Column(DateTime, nullable=True, comment="开始时间")
     closed_at = Column(DateTime, nullable=True, comment="结束时间")
     last_event_at = Column(DateTime, nullable=True, comment="最近事件时间")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         Index("idx_deal_journey_team_customer", "team_id", "customer_id"),
@@ -77,7 +78,7 @@ class CustomerDealJourneyEvent(Base):
     actor_id = Column(String(100), nullable=True, comment="操作者系统用户ID")
     summary = Column(Text, nullable=True, comment="事件摘要")
     metadata_json = Column(Text, nullable=True, comment="事件元数据JSON")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
     __table_args__ = (
         Index("idx_deal_journey_event_journey_time", "deal_journey_id", "event_time"),

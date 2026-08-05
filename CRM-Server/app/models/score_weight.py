@@ -7,8 +7,8 @@
 - crm_score_details: 热力值计算明细表
 """
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Index
-from sqlalchemy.sql import func
 from app.core.database import Base
+from app.utils.time import business_now
 
 
 class ScoreWeightConfig(Base):
@@ -33,9 +33,9 @@ class ScoreWeightConfig(Base):
     sort_order = Column(Integer, nullable=False, default=0, comment="排序序号")
 
     created_by = Column(String(100), nullable=False, comment="创建人")
-    created_time = Column(DateTime, nullable=False, default=func.now(), comment="创建时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
     updated_by = Column(String(100), nullable=True, comment="更新人")
-    updated_time = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now(), comment="更新时间")
+    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
     __table_args__ = (
         Index('idx_score_weight_team_module', 'team_id', 'module_type'),
@@ -62,7 +62,7 @@ class ScoreDetail(Base):
     score_change = Column(Integer, nullable=False, comment="分数变化")
     reason = Column(String(500), nullable=True, comment="计算原因说明")
 
-    calculated_time = Column(DateTime, nullable=False, default=func.now(), comment="计算时间")
+    calculated_time = Column(DateTime, nullable=False, default=business_now, comment="计算时间")
 
     __table_args__ = (
         Index('idx_score_detail_record', 'module_type', 'record_id'),

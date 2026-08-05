@@ -5,7 +5,13 @@
  */
 
 import { z } from 'zod'
-import { UserInfoSchema, PaginatedResponseSchema, OptionalStringFromNullableSchema } from './common'
+import {
+  BusinessDateStringSchema,
+  BusinessDateTimeStringSchema,
+  UserInfoSchema,
+  PaginatedResponseSchema,
+  OptionalStringFromNullableSchema
+} from './common'
 
 // ===== 合同状态枚举 =====
 export const ContractStatusSchema = z.enum([
@@ -36,15 +42,15 @@ export const ContractResponseSchema = z.object({
   customer_id: z.string().min(1),
   opportunity_id: z.number().int().nullable(),
   contract_amount: z.number().positive(),
-  signed_date: z.string().datetime().nullable(),
-  start_date: z.string().datetime().nullable(),
-  end_date: z.string().datetime().nullable(),
+  signed_date: BusinessDateStringSchema.nullable(),
+  start_date: BusinessDateStringSchema.nullable(),
+  end_date: BusinessDateStringSchema.nullable(),
   status: ContractStatusSchema,
   owner_id: z.string().nullable(),
   remark: z.string().nullable(),
   creator_id: z.string(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: BusinessDateTimeStringSchema,
+  last_modified_time: BusinessDateTimeStringSchema,
   version: z.number().int().nonnegative()
 })
 
@@ -67,9 +73,9 @@ export const ContractCreateSchema = z.object({
   customer_id: z.string().min(1),
   opportunity_id: z.number().int().optional(),
   contract_amount: z.number().positive(),
-  signed_date: z.string().datetime().optional(),
-  start_date: z.string().datetime().optional(),
-  end_date: z.string().datetime().optional(),
+  signed_date: BusinessDateStringSchema.optional(),
+  start_date: BusinessDateStringSchema.optional(),
+  end_date: BusinessDateStringSchema.optional(),
   remark: z.string().optional()
 })
 

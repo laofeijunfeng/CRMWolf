@@ -5,7 +5,12 @@
  */
 
 import { z } from 'zod'
-import { PaginatedResponseSchema, OptionalStringFromNullableSchema } from './common'
+import {
+  BusinessDateStringSchema,
+  BusinessDateTimeStringSchema,
+  PaginatedResponseSchema,
+  OptionalStringFromNullableSchema
+} from './common'
 
 // ===== 回款状态枚举 =====
 export const PaymentStatusSchema = z.enum([
@@ -28,13 +33,13 @@ export const PaymentResponseSchema = z.object({
   contract_id: z.number().int().positive(),
   payment_plan_id: z.number().int().nullable(),
   payment_amount: z.number().positive(),
-  payment_date: z.string().datetime(),
+  payment_date: BusinessDateStringSchema,
   payment_method: z.string().min(1).max(50),
   status: PaymentStatusSchema,
   remark: z.string().nullable(),
   creator_id: z.string(),
-  created_time: z.string().datetime(),
-  last_modified_time: z.string().datetime(),
+  created_time: BusinessDateTimeStringSchema,
+  last_modified_time: BusinessDateTimeStringSchema,
   version: z.number().int().nonnegative()
 })
 
@@ -56,7 +61,7 @@ export const PaymentCreateSchema = z.object({
   contract_id: z.number().int().positive(),
   payment_plan_id: z.number().int().optional(),
   payment_amount: z.number().positive(),
-  payment_date: z.string().datetime(),
+  payment_date: BusinessDateStringSchema,
   payment_method: z.string().min(1).max(50),
   remark: z.string().optional()
 })
@@ -68,7 +73,7 @@ export const PaymentPlanResponseSchema = z.object({
   id: z.number().int().positive(),
   contract_id: z.number().int().positive(),
   plan_amount: z.number().positive(),
-  plan_date: z.string().datetime(),
+  plan_date: BusinessDateStringSchema,
   status: PaymentStatusSchema,
   remark: z.string().nullable()
 })
