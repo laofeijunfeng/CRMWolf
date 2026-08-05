@@ -151,8 +151,23 @@ describe('Customers URL query detail sheet state', () => {
     expect(sheet.attributes('data-customer-id')).toBe('cus_test_19')
   })
 
+  it('does not restore the detail sheet from a legacy internal customer id query', async () => {
+    routeState.query = { customerId: '158', tab: 'opportunities', keep: '1' }
+
+    const wrapper = mount(Customers)
+    await flushPromises()
+
+    const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
+    expect(sheet.attributes('data-visible')).toBe('false')
+    expect(sheet.attributes('data-customer-id')).toBe('null')
+    expect(routerPush).toHaveBeenLastCalledWith({
+      path: '/customers',
+      query: { keep: '1' },
+    })
+  })
+
   it('removes customer detail query keys when closing the customer detail sheet', async () => {
-    routeState.query = { customerId: '19', tab: 'opportunities', opportunityId: '88', keep: '1' }
+    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities', opportunityId: '88', keep: '1' }
 
     const wrapper = mount(Customers)
     await flushPromises()

@@ -1,10 +1,10 @@
-import type { RouteLocationRaw } from 'vue-router'
+import type { LocationQueryRaw, RouteLocationRaw } from 'vue-router'
 
 export const isCustomerPublicId = (customerId: string): boolean => customerId.startsWith('cus_')
 
 export const customerDetailRoute = (
   customerId: string,
-  query: Record<string, string> = {}
+  query: LocationQueryRaw = {}
 ): RouteLocationRaw => {
   if (!isCustomerPublicId(customerId)) {
     throw new Error(`Customer detail route requires customer public_id, got "${customerId}"`)
@@ -13,8 +13,8 @@ export const customerDetailRoute = (
   return {
     path: '/customers',
     query: {
-      customerId,
       ...query,
+      customerId,
     },
   }
 }

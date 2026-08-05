@@ -51,6 +51,7 @@ import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { customerSourceOptions, companyScaleOptions } from '@/schemas/customer-form'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
+import { customerDetailRoute, isCustomerPublicId } from '@/utils/customerRoutes'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
@@ -107,9 +108,7 @@ const copyQueryWithoutCustomerDetailKeys = (query: LocationQuery): LocationQuery
 }
 
 const openCustomerDetail = (customerId: string): void => {
-  const query = copyQueryWithoutCustomerDetailKeys(route.query)
-  query['customerId'] = String(customerId)
-  router.push({ path: route.path, query })
+  router.push(customerDetailRoute(customerId, copyQueryWithoutCustomerDetailKeys(route.query)))
 }
 
 const closeCustomerDetail = (): void => {
@@ -119,13 +118,25 @@ const closeCustomerDetail = (): void => {
   })
 }
 
-const selectedCustomerId = computed(() => getSingleQueryValue(route.query, 'customerId'))
+const rawSelectedCustomerId = computed(() => getSingleQueryValue(route.query, 'customerId'))
+const selectedCustomerId = computed(() => {
+  const customerId = rawSelectedCustomerId.value
+  if (customerId === null || !isCustomerPublicId(customerId)) return null
+  return customerId
+})
 const sheetVisible = computed({
   get: () => selectedCustomerId.value !== null,
   set: (visible: boolean) => {
     if (!visible) {
       closeCustomerDetail()
     }
+  }
+})
+
+watchEffect(() => {
+  const customerId = rawSelectedCustomerId.value
+  if (customerId !== null && !isCustomerPublicId(customerId)) {
+    closeCustomerDetail()
   }
 })
 
