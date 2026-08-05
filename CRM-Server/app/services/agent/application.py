@@ -12,10 +12,11 @@ from typing import AsyncGenerator, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.crud.agent import agent_message_crud, agent_session_crud
-from app.models.agent import AgentMessageRole
+from app.models.agent import AgentMessage, AgentMessageRole
 from app.schemas.agent import AgentMessageCreate, AgentSessionCreate
 from app.services.agent import (
     agent_copy,
@@ -52,6 +53,9 @@ class AgentApplicationService:
         turn_input: Optional[AgentTurnInput] = None,
     ) -> AsyncGenerator[JSONDict, None]:
         db = SessionLocal()
+        session = None
+        user_message = None
+        trace_events: list[JSONDict] = []
         try:
             agent_turn_input = turn_input or AgentTurnInput.text(content)
             content = agent_turn_input.content
@@ -99,7 +103,6 @@ class AgentApplicationService:
             }
 
             assistant_content = None
-            trace_events: list[JSONDict] = []
             runtime_event_queue: asyncio.Queue[JSONDict] = asyncio.Queue()
             streamed_event_count = 0
             streamed_final_content: str | None = None
@@ -227,9 +230,67 @@ class AgentApplicationService:
         except HTTPException as exc:
             yield {"event": "error", "message": exc.detail, "status_code": exc.status_code}
         except Exception as exc:
-            yield {"event": "error", "message": agent_copy.service_error(str(exc))}
+            error_content = agent_copy.service_error(str(exc))
+            assistant_message = self._persist_runtime_error_message(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=getattr(session, "id", None),
+                user_message_id=getattr(user_message, "id", None),
+                content=error_content,
+                trace_events=trace_events,
+            )
+            if assistant_message is not None:
+                yield {
+                    "event": "message",
+                    "role": AgentMessageRole.ASSISTANT,
+                    "message_id": assistant_message.id,
+                    "content": assistant_message.content,
+                    "content_format": "text",
+                }
+            yield {"event": "error", "message": error_content}
         finally:
             db.close()
+
+    def _persist_runtime_error_message(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        session_id: int | None,
+        user_message_id: int | None,
+        content: str,
+        trace_events: list[JSONDict],
+    ) -> AgentMessage | None:
+        if not isinstance(session_id, int) or not isinstance(user_message_id, int):
+            return None
+        try:
+            db.rollback()
+            return agent_message_crud.create(
+                db,
+                AgentMessageCreate(
+                    team_id=team_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    role=AgentMessageRole.ASSISTANT,
+                    event_type="assistant_message",
+                    content=content,
+                    payload_json={
+                        "source": "runtime_error_fallback",
+                        "recovered_for_user_message_id": user_message_id,
+                        "trace_events": trace_events,
+                        "content_format": "text",
+                    },
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "Agent runtime error fallback message persistence failed: team_id=%s session_id=%s",
+                team_id,
+                session_id,
+            )
+            return None
 
     async def _run_root_runtime_for_turn(
         self,

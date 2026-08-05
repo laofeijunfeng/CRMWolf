@@ -870,70 +870,91 @@ class AgentRootRuntime:
             }
 
         streamed_customer_intelligence_trace = False
-        if _is_customer_intelligence_resume(state.get("resume_payload")):
-            event_key = _customer_intelligence_event_key_from_state(state)
-            if not event_key:
-                return {
-                    "customer_intelligence_result": {"handled": False, "reason": "missing_event_key"},
-                    "events": [{
-                        "event": "agent_root_customer_intelligence_resume_skipped",
-                        "reason": "missing_event_key",
-                    }],
+        try:
+            if _is_customer_intelligence_resume(state.get("resume_payload")):
+                event_key = _customer_intelligence_event_key_from_state(state)
+                if not event_key:
+                    return {
+                        "customer_intelligence_result": {"handled": False, "reason": "missing_event_key"},
+                        "events": [{
+                            "event": "agent_root_customer_intelligence_resume_skipped",
+                            "reason": "missing_event_key",
+                        }],
+                    }
+                graph_input = {
+                    "team_id": context.team_id,
+                    "user_id": context.user_id,
+                    "session_id": context.session_id,
+                    "event_key": event_key,
+                    "resume_payload": state.get("resume_payload") or {},
                 }
-            graph_input = {
-                "team_id": context.team_id,
-                "user_id": context.user_id,
-                "session_id": context.session_id,
-                "event_key": event_key,
-                "resume_payload": state.get("resume_payload") or {},
-            }
-            stream_resume_review = getattr(self.customer_intelligence_graph_service, "stream_resume_review", None)
-            if callable(stream_resume_review):
-                result = {}
-                async for chunk in stream_resume_review(graph_input):
-                    if not isinstance(chunk, dict):
-                        continue
-                    if chunk.get("kind") == "event":
-                        event = coerce_json_dict(chunk.get("event"))
-                        streamed_customer_intelligence_trace = True
-                        context.side_effects.customer_intelligence_events.append(event)
-                        await _publish_event(context, event)
-                    elif chunk.get("kind") == "result" and isinstance(chunk.get("result"), dict):
-                        result = chunk["result"]
+                stream_resume_review = getattr(self.customer_intelligence_graph_service, "stream_resume_review", None)
+                if callable(stream_resume_review):
+                    result = {}
+                    async for chunk in stream_resume_review(graph_input):
+                        if not isinstance(chunk, dict):
+                            continue
+                        if chunk.get("kind") == "event":
+                            event = coerce_json_dict(chunk.get("event"))
+                            streamed_customer_intelligence_trace = True
+                            context.side_effects.customer_intelligence_events.append(event)
+                            await _publish_event(context, event)
+                        elif chunk.get("kind") == "result" and isinstance(chunk.get("result"), dict):
+                            result = chunk["result"]
+                else:
+                    result = await self.customer_intelligence_graph_service.resume_review(graph_input)
             else:
-                result = await self.customer_intelligence_graph_service.resume_review(graph_input)
-        else:
-            event_object = context.customer_intelligence_event
-            if event_object is None:
-                return {
-                    "customer_intelligence_requested": False,
-                    "customer_intelligence_result": {"handled": False, "reason": "missing_event"},
-                    "events": [{
-                        "event": "agent_root_customer_intelligence_skipped",
-                        "reason": "missing_event",
-                    }],
+                event_object = context.customer_intelligence_event
+                if event_object is None:
+                    return {
+                        "customer_intelligence_requested": False,
+                        "customer_intelligence_result": {"handled": False, "reason": "missing_event"},
+                        "events": [{
+                            "event": "agent_root_customer_intelligence_skipped",
+                            "reason": "missing_event",
+                        }],
+                    }
+                graph_input = {
+                    "team_id": context.team_id,
+                    "user_id": context.user_id,
+                    "session_id": context.session_id,
+                    "event": event_object,
                 }
-            graph_input = {
-                "team_id": context.team_id,
-                "user_id": context.user_id,
-                "session_id": context.session_id,
-                "event": event_object,
+                stream_run = getattr(self.customer_intelligence_graph_service, "stream_run", None)
+                if callable(stream_run):
+                    result = {}
+                    async for chunk in stream_run(graph_input):
+                        if not isinstance(chunk, dict):
+                            continue
+                        if chunk.get("kind") == "event":
+                            event = coerce_json_dict(chunk.get("event"))
+                            streamed_customer_intelligence_trace = True
+                            context.side_effects.customer_intelligence_events.append(event)
+                            await _publish_event(context, event)
+                        elif chunk.get("kind") == "result" and isinstance(chunk.get("result"), dict):
+                            result = chunk["result"]
+                else:
+                    result = await self.customer_intelligence_graph_service.run(graph_input)
+        except Exception as exc:
+            logger.exception(
+                "Agent 客户智能后置刷新失败，已隔离为非阻塞后置效果: team_id=%s, session_id=%s",
+                context.team_id,
+                context.session_id,
+            )
+            failed_event = {
+                "event": "agent_root_customer_intelligence_graph_failed",
+                "reason": str(exc),
             }
-            stream_run = getattr(self.customer_intelligence_graph_service, "stream_run", None)
-            if callable(stream_run):
-                result = {}
-                async for chunk in stream_run(graph_input):
-                    if not isinstance(chunk, dict):
-                        continue
-                    if chunk.get("kind") == "event":
-                        event = coerce_json_dict(chunk.get("event"))
-                        streamed_customer_intelligence_trace = True
-                        context.side_effects.customer_intelligence_events.append(event)
-                        await _publish_event(context, event)
-                    elif chunk.get("kind") == "result" and isinstance(chunk.get("result"), dict):
-                        result = chunk["result"]
-            else:
-                result = await self.customer_intelligence_graph_service.run(graph_input)
+            context.side_effects.customer_intelligence_events.append(failed_event)
+            await _publish_event(context, failed_event)
+            return {
+                "customer_intelligence_requested": False,
+                "customer_intelligence_result": {
+                    "handled": False,
+                    "reason": "customer_intelligence_graph_failed",
+                },
+                "events": [failed_event],
+            }
 
         projected_result = _customer_intelligence_result_projection(result)
         output_events = _unstreamed_customer_intelligence_output_events(

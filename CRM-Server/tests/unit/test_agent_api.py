@@ -32,7 +32,11 @@ from app.services.agent.schemas import (
 from app.services.agent.confirmed_task_graph import ConfirmedTaskGraphService
 from app.services.agent.pending_graph import PendingTaskGraphService
 from app.services.agent.root_runtime import AgentRootRuntime
-from app.services.agent.state import AgentRuntimeTurnOutput
+from app.services.agent.state import (
+    AgentRootRuntimeSideEffects,
+    AgentRuntimeContext,
+    AgentRuntimeTurnOutput,
+)
 from app.services.agent.input import AgentTurnInput
 from app.services.agent.tools.base import AgentToolResult
 
@@ -930,6 +934,87 @@ def test_agent_stream_does_not_fallback_for_business_sqlalchemy_errors(monkeypat
         assert fake_checkpoint_fallback_runtime.calls == []
     finally:
         engine.dispose()
+
+
+def test_agent_stream_persists_assistant_error_when_runtime_fails_after_user_message(monkeypatch):
+    class FakeRootRuntime:
+        async def run_turn(self, **kwargs):
+            raise RuntimeError("customer intelligence provider failed")
+
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "跟进会话"}).json()
+        response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "确认"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert '"event": "message"' in response.text
+        assert '"role": "ASSISTANT"' in response.text
+        assert '"event": "error"' in response.text
+
+        messages_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assert messages_response.status_code == 200, messages_response.text
+        messages = messages_response.json()["items"]
+        assert [message["role"] for message in messages] == ["USER", "ASSISTANT"]
+        assistant_message = messages[1]
+        assert "customer intelligence provider failed" in assistant_message["content"]
+        assert assistant_message["payload_json"]["source"] == "runtime_error_fallback"
+        assert assistant_message["payload_json"]["recovered_for_user_message_id"] == messages[0]["id"]
+    finally:
+        engine.dispose()
+
+
+async def test_root_runtime_isolates_customer_intelligence_graph_failure():
+    class FakeCustomerIntelligenceGraphService:
+        async def stream_run(self, graph_input):
+            yield {
+                "kind": "event",
+                "event": {
+                    "event": "agent_step",
+                    "step": "customer_intelligence",
+                    "status": "started",
+                    "content": "更新客户智能档案",
+                },
+            }
+            raise RuntimeError("LLM rate limited")
+
+    published_events = []
+
+    async def collect_event(event):
+        published_events.append(event)
+
+    runtime = AgentRootRuntime(customer_intelligence_graph_service=FakeCustomerIntelligenceGraphService())
+    context = AgentRuntimeContext(
+        db=object(),
+        team_id=1,
+        user_id=2,
+        session_id=8,
+        customer_intelligence_event={"customer_id": 144, "team_id": 1},
+        side_effects=AgentRootRuntimeSideEffects(),
+        event_sink=collect_event,
+    )
+
+    update = await runtime._run_customer_intelligence_graph(
+        {"customer_intelligence_requested": True},
+        SimpleNamespace(context=context),
+    )
+
+    assert update["customer_intelligence_requested"] is False
+    assert update["customer_intelligence_result"]["handled"] is False
+    assert update["customer_intelligence_result"]["reason"] == "customer_intelligence_graph_failed"
+    assert any(
+        event.get("event") == "agent_root_customer_intelligence_graph_failed"
+        for event in context.side_effects.customer_intelligence_events
+    )
+    assert any(
+        event.get("event") == "agent_root_customer_intelligence_graph_failed"
+        for event in published_events
+    )
 
 
 def test_agent_event_interaction_protocol_for_confirmation():
