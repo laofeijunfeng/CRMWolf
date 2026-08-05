@@ -18,6 +18,9 @@ from app.services.agent.tools.base import AgentToolResult
 from app.services.customer_activity_kinds import CustomerActivityKind
 
 
+OPPORTUNITY_PUBLIC_ID = "opp_0c1f7324704544a2bd619df90635a67f"
+
+
 class FakeSemanticParser:
     def __init__(self, result):
         self.result = result
@@ -242,7 +245,7 @@ class FakeStageMoveSuggestionGenerator:
                     "priority": "high",
                     "requires_confirmation": True,
                     "related_object_type": "opportunity",
-                    "related_object_id": 301,
+                    "related_object_id": OPPORTUNITY_PUBLIC_ID,
                     "execution_payload": {
                         "stage_template_id": 902,
                         "target_stage_name": "招标准备",
@@ -1066,10 +1069,10 @@ async def test_agent_graph_attaches_opportunity_stage_move_as_next_task_after_fo
         items=[{"id": 101, "account_name": "睿狐科技", "owner_info": {"id": 2}}],
         customer_context={
             "customer": {"id": 101, "account_name": "睿狐科技"},
-            "opportunities": {"items": [{"id": 301, "opportunity_name": "睿狐科技采购项目"}]},
+            "opportunities": {"items": [{"id": OPPORTUNITY_PUBLIC_ID, "opportunity_name": "睿狐科技采购项目"}]},
             "active_opportunity_stage_context": [{
                 "opportunity": {
-                    "id": 301,
+                    "id": OPPORTUNITY_PUBLIC_ID,
                     "opportunity_name": "睿狐科技采购项目",
                     "status": 0,
                     "approval_phase": "approved",
@@ -1107,7 +1110,7 @@ async def test_agent_graph_attaches_opportunity_stage_move_as_next_task_after_fo
     assert confirmation_events[0]["action"] == "create_customer_activity"
     next_task = confirmation_events[0]["payload"]["_next_task"]
     assert next_task["action"] == "move_opportunity_stage"
-    assert next_task["payload"]["opportunity_id"] == 301
+    assert next_task["payload"]["opportunity_id"] == OPPORTUNITY_PUBLIC_ID
     assert next_task["payload"]["stage_template_id"] == 902
     assert next_task["payload"]["target_stage_name"] == "招标准备"
 

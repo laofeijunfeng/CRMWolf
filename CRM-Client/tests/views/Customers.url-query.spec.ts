@@ -117,7 +117,7 @@ const customerFixture = (): CustomerResponse => ({
   version: 1,
 })
 
-describe('Customers URL query detail sheet state', () => {
+describe('Customers local detail sheet state', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     routeState.path = '/customers'
@@ -127,30 +127,31 @@ describe('Customers URL query detail sheet state', () => {
     customerApi.getPublicCustomers.mockResolvedValue([])
   })
 
-  it('pushes customerId into the route query when opening a customer detail sheet from the list', async () => {
+  it('opens a customer detail sheet from the list without changing the route query', async () => {
     const wrapper = mount(Customers)
     await flushPromises()
 
     await wrapper.get('.link-text').trigger('click')
 
-    expect(routerPush).toHaveBeenLastCalledWith({
-      path: '/customers',
-      query: { customerId: 'cus_test_19' },
-    })
+    const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
+    expect(sheet.attributes('data-visible')).toBe('true')
+    expect(sheet.attributes('data-customer-id')).toBe('cus_test_19')
+    expect(routerPush).not.toHaveBeenCalled()
   })
 
-  it('restores an open customer detail sheet from customerId in the route query on mount', async () => {
+  it('does not restore an open customer detail sheet from customerId in the route query on mount', async () => {
     routeState.query = { customerId: 'cus_test_19' }
 
     const wrapper = mount(Customers)
     await flushPromises()
 
     const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
-    expect(sheet.attributes('data-visible')).toBe('true')
-    expect(sheet.attributes('data-customer-id')).toBe('cus_test_19')
+    expect(sheet.attributes('data-visible')).toBe('false')
+    expect(sheet.attributes('data-customer-id')).toBe('null')
+    expect(routerPush).not.toHaveBeenCalled()
   })
 
-  it('does not restore the detail sheet from a legacy internal customer id query', async () => {
+  it('ignores legacy customer detail query keys', async () => {
     routeState.query = { customerId: '158', tab: 'opportunities', keep: '1' }
 
     const wrapper = mount(Customers)
@@ -159,22 +160,20 @@ describe('Customers URL query detail sheet state', () => {
     const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
     expect(sheet.attributes('data-visible')).toBe('false')
     expect(sheet.attributes('data-customer-id')).toBe('null')
-    expect(routerPush).toHaveBeenLastCalledWith({
-      path: '/customers',
-      query: { keep: '1' },
-    })
+    expect(routerPush).not.toHaveBeenCalled()
   })
 
-  it('removes customer detail query keys when closing the customer detail sheet', async () => {
+  it('closes the customer detail sheet without changing the route query', async () => {
     routeState.query = { customerId: 'cus_test_19', tab: 'opportunities', opportunityId: '88', keep: '1' }
 
     const wrapper = mount(Customers)
     await flushPromises()
+    await wrapper.get('.link-text').trigger('click')
+    expect(wrapper.get('[data-testid="customer-detail-sheet"]').attributes('data-visible')).toBe('true')
+
     await wrapper.get('[data-testid="close-customer-detail"]').trigger('click')
 
-    expect(routerPush).toHaveBeenLastCalledWith({
-      path: '/customers',
-      query: { keep: '1' },
-    })
+    expect(wrapper.get('[data-testid="customer-detail-sheet"]').attributes('data-visible')).toBe('false')
+    expect(routerPush).not.toHaveBeenCalled()
   })
 })

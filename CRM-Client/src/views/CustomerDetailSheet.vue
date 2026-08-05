@@ -8,7 +8,6 @@
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
 import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 import {
   Sheet,
   SheetHeader,
@@ -70,8 +69,6 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { confirmDelete } from '@/utils/confirmDialog'
-import { customerDetailRoute } from '@/utils/customerRoutes'
-import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -83,10 +80,9 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   'refresh': []
+  'view-customer': [customerId: string]
 }>()
 
-const route = useRoute()
-const router = useRouter()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 const approvalStore = useApprovalStore()
@@ -402,60 +398,9 @@ const handleEdit = (): void => {
   customerEditDialogOpen.value = true
 }
 
-const getSingleQueryValue = (value: unknown): string | undefined => {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) {
-    return typeof value[0] === 'string' ? value[0] : undefined
-  }
-  return undefined
-}
-
-const parseOpportunityPublicId = (value: unknown): string | null => {
-  const rawValue = getSingleQueryValue(value)
-  if (rawValue === undefined || rawValue.trim() === '') return null
-  return isOpportunityPublicId(rawValue) ? rawValue : null
-}
-
-const getCustomerRouteQuery = (extra: Record<string, string | undefined> = {}): Record<string, string> => {
-  const query: Record<string, string> = {}
-  const currentCustomerId = getSingleQueryValue(route.query['customerId'])
-  if (currentCustomerId !== undefined) {
-    query['customerId'] = currentCustomerId
-  } else if (props.customerId !== null) {
-    query['customerId'] = String(props.customerId)
-  }
-
-  const currentTab = getSingleQueryValue(route.query['tab'])
-  if (currentTab !== undefined) {
-    query['tab'] = currentTab
-  }
-
-  const currentOpportunityId = getSingleQueryValue(route.query['opportunityId'])
-  if (currentOpportunityId !== undefined) {
-    query['opportunityId'] = currentOpportunityId
-  }
-
-  Object.entries(extra).forEach(([key, value]) => {
-    if (value !== undefined) {
-      query[key] = value
-    }
-  })
-
-  return Object.fromEntries(
-    Object.entries(query).filter(([key]) => (
-      !Object.prototype.hasOwnProperty.call(extra, key) || extra[key] !== undefined
-    )),
-  )
-}
-
-const restorePanelFromRoute = (): void => {
-  const routeTab = getSingleQueryValue(route.query['tab'])
-  activePanel.value = navTabs.some(tab => tab.key === routeTab) ? routeTab as string : 'customer-brief'
-
-  const routeOpportunityId = activePanel.value === 'opportunities'
-    ? parseOpportunityPublicId(route.query['opportunityId'])
-    : null
-  selectedOpportunityId.value = routeOpportunityId
+const resetLocalNavigation = (): void => {
+  activePanel.value = 'customer-brief'
+  selectedOpportunityId.value = null
   highlightedOpportunityId.value = null
   restoreFocusOpportunityId.value = null
 }
@@ -465,13 +410,6 @@ const setActivePanel = (panel: string): void => {
   selectedOpportunityId.value = null
   highlightedOpportunityId.value = null
   restoreFocusOpportunityId.value = null
-  void router.push({
-    path: '/customers',
-    query: getCustomerRouteQuery({
-      tab: panel === 'customer-brief' ? undefined : panel,
-      opportunityId: undefined
-    })
-  })
 }
 
 // ==================== Helper Functions ====================
@@ -785,13 +723,6 @@ const handleViewOpportunity = (opportunityId: string): void => {
   selectedOpportunityId.value = opportunityId
   highlightedOpportunityId.value = null
   restoreFocusOpportunityId.value = null
-  void router.push({
-    path: '/customers',
-    query: getCustomerRouteQuery({
-      tab: 'opportunities',
-      opportunityId: String(opportunityId)
-    })
-  })
 }
 
 const handleBackFromOpportunity = (): void => {
@@ -801,10 +732,6 @@ const handleBackFromOpportunity = (): void => {
     highlightedOpportunityId.value = previousOpportunityId
     restoreFocusOpportunityId.value = previousOpportunityId
   }
-  void router.replace({
-    path: '/customers',
-    query: getCustomerRouteQuery({ opportunityId: undefined })
-  })
 }
 
 const handleBackFromContract = (): void => {
@@ -1093,8 +1020,7 @@ const handlePaymentPlanDetailViewCustomer = (customerId: string): void => {
     selectedRecord.value = null
     return
   }
-  // Navigate to different customer using router
-  router.push(customerDetailRoute(customerId))
+  emit('view-customer', customerId)
 }
 
 const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void => {
@@ -1105,11 +1031,11 @@ const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void =>
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
-    restorePanelFromRoute()
+    resetLocalNavigation()
     loadAllData(props.customerId)
   } else if (!visible) {
     // 清理状态
-    activePanel.value = 'customer-brief'
+    resetLocalNavigation()
     customer.value = null
     followUps.value = []
     opportunities.value = []
@@ -1123,9 +1049,6 @@ watch(() => props.visible, (visible): void => {
     planSheetVisible.value = false
     selectedRecord.value = null
     recordSheetVisible.value = false
-    selectedOpportunityId.value = null
-    highlightedOpportunityId.value = null
-    restoreFocusOpportunityId.value = null
     fixedContractOpportunity.value = null
     customerEditDialogOpen.value = false
     deploymentDialogOpen.value = false
@@ -1134,7 +1057,7 @@ watch(() => props.visible, (visible): void => {
 
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
-  restorePanelFromRoute()
+  resetLocalNavigation()
   selectedContractId.value = null
   loadAllData(customerId)
 })

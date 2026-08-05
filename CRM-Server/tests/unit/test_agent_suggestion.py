@@ -7,6 +7,10 @@ from app.services.agent.schemas import AgentSemanticParseResult, AgentSuggestion
 from app.services.agent.suggestion import AgentSuggestionGenerator, AgentSuggestionGeneratorError
 
 
+OPPORTUNITY_PUBLIC_ID = "opp_0c1f7324704544a2bd619df90635a67f"
+OTHER_OPPORTUNITY_PUBLIC_ID = "opp_9b2c8e1f4a5d4f0c9876543210abcdef"
+
+
 def semantic_result():
     return AgentSemanticParseResult.model_validate({
         "intent": "CUSTOMER_ACTIVITY",
@@ -252,6 +256,45 @@ def test_suggestion_guardrail_keeps_valid_opportunity_stage_move():
             "requires_confirmation": True,
             "missing_fields": [],
             "related_object_type": "opportunity",
+            "related_object_id": OPPORTUNITY_PUBLIC_ID,
+            "execution_payload": {"stage_template_id": 12},
+            "risk_notes": [],
+            "confidence": 0.88,
+        }],
+        "need_user_choice": True,
+        "clarification_question": None,
+    })
+
+    guarded = AgentSuggestionGenerator.apply_business_guardrails(
+        ai_result,
+        semantic_result(),
+        {
+            "active_opportunity_stage_context": [{
+                "opportunity": {"id": OPPORTUNITY_PUBLIC_ID, "status": 0, "approval_phase": "approved"},
+                "procurement_stages": [
+                    {"id": 11, "stage_name": "立项", "sort_order": 1, "is_current": True},
+                    {"id": 12, "stage_name": "招标准备", "sort_order": 2, "is_current": False},
+                ],
+            }],
+        },
+    )
+
+    assert guarded.suggestions[0].action == "MOVE_OPPORTUNITY_STAGE"
+    assert guarded.suggestions[0].related_object_id == OPPORTUNITY_PUBLIC_ID
+    assert guarded.suggestions[0].execution_payload["target_stage_name"] == "招标准备"
+
+
+def test_suggestion_guardrail_rejects_numeric_opportunity_stage_move_id():
+    ai_result = AgentSuggestionResult.model_validate({
+        "summary": "客户已进入招标准备。",
+        "suggestions": [{
+            "action": "MOVE_OPPORTUNITY_STAGE",
+            "title": "推进商机阶段到招标准备",
+            "reason": "用户输入提到需要准备招标技术和商务材料。",
+            "priority": "high",
+            "requires_confirmation": True,
+            "missing_fields": [],
+            "related_object_type": "opportunity",
             "related_object_id": 301,
             "execution_payload": {"stage_template_id": 12},
             "risk_notes": [],
@@ -266,7 +309,7 @@ def test_suggestion_guardrail_keeps_valid_opportunity_stage_move():
         semantic_result(),
         {
             "active_opportunity_stage_context": [{
-                "opportunity": {"id": 301, "status": 0, "approval_phase": "approved"},
+                "opportunity": {"id": OPPORTUNITY_PUBLIC_ID, "status": 0, "approval_phase": "approved"},
                 "procurement_stages": [
                     {"id": 11, "stage_name": "立项", "sort_order": 1, "is_current": True},
                     {"id": 12, "stage_name": "招标准备", "sort_order": 2, "is_current": False},
@@ -275,9 +318,8 @@ def test_suggestion_guardrail_keeps_valid_opportunity_stage_move():
         },
     )
 
-    assert guarded.suggestions[0].action == "MOVE_OPPORTUNITY_STAGE"
-    assert guarded.suggestions[0].related_object_id == 301
-    assert guarded.suggestions[0].execution_payload["target_stage_name"] == "招标准备"
+    assert guarded.suggestions == []
+    assert guarded.need_user_choice is False
 
 
 def test_suggestion_guardrail_limits_opportunity_stage_move_to_next_stage():
@@ -291,7 +333,7 @@ def test_suggestion_guardrail_limits_opportunity_stage_move_to_next_stage():
             "requires_confirmation": True,
             "missing_fields": [],
             "related_object_type": "opportunity",
-            "related_object_id": 301,
+            "related_object_id": OPPORTUNITY_PUBLIC_ID,
             "execution_payload": {"stage_template_id": 13},
             "risk_notes": [],
             "confidence": 0.9,
@@ -305,7 +347,7 @@ def test_suggestion_guardrail_limits_opportunity_stage_move_to_next_stage():
         semantic_result(),
         {
             "active_opportunity_stage_context": [{
-                "opportunity": {"id": 301, "status": 0, "approval_phase": "approved"},
+                "opportunity": {"id": OPPORTUNITY_PUBLIC_ID, "status": 0, "approval_phase": "approved"},
                 "procurement_stages": [
                     {"id": 11, "stage_name": "立项", "sort_order": 1, "is_current": True},
                     {"id": 12, "stage_name": "方案确认", "sort_order": 2, "is_current": False},
@@ -351,14 +393,14 @@ def test_suggestion_guardrail_keeps_ambiguous_stage_move_for_business_selection(
         {
             "active_opportunity_stage_context": [
                 {
-                    "opportunity": {"id": 301, "status": 0, "approval_phase": "approved"},
+                    "opportunity": {"id": OPPORTUNITY_PUBLIC_ID, "status": 0, "approval_phase": "approved"},
                     "procurement_stages": [
                         {"id": 11, "stage_name": "商务谈判", "sort_order": 1, "is_current": True},
                         {"id": 12, "stage_name": "签约", "sort_order": 2, "is_current": False},
                     ],
                 },
                 {
-                    "opportunity": {"id": 302, "status": 0, "approval_phase": "approved"},
+                    "opportunity": {"id": OTHER_OPPORTUNITY_PUBLIC_ID, "status": 0, "approval_phase": "approved"},
                     "procurement_stages": [
                         {"id": 11, "stage_name": "商务谈判", "sort_order": 1, "is_current": True},
                         {"id": 12, "stage_name": "签约", "sort_order": 2, "is_current": False},
@@ -385,7 +427,7 @@ def test_suggestion_guardrail_blocks_stage_move_for_unapproved_opportunity():
             "requires_confirmation": True,
             "missing_fields": [],
             "related_object_type": "opportunity",
-            "related_object_id": 301,
+            "related_object_id": OPPORTUNITY_PUBLIC_ID,
             "execution_payload": {"stage_template_id": 12},
             "risk_notes": [],
             "confidence": 0.88,
@@ -399,7 +441,7 @@ def test_suggestion_guardrail_blocks_stage_move_for_unapproved_opportunity():
         semantic_result(),
         {
             "active_opportunity_stage_context": [{
-                "opportunity": {"id": 301, "status": 0, "approval_phase": "pending_review"},
+                "opportunity": {"id": OPPORTUNITY_PUBLIC_ID, "status": 0, "approval_phase": "pending_review"},
                 "procurement_stages": [
                     {"id": 11, "stage_name": "立项", "sort_order": 1, "is_current": True},
                     {"id": 12, "stage_name": "招标准备", "sort_order": 2, "is_current": False},
@@ -435,7 +477,7 @@ def test_suggestion_guardrail_keeps_trial_license_with_approved_opportunity_and_
         ai_result,
         semantic_result(),
         {
-            "opportunities": {"items": [{"id": 301, "approval_phase": "approved"}]},
+            "opportunities": {"items": [{"id": OPPORTUNITY_PUBLIC_ID, "approval_phase": "approved"}]},
             "contracts": {"items": []},
             "deployment_infos": {"items": [{"id": 401, "deployment_name": "生产环境"}]},
         },
@@ -443,7 +485,7 @@ def test_suggestion_guardrail_keeps_trial_license_with_approved_opportunity_and_
 
     assert guarded.suggestions[0].action == "CREATE_LICENSE_APPLICATION"
     assert guarded.suggestions[0].related_object_type == "opportunity"
-    assert guarded.suggestions[0].related_object_id == 301
+    assert guarded.suggestions[0].related_object_id == OPPORTUNITY_PUBLIC_ID
 
 
 def test_suggestion_guardrail_blocks_official_license_without_approved_contract():
@@ -469,7 +511,7 @@ def test_suggestion_guardrail_blocks_official_license_without_approved_contract(
         ai_result,
         semantic_result(),
         {
-            "opportunities": {"items": [{"id": 301, "approval_phase": "approved"}]},
+            "opportunities": {"items": [{"id": OPPORTUNITY_PUBLIC_ID, "approval_phase": "approved"}]},
             "contracts": {"items": [{"id": 201, "status": "PENDING_REVIEW"}]},
             "deployment_infos": {"items": [{"id": 401, "deployment_name": "生产环境"}]},
         },

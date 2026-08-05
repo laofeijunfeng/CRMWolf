@@ -381,8 +381,7 @@ function handlePaymentPlanChange(value: unknown): void {
   const plan = selectedPaymentPlan.value
   if (plan === null || !isCreateMode.value) return
 
-  const amount = plan.remaining_amount ?? plan.planned_amount
-  form.invoiceAmount = String(amount)
+  form.invoiceAmount = String(getPaymentPlanInvoiceAmount(plan))
 }
 
 function handleInvoiceTitleChange(value: unknown): void {
@@ -440,8 +439,12 @@ function contractOptionLabel(contract: ContractListResponse): string {
 }
 
 function paymentPlanOptionLabel(plan: PaymentPlanResponse): string {
-  const amount = plan.remaining_amount ?? plan.planned_amount
-  return `${plan.stage_name} · 待开 ${formatCurrency(Number(amount))}`
+  return `${plan.stage_name} · 计划 ${formatCurrency(getPaymentPlanInvoiceAmount(plan))}`
+}
+
+function getPaymentPlanInvoiceAmount(plan: PaymentPlanResponse): number {
+  const plannedAmount = Number(plan.planned_amount)
+  return Number.isFinite(plannedAmount) ? plannedAmount : 0
 }
 
 function invoiceTitleTypeLabel(titleType: InvoiceTitleResponse['title_type']): string {

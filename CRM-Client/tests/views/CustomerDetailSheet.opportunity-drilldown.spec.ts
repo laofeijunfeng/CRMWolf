@@ -27,7 +27,7 @@ const handleApiError = vi.hoisted(() => vi.fn())
 const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn() }))
 
 interface OpportunityCustomerContext {
-  customerId: number
+  customerId: string
   customerName?: string
 }
 
@@ -120,8 +120,8 @@ vi.mock('@/components/panels/OpportunitiesPanel.vue', () => ({
   default: defineComponent({
     name: 'OpportunitiesPanel',
     props: {
-      highlightedOpportunityId: Number,
-      restoreFocusOpportunityId: Number,
+      highlightedOpportunityId: String,
+      restoreFocusOpportunityId: String,
     },
     emits: ['view', 'open-full-page', 'add'],
     setup: (props, { emit }) => () => h('div', {
@@ -129,8 +129,8 @@ vi.mock('@/components/panels/OpportunitiesPanel.vue', () => ({
       'data-highlighted-opportunity-id': props.highlightedOpportunityId === undefined ? '' : String(props.highlightedOpportunityId),
       'data-restore-focus-opportunity-id': props.restoreFocusOpportunityId === undefined ? '' : String(props.restoreFocusOpportunityId),
     }, [
-      h('button', { type: 'button', 'data-testid': 'view-opportunity', onClick: () => emit('view', 88) }, 'view opportunity'),
-      h('button', { type: 'button', 'data-testid': 'open-full-page', onClick: () => emit('open-full-page', 88) }, 'open full page'),
+      h('button', { type: 'button', 'data-testid': 'view-opportunity', onClick: () => emit('view', 'opp_test_88') }, 'view opportunity'),
+      h('button', { type: 'button', 'data-testid': 'open-full-page', onClick: () => emit('open-full-page', 'opp_test_88') }, 'open full page'),
     ]),
   }),
 }))
@@ -142,7 +142,7 @@ vi.mock('@/components/panels/OpportunityDetailContent.vue', () => ({
   default: defineComponent({
     name: 'OpportunityDetailContent',
     props: {
-      opportunityId: Number,
+      opportunityId: String,
       embedded: Boolean,
       customerContext: Object as PropType<OpportunityCustomerContext>,
     },
@@ -167,7 +167,8 @@ vi.mock('@/components/dialogs/ContractFormDialog.vue', () => ({ default: defineC
 vi.mock('@/components/dialogs/InvoiceTitleFormDialog.vue', () => ({ default: defineComponent({ name: 'InvoiceTitleFormDialog', setup: () => () => null }) }))
 
 const customerFixture = (overrides: Partial<CustomerDetailResponse> = {}): CustomerDetailResponse => ({
-  id: 19,
+  id: 'cus_test_19',
+  public_id: 'cus_test_19',
   account_name: '上海测试客户',
   industry: null,
   city: '上海',
@@ -195,9 +196,9 @@ const customerFixture = (overrides: Partial<CustomerDetailResponse> = {}): Custo
 })
 
 const opportunityFixture = (): OpportunityListResponse => ({
-  id: 88,
+  id: 'opp_test_88',
   opportunity_name: 'CRM 升级项目',
-  customer_id: 19,
+  customer_id: 'cus_test_19',
   procurement_method_id: null,
   procurement_method_info: null,
   total_amount: 320000,
@@ -241,7 +242,7 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
   it('renders opportunity detail content inside the current customer sheet when an opportunity is selected', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: false,
       },
     })
@@ -257,14 +258,14 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     expect(wrapper.findAll('[data-testid="sheet-root"]')).toHaveLength(1)
     expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(false)
     const detail = wrapper.get('[data-testid="opportunity-detail-content"]')
-    expect(detail.attributes('data-opportunity-id')).toBe('88')
+    expect(detail.attributes('data-opportunity-id')).toBe('opp_test_88')
     expect(detail.attributes('data-embedded')).toBe('true')
   })
 
   it('returns from opportunity detail to the opportunities list with highlighted row focus metadata', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: false,
       },
     })
@@ -281,15 +282,15 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
     const panel = wrapper.get('[data-testid="opportunities-panel"]')
-    expect(panel.attributes('data-highlighted-opportunity-id')).toBe('88')
-    expect(panel.attributes('data-restore-focus-opportunity-id')).toBe('88')
+    expect(panel.attributes('data-highlighted-opportunity-id')).toBe('opp_test_88')
+    expect(panel.attributes('data-restore-focus-opportunity-id')).toBe('opp_test_88')
     expect(wrapper.get('[data-testid="tab-opportunities"]').attributes('data-active')).toBe('true')
   })
 
   it('refreshes customer data when embedded opportunity detail emits refresh', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: false,
       },
     })
@@ -305,13 +306,13 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await wrapper.get('[data-testid="detail-refresh"]').trigger('click')
     await flushPromises()
 
-    expect(customerApi.getCustomerDetail).toHaveBeenCalledWith(19)
+    expect(customerApi.getCustomerDetail).toHaveBeenCalledWith('cus_test_19')
   })
 
   it('reloads all customer detail data when customerId changes while visible', async () => {
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: true,
       },
     })
@@ -326,25 +327,24 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     deploymentApi.list.mockClear()
     customerApi.getCustomerMembers.mockClear()
 
-    await wrapper.setProps({ customerId: 42 })
+    await wrapper.setProps({ customerId: 'cus_test_42' })
     await flushPromises()
 
-    expect(customerApi.getCustomerDetail).toHaveBeenCalledWith(42)
-    expect(customerActivityApi.getActivities).toHaveBeenCalledWith(42)
-    expect(opportunityApi.getOpportunities).toHaveBeenCalledWith({ customer_id: 42 })
-    expect(contractApi.getCustomerContracts).toHaveBeenCalledWith(42)
-    expect(invoiceApi.getInvoiceTitles).toHaveBeenCalledWith(42)
-    expect(deploymentApi.list).toHaveBeenCalledWith(42)
-    expect(customerApi.getCustomerMembers).toHaveBeenCalledWith(42)
+    expect(customerApi.getCustomerDetail).toHaveBeenCalledWith('cus_test_42')
+    expect(customerActivityApi.getActivities).toHaveBeenCalledWith('cus_test_42')
+    expect(opportunityApi.getOpportunities).toHaveBeenCalledWith({ customer_id: 'cus_test_42' })
+    expect(contractApi.getCustomerContracts).toHaveBeenCalledWith('cus_test_42')
+    expect(invoiceApi.getInvoiceTitles).toHaveBeenCalledWith('cus_test_42')
+    expect(deploymentApi.list).toHaveBeenCalledWith('cus_test_42')
+    expect(customerApi.getCustomerMembers).toHaveBeenCalledWith('cus_test_42')
   })
 
   it('keeps the latest customer detail data when an older load resolves after a customerId change', async () => {
-    routeState.query = { customerId: '19', tab: 'opportunities', opportunityId: '88' }
     const customer19Load = createDeferred<CustomerDetailResponse>()
     const customer42Load = createDeferred<CustomerDetailResponse>()
-    customerApi.getCustomerDetail.mockImplementation((customerId: number) => {
-      if (customerId === 19) return customer19Load.promise
-      if (customerId === 42) return customer42Load.promise
+    customerApi.getCustomerDetail.mockImplementation((customerId: string) => {
+      if (customerId === 'cus_test_19') return customer19Load.promise
+      if (customerId === 'cus_test_42') return customer42Load.promise
       return Promise.resolve(customerFixture({
         id: customerId,
         account_name: `客户 ${customerId}`,
@@ -353,55 +353,54 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: true,
       },
     })
 
     await nextTick()
-    routeState.query = { customerId: '42', tab: 'opportunities', opportunityId: '88' }
-    await wrapper.setProps({ customerId: 42 })
+    await wrapper.setProps({ customerId: 'cus_test_42' })
     await nextTick()
 
-    customer42Load.resolve(customerFixture({ id: 42, account_name: '客户 42' }))
+    customer42Load.resolve(customerFixture({ id: 'cus_test_42', public_id: 'cus_test_42', account_name: '客户 42' }))
+    await flushPromises()
+    await nextTick()
+    await wrapper.get('[data-testid="tab-customer-info"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('客户 42')
+    expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
+
+    customer19Load.resolve(customerFixture({ id: 'cus_test_19', public_id: 'cus_test_19', account_name: '客户 19' }))
     await flushPromises()
     await nextTick()
 
-    const detail = wrapper.get('[data-testid="opportunity-detail-content"]')
-    expect(detail.attributes('data-context-customer-id')).toBe('42')
-    expect(detail.attributes('data-context-customer-name')).toBe('客户 42')
-
-    customer19Load.resolve(customerFixture({ id: 19, account_name: '客户 19' }))
-    await flushPromises()
-    await nextTick()
-
-    const currentDetail = wrapper.get('[data-testid="opportunity-detail-content"]')
-    expect(currentDetail.attributes('data-context-customer-id')).toBe('42')
-    expect(currentDetail.attributes('data-context-customer-name')).toBe('客户 42')
+    expect(wrapper.text()).toContain('客户 42')
+    expect(wrapper.text()).not.toContain('客户 19')
   })
 
-  it('restores the opportunities tab from the route query on mount', async () => {
-    routeState.query = { customerId: '19', tab: 'opportunities' }
+  it('does not restore the opportunities tab from the route query on mount', async () => {
+    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities' }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: true,
       },
     })
 
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="tab-opportunities"]').attributes('data-active')).toBe('true')
-    expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="tab-customer-brief"]').attributes('data-active')).toBe('true')
+    expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(false)
   })
 
-  it('pushes the active tab into the route query when switching to opportunities', async () => {
-    routeState.query = { customerId: '19' }
+  it('switches tabs locally without changing the route query', async () => {
+    routeState.query = { customerId: 'cus_test_19' }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: true,
       },
     })
@@ -410,67 +409,69 @@ describe('CustomerDetailSheet opportunity drilldown', () => {
     await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
     await nextTick()
 
-    expect(routerPush).toHaveBeenLastCalledWith({
-      path: '/customers',
-      query: { customerId: '19', tab: 'opportunities' },
-    })
+    expect(wrapper.get('[data-testid="tab-opportunities"]').attributes('data-active')).toBe('true')
+    expect(routerPush).not.toHaveBeenCalled()
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 
-  it('pushes opportunityId and keeps the opportunities tab when selecting an embedded opportunity', async () => {
-    routeState.query = { customerId: '19', tab: 'opportunities' }
+  it('opens embedded opportunity detail locally without changing the route query', async () => {
+    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities' }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: true,
       },
     })
 
     await flushPromises()
+    await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
+    await nextTick()
     await wrapper.get('[data-testid="view-opportunity"]').trigger('click')
     await nextTick()
 
-    expect(routerPush).toHaveBeenLastCalledWith({
-      path: '/customers',
-      query: { customerId: '19', tab: 'opportunities', opportunityId: '88' },
-    })
+    expect(wrapper.get('[data-testid="opportunity-detail-content"]').attributes('data-opportunity-id')).toBe('opp_test_88')
+    expect(routerPush).not.toHaveBeenCalled()
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 
-  it('restores embedded opportunity detail from the route query on mount', async () => {
-    routeState.query = { customerId: '19', tab: 'opportunities', opportunityId: '88' }
+  it('does not restore embedded opportunity detail from the route query on mount', async () => {
+    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities', opportunityId: 'opp_test_88' }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: true,
       },
     })
 
     await flushPromises()
 
-    const detail = wrapper.get('[data-testid="opportunity-detail-content"]')
-    expect(detail.attributes('data-opportunity-id')).toBe('88')
-    expect(wrapper.find('[data-testid="opportunities-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="tab-customer-brief"]').attributes('data-active')).toBe('true')
   })
 
-  it('replaces only opportunityId in the route query when returning to the opportunities list', async () => {
-    routeState.query = { customerId: '19', tab: 'opportunities', opportunityId: '88' }
+  it('returns to the opportunities list locally without changing the route query', async () => {
+    routeState.query = { customerId: 'cus_test_19', tab: 'opportunities', opportunityId: 'opp_test_88' }
 
     const wrapper = mount(CustomerDetailSheet, {
       props: {
-        customerId: 19,
+        customerId: 'cus_test_19',
         visible: true,
       },
     })
 
     await flushPromises()
+    await wrapper.get('[data-testid="tab-opportunities"]').trigger('click')
+    await nextTick()
+    await wrapper.get('[data-testid="view-opportunity"]').trigger('click')
+    await nextTick()
     await wrapper.get('[data-testid="back-to-opportunities"]').trigger('click')
     await nextTick()
 
-    expect(routerReplace).toHaveBeenLastCalledWith({
-      path: '/customers',
-      query: { customerId: '19', tab: 'opportunities' },
-    })
+    expect(wrapper.find('[data-testid="opportunity-detail-content"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="opportunities-panel"]').exists()).toBe(true)
+    expect(routerReplace).not.toHaveBeenCalled()
     expect(routerPush).not.toHaveBeenCalled()
   })
 })

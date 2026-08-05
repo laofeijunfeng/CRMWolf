@@ -15,6 +15,7 @@ from app.services.agent import business_rules
 from app.services.agent.langchain_runtime import AgentLangChainRuntime, AgentLangChainStructuredOutputError
 from app.services.agent.prompts import CRM_AGENT_SUGGESTION_SYSTEM_PROMPT, build_suggestion_messages
 from app.services.agent.schemas import AgentBusinessSuggestion, AgentSemanticParseResult, AgentSuggestionResult
+from app.utils.public_id import is_opportunity_public_id
 
 
 class AgentSuggestionGeneratorError(Exception):
@@ -281,17 +282,22 @@ class AgentSuggestionGenerator:
             if isinstance(item.get("opportunity"), dict)
             and cls._is_active_opportunity(item["opportunity"])
             and cls._is_approved_opportunity(item["opportunity"])
+            and is_opportunity_public_id(item["opportunity"].get("id"))
             and isinstance(item.get("procurement_stages"), list)
         ]
         related_id = suggestion.related_object_id
         if related_id is not None:
+            if not is_opportunity_public_id(related_id):
+                return None
             valid_contexts = [
                 item
                 for item in valid_contexts
-                if item["opportunity"].get("id") is not None and int(item["opportunity"]["id"]) == int(related_id)
+                if cls._opportunity_public_ids_match(item["opportunity"].get("id"), related_id)
             ]
         elif len(valid_contexts) == 1:
             related_id = valid_contexts[0]["opportunity"].get("id")
+            if not is_opportunity_public_id(related_id):
+                return None
         else:
             candidate_contexts = [
                 item
@@ -329,7 +335,7 @@ class AgentSuggestionGenerator:
 
         return suggestion.model_copy(update={
             "related_object_type": "opportunity",
-            "related_object_id": int(related_id),
+            "related_object_id": str(related_id),
             "execution_payload": {
                 **(suggestion.execution_payload or {}),
                 "stage_template_id": target_stage_id,
@@ -337,6 +343,10 @@ class AgentSuggestionGenerator:
                 "stage_move_steps": target_stage.get("stage_move_steps"),
             },
         })
+
+    @staticmethod
+    def _opportunity_public_ids_match(left: object, right: object) -> bool:
+        return is_opportunity_public_id(left) and is_opportunity_public_id(right) and str(left) == str(right)
 
     @staticmethod
     def _stage_move_target(

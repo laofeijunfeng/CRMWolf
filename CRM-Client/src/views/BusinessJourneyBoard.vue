@@ -25,6 +25,7 @@ import businessJourneyBoardApi, {
   type BusinessJourneyBoardResponse,
   type BusinessJourneyBoardStageKey
 } from '@/api/businessJourneyBoard'
+import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
@@ -43,6 +44,15 @@ const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const activeTab = ref('all')
 const ownerFilterOptions = ref<{ value: string; label: string }[]>([])
+const selectedCustomerId = ref<string | null>(null)
+const sheetVisible = computed({
+  get: () => selectedCustomerId.value !== null,
+  set: (visible: boolean) => {
+    if (!visible) {
+      selectedCustomerId.value = null
+    }
+  }
+})
 
 const tabs = [
   { key: 'all', label: '所有业务' }
@@ -142,6 +152,14 @@ const getCardStageName = (card: BusinessJourneyBoardCard): string => {
 const getWinProbability = (card: BusinessJourneyBoardCard): string => {
   const value = card.primary_opportunity?.win_probability
   return value === null || value === undefined ? '-' : `${value}%`
+}
+
+const openCustomerDetail = (customerId: string): void => {
+  selectedCustomerId.value = customerId
+}
+
+const handleSheetRefresh = (): void => {
+  void loadBoard()
 }
 
 const loadBoard = async (): Promise<void> => {
@@ -288,6 +306,12 @@ watchEffect(() => {
                   v-for="card in column.cards"
                   :key="card.journey_id"
                   class="journey-card"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="`查看客户详情：${card.customer_name ?? card.customer_id}`"
+                  @click="openCustomerDetail(card.customer_id)"
+                  @keydown.enter.prevent="openCustomerDetail(card.customer_id)"
+                  @keydown.space.prevent="openCustomerDetail(card.customer_id)"
                 >
                   <CardContent class="journey-card-content">
                     <div class="journey-card-topline">
@@ -346,6 +370,13 @@ watchEffect(() => {
         </div>
       </CardContent>
     </Card>
+
+    <CustomerDetailSheet
+      v-model:visible="sheetVisible"
+      :customer-id="selectedCustomerId"
+      @refresh="handleSheetRefresh"
+      @view-customer="openCustomerDetail"
+    />
   </div>
 </template>
 
@@ -485,6 +516,7 @@ watchEffect(() => {
   border-radius: 8px;
   background: hsl(var(--card));
   box-shadow: none;
+  cursor: pointer;
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease;

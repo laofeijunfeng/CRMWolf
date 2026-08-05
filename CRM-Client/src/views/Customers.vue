@@ -18,7 +18,6 @@
  * - ✅ 保留业务逻辑（退回公海、输单、赢单等）
  */
 import { ref, reactive, computed, onMounted, watchEffect, type Component } from 'vue'
-import { useRoute, useRouter, type LocationQuery, type LocationQueryRaw } from 'vue-router'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
@@ -50,13 +49,10 @@ import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { customerSourceOptions, companyScaleOptions } from '@/schemas/customer-form'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { getPrimarySort } from '@/utils/listSorts'
-import { customerDetailRoute, isCustomerPublicId } from '@/utils/customerRoutes'
 
 // 自动从 route.meta.title 设置页面标题
 usePageTitle()
 
-const route = useRoute()
-const router = useRouter()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
@@ -74,68 +70,16 @@ const transferDialogOpen = ref(false)
 const showCustomerForm = ref(false)
 const editingCustomerId = ref<string | null>(null)
 
-// CustomerDetailSheet URL query 状态
-const customerDetailQueryKeys = ['customerId', 'tab', 'opportunityId'] as const
-
-const isCustomerDetailQueryKey = (key: string): boolean => customerDetailQueryKeys.some(queryKey => queryKey === key)
-
-const getSingleQueryValue = (query: LocationQuery, key: string): string | null => {
-  const value = query[key]
-  if (typeof value === 'string' && value.trim() !== '') return value
-  if (Array.isArray(value)) {
-    return value.find((item): item is string => typeof item === 'string' && item.trim() !== '') ?? null
-  }
-  return null
-}
-
-const copyQueryWithoutCustomerDetailKeys = (query: LocationQuery): LocationQueryRaw => {
-  const nextQuery: LocationQueryRaw = {}
-  Object.entries(query).forEach(([key, value]) => {
-    if (isCustomerDetailQueryKey(key)) return
-    if (typeof value === 'string') {
-      nextQuery[key] = value
-    } else if (Array.isArray(value)) {
-      const values = value.filter((item): item is string => typeof item === 'string')
-      if (values.length > 0) {
-        nextQuery[key] = values
-      }
-    } else if (value === null) {
-      nextQuery[key] = value
-    }
-  })
-  return nextQuery
-}
-
+const selectedCustomerId = ref<string | null>(null)
 const openCustomerDetail = (customerId: string): void => {
-  router.push(customerDetailRoute(customerId, copyQueryWithoutCustomerDetailKeys(route.query)))
+  selectedCustomerId.value = customerId
 }
-
-const closeCustomerDetail = (): void => {
-  router.push({
-    path: route.path,
-    query: copyQueryWithoutCustomerDetailKeys(route.query)
-  })
-}
-
-const rawSelectedCustomerId = computed(() => getSingleQueryValue(route.query, 'customerId'))
-const selectedCustomerId = computed(() => {
-  const customerId = rawSelectedCustomerId.value
-  if (customerId === null || !isCustomerPublicId(customerId)) return null
-  return customerId
-})
 const sheetVisible = computed({
   get: () => selectedCustomerId.value !== null,
   set: (visible: boolean) => {
     if (!visible) {
-      closeCustomerDetail()
+      selectedCustomerId.value = null
     }
-  }
-})
-
-watchEffect(() => {
-  const customerId = rawSelectedCustomerId.value
-  if (customerId !== null && !isCustomerPublicId(customerId)) {
-    closeCustomerDetail()
   }
 })
 
@@ -1170,6 +1114,7 @@ watchEffect(() => {
       v-model:visible="sheetVisible"
       :customer-id="selectedCustomerId ?? null"
       @refresh="handleSheetRefresh"
+      @view-customer="openCustomerDetail"
     />
 
     <!-- 移交客户弹窗 -->
