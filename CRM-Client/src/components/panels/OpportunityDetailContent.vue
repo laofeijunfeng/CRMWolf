@@ -64,6 +64,7 @@ import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
+import { customerDetailRoute } from '@/utils/customerRoutes'
 
 interface CustomerContext {
   customerId: string
@@ -951,7 +952,7 @@ watch(approvalPhase, phase => {
                     <div class="attribute-label">客户名称</div>
                     <RouterLink
                       v-if="opportunity.customer_info && !embedded"
-                      :to="`/customers/${opportunity.customer_id}`"
+                      :to="customerDetailRoute(opportunity.customer_id)"
                       class="attribute-value link-text"
                       @click="emit('close')"
                     >

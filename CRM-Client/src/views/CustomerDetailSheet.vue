@@ -73,6 +73,7 @@ import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { confirmDelete } from '@/utils/confirmDialog'
+import { customerDetailRoute } from '@/utils/customerRoutes'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -1113,7 +1114,7 @@ const handlePaymentPlanDetailViewCustomer = (customerId: string): void => {
     return
   }
   // Navigate to different customer using router
-  router.push({ path: '/customers', query: { customerId: String(customerId) } })
+  router.push(customerDetailRoute(customerId))
 }
 
 const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void => {

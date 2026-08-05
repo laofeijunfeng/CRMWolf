@@ -553,6 +553,7 @@ import { formatDateRelative } from '@/utils/format'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue, getNumericFilterValue } from '@/utils/listFilters'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
 import { handleApiError } from '@/utils/errorHandler'
+import { customerDetailRoute } from '@/utils/customerRoutes'
 import approvalGenericApi from '@/api/approvalGeneric'
 import contractApi from '@/api/contract'
 import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery } from '@/schemas/approvalGeneric'
@@ -1255,14 +1256,14 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     })
     if (!confirmed) return
     // 跳转到对应实体编辑页
-    const route: Record<Exclude<EntityType, 'CONTRACT'>, string> = {
+    const route: Record<Exclude<EntityType, 'CONTRACT'>, string | ReturnType<typeof customerDetailRoute>> = {
       INVOICE: `/invoices/${row.business_id}`,
       // 回款无独立编辑页（/payments 为列表页）：跳列表页 + info 提示，
       // 保证不白屏/不断旅程；用户在列表内修改后重新提交审批。
       PAYMENT: `/payments`,
       // License 申请在客户详情页的 License 管理 Tab 编辑
       LICENSE: row.customer_info?.id !== undefined
-        ? `/customers/${row.customer_info.id}?tab=license-management`
+        ? customerDetailRoute(row.customer_info.id, { tab: 'license-management' })
         : '/customers',
       OPPORTUNITY: `/opportunities?opportunityId=${row.business_id}`
     }

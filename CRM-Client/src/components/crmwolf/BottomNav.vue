@@ -91,7 +91,7 @@ const overflowItems = computed<NavItem[]>(() => {
 
 /**
  * Check if a route is currently active
- * Handles nested routes (e.g., /customers/:id should highlight /customers)
+ * Handles nested routes (e.g., /leads/:id should highlight /leads)
  */
 function isRouteActive(itemRoute: string): boolean {
   // Special handling for routes with sub-paths

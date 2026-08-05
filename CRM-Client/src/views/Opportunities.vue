@@ -36,6 +36,7 @@ import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCu
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { getDateBounds, getDelimitedFilterValues, getFilterValue } from '@/utils/listFilters'
 import { buildSortFieldsFromFilterFields, getPrimarySort } from '@/utils/listSorts'
+import { customerDetailRoute } from '@/utils/customerRoutes'
 import { normalizePaginatedResponse } from '@/types/pagination'
 import OpportunityDetailSheet from './OpportunityDetailSheet.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
@@ -378,7 +379,7 @@ const handlePageSizeChange = (pageSize: number): void => {
 }
 
 const handleViewCustomer = (customerId: string): void => {
-  router.push(`/customers/${customerId}`)
+  router.push(customerDetailRoute(customerId))
 }
 
 // 打开商机详情抽屉

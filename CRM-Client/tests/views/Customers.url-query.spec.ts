@@ -77,13 +77,14 @@ vi.mock('@/components/ui/button', () => ({
 }))
 vi.mock('@/components/AICustomerCreateDialog.vue', () => ({ default: defineComponent({ name: 'AICustomerCreateDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/CustomerFormDialog.vue', () => ({ default: defineComponent({ name: 'CustomerFormDialog', setup: () => () => null }) }))
+vi.mock('@/components/dialogs/CustomerTransferDialog.vue', () => ({ default: defineComponent({ name: 'CustomerTransferDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/StatusBadge.vue', () => ({ default: defineComponent({ name: 'StatusBadge', setup: () => () => h('span') }) }))
 vi.mock('@/components/ScoreIndicator.vue', () => ({ default: defineComponent({ name: 'ScoreIndicator', setup: () => () => h('span') }) }))
 vi.mock('@/views/CustomerDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'CustomerDetailSheet',
-    props: { visible: Boolean, customerId: Number },
+    props: { visible: Boolean, customerId: String },
     emits: ['update:visible', 'refresh'],
     setup: (props, { emit }) => () => h('div', {
       'data-testid': 'customer-detail-sheet',
@@ -96,7 +97,8 @@ vi.mock('@/views/CustomerDetailSheet.vue', () => ({
 }))
 
 const customerFixture = (): CustomerResponse => ({
-  id: 19,
+  id: 'cus_test_19',
+  public_id: 'cus_test_19',
   account_name: '上海测试客户',
   industry: null,
   city: '上海',
@@ -134,19 +136,19 @@ describe('Customers URL query detail sheet state', () => {
 
     expect(routerPush).toHaveBeenLastCalledWith({
       path: '/customers',
-      query: { customerId: '19' },
+      query: { customerId: 'cus_test_19' },
     })
   })
 
   it('restores an open customer detail sheet from customerId in the route query on mount', async () => {
-    routeState.query = { customerId: '19' }
+    routeState.query = { customerId: 'cus_test_19' }
 
     const wrapper = mount(Customers)
     await flushPromises()
 
     const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
     expect(sheet.attributes('data-visible')).toBe('true')
-    expect(sheet.attributes('data-customer-id')).toBe('19')
+    expect(sheet.attributes('data-customer-id')).toBe('cus_test_19')
   })
 
   it('removes customer detail query keys when closing the customer detail sheet', async () => {
