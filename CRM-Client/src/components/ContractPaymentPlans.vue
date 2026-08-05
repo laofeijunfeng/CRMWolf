@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/dialog'
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -547,9 +546,14 @@ watch(
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel :disabled="deletingPlan">取消</AlertDialogCancel>
-          <AlertDialogAction :disabled="deletingPlan" @click="handleDeletePlan">
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingPlan"
+            @click="handleDeletePlan"
+          >
             {{ deletingPlan ? '删除中...' : '删除' }}
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -564,9 +568,14 @@ watch(
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel :disabled="deletingRecord">取消</AlertDialogCancel>
-          <AlertDialogAction :disabled="deletingRecord" @click="handleDeleteRecord">
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="deletingRecord"
+            @click="handleDeleteRecord"
+          >
             {{ deletingRecord ? '删除中...' : '删除' }}
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

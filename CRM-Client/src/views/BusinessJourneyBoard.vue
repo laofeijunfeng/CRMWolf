@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watchEffect } from 'vue'
 import {
   AlertCircle,
   CheckCircle2,
@@ -17,6 +17,8 @@ import {
   TableToolbarButton
 } from '@/components/crmwolf'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import businessJourneyBoardApi, {
   type BusinessJourneyBoardCard,
   type BusinessJourneyBoardColumn,
@@ -25,6 +27,8 @@ import businessJourneyBoardApi, {
 } from '@/api/businessJourneyBoard'
 import { useHeaderStore } from '@/stores/header'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
+import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { getDateBounds, getDelimitedFilterValues } from '@/utils/listFilters'
 import { logger } from '@/utils/logger'
 
@@ -35,7 +39,14 @@ const loading = ref(false)
 const errorMessage = ref('')
 const board = ref<BusinessJourneyBoardResponse | null>(null)
 const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
+const activeColumns = ref<ViewPreferenceConfig['columns']>([])
+const activeTab = ref('all')
 const ownerFilterOptions = ref<{ value: string; label: string }[]>([])
+
+const tabs = [
+  { key: 'all', label: '所有业务' }
+]
 
 const filterFields = computed<ListFilterField[]>(() => [
   {
@@ -167,20 +178,54 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
   }
 }
 
-const handleFilterApply = (filters: ListFilterCondition[]): void => {
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'business-journey-board.board',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  activeColumns,
+  refresh: loadBoard,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const customFilterViewSaving = computed(() => customFilterViews.saving.value)
+
+const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
+  await customFilterViews.updateActiveCustomViewConfig()
   void loadBoard()
 }
 
 const handleFilterReset = (): void => {
   activeFilters.value = []
+  void customFilterViews.updateActiveCustomViewConfig()
   void loadBoard()
 }
 
+const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
+  activeFilters.value = filters
+  await customFilterViews.saveAsCustomView(filters)
+}
+
 onMounted(() => {
-  headerStore.clear()
   void fetchOwnerFilterOptions()
+  void customFilterViews.loadCustomViews()
   void loadBoard()
+})
+
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actions: () => []
+})
+
+watchEffect(() => {
+  if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) {
+      return
+    }
+    customFilterViews.applyBuiltInTab(headerStore.activeTab)
+    void loadBoard()
+  }
 })
 </script>
 
@@ -190,8 +235,11 @@ onMounted(() => {
       <ListFilterPopover
         v-model="activeFilters"
         :fields="filterFields"
+        save-view-enabled
+        :save-view-loading="customFilterViewSaving"
         @apply="handleFilterApply"
         @reset="handleFilterReset"
+        @save-view="handleSaveFilterView"
       />
       <TableToolbarButton
         class="refresh-button"

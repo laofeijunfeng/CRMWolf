@@ -23,7 +23,6 @@ import {
 } from '@/components/ui/accordion'
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -1283,9 +1282,14 @@ watch(approvalPhase, phase => {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel :disabled="paymentPlanDeleting">取消</AlertDialogCancel>
-          <AlertDialogAction :disabled="paymentPlanDeleting" @click="handleDeletePaymentPlan">
+          <Button
+            type="button"
+            variant="destructive"
+            :disabled="paymentPlanDeleting"
+            @click="handleDeletePaymentPlan"
+          >
             {{ paymentPlanDeleting ? '删除中...' : '删除' }}
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
