@@ -34,13 +34,14 @@ class AgentToolGuardrails:
         context: AgentToolContext,
         payload: Dict[str, object],
         policy: Optional[AgentToolExecutionPolicy] = None,
+        user_reply_confirms: bool = False,
     ) -> None:
         policy = policy or AgentToolExecutionPolicy()
         allowed_tool_names = policy.allowed_tool_names or context.allowed_tool_names or []
         if allowed_tool_names and tool_name not in allowed_tool_names:
             raise AgentToolGuardrailError(f"当前任务不允许执行 tool：{tool_name}")
 
-        if is_write or requires_confirmation:
+        if (is_write or requires_confirmation) and not user_reply_confirms:
             decision = policy.hitl_decision or context.hitl_decision
             if decision != self.APPROVED_DECISION or not context.confirmed_by_user or not context.task_id:
                 raise AgentToolGuardrailError("写入类 tool 必须经过 HITL approve 确认后才能执行。")

@@ -97,6 +97,8 @@ export interface AgentChatSSEEvent {
   task_id?: number
   task_key?: string
   intent?: string
+  technical_intent?: string
+  intent_label?: string
   confidence?: number
   execution_confidence?: number
   risk_level?: "low" | "medium" | "high" | string

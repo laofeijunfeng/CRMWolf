@@ -17,7 +17,6 @@ from app.services.agent.semantic import AgentSemanticParseEnvelope
 from app.services.agent.tools.base import AgentToolResult
 from app.services.customer_activity_kinds import CustomerActivityKind
 
-
 OPPORTUNITY_PUBLIC_ID = "opp_0c1f7324704544a2bd619df90635a67f"
 
 
@@ -125,6 +124,106 @@ class FakeToolService:
                 "follow_ups": {"items": []},
             },
             tool_call_id=502,
+        )
+
+
+class FakeReadQueryToolService(FakeToolService):
+    def __init__(self):
+        super().__init__(items=[{"id": 101, "account_name": "越秀金融"}])
+        self.follow_up_task_queries = []
+        self.work_summary_queries = []
+
+    async def list_follow_up_tasks(
+        self,
+        context,
+        *,
+        status="open",
+        due_window=None,
+        customer_id=None,
+        owner_scope="mine",
+        query_text=None,
+        limit=50,
+    ):
+        self.follow_up_task_queries.append({
+            "context": context,
+            "status": status,
+            "due_window": due_window,
+            "customer_id": customer_id,
+            "owner_scope": owner_scope,
+            "query_text": query_text,
+            "limit": limit,
+        })
+        return AgentToolResult(
+            tool_name="list_follow_up_tasks",
+            success=True,
+            data={
+                "items": [{
+                    "id": "fut_00000000000000000000000000001001",
+                    "customer": {"id": "cus_test_101", "name": "越秀金融"},
+                    "title": "确认预算进展",
+                    "status": status,
+                    "due_at": "2026-08-06T09:30:00",
+                    "overdue_days": 0,
+                }],
+                "total": 1,
+                "filters": {
+                    "status": status,
+                    "due_window": due_window,
+                    "customer_id": customer_id,
+                    "owner_scope": owner_scope,
+                    "query_text": query_text,
+                },
+            },
+            tool_call_id=510,
+        )
+
+    async def summarize_completed_work(
+        self,
+        context,
+        *,
+        window="this_week",
+        customer_id=None,
+        include_tasks=True,
+        include_activities=True,
+        include_business_events=True,
+        start_at=None,
+        end_at=None,
+        cursor=None,
+        limit=50,
+        question=None,
+    ):
+        self.work_summary_queries.append({
+            "context": context,
+            "window": window,
+            "customer_id": customer_id,
+            "include_tasks": include_tasks,
+            "include_activities": include_activities,
+            "include_business_events": include_business_events,
+            "start_at": start_at,
+            "end_at": end_at,
+            "cursor": cursor,
+            "limit": limit,
+            "question": question,
+        })
+        return AgentToolResult(
+            tool_name="summarize_completed_work",
+            success=True,
+            data={
+                "facts": {"items": [{"fact_id": "fact_task_1"}], "available_total": 1},
+                "narrative": {
+                    "answer": f"### 工作总结\n已完成预算确认。窗口：{window}",
+                    "highlights": [{
+                        "title": "预算确认",
+                        "summary": "已完成预算确认。",
+                        "fact_ids": ["fact_task_1"],
+                    }],
+                    "customer_summaries": [],
+                    "confidence": 0.9,
+                    "citations": [{"fact_id": "fact_task_1"}],
+                },
+                "summary_source": "deterministic_work_summary_fallback",
+            },
+            tool_call_id=511,
         )
 
 
@@ -581,6 +680,144 @@ async def test_agent_graph_exposes_structured_output_fallback_metadata():
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_routes_work_summary_queries_to_summary_tool():
+    tool_service = FakeReadQueryToolService()
+    result = await build_service(
+        semantic_result(
+            intent="CRM_READ_QUERY",
+            customer={"name_text": None, "confidence": 0.0},
+            follow_up={},
+        ),
+        tool_service,
+    ).run(input_state("本周我完成了什么？帮我生成周报"))
+
+    assert tool_service.work_summary_queries
+    assert tool_service.work_summary_queries[0]["window"] == "this_week"
+    assert tool_service.work_summary_queries[0]["question"] == "本周我完成了什么？帮我生成周报"
+    assert tool_service.follow_up_task_queries == []
+    assert "已完成预算确认" in result["response"]
+    final_event = [event for event in result["events"] if event.get("event") == "final"][-1]
+    assert final_event["content_format"] == "markdown"
+    assert final_event["tool_execution_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_routes_monthly_work_summary_to_this_month():
+    tool_service = FakeReadQueryToolService()
+    await build_service(
+        semantic_result(
+            intent="CRM_READ_QUERY",
+            customer={"name_text": None, "confidence": 0.0},
+            follow_up={},
+        ),
+        tool_service,
+    ).run(input_state("本月工作总结"))
+
+    assert tool_service.work_summary_queries[0]["window"] == "this_month"
+    assert tool_service.follow_up_task_queries == []
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_routes_follow_up_schedule_queries_to_task_tool():
+    tool_service = FakeReadQueryToolService()
+    result = await build_service(
+        semantic_result(
+            intent="CRM_READ_QUERY",
+            customer={"name_text": None, "confidence": 0.0},
+            follow_up={},
+        ),
+        tool_service,
+    ).run(input_state("下周我还有哪些客户要跟进？"))
+
+    assert tool_service.follow_up_task_queries
+    assert tool_service.follow_up_task_queries[0]["status"] == "open"
+    assert tool_service.follow_up_task_queries[0]["due_window"] == "next_week"
+    assert tool_service.work_summary_queries == []
+    assert "确认预算进展" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_keeps_this_week_task_query_as_task_tool():
+    tool_service = FakeReadQueryToolService()
+    await build_service(
+        semantic_result(
+            intent="CRM_READ_QUERY",
+            customer={"name_text": None, "confidence": 0.0},
+            follow_up={},
+        ),
+        tool_service,
+    ).run(input_state("本周我的任务有哪些？"))
+
+    assert tool_service.follow_up_task_queries[0]["due_window"] == "this_week"
+    assert tool_service.work_summary_queries == []
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_routes_customer_scoped_task_query_after_customer_resolution():
+    tool_service = FakeReadQueryToolService()
+    result = await build_service(
+        semantic_result(
+            intent="CRM_READ_QUERY",
+            customer={"name_text": "越秀金融", "confidence": 0.95},
+            follow_up={},
+        ),
+        tool_service,
+    ).run(input_state("越秀金融下周有哪些任务？"))
+
+    assert tool_service.searches[0]["keyword"] == "越秀金融"
+    assert tool_service.follow_up_task_queries
+    assert tool_service.follow_up_task_queries[0]["customer_id"] == "101"
+    assert tool_service.follow_up_task_queries[0]["due_window"] == "next_week"
+    assert tool_service.context_queries == []
+    assert "确认预算进展" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_routes_customer_scoped_work_summary_after_customer_resolution():
+    tool_service = FakeReadQueryToolService()
+    result = await build_service(
+        semantic_result(
+            intent="CRM_READ_QUERY",
+            customer={"name_text": "越秀金融", "confidence": 0.95},
+            follow_up={},
+        ),
+        tool_service,
+    ).run(input_state("越秀金融本月完成了什么？"))
+
+    assert tool_service.searches[0]["keyword"] == "越秀金融"
+    assert tool_service.work_summary_queries
+    assert tool_service.work_summary_queries[0]["customer_id"] == "101"
+    assert tool_service.work_summary_queries[0]["window"] == "this_month"
+    assert tool_service.context_queries == []
+    assert "已完成预算确认" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_does_not_route_customer_activity_with_task_word_to_read_tool():
+    tool_service = FakeReadQueryToolService()
+    result = await build_service(
+        semantic_result(
+            intent="CUSTOMER_ACTIVITY",
+            customer={"name_text": "越秀金融", "confidence": 0.95},
+            follow_up={
+                "content": "客户要求下周提供预算资料",
+                "method": "微信",
+                "next_action": "下周提供预算资料",
+                "next_follow_time_text": None,
+                "next_follow_time": None,
+                "next_follow_time_iso": None,
+            },
+        ),
+        tool_service,
+    ).run(input_state("今天和越秀金融沟通，客户说下周任务是提供预算资料"))
+
+    assert tool_service.follow_up_task_queries == []
+    assert tool_service.work_summary_queries == []
+    assert tool_service.context_queries[0]["customer_id"] == "101"
+    assert "请确认是否创建这条客户活动？" in result["response"]
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_loads_customer_context_and_generates_ai_suggestions():
     tool_service = FakeToolService()
     suggestion_generator = FakeSuggestionGenerator()
@@ -743,12 +980,12 @@ async def test_checkpointed_agent_graph_scopes_runtime_state_to_current_turn():
     )
     parser = FakeSemanticParserSequence([
         semantic_result(
-            intent="CUSTOMER_QUERY",
+            intent="CRM_READ_QUERY",
             customer={"name_text": "赤道科技", "confidence": 0.95},
             follow_up={"content": None, "method": None},
         ),
         semantic_result(
-            intent="CUSTOMER_QUERY",
+            intent="CRM_READ_QUERY",
             customer={"name_text": "三一新能源", "confidence": 0.95},
             follow_up={"content": None, "method": None},
         ),
@@ -1305,7 +1542,7 @@ async def test_agent_graph_customer_query_uses_lookup_text_hint_when_parser_miss
     service = CRMAgentGraphService(
         tool_service=tool_service,
         semantic_parser=FakeSemanticParser(semantic_result(
-            intent="CUSTOMER_QUERY",
+            intent="CRM_READ_QUERY",
             customer={"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
             follow_up={"content": None, "method": None},
             business_signals=[],

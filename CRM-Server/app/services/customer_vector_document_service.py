@@ -11,6 +11,7 @@ from app.models.customer_vector_document import (
     CustomerVectorDocumentSyncStatus,
 )
 from app.models.deal_journey import CustomerDealJourneyEvent
+from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.services.customer_evidence_builder import BuiltCustomerEvidence, customer_evidence_builder
 from app.services.industry_display_service import industry_display_service
 from app.utils.time import business_now
@@ -145,6 +146,7 @@ class CustomerVectorDocumentService:
             existing.title = evidence.title
             existing.text = evidence.text
             existing.text_hash = evidence.text_hash
+            existing.metadata_json = evidence.metadata_json
             existing.qdrant_point_id = evidence.qdrant_point_id
             existing.occurred_at = evidence.occurred_at
             existing.confidence = evidence.confidence
@@ -172,6 +174,7 @@ class CustomerVectorDocumentService:
             title=evidence.title,
             text=evidence.text,
             text_hash=evidence.text_hash,
+            metadata_json=evidence.metadata_json,
             qdrant_point_id=evidence.qdrant_point_id,
             occurred_at=evidence.occurred_at,
             confidence=evidence.confidence,
@@ -238,6 +241,42 @@ class CustomerVectorDocumentService:
             return None
         return self.upsert_evidence_metadata(db, evidence, commit=commit)
 
+    def upsert_sales_commitment(
+        self,
+        db: Session,
+        commitment: SalesCommitment,
+        *,
+        commit: bool = True,
+    ) -> CustomerVectorDocument | None:
+        customer = self._get_customer(db, int(commitment.customer_id), int(commitment.team_id))
+        evidence = customer_evidence_builder.from_sales_commitment(commitment, customer=customer)
+        if evidence is None:
+            return None
+        return self.upsert_evidence_metadata(db, evidence, commit=commit)
+
+    def upsert_follow_up_task(
+        self,
+        db: Session,
+        task: FollowUpTask,
+        *,
+        commit: bool = True,
+    ) -> CustomerVectorDocument | None:
+        customer = self._get_customer(db, int(task.customer_id), int(task.team_id))
+        commitment = None
+        if task.commitment_id is not None:
+            commitment = (
+                db.query(SalesCommitment)
+                .filter(
+                    SalesCommitment.id == task.commitment_id,
+                    SalesCommitment.team_id == task.team_id,
+                )
+                .first()
+            )
+        evidence = customer_evidence_builder.from_follow_up_task(task, customer=customer, commitment=commitment)
+        if evidence is None:
+            return None
+        return self.upsert_evidence_metadata(db, evidence, commit=commit)
+
     def mark_source_deleted(self, db: Session, team_id: int, source_type: str, source_object_id: str) -> int:
         documents = (
             db.query(CustomerVectorDocument)
@@ -269,6 +308,25 @@ class CustomerVectorDocumentService:
             source_type=CustomerVectorDocumentSourceType.FOLLOW_UP,
             source_object_id=str(activity.id),
         )
+
+    def mark_sales_commitment_deleted(self, db: Session, commitment: SalesCommitment) -> int:
+        return self.mark_source_deleted(
+            db=db,
+            team_id=int(commitment.team_id),
+            source_type=CustomerVectorDocumentSourceType.SALES_COMMITMENT,
+            source_object_id=str(commitment.public_id),
+        )
+
+    def mark_follow_up_task_deleted(self, db: Session, task: FollowUpTask) -> int:
+        return self.mark_source_deleted(
+            db=db,
+            team_id=int(task.team_id),
+            source_type=CustomerVectorDocumentSourceType.FOLLOW_UP_TASK,
+            source_object_id=str(task.public_id),
+        )
+
+    def _get_customer(self, db: Session, customer_id: int, team_id: int) -> Customer | None:
+        return db.query(Customer).filter(Customer.id == customer_id, Customer.team_id == team_id).first()
 
     def mark_synced(self, db: Session, document: CustomerVectorDocument) -> CustomerVectorDocument:
         document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED

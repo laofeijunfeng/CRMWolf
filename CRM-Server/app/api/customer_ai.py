@@ -125,6 +125,7 @@ async def create_customer_activity_from_ai(
         obj_in=activity_create,
         customer_id=customer.id,
         creator_id=str(current_user.id),
+        owner_id=str(current_user.id),
         team_id=customer.team_id,
         operator_name=current_user.name if hasattr(current_user, 'name') else None
     )

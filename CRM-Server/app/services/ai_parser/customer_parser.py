@@ -375,6 +375,7 @@ class CustomerAIParser(EntityAIParserBase):
                 obj_in=activity_create,
                 customer_id=customer.id,
                 creator_id=user_id,
+                owner_id=user_id,
                 team_id=team_id
             )
             await customer_activity_processing_service.trigger_processing(created_activity.id, team_id)

@@ -16,13 +16,22 @@ from app.models.deal_journey import (
     DealJourneyStatus,
 )
 from app.models.industry import Industry
+from app.models.sales_commitment import (
+    DueAtGranularity,
+    FollowUpTask,
+    FollowUpTaskSourceType,
+    FollowUpTaskStatus,
+    SalesCommitment,
+    SalesCommitmentStatus,
+)
 from app.services.customer_activity_kinds import CustomerActivityKind
 from app.services.customer_evidence_builder import customer_evidence_builder
-from app.services.industry_display_service import industry_display_service
 from app.services.customer_qdrant_index_service import CustomerEvidenceDocument, SourceType
 from app.services.customer_vector_document_service import customer_vector_document_service
+from app.services.customer_vector_evidence_reconciliation_service import CustomerVectorEvidenceReconciliationService
 from app.services.customer_vector_sync_service import CustomerVectorSyncService
 from app.services.deal_journey_service import deal_journey_service
+from app.services.industry_display_service import industry_display_service
 
 
 @compiles(BigInteger, "sqlite")
@@ -35,6 +44,8 @@ def _session():
     Base.metadata.create_all(engine, tables=[
         Customer.__table__,
         CustomerActivity.__table__,
+        SalesCommitment.__table__,
+        FollowUpTask.__table__,
         CustomerDealJourney.__table__,
         CustomerDealJourneyEvent.__table__,
         CustomerVectorDocument.__table__,
@@ -70,11 +81,72 @@ def _customer_activity(
         summary="张总确认进入合同阶段",
         occurred_at=datetime(2026, 8, 2, 10, 30, 0),
         creator_id="9",
+        owner_id="9",
     )
     db.add(activity)
     db.commit()
     db.refresh(activity)
     return activity
+
+
+def _sales_commitment_and_task(db) -> tuple[Customer, SalesCommitment, FollowUpTask]:
+    customer = Customer(
+        team_id=2,
+        public_id="cus_1234567890abcdef1234567890abcdef",
+        account_name="越秀金融",
+        city="广州",
+        creator_id="9",
+    )
+    db.add(customer)
+    db.commit()
+    db.refresh(customer)
+    commitment = SalesCommitment(
+        team_id=2,
+        public_id="scm_1234567890abcdef1234567890abcdef",
+        customer_id=customer.id,
+        owner_id="9",
+        creator_id="9",
+        title="确认预算",
+        content="客户下周三反馈预算审批结果",
+        commitment_type="CUSTOMER_COMMITMENT",
+        status=SalesCommitmentStatus.OPEN,
+        confidence=0.91,
+        source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+        source_key="activity:20",
+        source_activity_id=None,
+        due_at=datetime(2026, 8, 12, 10, 0, 0),
+        due_at_text="下周三",
+        due_at_granularity=DueAtGranularity.DATETIME,
+        evidence_json={"activity_id": 20, "quote": "客户下周三反馈预算审批结果"},
+        commitment_hash="commitment-hash-1",
+    )
+    db.add(commitment)
+    db.commit()
+    db.refresh(commitment)
+    task = FollowUpTask(
+        team_id=2,
+        public_id="fut_1234567890abcdef1234567890abcdef",
+        customer_id=customer.id,
+        commitment_id=commitment.id,
+        owner_id="9",
+        creator_id="9",
+        title="回访预算审批结果",
+        description="下周三问王总预算有没有批",
+        status=FollowUpTaskStatus.OPEN,
+        due_at=datetime(2026, 8, 12, 10, 0, 0),
+        due_at_text="下周三",
+        due_at_granularity=DueAtGranularity.DATETIME,
+        source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+        source_key="activity:20",
+        source_activity_id=None,
+        confidence=0.93,
+        evidence_json={"source_activity_id": 20, "quote": "下周三问王总预算有没有批"},
+        task_hash="task-hash-1",
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return customer, commitment, task
 
 
 def test_builder_creates_follow_up_evidence_from_customer_activity():
@@ -112,6 +184,172 @@ def test_service_upserts_customer_activity_metadata_idempotently():
     assert first.id == second.id
     assert second.sync_status == CustomerVectorDocumentSyncStatus.PENDING
     assert "合同审批已经启动" in second.text
+    assert db.query(CustomerVectorDocument).count() == 1
+
+
+def test_builder_creates_sales_commitment_evidence_with_public_metadata_contract():
+    db = _session()
+    customer, commitment, _task = _sales_commitment_and_task(db)
+
+    evidence = customer_evidence_builder.from_sales_commitment(commitment, customer=customer)
+
+    assert evidence is not None
+    assert evidence.source_type == "sales_commitment"
+    assert evidence.source_object_id == commitment.public_id
+    assert evidence.business_object_type == "sales_commitment"
+    assert evidence.business_object_id == commitment.public_id
+    assert "客户下周三反馈预算审批结果" in evidence.text
+    assert evidence.metadata_json is not None
+    assert evidence.metadata_json["commitment_public_id"] == commitment.public_id
+    assert evidence.metadata_json["customer_public_id"] == customer.public_id
+    assert evidence.metadata_json["status"] == SalesCommitmentStatus.OPEN
+    assert evidence.metadata_json["evidence"] == {"quote": "客户下周三反馈预算审批结果"}
+
+
+def test_builder_creates_follow_up_task_evidence_with_public_metadata_contract():
+    db = _session()
+    customer, commitment, task = _sales_commitment_and_task(db)
+
+    evidence = customer_evidence_builder.from_follow_up_task(task, customer=customer, commitment=commitment)
+
+    assert evidence is not None
+    assert evidence.source_type == "follow_up_task"
+    assert evidence.source_object_id == task.public_id
+    assert evidence.business_object_type == "follow_up_task"
+    assert evidence.business_object_id == task.public_id
+    assert "回访预算审批结果" in evidence.text
+    assert evidence.metadata_json is not None
+    assert evidence.metadata_json["task_public_id"] == task.public_id
+    assert evidence.metadata_json["commitment_public_id"] == commitment.public_id
+    assert evidence.metadata_json["customer_public_id"] == customer.public_id
+    assert evidence.metadata_json["status"] == FollowUpTaskStatus.OPEN
+    assert evidence.metadata_json["evidence"] == {"quote": "下周三问王总预算有没有批"}
+
+
+def test_service_upserts_sales_commitment_metadata_idempotently_with_public_source_object():
+    db = _session()
+    _customer, commitment, _task = _sales_commitment_and_task(db)
+
+    first = customer_vector_document_service.upsert_sales_commitment(db, commitment)
+    commitment.status = SalesCommitmentStatus.FULFILLED
+    commitment.content = "预算已确认，客户准备走采购流程"
+    db.commit()
+    db.refresh(commitment)
+    second = customer_vector_document_service.upsert_sales_commitment(db, commitment)
+
+    assert first is not None
+    assert second is not None
+    assert first.id == second.id
+    assert second.source_type == "sales_commitment"
+    assert second.source_object_id == commitment.public_id
+    assert second.business_object_id == commitment.public_id
+    assert second.metadata_json["status"] == SalesCommitmentStatus.FULFILLED
+    assert "预算已确认" in second.text
+    assert db.query(CustomerVectorDocument).count() == 1
+
+
+def test_service_upserts_follow_up_task_metadata_idempotently_with_public_source_object():
+    db = _session()
+    _customer, _commitment, task = _sales_commitment_and_task(db)
+
+    first = customer_vector_document_service.upsert_follow_up_task(db, task)
+    task.status = FollowUpTaskStatus.COMPLETED
+    task.completed_at = datetime(2026, 8, 12, 11, 0, 0)
+    db.commit()
+    db.refresh(task)
+    second = customer_vector_document_service.upsert_follow_up_task(db, task)
+
+    assert first is not None
+    assert second is not None
+    assert first.id == second.id
+    assert second.source_type == "follow_up_task"
+    assert second.source_object_id == task.public_id
+    assert second.business_object_id == task.public_id
+    assert second.metadata_json["status"] == FollowUpTaskStatus.COMPLETED
+    assert second.metadata_json["completed_at"] == "2026-08-12T11:00:00"
+    assert db.query(CustomerVectorDocument).count() == 1
+
+
+def test_vector_evidence_reconciliation_refreshes_stale_follow_up_task_metadata():
+    db = _session()
+    _customer, _commitment, task = _sales_commitment_and_task(db)
+    document = customer_vector_document_service.upsert_follow_up_task(db, task)
+    assert document is not None
+    document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
+    task.status = FollowUpTaskStatus.COMPLETED
+    task.completed_at = datetime(2026, 8, 12, 11, 0, 0)
+    db.commit()
+
+    result = CustomerVectorEvidenceReconciliationService().reconcile_once(db, team_id=2)
+
+    refreshed = db.query(CustomerVectorDocument).one()
+    assert result.scanned == 1
+    assert result.refreshed == 1
+    assert result.delete_pending == 0
+    assert refreshed.sync_status == CustomerVectorDocumentSyncStatus.PENDING
+    assert refreshed.metadata_json["status"] == FollowUpTaskStatus.COMPLETED
+    assert refreshed.metadata_json["completed_at"] == "2026-08-12T11:00:00"
+
+
+def test_vector_evidence_reconciliation_refreshes_stale_sales_commitment_metadata():
+    db = _session()
+    _customer, commitment, _task = _sales_commitment_and_task(db)
+    document = customer_vector_document_service.upsert_sales_commitment(db, commitment)
+    assert document is not None
+    document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
+    commitment.status = SalesCommitmentStatus.CANCELLED
+    commitment.content = "客户确认本轮预算不再推进"
+    db.commit()
+
+    result = CustomerVectorEvidenceReconciliationService().reconcile_once(db, team_id=2)
+
+    refreshed = db.query(CustomerVectorDocument).one()
+    assert result.scanned == 1
+    assert result.refreshed == 1
+    assert refreshed.sync_status == CustomerVectorDocumentSyncStatus.PENDING
+    assert refreshed.metadata_json["status"] == SalesCommitmentStatus.CANCELLED
+    assert "本轮预算不再推进" in refreshed.text
+
+
+def test_vector_evidence_reconciliation_marks_missing_task_source_delete_pending():
+    db = _session()
+    _customer, _commitment, task = _sales_commitment_and_task(db)
+    document = customer_vector_document_service.upsert_follow_up_task(db, task)
+    assert document is not None
+    document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
+    task_public_id = task.public_id
+    db.delete(task)
+    db.commit()
+
+    result = CustomerVectorEvidenceReconciliationService().reconcile_once(db, team_id=2)
+
+    refreshed = db.query(CustomerVectorDocument).one()
+    assert result.scanned == 1
+    assert result.refreshed == 0
+    assert result.delete_pending == 1
+    assert result.items[0].reason == "task_not_found"
+    assert result.items[0].business_object_id == task_public_id
+    assert refreshed.sync_status == CustomerVectorDocumentSyncStatus.DELETE_PENDING
+
+
+def test_vector_evidence_reconciliation_is_idempotent_for_current_metadata():
+    db = _session()
+    _customer, _commitment, task = _sales_commitment_and_task(db)
+    document = customer_vector_document_service.upsert_follow_up_task(db, task)
+    assert document is not None
+    document.sync_status = CustomerVectorDocumentSyncStatus.SYNCED
+    document.synced_at = datetime(2026, 8, 12, 11, 0, 0)
+    db.commit()
+
+    first = CustomerVectorEvidenceReconciliationService().reconcile_once(db, team_id=2)
+    second = CustomerVectorEvidenceReconciliationService().reconcile_once(db, team_id=2)
+
+    refreshed = db.query(CustomerVectorDocument).one()
+    assert first.unchanged == 1
+    assert second.unchanged == 1
+    assert first.refreshed == 0
+    assert second.refreshed == 0
+    assert refreshed.sync_status == CustomerVectorDocumentSyncStatus.SYNCED
     assert db.query(CustomerVectorDocument).count() == 1
 
 
@@ -459,6 +697,27 @@ def test_vector_sync_upserts_pending_metadata_to_qdrant_and_marks_synced():
     document = db.query(CustomerVectorDocument).one()
     assert document.sync_status == CustomerVectorDocumentSyncStatus.SYNCED
     assert document.synced_at is not None
+
+
+def test_vector_sync_carries_follow_up_task_metadata_json_to_qdrant_payload():
+    db = _session()
+    _customer, _commitment, task = _sales_commitment_and_task(db)
+    metadata = customer_vector_document_service.upsert_follow_up_task(db, task)
+    index_writer = FakeIndexWriter()
+    sync_service = CustomerVectorSyncService(
+        embedding_service=FakeEmbeddingService(),
+        index_writer=index_writer,
+    )
+
+    stats = sync_service.sync_once(db, limit=10)
+
+    assert metadata is not None
+    assert stats.upserted == 1
+    assert index_writer.upserted[0].source_type == "follow_up_task"
+    assert index_writer.upserted[0].source_object_id == task.public_id
+    assert index_writer.upserted[0].business_object_id == task.public_id
+    assert index_writer.upserted[0].metadata_json["task_public_id"] == task.public_id
+    assert index_writer.upserted[0].metadata_json["status"] == FollowUpTaskStatus.OPEN
 
 
 def test_vector_sync_deletes_delete_pending_metadata_from_qdrant():

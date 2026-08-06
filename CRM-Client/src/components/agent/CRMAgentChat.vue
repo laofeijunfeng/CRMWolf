@@ -574,7 +574,7 @@ const eventToLogText = (event: AgentChatSSEEvent): string | null => {
     case "follow_up_quality_required":
       return event.content !== undefined && event.content.length > 0 ? event.content : "需要补充客户活动信息"
     case "intent":
-      return `识别意图：${stringifyValue(event.intent)}`
+      return `识别意图：${stringifyValue(event.intent_label ?? event.intent)}`
     case "entity_parse":
       return "已解析客户、业务内容和下一步动作"
     case "tool_result":

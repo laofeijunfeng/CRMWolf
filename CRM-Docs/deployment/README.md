@@ -32,8 +32,9 @@ bash CRM-Docs/deployment/deploy.sh
 2. 导出 `crm-images.tar`。
 3. 上传镜像包、本目录 `docker-compose.yml`、`docker-compose.server.yml` 和 `CRM-Docs/deployment/secrets/` 下的密钥文件。
 4. 在服务器执行 `docker compose -f docker-compose.yml -f docker-compose.server.yml up -d`。
-5. 执行 Alembic 数据库迁移。
-6. 检查前后端健康状态。
+5. 执行 Alembic 数据库结构迁移。
+6. 执行销售承诺/跟进任务历史数据回填。
+7. 检查前后端健康状态。
 
 ## 前置条件
 
@@ -99,6 +100,21 @@ docker logs crm-backend --since 10m | grep -E '客户智能历史补档|客户�
 ```
 
 如果日志里能看到“客户智能历史补档调度已启动”和“客户证据向量同步调度已启动”，说明自动补件链路已经启动；后续看到“客户智能历史补档已调度”或“客户证据向量同步完成”，说明历史数据正在分批补齐。
+
+## 销售承诺/跟进任务上线检查
+
+销售承诺/跟进任务包含两类迁移，不能只执行 Alembic：
+
+1. 结构迁移：`python -m alembic upgrade head`，创建任务、承诺、事件、投影运行等表。
+2. 数据回填：`python scripts/backfill_follow_up_tasks.py --days 90 --limit 1000 --confirm`，把最近 90 天客户活动中每个客户、每个 owner 最新 1 条明确下一步时间的活动投影为任务。
+
+`deploy.sh` 已在 Alembic 成功后自动执行历史回填。回填脚本可重复执行，投影层按来源活动和任务 hash 幂等处理，不应重复制造任务。
+
+上线后可用以下命令确认：
+
+```bash
+docker exec crm-backend python -c "from app.core.database import SessionLocal; from app.models.sales_commitment import FollowUpTask, SalesCommitment, FollowUpTaskProjectionRun; db=SessionLocal(); print('follow_up_tasks', db.query(FollowUpTask).count()); print('sales_commitments', db.query(SalesCommitment).count()); print('projection_runs', db.query(FollowUpTaskProjectionRun).count()); db.close()"
+```
 
 ## 文件说明
 

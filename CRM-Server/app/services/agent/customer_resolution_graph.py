@@ -32,7 +32,6 @@ from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_regis
 from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.types import JSONDict, coerce_json_dict
 
-
 CUSTOMER_RESOLUTION_CHECKPOINT_NS = "crm_agent_customer_resolution"
 
 
@@ -263,7 +262,7 @@ class CustomerResolutionGraphService:
             or semantic_result.intent_confidence < 0.75
             or (
                 semantic_result.intent != "UNKNOWN"
-                and semantic_result.intent != "CUSTOMER_QUERY"
+                and semantic_result.intent != "CRM_READ_QUERY"
                 and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
                 and not customer_from_memory
                 and semantic_result.customer.confidence < 0.7
@@ -309,7 +308,7 @@ class CustomerResolutionGraphService:
             return False
         if parsed.get("_customer_name_source") == "EXPLICIT_TEXT_HINT":
             return False
-        if semantic_result.intent in {"UNKNOWN", "CUSTOMER_QUERY"}:
+        if semantic_result.intent in {"UNKNOWN", "CRM_READ_QUERY"}:
             return False
         if semantic_result.customer.resolution_source == "MEMORY":
             return True

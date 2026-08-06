@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 AgentIntent = Literal[
     "CUSTOMER_ACTIVITY",
@@ -16,8 +16,19 @@ AgentIntent = Literal[
     "CREATE_INVOICE_TITLE",
     "CREATE_DEPLOYMENT_INFO",
     "CREATE_CUSTOMER_MEMBER",
-    "CUSTOMER_QUERY",
+    "CRM_READ_QUERY",
     "UNKNOWN",
+]
+AgentReadQueryType = Literal[
+    "FOLLOW_UP_TASKS",
+    "WORK_SUMMARY",
+    "CUSTOMER_PROFILE",
+    "OPPORTUNITY",
+    "CONTRACT",
+    "PAYMENT",
+    "INVOICE",
+    "LICENSE",
+    "UNKNOWN_READ",
 ]
 
 AgentHITLDecisionType = Literal["approve", "edit", "reject", "respond"]
@@ -31,6 +42,20 @@ AgentTurnRelationDecisionType = Literal[
     "CHITCHAT",
 ]
 AgentConfirmationIntentType = Literal["confirm", "reject", "unknown"]
+AgentTurnIntentType = Literal[
+    "SUBMIT_FIELDS",
+    "CONFIRM_EXECUTION",
+    "REJECT_EXECUTION",
+    "CANCEL_CURRENT_TASK",
+    "DISMISS_CURRENT_SUGGESTION",
+    "PAUSE_CURRENT_TASK",
+    "PATCH_ACTIVE_DRAFT",
+    "RESUME_SUSPENDED_DRAFT",
+    "START_NEW_FLOW",
+    "ASK_QUESTION",
+    "CHITCHAT",
+    "ASK_CLARIFICATION",
+]
 AgentSuggestionAction = Literal[
     "CREATE_OPPORTUNITY",
     "MOVE_OPPORTUNITY_STAGE",
@@ -173,10 +198,21 @@ class AgentRequestedAction(BaseModel):
     reason: Optional[str] = Field(None, description="动作触发原因")
 
 
+class AgentReadQueryEntity(BaseModel):
+    type: AgentReadQueryType = Field("UNKNOWN_READ", description="CRM 读取查询类型")
+    status: Optional[Literal["open", "completed", "cancelled", "all"]] = Field(None, description="任务状态过滤")
+    due_window: Optional[Literal["today", "this_week", "next_week", "overdue"]] = Field(None, description="任务到期窗口")
+    work_window: Optional[Literal["today", "this_week", "last_week", "this_month", "custom"]] = Field(None, description="工作总结窗口")
+    owner_scope: Optional[Literal["mine", "customer"]] = Field(None, description="任务/事实归属范围")
+    customer_name_text: Optional[str] = Field(None, description="读取查询中的客户名称文本")
+    query_text: Optional[str] = Field(None, description="读取查询中的语义条件，例如预算、试用反馈、合同卡点")
+
+
 class AgentSemanticParseResult(BaseModel):
     intent: AgentIntent = Field("UNKNOWN", description="归一化意图")
     intent_confidence: float = Field(0.0, ge=0.0, le=1.0)
     customer: AgentCustomerEntity = Field(default_factory=AgentCustomerEntity)
+    read_query: AgentReadQueryEntity = Field(default_factory=AgentReadQueryEntity)
     follow_up: AgentFollowUpEntity = Field(default_factory=AgentFollowUpEntity)
     payment: AgentPaymentEntity = Field(default_factory=AgentPaymentEntity)
     lead: AgentLeadEntity = Field(default_factory=AgentLeadEntity)
@@ -192,6 +228,16 @@ class AgentSemanticParseResult(BaseModel):
     need_clarification: bool = Field(False)
     clarification_question: Optional[str] = Field(None)
     evidence: List[str] = Field(default_factory=list, description="用于解释判断的原文依据")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_customer_query(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        if normalized.get("intent") == "CUSTOMER_QUERY":
+            normalized["intent"] = "CRM_READ_QUERY"
+        return normalized
 
 
 class AgentBusinessSuggestion(BaseModel):
@@ -236,6 +282,37 @@ class CustomerContextAnswerResult(BaseModel):
     citations: List[Dict[str, object]] = Field(default_factory=list, max_length=8, description="回答引用的证据来源")
 
 
+class WorkSummaryNarrativeItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: Literal["completed_work", "process_record", "business_progress"] = Field(
+        ...,
+        description="总结项分类，不能把过程记录写成已完成任务",
+    )
+    title: str = Field(..., min_length=1, max_length=120, description="总结项标题")
+    summary: str = Field(..., min_length=1, max_length=300, description="总结项内容")
+    fact_ids: List[str] = Field(default_factory=list, min_length=1, max_length=8, description="支撑该总结项的 fact_id")
+
+
+class WorkSummaryNarrativeResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str = Field("", max_length=4000, description="面向销售用户的工作总结")
+    highlights: List[WorkSummaryNarrativeItem] = Field(default_factory=list, max_length=12)
+    customer_summaries: List[WorkSummaryNarrativeItem] = Field(default_factory=list, max_length=12)
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    narrative_mode: str = Field("fallback", description="langchain_structured_output/fallback/degraded/insufficient")
+    missing_context: List[str] = Field(default_factory=list, max_length=5)
+    citations: List[Dict[str, object]] = Field(default_factory=list, max_length=30, description="可回指的事实引用")
+
+    @model_validator(mode="after")
+    def require_fact_references(self) -> "WorkSummaryNarrativeResult":
+        for item in [*self.highlights, *self.customer_summaries]:
+            if not item.fact_ids:
+                raise ValueError("每个工作总结项必须引用至少一个 fact_id")
+        return self
+
+
 class AgentMemorySnapshot(BaseModel):
     recent_messages: List[Dict[str, object]] = Field(default_factory=list)
     pending_task: Optional[Dict[str, object]] = None
@@ -272,6 +349,15 @@ class AgentConfirmationIntentDecision(BaseModel):
     intent: AgentConfirmationIntentType = Field("unknown", description="用户是否确认或拒绝当前待确认动作")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
     reason: str = Field("", description="简短判断依据")
+
+
+class AgentTurnIntentDecision(BaseModel):
+    intent: AgentTurnIntentType = Field("START_NEW_FLOW", description="用户本轮输入对当前 Agent 状态的归一化意图")
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    target_task_id: Optional[int] = Field(None, description="本轮意图指向的 Agent task ID；无法确定则为 null")
+    normalized_action: Optional[str] = Field(None, description="可映射到 interrupt resume 的动作，例如 cancel/submit_fields/approve")
+    reason: str = Field("", description="一句话说明判断依据")
+    question: Optional[str] = Field(None, description="低置信度时需要追问用户的问题")
 
 
 class AgentHITLPolicy(BaseModel):

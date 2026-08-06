@@ -34,6 +34,11 @@ from app.services.agent.state import (
     AgentRuntimeContext,
 )
 from app.services.agent.types import JSONDict, coerce_json_dict
+from app.services.follow_up_task_confirmation_channel_service import (
+    FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+    FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+    follow_up_task_confirmation_channel_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +106,44 @@ class AgentApplicationService:
                 "message_id": user_message.id,
                 "content": user_message.content,
             }
+
+            bound_confirmation_event = self._resolve_bound_follow_up_confirmation_reply(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session.id,
+                content=content,
+                turn_input=agent_turn_input,
+            )
+            if bound_confirmation_event is not None:
+                emitted_event = coerce_json_dict(bound_confirmation_event)
+                interactions._append_trace_event(trace_events, emitted_event)
+                yield emitted_event
+                assistant_message = agent_message_crud.create(
+                    db,
+                    AgentMessageCreate(
+                        team_id=team_id,
+                        user_id=user_id,
+                        session_id=session.id,
+                        role=AgentMessageRole.ASSISTANT,
+                        event_type="assistant_message",
+                        content=str(emitted_event.get("content") or agent_copy.generic_completed()),
+                        payload_json={
+                            "source": "follow_up_task_confirmation_reply",
+                            "trace_events": trace_events,
+                            "content_format": emitted_event.get("content_format") or "text",
+                        },
+                    ),
+                )
+                yield {
+                    "event": "message",
+                    "role": AgentMessageRole.ASSISTANT,
+                    "message_id": assistant_message.id,
+                    "content": assistant_message.content,
+                    "content_format": emitted_event.get("content_format") or "text",
+                }
+                yield {"event": "done", "session_id": session.id}
+                return
 
             assistant_content = None
             runtime_event_queue: asyncio.Queue[JSONDict] = asyncio.Queue()
@@ -202,6 +245,17 @@ class AgentApplicationService:
             if not assistant_content:
                 assistant_content = agent_copy.generic_completed()
                 assistant_content_format = "text"
+
+            proactive_confirmation_event = self._build_follow_up_confirmation_prompt_event(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session.id,
+                turn_input=agent_turn_input,
+            )
+            if proactive_confirmation_event is not None:
+                emitted_prompt_event = emit(proactive_confirmation_event)
+                yield emitted_prompt_event
 
             assistant_message = agent_message_crud.create(
                 db,
@@ -326,6 +380,82 @@ class AgentApplicationService:
             logger.warning("Agent root graph checkpoint is unavailable", exc_info=True)
             return AgentApplicationRuntimeResult(checkpoint_unavailable=True)
 
+    def _resolve_bound_follow_up_confirmation_reply(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        content: str,
+        turn_input: AgentTurnInput,
+    ) -> JSONDict | None:
+        case_public_id = _case_public_id_from_turn_metadata(turn_input.metadata)
+        explicit_binding = case_public_id is not None
+        if case_public_id is None:
+            latest_interaction = _latest_follow_up_confirmation_interaction(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            case_public_id = _case_public_id_from_interaction(latest_interaction)
+            if case_public_id is None:
+                return None
+            decision = follow_up_task_confirmation_channel_service.preview_reply_decision(content)
+            if not decision.resolved:
+                return None
+
+        try:
+            return coerce_json_dict(
+                follow_up_task_confirmation_channel_service.resolve_bound_reply(
+                    db,
+                    team_id=team_id,
+                    user_id=user_id,
+                    case_public_id=case_public_id,
+                    reply_text=content,
+                )
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception(
+                "Follow-up confirmation reply binding failed: team_id=%s user_id=%s case_public_id=%s explicit=%s",
+                team_id,
+                user_id,
+                case_public_id,
+                explicit_binding,
+            )
+            return None
+
+    def _build_follow_up_confirmation_prompt_event(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        turn_input: AgentTurnInput,
+    ) -> JSONDict | None:
+        try:
+            event = follow_up_task_confirmation_channel_service.prompt_next_pending_case(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                channel=turn_input.source or "web",
+                provider=turn_input.provider,
+                agent_session_id=session_id,
+            )
+            return coerce_json_dict(event) if event is not None else None
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception(
+                "Follow-up confirmation prompt failed: team_id=%s user_id=%s session_id=%s",
+                team_id,
+                user_id,
+                session_id,
+            )
+            return None
+
 
 agent_application_service = AgentApplicationService()
 
@@ -347,4 +477,74 @@ def _content_format_from_events(events: object) -> str | None:
         normalized = _normalize_content_format(event.get("content_format"))
         if normalized:
             return normalized
+    return None
+
+
+def _case_public_id_from_turn_metadata(metadata: object) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in ("case_public_id", "follow_up_confirmation_case_public_id"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _latest_follow_up_confirmation_interaction(
+    db: Session,
+    *,
+    team_id: int,
+    user_id: int,
+    session_id: int,
+) -> dict[str, object] | None:
+    messages = (
+        db.query(AgentMessage)
+        .filter(
+            AgentMessage.session_id == session_id,
+            AgentMessage.team_id == team_id,
+            AgentMessage.user_id == user_id,
+            AgentMessage.role == AgentMessageRole.ASSISTANT,
+        )
+        .order_by(AgentMessage.created_time.desc(), AgentMessage.id.desc())
+        .limit(5)
+        .all()
+    )
+    for message in messages:
+        payload = message.payload_json if isinstance(message.payload_json, dict) else {}
+        trace_events = payload.get("trace_events") if isinstance(payload.get("trace_events"), list) else []
+        for event in reversed(trace_events):
+            if not isinstance(event, dict):
+                continue
+            if event.get("event") != FOLLOW_UP_CONFIRMATION_PROMPT_EVENT:
+                continue
+            interaction = event.get("interaction")
+            if _is_waiting_follow_up_confirmation_interaction(interaction):
+                return interaction
+    return None
+
+
+def _is_waiting_follow_up_confirmation_interaction(interaction: object) -> bool:
+    if not isinstance(interaction, dict):
+        return False
+    return (
+        interaction.get("business_action") == FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
+        and interaction.get("status") in {None, "waiting_user_input", "waiting_confirmation"}
+        and _case_public_id_from_interaction(interaction) is not None
+    )
+
+
+def _case_public_id_from_interaction(interaction: object) -> str | None:
+    if not isinstance(interaction, dict):
+        return None
+    payload = interaction.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("case_public_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    case = payload.get("case")
+    if isinstance(case, dict):
+        case_public_id = case.get("public_id") or case.get("id")
+        if isinstance(case_public_id, str) and case_public_id.strip():
+            return case_public_id.strip()
     return None

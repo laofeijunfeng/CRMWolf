@@ -57,7 +57,7 @@ class CustomerIntelligenceTriggerPolicy:
         turn: AgentCustomerIntelligenceTurn,
     ) -> CustomerIntelligenceEvent | None:
         intent = _first_intent(events)
-        if intent != "CUSTOMER_QUERY":
+        if intent != "CRM_READ_QUERY":
             return None
         customer_id = _latest_customer_id(events)
         if customer_id is None:

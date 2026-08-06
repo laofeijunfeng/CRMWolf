@@ -13,6 +13,7 @@ from app.core.deps import (
     get_current_user_team,
 )
 from app.crud.customer_activity import customer_activity_crud
+from app.models.sales_commitment import FollowUpTaskProjectionTrigger
 from app.schemas.customer_activity import (
     CustomerActivityCreate,
     CustomerActivityProcessResponse,
@@ -23,6 +24,7 @@ from app.schemas.customer_activity import (
 )
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.customer_activity_processing_service import customer_activity_processing_service
+from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 
 
 router = APIRouter(prefix="/v1/customer-activities", tags=["客户活动"])
@@ -38,20 +40,30 @@ def _loads(value: str | None):
     return parsed if isinstance(parsed, dict) else None
 
 
+def _load_user_info(db: Session, user_id: str | None):
+    if not user_id:
+        return None
+    try:
+        numeric_user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    user_data = db.execute(text("""
+        SELECT id, name, avatar_url
+        FROM users
+        WHERE id = :user_id
+    """), {"user_id": numeric_user_id}).first()
+    if not user_data:
+        return None
+    return {
+        "id": str(user_data[0]),
+        "name": user_data[1],
+        "avatar_url": user_data[2],
+    }
+
+
 def _build_activity_response(db: Session, activity) -> CustomerActivityResponse:
-    creator_info = None
-    if activity.creator_id:
-        creator_data = db.execute(text("""
-            SELECT id, name, avatar_url
-            FROM users
-            WHERE id = :creator_id
-        """), {"creator_id": int(activity.creator_id)}).first()
-        if creator_data:
-            creator_info = {
-                "id": str(creator_data[0]),
-                "name": creator_data[1],
-                "avatar_url": creator_data[2],
-            }
+    creator_info = _load_user_info(db, activity.creator_id)
+    owner_info = _load_user_info(db, activity.owner_id)
 
     customer_info = None
     if activity.customer_id:
@@ -97,9 +109,11 @@ def _build_activity_response(db: Session, activity) -> CustomerActivityResponse:
         "next_action": activity.next_action,
         "occurred_at": activity.occurred_at,
         "creator_id": activity.creator_id,
+        "owner_id": activity.owner_id,
         "created_time": activity.created_time,
         "updated_time": activity.updated_time,
         "creator_info": creator_info,
+        "owner_info": owner_info,
         "customer_info": customer_info,
         "effectiveness_score": activity.effectiveness_score,
         "effectiveness_is_valid": activity.effectiveness_is_valid,
@@ -109,6 +123,16 @@ def _build_activity_response(db: Session, activity) -> CustomerActivityResponse:
         "effectiveness_evaluated_time": activity.effectiveness_evaluated_time,
         "effectiveness_error_message": activity.effectiveness_error_message,
     })
+
+
+def _activity_has_next_step(activity) -> bool:
+    next_action = (activity.next_action or "").strip()
+    return bool(next_action or activity.next_follow_time)
+
+
+def _update_touched_next_step(activity_update: CustomerActivityUpdate) -> bool:
+    update_data = activity_update.model_dump(exclude_unset=True)
+    return "next_action" in update_data or "next_follow_time" in update_data
 
 
 @router.get("/kinds", summary="客户活动分类元数据")
@@ -130,9 +154,17 @@ async def create_activity(
         obj_in=activity,
         customer_id=customer.id,
         creator_id=str(current_user.id),
+        owner_id=str(current_user.id),
         team_id=team_id,
         operator_name=current_user.name,
     )
+    if _activity_has_next_step(created):
+        await customer_activity_processing_service.trigger_follow_up_task_projection(
+            activity_id=created.id,
+            team_id=team_id,
+            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+            actor_id=str(current_user.id),
+        )
     await customer_activity_processing_service.trigger_processing(created.id, team_id)
     return _build_activity_response(db, created)
 
@@ -171,7 +203,15 @@ async def update_activity(
     if activity.creator_id != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权更新此客户活动")
     check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
+    should_project = _update_touched_next_step(activity_update)
     updated = customer_activity_crud.update(db, activity, activity_update)
+    if should_project:
+        await customer_activity_processing_service.trigger_follow_up_task_projection(
+            activity_id=updated.id,
+            team_id=team_id,
+            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
+            actor_id=str(current_user.id),
+        )
     await customer_activity_processing_service.trigger_processing(updated.id, team_id)
     return _build_activity_response(db, updated)
 
@@ -190,6 +230,12 @@ async def update_next_time(
     check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
     if next_time.next_follow_time:
         updated = customer_activity_crud.update_next_time(db, activity, next_time.next_follow_time)
+        await customer_activity_processing_service.trigger_follow_up_task_projection(
+            activity_id=updated.id,
+            team_id=team_id,
+            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
+            actor_id=str(current_user.id),
+        )
         customer_activity_crud.update_effectiveness_status(db, updated.id, "GENERATING")
         db.refresh(updated)
         await customer_activity_processing_service.trigger_evaluation(updated.id, team_id)
@@ -240,5 +286,13 @@ def delete_activity(
     if activity.creator_id != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权删除此客户活动")
     check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
+    follow_up_task_projection_service.run_activity_projection(
+        db,
+        activity_id=activity.id,
+        activity_snapshot=activity,
+        trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_DELETED,
+        actor_id=str(current_user.id),
+        team_id=team_id,
+    )
     customer_activity_crud.delete(db, activity)
     return MessageResponse(message="删除成功")

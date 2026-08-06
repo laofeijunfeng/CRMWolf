@@ -15,11 +15,19 @@ def build_semantic_trace_events(state: AgentGraphState) -> list[JSONDict]:
     if not semantic_result:
         return []
     semantic_metadata = state.get("semantic_metadata") or {}
+    intent_label = _intent_display_label(semantic_result)
     return [
-        {"event": "intent", "intent": semantic_result.intent},
+        {
+            "event": "intent",
+            "intent": semantic_result.intent,
+            "technical_intent": semantic_result.intent,
+            "intent_label": intent_label,
+        },
         {
             "event": "semantic_parsed",
             "intent": semantic_result.intent,
+            "technical_intent": semantic_result.intent,
+            "intent_label": intent_label,
             "confidence": semantic_result.intent_confidence,
             "parse_source": semantic_metadata.get("parse_source"),
             "model": semantic_metadata.get("model"),
@@ -87,3 +95,29 @@ def _suggestion_result(state: AgentGraphState) -> AgentSuggestionResult | None:
 def _follow_up_quality_result(state: AgentGraphState) -> AgentFollowUpQualityResult | None:
     value = state.get("follow_up_quality_result")
     return value if isinstance(value, AgentFollowUpQualityResult) else None
+
+
+def _intent_display_label(semantic_result: AgentSemanticParseResult) -> str:
+    if semantic_result.intent == "CRM_READ_QUERY":
+        return {
+            "FOLLOW_UP_TASKS": "任务查询",
+            "WORK_SUMMARY": "工作总结",
+            "CUSTOMER_PROFILE": "客户查询",
+            "OPPORTUNITY": "商机查询",
+            "CONTRACT": "合同查询",
+            "PAYMENT": "回款查询",
+            "INVOICE": "发票查询",
+            "LICENSE": "License 查询",
+        }.get(semantic_result.read_query.type, "业务查询")
+    return {
+        "CUSTOMER_ACTIVITY": "客户跟进记录",
+        "PAYMENT_RECORD": "回款记录",
+        "CREATE_LEAD": "创建线索",
+        "CREATE_CUSTOMER": "创建客户",
+        "CREATE_OPPORTUNITY": "创建商机",
+        "CREATE_CONTACT": "创建联系人",
+        "CREATE_INVOICE_TITLE": "创建发票抬头",
+        "CREATE_DEPLOYMENT_INFO": "创建部署信息",
+        "CREATE_CUSTOMER_MEMBER": "添加客户团队成员",
+        "UNKNOWN": "无法识别",
+    }.get(semantic_result.intent, semantic_result.intent)

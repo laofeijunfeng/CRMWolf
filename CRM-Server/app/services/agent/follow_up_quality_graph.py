@@ -29,7 +29,6 @@ from app.services.agent.state import (
 )
 from app.services.agent.types import coerce_json_dict
 
-
 FOLLOW_UP_QUALITY_CHECKPOINT_NS = "crm_agent_follow_up_quality"
 
 
@@ -213,7 +212,7 @@ def _requires_clarification(
         or semantic_result.intent_confidence < 0.75
         or (
             semantic_result.intent != "UNKNOWN"
-            and semantic_result.intent != "CUSTOMER_QUERY"
+            and semantic_result.intent != "CRM_READ_QUERY"
             and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
             and not customer_from_memory
             and semantic_result.customer.confidence < 0.7

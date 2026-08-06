@@ -51,7 +51,7 @@ def test_customer_intelligence_trigger_builds_agent_question_from_structured_new
 
     event = policy.from_new_flow_events(
         [
-            {"event": "intent", "intent": "CUSTOMER_QUERY"},
+            {"event": "intent", "intent": "CRM_READ_QUERY"},
             {"event": "business_context_loaded", "customer": {"id": 101, "account_name": "越秀金融"}},
         ],
         turn=AgentCustomerIntelligenceTurn(
@@ -83,7 +83,7 @@ def test_customer_intelligence_trigger_uses_latest_loaded_customer_for_agent_que
 
     event = policy.from_new_flow_events(
         [
-            {"event": "intent", "intent": "CUSTOMER_QUERY"},
+            {"event": "intent", "intent": "CRM_READ_QUERY"},
             {"event": "business_context_loaded", "customer": {"id": 101, "account_name": "旧客户"}},
             {"event": "business_context_loaded", "customer": {"id": 202, "account_name": "中国科学院信息工程研究所"}},
         ],

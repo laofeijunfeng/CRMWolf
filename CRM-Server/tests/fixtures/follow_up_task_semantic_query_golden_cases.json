@@ -1,0 +1,266 @@
+[
+  {
+    "name": "budget_query_filters_completed_candidate",
+    "category": "budget",
+    "query_text": "预算相关未完成任务",
+    "user_id": 9,
+    "status": "open",
+    "owner_scope": "mine",
+    "semantic_task_public_ids": [
+      "fut_eval_budget_done",
+      "fut_eval_budget_open"
+    ],
+    "expected_task_public_ids": [
+      "fut_eval_budget_open"
+    ],
+    "forbidden_task_public_ids": [
+      "fut_eval_budget_done",
+      "fut_eval_trial_feedback"
+    ],
+    "tasks": [
+      {
+        "public_id": "fut_eval_budget_open",
+        "customer_public_id": "cus_eval_yuexiu",
+        "customer_name": "越秀金融",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "回访预算审批结果",
+        "description": "确认王总预算是否已经批复",
+        "due_at": "2026-08-12T10:00:00"
+      },
+      {
+        "public_id": "fut_eval_budget_done",
+        "customer_public_id": "cus_eval_yuexiu",
+        "customer_name": "越秀金融",
+        "owner_id": "9",
+        "status": "COMPLETED",
+        "title": "确认预算口径",
+        "description": "预算口径已经确认，等待采购流程",
+        "due_at": "2026-08-08T10:00:00",
+        "completed_at": "2026-08-08T16:00:00"
+      },
+      {
+        "public_id": "fut_eval_trial_feedback",
+        "customer_public_id": "cus_eval_huaxin",
+        "customer_name": "华信制造",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "收集试用反馈",
+        "description": "试用账号开通后确认关键用户反馈",
+        "due_at": "2026-08-13T11:00:00"
+      }
+    ]
+  },
+  {
+    "name": "trial_feedback_query_returns_trial_task",
+    "category": "trial",
+    "query_text": "试用反馈还有哪些要跟",
+    "user_id": 9,
+    "status": "open",
+    "owner_scope": "mine",
+    "semantic_task_public_ids": [
+      "fut_eval_trial_feedback"
+    ],
+    "expected_task_public_ids": [
+      "fut_eval_trial_feedback"
+    ],
+    "forbidden_task_public_ids": [
+      "fut_eval_contract_blocker"
+    ],
+    "tasks": [
+      {
+        "public_id": "fut_eval_trial_feedback",
+        "customer_public_id": "cus_eval_huaxin",
+        "customer_name": "华信制造",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "收集试用反馈",
+        "description": "客户试用 3 天后回收关键用户反馈",
+        "due_at": "2026-08-13T11:00:00"
+      },
+      {
+        "public_id": "fut_eval_contract_blocker",
+        "customer_public_id": "cus_eval_zhengda",
+        "customer_name": "正达集团",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "确认合同法务意见",
+        "description": "法务关注付款条款，需要销售确认是否接受修改",
+        "due_at": "2026-08-14T15:00:00"
+      }
+    ]
+  },
+  {
+    "name": "contract_blocker_query_returns_contract_task",
+    "category": "contract",
+    "query_text": "合同卡点有哪些客户要处理",
+    "user_id": 9,
+    "status": "open",
+    "owner_scope": "mine",
+    "semantic_task_public_ids": [
+      "fut_eval_contract_blocker"
+    ],
+    "expected_task_public_ids": [
+      "fut_eval_contract_blocker"
+    ],
+    "forbidden_task_public_ids": [],
+    "tasks": [
+      {
+        "public_id": "fut_eval_contract_blocker",
+        "customer_public_id": "cus_eval_zhengda",
+        "customer_name": "正达集团",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "确认合同法务意见",
+        "description": "客户法务卡在付款条款，需要本周确认",
+        "due_at": "2026-08-14T15:00:00"
+      }
+    ]
+  },
+  {
+    "name": "procurement_query_returns_procurement_task",
+    "category": "procurement",
+    "query_text": "采购流程相关跟进",
+    "user_id": 9,
+    "status": "open",
+    "owner_scope": "mine",
+    "semantic_task_public_ids": [
+      "fut_eval_procurement"
+    ],
+    "expected_task_public_ids": [
+      "fut_eval_procurement"
+    ],
+    "forbidden_task_public_ids": [],
+    "tasks": [
+      {
+        "public_id": "fut_eval_procurement",
+        "customer_public_id": "cus_eval_nanhu",
+        "customer_name": "南湖政务",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "确认采购挂网时间",
+        "description": "客户预计走采购挂网，需确认采购负责人和时间表",
+        "due_at": "2026-08-17T09:30:00"
+      }
+    ]
+  },
+  {
+    "name": "semantic_candidate_from_other_owner_is_filtered",
+    "category": "owner_scope",
+    "query_text": "预算相关任务",
+    "user_id": 9,
+    "status": "open",
+    "owner_scope": "mine",
+    "semantic_task_public_ids": [
+      "fut_eval_other_owner_budget"
+    ],
+    "expected_task_public_ids": [],
+    "forbidden_task_public_ids": [
+      "fut_eval_other_owner_budget"
+    ],
+    "tasks": [
+      {
+        "public_id": "fut_eval_other_owner_budget",
+        "customer_public_id": "cus_eval_yuexiu",
+        "customer_name": "越秀金融",
+        "owner_id": "10",
+        "status": "OPEN",
+        "title": "销售确认预算审批",
+        "description": "销售自己跟客户确认预算，不属于当前售前",
+        "due_at": "2026-08-12T10:00:00"
+      }
+    ]
+  },
+  {
+    "name": "cancelled_candidate_is_filtered_from_open_query",
+    "category": "stale_status",
+    "query_text": "合同相关任务",
+    "user_id": 9,
+    "status": "open",
+    "owner_scope": "mine",
+    "semantic_task_public_ids": [
+      "fut_eval_cancelled_contract"
+    ],
+    "expected_task_public_ids": [],
+    "forbidden_task_public_ids": [
+      "fut_eval_cancelled_contract"
+    ],
+    "tasks": [
+      {
+        "public_id": "fut_eval_cancelled_contract",
+        "customer_public_id": "cus_eval_zhengda",
+        "customer_name": "正达集团",
+        "owner_id": "9",
+        "status": "CANCELLED",
+        "title": "确认旧合同附件",
+        "description": "旧附件已废弃，不应作为未完成任务返回",
+        "due_at": "2026-08-10T10:00:00",
+        "cancelled_at": "2026-08-10T12:00:00"
+      }
+    ]
+  },
+  {
+    "name": "semantic_rank_is_preserved_after_structured_filter",
+    "category": "ranking",
+    "query_text": "预算审批和采购预算",
+    "user_id": 9,
+    "status": "open",
+    "owner_scope": "mine",
+    "semantic_task_public_ids": [
+      "fut_eval_procurement_budget",
+      "fut_eval_budget_open"
+    ],
+    "expected_task_public_ids": [
+      "fut_eval_procurement_budget",
+      "fut_eval_budget_open"
+    ],
+    "forbidden_task_public_ids": [],
+    "tasks": [
+      {
+        "public_id": "fut_eval_budget_open",
+        "customer_public_id": "cus_eval_yuexiu",
+        "customer_name": "越秀金融",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "回访预算审批结果",
+        "description": "确认王总预算是否已经批复",
+        "due_at": "2026-08-12T10:00:00"
+      },
+      {
+        "public_id": "fut_eval_procurement_budget",
+        "customer_public_id": "cus_eval_nanhu",
+        "customer_name": "南湖政务",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "确认采购预算口径",
+        "description": "采购预算需确认财政口径",
+        "due_at": "2026-08-15T09:30:00"
+      }
+    ]
+  },
+  {
+    "name": "no_semantic_candidate_returns_empty_result",
+    "category": "no_hit",
+    "query_text": "回款发票相关任务",
+    "user_id": 9,
+    "status": "open",
+    "owner_scope": "mine",
+    "semantic_task_public_ids": [],
+    "expected_task_public_ids": [],
+    "forbidden_task_public_ids": [
+      "fut_eval_budget_open"
+    ],
+    "tasks": [
+      {
+        "public_id": "fut_eval_budget_open",
+        "customer_public_id": "cus_eval_yuexiu",
+        "customer_name": "越秀金融",
+        "owner_id": "9",
+        "status": "OPEN",
+        "title": "回访预算审批结果",
+        "description": "确认王总预算是否已经批复",
+        "due_at": "2026-08-12T10:00:00"
+      }
+    ]
+  }
+]

@@ -22,6 +22,10 @@ class AgentStrictPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+CustomerIdentifier = Union[str, int]
+LeadIdentifier = Union[str, int]
+
+
 class AgentLeadCreatePayload(AgentStrictPayload):
     lead_name: str = Field(..., min_length=1, max_length=255)
     source: str = Field("其他", min_length=1, max_length=100)
@@ -65,7 +69,7 @@ class AgentInvoiceTitlePayload(AgentStrictPayload):
 
 
 class AgentDeploymentInfoPayload(AgentStrictPayload):
-    customer_id: str = Field(..., min_length=1)
+    customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     deployment_name: str = Field(..., min_length=1, max_length=100)
     server_address: str = Field(..., min_length=1, max_length=500)
     authorized_users: Optional[int] = Field(None, gt=0)
@@ -80,7 +84,7 @@ class AgentCustomerMemberPayload(AgentStrictPayload):
 
 
 class AgentOpportunityPayload(AgentStrictPayload):
-    customer_id: str = Field(..., min_length=1)
+    customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     total_amount: float = Field(..., gt=0)
     user_count: int = Field(..., gt=0)
     license_type: Literal["SUBSCRIPTION", "PERPETUAL"]
@@ -114,12 +118,57 @@ class SearchCreationDuplicatesInput(BaseModel):
 
 
 class GetCustomerContextInput(BaseModel):
-    customer_id: str = Field(..., min_length=1)
+    customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     query_text: Optional[str] = None
 
 
+class ListFollowUpTasksInput(BaseModel):
+    status: Literal["open", "completed", "cancelled", "all"] = "open"
+    due_window: Optional[Literal["today", "this_week", "next_week", "overdue"]] = None
+    customer_id: Optional[CustomerIdentifier] = Field(None, description="客户对外ID；兼容历史任务中的数据库ID")
+    owner_scope: Literal["mine", "customer"] = "mine"
+    query_text: Optional[str] = Field(None, min_length=1, description="可选语义条件，例如预算、试用反馈、合同卡点")
+    limit: int = Field(50, ge=1, le=100)
+
+
+class GetFollowUpTaskDetailInput(BaseModel):
+    task_id: str = Field(..., min_length=1)
+
+
+class ListCompletedWorkInput(BaseModel):
+    window: Literal["today", "this_week", "last_week", "this_month", "custom"] = "this_week"
+    customer_id: Optional[CustomerIdentifier] = Field(None, description="客户对外ID；兼容历史任务中的数据库ID")
+    include_tasks: bool = True
+    include_activities: bool = True
+    include_business_events: bool = True
+    start_at: Optional[str] = Field(
+        None,
+        description="custom 窗口开始时间，ISO 日期或日期时间；日期按当天 00:00 处理",
+    )
+    end_at: Optional[str] = Field(
+        None,
+        description="custom 窗口结束时间，ISO 日期或日期时间；日期按包含当天处理",
+    )
+    cursor: Optional[str] = Field(None, min_length=1, description="上一页返回的 next_cursor")
+    limit: int = Field(50, ge=1, le=100)
+
+
+class SummarizeCompletedWorkInput(ListCompletedWorkInput):
+    question: Optional[str] = Field(None, max_length=200, description="用户原始问题，例如 本周我完成了什么")
+
+
+class ListFollowUpTaskConfirmationCasesInput(BaseModel):
+    limit: int = Field(20, ge=1, le=50)
+
+
+class ResolveFollowUpTaskConfirmationCaseInput(BaseModel):
+    case_id: str = Field(..., min_length=1, description="跟进任务确认Case对外ID（fuc_...）")
+    reply_text: str = Field(..., min_length=1, description="用户对确认问题的自然语言回复")
+    idempotency_suffix: Optional[str] = None
+
+
 class CreateCustomerActivityInput(BaseModel):
-    customer_id: str = Field(..., min_length=1)
+    customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     customer_name: Optional[str] = None
     activity_kind: str = "OTHER_FOLLOW_UP"
     source_content: str = Field(..., min_length=1)
@@ -140,7 +189,7 @@ class CreateCustomerInput(BaseModel):
 
 
 class CreateLeadFollowUpInput(BaseModel):
-    lead_id: str = Field(..., min_length=1)
+    lead_id: LeadIdentifier = Field(..., description="线索对外ID；兼容历史任务中的数据库ID")
     content: str = Field(..., min_length=1)
     method: str = "其他"
     next_action: Optional[str] = None
@@ -149,12 +198,12 @@ class CreateLeadFollowUpInput(BaseModel):
 
 
 class CreateContactInput(BaseModel):
-    customer_id: str = Field(..., min_length=1)
+    customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     contact: AgentContactPayload
 
 
 class CreateInvoiceTitleInput(BaseModel):
-    customer_id: str = Field(..., min_length=1)
+    customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     invoice_title: AgentInvoiceTitlePayload
     set_default: bool = False
 
@@ -164,7 +213,7 @@ class CreateDeploymentInfoInput(BaseModel):
 
 
 class CreateCustomerMemberInput(BaseModel):
-    customer_id: str = Field(..., min_length=1)
+    customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     member: AgentCustomerMemberPayload
 
 
@@ -174,7 +223,7 @@ class CreateOpportunityInput(BaseModel):
 
 
 class ListCustomerOpportunitiesInput(BaseModel):
-    customer_id: str = Field(..., min_length=1)
+    customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     status: Optional[str] = None
     limit: int = Field(20, ge=1, le=100)
 
@@ -221,6 +270,7 @@ class AgentToolSpec:
     is_write: bool
     requires_confirmation: bool
     runner: Callable[[CRMAgentToolService, AgentToolContext, BaseModel], Awaitable[AgentToolResult]]
+    user_reply_confirms: bool = False
 
 
 class AgentToolRegistry:
@@ -307,6 +357,7 @@ class AgentToolRegistry:
             tool_name=name,
             is_write=spec.is_write,
             requires_confirmation=spec.requires_confirmation,
+            user_reply_confirms=spec.user_reply_confirms,
             context=context,
             payload=normalized_payload,
             policy=policy,
@@ -328,6 +379,60 @@ class AgentToolRegistry:
 
         async def get_customer_context(service, context, model):
             return await service.get_customer_context(context, model.customer_id, query_text=model.query_text)
+
+        async def list_follow_up_tasks(service, context, model):
+            return await service.list_follow_up_tasks(
+                context,
+                status=model.status,
+                due_window=model.due_window,
+                customer_id=model.customer_id,
+                owner_scope=model.owner_scope,
+                query_text=model.query_text,
+                limit=model.limit,
+            )
+
+        async def get_follow_up_task_detail(service, context, model):
+            return await service.get_follow_up_task_detail(context, task_id=model.task_id)
+
+        async def list_completed_work(service, context, model):
+            return await service.list_completed_work(
+                context,
+                window=model.window,
+                customer_id=model.customer_id,
+                include_tasks=model.include_tasks,
+                include_activities=model.include_activities,
+                include_business_events=model.include_business_events,
+                start_at=model.start_at,
+                end_at=model.end_at,
+                cursor=model.cursor,
+                limit=model.limit,
+            )
+
+        async def summarize_completed_work(service, context, model):
+            return await service.summarize_completed_work(
+                context,
+                window=model.window,
+                customer_id=model.customer_id,
+                include_tasks=model.include_tasks,
+                include_activities=model.include_activities,
+                include_business_events=model.include_business_events,
+                start_at=model.start_at,
+                end_at=model.end_at,
+                cursor=model.cursor,
+                limit=model.limit,
+                question=model.question,
+            )
+
+        async def list_follow_up_task_confirmation_cases(service, context, model):
+            return await service.list_follow_up_task_confirmation_cases(context, limit=model.limit)
+
+        async def resolve_follow_up_task_confirmation_case(service, context, model):
+            return await service.resolve_follow_up_task_confirmation_case(
+                context,
+                case_id=model.case_id,
+                reply_text=model.reply_text,
+                idempotency_suffix=model.idempotency_suffix,
+            )
 
         async def create_customer_activity(service, context, model):
             return await service.create_customer_activity(
@@ -465,6 +570,48 @@ class AgentToolRegistry:
             ),
             AgentToolSpec("search_creation_duplicates", "创建客户/线索前按团队范围检查重复", SearchCreationDuplicatesInput, False, False, search_creation_duplicates),
             AgentToolSpec("get_customer_context", "获取客户业务上下文", GetCustomerContextInput, False, False, get_customer_context),
+            AgentToolSpec(
+                "list_follow_up_tasks",
+                "查询当前用户或指定客户范围内的跟进任务事实源；query_text 可用向量证据补充语义条件，任务状态仍以结构化表为准",
+                ListFollowUpTasksInput,
+                False,
+                False,
+                list_follow_up_tasks,
+            ),
+            AgentToolSpec("get_follow_up_task_detail", "按任务对外ID获取跟进任务详情和来源活动摘要", GetFollowUpTaskDetailInput, False, False, get_follow_up_task_detail),
+            AgentToolSpec(
+                "list_completed_work",
+                "按时间窗口查询当前用户的结构化工作事实，覆盖已完成任务、客户活动和业务推进事件",
+                ListCompletedWorkInput,
+                False,
+                False,
+                list_completed_work,
+            ),
+            AgentToolSpec(
+                "summarize_completed_work",
+                "基于结构化工作事实生成带 fact_id 引用的工作总结；用于回答周报、月报、本周完成了什么",
+                SummarizeCompletedWorkInput,
+                False,
+                False,
+                summarize_completed_work,
+            ),
+            AgentToolSpec(
+                "list_follow_up_task_confirmation_cases",
+                "查询当前用户待确认的跟进任务处理Case",
+                ListFollowUpTaskConfirmationCasesInput,
+                False,
+                False,
+                list_follow_up_task_confirmation_cases,
+            ),
+            AgentToolSpec(
+                "resolve_follow_up_task_confirmation_case",
+                "应用用户对跟进任务确认Case的自然语言回复；只接受Case对外ID",
+                ResolveFollowUpTaskConfirmationCaseInput,
+                True,
+                False,
+                resolve_follow_up_task_confirmation_case,
+                True,
+            ),
             AgentToolSpec("create_customer_activity", "创建客户活动记录", CreateCustomerActivityInput, True, True, create_customer_activity),
             AgentToolSpec("create_lead", "通过现有线索 API 创建线索", CreateLeadInput, True, True, create_lead),
             AgentToolSpec("create_customer", "通过现有客户 API 创建客户", CreateCustomerInput, True, True, create_customer),

@@ -258,6 +258,7 @@ def _seed_customer_context(db: Session) -> Customer:
             next_action="准备试用环境",
             occurred_at=datetime(2026, 8, 2, 10, 0, 0),
             creator_id="9",
+            owner_id="9",
         )
     )
     customer_fact_service.upsert_fact(

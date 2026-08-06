@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint
 
 from app.core.database import Base
 from app.utils.time import business_now
@@ -9,6 +9,8 @@ class CustomerVectorDocumentSourceType:
     CUSTOMER_PROFILE = "customer_profile"
     CUSTOMER_BRIEF = "customer_brief"
     FOLLOW_UP = "follow_up"
+    SALES_COMMITMENT = "sales_commitment"
+    FOLLOW_UP_TASK = "follow_up_task"
     BUSINESS_FLOW = "business_flow"
     OPPORTUNITY = "opportunity"
     CONTRACT = "contract"
@@ -48,6 +50,7 @@ class CustomerVectorDocument(Base):
     title = Column(String(255), nullable=False, comment="证据标题")
     text = Column(Text, nullable=False, comment="可检索证据文本")
     text_hash = Column(String(64), nullable=False, index=True, comment="证据文本SHA256")
+    metadata_json = Column(JSON, nullable=True, comment="向量证据业务元数据")
     qdrant_point_id = Column(String(64), nullable=False, unique=True, comment="Qdrant point ID")
     occurred_at = Column(DateTime, nullable=True, index=True, comment="业务发生时间")
     confidence = Column(Float, nullable=True, comment="证据置信度")

@@ -1,0 +1,1292 @@
+[
+  {
+    "name": "same_owner_completed_budget_check",
+    "category": "same_owner_complete",
+    "source": "core",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "今天已和王总电话确认，客户预算已经通过，等采购流程。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_budget_check",
+          "owner_id": "user-sales-1",
+          "title": "确认客户预算是否通过"
+        }
+      ]
+    },
+    "result": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_budget_check",
+      "candidate_public_ids": ["fut_budget_check"],
+      "confidence": 0.93,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["预算已经通过", "电话确认"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_budget_check",
+      "required_candidate_public_ids": ["fut_budget_check"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["预算"]
+    }
+  },
+  {
+    "name": "same_owner_delay_budget_check",
+    "category": "same_owner_delay",
+    "source": "core",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "客户今天还没走完预算审批，说下周五再给明确反馈。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_budget_check",
+          "owner_id": "user-sales-1",
+          "title": "确认客户预算是否通过"
+        }
+      ]
+    },
+    "result": {
+      "decision": "DELAY",
+      "task_public_id": "fut_budget_check",
+      "candidate_public_ids": ["fut_budget_check"],
+      "confidence": 0.89,
+      "needs_confirmation": false,
+      "proposed_due_at": "2026-08-14T00:00:00",
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["预算审批", "下周五"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "DELAY",
+      "task_public_id": "fut_budget_check",
+      "required_candidate_public_ids": ["fut_budget_check"],
+      "min_confidence": 0.85,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["下周五"]
+    }
+  },
+  {
+    "name": "same_customer_unrelated_new_demo",
+    "category": "unrelated_new_action",
+    "source": "core",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "客户认可试用，约周五做产品演示。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_budget_check",
+          "owner_id": "user-sales-1",
+          "title": "确认客户预算是否通过"
+        }
+      ]
+    },
+    "result": {
+      "decision": "UNRELATED",
+      "task_public_id": null,
+      "candidate_public_ids": ["fut_budget_check"],
+      "confidence": 0.87,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["产品演示"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "UNRELATED",
+      "required_candidate_public_ids": ["fut_budget_check"],
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["演示"]
+    }
+  },
+  {
+    "name": "cross_owner_completion_needs_confirmation",
+    "category": "cross_owner_confirmation",
+    "source": "core",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-presales-1",
+        "summary": "我替销售和客户确认了预算，客户说预算已经通过。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_sales_budget",
+          "owner_id": "user-sales-1",
+          "title": "确认客户预算是否通过"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_sales_budget",
+      "candidate_public_ids": ["fut_sales_budget"],
+      "confidence": 0.84,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["CROSS_OWNER"],
+      "evidence_terms": ["替销售", "预算已经通过"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_sales_budget",
+      "required_candidate_public_ids": ["fut_sales_budget"],
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["CROSS_OWNER"],
+      "required_evidence_terms": ["预算"]
+    }
+  },
+  {
+    "name": "low_confidence_vague_progress_needs_confirmation",
+    "category": "low_confidence_confirmation",
+    "source": "core",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "客户说这个事情先再看看，晚点同步。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_trial_feedback",
+          "owner_id": "user-sales-1",
+          "title": "确认试用反馈"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_trial_feedback",
+      "candidate_public_ids": ["fut_trial_feedback"],
+      "confidence": 0.58,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["LOW_CONFIDENCE"],
+      "evidence_terms": ["先再看看"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_trial_feedback",
+      "max_confidence": 0.7,
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+    }
+  },
+  {
+    "name": "same_owner_completed_trial_feedback",
+    "category": "same_owner_complete",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-2",
+        "summary": "客户已经提交试用反馈，确认功能满足部门使用。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_trial_feedback_sales2",
+          "owner_id": "user-sales-2",
+          "title": "收集客户试用反馈"
+        }
+      ]
+    },
+    "result": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_trial_feedback_sales2",
+      "candidate_public_ids": ["fut_trial_feedback_sales2"],
+      "confidence": 0.92,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["已经提交试用反馈", "功能满足"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_trial_feedback_sales2",
+      "required_candidate_public_ids": ["fut_trial_feedback_sales2"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["试用反馈"]
+    }
+  },
+  {
+    "name": "same_owner_completed_demo_scheduled",
+    "category": "same_owner_complete",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-2",
+        "summary": "已经和客户确认演示安排，周五下午三点会议已发出。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_schedule_demo_sales2",
+          "owner_id": "user-sales-2",
+          "title": "确认产品演示时间"
+        }
+      ]
+    },
+    "result": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_schedule_demo_sales2",
+      "candidate_public_ids": ["fut_schedule_demo_sales2"],
+      "confidence": 0.94,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["确认演示安排", "会议已发出"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_schedule_demo_sales2",
+      "required_candidate_public_ids": ["fut_schedule_demo_sales2"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["演示"]
+    }
+  },
+  {
+    "name": "same_owner_completed_contract_review",
+    "category": "same_owner_complete",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-3",
+        "summary": "法务条款已确认无异议，客户让我们准备盖章版合同。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_contract_terms_sales3",
+          "owner_id": "user-sales-3",
+          "title": "确认合同条款"
+        }
+      ]
+    },
+    "result": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_contract_terms_sales3",
+      "candidate_public_ids": ["fut_contract_terms_sales3"],
+      "confidence": 0.91,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["法务条款已确认", "无异议"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_contract_terms_sales3",
+      "required_candidate_public_ids": ["fut_contract_terms_sales3"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["条款"]
+    }
+  },
+  {
+    "name": "same_owner_completed_invoice_info",
+    "category": "same_owner_complete",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-3",
+        "summary": "客户已发开票资料，抬头税号和地址电话都齐了。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_invoice_info_sales3",
+          "owner_id": "user-sales-3",
+          "title": "索要客户开票资料"
+        }
+      ]
+    },
+    "result": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_invoice_info_sales3",
+      "candidate_public_ids": ["fut_invoice_info_sales3"],
+      "confidence": 0.95,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["已发开票资料", "抬头税号"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_invoice_info_sales3",
+      "required_candidate_public_ids": ["fut_invoice_info_sales3"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["开票资料"]
+    }
+  },
+  {
+    "name": "same_owner_completed_po_received",
+    "category": "same_owner_complete",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-4",
+        "summary": "采购订单今天已经收到，客户确认本周内走付款。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_po_follow_sales4",
+          "owner_id": "user-sales-4",
+          "title": "跟进采购订单"
+        }
+      ]
+    },
+    "result": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_po_follow_sales4",
+      "candidate_public_ids": ["fut_po_follow_sales4"],
+      "confidence": 0.93,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["采购订单", "已经收到"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_po_follow_sales4",
+      "required_candidate_public_ids": ["fut_po_follow_sales4"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["采购订单"]
+    }
+  },
+  {
+    "name": "same_owner_delay_procurement_meeting",
+    "category": "same_owner_delay",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "采购会临时改到下周二，客户说会后给结论。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_procurement_result",
+          "owner_id": "user-sales-1",
+          "title": "确认采购会结论"
+        }
+      ]
+    },
+    "result": {
+      "decision": "DELAY",
+      "task_public_id": "fut_procurement_result",
+      "candidate_public_ids": ["fut_procurement_result"],
+      "confidence": 0.9,
+      "needs_confirmation": false,
+      "proposed_due_at": "2026-08-11T00:00:00",
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["采购会", "改到下周二"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "DELAY",
+      "task_public_id": "fut_procurement_result",
+      "required_candidate_public_ids": ["fut_procurement_result"],
+      "min_confidence": 0.85,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["下周二"]
+    }
+  },
+  {
+    "name": "same_owner_delay_trial_extension",
+    "category": "same_owner_delay",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-2",
+        "summary": "客户申请再试用一周，下周三给最终反馈。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_trial_final_feedback",
+          "owner_id": "user-sales-2",
+          "title": "确认试用最终反馈"
+        }
+      ]
+    },
+    "result": {
+      "decision": "DELAY",
+      "task_public_id": "fut_trial_final_feedback",
+      "candidate_public_ids": ["fut_trial_final_feedback"],
+      "confidence": 0.88,
+      "needs_confirmation": false,
+      "proposed_due_at": "2026-08-12T00:00:00",
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["再试用一周", "下周三"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "DELAY",
+      "task_public_id": "fut_trial_final_feedback",
+      "required_candidate_public_ids": ["fut_trial_final_feedback"],
+      "min_confidence": 0.85,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["试用一周"]
+    }
+  },
+  {
+    "name": "same_owner_delay_contract_signing",
+    "category": "same_owner_delay",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-3",
+        "summary": "客户负责人出差，合同签署顺延到下周五。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_contract_sign_sales3",
+          "owner_id": "user-sales-3",
+          "title": "跟进合同签署"
+        }
+      ]
+    },
+    "result": {
+      "decision": "DELAY",
+      "task_public_id": "fut_contract_sign_sales3",
+      "candidate_public_ids": ["fut_contract_sign_sales3"],
+      "confidence": 0.9,
+      "needs_confirmation": false,
+      "proposed_due_at": "2026-08-14T00:00:00",
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["合同签署", "顺延到下周五"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "DELAY",
+      "task_public_id": "fut_contract_sign_sales3",
+      "required_candidate_public_ids": ["fut_contract_sign_sales3"],
+      "min_confidence": 0.85,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["顺延"]
+    }
+  },
+  {
+    "name": "same_owner_delay_payment_schedule",
+    "category": "same_owner_delay",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-4",
+        "summary": "财务排款要等月底，客户让我月底前一天再提醒。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_payment_follow_sales4",
+          "owner_id": "user-sales-4",
+          "title": "跟进客户付款安排"
+        }
+      ]
+    },
+    "result": {
+      "decision": "DELAY",
+      "task_public_id": "fut_payment_follow_sales4",
+      "candidate_public_ids": ["fut_payment_follow_sales4"],
+      "confidence": 0.87,
+      "needs_confirmation": false,
+      "proposed_due_at": "2026-08-30T00:00:00",
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["财务排款", "月底前一天"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "DELAY",
+      "task_public_id": "fut_payment_follow_sales4",
+      "required_candidate_public_ids": ["fut_payment_follow_sales4"],
+      "min_confidence": 0.85,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["月底"]
+    }
+  },
+  {
+    "name": "unrelated_budget_task_new_technical_workshop",
+    "category": "unrelated_new_action",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "客户技术团队想先做接口工作坊，周四拉研发一起沟通。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_budget_check_sales1",
+          "owner_id": "user-sales-1",
+          "title": "确认预算审批"
+        }
+      ]
+    },
+    "result": {
+      "decision": "UNRELATED",
+      "task_public_id": null,
+      "candidate_public_ids": ["fut_budget_check_sales1"],
+      "confidence": 0.86,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["接口工作坊", "研发"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "UNRELATED",
+      "required_candidate_public_ids": ["fut_budget_check_sales1"],
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["工作坊"]
+    }
+  },
+  {
+    "name": "unrelated_contract_task_new_competitor_info",
+    "category": "unrelated_new_action",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-2",
+        "summary": "客户提到竞品报价偏低，需要我们下周补一份差异说明。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_contract_terms_sales2",
+          "owner_id": "user-sales-2",
+          "title": "确认合同条款"
+        }
+      ]
+    },
+    "result": {
+      "decision": "UNRELATED",
+      "task_public_id": null,
+      "candidate_public_ids": ["fut_contract_terms_sales2"],
+      "confidence": 0.84,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["竞品报价", "差异说明"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "UNRELATED",
+      "required_candidate_public_ids": ["fut_contract_terms_sales2"],
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["竞品"]
+    }
+  },
+  {
+    "name": "unrelated_payment_task_new_training_request",
+    "category": "unrelated_new_action",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-4",
+        "summary": "客户希望安排管理员培训，付款排期还没有聊到。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_payment_schedule_sales4",
+          "owner_id": "user-sales-4",
+          "title": "确认付款排期"
+        }
+      ]
+    },
+    "result": {
+      "decision": "UNRELATED",
+      "task_public_id": null,
+      "candidate_public_ids": ["fut_payment_schedule_sales4"],
+      "confidence": 0.82,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["管理员培训", "付款排期还没有聊到"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "UNRELATED",
+      "required_candidate_public_ids": ["fut_payment_schedule_sales4"],
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["培训"]
+    }
+  },
+  {
+    "name": "unrelated_trial_task_new_security_review",
+    "category": "unrelated_new_action",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-2",
+        "summary": "客户安全团队要求先走安全问卷，试用反馈暂时未更新。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_trial_feedback_sales2_old",
+          "owner_id": "user-sales-2",
+          "title": "确认试用反馈"
+        }
+      ]
+    },
+    "result": {
+      "decision": "UNRELATED",
+      "task_public_id": null,
+      "candidate_public_ids": ["fut_trial_feedback_sales2_old"],
+      "confidence": 0.83,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["安全问卷", "试用反馈暂时未更新"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "UNRELATED",
+      "required_candidate_public_ids": ["fut_trial_feedback_sales2_old"],
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["安全问卷"]
+    }
+  },
+  {
+    "name": "cross_owner_presales_completed_poc_needs_confirmation",
+    "category": "cross_owner_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-presales-2",
+        "summary": "我帮销售完成了 POC 验收沟通，客户说验收通过。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_sales_poc_acceptance",
+          "owner_id": "user-sales-2",
+          "title": "确认 POC 验收结果"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_sales_poc_acceptance",
+      "candidate_public_ids": ["fut_sales_poc_acceptance"],
+      "confidence": 0.88,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["CROSS_OWNER"],
+      "evidence_terms": ["帮销售", "验收通过"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_sales_poc_acceptance",
+      "required_candidate_public_ids": ["fut_sales_poc_acceptance"],
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["CROSS_OWNER"],
+      "required_evidence_terms": ["验收"]
+    }
+  },
+  {
+    "name": "cross_owner_sales_completed_presales_solution_needs_confirmation",
+    "category": "cross_owner_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "客户认可售前方案，我先记录一下，方案评审已经过了。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_presales_solution_review",
+          "owner_id": "user-presales-1",
+          "title": "跟进方案评审"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_presales_solution_review",
+      "candidate_public_ids": ["fut_presales_solution_review"],
+      "confidence": 0.86,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["CROSS_OWNER"],
+      "evidence_terms": ["售前方案", "评审已经过了"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_presales_solution_review",
+      "required_candidate_public_ids": ["fut_presales_solution_review"],
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["CROSS_OWNER"],
+      "required_evidence_terms": ["评审"]
+    }
+  },
+  {
+    "name": "cross_owner_delay_procurement_needs_confirmation",
+    "category": "cross_owner_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-presales-1",
+        "summary": "客户说采购流程延期到下周三，这个原来是销售在跟。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_sales_procurement_follow",
+          "owner_id": "user-sales-1",
+          "title": "跟进采购流程"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_sales_procurement_follow",
+      "candidate_public_ids": ["fut_sales_procurement_follow"],
+      "confidence": 0.85,
+      "needs_confirmation": true,
+      "proposed_due_at": "2026-08-12T00:00:00",
+      "forbid_auto_reasons": ["CROSS_OWNER"],
+      "evidence_terms": ["采购流程延期", "原来是销售在跟"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_sales_procurement_follow",
+      "required_candidate_public_ids": ["fut_sales_procurement_follow"],
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["CROSS_OWNER"],
+      "required_evidence_terms": ["延期"]
+    }
+  },
+  {
+    "name": "cross_owner_cancel_vendor_switch_needs_confirmation",
+    "category": "cross_owner_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-3",
+        "summary": "客户暂时切到集团统一采购，这个售前验证任务可能不用继续。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_presales_validation",
+          "owner_id": "user-presales-3",
+          "title": "跟进售前验证"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_presales_validation",
+      "candidate_public_ids": ["fut_presales_validation"],
+      "confidence": 0.81,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["CROSS_OWNER", "CANCEL_REQUIRES_CONFIRMATION"],
+      "evidence_terms": ["统一采购", "可能不用继续"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_presales_validation",
+      "required_candidate_public_ids": ["fut_presales_validation"],
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["CROSS_OWNER"],
+      "required_evidence_terms": ["统一采购"]
+    }
+  },
+  {
+    "name": "low_confidence_maybe_budget_done",
+    "category": "low_confidence_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "客户好像说预算差不多了，但没有明确确认。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_budget_check_sales1_vague",
+          "owner_id": "user-sales-1",
+          "title": "确认预算是否通过"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_budget_check_sales1_vague",
+      "candidate_public_ids": ["fut_budget_check_sales1_vague"],
+      "confidence": 0.62,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["LOW_CONFIDENCE", "AMBIGUOUS_EVIDENCE"],
+      "evidence_terms": ["好像", "差不多了"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_budget_check_sales1_vague",
+      "max_confidence": 0.7,
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+    }
+  },
+  {
+    "name": "low_confidence_customer_says_later",
+    "category": "low_confidence_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-2",
+        "summary": "客户说后面再看，目前不确定是不是要继续试用。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_trial_continue_sales2",
+          "owner_id": "user-sales-2",
+          "title": "确认客户是否继续试用"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_trial_continue_sales2",
+      "candidate_public_ids": ["fut_trial_continue_sales2"],
+      "confidence": 0.55,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["LOW_CONFIDENCE", "AMBIGUOUS_EVIDENCE"],
+      "evidence_terms": ["后面再看", "不确定"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_trial_continue_sales2",
+      "max_confidence": 0.7,
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+    }
+  },
+  {
+    "name": "low_confidence_price_objection_unclear",
+    "category": "low_confidence_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-3",
+        "summary": "客户觉得价格还有点问题，说内部再商量一下。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_price_confirm_sales3",
+          "owner_id": "user-sales-3",
+          "title": "确认价格是否接受"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_price_confirm_sales3",
+      "candidate_public_ids": ["fut_price_confirm_sales3"],
+      "confidence": 0.66,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["LOW_CONFIDENCE", "AMBIGUOUS_EVIDENCE"],
+      "evidence_terms": ["价格还有点问题", "再商量一下"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_price_confirm_sales3",
+      "max_confidence": 0.7,
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+    }
+  },
+  {
+    "name": "low_confidence_maybe_cancel_project",
+    "category": "low_confidence_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-4",
+        "summary": "客户说今年可能先不上了，但还要等老板最后拍板。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_project_launch_sales4",
+          "owner_id": "user-sales-4",
+          "title": "确认项目启动计划"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_project_launch_sales4",
+      "candidate_public_ids": ["fut_project_launch_sales4"],
+      "confidence": 0.6,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["LOW_CONFIDENCE", "CANCEL_REQUIRES_CONFIRMATION"],
+      "evidence_terms": ["可能先不上", "最后拍板"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_project_launch_sales4",
+      "max_confidence": 0.7,
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["LOW_CONFIDENCE"]
+    }
+  },
+  {
+    "name": "manual_clear_next_action_keep_open",
+    "category": "manual_clear_boundary",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "页面编辑时清空了下次跟进动作，没有新的进展说明。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_budget_check_manual_clear",
+          "owner_id": "user-sales-1",
+          "title": "确认预算是否通过"
+        }
+      ]
+    },
+    "result": {
+      "decision": "KEEP_OPEN",
+      "task_public_id": "fut_budget_check_manual_clear",
+      "candidate_public_ids": ["fut_budget_check_manual_clear"],
+      "confidence": 0.78,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
+      "evidence_terms": ["清空了下次跟进动作", "没有新的进展"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "KEEP_OPEN",
+      "task_public_id": "fut_budget_check_manual_clear",
+      "required_candidate_public_ids": ["fut_budget_check_manual_clear"],
+      "forbid_confirmation": true,
+      "required_forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
+      "required_evidence_terms": ["没有新的进展"]
+    }
+  },
+  {
+    "name": "manual_delete_source_activity_cancel_same_source",
+    "category": "delete_boundary",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-2",
+        "summary": "用户删除误录入的跟进记录，对应下次回访任务应取消。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_wrong_activity_task",
+          "owner_id": "user-sales-2",
+          "title": "误录入记录生成的回访任务"
+        }
+      ]
+    },
+    "result": {
+      "decision": "CANCEL",
+      "task_public_id": "fut_wrong_activity_task",
+      "candidate_public_ids": ["fut_wrong_activity_task"],
+      "confidence": 0.98,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["删除误录入", "对应任务应取消"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "CANCEL",
+      "task_public_id": "fut_wrong_activity_task",
+      "required_candidate_public_ids": ["fut_wrong_activity_task"],
+      "min_confidence": 0.95,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["误录入"]
+    }
+  },
+  {
+    "name": "manual_clear_next_time_but_progress_complete",
+    "category": "manual_clear_boundary",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-3",
+        "summary": "用户清空下次跟进时间，但正文写明客户已签合同。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_contract_sign_manual_clear",
+          "owner_id": "user-sales-3",
+          "title": "跟进客户合同签署"
+        }
+      ]
+    },
+    "result": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_contract_sign_manual_clear",
+      "candidate_public_ids": ["fut_contract_sign_manual_clear"],
+      "confidence": 0.91,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["清空下次跟进时间", "客户已签合同"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "COMPLETE",
+      "task_public_id": "fut_contract_sign_manual_clear",
+      "required_candidate_public_ids": ["fut_contract_sign_manual_clear"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["已签合同"]
+    }
+  },
+  {
+    "name": "manual_delete_cross_owner_needs_confirmation",
+    "category": "delete_boundary",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "销售删除了一条误录入活动，但候选任务归属售前，需要确认后再处理。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_presales_wrong_activity_task",
+          "owner_id": "user-presales-1",
+          "title": "误录入活动产生的售前任务"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_presales_wrong_activity_task",
+      "candidate_public_ids": ["fut_presales_wrong_activity_task"],
+      "confidence": 0.86,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["CROSS_OWNER"],
+      "evidence_terms": ["删除", "候选任务归属售前"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": "fut_presales_wrong_activity_task",
+      "required_candidate_public_ids": ["fut_presales_wrong_activity_task"],
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["CROSS_OWNER"],
+      "required_evidence_terms": ["归属售前"]
+    }
+  },
+  {
+    "name": "ambiguous_multiple_candidates_needs_confirmation",
+    "category": "low_confidence_confirmation",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-5",
+        "summary": "客户说两个事项都还在推进，下周再一起看看。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_budget_sales5",
+          "owner_id": "user-sales-5",
+          "title": "确认预算"
+        },
+        {
+          "public_id": "fut_security_sales5",
+          "owner_id": "user-sales-5",
+          "title": "确认安全问卷"
+        }
+      ]
+    },
+    "result": {
+      "decision": "ASK_CONFIRMATION",
+      "task_public_id": null,
+      "candidate_public_ids": ["fut_budget_sales5", "fut_security_sales5"],
+      "confidence": 0.57,
+      "needs_confirmation": true,
+      "forbid_auto_reasons": ["LOW_CONFIDENCE", "MULTIPLE_CANDIDATES"],
+      "evidence_terms": ["两个事项", "一起看看"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "ASK_CONFIRMATION",
+      "required_candidate_public_ids": ["fut_budget_sales5", "fut_security_sales5"],
+      "max_confidence": 0.7,
+      "require_confirmation": true,
+      "required_forbid_auto_reasons": ["MULTIPLE_CANDIDATES"]
+    }
+  },
+  {
+    "name": "same_owner_cancel_customer_no_longer_needs_trial",
+    "category": "same_owner_cancel",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-2",
+        "summary": "客户明确说不再试用这个版本，先取消试用安排。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_trial_setup_sales2",
+          "owner_id": "user-sales-2",
+          "title": "安排客户试用"
+        }
+      ]
+    },
+    "result": {
+      "decision": "CANCEL",
+      "task_public_id": "fut_trial_setup_sales2",
+      "candidate_public_ids": ["fut_trial_setup_sales2"],
+      "confidence": 0.91,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["明确说不再试用", "取消试用安排"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "CANCEL",
+      "task_public_id": "fut_trial_setup_sales2",
+      "required_candidate_public_ids": ["fut_trial_setup_sales2"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["不再试用"]
+    }
+  },
+  {
+    "name": "same_owner_cancel_duplicate_follow_up",
+    "category": "same_owner_cancel",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-6",
+        "summary": "这条任务和今天新建的预算跟进重复，旧任务不用保留。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_duplicate_budget_old",
+          "owner_id": "user-sales-6",
+          "title": "旧预算跟进任务"
+        }
+      ]
+    },
+    "result": {
+      "decision": "CANCEL",
+      "task_public_id": "fut_duplicate_budget_old",
+      "candidate_public_ids": ["fut_duplicate_budget_old"],
+      "confidence": 0.9,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": [],
+      "evidence_terms": ["重复", "旧任务不用保留"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "CANCEL",
+      "task_public_id": "fut_duplicate_budget_old",
+      "required_candidate_public_ids": ["fut_duplicate_budget_old"],
+      "min_confidence": 0.9,
+      "forbid_confirmation": true,
+      "required_evidence_terms": ["重复"]
+    }
+  },
+  {
+    "name": "keep_open_partial_budget_progress",
+    "category": "keep_open",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-1",
+        "summary": "客户说预算提交给领导了，但还没有审批结果。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_budget_approval_sales1",
+          "owner_id": "user-sales-1",
+          "title": "确认预算审批结果"
+        }
+      ]
+    },
+    "result": {
+      "decision": "KEEP_OPEN",
+      "task_public_id": "fut_budget_approval_sales1",
+      "candidate_public_ids": ["fut_budget_approval_sales1"],
+      "confidence": 0.8,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
+      "evidence_terms": ["还没有审批结果"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "KEEP_OPEN",
+      "task_public_id": "fut_budget_approval_sales1",
+      "required_candidate_public_ids": ["fut_budget_approval_sales1"],
+      "forbid_confirmation": true,
+      "required_forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
+      "required_evidence_terms": ["还没有审批结果"]
+    }
+  },
+  {
+    "name": "keep_open_no_new_next_step",
+    "category": "keep_open",
+    "source": "semi_real",
+    "execution": "static_decision",
+    "input": {
+      "activity": {
+        "owner_id": "user-sales-7",
+        "summary": "今天只是同步了材料，没有约下一步，也没有确认旧事项进展。"
+      },
+      "open_tasks": [
+        {
+          "public_id": "fut_follow_decision_sales7",
+          "owner_id": "user-sales-7",
+          "title": "确认客户决策进展"
+        }
+      ]
+    },
+    "result": {
+      "decision": "KEEP_OPEN",
+      "task_public_id": "fut_follow_decision_sales7",
+      "candidate_public_ids": ["fut_follow_decision_sales7"],
+      "confidence": 0.79,
+      "needs_confirmation": false,
+      "forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
+      "evidence_terms": ["只是同步了材料", "没有确认旧事项"],
+      "state_mutation_requested": false
+    },
+    "expected": {
+      "decision": "KEEP_OPEN",
+      "task_public_id": "fut_follow_decision_sales7",
+      "required_candidate_public_ids": ["fut_follow_decision_sales7"],
+      "forbid_confirmation": true,
+      "required_forbid_auto_reasons": ["NO_COMPLETION_EVIDENCE"],
+      "required_evidence_terms": ["没有确认旧事项"]
+    }
+  }
+]

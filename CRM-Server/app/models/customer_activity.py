@@ -25,6 +25,7 @@ class CustomerActivity(Base):
     next_action = Column(Text, nullable=True, comment="下一步动作内容")
     occurred_at = Column(DateTime, nullable=False, default=business_now, comment="活动发生时间")
     creator_id = Column(String(100), nullable=False, comment="记录创建人")
+    owner_id = Column(String(100), nullable=False, comment="跟进归属人")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="记录创建时间")
     updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
     effectiveness_score = Column(Integer, nullable=True, comment="AI评估活动有效性得分，满分100")
@@ -40,10 +41,12 @@ class CustomerActivity(Base):
         Index("idx_customer_activity_deal_journey", "deal_journey_id"),
         Index("idx_customer_activity_original_lead", "original_lead_id"),
         Index("idx_customer_activity_creator", "creator_id"),
+        Index("idx_customer_activity_owner", "owner_id"),
         Index("idx_customer_activity_kind", "activity_kind"),
         Index("idx_customer_activity_next_time", "next_follow_time"),
         Index("idx_customer_activity_occurred_at", "occurred_at"),
         Index("idx_customer_activity_created_time", "created_time"),
         Index("idx_customer_activity_team", "team_id"),
+        Index("idx_customer_activity_team_owner_occurred", "team_id", "owner_id", "occurred_at"),
         {"comment": "客户活动表"},
     )

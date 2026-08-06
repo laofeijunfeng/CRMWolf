@@ -23,13 +23,13 @@ from app.schemas.agent import (
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult, JsonDict
 from app.services.customer_alias_service import CustomerAliasService, customer_alias_service
-from app.services.customer_intelligence_context_service import (
-    CustomerIntelligenceContextService,
-    customer_intelligence_context_service,
-)
 from app.services.customer_identity_resolution_service import (
     CustomerIdentityResolutionService,
     customer_identity_resolution_service,
+)
+from app.services.customer_intelligence_context_service import (
+    CustomerIntelligenceContextService,
+    customer_intelligence_context_service,
 )
 from app.services.customer_knowledge_candidate_service import (
     CustomerKnowledgeCandidateResult,
@@ -37,6 +37,17 @@ from app.services.customer_knowledge_candidate_service import (
     CustomerVisibilityPredicate,
     customer_knowledge_candidate_service,
 )
+from app.services.follow_up_task_confirmation_channel_service import (
+    FollowUpTaskConfirmationChannelService,
+    follow_up_task_confirmation_channel_service,
+)
+from app.services.follow_up_task_query_service import FollowUpTaskQueryService, follow_up_task_query_service
+from app.services.work_summary_narrative_service import WorkSummaryNarrativeService
+from app.services.work_summary_narrative_service import (
+    work_summary_narrative_service as default_work_summary_narrative_service,
+)
+from app.services.work_summary_service import WorkSummaryService
+from app.services.work_summary_service import work_summary_service as default_work_summary_service
 from app.utils.public_id import is_opportunity_public_id
 from app.utils.time import business_now
 
@@ -56,12 +67,22 @@ class CRMAgentToolService:
         knowledge_candidate_service: Optional[CustomerKnowledgeCandidateService] = None,
         alias_service: Optional[CustomerAliasService] = None,
         identity_resolution_service: Optional[CustomerIdentityResolutionService] = None,
+        follow_up_query_service: Optional[FollowUpTaskQueryService] = None,
+        follow_up_confirmation_channel_service: Optional[FollowUpTaskConfirmationChannelService] = None,
+        work_summary_service: Optional[WorkSummaryService] = None,
+        work_summary_narrative_service: Optional[WorkSummaryNarrativeService] = None,
     ) -> None:
         self.api_client = api_client or InternalCRMAPIClient()
         self.intelligence_context_service = intelligence_context_service or customer_intelligence_context_service
         self.knowledge_candidate_service = knowledge_candidate_service or customer_knowledge_candidate_service
         self.alias_service = alias_service or customer_alias_service
         self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
+        self.follow_up_query_service = follow_up_query_service or follow_up_task_query_service
+        self.follow_up_confirmation_channel_service = (
+            follow_up_confirmation_channel_service or follow_up_task_confirmation_channel_service
+        )
+        self.work_summary_service = work_summary_service or default_work_summary_service
+        self.work_summary_narrative_service = work_summary_narrative_service or default_work_summary_narrative_service
 
     async def search_customers(self, context: AgentToolContext, keyword: str, limit: int = 10) -> AgentToolResult:
         clean_keyword = keyword.strip()
@@ -359,13 +380,13 @@ class CRMAgentToolService:
     async def get_customer_context(
         self,
         context: AgentToolContext,
-        customer_id: str,
+        customer_id: Union[str, int],
         query_text: Optional[str] = None,
     ) -> AgentToolResult:
-        customer_public_id = str(customer_id)
-        payload = {"customer_id": customer_public_id, "query_text": query_text}
+        payload = {"customer_id": customer_id, "query_text": query_text}
 
         async def call_api():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id)
             detail = await self.api_client.request(
                 "GET",
                 f"/v1/customers/{customer_public_id}",
@@ -384,8 +405,228 @@ class CRMAgentToolService:
 
         return await self._run_read_tool(context, "get_customer_context", payload, call_api)
 
+    async def list_follow_up_tasks(
+        self,
+        context: AgentToolContext,
+        *,
+        status: str = "open",
+        due_window: Optional[str] = None,
+        customer_id: Optional[Union[str, int]] = None,
+        owner_scope: str = "mine",
+        query_text: Optional[str] = None,
+        limit: int = 50,
+    ) -> AgentToolResult:
+        payload = {
+            "status": status,
+            "due_window": due_window,
+            "customer_id": customer_id,
+            "owner_scope": owner_scope,
+            "query_text": query_text,
+            "limit": limit,
+        }
+
+        async def call_db():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
+            return self.follow_up_query_service.list_tasks(
+                context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                status=status,
+                due_window=due_window,
+                customer_public_id=customer_public_id,
+                owner_scope=owner_scope,
+                query_text=query_text,
+                limit=limit,
+            )
+
+        return await self._run_read_tool(context, "list_follow_up_tasks", payload, call_db)
+
+    async def get_follow_up_task_detail(
+        self,
+        context: AgentToolContext,
+        *,
+        task_id: str,
+    ) -> AgentToolResult:
+        payload = {"task_id": task_id}
+
+        async def call_db():
+            return self.follow_up_query_service.get_task_detail(
+                context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                task_public_id=task_id,
+            )
+
+        return await self._run_read_tool(context, "get_follow_up_task_detail", payload, call_db)
+
+    async def list_completed_work(
+        self,
+        context: AgentToolContext,
+        *,
+        window: str = "this_week",
+        customer_id: Optional[Union[str, int]] = None,
+        include_tasks: bool = True,
+        include_activities: bool = True,
+        include_business_events: bool = True,
+        start_at: Optional[str] = None,
+        end_at: Optional[str] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+    ) -> AgentToolResult:
+        payload = {
+            "window": window,
+            "customer_id": customer_id,
+            "include_tasks": include_tasks,
+            "include_activities": include_activities,
+            "include_business_events": include_business_events,
+            "start_at": start_at,
+            "end_at": end_at,
+            "cursor": cursor,
+            "limit": limit,
+        }
+
+        async def call_db():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
+            return self.work_summary_service.list_completed_work(
+                context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                window=window,
+                customer_public_id=customer_public_id,
+                include_tasks=include_tasks,
+                include_activities=include_activities,
+                include_business_events=include_business_events,
+                start_at=start_at,
+                end_at=end_at,
+                cursor=cursor,
+                limit=limit,
+            )
+
+        return await self._run_read_tool(context, "list_completed_work", payload, call_db)
+
+    async def summarize_completed_work(
+        self,
+        context: AgentToolContext,
+        *,
+        window: str = "this_week",
+        customer_id: Optional[Union[str, int]] = None,
+        include_tasks: bool = True,
+        include_activities: bool = True,
+        include_business_events: bool = True,
+        start_at: Optional[str] = None,
+        end_at: Optional[str] = None,
+        cursor: Optional[str] = None,
+        limit: int = 50,
+        question: Optional[str] = None,
+    ) -> AgentToolResult:
+        payload = {
+            "window": window,
+            "customer_id": customer_id,
+            "include_tasks": include_tasks,
+            "include_activities": include_activities,
+            "include_business_events": include_business_events,
+            "start_at": start_at,
+            "end_at": end_at,
+            "cursor": cursor,
+            "limit": limit,
+            "question": question,
+        }
+
+        async def call_db():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
+            facts = self.work_summary_service.list_completed_work(
+                context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                window=window,
+                customer_public_id=customer_public_id,
+                include_tasks=include_tasks,
+                include_activities=include_activities,
+                include_business_events=include_business_events,
+                start_at=start_at,
+                end_at=end_at,
+                cursor=cursor,
+                limit=limit,
+            )
+            narrative = await self.work_summary_narrative_service.summarize_with_metadata(
+                context.db,
+                team_id=context.team_id,
+                question=question or "总结我的工作",
+                work_facts=facts,
+            )
+            return {
+                "facts": facts,
+                "narrative": narrative.result.model_dump(),
+                "summary_source": narrative.summary_source,
+                "model": narrative.model,
+                "fallback_reason": narrative.fallback_reason,
+                "fallback_error": narrative.fallback_error,
+            }
+
+        return await self._run_read_tool(context, "summarize_completed_work", payload, call_db)
+
+    async def list_follow_up_task_confirmation_cases(
+        self,
+        context: AgentToolContext,
+        *,
+        limit: int = 20,
+    ) -> AgentToolResult:
+        payload = {"limit": limit}
+
+        async def call_db():
+            return self.follow_up_confirmation_channel_service.list_pending_cases(
+                context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                limit=limit,
+            )
+
+        return await self._run_read_tool(context, "list_follow_up_task_confirmation_cases", payload, call_db)
+
+    async def resolve_follow_up_task_confirmation_case(
+        self,
+        context: AgentToolContext,
+        *,
+        case_id: str,
+        reply_text: str,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        payload = {"case_id": case_id, "reply_text": reply_text}
+        action_key = self._action_key(
+            "resolve_follow_up_task_confirmation_case",
+            context,
+            payload,
+            idempotency_suffix,
+        )
+
+        async def call_db():
+            return self.follow_up_confirmation_channel_service.resolve_reply(
+                context.db,
+                team_id=context.team_id,
+                user_id=context.user_id,
+                case_public_id=case_id,
+                reply_text=reply_text,
+            )
+
+        return await self._run_write_tool(
+            context,
+            "resolve_follow_up_task_confirmation_case",
+            payload,
+            action_key,
+            call_db,
+        )
+
     @staticmethod
-    def _customer_internal_id(context: AgentToolContext, customer_public_id: str) -> int:
+    def _customer_internal_id(context: AgentToolContext, customer_public_id: Union[str, int]) -> int:
+        if isinstance(customer_public_id, int) or (isinstance(customer_public_id, str) and customer_public_id.isdecimal()):
+            customer = (
+                context.db.query(Customer)
+                .filter(Customer.team_id == context.team_id, Customer.id == int(customer_public_id))
+                .first()
+            )
+            if customer is None:
+                raise ValueError("客户不存在")
+            return int(customer.id)
         customer = (
             context.db.query(Customer)
             .filter(Customer.team_id == context.team_id, Customer.public_id == customer_public_id)
@@ -394,6 +635,32 @@ class CRMAgentToolService:
         if customer is None:
             raise ValueError("客户不存在")
         return int(customer.id)
+
+    @staticmethod
+    def _resolve_customer_public_id(context: AgentToolContext, customer_id: Union[str, int]) -> str:
+        if isinstance(customer_id, int) or (isinstance(customer_id, str) and customer_id.isdecimal()):
+            customer = (
+                context.db.query(Customer)
+                .filter(Customer.team_id == context.team_id, Customer.id == int(customer_id))
+                .first()
+            )
+            if customer is None:
+                raise CRMAPIClientError("客户不存在或无权限访问", status_code=404)
+            return str(customer.public_id)
+        return str(customer_id)
+
+    @staticmethod
+    def _resolve_lead_public_id(context: AgentToolContext, lead_id: Union[str, int]) -> str:
+        if isinstance(lead_id, int) or (isinstance(lead_id, str) and lead_id.isdecimal()):
+            lead = (
+                context.db.query(Lead)
+                .filter(Lead.team_id == context.team_id, Lead.id == int(lead_id))
+                .first()
+            )
+            if lead is None:
+                raise CRMAPIClientError("线索不存在或无权限访问", status_code=404)
+            return str(lead.public_id)
+        return str(lead_id)
 
     def _get_customer_intelligence_payload(
         self,
@@ -427,7 +694,7 @@ class CRMAgentToolService:
     async def create_customer_activity(
         self,
         context: AgentToolContext,
-        customer_id: str,
+        customer_id: Union[str, int],
         activity_kind: str,
         source_content: str,
         customer_name: Optional[str] = None,
@@ -436,9 +703,8 @@ class CRMAgentToolService:
         next_follow_time: Optional[str] = None,
         idempotency_suffix: Optional[str] = None,
     ) -> AgentToolResult:
-        customer_public_id = str(customer_id)
         payload = {
-            "customer_id": customer_public_id,
+            "customer_id": customer_id,
             "customer_name": customer_name,
             "activity_kind": activity_kind,
             "source_content": source_content,
@@ -449,6 +715,7 @@ class CRMAgentToolService:
         action_key = self._action_key("create_customer_activity", context, payload, idempotency_suffix)
 
         async def call_api():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id)
             return await self.api_client.request(
                 "POST",
                 f"/v1/customer-activities/{customer_public_id}",
@@ -506,7 +773,7 @@ class CRMAgentToolService:
     async def create_lead_follow_up(
         self,
         context: AgentToolContext,
-        lead_id: str,
+        lead_id: Union[str, int],
         content: str,
         method: str = "其他",
         next_action: Optional[str] = None,
@@ -523,9 +790,10 @@ class CRMAgentToolService:
         action_key = self._action_key("create_lead_follow_up", context, payload, idempotency_suffix)
 
         async def call_api():
+            lead_public_id = self._resolve_lead_public_id(context, lead_id)
             return await self.api_client.request(
                 "POST",
-                f"/v1/leads/{lead_id}/follow-ups",
+                f"/v1/leads/{lead_public_id}/follow-ups",
                 context.authorization,
                 json={
                     "content": content,
@@ -537,14 +805,15 @@ class CRMAgentToolService:
 
         return await self._run_write_tool(context, "create_lead_follow_up", payload, action_key, call_api)
 
-    async def create_contact(self, context: AgentToolContext, customer_id: str, contact: JsonDict) -> AgentToolResult:
+    async def create_contact(self, context: AgentToolContext, customer_id: Union[str, int], contact: JsonDict) -> AgentToolResult:
         payload = {"customer_id": customer_id, "contact": contact}
         action_key = self._action_key("create_contact", context, payload, None)
 
         async def call_api():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id)
             return await self.api_client.request(
                 "POST",
-                f"/v1/customers/{customer_id}/contacts",
+                f"/v1/customers/{customer_public_id}/contacts",
                 context.authorization,
                 json=contact,
             )
@@ -554,7 +823,7 @@ class CRMAgentToolService:
     async def create_invoice_title(
         self,
         context: AgentToolContext,
-        customer_id: str,
+        customer_id: Union[str, int],
         invoice_title: JsonDict,
         set_default: bool = False,
     ) -> AgentToolResult:
@@ -566,11 +835,12 @@ class CRMAgentToolService:
         action_key = self._action_key("create_invoice_title", context, payload, None)
 
         async def call_api():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id)
             created = await self.api_client.request(
                 "POST",
                 "/v1/invoice-titles",
                 context.authorization,
-                params={"customer_id": customer_id},
+                params={"customer_id": customer_public_id},
                 json=invoice_title,
             )
             if set_default and isinstance(created, dict) and created.get("id"):
@@ -593,11 +863,14 @@ class CRMAgentToolService:
         action_key = self._action_key("create_deployment_info", context, payload, None)
 
         async def call_api():
+            api_payload = dict(deployment_info)
+            if api_payload.get("customer_id") is not None:
+                api_payload["customer_id"] = self._resolve_customer_public_id(context, api_payload["customer_id"])
             return await self.api_client.request(
                 "POST",
                 "/v1/deployment-infos/",
                 context.authorization,
-                json=deployment_info,
+                json=api_payload,
             )
 
         return await self._run_write_tool(context, "create_deployment_info", payload, action_key, call_api)
@@ -605,16 +878,17 @@ class CRMAgentToolService:
     async def create_customer_member(
         self,
         context: AgentToolContext,
-        customer_id: str,
+        customer_id: Union[str, int],
         member: JsonDict,
     ) -> AgentToolResult:
         payload = {"customer_id": customer_id, "member": member}
         action_key = self._action_key("create_customer_member", context, payload, None)
 
         async def call_api():
+            customer_public_id = self._resolve_customer_public_id(context, customer_id)
             return await self.api_client.request(
                 "POST",
-                f"/v1/customers/{customer_id}/members",
+                f"/v1/customers/{customer_public_id}/members",
                 context.authorization,
                 json=member,
             )
@@ -632,11 +906,14 @@ class CRMAgentToolService:
         action_key = self._action_key("create_opportunity", context, payload, idempotency_suffix)
 
         async def call_api():
+            api_payload = dict(opportunity)
+            if api_payload.get("customer_id") is not None:
+                api_payload["customer_id"] = self._resolve_customer_public_id(context, api_payload["customer_id"])
             return await self.api_client.request(
                 "POST",
                 "/v1/opportunities/",
                 context.authorization,
-                json=opportunity,
+                json=api_payload,
             )
 
         return await self._run_write_tool(context, "create_opportunity", payload, action_key, call_api)
@@ -644,7 +921,7 @@ class CRMAgentToolService:
     async def list_customer_opportunities(
         self,
         context: AgentToolContext,
-        customer_id: str,
+        customer_id: Union[str, int],
         status: Optional[str] = None,
         limit: int = 20,
     ) -> AgentToolResult:
@@ -654,11 +931,13 @@ class CRMAgentToolService:
         payload = dict(params)
 
         async def call_api():
+            api_params = dict(params)
+            api_params["customer_id"] = self._resolve_customer_public_id(context, customer_id)
             return await self.api_client.request(
                 "GET",
                 "/v1/opportunities/",
                 context.authorization,
-                params=params,
+                params=api_params,
             )
 
         return await self._run_read_tool(context, "list_customer_opportunities", payload, call_api)

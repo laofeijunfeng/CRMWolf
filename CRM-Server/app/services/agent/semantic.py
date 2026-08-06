@@ -14,6 +14,7 @@ from app.services.ai_service import ai_service
 from app.services.agent.prompts import (
     build_confirmation_intent_messages,
     build_resource_resolution_messages,
+    build_turn_intent_messages,
     CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT,
     CRM_AGENT_RESOURCE_RESOLUTION_SYSTEM_PROMPT,
     CRM_AGENT_SEMANTIC_SYSTEM_PROMPT,
@@ -29,6 +30,7 @@ from app.services.agent.schemas import (
     AgentPendingInterruptionDecision,
     AgentResourceResolutionResult,
     AgentSemanticParseResult,
+    AgentTurnIntentDecision,
     AgentTurnRelationDecision,
 )
 from app.services.agent.types import JSONDict
@@ -300,6 +302,52 @@ class AgentSemanticParser:
             return AgentTurnRelationDecision.model_validate(parsed)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise AgentSemanticParserError(f"AI 本轮关系判断结果无效：{str(exc)}") from exc
+
+    async def assess_turn_intent(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_message: str,
+        current_interrupt: Optional[dict] = None,
+        active_task: Optional[dict] = None,
+        suspended_tasks: Optional[list[dict]] = None,
+        memory: Optional[AgentMemorySnapshot] = None,
+        current_date: Optional[date] = None,
+    ) -> AgentTurnIntentDecision:
+        config = ai_config_crud.get_config(db, team_id)
+        if not config:
+            raise AgentSemanticParserError("AI 配置未设置，无法判断本轮意图。")
+
+        api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
+        if not api_key:
+            raise AgentSemanticParserError("AI API Key 未设置，无法判断本轮意图。")
+
+        memory_json = (memory or AgentMemorySnapshot()).model_dump_json(exclude_none=True)
+        current_interrupt_json = json.dumps(current_interrupt or {}, ensure_ascii=False, default=str)
+        active_task_json = json.dumps(active_task or {}, ensure_ascii=False, default=str)
+        suspended_tasks_json = json.dumps(suspended_tasks or [], ensure_ascii=False, default=str)
+        raw = await self.ai_client._stream_chat_collect(
+            api_host=config.api_host,
+            api_key=api_key,
+            model=config.model_name,
+            messages=build_turn_intent_messages(
+                user_message,
+                current_interrupt_json,
+                active_task_json,
+                suspended_tasks_json,
+                memory_json,
+                current_date=current_date,
+            ),
+            temperature=0.0,
+            max_tokens=400,
+            response_format={"type": "json_object"},
+        )
+        try:
+            parsed = json.loads(self._clean_json(raw))
+            return AgentTurnIntentDecision.model_validate(parsed)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise AgentSemanticParserError(f"AI 本轮意图判断结果无效：{str(exc)}") from exc
 
     async def parse_with_metadata(
         self,

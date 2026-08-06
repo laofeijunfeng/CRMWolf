@@ -52,6 +52,7 @@ class PendingTaskSideEffectHandler:
                 context.session,
                 suspended_task,
                 graph_state.get("suspend_reason") or "用户开启了新的业务流程",
+                suspension_kind=_suspension_kind(graph_state),
             )
 
         task = _task_from_result(graph_state, context)
@@ -85,6 +86,11 @@ class PendingTaskSideEffectHandler:
 
 def _has_pending_task_result(graph_state: PendingTaskGraphResult) -> bool:
     return bool(graph_state.get("has_active_task") or graph_state.get("handled") or graph_state.get("events"))
+
+
+def _suspension_kind(graph_state: PendingTaskGraphResult) -> str | None:
+    value = graph_state.get("suspension_kind")
+    return value if value in {"paused", "dismissed"} else None
 
 
 def _task_from_result(

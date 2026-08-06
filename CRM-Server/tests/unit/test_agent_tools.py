@@ -1,13 +1,14 @@
 """CRM AI Agent tool adapter tests."""
-from datetime import date
+from datetime import date, datetime
+from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import BigInteger
-import pytest
-from pydantic import ValidationError
 
 from app.core.database import Base
 from app.models.agent import (
@@ -18,29 +19,49 @@ from app.models.agent import (
     AgentToolCall,
     AgentToolCallStatus,
 )
+from app.models.contract import Contract
 from app.models.customer import Customer, CustomerMember
+from app.models.customer_activity import CustomerActivity
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
 from app.models.customer_identity_term import CustomerIdentityTerm
+from app.models.customer_vector_document import CustomerVectorDocument
+from app.models.invoice import InvoiceApplication
 from app.models.lead import Lead, LeadSource, LeadStatus
+from app.models.license_application import LicenseApplication
 from app.models.opportunity import Opportunity
+from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.permission import Permission
+from app.models.procurement import OpportunityStageSnapshot
 from app.models.role import Role
 from app.models.role_permission import RolePermission
+from app.models.sales_commitment import (
+    FollowUpTask,
+    FollowUpTaskConfirmationCase,
+    FollowUpTaskConfirmationResolutionAction,
+    FollowUpTaskConfirmationStatus,
+    FollowUpTaskEvent,
+    FollowUpTaskSourceType,
+    FollowUpTaskStatus,
+    SalesCommitment,
+)
 from app.models.user import User
 from app.models.user_role import UserRole
-from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.middleware import build_langchain_hitl_middleware
 from app.services.agent.tool_registry import AgentToolRegistry
+from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.tools.service import CRMAgentToolService
 from app.services.customer_fact_service import CustomerFactInput, customer_fact_service
 from app.services.customer_identity_resolution_service import generated_identity_terms_for_customer_name
 from app.services.customer_knowledge_candidate_service import CustomerKnowledgeCandidateService
 from app.services.customer_qdrant_index_service import CustomerEvidenceSearchResult
-
+from app.services.follow_up_task_query_service import FollowUpTaskQueryService
+from app.services.follow_up_task_semantic_evidence_service import FollowUpTaskSemanticEvidenceService
 
 CUSTOMER_PUBLIC_ID = "cus_test_101"
 LEAD_PUBLIC_ID = "lead_test_8101"
 OPPORTUNITY_PUBLIC_ID = "opp_00000000000000000000000000001bbd"
+FOLLOW_UP_TASK_PUBLIC_ID = "fut_00000000000000000000000000001001"
+FOLLOW_UP_CONFIRMATION_CASE_PUBLIC_ID = "fuc_00000000000000000000000000002001"
 
 
 @compiles(BigInteger, "sqlite")
@@ -206,6 +227,11 @@ class DisabledCustomerKnowledgeCandidateService:
         )
 
 
+class FailingFollowUpTaskSemanticEvidenceService:
+    def recall(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("structured task query should not use semantic evidence")
+
+
 def _db_session(extra_tables=None):
     engine = create_engine(
         "sqlite:///:memory:",
@@ -221,7 +247,17 @@ def _db_session(extra_tables=None):
     ]
     if extra_tables:
         tables.extend(extra_tables)
-    Base.metadata.create_all(engine, tables=tables)
+    renamed_indexes = []
+    for table in tables:
+        for index in table.indexes:
+            if index.name:
+                renamed_indexes.append((index, index.name))
+                index.name = f"{table.name}_{index.name}"
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        for index, original_name in renamed_indexes:
+            index.name = original_name
     Session = sessionmaker(bind=engine)
     session = Session()
     return engine, session
@@ -276,6 +312,128 @@ def _grant_permissions(db, user_id, team_id, permission_codes):
         db.add(RolePermission(role_id=role.id, permission_id=permission.id))
     db.add(UserRole(user_id=user_id, role_id=role.id, team_id=team_id))
     db.commit()
+
+
+def _sales_commitment_tables():
+    return [
+        User.__table__,
+        Role.__table__,
+        Permission.__table__,
+        RolePermission.__table__,
+        UserRole.__table__,
+        Customer.__table__,
+        CustomerMember.__table__,
+        CustomerActivity.__table__,
+        CustomerVectorDocument.__table__,
+        Opportunity.__table__,
+        OpportunityStageSnapshot.__table__,
+        Contract.__table__,
+        PaymentPlan.__table__,
+        PaymentRecord.__table__,
+        InvoiceApplication.__table__,
+        LicenseApplication.__table__,
+        SalesCommitment.__table__,
+        FollowUpTask.__table__,
+        FollowUpTaskEvent.__table__,
+        FollowUpTaskConfirmationCase.__table__,
+    ]
+
+
+def _seed_follow_up_task_customer(db, *, customer_owner_id="2", add_member=False):
+    db.add(Customer(
+        id=101,
+        public_id=CUSTOMER_PUBLIC_ID,
+        team_id=1,
+        account_name="越秀金融",
+        city="广州",
+        owner_id=customer_owner_id,
+        creator_id=customer_owner_id,
+    ))
+    if add_member:
+        db.add(CustomerMember(
+            id=201,
+            team_id=1,
+            customer_id=101,
+            user_id="2",
+            member_role="PRESALES",
+            access_level="FOLLOW_UP",
+            created_by="9",
+            is_active=True,
+        ))
+    db.flush()
+
+
+def _seed_follow_up_task(
+    db,
+    *,
+    task_id,
+    public_id,
+    customer_id=101,
+    owner_id="2",
+    status=FollowUpTaskStatus.OPEN,
+    due_at=datetime(2026, 8, 6, 9, 30, 0),
+    completed_at=None,
+    source_activity_id=None,
+    commitment_id=None,
+    title=None,
+    description="确认客户预算进展",
+):
+    task = FollowUpTask(
+        id=task_id,
+        public_id=public_id,
+        team_id=1,
+        customer_id=customer_id,
+        commitment_id=commitment_id,
+        owner_id=owner_id,
+        creator_id=owner_id,
+        title=title or f"跟进任务 {task_id}",
+        description=description,
+        status=status,
+        due_at=due_at,
+        due_at_text="今天",
+        due_at_granularity="DATETIME",
+        due_at_timezone="Asia/Shanghai",
+        source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+        source_key=f"activity:{source_activity_id}" if source_activity_id is not None else f"task-source:{task_id}",
+        source_activity_id=source_activity_id,
+        confidence=0.91,
+        evidence_json={"quote": "客户说本周看预算"},
+        task_hash=f"task-hash-{task_id}",
+        completed_at=completed_at,
+    )
+    db.add(task)
+    db.flush()
+    return task
+
+
+def _seed_follow_up_confirmation_case(
+    db,
+    *,
+    case_id=2001,
+    public_id=FOLLOW_UP_CONFIRMATION_CASE_PUBLIC_ID,
+    task: FollowUpTask,
+    owner_id="2",
+    suggested_action=FollowUpTaskConfirmationResolutionAction.COMPLETE,
+):
+    case = FollowUpTaskConfirmationCase(
+        id=case_id,
+        public_id=public_id,
+        team_id=1,
+        task_id=task.id,
+        customer_id=task.customer_id,
+        owner_id=owner_id,
+        creator_id=owner_id,
+        status=FollowUpTaskConfirmationStatus.PENDING,
+        suggested_action=suggested_action,
+        confirmation_hash=f"confirmation-hash-{case_id}",
+        question_text=f"上次安排的「{task.title}」这次是否已经完成?",
+        source_activity_id=task.source_activity_id,
+        source_public_id=task.source_public_id,
+        source_plan_json={"plan_source": "unit_test"},
+    )
+    db.add(case)
+    db.flush()
+    return case
 
 
 @pytest.mark.asyncio
@@ -1300,6 +1458,643 @@ async def test_agent_tool_get_customer_context_fetches_opportunities_through_api
 
 
 @pytest.mark.asyncio
+async def test_agent_tool_list_follow_up_tasks_returns_current_owner_tasks_only(monkeypatch):
+    fixed_now = datetime(2026, 8, 6, 10, 0, 0)
+    monkeypatch.setattr("app.utils.time.business_now", lambda: fixed_now)
+    monkeypatch.setattr("app.services.follow_up_task_query_service.business_now", lambda: fixed_now)
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(
+        api_client=FakeCRMAPIClient(),
+        follow_up_query_service=FollowUpTaskQueryService(
+            semantic_evidence_service=FailingFollowUpTaskSemanticEvidenceService(),
+        ),
+    )
+    try:
+        _seed_follow_up_task_customer(db)
+        expected = _seed_follow_up_task(
+            db,
+            task_id=1001,
+            public_id=FOLLOW_UP_TASK_PUBLIC_ID,
+            owner_id="2",
+            due_at=datetime(2026, 8, 6, 9, 30, 0),
+        )
+        _seed_follow_up_task(
+            db,
+            task_id=1002,
+            public_id="fut_00000000000000000000000000001002",
+            owner_id="3",
+            due_at=datetime(2026, 8, 6, 9, 30, 0),
+        )
+        _seed_follow_up_task(
+            db,
+            task_id=1003,
+            public_id="fut_00000000000000000000000000001003",
+            owner_id="2",
+            due_at=datetime(2026, 8, 7, 9, 30, 0),
+        )
+        _seed_follow_up_task(
+            db,
+            task_id=1004,
+            public_id="fut_00000000000000000000000000001004",
+            owner_id="2",
+            status=FollowUpTaskStatus.COMPLETED,
+            due_at=datetime(2026, 8, 6, 9, 30, 0),
+            completed_at=datetime(2026, 8, 6, 9, 45, 0),
+        )
+        db.commit()
+
+        result = await service.list_follow_up_tasks(_context(db), due_window="today")
+
+        assert result.success is True
+        assert result.data["total"] == 1
+        assert result.data["items"][0]["id"] == expected.public_id
+        assert result.data["items"][0]["customer"]["id"] == CUSTOMER_PUBLIC_ID
+        assert result.data["semantic_retrieval"]["status"] == "not_attempted"
+        assert "source_activity_id" not in result.data["items"][0]
+        assert db.query(AgentToolCall).one().tool_name == "list_follow_up_tasks"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_list_follow_up_tasks_uses_semantic_evidence_as_filtered_candidates():
+    engine, db = _db_session(_sales_commitment_tables())
+    budget_task_id = "fut_00000000000000000000000000001021"
+    completed_task_id = "fut_00000000000000000000000000001022"
+    other_owner_task_id = "fut_00000000000000000000000000001023"
+    qdrant_service = FakeCustomerQdrantIndexService([
+        CustomerEvidenceSearchResult(
+            id="task-hit-budget",
+            score=0.91,
+            tenant_id=1,
+            team_id=1,
+            customer_id=101,
+            source_type="follow_up_task",
+            source_object_id=budget_task_id,
+            business_object_type="follow_up_task",
+            business_object_id=budget_task_id,
+            title="跟进任务: 回访预算",
+            text="客户说本周确认预算，需要周五回访预算进展。",
+            metadata_json={"task_public_id": budget_task_id, "status": FollowUpTaskStatus.OPEN},
+        ),
+        CustomerEvidenceSearchResult(
+            id="task-hit-completed",
+            score=0.89,
+            tenant_id=1,
+            team_id=1,
+            customer_id=101,
+            source_type="follow_up_task",
+            source_object_id=completed_task_id,
+            business_object_type="follow_up_task",
+            business_object_id=completed_task_id,
+            title="跟进任务: 已完成预算确认",
+            text="客户预算已经确认。",
+            metadata_json={"task_public_id": completed_task_id, "status": FollowUpTaskStatus.OPEN},
+        ),
+        CustomerEvidenceSearchResult(
+            id="task-hit-other-owner",
+            score=0.87,
+            tenant_id=1,
+            team_id=1,
+            customer_id=101,
+            source_type="follow_up_task",
+            source_object_id=other_owner_task_id,
+            business_object_type="follow_up_task",
+            business_object_id=other_owner_task_id,
+            title="跟进任务: 其他人的预算任务",
+            text="售前需要确认预算技术口径。",
+            metadata_json={"task_public_id": other_owner_task_id, "status": FollowUpTaskStatus.OPEN},
+        ),
+    ])
+    service = CRMAgentToolService(
+        api_client=FakeCRMAPIClient(),
+        follow_up_query_service=FollowUpTaskQueryService(
+            semantic_evidence_service=FollowUpTaskSemanticEvidenceService(
+                embedding_service=FakeCustomerEmbeddingService(),
+                qdrant_index_service=qdrant_service,
+            ),
+        ),
+    )
+    try:
+        _seed_follow_up_task_customer(db)
+        budget_task = _seed_follow_up_task(
+            db,
+            task_id=1021,
+            public_id=budget_task_id,
+            owner_id="2",
+            title="回访预算",
+            description="确认客户预算进展",
+        )
+        _seed_follow_up_task(
+            db,
+            task_id=1022,
+            public_id=completed_task_id,
+            owner_id="2",
+            status=FollowUpTaskStatus.COMPLETED,
+            completed_at=datetime(2026, 8, 6, 10, 30, 0),
+            title="已完成预算确认",
+            description="客户预算已经确认",
+        )
+        _seed_follow_up_task(
+            db,
+            task_id=1023,
+            public_id=other_owner_task_id,
+            owner_id="9",
+            title="其他人的预算任务",
+            description="售前确认预算技术口径",
+        )
+        db.commit()
+
+        result = await service.list_follow_up_tasks(_context(db), query_text="预算相关未完成任务")
+
+        assert result.success is True
+        assert [item["id"] for item in result.data["items"]] == [budget_task.public_id]
+        assert result.data["items"][0]["status"] == FollowUpTaskStatus.OPEN
+        assert result.data["items"][0]["semantic_evidence"][0]["object_public_id"] == budget_task.public_id
+        assert result.data["semantic_retrieval"]["status"] == "ok"
+        assert result.data["usage_policy"]["task_state_source"] == "mysql"
+        assert qdrant_service.team_queries[0]["source_types"] == ("follow_up_task", "sales_commitment")
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_list_follow_up_tasks_maps_commitment_semantic_hit_back_to_task():
+    engine, db = _db_session(_sales_commitment_tables())
+    commitment_public_id = "scm_00000000000000000000000000003021"
+    task_public_id = "fut_00000000000000000000000000003021"
+    qdrant_service = FakeCustomerQdrantIndexService([
+        CustomerEvidenceSearchResult(
+            id="commitment-hit-budget",
+            score=0.92,
+            tenant_id=1,
+            team_id=1,
+            customer_id=101,
+            source_type="sales_commitment",
+            source_object_id=commitment_public_id,
+            business_object_type="sales_commitment",
+            business_object_id=commitment_public_id,
+            title="销售承诺: 下周确认预算",
+            text="承诺下周三回访客户预算进展。",
+            metadata_json={"commitment_public_id": commitment_public_id, "status": "OPEN"},
+        )
+    ])
+    service = CRMAgentToolService(
+        api_client=FakeCRMAPIClient(),
+        follow_up_query_service=FollowUpTaskQueryService(
+            semantic_evidence_service=FollowUpTaskSemanticEvidenceService(
+                embedding_service=FakeCustomerEmbeddingService(),
+                qdrant_index_service=qdrant_service,
+            ),
+        ),
+    )
+    try:
+        _seed_follow_up_task_customer(db)
+        commitment = SalesCommitment(
+            id=3021,
+            public_id=commitment_public_id,
+            team_id=1,
+            customer_id=101,
+            owner_id="2",
+            creator_id="2",
+            title="下周确认预算",
+            content="下周三回访客户预算进展",
+            status="OPEN",
+            source_type=FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
+            source_key="activity:3021",
+            due_at=datetime(2026, 8, 12, 9, 30, 0),
+            due_at_text="下周三",
+            commitment_hash="commitment-hash-3021",
+        )
+        db.add(commitment)
+        db.flush()
+        task = _seed_follow_up_task(
+            db,
+            task_id=3021,
+            public_id=task_public_id,
+            owner_id="2",
+            commitment_id=commitment.id,
+            title="回访预算",
+            description="下周三回访客户预算进展",
+        )
+        db.commit()
+
+        result = await service.list_follow_up_tasks(_context(db), query_text="预算进展")
+
+        assert result.success is True
+        assert [item["id"] for item in result.data["items"]] == [task.public_id]
+        assert result.data["items"][0]["semantic_evidence"][0]["source_type"] == "sales_commitment"
+        assert result.data["items"][0]["semantic_evidence"][0]["object_public_id"] == commitment.public_id
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_registry_accepts_follow_up_task_query_text():
+    engine, db = _db_session(_sales_commitment_tables())
+    task_public_id = "fut_00000000000000000000000000001031"
+    qdrant_service = FakeCustomerQdrantIndexService([
+        CustomerEvidenceSearchResult(
+            id="task-hit-trial",
+            score=0.9,
+            tenant_id=1,
+            team_id=1,
+            customer_id=101,
+            source_type="follow_up_task",
+            source_object_id=task_public_id,
+            business_object_type="follow_up_task",
+            business_object_id=task_public_id,
+            title="跟进任务: 试用反馈",
+            text="客户周五反馈试用体验。",
+            metadata_json={"task_public_id": task_public_id, "status": FollowUpTaskStatus.OPEN},
+        )
+    ])
+    service = CRMAgentToolService(
+        api_client=FakeCRMAPIClient(),
+        follow_up_query_service=FollowUpTaskQueryService(
+            semantic_evidence_service=FollowUpTaskSemanticEvidenceService(
+                embedding_service=FakeCustomerEmbeddingService(),
+                qdrant_index_service=qdrant_service,
+            ),
+        ),
+    )
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        _seed_follow_up_task_customer(db)
+        _seed_follow_up_task(
+            db,
+            task_id=1031,
+            public_id=task_public_id,
+            owner_id="2",
+            title="试用反馈",
+            description="客户周五反馈试用体验",
+        )
+        db.commit()
+
+        result = await registry.execute(
+            "list_follow_up_tasks",
+            _context(db),
+            {"query_text": "试用反馈", "status": "open"},
+        )
+
+        assert result.success is True
+        assert [item["id"] for item in result.data["items"]] == [task_public_id]
+        tool_call = db.query(AgentToolCall).one()
+        assert tool_call.request_json["query_text"] == "试用反馈"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_list_follow_up_tasks_customer_scope_uses_customer_visibility():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    try:
+        _grant_permissions(db, user_id=2, team_id=1, permission_codes=["customer:view:own"])
+        _seed_follow_up_task_customer(db, customer_owner_id="9", add_member=True)
+        _seed_follow_up_task(
+            db,
+            task_id=1005,
+            public_id="fut_00000000000000000000000000001005",
+            owner_id="9",
+            due_at=datetime(2026, 8, 6, 9, 30, 0),
+        )
+        db.commit()
+
+        result = await service.list_follow_up_tasks(
+            _context(db),
+            customer_id=CUSTOMER_PUBLIC_ID,
+            owner_scope="customer",
+        )
+
+        assert result.success is True
+        assert result.data["total"] == 1
+        assert result.data["items"][0]["owner_id"] == "9"
+        assert result.data["filters"]["customer_id"] == CUSTOMER_PUBLIC_ID
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_get_follow_up_task_detail_uses_public_id_and_hides_internal_activity_id():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    try:
+        _seed_follow_up_task_customer(db)
+        db.add(CustomerActivity(
+            id=301,
+            team_id=1,
+            customer_id=101,
+            activity_kind="PHONE_FOLLOW_UP",
+            title="电话沟通预算",
+            source_content="客户说本周看预算，周五再联系",
+            summary="客户还在确认预算",
+            next_action="周五回访预算进展",
+            next_follow_time=datetime(2026, 8, 7, 9, 30, 0),
+            occurred_at=datetime(2026, 8, 6, 9, 0, 0),
+            owner_id="2",
+            creator_id="2",
+        ))
+        task = _seed_follow_up_task(
+            db,
+            task_id=1006,
+            public_id="fut_00000000000000000000000000001006",
+            owner_id="2",
+            due_at=datetime(2026, 8, 7, 9, 30, 0),
+            source_activity_id=301,
+        )
+        db.commit()
+
+        result = await service.get_follow_up_task_detail(_context(db), task_id=task.public_id)
+
+        assert result.success is True
+        assert result.data["id"] == task.public_id
+        assert result.data["customer"]["id"] == CUSTOMER_PUBLIC_ID
+        assert result.data["source_activity"]["next_action"] == "周五回访预算进展"
+        assert "source_activity_id" not in result.data
+        assert "id" not in result.data["source_activity"]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_list_completed_work_returns_completed_tasks_and_activities(monkeypatch):
+    fixed_now = datetime(2026, 8, 6, 10, 0, 0)
+    monkeypatch.setattr("app.utils.time.business_now", lambda: fixed_now)
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    try:
+        _seed_follow_up_task_customer(db)
+        task = _seed_follow_up_task(
+            db,
+            task_id=1007,
+            public_id="fut_00000000000000000000000000001007",
+            owner_id="2",
+            status=FollowUpTaskStatus.COMPLETED,
+            due_at=datetime(2026, 8, 5, 9, 30, 0),
+            completed_at=datetime(2026, 8, 5, 17, 0, 0),
+        )
+        db.add_all([
+            CustomerActivity(
+                id=302,
+                team_id=1,
+                customer_id=101,
+                activity_kind="WECHAT_FOLLOW_UP",
+                title="微信同步试用",
+                source_content="客户认可试用方案",
+                summary="客户认可试用方案",
+                occurred_at=datetime(2026, 8, 6, 9, 0, 0),
+                owner_id="2",
+                creator_id="2",
+            ),
+            CustomerActivity(
+                id=303,
+                team_id=1,
+                customer_id=101,
+                activity_kind="PHONE_FOLLOW_UP",
+                title="其他人的跟进",
+                source_content="其他销售的记录",
+                summary="其他销售的记录",
+                occurred_at=datetime(2026, 8, 6, 9, 0, 0),
+                owner_id="9",
+                creator_id="9",
+            ),
+        ])
+        db.commit()
+
+        result = await service.list_completed_work(_context(db), window="this_week")
+
+        assert result.success is True
+        assert result.data["completed_tasks"][0]["id"] == task.public_id
+        assert [activity["title"] for activity in result.data["activities"]] == ["微信同步试用"]
+        assert result.data["total"] == 2
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_summarize_completed_work_returns_facts_and_grounded_narrative(monkeypatch):
+    fixed_now = datetime(2026, 8, 6, 10, 0, 0)
+    monkeypatch.setattr("app.utils.time.business_now", lambda: fixed_now)
+    engine, db = _db_session(_sales_commitment_tables())
+
+    class FakeNarrativeService:
+        async def summarize_with_metadata(self, db, *, team_id, question, work_facts):  # noqa: ARG002
+            fact_id = work_facts["items"][0]["fact_id"]
+            narrative = SimpleNamespace(
+                model_dump=lambda: {
+                    "answer": "本周已完成预算确认。",
+                    "highlights": [{
+                        "category": "completed_work",
+                        "title": "预算确认",
+                        "summary": "已完成预算进展确认。",
+                        "fact_ids": [fact_id],
+                    }],
+                    "customer_summaries": [],
+                    "confidence": 0.9,
+                    "narrative_mode": "fallback",
+                    "missing_context": [],
+                    "citations": [{"fact_id": fact_id}],
+                }
+            )
+            return SimpleNamespace(
+                result=narrative,
+                summary_source="deterministic_work_summary_fallback",
+                model=None,
+                fallback_reason="ai_config_missing",
+                fallback_error=None,
+            )
+
+    service = CRMAgentToolService(
+        api_client=FakeCRMAPIClient(),
+        work_summary_narrative_service=FakeNarrativeService(),
+    )
+    try:
+        _seed_follow_up_task_customer(db)
+        task = _seed_follow_up_task(
+            db,
+            task_id=1017,
+            public_id="fut_00000000000000000000000000001017",
+            owner_id="2",
+            status=FollowUpTaskStatus.COMPLETED,
+            due_at=datetime(2026, 8, 5, 9, 30, 0),
+            completed_at=datetime(2026, 8, 5, 17, 0, 0),
+        )
+        db.commit()
+
+        result = await service.summarize_completed_work(_context(db), window="this_week", question="本周我完成了什么")
+
+        assert result.success is True
+        assert result.data["facts"]["completed_tasks"][0]["id"] == task.public_id
+        assert result.data["narrative"]["highlights"][0]["fact_ids"] == [result.data["facts"]["items"][0]["fact_id"]]
+        assert result.data["summary_source"] == "deterministic_work_summary_fallback"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_list_follow_up_task_confirmation_cases_returns_current_owner_cases():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    try:
+        _seed_follow_up_task_customer(db)
+        owned_task = _seed_follow_up_task(
+            db,
+            task_id=1008,
+            public_id="fut_00000000000000000000000000001008",
+            owner_id="2",
+        )
+        other_task = _seed_follow_up_task(
+            db,
+            task_id=1009,
+            public_id="fut_00000000000000000000000000001009",
+            owner_id="9",
+        )
+        case = _seed_follow_up_confirmation_case(db, task=owned_task)
+        _seed_follow_up_confirmation_case(
+            db,
+            case_id=2002,
+            public_id="fuc_00000000000000000000000000002002",
+            task=other_task,
+            owner_id="9",
+        )
+        db.commit()
+
+        result = await service.list_follow_up_task_confirmation_cases(_context(db))
+
+        assert result.success is True
+        assert result.data["total"] == 1
+        assert result.data["items"][0]["id"] == case.public_id
+        assert result.data["items"][0]["task"]["id"] == owned_task.public_id
+        assert result.data["items"][0]["customer"]["id"] == CUSTOMER_PUBLIC_ID
+        assert result.data["items"][0]["owner_id"] == "2"
+        assert db.query(AgentToolCall).one().tool_name == "list_follow_up_task_confirmation_cases"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_resolve_follow_up_task_confirmation_case_applies_user_reply_without_extra_hitl():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        _seed_follow_up_task_customer(db)
+        task = _seed_follow_up_task(
+            db,
+            task_id=1010,
+            public_id="fut_00000000000000000000000000001010",
+            owner_id="2",
+        )
+        case = _seed_follow_up_confirmation_case(db, task=task)
+        db.commit()
+
+        result = await registry.execute(
+            "resolve_follow_up_task_confirmation_case",
+            _context(db),
+            {"case_id": case.public_id, "reply_text": "已确认完成"},
+        )
+        db.refresh(task)
+        db.refresh(case)
+
+        assert result.success is True
+        assert result.data["decision"]["action"] == FollowUpTaskConfirmationResolutionAction.COMPLETE
+        assert result.data["decision"]["resolved"] is True
+        assert result.data["application"]["status"] == "APPLIED"
+        assert task.status == FollowUpTaskStatus.COMPLETED
+        assert case.status == FollowUpTaskConfirmationStatus.RESOLVED
+        assert case.application_status == "APPLIED"
+        assert db.query(FollowUpTaskEvent).count() == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_resolve_follow_up_task_confirmation_case_non_owner_does_not_mutate_task():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        _seed_follow_up_task_customer(db)
+        task = _seed_follow_up_task(
+            db,
+            task_id=1011,
+            public_id="fut_00000000000000000000000000001011",
+            owner_id="9",
+        )
+        case = _seed_follow_up_confirmation_case(db, task=task, owner_id="9")
+        db.commit()
+
+        result = await registry.execute(
+            "resolve_follow_up_task_confirmation_case",
+            _context(db),
+            {"case_id": case.public_id, "reply_text": "已确认完成"},
+        )
+        db.refresh(task)
+        db.refresh(case)
+
+        assert result.success is True
+        assert result.data["application"]["status"] == "SKIPPED"
+        assert result.data["application"]["skip_reason"] == "CONFIRMATION_ACTOR_NOT_OWNER"
+        assert task.status == FollowUpTaskStatus.OPEN
+        assert case.status == FollowUpTaskConfirmationStatus.PENDING
+        assert db.query(FollowUpTaskEvent).count() == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_unknown_confirmation_reply_keeps_case_pending_with_follow_up_prompt():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        _seed_follow_up_task_customer(db)
+        task = _seed_follow_up_task(
+            db,
+            task_id=1012,
+            public_id="fut_00000000000000000000000000001012",
+            owner_id="2",
+        )
+        case = _seed_follow_up_confirmation_case(db, task=task)
+        db.commit()
+
+        result = await registry.execute(
+            "resolve_follow_up_task_confirmation_case",
+            _context(db),
+            {"case_id": case.public_id, "reply_text": "客户态度一般"},
+        )
+        db.refresh(task)
+        db.refresh(case)
+
+        assert result.success is True
+        assert result.data["decision"]["action"] == FollowUpTaskConfirmationResolutionAction.UNKNOWN
+        assert result.data["decision"]["resolved"] is False
+        assert result.data["application"]["status"] == "SKIPPED"
+        assert result.data["application"]["skip_reason"] == "CONFIRMATION_CASE_NOT_RESOLVED"
+        assert result.data["assistant_follow_up_prompt"]
+        assert task.status == FollowUpTaskStatus.OPEN
+        assert case.status == FollowUpTaskConfirmationStatus.PENDING
+        assert case.unresolved_reply_count == 1
+        assert case.last_unresolved_reply_text == "客户态度一般"
+        assert db.query(FollowUpTaskEvent).count() == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_move_opportunity_stage_calls_existing_api():
     engine, db = _db_session([Opportunity.__table__])
     fake_client = FakeCRMAPIClient()
@@ -1355,7 +2150,7 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
     try:
         first = await service.create_customer_activity(
             context,
-            customer_id=101,
+            customer_id=CUSTOMER_PUBLIC_ID,
             customer_name="越秀金融",
             activity_kind="PHONE_FOLLOW_UP",
             source_content="今天和王总沟通了项目进展",
@@ -1365,7 +2160,7 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
         )
         second = await service.create_customer_activity(
             context,
-            customer_id=101,
+            customer_id=CUSTOMER_PUBLIC_ID,
             customer_name="越秀金融",
             activity_kind="PHONE_FOLLOW_UP",
             source_content="今天和王总沟通了项目进展",
@@ -1378,7 +2173,7 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
         assert second.success is True
         assert second.idempotent_replay is True
         assert len(fake_client.calls) == 1
-        assert fake_client.calls[0]["path"] == "/v1/customer-activities/101"
+        assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}"
         assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1
@@ -1518,7 +2313,7 @@ async def test_agent_tool_create_invoice_title_calls_existing_api_and_sets_defau
     try:
         result = await service.create_invoice_title(
             _context(db),
-            customer_id=101,
+            customer_id=CUSTOMER_PUBLIC_ID,
             invoice_title={
                 "title_type": "COMPANY",
                 "title": "越秀金融控股有限公司",
@@ -1534,7 +2329,7 @@ async def test_agent_tool_create_invoice_title_calls_existing_api_and_sets_defau
                 "method": "POST",
                 "path": "/v1/invoice-titles",
                 "authorization": "Bearer test-token",
-                "params": {"customer_id": 101},
+                "params": {"customer_id": CUSTOMER_PUBLIC_ID},
                 "json": {
                     "title_type": "COMPANY",
                     "title": "越秀金融控股有限公司",
@@ -1564,7 +2359,7 @@ async def test_agent_tool_create_deployment_info_calls_existing_api():
         result = await service.create_deployment_info(
             _context(db),
             deployment_info={
-                "customer_id": 101,
+                "customer_id": CUSTOMER_PUBLIC_ID,
                 "deployment_name": "生产环境",
                 "server_address": "https://crm.example.com",
                 "authorized_users": 100,
@@ -1580,7 +2375,7 @@ async def test_agent_tool_create_deployment_info_calls_existing_api():
             "authorization": "Bearer test-token",
             "params": None,
             "json": {
-                "customer_id": 101,
+                "customer_id": CUSTOMER_PUBLIC_ID,
                 "deployment_name": "生产环境",
                 "server_address": "https://crm.example.com",
                 "authorized_users": 100,
@@ -1808,11 +2603,11 @@ async def test_agent_tool_registry_exposes_readonly_langchain_tools_only():
             tool.name: tool
             for tool in registry.to_readonly_langchain_tools(
                 _context(db),
-                allowed_tool_names=["search_customers", "create_customer_activity"],
+                allowed_tool_names=["search_customers", "list_follow_up_tasks", "create_customer_activity"],
             )
         }
 
-        assert set(tools) == {"search_customers"}
+        assert set(tools) == {"search_customers", "list_follow_up_tasks"}
     finally:
         db.close()
         engine.dispose()

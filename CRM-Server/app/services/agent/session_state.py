@@ -83,11 +83,25 @@ def _remember_current_customer(db: Session, session, customer: Optional[dict]) -
         return
     agent_session_crud.update(db, session, AgentSessionUpdate(context_json=context))
 
-def _suspend_pending_task(db: Session, session, task, reason: str) -> None:
+def _suspend_pending_task(
+    db: Session,
+    session,
+    task,
+    reason: str,
+    *,
+    suspension_kind: str | None = None,
+) -> None:
     if not task:
         return
     state = dict(task.state_json or {})
     state["suspended_reason"] = reason
+    if suspension_kind:
+        state["suspension_kind"] = suspension_kind
+        if suspension_kind == "dismissed":
+            state["dismissed"] = True
+            state["dismissed_reason"] = reason
+    elif state.get("suspension_kind") is None:
+        state["suspension_kind"] = "paused"
     agent_task_crud.update(
         db,
         task,
@@ -111,6 +125,9 @@ def _resume_suspended_task(db: Session, session, task):
     return task
 
 def _is_resumable_task(task) -> bool:
+    state = task.state_json or {}
+    if state.get("dismissed") is True or state.get("suspension_kind") == "dismissed":
+        return False
     action = (task.state_json or {}).get("action")
     return action in {
         "collect_opportunity_fields",
@@ -194,12 +211,20 @@ def _suspended_task_snapshots(db: Session, session, team_id: int, user_id: int) 
     for task in agent_task_crud.list_by_session(db, session.id, team_id=team_id, user_id=user_id):
         if task.id in seen_ids:
             continue
-        if task.status == AgentTaskStatus.SUSPENDED and _is_resumable_task(task):
+        if task.status == AgentTaskStatus.SUSPENDED and _is_suspended_business_draft(task):
             snapshots.append(_pending_task_snapshot(task))
             seen_ids.add(task.id)
         if len(snapshots) >= 5:
             break
     return snapshots[:5]
+
+
+def _is_suspended_business_draft(task) -> bool:
+    action = (task.state_json or {}).get("action")
+    return action in {
+        "collect_opportunity_fields",
+        "create_opportunity",
+    }
 
 def _is_high_confidence_new_flow(decision: AgentPendingInterruptionDecision) -> bool:
     if decision.decision != "START_NEW_FLOW":
@@ -265,4 +290,4 @@ def _is_confirmation(content: str) -> bool:
 
 def _is_rejection(content: str) -> bool:
     normalized = content.strip().lower()
-    return normalized in {"否", "不", "不用", "不要", "取消", "先不处理", "no", "n"}
+    return normalized in {"否", "不", "不用", "不要", "取消", "先不处理", "暂不处理", "no", "n"}

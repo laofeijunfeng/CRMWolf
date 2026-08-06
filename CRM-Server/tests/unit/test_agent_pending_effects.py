@@ -15,7 +15,7 @@ def test_pending_task_side_effect_handler_applies_session_effects(monkeypatch):
 
     monkeypatch.setattr(
         "app.services.agent.pending_effects.session_state._suspend_pending_task",
-        lambda db_arg, session_arg, task_arg, reason: suspended.append((task_arg, reason)),
+        lambda db_arg, session_arg, task_arg, reason, **kwargs: suspended.append((task_arg, reason, kwargs)),
     )
     monkeypatch.setattr(
         "app.services.agent.pending_effects.session_state._remember_current_customer",
@@ -41,7 +41,7 @@ def test_pending_task_side_effect_handler_applies_session_effects(monkeypatch):
         ),
     )
 
-    assert suspended == [(suspended_task, "新客户流程")]
+    assert suspended == [(suspended_task, "新客户流程", {"suspension_kind": None})]
     assert remembered_customers == [{"id": 101, "account_name": "越秀金融"}]
     assert result.task is task
     assert result.events[0]["event"] == "confirmation_required"
@@ -63,7 +63,7 @@ def test_pending_task_side_effect_handler_does_not_restore_cleared_task(monkeypa
 
     monkeypatch.setattr(
         "app.services.agent.pending_effects.session_state._suspend_pending_task",
-        lambda db_arg, session_arg, task_arg, reason: suspended.append((task_arg, reason)),
+        lambda db_arg, session_arg, task_arg, reason, **kwargs: suspended.append((task_arg, reason, kwargs)),
     )
 
     result = handler.apply(
@@ -72,6 +72,7 @@ def test_pending_task_side_effect_handler_does_not_restore_cleared_task(monkeypa
             "handled": True,
             "suspended_task_id": 11,
             "suspend_reason": "用户选择先不处理。",
+            "suspension_kind": "dismissed",
             "clear_pending_task_id": 11,
             "assistant_content": "好嘞，这一步先放着。",
             "events": [{"event": "task_cancelled"}, {"event": "final"}],
@@ -83,6 +84,6 @@ def test_pending_task_side_effect_handler_does_not_restore_cleared_task(monkeypa
         ),
     )
 
-    assert suspended == [(task, "用户选择先不处理。")]
+    assert suspended == [(task, "用户选择先不处理。", {"suspension_kind": "dismissed"})]
     assert result.task is None
     assert result.current_interrupt is None

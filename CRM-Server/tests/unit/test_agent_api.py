@@ -7,10 +7,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.types import BigInteger
 
 from app.api import agent as agent_api
@@ -23,22 +23,41 @@ from app.models.agent import (
     AgentTaskStatus,
     AgentToolCall,
 )
+from app.models.customer import Customer
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_vector_document import CustomerVectorDocument
+from app.models.sales_commitment import (
+    FollowUpTask,
+    FollowUpTaskConfirmationCase,
+    FollowUpTaskConfirmationPromptDelivery,
+    FollowUpTaskEvent,
+    FollowUpTaskProjectionRun,
+    SalesCommitment,
+)
+from app.services.agent.confirmed_task_graph import ConfirmedTaskGraphService
+from app.services.agent.input import AgentTurnInput
+from app.services.agent.pending_graph import PendingTaskGraphService
+from app.services.agent.root_runtime import AgentRootRuntime
 from app.services.agent.schemas import (
     AgentFollowUpQualityResult,
     AgentPendingInterruptionDecision,
     AgentSemanticParseResult,
     AgentTurnRelationDecision,
 )
-from app.services.agent.confirmed_task_graph import ConfirmedTaskGraphService
-from app.services.agent.pending_graph import PendingTaskGraphService
-from app.services.agent.root_runtime import AgentRootRuntime
 from app.services.agent.state import (
     AgentRootRuntimeSideEffects,
     AgentRuntimeContext,
     AgentRuntimeTurnOutput,
 )
-from app.services.agent.input import AgentTurnInput
+from app.services.agent.interactions import _opportunity_interaction_fields
+from app.services.agent.task_actions import _tool_payload_for_action
 from app.services.agent.tools.base import AgentToolResult
+from app.services.follow_up_task_confirmation_channel_service import (
+    FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+    FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+    FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT,
+)
+from app.services.im_agent_gateway import IMAgentGateway
 
 
 @compiles(BigInteger, "sqlite")
@@ -53,6 +72,15 @@ def _build_client(monkeypatch):
         connect_args={"check_same_thread": False},
     )
     tables = [
+        Customer.__table__,
+        CustomerActivity.__table__,
+        CustomerVectorDocument.__table__,
+        SalesCommitment.__table__,
+        FollowUpTask.__table__,
+        FollowUpTaskEvent.__table__,
+        FollowUpTaskProjectionRun.__table__,
+        FollowUpTaskConfirmationCase.__table__,
+        FollowUpTaskConfirmationPromptDelivery.__table__,
         AgentSession.__table__,
         AgentMessage.__table__,
         AgentTask.__table__,
@@ -361,6 +389,155 @@ async def test_agent_application_uses_streamed_final_as_assistant_content(monkey
             assert persisted_assistant.payload_json["content_format"] == "markdown"
         finally:
             db.close()
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_and_im_gateway_share_follow_up_confirmation_prompt_channel(monkeypatch):
+    class FakeRootRuntime:
+        async def run_turn(self, *, content, context, **kwargs):
+            if context.event_sink:
+                await context.event_sink({
+                    "event": "final",
+                    "content": f"已处理：{content}",
+                    "content_format": "text",
+                })
+            return {"application_action": "run_new_flow", "events": []}
+
+    prompt_calls = []
+
+    def fake_prompt_next_pending_case(db, *, team_id, user_id, channel, provider, agent_session_id):
+        prompt_calls.append({
+            "team_id": team_id,
+            "user_id": user_id,
+            "channel": channel,
+            "provider": provider,
+            "agent_session_id": agent_session_id,
+        })
+        return {
+            "event": FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+            "content": "上次你说要确认预算，这个有进展吗？",
+            "content_format": "text",
+            "case_public_id": "fuc_11111111111111111111111111111111",
+            "interaction": {
+                "type": "choice",
+                "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+                "status": "waiting_user_input",
+                "payload": {"case_public_id": "fuc_11111111111111111111111111111111"},
+                "choices": [
+                    {"label": "已完成", "value": "已完成"},
+                    {"label": "先放着", "value": "先放着"},
+                    {"label": "不管了", "value": "不管了"},
+                ],
+            },
+        }
+
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
+    monkeypatch.setattr(
+        agent_api.agent_application_module.follow_up_task_confirmation_channel_service,
+        "prompt_next_pending_case",
+        fake_prompt_next_pending_case,
+    )
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    try:
+        web_session = client.post("/v1/agent/sessions", json={"title": "Web 确认提示"}).json()
+        web_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": web_session["id"], "content": "今天我的任务有哪些"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert web_response.status_code == 200, web_response.text
+        assert FOLLOW_UP_CONFIRMATION_PROMPT_EVENT in web_response.text
+        assert FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION in web_response.text
+
+        im_session = client.post("/v1/agent/sessions", json={"title": "IM 确认提示"}).json()
+        db = Session()
+        try:
+            im_result = asyncio.run(
+                IMAgentGateway().handle_text(
+                    db,
+                    team_id=1,
+                    user_id=2,
+                    provider="feishu",
+                    session_id=im_session["id"],
+                    user_text="@CRMWolf 今天我的任务有哪些",
+                    agent_content="今天我的任务有哪些",
+                )
+            )
+        finally:
+            db.close()
+
+        assert im_result["interaction"]["business_action"] == FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
+        assert any(event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT for event in im_result["im_events"])
+        assert [call["channel"] for call in prompt_calls] == ["web", "im"]
+        assert prompt_calls[1]["provider"] == "feishu"
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_resolves_bound_follow_up_confirmation_reply_before_runtime(monkeypatch):
+    class RuntimeMustNotRun:
+        async def run_turn(self, **kwargs):
+            raise AssertionError("bound follow-up confirmation replies must bypass root runtime")
+
+    resolve_calls = []
+
+    def fake_resolve_bound_reply(db, *, team_id, user_id, case_public_id, reply_text):
+        resolve_calls.append({
+            "team_id": team_id,
+            "user_id": user_id,
+            "case_public_id": case_public_id,
+            "reply_text": reply_text,
+        })
+        return {
+            "event": FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT,
+            "content": "已更新为下周五继续跟进。",
+            "content_format": "text",
+            "case_public_id": case_public_id,
+            "resolution": "delayed",
+        }
+
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", RuntimeMustNotRun())
+    monkeypatch.setattr(
+        agent_api.agent_application_module.follow_up_task_confirmation_channel_service,
+        "resolve_bound_reply",
+        fake_resolve_bound_reply,
+    )
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "确认回复"}).json()
+        response = client.post(
+            "/v1/agent/chat/stream",
+            json={
+                "session_id": session["id"],
+                "content": "今天联系了，还没有进展，下周五再说",
+                "interaction_metadata": {
+                    "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+                    "case_public_id": "fuc_22222222222222222222222222222222",
+                },
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT in response.text
+        assert "已更新为下周五继续跟进。" in response.text
+        assert resolve_calls == [
+            {
+                "team_id": 1,
+                "user_id": 2,
+                "case_public_id": "fuc_22222222222222222222222222222222",
+                "reply_text": "今天联系了，还没有进展，下周五再说",
+            }
+        ]
+
+        messages_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assistant_message = messages_response.json()["items"][1]
+        assert assistant_message["payload_json"]["source"] == "follow_up_task_confirmation_reply"
     finally:
         engine.dispose()
 
@@ -1204,7 +1381,7 @@ def test_agent_event_interaction_protocol_for_missing_lead_fields():
 
 
 def test_agent_tool_payload_for_create_lead_defaults_source():
-    payload = agent_api._tool_payload_for_action(
+    payload = _tool_payload_for_action(
         "create_lead",
         {
             "lead": {
@@ -1231,7 +1408,7 @@ def test_agent_tool_payload_for_create_lead_defaults_source():
 
 
 def test_agent_tool_payload_for_create_opportunity_strips_draft_fields():
-    payload = agent_api._tool_payload_for_action(
+    payload = _tool_payload_for_action(
         "create_opportunity",
         {
             "customer_id": 101,
@@ -1761,8 +1938,76 @@ def test_agent_stream_collects_opportunity_fields_without_rerunning_graph(monkey
         engine.dispose()
 
 
+def test_agent_stream_cancels_active_form_interrupt_for_plain_skip_text(monkeypatch):
+    customer = {
+        "id": 101,
+        "account_name": "广州睿狐科技有限公司",
+        "owner_info": {"id": 2},
+        "collaborator_infos": [],
+    }
+
+    class FakeGraphService:
+        def __init__(self):
+            self.calls = []
+
+        async def stream_events(self, input_state):
+            self.calls.append(input_state)
+            yield {
+                "event": "opportunity_fields_required",
+                "action": "collect_opportunity_fields",
+                "customer": customer,
+                "payload": {
+                    "customer_id": customer["id"],
+                    "opportunity": {
+                        "customer_id": customer["id"],
+                        "total_amount": 50000,
+                    },
+                    "missing_fields": ["purchase_type", "expected_closing_date"],
+                },
+            }
+            yield {"event": "final", "content": "请补充采购类型和预计成交日期。"}
+
+    fake_graph = FakeGraphService()
+    monkeypatch.setattr(agent_api, "crm_agent_graph_service", fake_graph)
+
+    client, engine = _build_client(monkeypatch)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "商机会话"}).json()
+
+        first_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "帮广州睿狐科技建一个商机，金额 5 万"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert first_response.status_code == 200, first_response.text
+        assert '"event": "opportunity_fields_required"' in first_response.text
+
+        second_response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": "暂不处理"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+        assert second_response.status_code == 200, second_response.text
+        assert '"event": "turn_intent_classified"' in second_response.text
+        assert '"intent": "DISMISS_CURRENT_SUGGESTION"' in second_response.text
+        assert '"resume_action": "cancel"' in second_response.text
+        assert '"event": "task_cancelled"' in second_response.text
+        assert "还差商机" not in second_response.text
+        assert len(fake_graph.calls) == 1
+
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        try:
+            task = db.query(AgentTask).one()
+            assert task.status == AgentTaskStatus.SUSPENDED
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
 def test_opportunity_interaction_includes_subscription_years_with_license_type():
-    fields = agent_api._opportunity_interaction_fields(
+    fields = _opportunity_interaction_fields(
         ["total_amount", "user_count", "license_type"],
         {"id": 101, "account_name": "测试客户"},
     )

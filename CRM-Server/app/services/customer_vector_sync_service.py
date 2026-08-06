@@ -124,6 +124,7 @@ class CustomerVectorSyncService:
             business_object_type=document.business_object_type,
             business_object_id=document.business_object_id,
             text_hash=document.text_hash,
+            metadata_json=document.metadata_json if isinstance(document.metadata_json, dict) else None,
             occurred_at=document.occurred_at,
             confidence=document.confidence,
             visibility_scope=document.visibility_scope,

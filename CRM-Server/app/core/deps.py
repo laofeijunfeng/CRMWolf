@@ -8,7 +8,7 @@ from app.crud.user import user_crud
 from app.crud.permission import permission_crud
 from app.crud.team import team_crud, user_team_crud
 from app.models.team import UserTeam
-from app.utils.public_id import is_opportunity_public_id
+from app.utils.public_id import is_follow_up_task_public_id, is_opportunity_public_id
 
 security = HTTPBearer()
 
@@ -55,6 +55,15 @@ def _get_opportunity_by_public_id(db: Session, opportunity_identifier, team_id: 
     if not is_opportunity_public_id(public_id):
         return None
     return opportunity_crud.get_by_public_id(db, public_id, team_id)
+
+
+def _get_follow_up_task_by_public_id(db: Session, task_identifier, team_id: int):
+    from app.crud.sales_commitment import follow_up_task_crud
+
+    public_id = str(task_identifier)
+    if not is_follow_up_task_public_id(public_id):
+        return None
+    return follow_up_task_crud.get_by_public_id(db, public_id, team_id)
 
 
 async def get_current_user(
@@ -807,6 +816,108 @@ def check_customer_activity_permission(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="缺少客户活动权限"
     )
+
+
+def check_follow_up_task_direct_view_permission(
+    task_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    检查跟进任务直接查看权限。
+
+    权限规则：
+    - task public_id 必须合法，内部不接受数据库主键作为对外入参。
+    - 任务 owner 可查看自己的任务。
+    - 预留 follow_up_task:view:team / follow_up_task:view:all 用于后续管理视图。
+    """
+    task = _get_follow_up_task_by_public_id(db, task_id, team_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="跟进任务不存在",
+        )
+
+    if task.owner_id == str(current_user.id):
+        return task
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    if "follow_up_task:view:all" in permission_codes or "follow_up_task:view:team" in permission_codes:
+        return task
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="缺少跟进任务查看权限",
+    )
+
+
+def check_follow_up_task_view_permission(
+    task_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    检查客户上下文里的跟进任务查看权限。
+
+    该 helper 适用于客户详情、客户上下文 Agent 回答等场景；全局任务详情应使用
+    check_follow_up_task_direct_view_permission，避免客户查看权限被扩大成任务管理视图权限。
+    """
+    task = _get_follow_up_task_by_public_id(db, task_id, team_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="跟进任务不存在",
+        )
+
+    if task.owner_id == str(current_user.id):
+        return task
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+
+    if "follow_up_task:view:all" in permission_codes or "follow_up_task:view:team" in permission_codes:
+        return task
+
+    check_customer_view_permission(task.customer_id, team_id, current_user, db)
+    return task
+
+
+def check_follow_up_task_owner_permission(
+    task_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    检查跟进任务状态操作权限。
+
+    能查看客户或任务，不代表能完成/取消任务；Phase 1 以任务 owner 为准，
+    并预留 follow_up_task:operate:all / follow_up_task:edit:all 给后续管理能力。
+    """
+    task = _get_follow_up_task_by_public_id(db, task_id, team_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="跟进任务不存在",
+        )
+
+    if task.owner_id == str(current_user.id):
+        return task
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {p.code for p in user_permissions}
+    if "follow_up_task:operate:all" in permission_codes or "follow_up_task:edit:all" in permission_codes:
+        return task
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="只能操作自己的跟进任务",
+    )
+
 
 def check_customer_member_manage_permission(
     customer_id: str,

@@ -4,6 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.services.agent import interactions
+from app.services.agent import session_state
 from app.services.agent.interrupts import (
     allowed_resume_actions_for_interaction,
     interrupt_from_waiting_event,
@@ -12,6 +13,7 @@ from app.services.agent.interrupts import (
     validate_resume_payload,
 )
 from app.services.agent.input import AgentTurnInput
+from app.services.agent.turn_intent import AgentTurnIntentRouter
 
 
 def test_confirmation_waiting_task_projects_to_confirm_interrupt():
@@ -221,6 +223,93 @@ def test_resume_payload_maps_turn_relation_choice_label_to_selected_task():
 
     assert payload["action"] == "select"
     assert payload["metadata"]["selected_task_id"] == 301
+
+
+async def test_turn_intent_router_cancels_form_interrupt_for_natural_language_skip():
+    task = SimpleNamespace(
+        id=13,
+        intent="CREATE_OPPORTUNITY",
+        target_type="customer",
+        target_id=101,
+        summary="等待补充商机信息",
+        state_json={"action": "collect_opportunity_fields"},
+        input_json={},
+        status="WAITING_USER",
+    )
+
+    result = await AgentTurnIntentRouter().route_resume(
+        None,
+        team_id=1,
+        user_id=2,
+        session=None,
+        turn_input=AgentTurnInput.text("暂不处理"),
+        current_interrupt={
+            "type": "form",
+            "reason": "missing_required_fields",
+            "allowed_resume_actions": ["submit_fields", "cancel"],
+            "business_action": "create_opportunity",
+            "task_projection_id": 13,
+        },
+        active_task=task,
+    )
+
+    assert result.resume_payload["action"] == "cancel"
+    assert result.decision.intent == "DISMISS_CURRENT_SUGGESTION"
+    assert result.resume_payload["metadata"]["turn_intent"]["intent"] == "DISMISS_CURRENT_SUGGESTION"
+
+
+async def test_turn_intent_router_keeps_field_supplement_on_form_interrupt():
+    task = SimpleNamespace(
+        id=13,
+        intent="CREATE_OPPORTUNITY",
+        target_type="customer",
+        target_id=101,
+        summary="等待补充商机信息",
+        state_json={"action": "collect_opportunity_fields"},
+        input_json={},
+        status="WAITING_USER",
+    )
+
+    result = await AgentTurnIntentRouter().route_resume(
+        None,
+        team_id=1,
+        user_id=2,
+        session=None,
+        turn_input=AgentTurnInput.text("金额 48450，120 人，续购"),
+        current_interrupt={
+            "type": "form",
+            "reason": "missing_required_fields",
+            "allowed_resume_actions": ["submit_fields", "cancel"],
+            "business_action": "create_opportunity",
+            "task_projection_id": 13,
+        },
+        active_task=task,
+    )
+
+    assert result.resume_payload["action"] == "submit_fields"
+    assert result.decision.intent == "SUBMIT_FIELDS"
+
+
+def test_dismissed_suspended_task_is_not_resumable():
+    task = SimpleNamespace(
+        status="SUSPENDED",
+        state_json={
+            "action": "collect_opportunity_fields",
+            "suspension_kind": "dismissed",
+            "dismissed": True,
+        },
+    )
+
+    assert session_state._is_resumable_task(task) is False
+
+
+def test_legacy_suspended_task_without_suspension_kind_stays_resumable():
+    task = SimpleNamespace(
+        status="SUSPENDED",
+        state_json={"action": "collect_opportunity_fields"},
+    )
+
+    assert session_state._is_resumable_task(task) is True
 
 
 def test_resume_payload_maps_turn_relation_choice_number_to_selected_task():

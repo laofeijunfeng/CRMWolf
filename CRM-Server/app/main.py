@@ -24,6 +24,7 @@ from app.api import (
     customers,
     filter_options,
     finance,
+    follow_up_tasks,
     industry,
     invoices,
     leads,
@@ -53,6 +54,7 @@ from app.api.deployment import router as deployment_router  # 新增
 from app.api.frontend_logs import router as frontend_logs_router
 from app.api.im_bots import router as im_bots_router
 from app.api.license_application import router as license_application_router  # 新增
+from app.core.database import SessionLocal
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
@@ -61,7 +63,6 @@ from app.core.exceptions import (
     sqlalchemy_exception_handler,
     validation_exception_handler,
 )
-from app.core.database import SessionLocal
 from app.services.customer_intelligence_health_service import customer_intelligence_health_service
 
 # 导入初始化服务
@@ -117,6 +118,9 @@ api_router.include_router(filter_options.router)
 api_router.include_router(contracts.router)
 api_router.include_router(approvals.router)
 api_router.include_router(sales_dashboard.router)
+api_router.include_router(follow_up_tasks.router)
+api_router.include_router(follow_up_tasks.projection_router)
+api_router.include_router(follow_up_tasks.observability_router)
 api_router.include_router(business_journey_board.router)
 api_router.include_router(system_configs.router)
 api_router.include_router(view_preferences.router)

@@ -4,8 +4,12 @@ import pytest
 
 import app.services.im_agent_gateway as gateway_module
 import app.services.im_feishu as feishu_module
-from app.services.agent.input import AgentInputKind
 from app.models.agent import AgentTaskStatus
+from app.services.agent.input import AgentInputKind
+from app.services.follow_up_task_confirmation_channel_service import (
+    FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+    FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+)
 from app.services.im_agent_gateway import IMAgentGateway
 from app.services.im_feishu import FeishuBotService
 
@@ -197,6 +201,101 @@ async def test_im_gateway_maps_referenced_choice_number_to_interaction_metadata(
     assert captured["turn_input"].metadata["selected_task_id"] == 201
     assert captured["turn_input"].metadata["business_action"] == "select_suspended_task"
     assert captured["turn_input"].metadata["reply_to_message_ids"] == ["om_bot_reply"]
+
+
+@pytest.mark.asyncio
+async def test_im_gateway_binds_latest_follow_up_confirmation_interaction(monkeypatch):
+    gateway = IMAgentGateway()
+    captured = {}
+
+    monkeypatch.setattr(
+        gateway,
+        "_latest_waiting_interaction",
+        lambda *args, **kwargs: {
+            "interaction_id": "int_follow_up_confirmation",
+            "type": "choice",
+            "business_action": "resolve_follow_up_task_confirmation_case",
+            "status": "waiting_user_input",
+            "payload": {"case_public_id": "fuc_11111111111111111111111111111111"},
+            "choices": [
+                {"label": "已完成", "value": "已完成"},
+                {"label": "先放着", "value": "先放着"},
+                {"label": "不管了", "value": "不管了"},
+            ],
+        },
+    )
+
+    async def fake_handle_message(**kwargs):
+        captured.update(kwargs)
+        return {"final_content": "bound", "interaction": None, "events": [], "im_events": []}
+
+    monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
+
+    result = await gateway.handle_text(
+        None,
+        team_id=1,
+        user_id=2,
+        provider="feishu",
+        session_id=10,
+        user_text="今天联系了,还没有进展,下周五再说",
+        agent_content="今天联系了,还没有进展,下周五再说",
+    )
+
+    assert result["final_content"] == "bound"
+    assert captured["session_id"] == 10
+    assert captured["turn_input"].metadata["business_action"] == "resolve_follow_up_task_confirmation_case"
+    assert captured["turn_input"].metadata["case_public_id"] == "fuc_11111111111111111111111111111111"
+    assert captured["turn_input"].metadata["follow_up_confirmation_case_public_id"] == (
+        "fuc_11111111111111111111111111111111"
+    )
+
+
+@pytest.mark.asyncio
+async def test_im_gateway_binds_referenced_follow_up_confirmation_session(monkeypatch):
+    gateway = IMAgentGateway()
+    captured = {}
+
+    monkeypatch.setattr(gateway, "_resolve_referenced_pending_session_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gateway, "_session_id_for_response_message", lambda *args, **kwargs: 91)
+    monkeypatch.setattr(
+        gateway,
+        "_latest_waiting_interaction",
+        lambda *args, **kwargs: {
+            "interaction_id": "int_follow_up_confirmation",
+            "type": "choice",
+            "business_action": "resolve_follow_up_task_confirmation_case",
+            "status": "waiting_user_input",
+            "payload": {"case": {"public_id": "fuc_22222222222222222222222222222222"}},
+            "choices": [
+                {"label": "已完成", "value": "已完成"},
+                {"label": "先放着", "value": "先放着"},
+                {"label": "不管了", "value": "不管了"},
+            ],
+        },
+    )
+
+    async def fake_handle_message(**kwargs):
+        captured.update(kwargs)
+        return {"final_content": "referenced", "interaction": None, "events": [], "im_events": []}
+
+    monkeypatch.setattr(gateway_module.agent_im_conversation_service, "handle_message", fake_handle_message)
+
+    result = await gateway.handle_text(
+        object(),
+        team_id=1,
+        user_id=2,
+        provider="feishu",
+        session_id=10,
+        user_text="下周五再说",
+        agent_content="引用消息:\n你有一项上次跟进需要确认\n\n本次指令:\n下周五再说",
+        referenced_message_ids=["om_bot_reply"],
+    )
+
+    assert result["final_content"] == "referenced"
+    assert captured["session_id"] == 91
+    assert captured["turn_input"].content == "下周五再说"
+    assert captured["turn_input"].metadata["reply_to_message_ids"] == ["om_bot_reply"]
+    assert captured["turn_input"].metadata["case_public_id"] == "fuc_22222222222222222222222222222222"
 
 
 @pytest.mark.asyncio
@@ -525,3 +624,41 @@ def test_feishu_renders_non_confirmation_choice_options():
     assert "2. 继续处理：广州睿狐创建商机确认" in text
     assert "回复序号或选项文字" in text
     assert "回复「是」确认" not in text
+
+
+def test_feishu_renders_follow_up_confirmation_choices_and_keeps_session_binding():
+    service = FeishuBotService()
+    result = {
+        "session": {"event": "session", "session_id": 88},
+        "final_content": "上次你说要确认预算，这个有进展吗？",
+        "interaction": {
+            "type": "choice",
+            "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+            "choices": [
+                {"label": "已完成", "value": "已完成"},
+                {"label": "先放着", "value": "先放着"},
+                {"label": "不管了", "value": "不管了"},
+            ],
+        },
+        "events": [
+            {"event": "session", "session_id": 88},
+            {
+                "event": FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+                "interaction": {
+                    "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+                    "payload": {"case_public_id": "fuc_11111111111111111111111111111111"},
+                },
+            },
+        ],
+    }
+
+    text = service._render_im_reply(result)
+    binding = service._extract_reply_binding(result)
+
+    assert "1. 已完成" in text
+    assert "2. 先放着" in text
+    assert "3. 不管了" in text
+    assert "回复序号或选项文字" in text
+    assert "回复「是」确认" not in text
+    assert binding.agent_session_id == 88
+    assert binding.agent_task_id is None

@@ -627,6 +627,7 @@ class PendingTaskGraphService:
             "switch_notice": result.switch_notice,
             "suspended_task_id": _optional_object_id(result.suspended_task),
             "suspend_reason": result.suspend_reason,
+            "suspension_kind": getattr(result, "suspension_kind", None),
             "clear_pending_task_id": result.clear_pending_task_id,
             "confirmation_decision": _decision_projection(result.confirmation_decision),
             "preflight_result": _preflight_result_projection(result),
@@ -740,7 +741,7 @@ class PendingTaskGraphService:
         action = _resume_action(resume_payload_json)
         reason = _resume_reason(resume_payload_json, current_interrupt)
         if action == "cancel":
-            cancel_update = _cancel_pending_task_update(runtime.context.task)
+            cancel_update = _cancel_pending_task_update(runtime.context.task, resume_payload=resume_payload_json)
             if runtime.context.task:
                 runtime.context.side_effects.suspended_task = runtime.context.task
             runtime.context.side_effects.task = None
@@ -774,7 +775,7 @@ class PendingTaskGraphService:
                 update["confirmation_decision"] = _decision_projection(decision)
                 return update
             if action in {"reject", "cancel"}:
-                cancel_update = _cancel_pending_task_update(runtime.context.task)
+                cancel_update = _cancel_pending_task_update(runtime.context.task, resume_payload=resume_payload_json)
                 if runtime.context.task:
                     runtime.context.side_effects.suspended_task = runtime.context.task
                 runtime.context.side_effects.task = None
@@ -1165,7 +1166,7 @@ def _switch_pending_task_update(task: object) -> PendingTaskGraphState:
     return update
 
 
-def _cancel_pending_task_update(task: object) -> PendingTaskGraphState:
+def _cancel_pending_task_update(task: object, *, resume_payload: JSONDict | None = None) -> PendingTaskGraphState:
     assistant_content = agent_copy.task_put_aside()
     task_id = _optional_object_id(task)
     update: PendingTaskGraphState = {
@@ -1174,6 +1175,7 @@ def _cancel_pending_task_update(task: object) -> PendingTaskGraphState:
         "has_active_task": False,
         "task_projection": {},
         "suspend_reason": "用户选择先不处理。",
+        "suspension_kind": _suspension_kind_from_resume_payload(resume_payload),
         "events": _events([
             {
                 "event": "task_cancelled",
@@ -1194,6 +1196,17 @@ def _cancel_pending_task_update(task: object) -> PendingTaskGraphState:
             {"event": "final", "content": assistant_content},
         ])
     return update
+
+
+def _suspension_kind_from_resume_payload(resume_payload: JSONDict | None = None) -> str:
+    metadata = coerce_json_dict((resume_payload or {}).get("metadata"))
+    turn_intent = coerce_json_dict(metadata.get("turn_intent"))
+    intent = turn_intent.get("intent")
+    if intent in {"DISMISS_CURRENT_SUGGESTION", "CANCEL_CURRENT_TASK", "REJECT_EXECUTION"}:
+        return "dismissed"
+    if intent == "PAUSE_CURRENT_TASK":
+        return "paused"
+    return "paused"
 
 
 def _task_projection(task: object) -> JSONDict:

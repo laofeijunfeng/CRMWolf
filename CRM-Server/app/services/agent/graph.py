@@ -19,13 +19,17 @@ from app.services.agent.checkpointer import (
     with_checkpoint_unavailable_fallback_event,
 )
 from app.services.agent.creation_duplicates_graph import CreationDuplicateGraphService
-from app.services.agent.customer_resolution_graph import CustomerResolutionGraphService
 from app.services.agent.customer_mentions import explicit_customer_hint_from_message
+from app.services.agent.customer_resolution_graph import CustomerResolutionGraphService
 from app.services.agent.follow_up_quality_graph import FollowUpQualityGraphService
 from app.services.agent.memory import AgentMemoryService, agent_memory_service
 from app.services.agent.quality import (
     AgentFollowUpQualityEvaluator,
     agent_follow_up_quality_evaluator,
+)
+from app.services.agent.read_query_planner import (
+    AgentReadQueryPlanner,
+    agent_read_query_planner,
 )
 from app.services.agent.schemas import (
     AgentFollowUpQualityResult,
@@ -50,13 +54,13 @@ from app.services.agent.suggestion import (
 from app.services.agent.temporal import AgentTemporalResolver, agent_temporal_resolver
 from app.services.agent.tool_registry import AgentToolRegistry, agent_tool_registry
 from app.services.agent.tools import CRMAgentToolService
+from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.trace_events import (
     build_follow_up_quality_trace_events,
     build_semantic_trace_events,
     build_suggestion_trace_events,
 )
 from app.services.agent.types import JSONDict, coerce_json_dict
-
 
 NEW_FLOW_CHECKPOINT_NS = "crm_agent_new_flow"
 
@@ -93,6 +97,7 @@ class CRMAgentGraphService:
         semantic_parser: Optional[AgentSemanticParser] = None,
         memory_service: Optional[AgentMemoryService] = None,
         tool_registry: Optional[AgentToolRegistry] = None,
+        read_query_planner: Optional[AgentReadQueryPlanner] = None,
         temporal_resolver: Optional[AgentTemporalResolver] = None,
         suggestion_generator: Optional[AgentSuggestionGenerator] = None,
         follow_up_quality_evaluator: Optional[AgentFollowUpQualityEvaluator] = None,
@@ -100,6 +105,7 @@ class CRMAgentGraphService:
     ) -> None:
         self.semantic_parser = semantic_parser or agent_semantic_parser
         self.memory_service = memory_service or agent_memory_service
+        self.read_query_planner = read_query_planner or agent_read_query_planner
         self.temporal_resolver = temporal_resolver or agent_temporal_resolver
         self.suggestion_generator = suggestion_generator or agent_suggestion_generator
         self.follow_up_quality_evaluator = follow_up_quality_evaluator or agent_follow_up_quality_evaluator
@@ -135,6 +141,7 @@ class CRMAgentGraphService:
         graph = StateGraph(AgentGraphState, context_schema=AgentGraphRuntimeContext)
         graph.add_node("load_memory", self._load_memory)
         graph.add_node("semantic_parse", self._semantic_parse)
+        graph.add_node("run_agent_read_tool", self._run_agent_read_tool)
         graph.add_node("search_creation_duplicates", self._search_creation_duplicates)
         graph.add_node("evaluate_follow_up_quality", self._evaluate_follow_up_quality)
         graph.add_node("search_customer", self._search_customer)
@@ -146,16 +153,19 @@ class CRMAgentGraphService:
             "semantic_parse",
             self._route_after_semantic_parse,
             {
+                "agent_read_tool": "run_agent_read_tool",
                 "creation_duplicates": "search_creation_duplicates",
                 "customer_search": "search_customer",
                 "response": "build_response",
             },
         )
+        graph.add_edge("run_agent_read_tool", "build_response")
         graph.add_edge("search_creation_duplicates", "build_response")
         graph.add_conditional_edges(
             "search_customer",
             self._route_after_customer_search,
             {
+                "agent_read_tool": "run_agent_read_tool",
                 "quality": "evaluate_follow_up_quality",
                 "context": "load_customer_context",
                 "response": "build_response",
@@ -182,6 +192,8 @@ class CRMAgentGraphService:
         return graph.compile(checkpointer=checkpointer)
 
     def _route_after_semantic_parse(self, state: AgentGraphState) -> str:
+        if self._should_run_agent_read_tool(state):
+            return "agent_read_tool"
         if self._should_run_creation_duplicate_search(state):
             return "creation_duplicates"
         if self._should_enter_customer_resolution(state):
@@ -189,6 +201,8 @@ class CRMAgentGraphService:
         return "response"
 
     def _route_after_customer_search(self, state: AgentGraphState) -> str:
+        if self._should_run_customer_scoped_agent_read_tool(state):
+            return "agent_read_tool"
         if self._should_run_follow_up_quality(state):
             return "quality"
         if self._should_run_customer_context(state):
@@ -319,6 +333,53 @@ class CRMAgentGraphService:
             state_update["creation_duplicate_candidates"] = duplicate_candidates
         return state_update
 
+    async def _run_agent_read_tool(
+        self,
+        state: AgentGraphState,
+        runtime: Runtime[AgentGraphRuntimeContext],
+    ) -> AgentGraphState:
+        context = runtime.context
+        read_query = self.read_query_planner.plan(
+            semantic_result=_semantic_from_state(state),
+            content=state.get("content", ""),
+            parsed=state.get("parsed") or {},
+            selected_customer=state.get("selected_customer") or None,
+        )
+        if (
+            not read_query
+            or read_query.requires_customer_resolution
+            or not read_query.tool_name
+            or not context.db
+            or not context.authorization
+        ):
+            return {}
+        tool_context = AgentToolContext(
+            db=context.db,
+            team_id=context.team_id,
+            user_id=context.user_id,
+            session_id=context.session_id,
+            authorization=context.authorization,
+        )
+        result = await self.tool_registry.execute(
+            read_query.tool_name,
+            tool_context,
+            read_query.payload,
+        )
+        return {
+            "read_tool_name": read_query.tool_name,
+            "read_tool_payload": coerce_json_dict(read_query.payload),
+            "read_query_type": read_query.query_type,
+            "read_query_trace_label": read_query.trace_label,
+            "read_tool_result": coerce_json_dict(result.to_event()),
+            "events": [{
+                "event": "agent_read_tool_executed",
+                "tool_name": read_query.tool_name,
+                "query_type": read_query.query_type,
+                "trace_label": read_query.trace_label,
+                "success": result.success,
+            }],
+        }
+
     async def _evaluate_follow_up_quality(
         self,
         state: AgentGraphState,
@@ -444,6 +505,11 @@ class CRMAgentGraphService:
             "customer_candidates": state.get("customer_candidates") or [],
             "selected_customer": state.get("selected_customer"),
             "business_context": state.get("business_context") or {},
+            "read_tool_name": state.get("read_tool_name"),
+            "read_tool_payload": state.get("read_tool_payload") or {},
+            "read_tool_result": state.get("read_tool_result") or {},
+            "read_query_type": state.get("read_query_type"),
+            "read_query_trace_label": state.get("read_query_trace_label"),
             "semantic": state.get("semantic") or {},
             "semantic_metadata": state.get("semantic_metadata") or {},
             "semantic_error": state.get("semantic_error"),
@@ -499,6 +565,7 @@ class CRMAgentGraphService:
         step_labels = {
             "load_memory": "加载会话记忆",
             "semantic_parse": "AI 语义理解",
+            "run_agent_read_tool": "查询任务/工作事实",
             "search_creation_duplicates": "检查创建重复",
             "search_customer": "搜索客户",
             "evaluate_follow_up_quality": "AI 跟进质量评估",
@@ -600,6 +667,36 @@ class CRMAgentGraphService:
                 or lead.get("contact_phone")
                 or customer.get("contact_phone")
             )
+        )
+
+    def _should_run_agent_read_tool(self, state: AgentGraphState) -> bool:
+        read_query = self.read_query_planner.plan(
+            semantic_result=_semantic_from_state(state),
+            content=state.get("content", ""),
+            parsed=state.get("parsed") or {},
+        )
+        return (
+            bool(state.get("has_authorization"))
+            and bool(state.get("has_db"))
+            and bool(read_query)
+            and not read_query.requires_customer_resolution
+            and bool(read_query.tool_name)
+        )
+
+    def _should_run_customer_scoped_agent_read_tool(self, state: AgentGraphState) -> bool:
+        read_query = self.read_query_planner.plan(
+            semantic_result=_semantic_from_state(state),
+            content=state.get("content", ""),
+            parsed=state.get("parsed") or {},
+            selected_customer=state.get("selected_customer") or None,
+        )
+        return (
+            bool(state.get("has_authorization"))
+            and bool(state.get("has_db"))
+            and bool((state.get("selected_customer") or {}).get("id"))
+            and bool(read_query)
+            and not read_query.requires_customer_resolution
+            and bool(read_query.tool_name)
         )
 
     def _should_run_customer_search(self, state: AgentGraphState) -> bool:
@@ -742,7 +839,7 @@ class CRMAgentGraphService:
             or semantic_result.intent_confidence < 0.75
             or (
                 semantic_result.intent != "UNKNOWN"
-                and semantic_result.intent != "CUSTOMER_QUERY"
+                and semantic_result.intent != "CRM_READ_QUERY"
                 and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
                 and not customer_from_memory
                 and semantic_result.customer.confidence < 0.7
@@ -798,7 +895,7 @@ class CRMAgentGraphService:
             return False
         if parsed.get("_customer_name_source") == "EXPLICIT_TEXT_HINT":
             return False
-        if semantic_result.intent in {"UNKNOWN", "CUSTOMER_QUERY"}:
+        if semantic_result.intent in {"UNKNOWN", "CRM_READ_QUERY"}:
             return False
         if semantic_result.customer.resolution_source == "MEMORY":
             return True
@@ -865,6 +962,9 @@ def _checkpoint_state_from_input(input_state: AgentGraphInput) -> AgentGraphStat
         "creation_duplicate_candidates": {},
         "selected_customer": None,
         "business_context": {},
+        "read_tool_name": None,
+        "read_tool_payload": {},
+        "read_tool_result": {},
         "suggestion": {},
         "suggestion_metadata": {},
         "suggestion_error": None,

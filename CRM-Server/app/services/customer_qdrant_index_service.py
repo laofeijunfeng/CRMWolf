@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from qdrant_client.http import models as qmodels
@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.qdrant import get_qdrant_client
 
 PayloadScalar = str | int | float | bool | None
-PayloadValue = PayloadScalar | list[str]
+PayloadValue = PayloadScalar | list["PayloadValue"] | dict[str, "PayloadValue"]
 EvidencePayload = dict[str, PayloadValue]
 
 SourceType = Literal[
@@ -18,6 +18,8 @@ SourceType = Literal[
     "customer_profile",
     "customer_brief",
     "follow_up",
+    "sales_commitment",
+    "follow_up_task",
     "business_flow",
     "opportunity",
     "contract",
@@ -41,6 +43,7 @@ class CustomerEvidenceDocument:
     business_object_type: str | None = None
     business_object_id: str | None = None
     text_hash: str | None = None
+    metadata_json: EvidencePayload | None = None
     occurred_at: datetime | None = None
     confidence: float | None = None
     visibility_scope: str = "team"
@@ -60,6 +63,7 @@ class CustomerEvidenceSearchResult:
     business_object_id: str | None
     title: str | None
     text: str | None
+    metadata_json: EvidencePayload | None = None
 
 
 class CustomerQdrantSchemaMismatchError(Exception):
@@ -262,7 +266,7 @@ class CustomerQdrantIndexService:
         )
 
     def _build_payload(self, document: CustomerEvidenceDocument) -> EvidencePayload:
-        return {
+        payload: EvidencePayload = {
             "tenant_id": document.tenant_id,
             "team_id": document.team_id,
             "customer_id": document.customer_id,
@@ -278,6 +282,9 @@ class CustomerQdrantIndexService:
             "visibility_scope": document.visibility_scope,
             "metadata_version": document.metadata_version,
         }
+        if document.metadata_json:
+            payload["metadata_json"] = document.metadata_json
+        return payload
 
     def _build_customer_filter(
         self,
@@ -339,6 +346,7 @@ class CustomerQdrantIndexService:
             business_object_id=self._payload_str(payload, "business_object_id"),
             title=self._payload_str(payload, "title"),
             text=self._payload_str(payload, "text"),
+            metadata_json=self._payload_object(payload, "metadata_json"),
         )
 
     @staticmethod
@@ -361,6 +369,11 @@ class CustomerQdrantIndexService:
     def _payload_int(payload: dict[str, object], key: str) -> int | None:
         value = payload.get(key)
         return value if isinstance(value, int) else None
+
+    @staticmethod
+    def _payload_object(payload: dict[str, object], key: str) -> EvidencePayload | None:
+        value = payload.get(key)
+        return cast("EvidencePayload", value) if isinstance(value, dict) else None
 
 
 customer_qdrant_index_service = CustomerQdrantIndexService()

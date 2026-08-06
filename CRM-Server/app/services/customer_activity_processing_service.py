@@ -11,6 +11,7 @@ from app.services.customer_activity_ai.evaluation_agent import ActivityEvaluatio
 from app.services.customer_activity_ai.structuring_agent import ActivityStructuringError
 from app.services.customer_activity_ai.workflow import customer_activity_ai_workflow
 from app.core.database import SessionLocal
+from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,67 @@ class CustomerActivityProcessingService:
 
     async def trigger_evaluation(self, activity_id: int, team_id: int) -> None:
         asyncio.create_task(self.evaluate(activity_id=activity_id, team_id=team_id))
+
+    async def project_follow_up_task(
+        self,
+        *,
+        activity_id: int,
+        team_id: int,
+        trigger_type: str,
+        actor_id: str | None = None,
+    ) -> Dict[str, Any]:
+        logger.info(
+            "开始客户活动任务投影: activity_id=%s, team_id=%s, trigger_type=%s",
+            activity_id,
+            team_id,
+            trigger_type,
+        )
+        db = SessionLocal()
+        try:
+            try:
+                result = follow_up_task_projection_service.run_activity_projection(
+                    db,
+                    activity_id=activity_id,
+                    team_id=team_id,
+                    trigger_type=trigger_type,
+                    actor_id=actor_id,
+                )
+                logger.info(
+                    "客户活动任务投影完成: activity_id=%s, status=%s, skip_reason=%s",
+                    activity_id,
+                    result.projection_run_status,
+                    result.skip_reason,
+                )
+                return {
+                    "success": result.projection_run_status != "FAILED",
+                    "activity_id": activity_id,
+                    "projection_run_id": result.projection_run_id,
+                    "status": result.projection_run_status,
+                    "skip_reason": result.skip_reason,
+                    "error": result.error_message,
+                }
+            except Exception as exc:
+                logger.exception("客户活动任务投影调度失败: activity_id=%s", activity_id)
+                return {"success": False, "activity_id": activity_id, "error": str(exc)}
+        finally:
+            db.close()
+
+    async def trigger_follow_up_task_projection(
+        self,
+        *,
+        activity_id: int,
+        team_id: int,
+        trigger_type: str,
+        actor_id: str | None = None,
+    ) -> None:
+        asyncio.create_task(
+            self.project_follow_up_task(
+                activity_id=activity_id,
+                team_id=team_id,
+                trigger_type=trigger_type,
+                actor_id=actor_id,
+            )
+        )
 
     async def recover_unfinished(self, limit: int = 100) -> int:
         db = SessionLocal()

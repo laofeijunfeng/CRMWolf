@@ -18,6 +18,7 @@ def test_customer_activity_event_is_stable_and_business_readable() -> None:
         next_action="准备试用环境",
         occurred_at=datetime(2026, 8, 2, 10, 0, 0),
         creator_id="9",
+        owner_id="9",
     )
 
     first = customer_intelligence_event_service.from_customer_activity(activity)

@@ -101,6 +101,11 @@ class AgentGraphState(TypedDict, total=False):
     creation_duplicate_candidates: JSONDict
     selected_customer: JSONDict | None
     business_context: JSONDict
+    read_tool_name: Optional[str]
+    read_tool_payload: JSONDict
+    read_tool_result: JSONDict
+    read_query_type: Optional[str]
+    read_query_trace_label: Optional[str]
     suggestion: JSONDict
     suggestion_metadata: JSONDict
     suggestion_error: Optional[str]
@@ -357,6 +362,11 @@ class ActionPlanningGraphState(TypedDict, total=False):
     customer_candidates: list[JSONDict]
     selected_customer: JSONDict | None
     business_context: JSONDict
+    read_tool_name: Optional[str]
+    read_tool_payload: JSONDict
+    read_tool_result: JSONDict
+    read_query_type: Optional[str]
+    read_query_trace_label: Optional[str]
     semantic: JSONDict
     semantic_metadata: JSONDict
     semantic_error: Optional[str]
@@ -889,6 +899,7 @@ class PendingTaskGraphState(TypedDict, total=False):
     switch_notice: Optional[str]
     suspended_task_id: int
     suspend_reason: Optional[str]
+    suspension_kind: Optional[str]
     selected_customer: JSONDict
     remember_pending_task: bool
     clear_pending_task_id: Optional[int]
@@ -1097,6 +1108,7 @@ class AgentRuntimeState(TypedDict, total=False):
     content: str
     turn_kind: str
     current_interrupt: AgentInterruptPayload | None
+    turn_intent: JSONDict
     task_projection: JSONDict
     suspended_candidates: list[JSONDict]
     pending_task_requested: bool

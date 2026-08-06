@@ -817,7 +817,7 @@ function getPurchaseTypeText(type: string | undefined): string {
 
 function getPurchaseTypeClass(type: string | undefined): string {
   if (type === undefined || type.trim() === '') return ''
-  const map: Record<string, string> = { NEW: 'status-info', RENEWAL: 'status-success', EXPANSION: 'status-warning' }
+  const map: Record<string, string> = { NEW: 'status-warning', RENEWAL: 'status-success', EXPANSION: 'status-info' }
   return map[type] ?? ''
 }
 

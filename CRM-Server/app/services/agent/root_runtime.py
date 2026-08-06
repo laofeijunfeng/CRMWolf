@@ -37,7 +37,6 @@ from app.services.agent.interrupts import (
     AgentResumePayload,
     interrupt_from_waiting_task,
     interrupt_payload_from_json,
-    resume_payload_from_turn_input,
     validate_resume_payload,
 )
 from app.services.agent.new_flow_effects import (
@@ -68,6 +67,7 @@ from app.services.agent.state import (
     PendingTaskGraphResult,
     PendingTaskGraphSideEffects,
 )
+from app.services.agent.turn_intent import AgentTurnIntentRouter, agent_turn_intent_router
 from app.services.agent.types import JSONDict, JSONList, coerce_json_dict, coerce_json_value
 from app.services.customer_intelligence_trace_service import visible_trace_events
 
@@ -127,6 +127,7 @@ class AgentRootRuntime:
         pending_task_side_effect_handler: PendingTaskSideEffectHandler | None = None,
         customer_intelligence_graph_service: CustomerIntelligenceGraphService | None = None,
         customer_intelligence_trigger_policy: CustomerIntelligenceTriggerPolicy | None = None,
+        turn_intent_router: AgentTurnIntentRouter | None = None,
     ) -> None:
         self.pending_graph_service = pending_graph_service or pending_task_graph_service
         self.new_flow_graph_service = new_flow_graph_service or crm_agent_graph_service
@@ -141,6 +142,7 @@ class AgentRootRuntime:
         self.customer_intelligence_trigger_policy = (
             customer_intelligence_trigger_policy or default_customer_intelligence_trigger_policy
         )
+        self.turn_intent_router = turn_intent_router or agent_turn_intent_router
         self._graph = self._build_graph(checkpointer)
 
     def _build_graph(self, checkpointer):
@@ -388,11 +390,30 @@ class AgentRootRuntime:
         )
         if not has_pending_interrupt:
             await self.checkpoint_turn_start(initial_state, context=context)
+        turn_intent_result = await self.turn_intent_router.route_resume(
+            context.db,
+            team_id=team_id,
+            user_id=user_id,
+            session=context.session,
+            turn_input=turn_input,
+            current_interrupt=runtime_current_interrupt,
+            active_task=context.task,
+            suspended_candidates=initial_state.get("suspended_candidates") or [],
+        )
+        turn_intent_event: JSONDict = {
+            "event": "turn_intent_classified",
+            "intent": turn_intent_result.decision.intent,
+            "confidence": turn_intent_result.decision.confidence,
+            "target_task_id": turn_intent_result.decision.target_task_id,
+            "normalized_action": turn_intent_result.decision.normalized_action,
+            "resume_action": turn_intent_result.resume_payload.get("action"),
+            "reason": turn_intent_result.decision.reason,
+            "source": turn_intent_result.source,
+        }
+        context.side_effects.pending_task_events.append(turn_intent_event)
+        await _publish_event(context, turn_intent_event)
         return await self.resume_interrupt(
-            resume_payload=resume_payload_from_turn_input(
-                turn_input,
-                current_interrupt=runtime_current_interrupt,
-            ),
+            resume_payload=turn_intent_result.resume_payload,
             team_id=team_id,
             user_id=user_id,
             session_id=session_id,
@@ -642,13 +663,19 @@ class AgentRootRuntime:
         runtime: Runtime[AgentRuntimeContext],
     ) -> AgentRuntimeState:
         resume_payload = interrupt(state["current_interrupt"])
+        resume_payload_json = coerce_json_dict(resume_payload)
+        metadata = coerce_json_dict(resume_payload_json.get("metadata"))
+        turn_intent = coerce_json_dict(metadata.get("turn_intent"))
         update: AgentRuntimeState = {
             "runtime_status": "resumed",
             "current_interrupt": None,
-            "resume_payload": coerce_json_dict(resume_payload),
+            "resume_payload": resume_payload_json,
+            "turn_intent": turn_intent,
             "events": [{
                 "event": "agent_root_interrupt_resumed",
-                "resume_action": coerce_json_dict(resume_payload).get("action"),
+                "resume_action": resume_payload_json.get("action"),
+                "turn_intent": turn_intent.get("intent"),
+                "turn_intent_confidence": turn_intent.get("confidence"),
             }],
         }
         if runtime.context and runtime.context.task:

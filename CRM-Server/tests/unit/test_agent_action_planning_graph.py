@@ -1,8 +1,7 @@
 """Action-planning domain LangGraph tests."""
 
-from langgraph.checkpoint.memory import InMemorySaver
-
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 
 from app.services.agent.action_planning_graph import (
     ActionPlanningGraphService,
@@ -182,11 +181,10 @@ async def test_action_planning_graph_passes_customer_context_defaults_to_opportu
 @pytest.mark.asyncio
 async def test_action_planning_graph_answers_customer_query_from_loaded_context():
     service = ActionPlanningGraphService(checkpointer=InMemorySaver())
-    semantic = semantic_result(intent="CUSTOMER_QUERY")
+    semantic = semantic_result(intent="CRM_READ_QUERY", read_query={"type": "CUSTOMER_PROFILE"})
 
     result = await service.run(action_input(
         semantic_result=semantic,
-        intent="CUSTOMER_QUERY",
         parsed={"customer_name": "越秀金融"},
         business_context={
             "customer": {
@@ -218,17 +216,16 @@ async def test_action_planning_graph_answers_customer_query_from_loaded_context(
     final_events = [event for event in result["events"] if event["event"] == "final"]
     assert final_events[-1]["content"] == result["response"]
     assert final_events[-1]["content_format"] == "markdown"
-    assert f"已读取「越秀金融」的客户档案和业务上下文。\n\n- **基础档案**" in result["response"]
+    assert "已读取「越秀金融」的客户档案和业务上下文。\n\n- **基础档案**" in result["response"]
 
 
 @pytest.mark.asyncio
 async def test_action_planning_graph_explains_unresolved_customer_query_without_old_placeholder():
     service = ActionPlanningGraphService(checkpointer=InMemorySaver())
-    semantic = semantic_result(intent="CUSTOMER_QUERY")
+    semantic = semantic_result(intent="CRM_READ_QUERY", read_query={"type": "CUSTOMER_PROFILE"})
 
     result = await service.run(action_input(
         semantic_result=semantic,
-        intent="CUSTOMER_QUERY",
         parsed={"customer_name": "中科院"},
         customer_candidates=[],
         selected_customer=None,
@@ -244,11 +241,10 @@ async def test_action_planning_graph_explains_unresolved_customer_query_without_
 @pytest.mark.asyncio
 async def test_action_planning_graph_explains_customer_search_failure_for_customer_query():
     service = ActionPlanningGraphService(checkpointer=InMemorySaver())
-    semantic = semantic_result(intent="CUSTOMER_QUERY")
+    semantic = semantic_result(intent="CRM_READ_QUERY", read_query={"type": "CUSTOMER_PROFILE"})
 
     result = await service.run(action_input(
         semantic_result=semantic,
-        intent="CUSTOMER_QUERY",
         parsed={"customer_name": "中科院"},
         customer_candidates=[],
         selected_customer=None,
@@ -262,6 +258,32 @@ async def test_action_planning_graph_explains_customer_search_failure_for_custom
 
     assert result["action"] == {}
     assert result["response"] == "客户搜索暂时失败，当前无法读取客户情况。请稍后再试。"
+
+
+@pytest.mark.asyncio
+async def test_action_planning_graph_normalizes_legacy_customer_query_at_input_boundary():
+    service = ActionPlanningGraphService(checkpointer=InMemorySaver())
+    input_state = action_input(
+        parsed={"customer_name": "越秀金融"},
+        selected_customer={"id": 101, "account_name": "越秀金融"},
+        business_context={"customer": {"id": 101, "account_name": "越秀金融"}},
+    )
+    input_state["intent"] = "CUSTOMER_QUERY"
+    input_state["semantic"] = {"intent": "CUSTOMER_QUERY", "read_query": {"type": "CUSTOMER_PROFILE"}}
+    input_state["semantic_result"] = None
+
+    result = await service.run(input_state)
+
+    intent_events = [event for event in result["events"] if event["event"] == "intent"]
+    final_events = [event for event in result["events"] if event["event"] == "final"]
+    assert result["business_action_route"] == "customer_query"
+    assert result["action"] == {}
+    assert intent_events[0]["intent"] == "CRM_READ_QUERY"
+    assert intent_events[0]["technical_intent"] == "CRM_READ_QUERY"
+    assert intent_events[0]["intent_label"] == "客户查询"
+    assert final_events[-1]["intent"] == "CRM_READ_QUERY"
+    assert "CUSTOMER_QUERY" not in str(result["events"])
+    assert "已读取「越秀金融」的客户档案和业务上下文。" in result["response"]
 
 
 @pytest.mark.asyncio
@@ -280,11 +302,10 @@ async def test_action_planning_graph_does_not_turn_customer_query_suggestions_in
         "need_user_choice": False,
         "clarification_question": None,
     })
-    semantic = semantic_result(intent="CUSTOMER_QUERY")
+    semantic = semantic_result(intent="CRM_READ_QUERY", read_query={"type": "CUSTOMER_PROFILE"})
 
     result = await service.run(action_input(
         semantic_result=semantic,
-        intent="CUSTOMER_QUERY",
         parsed={"customer_name": "中科院"},
         selected_customer={"id": 101, "account_name": "中国科学院信息工程研究所"},
         business_context={"customer": {"id": 101, "account_name": "中国科学院信息工程研究所"}},

@@ -52,17 +52,26 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 - CREATE_INVOICE_TITLE：创建发票抬头或开票抬头。
 - CREATE_DEPLOYMENT_INFO：创建部署信息。
 - CREATE_CUSTOMER_MEMBER：添加或设置客户团队成员、协作成员、售前/交付/支持成员。
-- CUSTOMER_QUERY：查询客户、合同、商机、回款、发票、License 等信息。
+- CRM_READ_QUERY：读取 CRM 事实，包括任务、工作总结、客户、合同、商机、回款、发票、License 等信息。
 - UNKNOWN：无法可靠判断。
 
 【输出 JSON Schema】
 {
-  "intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CUSTOMER_QUERY|UNKNOWN",
+  "intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CRM_READ_QUERY|UNKNOWN",
   "intent_confidence": 0.0,
   "customer": {
     "name_text": "客户名称或简称，无法识别则为 null",
     "confidence": 0.0,
     "resolution_source": "EXPLICIT|MEMORY|NONE"
+  },
+  "read_query": {
+    "type": "FOLLOW_UP_TASKS|WORK_SUMMARY|CUSTOMER_PROFILE|OPPORTUNITY|CONTRACT|PAYMENT|INVOICE|LICENSE|UNKNOWN_READ",
+    "status": "open|completed|cancelled|all|null",
+    "due_window": "today|this_week|next_week|overdue|null",
+    "work_window": "today|this_week|last_week|this_month|custom|null",
+    "owner_scope": "mine|customer|null",
+    "customer_name_text": "读取查询中的客户名称，无法识别则为 null",
+    "query_text": "读取查询中的语义条件，例如预算、试用反馈、合同卡点；无则为 null"
   },
   "follow_up": {
     "content": "可沉淀为客户活动的业务事实，无法识别则为 null",
@@ -363,7 +372,7 @@ CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agen
   "decision": "CONTINUE_PENDING|START_NEW_FLOW|ASK_USER",
   "confidence": 0.0,
   "detected_customer_name": "本轮明确提到的新客户名称，无法识别则为 null",
-  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CUSTOMER_QUERY|UNKNOWN|null",
+  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CRM_READ_QUERY|UNKNOWN|null",
   "is_field_supplement": false,
   "reason": "一句话说明判断依据",
   "question": "需要用户确认时的问题；无需确认则为 null"
@@ -412,7 +421,7 @@ CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 会�
   "confidence": 0.0,
   "target_task_id": 123,
   "detected_customer_name": "本轮明确提到的客户名称，无法识别则为 null",
-  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CUSTOMER_QUERY|UNKNOWN|null",
+  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CRM_READ_QUERY|UNKNOWN|null",
   "reason": "一句话说明判断依据",
   "question": "需要用户确认时的问题；无需确认则为 null"
 }
@@ -653,6 +662,78 @@ def build_resource_resolution_messages(
         "【候选资源】\n"
         f"{candidates_json}\n\n"
         "【用户本轮回复】\n"
+        f"{user_message}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+CRM_AGENT_TURN_INTENT_SYSTEM_PROMPT = """你是 CRMWolf 的 Agent 本轮意图路由器。
+
+你的任务是判断用户本轮输入对当前 Agent 运行状态的真实意图，只做分类，不执行任何业务动作。
+
+【输入上下文】
+- current_interrupt：当前 LangGraph 正在等待用户处理的交互，可能是表单、选择、确认或文本补充。
+- active_task：当前等待用户的 Agent 任务。
+- suspended_tasks：用户之前暂停的业务草稿。
+- session_context：最近客户、最近业务主题等会话记忆。
+
+【意图枚举】
+- SUBMIT_FIELDS：用户明显是在补充当前表单缺失字段，例如金额、人数、日期、采购方式。
+- CONFIRM_EXECUTION：用户明确同意执行当前待确认动作。
+- REJECT_EXECUTION：用户明确拒绝执行当前待确认动作。
+- CANCEL_CURRENT_TASK：用户明确取消当前任务或不继续当前流程。
+- DISMISS_CURRENT_SUGGESTION：用户明确表示当前建议不处理、不建、不需要，尤其是系统主动建议的下一步动作。
+- PAUSE_CURRENT_TASK：用户只是暂时放一下，后续可能继续。
+- PATCH_ACTIVE_DRAFT：用户修改当前草稿字段。
+- RESUME_SUSPENDED_DRAFT：用户恢复或继续之前暂停的草稿。
+- START_NEW_FLOW：用户开启新的客户或新的业务流程。
+- ASK_QUESTION：用户在问业务问题，不是在处理当前任务。
+- CHITCHAT：寒暄、感谢、无业务动作表达。
+- ASK_CLARIFICATION：无法可靠判断，需要追问。
+
+【判断原则】
+- 必须基于整体语义判断，不要只按关键词。
+- 对 IM 普通文本也要按自然语言理解，不能依赖按钮或结构化 metadata。
+- 如果用户说“先不处理、暂不处理、不用了、这次不用、先记录就行、不要建商机、后面再说”，通常是 CANCEL_CURRENT_TASK 或 DISMISS_CURRENT_SUGGESTION。
+- 如果当前任务来自系统主动建议，例如创建商机、创建联系人、创建付款计划，而用户表达“不处理/不用建/先记录主动作”，优先 DISMISS_CURRENT_SUGGESTION。
+- 如果用户补充了当前缺失字段，例如“金额 48450，120 人，续购”，才是 SUBMIT_FIELDS。
+- 如果用户明确换了客户或换了业务事项，且文本足以形成新动作，返回 START_NEW_FLOW。
+- 低置信度时返回 ASK_CLARIFICATION，不要硬判。
+- normalized_action 只能输出：cancel、dismiss、pause、submit_fields、approve、reject、start_new_flow、ask_question、clarify、resume、patch。
+- 禁止输出 Markdown，禁止输出解释文字，只输出 JSON。
+
+【输出 JSON Schema】
+{
+  "intent": "SUBMIT_FIELDS|CONFIRM_EXECUTION|REJECT_EXECUTION|CANCEL_CURRENT_TASK|DISMISS_CURRENT_SUGGESTION|PAUSE_CURRENT_TASK|PATCH_ACTIVE_DRAFT|RESUME_SUSPENDED_DRAFT|START_NEW_FLOW|ASK_QUESTION|CHITCHAT|ASK_CLARIFICATION",
+  "confidence": 0.0,
+  "target_task_id": 123,
+  "normalized_action": "cancel|dismiss|pause|submit_fields|approve|reject|start_new_flow|ask_question|clarify|resume|patch",
+  "reason": "一句话说明判断依据",
+  "question": "需要追问时的问题；无需追问则为 null"
+}
+"""
+
+
+def build_turn_intent_messages(
+    user_message: str,
+    current_interrupt_json: str,
+    active_task_json: str,
+    suspended_tasks_json: str,
+    memory_json: str,
+    current_date: Optional[date] = None,
+) -> list[dict[str, str]]:
+    prompt_date = current_date or date.today()
+    system = f"{CRM_AGENT_TURN_INTENT_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
+    user = (
+        "【current_interrupt】\n"
+        f"{current_interrupt_json}\n\n"
+        "【active_task】\n"
+        f"{active_task_json}\n\n"
+        "【suspended_tasks】\n"
+        f"{suspended_tasks_json}\n\n"
+        "【session_context】\n"
+        f"{memory_json}\n\n"
+        "【用户本轮输入】\n"
         f"{user_message}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]

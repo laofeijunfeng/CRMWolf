@@ -44,7 +44,7 @@ class AgentConfirmationIntentService:
         "y",
         "ok",
     }
-    direct_rejection_texts = {"否", "不", "不用", "不要", "取消", "先不处理", "no", "n"}
+    direct_rejection_texts = {"否", "不", "不用", "不要", "取消", "先不处理", "暂不处理", "no", "n"}
     confidence_threshold = 0.82
 
     def is_executable_confirmation_task(self, task) -> bool:

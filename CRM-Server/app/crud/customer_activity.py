@@ -130,6 +130,7 @@ class CustomerActivityCRUD:
         team_id: int,
         operator_name: str | None = None,
         original_lead_id: int | None = None,
+        owner_id: str | None = None,
     ) -> CustomerActivity:
         from app.services.deal_journey_service import deal_journey_service
         from app.services.operation_log_service import operation_log_service
@@ -143,6 +144,7 @@ class CustomerActivityCRUD:
         data["content_json"] = _json_dumps(content_json)
         data["customer_id"] = customer_id
         data["creator_id"] = creator_id
+        data["owner_id"] = owner_id or creator_id
         data["team_id"] = team_id
         data["occurred_at"] = data.get("occurred_at") or business_now()
         if data.get("next_follow_time") is not None and not data.get("next_follow_time_source"):
@@ -225,6 +227,7 @@ class CustomerActivityCRUD:
                 next_action=lead_follow_up.next_action,
                 occurred_at=lead_follow_up.created_time or business_now(),
                 creator_id=lead_follow_up.creator_id,
+                owner_id=lead_follow_up.creator_id,
                 created_time=lead_follow_up.created_time,
             )
             db.add(activity)

@@ -58,6 +58,7 @@ class PendingTaskPreflightResult:
     switch_notice: str | None = None
     suspended_task: object = None
     suspend_reason: str | None = None
+    suspension_kind: str | None = None
     clear_pending_task_id: int | None = None
     confirmation_decision: object = None
 
@@ -224,6 +225,7 @@ class PendingPreflightGraphService:
                 assistant_content=result.assistant_content,
                 suspended_task=result.suspended_task,
                 suspend_reason=result.suspend_reason,
+                suspension_kind=result.suspension_kind,
                 clear_pending_task_id=result.clear_pending_task_id,
                 confirmation_decision=decision,
             )
@@ -271,6 +273,7 @@ class PendingPreflightGraphService:
                 switch_notice=switch_notice,
                 suspended_task=context.task,
                 suspend_reason=decision.reason or "用户开启了新的业务流程",
+                suspension_kind="paused",
                 events=[
                     *confirmation_events,
                     assessed_event,
@@ -415,6 +418,7 @@ def _cancel_task(task: object) -> PendingTaskPreflightResult:
         assistant_content=assistant_content,
         suspended_task=task,
         suspend_reason="用户选择先不处理。",
+        suspension_kind="dismissed",
         clear_pending_task_id=_optional_object_id(task),
         events=[
             {
@@ -451,6 +455,7 @@ def _result_projection(result: PendingTaskPreflightResult) -> JSONDict:
         "has_switch_notice": bool(result.switch_notice),
         "suspended_task_id": coerce_json_value(_optional_object_id(result.suspended_task)),
         "clear_pending_task_id": coerce_json_value(result.clear_pending_task_id),
+        "suspension_kind": coerce_json_value(result.suspension_kind),
     }
 
 

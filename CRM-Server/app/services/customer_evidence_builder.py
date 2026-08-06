@@ -10,6 +10,7 @@ from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import CustomerVectorDocumentSourceType
 from app.models.deal_journey import CustomerDealJourneyEvent
+from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.customer_alias_service import generated_aliases_for_customer_name
 
@@ -31,6 +32,7 @@ class BuiltCustomerEvidence:
     title: str
     text: str
     text_hash: str
+    metadata_json: JSONObject | None
     qdrant_point_id: str
     occurred_at: datetime | None
     confidence: float
@@ -121,6 +123,61 @@ class CustomerEvidenceBuilder:
             confidence=0.95,
         )
 
+    def from_sales_commitment(
+        self,
+        commitment: SalesCommitment,
+        *,
+        customer: Customer | None = None,
+    ) -> BuiltCustomerEvidence | None:
+        if not commitment.public_id:
+            return None
+
+        text = self._sales_commitment_text(commitment, customer=customer)
+        if not text:
+            return None
+        source_object_id = str(commitment.public_id)
+        return self._build_customer_evidence(
+            team_id=int(commitment.team_id),
+            customer_id=int(commitment.customer_id),
+            source_type=CustomerVectorDocumentSourceType.SALES_COMMITMENT,
+            source_object_id=source_object_id,
+            business_object_type="sales_commitment",
+            business_object_id=source_object_id,
+            title=f"销售承诺: {commitment.title}"[:255],
+            text=text,
+            occurred_at=commitment.due_at or commitment.updated_time or commitment.created_time,
+            confidence=float(commitment.confidence),
+            metadata_json=self._sales_commitment_metadata(commitment, customer=customer),
+        )
+
+    def from_follow_up_task(
+        self,
+        task: FollowUpTask,
+        *,
+        customer: Customer | None = None,
+        commitment: SalesCommitment | None = None,
+    ) -> BuiltCustomerEvidence | None:
+        if not task.public_id:
+            return None
+
+        text = self._follow_up_task_text(task, customer=customer, commitment=commitment)
+        if not text:
+            return None
+        source_object_id = str(task.public_id)
+        return self._build_customer_evidence(
+            team_id=int(task.team_id),
+            customer_id=int(task.customer_id),
+            source_type=CustomerVectorDocumentSourceType.FOLLOW_UP_TASK,
+            source_object_id=source_object_id,
+            business_object_type="follow_up_task",
+            business_object_id=source_object_id,
+            title=f"跟进任务: {task.title}"[:255],
+            text=text,
+            occurred_at=task.due_at,
+            confidence=float(task.confidence),
+            metadata_json=self._follow_up_task_metadata(task, customer=customer, commitment=commitment),
+        )
+
     def _build_customer_evidence(
         self,
         *,
@@ -134,6 +191,7 @@ class CustomerEvidenceBuilder:
         text: str,
         occurred_at: datetime | None,
         confidence: float,
+        metadata_json: JSONObject | None = None,
     ) -> BuiltCustomerEvidence:
         text_hash = sha256(text.encode("utf-8")).hexdigest()
         document_key = self._document_key(
@@ -153,6 +211,7 @@ class CustomerEvidenceBuilder:
             title=title,
             text=text,
             text_hash=text_hash,
+            metadata_json=metadata_json,
             qdrant_point_id=document_key,
             occurred_at=occurred_at,
             confidence=confidence,
@@ -235,6 +294,150 @@ class CustomerEvidenceBuilder:
         if metadata:
             sections.append(f"事件元数据: {self._structured_content_text(metadata)}")
         return "\n".join(section for section in sections if section.strip())
+
+    def _sales_commitment_text(self, commitment: SalesCommitment, *, customer: Customer | None) -> str:
+        sections: list[str] = []
+        if customer is not None:
+            sections.append(f"客户: {customer.account_name}")
+            sections.append(f"客户对外ID: {customer.public_id}")
+        sections.extend([
+            f"承诺对外ID: {commitment.public_id}",
+            f"承诺类型: {commitment.commitment_type}",
+            f"状态: {commitment.status}",
+            f"归属人: {commitment.owner_id}",
+            f"标题: {commitment.title}",
+            f"内容: {commitment.content}",
+        ])
+        if commitment.due_at:
+            sections.append(f"到期时间: {commitment.due_at.isoformat()}")
+        if commitment.due_at_text:
+            sections.append(f"原始时间表达: {commitment.due_at_text}")
+        if commitment.source_type:
+            sections.append(f"来源类型: {commitment.source_type}")
+        if commitment.source_public_id:
+            sections.append(f"来源对外ID: {commitment.source_public_id}")
+        return "\n".join(section for section in sections if section.strip())
+
+    def _follow_up_task_text(
+        self,
+        task: FollowUpTask,
+        *,
+        customer: Customer | None,
+        commitment: SalesCommitment | None,
+    ) -> str:
+        sections: list[str] = []
+        if customer is not None:
+            sections.append(f"客户: {customer.account_name}")
+            sections.append(f"客户对外ID: {customer.public_id}")
+        sections.extend([
+            f"任务对外ID: {task.public_id}",
+            f"状态: {task.status}",
+            f"归属人: {task.owner_id}",
+            f"标题: {task.title}",
+        ])
+        if task.description:
+            sections.append(f"描述: {task.description}")
+        sections.append(f"到期时间: {task.due_at.isoformat()}")
+        if task.due_at_text:
+            sections.append(f"原始时间表达: {task.due_at_text}")
+        if task.source_type:
+            sections.append(f"来源类型: {task.source_type}")
+        if task.source_public_id:
+            sections.append(f"来源对外ID: {task.source_public_id}")
+        if commitment is not None and commitment.public_id:
+            sections.append(f"关联承诺对外ID: {commitment.public_id}")
+        if task.completed_at:
+            sections.append(f"完成时间: {task.completed_at.isoformat()}")
+        if task.cancelled_at:
+            sections.append(f"取消时间: {task.cancelled_at.isoformat()}")
+        return "\n".join(section for section in sections if section.strip())
+
+    def _sales_commitment_metadata(
+        self,
+        commitment: SalesCommitment,
+        *,
+        customer: Customer | None,
+    ) -> JSONObject:
+        metadata: JSONObject = {
+            "entity_type": "sales_commitment",
+            "commitment_public_id": str(commitment.public_id),
+            "owner_id": commitment.owner_id,
+            "creator_id": commitment.creator_id,
+            "status": commitment.status,
+            "commitment_type": commitment.commitment_type,
+            "due_at": self._datetime_text(commitment.due_at),
+            "due_at_text": commitment.due_at_text,
+            "due_at_granularity": commitment.due_at_granularity,
+            "due_at_timezone": commitment.due_at_timezone,
+            "source_type": commitment.source_type,
+            "source_public_id": commitment.source_public_id,
+            "created_time": self._datetime_text(commitment.created_time),
+            "updated_time": self._datetime_text(commitment.updated_time),
+            "evidence": self._safe_evidence_metadata(commitment.evidence_json),
+        }
+        self._add_customer_metadata(metadata, customer)
+        return self._compact_json_value(metadata)  # type: ignore[return-value]
+
+    def _follow_up_task_metadata(
+        self,
+        task: FollowUpTask,
+        *,
+        customer: Customer | None,
+        commitment: SalesCommitment | None,
+    ) -> JSONObject:
+        metadata: JSONObject = {
+            "entity_type": "follow_up_task",
+            "task_public_id": str(task.public_id),
+            "commitment_public_id": str(commitment.public_id) if commitment is not None and commitment.public_id else None,
+            "owner_id": task.owner_id,
+            "creator_id": task.creator_id,
+            "status": task.status,
+            "due_at": self._datetime_text(task.due_at),
+            "due_at_text": task.due_at_text,
+            "due_at_granularity": task.due_at_granularity,
+            "due_at_timezone": task.due_at_timezone,
+            "source_type": task.source_type,
+            "source_public_id": task.source_public_id,
+            "completed_at": self._datetime_text(task.completed_at),
+            "cancelled_at": self._datetime_text(task.cancelled_at),
+            "created_time": self._datetime_text(task.created_time),
+            "updated_time": self._datetime_text(task.updated_time),
+            "evidence": self._safe_evidence_metadata(task.evidence_json),
+        }
+        self._add_customer_metadata(metadata, customer)
+        return self._compact_json_value(metadata)  # type: ignore[return-value]
+
+    def _add_customer_metadata(self, metadata: JSONObject, customer: Customer | None) -> None:
+        if customer is None:
+            return
+        metadata["customer_public_id"] = customer.public_id
+        metadata["customer_name"] = customer.account_name
+
+    def _datetime_text(self, value: datetime | None) -> str | None:
+        return value.isoformat() if value else None
+
+    def _safe_evidence_metadata(self, value: JSONValue) -> JSONValue:
+        if isinstance(value, dict):
+            result: JSONObject = {}
+            for key, item in value.items():
+                if self._is_internal_identifier_key(str(key)):
+                    continue
+                compacted = self._safe_evidence_metadata(item)
+                if self._has_content(compacted):
+                    result[str(key)] = compacted
+            return result
+        if isinstance(value, list):
+            result_list = [self._safe_evidence_metadata(item) for item in value]
+            return [item for item in result_list if self._has_content(item)]
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    def _is_internal_identifier_key(self, key: str) -> bool:
+        normalized = key.lower()
+        if normalized.endswith("_public_id") or normalized.endswith("_public_ids"):
+            return False
+        return normalized in {"id", "ids"} or normalized.endswith("_id") or normalized.endswith("_ids")
 
     def _parse_object(self, raw: str | None) -> JSONObject:
         if not raw:

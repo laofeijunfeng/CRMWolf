@@ -1,0 +1,414 @@
+[
+  {
+    "name": "grounded_week_summary_mixed_sources",
+    "category": "mixed_sources",
+    "execution": "static_narrative",
+    "work_facts": {
+      "items": [
+        {
+          "fact_id": "completed_follow_up_task:fut_eval_budget:2026-08-05T17:30:00",
+          "fact_type": "completed_follow_up_task",
+          "source_group": "task",
+          "occurred_at": "2026-08-05T17:30:00",
+          "customer": {"id": "cus_eval_yuexiu", "name": "越秀金融"},
+          "attribution": {"user_id": "2", "field": "owner_id", "source": "crm_follow_up_tasks.owner_id"},
+          "title": "确认预算进展",
+          "payload": {"id": "fut_eval_budget", "owner_id": "2", "title": "确认预算进展"}
+        },
+        {
+          "fact_id": "customer_activity:同步试用方案:2026-08-06T09:00:00",
+          "fact_type": "customer_activity",
+          "source_group": "activity",
+          "occurred_at": "2026-08-06T09:00:00",
+          "customer": {"id": "cus_eval_yuexiu", "name": "越秀金融"},
+          "attribution": {"user_id": "2", "field": "owner_id", "source": "crm_customer_activities.owner_id"},
+          "title": "同步试用方案",
+          "payload": {"owner_id": "2", "title": "同步试用方案"}
+        },
+        {
+          "fact_id": "payment_recorded:PR-2026-001:2026-08-06T00:00:00",
+          "fact_type": "payment_recorded",
+          "source_group": "business_event",
+          "occurred_at": "2026-08-06T00:00:00",
+          "customer": {"id": "cus_eval_yuexiu", "name": "越秀金融"},
+          "attribution": {
+            "user_id": "2",
+            "field": "creator_id",
+            "source": "crm_payment_records.creator_id_or_commission_member_id"
+          },
+          "title": "越秀金融 CRM 合同回款 50000.0",
+          "payload": {"record_number": "PR-2026-001", "actual_amount": 50000.0}
+        }
+      ],
+      "available_total": 3,
+      "truncated": false,
+      "source_total_counts": {
+        "completed_follow_up_task": 1,
+        "customer_activity": 1,
+        "payment_recorded": 1
+      },
+      "filters": {
+        "window": "this_week",
+        "starts_at": "2026-08-03T00:00:00",
+        "ends_at": "2026-08-10T00:00:00",
+        "timezone": "Asia/Shanghai"
+      }
+    },
+    "result": {
+      "answer": "本周围绕越秀金融完成了预算确认，推进了试用方案同步，并记录了一笔回款。",
+      "highlights": [
+        {
+          "category": "completed_work",
+          "title": "预算确认",
+          "summary": "越秀金融的预算进展已确认。",
+          "fact_ids": ["completed_follow_up_task:fut_eval_budget:2026-08-05T17:30:00"]
+        },
+        {
+          "category": "business_progress",
+          "title": "回款记录",
+          "summary": "越秀金融 CRM 合同有 50000.0 回款记录。",
+          "fact_ids": ["payment_recorded:PR-2026-001:2026-08-06T00:00:00"]
+        }
+      ],
+      "customer_summaries": [
+        {
+          "category": "process_record",
+          "title": "越秀金融",
+          "summary": "本周同步了试用方案，形成后续演示基础。",
+          "fact_ids": ["customer_activity:同步试用方案:2026-08-06T09:00:00"]
+        }
+      ],
+      "confidence": 0.91,
+      "narrative_mode": "langchain_structured_output",
+      "missing_context": [],
+      "citations": [
+        {"fact_id": "completed_follow_up_task:fut_eval_budget:2026-08-05T17:30:00"},
+        {"fact_id": "payment_recorded:PR-2026-001:2026-08-06T00:00:00"},
+        {"fact_id": "customer_activity:同步试用方案:2026-08-06T09:00:00"}
+      ]
+    },
+    "expected": {
+      "required_fact_ids": [
+        "completed_follow_up_task:fut_eval_budget:2026-08-05T17:30:00",
+        "customer_activity:同步试用方案:2026-08-06T09:00:00",
+        "payment_recorded:PR-2026-001:2026-08-06T00:00:00"
+      ],
+      "required_fact_types": ["completed_follow_up_task", "customer_activity", "payment_recorded"],
+      "source_total_counts": {
+        "completed_follow_up_task": 1,
+        "customer_activity": 1,
+        "payment_recorded": 1
+      },
+      "owner_id": "2",
+      "min_confidence": 0.85,
+      "required_answer_terms": ["越秀金融", "预算", "回款"]
+    }
+  },
+  {
+    "name": "customer_activity_is_process_record",
+    "category": "category_boundary",
+    "execution": "static_narrative",
+    "work_facts": {
+      "items": [
+        {
+          "fact_id": "customer_activity:电话沟通采购流程:2026-08-04T15:00:00",
+          "fact_type": "customer_activity",
+          "source_group": "activity",
+          "occurred_at": "2026-08-04T15:00:00",
+          "customer": {"id": "cus_eval_huaxin", "name": "华信软件"},
+          "attribution": {"user_id": "2", "field": "owner_id", "source": "crm_customer_activities.owner_id"},
+          "title": "电话沟通采购流程",
+          "payload": {"owner_id": "2", "title": "电话沟通采购流程"}
+        }
+      ],
+      "available_total": 1,
+      "truncated": false,
+      "source_total_counts": {"customer_activity": 1},
+      "filters": {
+        "window": "this_week",
+        "starts_at": "2026-08-03T00:00:00",
+        "ends_at": "2026-08-10T00:00:00"
+      }
+    },
+    "result": {
+      "answer": "本周与华信软件沟通了采购流程，这是已记录的客户跟进过程。",
+      "highlights": [
+        {
+          "category": "process_record",
+          "title": "采购流程沟通",
+          "summary": "已记录与客户电话沟通采购流程。",
+          "fact_ids": ["customer_activity:电话沟通采购流程:2026-08-04T15:00:00"]
+        }
+      ],
+      "customer_summaries": [],
+      "confidence": 0.86,
+      "narrative_mode": "fallback",
+      "missing_context": [],
+      "citations": [{"fact_id": "customer_activity:电话沟通采购流程:2026-08-04T15:00:00"}]
+    },
+    "expected": {
+      "required_fact_ids": ["customer_activity:电话沟通采购流程:2026-08-04T15:00:00"],
+      "required_fact_types": ["customer_activity"],
+      "source_total_counts": {"customer_activity": 1},
+      "owner_id": "2",
+      "min_confidence": 0.8,
+      "required_answer_terms": ["华信软件", "客户跟进过程"]
+    }
+  },
+  {
+    "name": "business_events_are_business_progress",
+    "category": "business_progress",
+    "execution": "static_narrative",
+    "work_facts": {
+      "items": [
+        {
+          "fact_id": "contract_signed:C-2026-7788:2026-08-05T00:00:00",
+          "fact_type": "contract_signed",
+          "source_group": "business_event",
+          "occurred_at": "2026-08-05T00:00:00",
+          "customer": {"id": "cus_eval_zhengda", "name": "正达集团"},
+          "attribution": {"user_id": "2", "field": "owner_id", "source": "crm_contracts.owner_id"},
+          "title": "正达集团 CRM 合同",
+          "payload": {"contract_number": "C-2026-7788", "total_amount": 180000.0}
+        },
+        {
+          "fact_id": "invoice_application:INV-2026-7788:2026-08-06T11:00:00",
+          "fact_type": "invoice_application",
+          "source_group": "business_event",
+          "occurred_at": "2026-08-06T11:00:00",
+          "customer": {"id": "cus_eval_zhengda", "name": "正达集团"},
+          "attribution": {"user_id": "2", "field": "applicant_id", "source": "crm_invoice_applications.applicant_id"},
+          "title": "开票申请 INV-2026-7788",
+          "payload": {"application_number": "INV-2026-7788", "invoice_amount": 90000.0}
+        }
+      ],
+      "available_total": 2,
+      "truncated": false,
+      "source_total_counts": {"contract_signed": 1, "invoice_application": 1},
+      "filters": {
+        "window": "this_week",
+        "starts_at": "2026-08-03T00:00:00",
+        "ends_at": "2026-08-10T00:00:00"
+      }
+    },
+    "result": {
+      "answer": "本周正达集团完成合同签署并提交了开票申请，属于业务推进。",
+      "highlights": [
+        {
+          "category": "business_progress",
+          "title": "正达集团合同与开票",
+          "summary": "合同已签署，并提交了对应开票申请。",
+          "fact_ids": [
+            "contract_signed:C-2026-7788:2026-08-05T00:00:00",
+            "invoice_application:INV-2026-7788:2026-08-06T11:00:00"
+          ]
+        }
+      ],
+      "customer_summaries": [],
+      "confidence": 0.9,
+      "narrative_mode": "langchain_structured_output",
+      "missing_context": [],
+      "citations": [
+        {"fact_id": "contract_signed:C-2026-7788:2026-08-05T00:00:00"},
+        {"fact_id": "invoice_application:INV-2026-7788:2026-08-06T11:00:00"}
+      ]
+    },
+    "expected": {
+      "required_fact_ids": [
+        "contract_signed:C-2026-7788:2026-08-05T00:00:00",
+        "invoice_application:INV-2026-7788:2026-08-06T11:00:00"
+      ],
+      "required_fact_types": ["contract_signed", "invoice_application"],
+      "source_total_counts": {"contract_signed": 1, "invoice_application": 1},
+      "owner_id": "2",
+      "min_confidence": 0.85,
+      "required_answer_terms": ["正达集团", "业务推进"]
+    }
+  },
+  {
+    "name": "truncated_summary_discloses_partial_basis",
+    "category": "pagination",
+    "execution": "static_narrative",
+    "work_facts": {
+      "items": [
+        {
+          "fact_id": "completed_follow_up_task:fut_eval_page_1:2026-08-06T10:00:00",
+          "fact_type": "completed_follow_up_task",
+          "source_group": "task",
+          "occurred_at": "2026-08-06T10:00:00",
+          "customer": {"id": "cus_eval_nanhu", "name": "南湖制造"},
+          "attribution": {"user_id": "2", "field": "owner_id", "source": "crm_follow_up_tasks.owner_id"},
+          "title": "确认演示名单",
+          "payload": {"id": "fut_eval_page_1", "owner_id": "2", "title": "确认演示名单"}
+        },
+        {
+          "fact_id": "customer_activity:同步部署窗口:2026-08-06T09:30:00",
+          "fact_type": "customer_activity",
+          "source_group": "activity",
+          "occurred_at": "2026-08-06T09:30:00",
+          "customer": {"id": "cus_eval_nanhu", "name": "南湖制造"},
+          "attribution": {"user_id": "2", "field": "owner_id", "source": "crm_customer_activities.owner_id"},
+          "title": "同步部署窗口",
+          "payload": {"owner_id": "2", "title": "同步部署窗口"}
+        }
+      ],
+      "available_total": 5,
+      "truncated": true,
+      "next_cursor": "Mg==",
+      "pagination": {"truncated": true, "next_cursor": "Mg==", "available_total": 5},
+      "source_total_counts": {"completed_follow_up_task": 2, "customer_activity": 3},
+      "filters": {
+        "window": "today",
+        "starts_at": "2026-08-06T00:00:00",
+        "ends_at": "2026-08-07T00:00:00"
+      }
+    },
+    "result": {
+      "answer": "当前总结基于部分事实：南湖制造已确认演示名单，并同步了部署窗口。",
+      "highlights": [
+        {
+          "category": "completed_work",
+          "title": "确认演示名单",
+          "summary": "南湖制造的演示名单已确认。",
+          "fact_ids": ["completed_follow_up_task:fut_eval_page_1:2026-08-06T10:00:00"]
+        },
+        {
+          "category": "process_record",
+          "title": "部署窗口沟通",
+          "summary": "已同步部署窗口。",
+          "fact_ids": ["customer_activity:同步部署窗口:2026-08-06T09:30:00"]
+        }
+      ],
+      "customer_summaries": [],
+      "confidence": 0.68,
+      "narrative_mode": "langchain_structured_output",
+      "missing_context": ["后续分页事实"],
+      "citations": [
+        {"fact_id": "completed_follow_up_task:fut_eval_page_1:2026-08-06T10:00:00"},
+        {"fact_id": "customer_activity:同步部署窗口:2026-08-06T09:30:00"}
+      ]
+    },
+    "expected": {
+      "required_fact_ids": [
+        "completed_follow_up_task:fut_eval_page_1:2026-08-06T10:00:00",
+        "customer_activity:同步部署窗口:2026-08-06T09:30:00"
+      ],
+      "source_total_counts": {"completed_follow_up_task": 2, "customer_activity": 3},
+      "owner_id": "2",
+      "require_truncated_disclosure": true,
+      "min_confidence": 0.6
+    }
+  },
+  {
+    "name": "other_owner_noise_is_not_referenced",
+    "category": "owner_scope",
+    "execution": "static_narrative",
+    "work_facts": {
+      "items": [
+        {
+          "fact_id": "completed_follow_up_task:fut_eval_presales:2026-08-05T16:00:00",
+          "fact_type": "completed_follow_up_task",
+          "source_group": "task",
+          "occurred_at": "2026-08-05T16:00:00",
+          "customer": {"id": "cus_eval_shared", "name": "共管客户"},
+          "attribution": {"user_id": "8", "field": "owner_id", "source": "crm_follow_up_tasks.owner_id"},
+          "title": "售前确认技术清单",
+          "payload": {"id": "fut_eval_presales", "owner_id": "8", "title": "售前确认技术清单"}
+        }
+      ],
+      "available_total": 1,
+      "truncated": false,
+      "source_total_counts": {"completed_follow_up_task": 1},
+      "filters": {
+        "window": "this_week",
+        "starts_at": "2026-08-03T00:00:00",
+        "ends_at": "2026-08-10T00:00:00"
+      }
+    },
+    "result": {
+      "answer": "本周为共管客户完成了售前技术清单确认。",
+      "highlights": [
+        {
+          "category": "completed_work",
+          "title": "技术清单确认",
+          "summary": "售前已确认技术清单。",
+          "fact_ids": ["completed_follow_up_task:fut_eval_presales:2026-08-05T16:00:00"]
+        }
+      ],
+      "customer_summaries": [],
+      "confidence": 0.88,
+      "narrative_mode": "fallback",
+      "missing_context": [],
+      "citations": [{"fact_id": "completed_follow_up_task:fut_eval_presales:2026-08-05T16:00:00"}]
+    },
+    "expected": {
+      "required_fact_ids": ["completed_follow_up_task:fut_eval_presales:2026-08-05T16:00:00"],
+      "forbidden_fact_ids": ["completed_follow_up_task:fut_eval_sales_owner:2026-08-05T15:00:00"],
+      "required_fact_types": ["completed_follow_up_task"],
+      "source_total_counts": {"completed_follow_up_task": 1},
+      "owner_id": "8",
+      "min_confidence": 0.8,
+      "required_answer_terms": ["共管客户", "售前"]
+    }
+  },
+  {
+    "name": "human_correction_is_structured_and_replayable",
+    "category": "human_correction",
+    "execution": "static_narrative",
+    "work_facts": {
+      "items": [
+        {
+          "fact_id": "license_application:LIC-2026-6601:2026-08-06T14:00:00",
+          "fact_type": "license_application",
+          "source_group": "business_event",
+          "occurred_at": "2026-08-06T14:00:00",
+          "customer": {"id": "cus_eval_luming", "name": "鹿鸣科技"},
+          "attribution": {"user_id": "2", "field": "applicant_id", "source": "crm_license_applications.applicant_id"},
+          "title": "License 申请 LIC-2026-6601",
+          "payload": {"application_number": "LIC-2026-6601", "license_type": "TRIAL", "authorized_users": 20}
+        }
+      ],
+      "available_total": 1,
+      "truncated": false,
+      "source_total_counts": {"license_application": 1},
+      "filters": {
+        "window": "today",
+        "starts_at": "2026-08-06T00:00:00",
+        "ends_at": "2026-08-07T00:00:00"
+      }
+    },
+    "result": {
+      "answer": "今天鹿鸣科技的试用 License 申请已通过，是业务推进事实。",
+      "highlights": [
+        {
+          "category": "business_progress",
+          "title": "试用 License 申请",
+          "summary": "鹿鸣科技的 20 用户试用 License 申请已通过。",
+          "fact_ids": ["license_application:LIC-2026-6601:2026-08-06T14:00:00"]
+        }
+      ],
+      "customer_summaries": [],
+      "confidence": 0.87,
+      "narrative_mode": "langchain_structured_output",
+      "missing_context": [],
+      "citations": [{"fact_id": "license_application:LIC-2026-6601:2026-08-06T14:00:00"}]
+    },
+    "human_corrections": [
+      {
+        "correction_type": "rewrite_summary",
+        "target_fact_id": "license_application:LIC-2026-6601:2026-08-06T14:00:00",
+        "replacement_text": "强调这是 License 申请通过，不要写成合同成交。",
+        "note": "用户纠正总结口径，作为后续 prompt 和样本优化依据。",
+        "feedback_source": "human_review"
+      }
+    ],
+    "expected": {
+      "required_fact_ids": ["license_application:LIC-2026-6601:2026-08-06T14:00:00"],
+      "required_fact_types": ["license_application"],
+      "source_total_counts": {"license_application": 1},
+      "owner_id": "2",
+      "min_confidence": 0.8,
+      "required_answer_terms": ["鹿鸣科技", "License"]
+    }
+  }
+]

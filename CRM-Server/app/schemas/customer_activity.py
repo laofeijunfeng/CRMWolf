@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.services.customer_activity_kinds import ACTIVITY_KIND_META, get_activity_kind_meta, normalize_activity_kind
 
-
 NEXT_FOLLOW_TIME_SOURCES = {"UI_DEFAULT", "USER", "AI_EXTRACTED", "AGENT", "MIGRATED"}
 
 
@@ -124,9 +123,11 @@ class CustomerActivityResponse(BaseModel):
     next_action: Optional[str] = Field(None, description="下一步动作内容")
     occurred_at: datetime = Field(..., description="活动发生时间")
     creator_id: str = Field(..., description="创建人系统用户ID")
+    owner_id: str = Field(..., description="跟进归属人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     updated_time: datetime = Field(..., description="更新时间")
     creator_info: Optional[OwnerInfo] = Field(None, description="创建人信息")
+    owner_info: Optional[OwnerInfo] = Field(None, description="跟进归属人信息")
     customer_info: Optional[CustomerBasicInfo] = Field(None, description="客户基本信息")
     effectiveness_score: Optional[int] = Field(None, description="AI评估活动有效性得分，满分100")
     effectiveness_is_valid: Optional[bool] = Field(None, description="AI评估是否有效")

@@ -25,6 +25,11 @@ from app.services.agent.invoice_title_graph import InvoiceTitlePlanningGraphServ
 from app.services.agent.lead_graph import LeadPlanningGraphService
 from app.services.agent.opportunity_graph import OpportunityPlanningGraphService
 from app.services.agent.payment_record_graph import PaymentRecordPlanningGraphService
+from app.services.agent.read_query_presenters import (
+    follow_up_tasks_tool_response,
+    read_tool_error_response,
+    work_summary_tool_response,
+)
 from app.services.agent.resource_resolution_graph import ResourceResolutionGraphService
 from app.services.agent.schemas import (
     AgentFollowUpQualityResult,
@@ -41,10 +46,10 @@ from app.services.agent.state import (
 from app.services.agent.types import JSONDict, JSONValue, coerce_json_dict
 from app.services.customer_activity_kinds import get_activity_category, infer_activity_kind
 
-
 ACTION_PLANNING_CHECKPOINT_NS = "crm_agent_action_planning"
 
 ResponseRoute = Literal[
+    "read_tool_result",
     "semantic_error",
     "clarification",
     "creation_duplicate",
@@ -155,6 +160,7 @@ class ActionPlanningGraphService:
         graph = StateGraph(ActionPlanningGraphState, context_schema=ActionPlanningRuntimeContext)
         graph.add_node("collect_trace_events", self._collect_trace_events)
         graph.add_node("route_response", self._route_response)
+        graph.add_node("read_tool_response", self._read_tool_response)
         graph.add_node("semantic_error_response", self._semantic_error_response)
         graph.add_node("clarification_response", self._clarification_response)
         graph.add_node("creation_duplicate_response", self._creation_duplicate_response)
@@ -179,6 +185,7 @@ class ActionPlanningGraphService:
             "route_response",
             self._route_after_response_guard,
             {
+                "read_tool_result": "read_tool_response",
                 "semantic_error": "semantic_error_response",
                 "clarification": "clarification_response",
                 "creation_duplicate": "creation_duplicate_response",
@@ -186,6 +193,7 @@ class ActionPlanningGraphService:
                 "business_action": "route_business_action",
             },
         )
+        graph.add_edge("read_tool_response", "finalize_response")
         graph.add_edge("semantic_error_response", "finalize_response")
         graph.add_edge("clarification_response", "finalize_response")
         graph.add_edge("creation_duplicate_response", "finalize_response")
@@ -256,7 +264,12 @@ class ActionPlanningGraphService:
 
         events: list[JSONDict] = [
             reset_event,
-            {"event": "intent", "intent": state.get("intent") or "UNKNOWN"},
+            {
+                "event": "intent",
+                "intent": state.get("intent") or "UNKNOWN",
+                "technical_intent": state.get("intent") or "UNKNOWN",
+                "intent_label": _state_intent_label(state, runtime.context.semantic_result),
+            },
         ]
         semantic_result = runtime.context.semantic_result
         if semantic_result:
@@ -296,6 +309,7 @@ class ActionPlanningGraphService:
     def _route_after_response_guard(self, state: ActionPlanningGraphState) -> ResponseRoute:
         route = state.get("response_route")
         if route in {
+            "read_tool_result",
             "semantic_error",
             "clarification",
             "creation_duplicate",
@@ -304,6 +318,19 @@ class ActionPlanningGraphService:
         }:
             return route
         return "business_action"
+
+    def _read_tool_response(self, state: ActionPlanningGraphState) -> ActionPlanningGraphState:
+        result = coerce_json_dict(state.get("read_tool_result"))
+        tool_name = _display_text(result.get("tool_name")) or _display_text(state.get("read_tool_name"))
+        if result.get("success") is False:
+            return {"response": read_tool_error_response(tool_name, result)}
+        data = result.get("data")
+        if tool_name == "summarize_completed_work":
+            return {"response": work_summary_tool_response(data)}
+        if tool_name == "list_follow_up_tasks":
+            payload = coerce_json_dict(state.get("read_tool_payload"))
+            return {"response": follow_up_tasks_tool_response(data, payload)}
+        return {"response": "已完成查询，但当前还不能可靠整理这类结果。"}
 
     def _semantic_error_response(self, state: ActionPlanningGraphState) -> ActionPlanningGraphState:
         return {"response": state.get("semantic_error") or "语义理解失败，请稍后重试。"}
@@ -602,12 +629,12 @@ class ActionPlanningGraphService:
             state.get("selected_customer") or {},
         )
 
-        if runtime.context.suggestion_result and not action and state.get("intent") != "CUSTOMER_QUERY":
+        if runtime.context.suggestion_result and not action and state.get("intent") != "CRM_READ_QUERY":
             response = business_rules.append_suggestions_to_response(response, suggestions)
 
         stage_move = coerce_json_dict(stage_move_action)
         next_task = coerce_json_dict(opportunity_next_task)
-        if state.get("intent") != "CUSTOMER_QUERY":
+        if state.get("intent") != "CRM_READ_QUERY":
             if stage_move:
                 if action.get("action") == "create_customer_activity":
                     _attach_next_task(action, stage_move)
@@ -700,7 +727,10 @@ class ActionPlanningGraphService:
 
     def _finalize_response(self, state: ActionPlanningGraphState) -> ActionPlanningGraphState:
         content_format = "text"
-        if state.get("intent") == "CUSTOMER_QUERY" and not coerce_json_dict(state.get("action")):
+        if state.get("read_tool_result"):
+            response = state.get("response") or "已完成查询。"
+            content_format = "markdown"
+        elif state.get("intent") == "CRM_READ_QUERY" and not coerce_json_dict(state.get("action")):
             response = state.get("response") or _customer_query_context_response(state)
             content_format = "markdown"
         else:
@@ -947,6 +977,8 @@ def _response_route(
     follow_up_quality_result: AgentFollowUpQualityResult | None,
 ) -> ResponseRoute:
     intent = state.get("intent") or "UNKNOWN"
+    if state.get("read_tool_result"):
+        return "read_tool_result"
     if state.get("semantic_error"):
         return "semantic_error"
     if semantic_result and _requires_clarification(
@@ -973,9 +1005,57 @@ def _business_action_route(intent: str) -> BusinessActionRoute:
         "CREATE_INVOICE_TITLE": "create_invoice_title",
         "CREATE_DEPLOYMENT_INFO": "create_deployment_info",
         "CREATE_CUSTOMER_MEMBER": "create_customer_member",
-        "CUSTOMER_QUERY": "customer_query",
+        "CRM_READ_QUERY": "customer_query",
     }
     return routes.get(intent, "unknown")
+
+
+def _state_intent_label(
+    state: ActionPlanningGraphState,
+    semantic_result: AgentSemanticParseResult | None,
+) -> str:
+    if semantic_result is not None:
+        return _semantic_intent_label(semantic_result)
+    intent = _display_text(state.get("intent")) or "UNKNOWN"
+    if intent == "CRM_READ_QUERY":
+        semantic = coerce_json_dict(state.get("semantic"))
+        read_query = coerce_json_dict(semantic.get("read_query"))
+        return _read_query_intent_label(_display_text(read_query.get("type")))
+    return _technical_intent_label(intent)
+
+
+def _semantic_intent_label(semantic_result: AgentSemanticParseResult) -> str:
+    if semantic_result.intent == "CRM_READ_QUERY":
+        return _read_query_intent_label(semantic_result.read_query.type)
+    return _technical_intent_label(semantic_result.intent)
+
+
+def _read_query_intent_label(read_query_type: str) -> str:
+    return {
+        "FOLLOW_UP_TASKS": "任务查询",
+        "WORK_SUMMARY": "工作总结",
+        "CUSTOMER_PROFILE": "客户查询",
+        "OPPORTUNITY": "商机查询",
+        "CONTRACT": "合同查询",
+        "PAYMENT": "回款查询",
+        "INVOICE": "发票查询",
+        "LICENSE": "License 查询",
+    }.get(read_query_type, "业务查询")
+
+
+def _technical_intent_label(intent: str) -> str:
+    return {
+        "CUSTOMER_ACTIVITY": "客户跟进记录",
+        "PAYMENT_RECORD": "回款记录",
+        "CREATE_LEAD": "创建线索",
+        "CREATE_CUSTOMER": "创建客户",
+        "CREATE_OPPORTUNITY": "创建商机",
+        "CREATE_CONTACT": "创建联系人",
+        "CREATE_INVOICE_TITLE": "创建发票抬头",
+        "CREATE_DEPLOYMENT_INFO": "创建部署信息",
+        "CREATE_CUSTOMER_MEMBER": "添加客户团队成员",
+        "UNKNOWN": "无法识别",
+    }.get(intent, intent)
 
 
 def _customer_query_unresolved_response(state: ActionPlanningGraphState) -> str:
@@ -1125,9 +1205,12 @@ def _semantic_trace_events(
     semantic_result: AgentSemanticParseResult,
 ) -> list[JSONDict]:
     metadata = state.get("semantic_metadata") or {}
+    intent_label = _semantic_intent_label(semantic_result)
     return [{
         "event": "semantic_parsed",
         "intent": semantic_result.intent,
+        "technical_intent": semantic_result.intent,
+        "intent_label": intent_label,
         "confidence": semantic_result.intent_confidence,
         "parse_source": metadata.get("parse_source"),
         "model": metadata.get("model"),
@@ -1199,7 +1282,7 @@ def _requires_clarification(
         or semantic_result.intent_confidence < 0.75
         or (
             semantic_result.intent != "UNKNOWN"
-            and semantic_result.intent != "CUSTOMER_QUERY"
+            and semantic_result.intent != "CRM_READ_QUERY"
             and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
             and not customer_from_memory
             and semantic_result.customer.confidence < 0.7
@@ -1320,11 +1403,14 @@ def _checkpoint_state_from_input(input_state: ActionPlanningGraphInput) -> Actio
         "user_id": int(input_state.get("user_id") or 0),
         "session_id": int(input_state.get("session_id") or 0),
         "content": str(input_state.get("content") or ""),
-        "intent": input_state.get("intent") or "UNKNOWN",
+        "intent": _normalized_action_planning_intent(input_state),
         "parsed": coerce_json_dict(input_state.get("parsed")),
         "customer_candidates": _json_dict_list(input_state.get("customer_candidates")),
         "selected_customer": _optional_json_dict(input_state.get("selected_customer")),
         "business_context": coerce_json_dict(input_state.get("business_context")),
+        "read_tool_name": _optional_string(input_state.get("read_tool_name")),
+        "read_tool_payload": coerce_json_dict(input_state.get("read_tool_payload")),
+        "read_tool_result": coerce_json_dict(input_state.get("read_tool_result")),
         "semantic": coerce_json_dict(input_state.get("semantic")),
         "semantic_metadata": coerce_json_dict(input_state.get("semantic_metadata")),
         "semantic_error": _optional_string(input_state.get("semantic_error")),
@@ -1344,6 +1430,24 @@ def _checkpoint_state_from_input(input_state: ActionPlanningGraphInput) -> Actio
         "events": [],
     }
     return state
+
+
+def _normalized_action_planning_intent(input_state: ActionPlanningGraphInput) -> str:
+    semantic_result = input_state.get("semantic_result")
+    if isinstance(semantic_result, AgentSemanticParseResult):
+        return semantic_result.intent
+    semantic = coerce_json_dict(input_state.get("semantic"))
+    semantic_intent = semantic.get("intent")
+    if semantic_intent == "CUSTOMER_QUERY":
+        return "CRM_READ_QUERY"
+    if isinstance(semantic_intent, str) and semantic_intent.strip():
+        return semantic_intent.strip()
+    input_intent = input_state.get("intent")
+    if input_intent == "CUSTOMER_QUERY":
+        return "CRM_READ_QUERY"
+    if isinstance(input_intent, str) and input_intent.strip():
+        return input_intent.strip()
+    return "UNKNOWN"
 
 
 def _runtime_context_from_input(input_state: ActionPlanningGraphInput) -> ActionPlanningRuntimeContext:

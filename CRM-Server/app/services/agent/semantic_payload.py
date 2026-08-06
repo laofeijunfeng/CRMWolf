@@ -57,7 +57,7 @@ def parsed_from_semantic(
     })
 
     return {
-        "customer_name": semantic_result.customer.name_text,
+        "customer_name": semantic_result.customer.name_text or semantic_result.read_query.customer_name_text,
         "original_content": original_content,
         "follow_up_content": semantic_result.follow_up.content or original_content,
         "method": semantic_result.follow_up.method or "AI录入",

@@ -33,7 +33,7 @@ export type IndustryType = 'IT/互联网' | '金融' | '教育' | '医疗' | '�
 export type CompanyScaleType = '1-50人' | '51-200人' | '201-500人' | '501-1000人' | '1000人以上'
 
 type StatusType = 'lead' | 'customer' | 'opportunity' | 'contract' | 'invoice' | 'paymentPlan' | 'paymentRecord' | 'generic' | 'source' | 'authorizationMode' | 'procurementType' | 'industry' | 'companyScale'
-type StatusColor = 'neutral' | 'warning' | 'success' | 'danger'
+type StatusColor = 'neutral' | 'info' | 'warning' | 'success' | 'danger'
 
 interface StatusConfigItem {
   label: string
@@ -119,7 +119,7 @@ const STATUS_CONFIG = {
   procurementType: {
     'NEW': { label: '新购', color: 'warning' },
     'RENEWAL': { label: '续购', color: 'success' },
-    'EXPANSION': { label: '增购', color: 'success' }
+    'EXPANSION': { label: '增购', color: 'info' }
   },
   industry: {
     // 行业字段统一使用 neutral 颜色
@@ -156,6 +156,7 @@ const config = computed<StatusConfigItem>(() => {
 const statusClasses = computed(() => {
   const colorMap: Record<StatusColor, string> = {
     neutral: 'status-neutral',
+    info: 'status-info',
     warning: 'status-warning',
     success: 'status-success',
     danger: 'status-danger'
@@ -211,6 +212,11 @@ const ariaLabel = computed(() => config.value.label)
 .status-warning {
   background: $wolf-warning-bg-v2;
   color: $wolf-warning-text-v2;
+}
+
+.status-info {
+  background: $wolf-primary-light-v2;
+  color: $wolf-primary-v2;
 }
 
 .status-success {

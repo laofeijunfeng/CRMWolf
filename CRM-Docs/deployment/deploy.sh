@@ -137,7 +137,11 @@ sleep 10
 echo "[迁移] 执行数据库迁移..."
 docker exec crm-backend python -m alembic upgrade head
 
-# 6. 健康检查
+# 6. 执行销售承诺/跟进任务历史回填
+echo "[回填] 执行销售承诺/跟进任务历史回填..."
+docker exec crm-backend python scripts/backfill_follow_up_tasks.py --days 90 --limit 1000 --confirm
+
+# 7. 健康检查
 echo "[检查] 执行健康检查..."
 BACKEND_HEALTH=$(docker exec crm-backend curl -sf http://localhost:8000/health -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
 FRONTEND_HEALTH=$(docker exec crm-frontend curl -sf http://localhost:80/health -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
