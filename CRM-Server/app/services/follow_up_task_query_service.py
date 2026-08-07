@@ -9,6 +9,10 @@ from app.crud.sales_commitment import follow_up_task_crud
 from app.models.customer import Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
+from app.services.follow_up_task_query_intent import (
+    extract_follow_up_task_semantic_query_text,
+    normalize_follow_up_task_retrieval_mode,
+)
 from app.services.follow_up_task_semantic_evidence_service import (
     FollowUpTaskSemanticEvidenceService,
     follow_up_task_semantic_evidence_service,
@@ -48,6 +52,7 @@ class FollowUpTaskQueryService:
         customer_public_id: str | None = None,
         owner_scope: str = "mine",
         query_text: str | None = None,
+        retrieval_mode: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         statuses = self._normalize_status(status)
@@ -61,11 +66,16 @@ class FollowUpTaskQueryService:
         semantic_retrieval = self._semantic_retrieval_not_attempted()
         semantic_task_public_ids: list[str] | None = None
         clean_query_text = query_text.strip() if isinstance(query_text, str) else ""
-        if clean_query_text:
+        semantic_query_text = extract_follow_up_task_semantic_query_text(clean_query_text)
+        normalized_retrieval_mode = normalize_follow_up_task_retrieval_mode(retrieval_mode, clean_query_text)
+        query_text_ignored_reason = None
+        if normalized_retrieval_mode == "structured" and clean_query_text:
+            query_text_ignored_reason = "structured_retrieval_mode"
+        if normalized_retrieval_mode == "semantic_filter" and semantic_query_text:
             semantic_result = self.semantic_evidence_service.recall(
                 db,
                 team_id=team_id,
-                query_text=clean_query_text,
+                query_text=semantic_query_text,
                 limit=limit,
             )
             semantic_retrieval = semantic_result.retrieval_event
@@ -101,7 +111,9 @@ class FollowUpTaskQueryService:
                 "due_window": due_window,
                 "customer_id": customer.public_id if customer else None,
                 "owner_scope": owner_scope,
-                "query_text": clean_query_text or None,
+                "retrieval_mode": normalized_retrieval_mode,
+                "query_text": semantic_query_text if normalized_retrieval_mode == "semantic_filter" else None,
+                "query_text_ignored_reason": query_text_ignored_reason,
             },
             "customer_summary": self._customer_summary(items),
             "semantic_retrieval": semantic_retrieval,

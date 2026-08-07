@@ -1518,6 +1518,100 @@ async def test_agent_tool_list_follow_up_tasks_returns_current_owner_tasks_only(
 
 
 @pytest.mark.asyncio
+async def test_agent_tool_list_follow_up_tasks_structured_mode_ignores_generic_query_text():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(
+        api_client=FakeCRMAPIClient(),
+        follow_up_query_service=FollowUpTaskQueryService(
+            semantic_evidence_service=FailingFollowUpTaskSemanticEvidenceService(),
+        ),
+    )
+    try:
+        _seed_follow_up_task_customer(db)
+        _seed_follow_up_task(
+            db,
+            task_id=1011,
+            public_id="fut_00000000000000000000000000001011",
+            owner_id="2",
+            title="确认预算进展",
+        )
+        _seed_follow_up_task(
+            db,
+            task_id=1012,
+            public_id="fut_00000000000000000000000000001012",
+            owner_id="2",
+            title="确认试用反馈",
+        )
+        db.commit()
+
+        result = await service.list_follow_up_tasks(
+            _context(db),
+            query_text="我还有哪些任务",
+            retrieval_mode="structured",
+        )
+
+        assert result.success is True
+        assert result.data["total"] == 2
+        assert result.data["semantic_retrieval"]["status"] == "not_attempted"
+        assert result.data["filters"]["retrieval_mode"] == "structured"
+        assert result.data["filters"]["query_text"] is None
+        assert result.data["filters"]["query_text_ignored_reason"] == "structured_retrieval_mode"
+        tool_call = db.query(AgentToolCall).one()
+        assert tool_call.request_json["retrieval_mode"] == "structured"
+        assert tool_call.request_json["query_text"] == "我还有哪些任务"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_registry_keeps_legacy_generic_follow_up_query_text_structured():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(
+        api_client=FakeCRMAPIClient(),
+        follow_up_query_service=FollowUpTaskQueryService(
+            semantic_evidence_service=FailingFollowUpTaskSemanticEvidenceService(),
+        ),
+    )
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        _seed_follow_up_task_customer(db)
+        _seed_follow_up_task(
+            db,
+            task_id=1013,
+            public_id="fut_00000000000000000000000000001013",
+            owner_id="2",
+            title="确认预算进展",
+        )
+        _seed_follow_up_task(
+            db,
+            task_id=1014,
+            public_id="fut_00000000000000000000000000001014",
+            owner_id="2",
+            title="确认试用反馈",
+        )
+        db.commit()
+
+        result = await registry.execute(
+            "list_follow_up_tasks",
+            _context(db),
+            {"query_text": "我还有哪些任务", "status": "open"},
+        )
+
+        assert result.success is True
+        assert result.data["total"] == 2
+        assert result.data["semantic_retrieval"]["status"] == "not_attempted"
+        assert result.data["filters"]["retrieval_mode"] == "structured"
+        assert result.data["filters"]["query_text"] is None
+        tool_call = db.query(AgentToolCall).one()
+        assert tool_call.request_json["query_text"] == "我还有哪些任务"
+        assert tool_call.request_json["retrieval_mode"] == "structured"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_list_follow_up_tasks_uses_semantic_evidence_as_filtered_candidates():
     engine, db = _db_session(_sales_commitment_tables())
     budget_task_id = "fut_00000000000000000000000000001021"
@@ -1567,11 +1661,12 @@ async def test_agent_tool_list_follow_up_tasks_uses_semantic_evidence_as_filtere
             metadata_json={"task_public_id": other_owner_task_id, "status": FollowUpTaskStatus.OPEN},
         ),
     ])
+    embedding_service = FakeCustomerEmbeddingService()
     service = CRMAgentToolService(
         api_client=FakeCRMAPIClient(),
         follow_up_query_service=FollowUpTaskQueryService(
             semantic_evidence_service=FollowUpTaskSemanticEvidenceService(
-                embedding_service=FakeCustomerEmbeddingService(),
+                embedding_service=embedding_service,
                 qdrant_index_service=qdrant_service,
             ),
         ),
@@ -1612,9 +1707,12 @@ async def test_agent_tool_list_follow_up_tasks_uses_semantic_evidence_as_filtere
         assert [item["id"] for item in result.data["items"]] == [budget_task.public_id]
         assert result.data["items"][0]["status"] == FollowUpTaskStatus.OPEN
         assert result.data["items"][0]["semantic_evidence"][0]["object_public_id"] == budget_task.public_id
+        assert result.data["filters"]["retrieval_mode"] == "semantic_filter"
+        assert result.data["filters"]["query_text"] == "预算相关"
         assert result.data["semantic_retrieval"]["status"] == "ok"
         assert result.data["usage_policy"]["task_state_source"] == "mysql"
         assert qdrant_service.team_queries[0]["source_types"] == ("follow_up_task", "sales_commitment")
+        assert embedding_service.queries == ["预算相关"]
     finally:
         db.close()
         engine.dispose()
@@ -1744,6 +1842,7 @@ async def test_agent_tool_registry_accepts_follow_up_task_query_text():
         assert [item["id"] for item in result.data["items"]] == [task_public_id]
         tool_call = db.query(AgentToolCall).one()
         assert tool_call.request_json["query_text"] == "试用反馈"
+        assert tool_call.request_json["retrieval_mode"] == "semantic_filter"
     finally:
         db.close()
         engine.dispose()
@@ -2174,6 +2273,7 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
         assert second.idempotent_replay is True
         assert len(fake_client.calls) == 1
         assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}"
+        assert fake_client.calls[0]["params"] == {"post_commit_mode": "sync"}
         assert fake_client.calls[0]["json"]["next_follow_time"] == "2026-07-29T09:00:00"
         assert db.query(AgentIdempotencyKey).count() == 1
         assert db.query(AgentToolCall).count() == 1

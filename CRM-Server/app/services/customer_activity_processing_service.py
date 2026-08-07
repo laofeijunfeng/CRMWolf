@@ -5,16 +5,28 @@ import asyncio
 import logging
 from typing import Any, Dict
 
+from app.core.database import SessionLocal
 from app.crud.customer_activity import customer_activity_crud
 from app.services.ai_task_limiter import ai_generation_semaphore
 from app.services.customer_activity_ai.evaluation_agent import ActivityEvaluationError
 from app.services.customer_activity_ai.structuring_agent import ActivityStructuringError
 from app.services.customer_activity_ai.workflow import customer_activity_ai_workflow
-from app.core.database import SessionLocal
-from app.services.follow_up_task_projection_service import follow_up_task_projection_service
-
+from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
 
 logger = logging.getLogger(__name__)
+
+
+def _empty_post_commit_outcome() -> Dict[str, Any]:
+    return {
+        "needs_user_confirmation": False,
+        "confirmation_case_public_ids": [],
+        "confirmation_cases": [],
+        "created_confirmation_case_count": 0,
+        "prompt_policy": {
+            "prompt_scope": "current_activity",
+            "delivery": "channel_contextual",
+        },
+    }
 
 
 class CustomerActivityProcessingService:
@@ -70,7 +82,7 @@ class CustomerActivityProcessingService:
     async def trigger_evaluation(self, activity_id: int, team_id: int) -> None:
         asyncio.create_task(self.evaluate(activity_id=activity_id, team_id=team_id))
 
-    async def project_follow_up_task(
+    async def run_post_commit_workflow(
         self,
         *,
         activity_id: int,
@@ -79,42 +91,47 @@ class CustomerActivityProcessingService:
         actor_id: str | None = None,
     ) -> Dict[str, Any]:
         logger.info(
-            "开始客户活动任务投影: activity_id=%s, team_id=%s, trigger_type=%s",
+            "开始客户活动后提交 workflow: activity_id=%s, team_id=%s, trigger_type=%s",
             activity_id,
             team_id,
             trigger_type,
         )
-        db = SessionLocal()
         try:
-            try:
-                result = follow_up_task_projection_service.run_activity_projection(
-                    db,
-                    activity_id=activity_id,
-                    team_id=team_id,
-                    trigger_type=trigger_type,
-                    actor_id=actor_id,
-                )
-                logger.info(
-                    "客户活动任务投影完成: activity_id=%s, status=%s, skip_reason=%s",
-                    activity_id,
-                    result.projection_run_status,
-                    result.skip_reason,
-                )
-                return {
-                    "success": result.projection_run_status != "FAILED",
-                    "activity_id": activity_id,
-                    "projection_run_id": result.projection_run_id,
-                    "status": result.projection_run_status,
-                    "skip_reason": result.skip_reason,
-                    "error": result.error_message,
-                }
-            except Exception as exc:
-                logger.exception("客户活动任务投影调度失败: activity_id=%s", activity_id)
-                return {"success": False, "activity_id": activity_id, "error": str(exc)}
-        finally:
-            db.close()
+            state = await customer_activity_post_commit_workflow.run(
+                activity_id=activity_id,
+                team_id=team_id,
+                trigger_type=trigger_type,
+                actor_id=actor_id,
+            )
+            logger.info(
+                "客户活动后提交 workflow 完成: activity_id=%s, skip_reason=%s, error=%s",
+                activity_id,
+                state.get("skip_reason"),
+                state.get("error_message"),
+            )
+            return {
+                "success": not bool(state.get("error_message")),
+                "activity_id": activity_id,
+                "skip_reason": state.get("skip_reason"),
+                "error": state.get("error_message"),
+                "projection_result": state.get("projection_result"),
+                "match_result": state.get("match_result"),
+                "transition_plan": state.get("transition_plan"),
+                "policy_results": state.get("policy_results") or [],
+                "execution_results": state.get("execution_results") or [],
+                "confirmation_cases": state.get("confirmation_cases") or [],
+                "post_commit": state.get("post_commit") or _empty_post_commit_outcome(),
+            }
+        except Exception as exc:
+            logger.exception("客户活动后提交 workflow 调度失败: activity_id=%s", activity_id)
+            return {
+                "success": False,
+                "activity_id": activity_id,
+                "error": str(exc),
+                "post_commit": _empty_post_commit_outcome(),
+            }
 
-    async def trigger_follow_up_task_projection(
+    async def trigger_post_commit_workflow(
         self,
         *,
         activity_id: int,
@@ -123,7 +140,7 @@ class CustomerActivityProcessingService:
         actor_id: str | None = None,
     ) -> None:
         asyncio.create_task(
-            self.project_follow_up_task(
+            self.run_post_commit_workflow(
                 activity_id=activity_id,
                 team_id=team_id,
                 trigger_type=trigger_type,

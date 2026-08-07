@@ -246,17 +246,6 @@ class AgentApplicationService:
                 assistant_content = agent_copy.generic_completed()
                 assistant_content_format = "text"
 
-            proactive_confirmation_event = self._build_follow_up_confirmation_prompt_event(
-                db,
-                team_id=team_id,
-                user_id=user_id,
-                session_id=session.id,
-                turn_input=agent_turn_input,
-            )
-            if proactive_confirmation_event is not None:
-                emitted_prompt_event = emit(proactive_confirmation_event)
-                yield emitted_prompt_event
-
             assistant_message = agent_message_crud.create(
                 db,
                 AgentMessageCreate(
@@ -426,36 +415,6 @@ class AgentApplicationService:
                 explicit_binding,
             )
             return None
-
-    def _build_follow_up_confirmation_prompt_event(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        user_id: int,
-        session_id: int,
-        turn_input: AgentTurnInput,
-    ) -> JSONDict | None:
-        try:
-            event = follow_up_task_confirmation_channel_service.prompt_next_pending_case(
-                db,
-                team_id=team_id,
-                user_id=user_id,
-                channel=turn_input.source or "web",
-                provider=turn_input.provider,
-                agent_session_id=session_id,
-            )
-            return coerce_json_dict(event) if event is not None else None
-        except SQLAlchemyError:
-            db.rollback()
-            logger.exception(
-                "Follow-up confirmation prompt failed: team_id=%s user_id=%s session_id=%s",
-                team_id,
-                user_id,
-                session_id,
-            )
-            return None
-
 
 agent_application_service = AgentApplicationService()
 

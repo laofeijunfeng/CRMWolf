@@ -103,14 +103,20 @@ def _seed_customer_and_activity(db_session) -> None:
     ])
 
 
-def _create_task(db_session, *, task_hash: str = "task-hash", title: str = "确认客户预算是否通过") -> FollowUpTask:
+def _create_task(
+    db_session,
+    *,
+    task_hash: str = "task-hash",
+    title: str = "确认客户预算是否通过",
+    owner_id: str = "2",
+) -> FollowUpTask:
     return follow_up_task_crud.create(
         db_session,
         FollowUpTaskInternalCreate(
             team_id=1,
             customer_id=1,
-            owner_id="2",
-            creator_id="2",
+            owner_id=owner_id,
+            creator_id=owner_id,
             title=title,
             description="客户说本周确认预算。",
             status=FollowUpTaskStatus.OPEN,
@@ -146,7 +152,13 @@ def _candidate(task: FollowUpTask) -> TaskReconciliationCandidate:
     )
 
 
-def _create_confirmation_case(db_session, task: FollowUpTask) -> FollowUpTaskConfirmationCase:
+def _create_confirmation_case(
+    db_session,
+    task: FollowUpTask,
+    *,
+    source_activity_public_id: str = "act_22222222222222222222222222222222",
+    source_activity_id: int | None = None,
+) -> FollowUpTaskConfirmationCase:
     plan = FollowUpTaskTransitionPlanService().plan(
         FollowUpTaskReconciliationDecision(
             decision="COMPLETE",
@@ -165,7 +177,7 @@ def _create_confirmation_case(db_session, task: FollowUpTask) -> FollowUpTaskCon
                 "cross_owner": "confirmation_only",
             },
         ),
-        source_activity_public_id="act_22222222222222222222222222222222",
+        source_activity_public_id=source_activity_public_id,
         plan_source="unit_test_plan",
     )
     return FollowUpTaskConfirmationService().create_case_from_plan_action(
@@ -174,7 +186,9 @@ def _create_confirmation_case(db_session, task: FollowUpTask) -> FollowUpTaskCon
         task=task,
         plan=plan,
         action=plan.actions[0],
-        actor_id="2",
+        actor_id=task.owner_id,
+        source_activity_id=source_activity_id,
+        source_public_id=source_activity_public_id,
     ).case
 
 
@@ -210,6 +224,147 @@ def test_prompt_next_pending_case_records_delivery_and_interaction(db_session):
     assert delivery.payload_json["case_public_id"] == case.public_id
     assert case.prompt_count == 1
     assert case.last_prompted_at == now
+
+
+def test_prompt_cases_by_public_ids_prompts_requested_owner_cases_without_owner_cooldown(db_session):
+    first_task = _create_task(db_session, task_hash="task-hash-1", title="确认客户预算是否通过")
+    second_task = _create_task(db_session, task_hash="task-hash-2", title="确认客户采购联系时间")
+    other_owner_task = _create_task(
+        db_session,
+        task_hash="task-hash-3",
+        title="确认客户合同盖章",
+        owner_id="8",
+    )
+    first_case = _create_confirmation_case(
+        db_session,
+        first_task,
+        source_activity_id=190,
+        source_activity_public_id="act_33333333333333333333333333333333",
+    )
+    second_case = _create_confirmation_case(
+        db_session,
+        second_task,
+        source_activity_id=190,
+        source_activity_public_id="act_33333333333333333333333333333333",
+    )
+    other_owner_case = _create_confirmation_case(
+        db_session,
+        other_owner_task,
+        source_activity_id=190,
+        source_activity_public_id="act_33333333333333333333333333333333",
+    )
+    now = datetime(2026, 8, 6, 11, 30, 0)
+    service = FollowUpTaskConfirmationChannelService(prompt_cooldown=timedelta(days=1))
+
+    events = service.prompt_cases_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[
+            first_case.public_id,
+            second_case.public_id,
+            first_case.public_id,
+            other_owner_case.public_id,
+            "fuc_missing",
+        ],
+        channel="im",
+        provider="feishu",
+        agent_session_id=44,
+        now=now,
+    )
+
+    db_session.refresh(first_case)
+    db_session.refresh(second_case)
+    db_session.refresh(other_owner_case)
+    deliveries = (
+        db_session.query(FollowUpTaskConfirmationPromptDelivery)
+        .order_by(FollowUpTaskConfirmationPromptDelivery.id.asc())
+        .all()
+    )
+
+    assert [event["case_public_id"] for event in events] == [first_case.public_id, second_case.public_id]
+    assert [delivery.case_id for delivery in deliveries] == [first_case.id, second_case.id]
+    assert all(delivery.channel == "im" for delivery in deliveries)
+    assert all(delivery.provider == "feishu" for delivery in deliveries)
+    assert all(delivery.agent_session_id == 44 for delivery in deliveries)
+    assert first_case.prompt_count == 1
+    assert second_case.prompt_count == 1
+    assert other_owner_case.prompt_count == 0
+    assert first_case.last_prompted_at == now
+    assert second_case.last_prompted_at == now
+
+
+def test_prompt_cases_by_public_ids_respects_case_cooldown(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=190,
+        source_activity_public_id="act_33333333333333333333333333333333",
+    )
+    service = FollowUpTaskConfirmationChannelService(prompt_cooldown=timedelta(hours=4))
+
+    first_events = service.prompt_cases_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        channel="web",
+        now=datetime(2026, 8, 6, 11, 0, 0),
+    )
+    second_events = service.prompt_cases_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        channel="web",
+        now=datetime(2026, 8, 6, 12, 0, 0),
+    )
+
+    db_session.refresh(case)
+
+    assert [event["case_public_id"] for event in first_events] == [case.public_id]
+    assert second_events == []
+    assert case.prompt_count == 1
+    assert db_session.query(FollowUpTaskConfirmationPromptDelivery).count() == 1
+
+
+def test_prompt_cases_by_public_ids_respects_case_prompt_limit(db_session):
+    task = _create_task(db_session)
+    case = _create_confirmation_case(
+        db_session,
+        task,
+        source_activity_id=190,
+        source_activity_public_id="act_33333333333333333333333333333333",
+    )
+    service = FollowUpTaskConfirmationChannelService(
+        prompt_cooldown=timedelta(seconds=0),
+        max_prompts_per_case=1,
+    )
+
+    first_events = service.prompt_cases_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        channel="web",
+        now=datetime(2026, 8, 6, 11, 0, 0),
+    )
+    second_events = service.prompt_cases_by_public_ids(
+        db_session,
+        team_id=1,
+        user_id=2,
+        case_public_ids=[case.public_id],
+        channel="web",
+        now=datetime(2026, 8, 6, 13, 0, 0),
+    )
+
+    db_session.refresh(case)
+
+    assert [event["case_public_id"] for event in first_events] == [case.public_id]
+    assert second_events == []
+    assert case.prompt_count == 1
+    assert db_session.query(FollowUpTaskConfirmationPromptDelivery).count() == 1
 
 
 def test_prompt_next_pending_case_applies_owner_level_cross_channel_cooldown(db_session):

@@ -183,7 +183,7 @@ class TaskReconciliationSemanticMatcher:
         *,
         team_id: int,
         activity_id: int,
-        include_cross_owner: bool = True,
+        include_cross_owner: bool = False,
     ) -> TaskReconciliationSemanticMatchResult:
         activity = (
             db.query(CustomerActivity)

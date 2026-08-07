@@ -6,7 +6,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud
 from app.models.sales_commitment import (
@@ -51,6 +51,25 @@ class FollowUpTaskConfirmationCaseCrudProtocol(Protocol):
         *,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationCase: ...
+
+    def update(
+        self,
+        db: Session,
+        db_obj: FollowUpTaskConfirmationCase,
+        obj_in: dict[str, object],
+        *,
+        commit: bool = True,
+    ) -> FollowUpTaskConfirmationCase: ...
+
+    def list_pending_by_source_activity(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        source_activity_id: int,
+        skip: int = 0,
+        limit: int = 500,
+    ) -> tuple[list[FollowUpTaskConfirmationCase], int]: ...
 
     def mark_prompted(
         self,
@@ -137,6 +156,8 @@ class FollowUpTaskConfirmationService:
         plan: FollowUpTaskTransitionPlan,
         action: FollowUpTaskTransitionAction,
         actor_id: str,
+        source_activity_id: int | None = None,
+        source_public_id: str | None = None,
         commit: bool = True,
     ) -> FollowUpTaskConfirmationCaseResult:
         if not action.requires_confirmation:
@@ -154,22 +175,39 @@ class FollowUpTaskConfirmationService:
                 confirmation_hash=confirmation_hash,
             )
 
+        create_payload = self._create_payload(
+            team_id=team_id,
+            task=task,
+            plan=plan,
+            action=action,
+            actor_id=actor_id,
+            confirmation_hash=confirmation_hash,
+            source_activity_id=source_activity_id,
+            source_public_id=source_public_id,
+        )
+        existing_thread_case = self._pending_case_for_activity_task(
+            db,
+            team_id=team_id,
+            task_id=task.id,
+            source_activity_id=source_activity_id,
+        )
+        if existing_thread_case is not None:
+            case = self._maybe_upgrade_pending_case(
+                db,
+                existing_thread_case,
+                incoming=create_payload.model_dump(),
+                incoming_confidence=action.confidence,
+                commit=commit,
+            )
+            return FollowUpTaskConfirmationCaseResult(
+                case=case,
+                created=False,
+                confirmation_hash=case.confirmation_hash,
+            )
+
         case = self.confirmation_case_crud.create(
             db,
-            FollowUpTaskConfirmationCaseInternalCreate(
-                team_id=team_id,
-                task_id=task.id,
-                customer_id=task.customer_id,
-                owner_id=task.owner_id,
-                creator_id=actor_id,
-                suggested_action=self._suggested_action(plan, action),
-                confirmation_hash=confirmation_hash,
-                question_text=self._question_text(task=task, plan=plan, action=action),
-                source_activity_id=task.source_activity_id,
-                source_public_id=action.source_activity_public_id or task.source_public_id,
-                source_plan_json=plan.to_dict(),
-                expires_at=self._default_expires_at(),
-            ),
+            create_payload,
             commit=commit,
         )
         return FollowUpTaskConfirmationCaseResult(case=case, created=True, confirmation_hash=confirmation_hash)
@@ -289,6 +327,116 @@ class FollowUpTaskConfirmationService:
 
     def _default_expires_at(self) -> datetime:
         return business_now() + timedelta(days=DEFAULT_CONFIRMATION_CASE_TTL_DAYS)
+
+    def _create_payload(
+        self,
+        *,
+        team_id: int,
+        task: FollowUpTask,
+        plan: FollowUpTaskTransitionPlan,
+        action: FollowUpTaskTransitionAction,
+        actor_id: str,
+        confirmation_hash: str,
+        source_activity_id: int | None,
+        source_public_id: str | None,
+    ) -> FollowUpTaskConfirmationCaseInternalCreate:
+        return FollowUpTaskConfirmationCaseInternalCreate(
+            team_id=team_id,
+            task_id=task.id,
+            customer_id=task.customer_id,
+            owner_id=task.owner_id,
+            creator_id=actor_id,
+            suggested_action=self._suggested_action(plan, action),
+            confirmation_hash=confirmation_hash,
+            question_text=self._question_text(task=task, plan=plan, action=action),
+            source_activity_id=source_activity_id if source_activity_id is not None else task.source_activity_id,
+            source_public_id=source_public_id or action.source_activity_public_id or task.source_public_id,
+            source_plan_json={
+                **plan.to_dict(),
+                "confirmation_source": {
+                    "source_activity_id": source_activity_id,
+                    "source_public_id": source_public_id,
+                    "task_source_activity_id": task.source_activity_id,
+                    "task_source_public_id": task.source_public_id,
+                },
+            },
+            expires_at=self._default_expires_at(),
+        )
+
+    def _pending_case_for_activity_task(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        task_id: int,
+        source_activity_id: int | None,
+    ) -> FollowUpTaskConfirmationCase | None:
+        if source_activity_id is None:
+            return None
+        cases, _ = self.confirmation_case_crud.list_pending_by_source_activity(
+            db,
+            team_id=team_id,
+            source_activity_id=source_activity_id,
+        )
+        for case in cases:
+            if case.task_id == task_id:
+                return case
+        return None
+
+    def _maybe_upgrade_pending_case(
+        self,
+        db: Session,
+        case: FollowUpTaskConfirmationCase,
+        *,
+        incoming: dict[str, Any],
+        incoming_confidence: float,
+        commit: bool,
+    ) -> FollowUpTaskConfirmationCase:
+        current_strength = self._case_strength(case.suggested_action)
+        incoming_strength = self._case_strength(str(incoming.get("suggested_action") or ""))
+        current_confidence = self._case_confidence(case)
+        should_upgrade = incoming_strength > current_strength or (
+            incoming_strength == current_strength and incoming_confidence > current_confidence
+        )
+        if not should_upgrade:
+            return case
+        return self.confirmation_case_crud.update(
+            db,
+            case,
+            {
+                "suggested_action": incoming["suggested_action"],
+                "confirmation_hash": incoming["confirmation_hash"],
+                "question_text": incoming["question_text"],
+                "source_activity_id": incoming["source_activity_id"],
+                "source_public_id": incoming["source_public_id"],
+                "source_plan_json": incoming["source_plan_json"],
+                "expires_at": incoming["expires_at"],
+            },
+            commit=commit,
+        )
+
+    @staticmethod
+    def _case_strength(action: str | None) -> int:
+        return {
+            FollowUpTaskConfirmationResolutionAction.COMPLETE: 4,
+            FollowUpTaskConfirmationResolutionAction.DELAY: 4,
+            FollowUpTaskConfirmationResolutionAction.CANCEL: 4,
+            FollowUpTaskConfirmationResolutionAction.KEEP_OPEN: 3,
+            FollowUpTaskConfirmationResolutionAction.UNKNOWN: 1,
+        }.get(str(action or ""), 0)
+
+    @staticmethod
+    def _case_confidence(case: FollowUpTaskConfirmationCase) -> float:
+        source_plan_json = case.source_plan_json
+        if not isinstance(source_plan_json, dict):
+            return 0.0
+        decision = source_plan_json.get("decision")
+        if not isinstance(decision, dict):
+            return 0.0
+        try:
+            return float(decision.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
 
     def _is_expired(self, case: FollowUpTaskConfirmationCase, *, now: datetime | None = None) -> bool:
         return case.expires_at is not None and case.expires_at <= (now or business_now())

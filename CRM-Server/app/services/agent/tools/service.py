@@ -41,7 +41,11 @@ from app.services.follow_up_task_confirmation_channel_service import (
     FollowUpTaskConfirmationChannelService,
     follow_up_task_confirmation_channel_service,
 )
-from app.services.follow_up_task_query_service import FollowUpTaskQueryService, follow_up_task_query_service
+from app.services.follow_up_task_query_intent import normalize_follow_up_task_retrieval_mode
+from app.services.follow_up_task_query_service import (
+    FollowUpTaskQueryService,
+    follow_up_task_query_service,
+)
 from app.services.work_summary_narrative_service import WorkSummaryNarrativeService
 from app.services.work_summary_narrative_service import (
     work_summary_narrative_service as default_work_summary_narrative_service,
@@ -414,14 +418,17 @@ class CRMAgentToolService:
         customer_id: Optional[Union[str, int]] = None,
         owner_scope: str = "mine",
         query_text: Optional[str] = None,
+        retrieval_mode: Optional[str] = None,
         limit: int = 50,
     ) -> AgentToolResult:
+        normalized_retrieval_mode = normalize_follow_up_task_retrieval_mode(retrieval_mode, query_text)
         payload = {
             "status": status,
             "due_window": due_window,
             "customer_id": customer_id,
             "owner_scope": owner_scope,
             "query_text": query_text,
+            "retrieval_mode": normalized_retrieval_mode,
             "limit": limit,
         }
 
@@ -436,6 +443,7 @@ class CRMAgentToolService:
                 customer_public_id=customer_public_id,
                 owner_scope=owner_scope,
                 query_text=query_text,
+                retrieval_mode=normalized_retrieval_mode,
                 limit=limit,
             )
 
@@ -720,6 +728,7 @@ class CRMAgentToolService:
                 "POST",
                 f"/v1/customer-activities/{customer_public_id}",
                 context.authorization,
+                params={"post_commit_mode": "sync"},
                 json={
                     "activity_kind": activity_kind,
                     "source_content": source_content,

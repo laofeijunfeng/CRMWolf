@@ -181,42 +181,70 @@ class FollowUpTaskConfirmationChannelService:
         if case is None:
             return None
 
-        task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
-        customer = self._customers_by_id(db, team_id=team_id, customer_ids=[case.customer_id]).get(case.customer_id)
-        event = self._prompt_event(case, task=task, customer=customer)
-        interaction = event["interaction"]
-        prompt_key = f"{case.public_id}:{interaction['interaction_id']}"
-        delivery = self.prompt_delivery_crud.create_sent(
+        return self._deliver_prompt(
             db,
             team_id=team_id,
-            case_id=case.id,
-            owner_id=case.owner_id,
+            case=case,
             channel=channel,
             provider=provider,
             agent_session_id=agent_session_id,
-            interaction_id=str(interaction["interaction_id"]),
-            prompt_key=prompt_key,
-            payload_json={
-                "event": event["event"],
-                "case_public_id": case.public_id,
-                "task_public_id": task.public_id if task is not None else None,
-                "customer_public_id": customer.public_id if customer is not None else None,
-            },
             prompted_at=resolved_now,
-            commit=False,
+            commit=commit,
         )
-        follow_up_task_confirmation_case_crud.mark_prompted(
-            db,
-            case,
-            prompted_at=resolved_now,
-            commit=False,
-        )
-        if commit:
+
+    def prompt_cases_by_public_ids(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        case_public_ids: list[str],
+        channel: str,
+        provider: str | None = None,
+        agent_session_id: int | None = None,
+        now: datetime | None = None,
+        commit: bool = True,
+    ) -> list[dict[str, Any]]:
+        resolved_now = now or business_now()
+        events: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        owner_id = str(user_id)
+        for case_public_id in case_public_ids:
+            if not case_public_id or case_public_id in seen:
+                continue
+            seen.add(case_public_id)
+            case = follow_up_task_confirmation_case_crud.get_by_public_id(
+                db,
+                str(case_public_id),
+                team_id=team_id,
+            )
+            if case is None:
+                continue
+            if case.status != FollowUpTaskConfirmationStatus.PENDING or case.owner_id != owner_id:
+                continue
+            if not self._case_prompt_allowed(
+                db,
+                team_id=team_id,
+                case=case,
+                now=resolved_now,
+            ):
+                continue
+            events.append(
+                self._deliver_prompt(
+                    db,
+                    team_id=team_id,
+                    case=case,
+                    channel=channel,
+                    provider=provider,
+                    agent_session_id=agent_session_id,
+                    prompted_at=resolved_now,
+                    prompt_scope="current_activity",
+                    commit=False,
+                )
+            )
+        if commit and events:
             db.commit()
-            db.refresh(case)
-            db.refresh(delivery)
-        event["delivery"] = self._delivery_payload(delivery)
-        return event
+        return events
 
     def _select_prompt_case(
         self,
@@ -244,17 +272,80 @@ class FollowUpTaskConfirmationChannelService:
             now=now,
         )
         for case in cases:
-            if int(case.prompt_count or 0) >= self.max_prompts_per_case:
-                continue
-            recent_case_delivery = self.prompt_delivery_crud.latest_for_case_since(
-                db,
-                team_id=team_id,
-                case_id=case.id,
-                since=cooldown_since,
-            )
-            if recent_case_delivery is None:
+            if self._case_prompt_allowed(db, team_id=team_id, case=case, now=now):
                 return case
         return None
+
+    def _case_prompt_allowed(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case: FollowUpTaskConfirmationCase,
+        now: datetime,
+    ) -> bool:
+        if int(case.prompt_count or 0) >= self.max_prompts_per_case:
+            return False
+        recent_case_delivery = self.prompt_delivery_crud.latest_for_case_since(
+            db,
+            team_id=team_id,
+            case_id=case.id,
+            since=now - self.prompt_cooldown,
+        )
+        return recent_case_delivery is None
+
+    def _deliver_prompt(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        case: FollowUpTaskConfirmationCase,
+        channel: str,
+        provider: str | None,
+        agent_session_id: int | None,
+        prompted_at: datetime,
+        prompt_scope: str | None = None,
+        commit: bool = True,
+    ) -> dict[str, Any]:
+        task = follow_up_task_crud.get_by_id(db, case.task_id, team_id=team_id)
+        customer = self._customers_by_id(db, team_id=team_id, customer_ids=[case.customer_id]).get(case.customer_id)
+        event = self._prompt_event(case, task=task, customer=customer)
+        interaction = event["interaction"]
+        payload_json = {
+            "event": event["event"],
+            "case_public_id": case.public_id,
+            "task_public_id": task.public_id if task is not None else None,
+            "customer_public_id": customer.public_id if customer is not None else None,
+        }
+        if prompt_scope:
+            payload_json["prompt_scope"] = prompt_scope
+        prompt_key = f"{case.public_id}:{interaction['interaction_id']}"
+        delivery = self.prompt_delivery_crud.create_sent(
+            db,
+            team_id=team_id,
+            case_id=case.id,
+            owner_id=case.owner_id,
+            channel=channel,
+            provider=provider,
+            agent_session_id=agent_session_id,
+            interaction_id=str(interaction["interaction_id"]),
+            prompt_key=prompt_key,
+            payload_json=payload_json,
+            prompted_at=prompted_at,
+            commit=False,
+        )
+        follow_up_task_confirmation_case_crud.mark_prompted(
+            db,
+            case,
+            prompted_at=prompted_at,
+            commit=False,
+        )
+        if commit:
+            db.commit()
+            db.refresh(case)
+            db.refresh(delivery)
+        event["delivery"] = self._delivery_payload(delivery)
+        return event
 
     def _prompt_event(
         self,

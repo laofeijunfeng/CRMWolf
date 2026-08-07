@@ -1225,6 +1225,8 @@ class AgentRootRuntime:
                 "user_id": context.user_id,
                 "session_id": context.session_id,
                 "authorization": context.authorization or "",
+                "channel": context.turn_input.source if context.turn_input else "web",
+                "provider": context.turn_input.provider if context.turn_input else None,
                 "events": [],
                 "event_sink": context.event_sink,
             })
@@ -1284,6 +1286,8 @@ class AgentRootRuntime:
             "user_id": context.user_id,
             "session_id": context.session_id,
             "authorization": context.authorization or "",
+            "channel": context.turn_input.source if context.turn_input else "web",
+            "provider": context.turn_input.provider if context.turn_input else None,
             "events": [],
             "event_sink": context.event_sink,
         })

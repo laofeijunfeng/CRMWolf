@@ -142,6 +142,7 @@ class FakeReadQueryToolService(FakeToolService):
         customer_id=None,
         owner_scope="mine",
         query_text=None,
+        retrieval_mode=None,
         limit=50,
     ):
         self.follow_up_task_queries.append({
@@ -151,6 +152,7 @@ class FakeReadQueryToolService(FakeToolService):
             "customer_id": customer_id,
             "owner_scope": owner_scope,
             "query_text": query_text,
+            "retrieval_mode": retrieval_mode,
             "limit": limit,
         })
         return AgentToolResult(
@@ -172,6 +174,7 @@ class FakeReadQueryToolService(FakeToolService):
                     "customer_id": customer_id,
                     "owner_scope": owner_scope,
                     "query_text": query_text,
+                    "retrieval_mode": retrieval_mode,
                 },
             },
             tool_call_id=510,
@@ -750,6 +753,24 @@ async def test_agent_graph_keeps_this_week_task_query_as_task_tool():
 
     assert tool_service.follow_up_task_queries[0]["due_window"] == "this_week"
     assert tool_service.work_summary_queries == []
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_keeps_generic_task_query_structured_when_llm_returns_query_text():
+    tool_service = FakeReadQueryToolService()
+    await build_service(
+        semantic_result(
+            intent="CRM_READ_QUERY",
+            customer={"name_text": None, "confidence": 0.0},
+            read_query={"type": "FOLLOW_UP_TASKS", "query_text": "下周我有什么工作安排"},
+            follow_up={},
+        ),
+        tool_service,
+    ).run(input_state("下周我有什么工作安排"))
+
+    assert tool_service.follow_up_task_queries[0]["due_window"] == "next_week"
+    assert tool_service.follow_up_task_queries[0]["retrieval_mode"] == "structured"
+    assert tool_service.follow_up_task_queries[0]["query_text"] is None
 
 
 @pytest.mark.asyncio

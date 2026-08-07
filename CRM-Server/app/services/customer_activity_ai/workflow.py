@@ -15,8 +15,8 @@ from app.core.database import SessionLocal
 from app.crud.customer_activity import customer_activity_crud
 from app.models.customer import Contact, Customer
 from app.models.customer_activity import CustomerActivity
-from app.models.sales_commitment import FollowUpTaskProjectionTrigger
 from app.models.opportunity import Opportunity
+from app.models.sales_commitment import FollowUpTaskProjectionTrigger
 from app.services.customer_activity_ai.checkpointer import customer_activity_checkpoint_saver
 from app.services.customer_activity_ai.evaluation_agent import (
     ActivityEvaluationAgent,
@@ -31,11 +31,10 @@ from app.services.customer_activity_ai.structuring_agent import (
     activity_structuring_agent,
 )
 from app.services.customer_activity_kinds import get_activity_kind_meta
+from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
 from app.services.follow_up_parser import follow_up_parser_service
-from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 from app.services.industry_display_service import industry_display_service
 from app.utils.time import business_now
-
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +150,7 @@ class CustomerActivityAIWorkflow:
         finally:
             db.close()
 
-    def _persist_structured_content(self, state: CustomerActivityAIState) -> CustomerActivityAIState:
+    async def _persist_structured_content(self, state: CustomerActivityAIState) -> CustomerActivityAIState:
         result = state["structure_result"]
         db = SessionLocal()
         try:
@@ -172,16 +171,23 @@ class CustomerActivityAIWorkflow:
             if not updated:
                 raise CustomerActivityWorkflowError("客户活动不存在")
             customer_activity_crud.update_effectiveness_status(db, state["activity_id"], "GENERATING")
-            try:
-                follow_up_task_projection_service.run_activity_projection(
-                    db,
-                    activity_id=updated.id,
-                    team_id=state["team_id"],
-                    trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_STRUCTURED_COMPLETED,
-                    actor_id=None,
-                )
-            except Exception:
-                logger.exception("客户活动结构化后任务投影触发失败: activity_id=%s", updated.id)
+        finally:
+            db.close()
+        try:
+            await customer_activity_post_commit_workflow.run(
+                activity_id=state["activity_id"],
+                team_id=state["team_id"],
+                trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_STRUCTURED_COMPLETED,
+                actor_id=None,
+            )
+        except Exception:
+            logger.exception("客户活动结构化后 post-commit workflow 触发失败: activity_id=%s", state["activity_id"])
+
+        db = SessionLocal()
+        try:
+            updated = customer_activity_crud.get_by_id(db, state["activity_id"], state["team_id"])
+            if not updated:
+                raise CustomerActivityWorkflowError("客户活动不存在")
             context = self._build_context(db, updated, state["team_id"])
             return {
                 "context": context,

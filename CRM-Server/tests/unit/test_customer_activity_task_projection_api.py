@@ -101,7 +101,7 @@ def client(db_session, monkeypatch):
     def _allow_customer_activity(customer_id, team_id, current_user, db):  # noqa: ARG001
         return customer
 
-    async def _run_projection_now(*, activity_id, team_id, trigger_type, actor_id=None):
+    async def _run_post_commit_now(*, activity_id, team_id, trigger_type, actor_id=None):
         follow_up_task_projection_service.run_activity_projection(
             db_session,
             activity_id=activity_id,
@@ -117,8 +117,8 @@ def client(db_session, monkeypatch):
     monkeypatch.setattr(customer_activities, "_load_user_info", lambda db, user_id: None)  # noqa: ARG005
     monkeypatch.setattr(
         customer_activities.customer_activity_processing_service,
-        "trigger_follow_up_task_projection",
-        _run_projection_now,
+        "trigger_post_commit_workflow",
+        _run_post_commit_now,
     )
     monkeypatch.setattr(
         customer_activities.customer_activity_processing_service,
@@ -221,7 +221,11 @@ def test_page_activity_create_without_structured_next_step_waits_for_ai_persiste
     rows, total = _list_open_tasks(db_session)
     assert rows == []
     assert total == 0
-    assert _projection_runs(db_session, activity_id=activity_id) == []
+    runs = _projection_runs(db_session, activity_id=activity_id)
+    assert len(runs) == 1
+    assert runs[0].trigger_type == FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC
+    assert runs[0].status == FollowUpTaskProjectionStatus.SKIPPED
+    assert runs[0].skip_reason == FollowUpTaskProjectionSkipReason.NO_NEXT_STEP
 
     customer_activity_crud.update_processed_content(
         db_session,
@@ -247,7 +251,7 @@ def test_page_activity_create_without_structured_next_step_waits_for_ai_persiste
     assert rows[0].title == "下周三电话确认预算"
     assert rows[0].source_activity_id == activity_id
     runs = _projection_runs(db_session, activity_id=activity_id)
-    assert len(runs) == 1
+    assert len(runs) == 2
     assert runs[0].trigger_type == FollowUpTaskProjectionTrigger.ACTIVITY_STRUCTURED_COMPLETED
     assert runs[0].created_task_ids_json == [rows[0].id]
 

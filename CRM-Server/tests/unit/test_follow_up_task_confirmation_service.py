@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
@@ -149,14 +150,21 @@ def _candidate(task: FollowUpTask) -> TaskReconciliationCandidate:
     )
 
 
-def _confirmation_plan(task: FollowUpTask):
+def _confirmation_plan(
+    task: FollowUpTask,
+    *,
+    decision: str = "COMPLETE",
+    confidence: float = 0.62,
+    source_activity_public_id: str = "act_22222222222222222222222222222222",
+):
     return FollowUpTaskTransitionPlanService().plan(
         FollowUpTaskReconciliationDecision(
-            decision="COMPLETE",
+            decision=decision,
             task_public_id=task.public_id,
             candidate_public_ids=(task.public_id,),
-            confidence=0.62,
+            confidence=confidence,
             evidence_terms=("预算",),
+            needs_confirmation=decision == "ASK_CONFIRMATION",
         ),
         TaskReconciliationCandidateSet(
             items=[_candidate(task)],
@@ -168,7 +176,7 @@ def _confirmation_plan(task: FollowUpTask):
                 "cross_owner": "confirmation_only",
             },
         ),
-        source_activity_public_id="act_22222222222222222222222222222222",
+        source_activity_public_id=source_activity_public_id,
         plan_source="unit_test_plan",
     )
 
@@ -250,6 +258,56 @@ def test_confirmation_case_created_from_blocked_transition_plan_is_idempotent(db
     assert response.task_id == task.public_id
     assert response.expires_at == first.case.expires_at
     assert "source_plan_json" not in response.model_dump()
+
+
+def test_confirmation_case_reuses_source_activity_task_thread_and_upgrades_suggestion(db_session):
+    task = _create_task(db_session)
+    service = FollowUpTaskConfirmationService()
+    unknown_plan = _confirmation_plan(task, decision="ASK_CONFIRMATION", confidence=0.58)
+    complete_plan = _confirmation_plan(task, decision="COMPLETE", confidence=0.94)
+
+    first = service.create_case_from_plan_action(
+        db_session,
+        team_id=1,
+        task=task,
+        plan=unknown_plan,
+        action=unknown_plan.actions[0],
+        actor_id="2",
+        source_activity_id=202,
+        source_public_id="act_22222222222222222222222222222222",
+    )
+    second = service.create_case_from_plan_action(
+        db_session,
+        team_id=1,
+        task=task,
+        plan=complete_plan,
+        action=replace(
+            complete_plan.actions[0],
+            action="ASK_CONFIRMATION",
+            executable=False,
+            requires_confirmation=True,
+            reason="AUTO_TRANSITION_BLOCKED_BY_POLICY",
+        ),
+        actor_id="2",
+        source_activity_id=202,
+        source_public_id="act_22222222222222222222222222222222",
+    )
+
+    cases, total = follow_up_task_confirmation_case_crud.list_pending_by_source_activity(
+        db_session,
+        team_id=1,
+        source_activity_id=202,
+    )
+    db_session.refresh(first.case)
+
+    assert first.created is True
+    assert second.created is False
+    assert second.case.id == first.case.id
+    assert total == 1
+    assert cases[0].id == first.case.id
+    assert first.case.suggested_action == FollowUpTaskConfirmationResolutionAction.COMPLETE
+    assert first.case.confirmation_hash == second.confirmation_hash
+    assert first.case.question_text == "上次安排的「确认客户预算是否通过」这次是否已经完成?"
 
 
 def test_confirmation_case_prompt_count_is_tracked(db_session):

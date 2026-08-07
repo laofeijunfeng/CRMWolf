@@ -182,6 +182,8 @@ class ConfirmedTaskGraphService:
                 team_id=context.team_id,
                 user_id=context.user_id,
                 execution=execution,
+                channel=context.channel,
+                provider=context.provider,
             )
         )
         context.side_effects.task_event = effect_result.task_event
@@ -303,6 +305,8 @@ def _runtime_context_from_input(
         user_id=int(input_state.get("user_id") or 0),
         session_id=int(input_state.get("session_id") or 0),
         authorization=input_state.get("authorization"),
+        channel=str(input_state.get("channel") or "web"),
+        provider=input_state.get("provider"),
         side_effects=side_effects,
         event_sink=input_state.get("event_sink"),
     )

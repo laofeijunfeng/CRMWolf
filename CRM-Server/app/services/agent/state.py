@@ -999,6 +999,8 @@ class ConfirmedTaskGraphInput(TypedDict, total=False):
     user_id: int
     session_id: int
     authorization: str
+    channel: str
+    provider: str | None
     events: list[JSONDict]
     event_sink: AgentRuntimeEventSink
 
@@ -1042,6 +1044,8 @@ class ConfirmedTaskRuntimeContext:
     user_id: int = 0
     session_id: int = 0
     authorization: str | None = None
+    channel: str = "web"
+    provider: str | None = None
     side_effects: ConfirmedTaskGraphSideEffects = field(default_factory=ConfirmedTaskGraphSideEffects)
     event_sink: AgentRuntimeEventSink | None = None
 

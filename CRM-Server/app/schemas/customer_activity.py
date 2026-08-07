@@ -103,6 +103,30 @@ class CustomerActivityUpdate(BaseModel):
         return value
 
 
+class CustomerActivityPostCommitConfirmationCase(BaseModel):
+    case_public_id: str = Field(..., description="确认Case对外ID")
+    task_public_id: str = Field(..., description="关联跟进任务对外ID")
+    created: bool = Field(..., description="本次后处理是否新建该确认Case")
+    confirmation_hash: str = Field(..., description="确认Case幂等哈希")
+    suggested_action: str = Field(..., description="建议处理动作")
+
+
+class CustomerActivityPostCommitPromptPolicy(BaseModel):
+    prompt_scope: str = Field(..., description="提示范围")
+    delivery: str = Field(..., description="提示投递策略")
+
+
+class CustomerActivityPostCommitOutcome(BaseModel):
+    needs_user_confirmation: bool = Field(..., description="是否需要用户确认历史任务状态")
+    confirmation_case_public_ids: list[str] = Field(default_factory=list, description="需要提示的确认Case对外ID列表")
+    confirmation_cases: list[CustomerActivityPostCommitConfirmationCase] = Field(
+        default_factory=list,
+        description="需要提示的确认Case摘要",
+    )
+    created_confirmation_case_count: int = Field(0, description="本次新建确认Case数量")
+    prompt_policy: CustomerActivityPostCommitPromptPolicy = Field(..., description="确认提示策略")
+
+
 class CustomerActivityResponse(BaseModel):
     id: int = Field(..., description="活动ID")
     customer_id: Optional[str] = Field(None, description="客户对外ID")
@@ -136,6 +160,10 @@ class CustomerActivityResponse(BaseModel):
     effectiveness_status: Optional[str] = Field(None, description="AI评估状态")
     effectiveness_evaluated_time: Optional[datetime] = Field(None, description="AI评估完成时间")
     effectiveness_error_message: Optional[str] = Field(None, description="AI评估失败原因")
+    post_commit: Optional[CustomerActivityPostCommitOutcome] = Field(
+        None,
+        description="活动提交后的任务投影与确认结果",
+    )
 
 
 class CustomerActivityProcessResponse(BaseModel):

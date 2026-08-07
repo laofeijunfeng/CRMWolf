@@ -6,6 +6,7 @@ from typing import Mapping
 
 from app.services.agent.schemas import AgentSemanticParseResult
 from app.services.agent.types import JSONDict
+from app.services.follow_up_task_query_intent import extract_follow_up_task_semantic_query_text
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ class AgentReadQueryPlanner:
             return self._follow_up_tasks_plan(
                 content=content,
                 text=text,
+                parsed=parsed,
                 semantic_result=semantic_result,
                 customer_id=customer_id,
             )
@@ -111,6 +113,7 @@ class AgentReadQueryPlanner:
         *,
         content: str,
         text: str,
+        parsed: Mapping[str, object],
         semantic_result: AgentSemanticParseResult,
         customer_id: str | None,
     ) -> AgentReadQueryPlan:
@@ -118,6 +121,7 @@ class AgentReadQueryPlanner:
         payload: JSONDict = {
             "status": read_query.status or _follow_up_task_status(text),
             "owner_scope": read_query.owner_scope or "mine",
+            "retrieval_mode": "structured",
             "limit": 50,
         }
         due_window = read_query.due_window or _follow_up_task_due_window(text)
@@ -125,8 +129,13 @@ class AgentReadQueryPlanner:
             payload["due_window"] = due_window
         if customer_id:
             payload["customer_id"] = customer_id
-        query_text = _read_query_text(read_query.query_text) or _follow_up_task_query_text(content)
+        query_text = _follow_up_task_semantic_query_text(
+            read_query.query_text,
+            content=content,
+            customer_name=_query_customer_name(parsed, semantic_result=semantic_result),
+        )
         if query_text:
+            payload["retrieval_mode"] = "semantic_filter"
             payload["query_text"] = query_text
         return AgentReadQueryPlan(
             query_type="FOLLOW_UP_TASKS",
@@ -192,6 +201,18 @@ def _has_explicit_customer_scope(
     return bool(stripped) and stripped not in {"客户", "哪些客户", "所有客户"}
 
 
+def _query_customer_name(
+    parsed: Mapping[str, object],
+    *,
+    semantic_result: AgentSemanticParseResult,
+) -> str | None:
+    customer_name = parsed.get("customer_name") or semantic_result.read_query.customer_name_text
+    if not isinstance(customer_name, str):
+        return None
+    stripped = customer_name.strip()
+    return stripped or None
+
+
 def _looks_like_query_fragment_customer_name(value: str) -> bool:
     if not value:
         return False
@@ -241,49 +262,16 @@ def _follow_up_task_status(text: str) -> str:
     return "open"
 
 
-def _follow_up_task_query_text(content: str) -> str | None:
-    text = str(content or "").strip()
-    if not text:
-        return None
-    generic_phrases = (
-        "今天",
-        "今日",
-        "本周",
-        "这周",
-        "下周",
-        "任务",
-        "待办",
-        "安排",
-        "客户要跟进",
-        "要跟进",
-        "需要跟进",
-        "还有哪些客户",
-        "未完成",
-        "没完成",
-        "逾期",
-        "延期",
-        "过期",
-        "哪些",
-        "有什么",
-        "有哪些",
-        "我",
-        "我的",
-        "还有",
-        "？",
-        "?",
-    )
-    reduced = text
-    for phrase in generic_phrases:
-        reduced = reduced.replace(phrase, "")
-    reduced = reduced.strip(" ，。；;、")
-    return reduced or None
-
-
-def _read_query_text(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    return stripped or None
+def _follow_up_task_semantic_query_text(
+    llm_query_text: object,
+    *,
+    content: str,
+    customer_name: str | None = None,
+) -> str | None:
+    llm_text = extract_follow_up_task_semantic_query_text(llm_query_text, customer_name=customer_name)
+    if llm_text:
+        return llm_text
+    return extract_follow_up_task_semantic_query_text(content, customer_name=customer_name)
 
 
 agent_read_query_planner = AgentReadQueryPlanner()

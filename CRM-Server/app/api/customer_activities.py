@@ -1,5 +1,5 @@
 import json
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
@@ -25,7 +25,6 @@ from app.schemas.customer_activity import (
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.customer_activity_processing_service import customer_activity_processing_service
 from app.services.follow_up_task_projection_service import follow_up_task_projection_service
-
 
 router = APIRouter(prefix="/v1/customer-activities", tags=["客户活动"])
 
@@ -61,7 +60,12 @@ def _load_user_info(db: Session, user_id: str | None):
     }
 
 
-def _build_activity_response(db: Session, activity) -> CustomerActivityResponse:
+def _build_activity_response(
+    db: Session,
+    activity,
+    *,
+    post_commit: dict[str, Any] | None = None,
+) -> CustomerActivityResponse:
     creator_info = _load_user_info(db, activity.creator_id)
     owner_info = _load_user_info(db, activity.owner_id)
 
@@ -122,17 +126,24 @@ def _build_activity_response(db: Session, activity) -> CustomerActivityResponse:
         "effectiveness_status": activity.effectiveness_status,
         "effectiveness_evaluated_time": activity.effectiveness_evaluated_time,
         "effectiveness_error_message": activity.effectiveness_error_message,
+        "post_commit": post_commit,
     })
 
 
-def _activity_has_next_step(activity) -> bool:
-    next_action = (activity.next_action or "").strip()
-    return bool(next_action or activity.next_follow_time)
-
-
-def _update_touched_next_step(activity_update: CustomerActivityUpdate) -> bool:
+def _update_touched_post_commit_fields(activity_update: CustomerActivityUpdate) -> bool:
     update_data = activity_update.model_dump(exclude_unset=True)
-    return "next_action" in update_data or "next_follow_time" in update_data
+    post_commit_fields = {
+        "activity_kind",
+        "title",
+        "source_content",
+        "content_json",
+        "summary",
+        "next_action",
+        "next_follow_time",
+        "next_follow_time_source",
+        "occurred_at",
+    }
+    return any(field in update_data for field in post_commit_fields)
 
 
 @router.get("/kinds", summary="客户活动分类元数据")
@@ -144,6 +155,7 @@ def get_activity_kinds():
 async def create_activity(
     customer_id: str,
     activity: CustomerActivityCreate,
+    post_commit_mode: str = Query("async", pattern="^(async|sync)$", description="活动后处理模式"),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -158,15 +170,24 @@ async def create_activity(
         team_id=team_id,
         operator_name=current_user.name,
     )
-    if _activity_has_next_step(created):
-        await customer_activity_processing_service.trigger_follow_up_task_projection(
+    post_commit: dict[str, Any] | None = None
+    if post_commit_mode == "sync":
+        post_commit_result = await customer_activity_processing_service.run_post_commit_workflow(
+            activity_id=created.id,
+            team_id=team_id,
+            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+            actor_id=str(current_user.id),
+        )
+        post_commit = post_commit_result.get("post_commit")
+    else:
+        await customer_activity_processing_service.trigger_post_commit_workflow(
             activity_id=created.id,
             team_id=team_id,
             trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
             actor_id=str(current_user.id),
         )
     await customer_activity_processing_service.trigger_processing(created.id, team_id)
-    return _build_activity_response(db, created)
+    return _build_activity_response(db, created, post_commit=post_commit)
 
 
 @router.get("/{customer_id}", response_model=List[CustomerActivityResponse], summary="查询客户活动列表")
@@ -203,10 +224,10 @@ async def update_activity(
     if activity.creator_id != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权更新此客户活动")
     check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
-    should_project = _update_touched_next_step(activity_update)
+    should_run_post_commit = _update_touched_post_commit_fields(activity_update)
     updated = customer_activity_crud.update(db, activity, activity_update)
-    if should_project:
-        await customer_activity_processing_service.trigger_follow_up_task_projection(
+    if should_run_post_commit:
+        await customer_activity_processing_service.trigger_post_commit_workflow(
             activity_id=updated.id,
             team_id=team_id,
             trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,
@@ -230,7 +251,7 @@ async def update_next_time(
     check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
     if next_time.next_follow_time:
         updated = customer_activity_crud.update_next_time(db, activity, next_time.next_follow_time)
-        await customer_activity_processing_service.trigger_follow_up_task_projection(
+        await customer_activity_processing_service.trigger_post_commit_workflow(
             activity_id=updated.id,
             team_id=team_id,
             trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_UPDATED,

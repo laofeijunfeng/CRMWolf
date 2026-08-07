@@ -393,7 +393,7 @@ async def test_agent_application_uses_streamed_final_as_assistant_content(monkey
         engine.dispose()
 
 
-def test_agent_stream_and_im_gateway_share_follow_up_confirmation_prompt_channel(monkeypatch):
+def test_agent_stream_and_im_gateway_do_not_prompt_unrelated_pending_confirmation_cases(monkeypatch):
     class FakeRootRuntime:
         async def run_turn(self, *, content, context, **kwargs):
             if context.event_sink:
@@ -404,39 +404,14 @@ def test_agent_stream_and_im_gateway_share_follow_up_confirmation_prompt_channel
                 })
             return {"application_action": "run_new_flow", "events": []}
 
-    prompt_calls = []
-
-    def fake_prompt_next_pending_case(db, *, team_id, user_id, channel, provider, agent_session_id):
-        prompt_calls.append({
-            "team_id": team_id,
-            "user_id": user_id,
-            "channel": channel,
-            "provider": provider,
-            "agent_session_id": agent_session_id,
-        })
-        return {
-            "event": FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
-            "content": "上次你说要确认预算，这个有进展吗？",
-            "content_format": "text",
-            "case_public_id": "fuc_11111111111111111111111111111111",
-            "interaction": {
-                "type": "choice",
-                "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
-                "status": "waiting_user_input",
-                "payload": {"case_public_id": "fuc_11111111111111111111111111111111"},
-                "choices": [
-                    {"label": "已完成", "value": "已完成"},
-                    {"label": "先放着", "value": "先放着"},
-                    {"label": "不管了", "value": "不管了"},
-                ],
-            },
-        }
+    def fail_prompt_next_pending_case(*args, **kwargs):
+        raise AssertionError("普通 Agent 任务查询不应该兜底弹出历史 pending confirmation case")
 
     monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", FakeRootRuntime())
     monkeypatch.setattr(
         agent_api.agent_application_module.follow_up_task_confirmation_channel_service,
         "prompt_next_pending_case",
-        fake_prompt_next_pending_case,
+        fail_prompt_next_pending_case,
     )
 
     client, engine = _build_client(monkeypatch)
@@ -450,8 +425,8 @@ def test_agent_stream_and_im_gateway_share_follow_up_confirmation_prompt_channel
         )
 
         assert web_response.status_code == 200, web_response.text
-        assert FOLLOW_UP_CONFIRMATION_PROMPT_EVENT in web_response.text
-        assert FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION in web_response.text
+        assert FOLLOW_UP_CONFIRMATION_PROMPT_EVENT not in web_response.text
+        assert FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION not in web_response.text
 
         im_session = client.post("/v1/agent/sessions", json={"title": "IM 确认提示"}).json()
         db = Session()
@@ -470,10 +445,8 @@ def test_agent_stream_and_im_gateway_share_follow_up_confirmation_prompt_channel
         finally:
             db.close()
 
-        assert im_result["interaction"]["business_action"] == FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
-        assert any(event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT for event in im_result["im_events"])
-        assert [call["channel"] for call in prompt_calls] == ["web", "im"]
-        assert prompt_calls[1]["provider"] == "feishu"
+        assert im_result["interaction"] is None
+        assert not any(event.get("event") == FOLLOW_UP_CONFIRMATION_PROMPT_EVENT for event in im_result["im_events"])
     finally:
         engine.dispose()
 

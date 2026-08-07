@@ -158,6 +158,23 @@ async def test_root_runtime_run_turn_aligns_context_task_to_checkpoint_interrupt
     class RuntimeUnderTest(AgentRootRuntime):
         def __init__(self):
             self.resume_calls = []
+            self.turn_intent_router = SimpleNamespace(route_resume=self._route_resume)
+
+        async def _route_resume(self, db, **kwargs):
+            return SimpleNamespace(
+                decision=SimpleNamespace(
+                    intent="CONFIRM_EXECUTION",
+                    confidence=1.0,
+                    target_task_id=kwargs["active_task"].id,
+                    normalized_action="approve",
+                    reason="测试确认输入。",
+                ),
+                resume_payload={
+                    "action": "approve",
+                    "task_projection_id": kwargs["current_interrupt"]["task_projection_id"],
+                },
+                source="test_router",
+            )
 
         async def current_interrupt(self, **kwargs):
             return {

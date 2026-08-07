@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - keeps imports resilient in stripped test
 from app.services.agent.guardrails import AgentToolExecutionPolicy, AgentToolGuardrails, agent_tool_guardrails
 from app.services.agent.tools import CRMAgentToolService
 from app.services.agent.tools.base import AgentToolContext, AgentToolResult
+from app.services.follow_up_task_query_intent import normalize_follow_up_task_retrieval_mode
 
 
 class AgentStrictPayload(BaseModel):
@@ -128,7 +129,16 @@ class ListFollowUpTasksInput(BaseModel):
     customer_id: Optional[CustomerIdentifier] = Field(None, description="客户对外ID；兼容历史任务中的数据库ID")
     owner_scope: Literal["mine", "customer"] = "mine"
     query_text: Optional[str] = Field(None, min_length=1, description="可选语义条件，例如预算、试用反馈、合同卡点")
+    retrieval_mode: Optional[Literal["structured", "semantic_filter"]] = Field(
+        None,
+        description="任务检索模式；structured 只查结构化任务表，semantic_filter 先用向量证据缩窄候选再查任务事实源",
+    )
     limit: int = Field(50, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def normalize_retrieval_mode(self) -> "ListFollowUpTasksInput":
+        self.retrieval_mode = normalize_follow_up_task_retrieval_mode(self.retrieval_mode, self.query_text)
+        return self
 
 
 class GetFollowUpTaskDetailInput(BaseModel):
@@ -388,6 +398,7 @@ class AgentToolRegistry:
                 customer_id=model.customer_id,
                 owner_scope=model.owner_scope,
                 query_text=model.query_text,
+                retrieval_mode=model.retrieval_mode,
                 limit=model.limit,
             )
 
@@ -572,7 +583,7 @@ class AgentToolRegistry:
             AgentToolSpec("get_customer_context", "获取客户业务上下文", GetCustomerContextInput, False, False, get_customer_context),
             AgentToolSpec(
                 "list_follow_up_tasks",
-                "查询当前用户或指定客户范围内的跟进任务事实源；query_text 可用向量证据补充语义条件，任务状态仍以结构化表为准",
+                "查询当前用户或指定客户范围内的跟进任务事实源；retrieval_mode=structured 用于列举任务，retrieval_mode=semantic_filter 用于预算、试用反馈、合同卡点等主题查询；任务状态仍以结构化表为准",
                 ListFollowUpTasksInput,
                 False,
                 False,
