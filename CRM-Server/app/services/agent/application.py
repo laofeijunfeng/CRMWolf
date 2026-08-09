@@ -36,7 +36,6 @@ from app.services.agent.state import (
 from app.services.agent.types import JSONDict, coerce_json_dict
 from app.services.follow_up_task_confirmation_channel_service import (
     FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
-    FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
     follow_up_task_confirmation_channel_service,
 )
 
@@ -111,7 +110,6 @@ class AgentApplicationService:
                 db,
                 team_id=team_id,
                 user_id=user_id,
-                session_id=session.id,
                 content=content,
                 turn_input=agent_turn_input,
             )
@@ -375,25 +373,14 @@ class AgentApplicationService:
         *,
         team_id: int,
         user_id: int,
-        session_id: int,
         content: str,
         turn_input: AgentTurnInput,
     ) -> JSONDict | None:
-        case_public_id = _case_public_id_from_turn_metadata(turn_input.metadata)
-        explicit_binding = case_public_id is not None
+        case_public_id = _structured_follow_up_confirmation_case_public_id_from_turn(
+            turn_input,
+        )
         if case_public_id is None:
-            latest_interaction = _latest_follow_up_confirmation_interaction(
-                db,
-                team_id=team_id,
-                user_id=user_id,
-                session_id=session_id,
-            )
-            case_public_id = _case_public_id_from_interaction(latest_interaction)
-            if case_public_id is None:
-                return None
-            decision = follow_up_task_confirmation_channel_service.preview_reply_decision(content)
-            if not decision.resolved:
-                return None
+            return None
 
         try:
             return coerce_json_dict(
@@ -408,11 +395,10 @@ class AgentApplicationService:
         except SQLAlchemyError:
             db.rollback()
             logger.exception(
-                "Follow-up confirmation reply binding failed: team_id=%s user_id=%s case_public_id=%s explicit=%s",
+                "Follow-up confirmation structured reply failed: team_id=%s user_id=%s case_public_id=%s",
                 team_id,
                 user_id,
                 case_public_id,
-                explicit_binding,
             )
             return None
 
@@ -439,8 +425,13 @@ def _content_format_from_events(events: object) -> str | None:
     return None
 
 
-def _case_public_id_from_turn_metadata(metadata: object) -> str | None:
+def _structured_follow_up_confirmation_case_public_id_from_turn(
+    turn_input: AgentTurnInput,
+) -> str | None:
+    metadata = turn_input.metadata
     if not isinstance(metadata, dict):
+        return None
+    if not _is_follow_up_confirmation_structured_action(metadata):
         return None
     for key in ("case_public_id", "follow_up_confirmation_case_public_id"):
         value = metadata.get(key)
@@ -449,61 +440,18 @@ def _case_public_id_from_turn_metadata(metadata: object) -> str | None:
     return None
 
 
-def _latest_follow_up_confirmation_interaction(
-    db: Session,
-    *,
-    team_id: int,
-    user_id: int,
-    session_id: int,
-) -> dict[str, object] | None:
-    messages = (
-        db.query(AgentMessage)
-        .filter(
-            AgentMessage.session_id == session_id,
-            AgentMessage.team_id == team_id,
-            AgentMessage.user_id == user_id,
-            AgentMessage.role == AgentMessageRole.ASSISTANT,
-        )
-        .order_by(AgentMessage.created_time.desc(), AgentMessage.id.desc())
-        .limit(5)
-        .all()
+def _is_follow_up_confirmation_structured_action(metadata: dict[str, object]) -> bool:
+    action_values = (
+        metadata.get("business_action"),
+        metadata.get("action"),
+        metadata.get("resume_action"),
     )
-    for message in messages:
-        payload = message.payload_json if isinstance(message.payload_json, dict) else {}
-        trace_events = payload.get("trace_events") if isinstance(payload.get("trace_events"), list) else []
-        for event in reversed(trace_events):
-            if not isinstance(event, dict):
-                continue
-            if event.get("event") != FOLLOW_UP_CONFIRMATION_PROMPT_EVENT:
-                continue
-            interaction = event.get("interaction")
-            if _is_waiting_follow_up_confirmation_interaction(interaction):
-                return interaction
-    return None
-
-
-def _is_waiting_follow_up_confirmation_interaction(interaction: object) -> bool:
-    if not isinstance(interaction, dict):
-        return False
-    return (
-        interaction.get("business_action") == FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION
-        and interaction.get("status") in {None, "waiting_user_input", "waiting_confirmation"}
-        and _case_public_id_from_interaction(interaction) is not None
+    return any(
+        value
+        in {
+            FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+            "resolve_follow_up_task_confirmation_case",
+            "follow_up_task_confirmation_reply",
+        }
+        for value in action_values
     )
-
-
-def _case_public_id_from_interaction(interaction: object) -> str | None:
-    if not isinstance(interaction, dict):
-        return None
-    payload = interaction.get("payload")
-    if not isinstance(payload, dict):
-        return None
-    value = payload.get("case_public_id")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    case = payload.get("case")
-    if isinstance(case, dict):
-        case_public_id = case.get("public_id") or case.get("id")
-        if isinstance(case_public_id, str) and case_public_id.strip():
-            return case_public_id.strip()
-    return None

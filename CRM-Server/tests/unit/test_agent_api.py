@@ -18,6 +18,7 @@ from app.core.database import Base
 from app.models.agent import (
     AgentIdempotencyKey,
     AgentMessage,
+    AgentMessageRole,
     AgentSession,
     AgentTask,
     AgentTaskStatus,
@@ -511,6 +512,98 @@ def test_agent_stream_resolves_bound_follow_up_confirmation_reply_before_runtime
         messages_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
         assistant_message = messages_response.json()["items"][1]
         assert assistant_message["payload_json"]["source"] == "follow_up_task_confirmation_reply"
+    finally:
+        engine.dispose()
+
+
+def test_agent_stream_does_not_resolve_implicit_follow_up_confirmation_for_long_text(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.calls = []
+
+        async def run_turn(self, *, content, context, **kwargs):
+            self.calls.append({"content": content, **kwargs})
+            context.side_effects.new_flow_events.append(
+                {"event": "final", "content": "进入主 Agent 处理"}
+            )
+            context.side_effects.new_flow_assistant_content = "进入主 Agent 处理"
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": "进入主 Agent 处理",
+            }
+
+    fake_runtime = FakeRootRuntime()
+    resolve_calls = []
+
+    def fake_resolve_bound_reply(db, *, team_id, user_id, case_public_id, reply_text):
+        resolve_calls.append({
+            "team_id": team_id,
+            "user_id": user_id,
+            "case_public_id": case_public_id,
+            "reply_text": reply_text,
+        })
+        raise AssertionError("implicit follow-up confirmation text must not mutate before root runtime")
+
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_runtime)
+    monkeypatch.setattr(
+        agent_api.agent_application_module.follow_up_task_confirmation_channel_service,
+        "resolve_bound_reply",
+        fake_resolve_bound_reply,
+    )
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "隐式确认误伤"}).json()
+        db = Session()
+        try:
+            db.add(
+                AgentMessage(
+                    team_id=1,
+                    user_id=2,
+                    session_id=session["id"],
+                    role=AgentMessageRole.ASSISTANT,
+                    event_type="assistant_message",
+                    content="这项跟进任务是否已完成?",
+                    payload_json={
+                        "trace_events": [
+                            {
+                                "event": FOLLOW_UP_CONFIRMATION_PROMPT_EVENT,
+                                "interaction": {
+                                    "business_action": FOLLOW_UP_CONFIRMATION_BUSINESS_ACTION,
+                                    "status": "waiting_user_input",
+                                    "payload": {
+                                        "case_public_id": "fuc_33333333333333333333333333333333",
+                                    },
+                                },
+                            }
+                        ],
+                    },
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        long_follow_up_note = (
+            "今天和客户同步了续费方案, 采购侧已确认会先走供应商入库, "
+            "技术侧还没有完成提单, 明天继续推动内部流程。"
+        )
+        response = client.post(
+            "/v1/agent/chat/stream",
+            json={"session_id": session["id"], "content": long_follow_up_note},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert "进入主 Agent 处理" in response.text
+        assert FOLLOW_UP_CONFIRMATION_RESOLVED_EVENT not in response.text
+        assert resolve_calls == []
+        assert [call["content"] for call in fake_runtime.calls] == [long_follow_up_note]
+
+        messages_response = client.get(f"/v1/agent/sessions/{session['id']}/messages")
+        assistant_message = messages_response.json()["items"][-1]
+        assert assistant_message["payload_json"]["source"] == "langgraph"
     finally:
         engine.dispose()
 
