@@ -10,6 +10,8 @@ from app.models.customer import Customer
 from app.models.invoice import (
     InvoiceApplication,
     InvoiceApplicationStatus,
+    InvoiceRedOffset,
+    InvoiceRedOffsetSourceType,
     InvoiceReissueApplication,
     InvoiceReissueApplicationStatus,
     InvoiceTitle,
@@ -211,6 +213,12 @@ class InvoiceApplicationCRUD:
                     InvoiceReissueApplication.new_invoice_file_path != "",
                 )
             )
+            red_offset_exists = exists().where(
+                and_(
+                    InvoiceRedOffset.team_id == team_id,
+                    InvoiceRedOffset.invoice_application_id == InvoiceApplication.id,
+                )
+            )
             pending_reissue_exists = exists().where(
                 and_(
                     InvoiceReissueApplication.team_id == team_id,
@@ -225,10 +233,12 @@ class InvoiceApplicationCRUD:
             status_predicates = []
             if "REISSUED" in invoice_effective_status_values:
                 status_predicates.append(completed_reissue_exists)
+            if "RED_OFFSET" in invoice_effective_status_values:
+                status_predicates.append(and_(red_offset_exists, not_(completed_reissue_exists)))
             if "REISSUE_PENDING" in invoice_effective_status_values:
-                status_predicates.append(and_(not_(completed_reissue_exists), pending_reissue_exists))
+                status_predicates.append(and_(not_(red_offset_exists), not_(completed_reissue_exists), pending_reissue_exists))
             if "ACTIVE" in invoice_effective_status_values:
-                status_predicates.append(and_(not_(completed_reissue_exists), not_(pending_reissue_exists)))
+                status_predicates.append(and_(not_(red_offset_exists), not_(completed_reissue_exists), not_(pending_reissue_exists)))
             if status_predicates:
                 query = query.filter(or_(*status_predicates))
         
@@ -547,6 +557,8 @@ class InvoiceReissueApplicationCRUD:
             raise ValueError("原发票申请不存在")
         if original_invoice.status != InvoiceApplicationStatus.ISSUED:
             raise ValueError("只有已开票的发票申请可以申请重开")
+        if invoice_red_offset_crud.get_by_invoice(db, original_invoice.id, team_id):
+            raise ValueError("该发票已冲红，不可申请重开")
         if self.get_active_by_original_invoice(db, original_invoice.id, team_id):
             raise ValueError("该发票已有未完成的重开申请")
 
@@ -616,6 +628,14 @@ class InvoiceReissueApplicationCRUD:
         reissue.new_issued_time = now
         reissue.completed_time = now
         reissue.status = InvoiceReissueApplicationStatus.COMPLETED
+
+        invoice_red_offset_crud.create_from_reissue(
+            db,
+            reissue,
+            red_invoice_file_path=red_invoice_file_path,
+            red_invoice_number=red_invoice_number,
+            red_offset_time=now,
+        )
         db.commit()
         db.refresh(reissue)
         return reissue
@@ -624,6 +644,129 @@ class InvoiceReissueApplicationCRUD:
         return BusinessNumberGenerator.generate("INVR", db)
 
 
+class InvoiceRedOffsetCRUD:
+    def get_by_id(self, db: Session, red_offset_id: int, team_id: Optional[int] = None) -> Optional[InvoiceRedOffset]:
+        query = db.query(InvoiceRedOffset).filter(InvoiceRedOffset.id == red_offset_id)
+        if team_id is not None:
+            query = query.filter(InvoiceRedOffset.team_id == team_id)
+        return query.first()
+
+    def get_by_invoice(
+        self,
+        db: Session,
+        invoice_application_id: int,
+        team_id: Optional[int] = None,
+    ) -> List[InvoiceRedOffset]:
+        query = db.query(InvoiceRedOffset).filter(
+            InvoiceRedOffset.invoice_application_id == invoice_application_id
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceRedOffset.team_id == team_id)
+        return query.order_by(InvoiceRedOffset.red_offset_time.asc(), InvoiceRedOffset.id.asc()).all()
+
+    def get_by_reissue(
+        self,
+        db: Session,
+        reissue_application_id: int,
+        team_id: Optional[int] = None,
+    ) -> Optional[InvoiceRedOffset]:
+        query = db.query(InvoiceRedOffset).filter(
+            InvoiceRedOffset.reissue_application_id == reissue_application_id
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceRedOffset.team_id == team_id)
+        return query.first()
+
+    def create_from_reissue(
+        self,
+        db: Session,
+        reissue: InvoiceReissueApplication,
+        *,
+        red_invoice_file_path: str,
+        red_invoice_number: Optional[str],
+        red_offset_time: datetime,
+    ) -> InvoiceRedOffset:
+        existing = self.get_by_reissue(db, reissue.id, reissue.team_id)
+        if existing:
+            existing.red_invoice_file_path = red_invoice_file_path
+            existing.red_invoice_number = red_invoice_number
+            existing.reason = reissue.reason
+            existing.created_by = reissue.applicant_id
+            existing.red_offset_time = red_offset_time
+            return existing
+
+        red_offset = InvoiceRedOffset(
+            team_id=reissue.team_id,
+            invoice_application_id=reissue.original_invoice_application_id,
+            source_type=InvoiceRedOffsetSourceType.REISSUE,
+            reissue_application_id=reissue.id,
+            red_invoice_file_path=red_invoice_file_path,
+            red_invoice_number=red_invoice_number,
+            reason=reissue.reason,
+            created_by=reissue.applicant_id,
+            red_offset_time=red_offset_time,
+        )
+        db.add(red_offset)
+        return red_offset
+
+    def assert_can_create_manual(
+        self,
+        db: Session,
+        invoice_application: InvoiceApplication,
+        *,
+        team_id: int,
+    ) -> None:
+        if invoice_application.team_id != team_id:
+            raise ValueError("发票申请不存在")
+        if invoice_application.status != InvoiceApplicationStatus.ISSUED:
+            raise ValueError("只有已开票的发票可以冲红")
+        if self.get_by_invoice(db, invoice_application.id, team_id):
+            raise ValueError("该发票已冲红")
+        if invoice_reissue_application_crud.get_active_by_original_invoice(db, invoice_application.id, team_id):
+            raise ValueError("该发票已有未完成的重开申请，不能单独冲红")
+
+        completed_reissue = db.query(InvoiceReissueApplication).filter(
+            InvoiceReissueApplication.team_id == team_id,
+            InvoiceReissueApplication.original_invoice_application_id == invoice_application.id,
+            InvoiceReissueApplication.status == InvoiceReissueApplicationStatus.COMPLETED,
+            InvoiceReissueApplication.new_invoice_file_path.isnot(None),
+            InvoiceReissueApplication.new_invoice_file_path != "",
+        ).first()
+        if completed_reissue:
+            raise ValueError("该发票已重开，不能单独冲红")
+
+    def create_manual(
+        self,
+        db: Session,
+        invoice_application: InvoiceApplication,
+        *,
+        red_invoice_file_path: str,
+        red_invoice_number: Optional[str],
+        reason: Optional[str],
+        created_by: str,
+        team_id: int,
+    ) -> InvoiceRedOffset:
+        self.assert_can_create_manual(db, invoice_application, team_id=team_id)
+
+        now = business_now()
+        red_offset = InvoiceRedOffset(
+            team_id=team_id,
+            invoice_application_id=invoice_application.id,
+            source_type=InvoiceRedOffsetSourceType.MANUAL,
+            reissue_application_id=None,
+            red_invoice_file_path=red_invoice_file_path,
+            red_invoice_number=red_invoice_number,
+            reason=reason,
+            created_by=created_by,
+            red_offset_time=now,
+        )
+        db.add(red_offset)
+        db.commit()
+        db.refresh(red_offset)
+        return red_offset
+
+
 invoice_title_crud = InvoiceTitleCRUD()
 invoice_application_crud = InvoiceApplicationCRUD()
 invoice_reissue_application_crud = InvoiceReissueApplicationCRUD()
+invoice_red_offset_crud = InvoiceRedOffsetCRUD()

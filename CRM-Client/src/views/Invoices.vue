@@ -121,6 +121,7 @@ const filterFields: ListFilterField[] = [
     options: [
       { value: 'ACTIVE', label: '有效' },
       { value: 'REISSUE_PENDING', label: '重开中' },
+      { value: 'RED_OFFSET', label: '已冲红' },
       { value: 'REISSUED', label: '已重开' }
     ]
   },
@@ -479,6 +480,11 @@ const handleConfirmInvoiced = async (): Promise<void> => {
 }
 
 const downloadInvoiceFile = async (row: InvoiceApplicationResponse): Promise<void> => {
+  if (row.invoice_effective_status === 'RED_OFFSET') {
+    toast.warning('原蓝字发票已红冲，不能下载')
+    return
+  }
+
   const filePath = row.current_invoice_file_path ?? row.invoice_file_path
   if (filePath === null || filePath === undefined || filePath.trim() === '') {
     toast.warning('该发票暂无可下载文件')
@@ -535,6 +541,7 @@ const getInvoiceEffectiveStatusText = (status: InvoiceEffectiveStatus | null | u
   const map: Record<InvoiceEffectiveStatus, string> = {
     ACTIVE: '有效',
     REISSUE_PENDING: '重开中',
+    RED_OFFSET: '已冲红',
     REISSUED: '已重开'
   }
   return status === null || status === undefined ? '有效' : map[status] ?? '有效'
@@ -544,12 +551,14 @@ const getInvoiceEffectiveStatusClass = (status: InvoiceEffectiveStatus | null | 
   const map: Record<InvoiceEffectiveStatus, string> = {
     ACTIVE: 'status-success',
     REISSUE_PENDING: 'status-warning',
+    RED_OFFSET: 'status-danger',
     REISSUED: 'status-muted'
   }
   return status === null || status === undefined ? 'status-success' : map[status] ?? 'status-success'
 }
 
 const hasDownloadableInvoiceFile = (row: InvoiceApplicationResponse): boolean => {
+  if (row.invoice_effective_status === 'RED_OFFSET') return false
   const filePath = row.current_invoice_file_path ?? row.invoice_file_path
   return row.status === 'ISSUED' && filePath !== null && filePath !== undefined && filePath.trim() !== ''
 }
@@ -940,6 +949,11 @@ watchEffect(() => {
 .status-warning {
   background: $wolf-warning-bg-v2;
   color: $wolf-warning-text-v2;
+}
+
+.status-danger {
+  background: $wolf-danger-bg-v2;
+  color: $wolf-danger-text-v2;
 }
 
 .status-muted,

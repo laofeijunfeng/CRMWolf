@@ -86,6 +86,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '客户管理' }
       },
       {
+        path: 'customer-tracking',
+        name: 'CustomerTracking',
+        component: () => import('@/views/CustomerTracking.vue'),
+        meta: { requiresAuth: true, title: '客户追踪' }
+      },
+      {
         path: 'customers/create',
         name: 'CustomerCreate',
         component: () => import('@/views/CustomerEdit.vue'),

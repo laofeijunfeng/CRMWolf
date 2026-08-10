@@ -198,6 +198,24 @@ class InvoiceReissueApplicationResponse(BaseModel):
         from_attributes = True
 
 
+class InvoiceRedOffsetResponse(BaseModel):
+    id: int = Field(..., description="冲红记录ID")
+    invoice_application_id: int = Field(..., description="被冲红的原发票申请ID")
+    source_type: str = Field(..., description="冲红来源：MANUAL/REISSUE")
+    reissue_application_id: Optional[int] = Field(None, description="来源重开申请ID")
+    red_invoice_file_path: str = Field(..., description="红字发票文件路径")
+    red_invoice_number: Optional[str] = Field(None, description="红字发票号码")
+    reason: Optional[str] = Field(None, description="冲红原因")
+    created_by: str = Field(..., description="操作人ID")
+    created_by_name: Optional[str] = Field(None, description="操作人姓名")
+    red_offset_time: datetime = Field(..., description="冲红时间")
+    created_time: datetime = Field(..., description="创建时间")
+    last_modified_time: datetime = Field(..., description="最后修改时间")
+
+    class Config:
+        from_attributes = True
+
+
 class InvoiceApplicationResponse(InvoiceApplicationBase):
     id: int = Field(..., description="发票申请ID")
     application_number: str = Field(..., description="申请单号")
@@ -235,11 +253,12 @@ class InvoiceApplicationResponse(InvoiceApplicationBase):
     applicant_name: Optional[str] = Field(None, description="申请人姓名")
     reviewer_name: Optional[str] = Field(None, description="审批人姓名")
     reissue_status: Optional[str] = Field(None, description="重开状态：NONE/REISSUE_PENDING/REISSUED")
-    invoice_effective_status: Optional[str] = Field(None, description="发票有效状态：ACTIVE/REISSUE_PENDING/REISSUED")
+    invoice_effective_status: Optional[str] = Field(None, description="发票有效状态：ACTIVE/REISSUE_PENDING/RED_OFFSET/REISSUED")
     current_invoice_file_kind: Optional[str] = Field(None, description="当前有效发票文件来源：original/reissue_new")
     current_invoice_file_path: Optional[str] = Field(None, description="当前有效发票文件路径")
     current_invoice_number: Optional[str] = Field(None, description="当前有效发票号码")
     current_reissue_id: Optional[int] = Field(None, description="当前有效发票对应的重开申请ID")
+    red_offsets: List[InvoiceRedOffsetResponse] = Field(default_factory=list, description="冲红记录")
     reissue_applications: List[InvoiceReissueApplicationResponse] = Field(default_factory=list, description="重开申请链路")
 
     class Config:

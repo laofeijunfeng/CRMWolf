@@ -64,6 +64,7 @@ import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegment
 import invoiceApi, {
   type InvoiceApplicationResponse,
   type InvoiceApplicationStatus,
+  type InvoiceRedOffsetResponse,
   type InvoiceReissueApplicationCreate,
   type InvoiceReissueApplicationResponse,
   type InvoiceType,
@@ -73,6 +74,7 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import {
   createInvoiceFileObjectUrl,
   downloadInvoiceFile as downloadInvoiceFileApi,
+  downloadInvoiceRedOffsetFile,
   downloadInvoiceReissueFile,
 } from '@/api/fileUpload'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
@@ -97,6 +99,7 @@ const emit = defineEmits<{
 
 const permissionStore = usePermissionStore()
 const userStore = useUserStore()
+const MAX_INVOICE_FILE_SIZE_MB = 10
 
 const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
@@ -106,12 +109,20 @@ const editDialogOpen = ref<boolean>(false)
 const markIssuedDialogOpen = ref<boolean>(false)
 const reissueDialogOpen = ref<boolean>(false)
 const completeReissueDialogOpen = ref<boolean>(false)
+const redOffsetDialogOpen = ref<boolean>(false)
 const marking = ref<boolean>(false)
 const creatingReissue = ref<boolean>(false)
 const completingReissue = ref<boolean>(false)
+const redOffsetting = ref<boolean>(false)
 const deleting = ref<boolean>(false)
 const invoiceFilePreviewUrl = ref<string>('')
 const invoiceFilePreviewLoading = ref<boolean>(false)
+const completeReissueRedFileUrl = ref<string>('')
+const completeReissueNewFileUrl = ref<string>('')
+const redOffsetFileUrl = ref<string>('')
+const completeReissueRedFileError = ref<string>('')
+const completeReissueNewFileError = ref<string>('')
+const redOffsetFileError = ref<string>('')
 const invoicedForm = ref<{ invoice_number: string }>({
   invoice_number: '',
 })
@@ -151,6 +162,43 @@ const completeReissueForm = ref<{
   red_file: null,
   new_file: null,
 })
+const redOffsetForm = ref<{
+  red_invoice_number: string
+  reason: string
+  file: File | null
+}>({
+  red_invoice_number: '',
+  reason: '',
+  file: null,
+})
+
+const buildUploadFileItem = (file: File, url: string): FileAttachmentItem => ({
+  id: file.name,
+  name: file.name,
+  size: file.size,
+  mimeType: file.type,
+  extension: getFileExtension(file.name),
+  status: 'idle',
+  ...(url.length > 0 ? { url } : {})
+})
+
+const completeReissueRedFileItems = computed<FileAttachmentItem[]>(() =>
+  completeReissueForm.value.red_file === null
+    ? []
+    : [buildUploadFileItem(completeReissueForm.value.red_file, completeReissueRedFileUrl.value)]
+)
+
+const completeReissueNewFileItems = computed<FileAttachmentItem[]>(() =>
+  completeReissueForm.value.new_file === null
+    ? []
+    : [buildUploadFileItem(completeReissueForm.value.new_file, completeReissueNewFileUrl.value)]
+)
+
+const redOffsetFileItems = computed<FileAttachmentItem[]>(() =>
+  redOffsetForm.value.file === null
+    ? []
+    : [buildUploadFileItem(redOffsetForm.value.file, redOffsetFileUrl.value)]
+)
 
 const currentUserId = computed<string>(() => {
   const id = userStore.userInfo?.id
@@ -183,9 +231,28 @@ const activeReissue = computed<InvoiceReissueApplicationResponse | null>(() => {
 })
 
 const canCreateReissue = computed<boolean>(() => {
-  return invoiceInfo.value?.status === 'ISSUED' &&
+  const invoice = invoiceInfo.value
+  if (invoice === null) return false
+  return invoice.status === 'ISSUED' &&
     activeReissue.value === null &&
+    invoice.invoice_effective_status !== 'RED_OFFSET' &&
+    invoice.invoice_effective_status !== 'REISSUED' &&
     permissionStore.hasPermission('invoice_reissue:create')
+})
+
+const manualRedOffsets = computed<InvoiceRedOffsetResponse[]>(() => {
+  return (invoiceInfo.value?.red_offsets ?? []).filter((item) => item.source_type === 'MANUAL' || item.reissue_application_id === null)
+})
+
+const canRedOffset = computed<boolean>(() => {
+  const invoice = invoiceInfo.value
+  if (invoice === null) return false
+  return invoice.status === 'ISSUED' &&
+    activeReissue.value === null &&
+    manualRedOffsets.value.length === 0 &&
+    invoice.invoice_effective_status !== 'RED_OFFSET' &&
+    invoice.invoice_effective_status !== 'REISSUED' &&
+    permissionStore.hasPermission('invoice:mark_issued')
 })
 
 const canApproveGeneric = computed<boolean>(() => {
@@ -280,10 +347,64 @@ const getReissueInvoiceFiles = (reissue: InvoiceReissueApplicationResponse): Fil
   return files
 }
 
+const buildRedOffsetFileName = (redOffset: InvoiceRedOffsetResponse): string => {
+  const extension = getFileExtension(redOffset.red_invoice_file_path)
+  const suffix = extension === '' ? '' : `.${extension}`
+  return `冲红记录-${redOffset.id}-红字发票${suffix}`
+}
+
+const getRedOffsetFiles = (redOffset: InvoiceRedOffsetResponse): FileAttachmentItem[] => {
+  const file: FileAttachmentItem = {
+    id: `red-offset-${redOffset.id}`,
+    name: buildRedOffsetFileName(redOffset),
+    extension: getFileExtension(redOffset.red_invoice_file_path),
+    status: 'done',
+  }
+  if (redOffset.red_invoice_number !== null && redOffset.red_invoice_number.trim() !== '') {
+    file.description = `发票号码：${redOffset.red_invoice_number}`
+  }
+  return [file]
+}
+
 const revokeInvoiceFilePreviewUrl = (): void => {
   if (invoiceFilePreviewUrl.value.length === 0) return
   window.URL.revokeObjectURL(invoiceFilePreviewUrl.value)
   invoiceFilePreviewUrl.value = ''
+}
+
+const revokeLocalFileUrl = (kind: 'complete-red' | 'complete-new' | 'red-offset'): void => {
+  const urlMap = {
+    'complete-red': completeReissueRedFileUrl,
+    'complete-new': completeReissueNewFileUrl,
+    'red-offset': redOffsetFileUrl,
+  }
+  const target = urlMap[kind]
+  if (target.value.length === 0) return
+  window.URL.revokeObjectURL(target.value)
+  target.value = ''
+}
+
+const resetCompleteReissueUploadForm = (): void => {
+  revokeLocalFileUrl('complete-red')
+  revokeLocalFileUrl('complete-new')
+  completeReissueForm.value = {
+    red_invoice_number: '',
+    new_invoice_number: '',
+    red_file: null,
+    new_file: null,
+  }
+  completeReissueRedFileError.value = ''
+  completeReissueNewFileError.value = ''
+}
+
+const resetRedOffsetUploadForm = (): void => {
+  revokeLocalFileUrl('red-offset')
+  redOffsetForm.value = {
+    red_invoice_number: '',
+    reason: '',
+    file: null,
+  }
+  redOffsetFileError.value = ''
 }
 
 const loadInvoiceFilePreviewUrl = async (
@@ -292,7 +413,7 @@ const loadInvoiceFilePreviewUrl = async (
 ): Promise<void> => {
   revokeInvoiceFilePreviewUrl()
   if (invoice.invoice_file_path === null || invoice.invoice_file_path.trim() === '') return
-  if (invoice.invoice_effective_status === 'REISSUED') return
+  if (invoice.invoice_effective_status === 'REISSUED' || invoice.invoice_effective_status === 'RED_OFFSET') return
 
   invoiceFilePreviewLoading.value = true
   try {
@@ -346,13 +467,17 @@ const resetState = (): void => {
   markIssuedDialogOpen.value = false
   reissueDialogOpen.value = false
   completeReissueDialogOpen.value = false
+  redOffsetDialogOpen.value = false
   marking.value = false
   creatingReissue.value = false
   completingReissue.value = false
+  redOffsetting.value = false
   editingReissueApplication.value = null
   completingReissueApplication.value = null
   deleting.value = false
   invoicedForm.value.invoice_number = ''
+  resetCompleteReissueUploadForm()
+  resetRedOffsetUploadForm()
 }
 
 const fillReissueFormFromInvoice = (invoice: InvoiceApplicationResponse): void => {
@@ -486,6 +611,7 @@ const handleSubmitReissue = async (): Promise<void> => {
 
 const handleOpenCompleteReissue = (reissue: InvoiceReissueApplicationResponse): void => {
   completingReissueApplication.value = reissue
+  resetCompleteReissueUploadForm()
   completeReissueForm.value = {
     red_invoice_number: reissue.red_invoice_number ?? '',
     new_invoice_number: reissue.new_invoice_number ?? '',
@@ -495,13 +621,38 @@ const handleOpenCompleteReissue = (reissue: InvoiceReissueApplicationResponse): 
   completeReissueDialogOpen.value = true
 }
 
-const handleReissueFileChange = (event: Event, fileKind: 'red' | 'new'): void => {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0] ?? null
+const handleCompleteReissueDialogOpenChange = (open: boolean): void => {
+  completeReissueDialogOpen.value = open
+  if (!open) {
+    completingReissueApplication.value = null
+    resetCompleteReissueUploadForm()
+  }
+}
+
+const setCompleteReissueFile = (fileKind: 'red' | 'new', file: File | null): void => {
+  const urlKind = fileKind === 'red' ? 'complete-red' : 'complete-new'
+  revokeLocalFileUrl(urlKind)
   if (fileKind === 'red') {
     completeReissueForm.value.red_file = file
+    completeReissueRedFileError.value = ''
+    completeReissueRedFileUrl.value = file === null ? '' : window.URL.createObjectURL(file)
   } else {
     completeReissueForm.value.new_file = file
+    completeReissueNewFileError.value = ''
+    completeReissueNewFileUrl.value = file === null ? '' : window.URL.createObjectURL(file)
+  }
+}
+
+const handleCompleteReissueFileUpload = (fileKind: 'red' | 'new', files: File[]): void => {
+  setCompleteReissueFile(fileKind, files[0] ?? null)
+}
+
+const handleCompleteReissueFileError = (fileKind: 'red' | 'new', message: string): void => {
+  setCompleteReissueFile(fileKind, null)
+  if (fileKind === 'red') {
+    completeReissueRedFileError.value = message
+  } else {
+    completeReissueNewFileError.value = message
   }
 }
 
@@ -526,8 +677,7 @@ const handleCompleteReissue = async (): Promise<void> => {
       new_invoice_number: newNumber,
     })
     toast.success('发票重开已完成')
-    completeReissueDialogOpen.value = false
-    completingReissueApplication.value = null
+    handleCompleteReissueDialogOpenChange(false)
     await fetchInvoiceDetail(invoice.id)
     emit('refresh')
   } catch (error: unknown) {
@@ -535,6 +685,61 @@ const handleCompleteReissue = async (): Promise<void> => {
     handleApiError(error, '完成发票重开')
   } finally {
     completingReissue.value = false
+  }
+}
+
+const handleOpenRedOffset = (): void => {
+  resetRedOffsetUploadForm()
+  redOffsetDialogOpen.value = true
+}
+
+const handleRedOffsetDialogOpenChange = (open: boolean): void => {
+  redOffsetDialogOpen.value = open
+  if (!open) {
+    resetRedOffsetUploadForm()
+  }
+}
+
+const setRedOffsetFile = (file: File | null): void => {
+  revokeLocalFileUrl('red-offset')
+  redOffsetForm.value.file = file
+  redOffsetFileError.value = ''
+  redOffsetFileUrl.value = file === null ? '' : window.URL.createObjectURL(file)
+}
+
+const handleRedOffsetFileUpload = (files: File[]): void => {
+  setRedOffsetFile(files[0] ?? null)
+}
+
+const handleRedOffsetFileError = (message: string): void => {
+  setRedOffsetFile(null)
+  redOffsetFileError.value = message
+}
+
+const handleRedOffsetInvoice = async (): Promise<void> => {
+  const invoice = invoiceInfo.value
+  if (invoice === null) return
+  if (redOffsetForm.value.file === null) {
+    toast.warning('请上传红字发票文件')
+    return
+  }
+
+  redOffsetting.value = true
+  try {
+    await invoiceApi.redOffsetInvoice(invoice.id, {
+      file: redOffsetForm.value.file,
+      red_invoice_number: redOffsetForm.value.red_invoice_number,
+      reason: redOffsetForm.value.reason,
+    })
+    toast.success('发票已冲红')
+    handleRedOffsetDialogOpenChange(false)
+    await fetchInvoiceDetail(invoice.id)
+    emit('refresh')
+  } catch (error: unknown) {
+    logger.error('[InvoiceDetailSheet]', '冲红发票失败', { error })
+    handleApiError(error, '冲红发票')
+  } finally {
+    redOffsetting.value = false
   }
 }
 
@@ -566,6 +771,19 @@ const handleDownloadReissueAttachment = async (
     return
   }
   toast.warning('无法识别重开发票文件类型')
+}
+
+const handleDownloadRedOffsetAttachment = async (
+  redOffset: InvoiceRedOffsetResponse,
+  _file: FileAttachmentItem,
+): Promise<void> => {
+  try {
+    await downloadInvoiceRedOffsetFile(redOffset.id, buildRedOffsetFileName(redOffset))
+    toast.success('发票文件下载成功')
+  } catch (error: unknown) {
+    logger.error('[InvoiceDetailSheet]', '下载冲红发票文件失败', { error })
+    handleApiError(error, '下载冲红发票文件')
+  }
 }
 
 const handleOpenChange = (open: boolean): void => {
@@ -652,7 +870,7 @@ const handleConfirmIssued = async (): Promise<void> => {
 const handleDownloadWithFeedback = async (_file?: FileAttachmentItem): Promise<void> => {
   const invoice = invoiceInfo.value
   if (invoice === null) return
-  if (invoice.invoice_effective_status === 'REISSUED') {
+  if (invoice.invoice_effective_status === 'REISSUED' || invoice.invoice_effective_status === 'RED_OFFSET') {
     toast.warning('原蓝字发票已红冲，不能下载')
     return
   }
@@ -670,7 +888,7 @@ const handleDownloadWithFeedback = async (_file?: FileAttachmentItem): Promise<v
 }
 
 const handlePreviewInvoiceFile = (_file: FileAttachmentItem): void => {
-  if (invoiceInfo.value?.invoice_effective_status === 'REISSUED') {
+  if (invoiceInfo.value?.invoice_effective_status === 'REISSUED' || invoiceInfo.value?.invoice_effective_status === 'RED_OFFSET') {
     toast.warning('原蓝字发票已红冲，不能预览')
     return
   }
@@ -762,6 +980,9 @@ watch(
 
 onBeforeUnmount((): void => {
   revokeInvoiceFilePreviewUrl()
+  revokeLocalFileUrl('complete-red')
+  revokeLocalFileUrl('complete-new')
+  revokeLocalFileUrl('red-offset')
 })
 </script>
 
@@ -785,6 +1006,12 @@ onBeforeUnmount((): void => {
                 type="invoice"
               />
               <span v-if="invoiceInfo" class="type-badge">{{ getInvoiceTypeText(invoiceInfo.invoice_type) }}</span>
+              <span
+                v-if="invoiceInfo?.invoice_effective_status === 'RED_OFFSET'"
+                class="reissue-badge reissue-badge--done"
+              >
+                已冲红
+              </span>
               <span
                 v-if="invoiceInfo?.reissue_status === 'REISSUE_PENDING'"
                 class="reissue-badge reissue-badge--pending"
@@ -984,6 +1211,44 @@ onBeforeUnmount((): void => {
               </CardContent>
             </Card>
 
+            <Card
+              v-for="redOffset in manualRedOffsets"
+              :key="`red-offset-${redOffset.id}`"
+              class="info-card"
+            >
+              <CardHeader class="section-heading">
+                <CardTitle class="section-title">冲红记录</CardTitle>
+              </CardHeader>
+              <CardContent class="section-content">
+                <div class="attributes-grid">
+                  <div class="attribute-item">
+                    <span class="attribute-label">冲红原因</span>
+                    <span class="attribute-value">{{ formatText(redOffset.reason) }}</span>
+                  </div>
+                  <div class="attribute-item">
+                    <span class="attribute-label">红字发票号码</span>
+                    <span class="attribute-value mono-value">{{ formatText(redOffset.red_invoice_number) }}</span>
+                  </div>
+                  <div class="attribute-item">
+                    <span class="attribute-label">操作人</span>
+                    <span class="attribute-value">{{ formatText(redOffset.created_by_name) }}</span>
+                  </div>
+                </div>
+
+                <div class="invoice-detail-group">
+                  <h4 class="invoice-detail-group-title">红字发票</h4>
+                  <FileAttachment
+                    mode="readonly"
+                    :files="getRedOffsetFiles(redOffset)"
+                    :allow-preview="false"
+                    :show-header="false"
+                    empty-text="暂无红字发票文件"
+                    @download="handleDownloadRedOffsetAttachment(redOffset, $event)"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
             <Card class="info-card">
               <CardHeader class="section-heading">
                 <CardTitle class="section-title">原发票</CardTitle>
@@ -1051,8 +1316,8 @@ onBeforeUnmount((): void => {
                   <FileAttachment
                     mode="readonly"
                     :files="invoiceFiles"
-                    :allow-download="invoiceInfo.invoice_effective_status !== 'REISSUED'"
-                    :allow-preview="invoiceInfo.invoice_effective_status !== 'REISSUED'"
+                    :allow-download="invoiceInfo.invoice_effective_status !== 'REISSUED' && invoiceInfo.invoice_effective_status !== 'RED_OFFSET'"
+                    :allow-preview="invoiceInfo.invoice_effective_status !== 'REISSUED' && invoiceInfo.invoice_effective_status !== 'RED_OFFSET'"
                     :show-header="false"
                     empty-text="暂无发票文件"
                     @download="handleDownloadWithFeedback"
@@ -1097,10 +1362,6 @@ onBeforeUnmount((): void => {
       </ScrollArea>
 
       <SheetFooter class="invoice-sheet-footer">
-        <Button variant="outline" type="button" @click="closeSheet">
-          <X data-icon="inline-start" aria-hidden="true" />
-          关闭
-        </Button>
         <Button v-if="canEdit" variant="outline" type="button" @click="handleEdit">
           编辑
         </Button>
@@ -1125,12 +1386,26 @@ onBeforeUnmount((): void => {
           标记开票
         </Button>
         <Button
+          v-if="canRedOffset"
+          variant="destructive"
+          type="button"
+          :disabled="redOffsetting"
+          @click="handleOpenRedOffset"
+        >
+          <Stamp data-icon="inline-start" aria-hidden="true" />
+          冲红
+        </Button>
+        <Button
           v-if="canCreateReissue"
           type="button"
           @click="handleCreateReissue"
         >
           <RotateCcw data-icon="inline-start" aria-hidden="true" />
           申请重开
+        </Button>
+        <Button variant="outline" type="button" @click="closeSheet">
+          <X data-icon="inline-start" aria-hidden="true" />
+          关闭
         </Button>
       </SheetFooter>
     </DetailSheetContent>
@@ -1160,6 +1435,56 @@ onBeforeUnmount((): void => {
         <Button type="button" :disabled="marking" @click="handleConfirmIssued">
           <Loader2 v-if="marking" data-icon="inline-start" aria-hidden="true" class="animate-spin" />
           {{ marking ? '提交中...' : '确定' }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog :open="redOffsetDialogOpen" @update:open="handleRedOffsetDialogOpenChange">
+    <DialogContent class="sm:max-w-[520px]">
+      <DialogHeader>
+        <DialogTitle>冲红发票</DialogTitle>
+        <DialogDescription>上传红字发票后，原蓝字发票将标记为已冲红。</DialogDescription>
+      </DialogHeader>
+      <div class="dialog-form">
+        <div class="form-field">
+          <Label for="red-offset-reason">冲红原因</Label>
+          <Textarea
+            id="red-offset-reason"
+            v-model="redOffsetForm.reason"
+            rows="3"
+            :disabled="redOffsetting"
+          />
+        </div>
+        <div class="form-field">
+          <Label for="red-offset-number">红字发票号码</Label>
+          <Input id="red-offset-number" v-model="redOffsetForm.red_invoice_number" :disabled="redOffsetting" />
+        </div>
+        <FileAttachment
+          title="红字发票文件"
+          description="支持 PDF、JPG、PNG、OFD，最大 10MB"
+          mode="manage"
+          accept=".pdf,.jpg,.jpeg,.png,.ofd"
+          :max-size-mb="MAX_INVOICE_FILE_SIZE_MB"
+          :files="redOffsetFileItems"
+          :multiple="false"
+          :required="true"
+          :disabled="redOffsetting"
+          :allow-download="false"
+          empty-text="暂无红字发票文件"
+          @upload="handleRedOffsetFileUpload"
+          @remove="setRedOffsetFile(null)"
+          @error="handleRedOffsetFileError"
+        />
+        <p v-if="redOffsetFileError" class="text-sm text-destructive" role="alert">{{ redOffsetFileError }}</p>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" type="button" :disabled="redOffsetting" @click="handleRedOffsetDialogOpenChange(false)">
+          取消
+        </Button>
+        <Button type="button" :disabled="redOffsetting" @click="handleRedOffsetInvoice">
+          <Loader2 v-if="redOffsetting" data-icon="inline-start" aria-hidden="true" class="animate-spin" />
+          {{ redOffsetting ? '提交中...' : '确认冲红' }}
         </Button>
       </DialogFooter>
     </DialogContent>
@@ -1269,7 +1594,7 @@ onBeforeUnmount((): void => {
     </DialogContent>
   </Dialog>
 
-  <Dialog :open="completeReissueDialogOpen" @update:open="completeReissueDialogOpen = $event">
+  <Dialog :open="completeReissueDialogOpen" @update:open="handleCompleteReissueDialogOpenChange">
     <DialogContent class="sm:max-w-[560px]">
       <DialogHeader>
         <DialogTitle>完成发票重开</DialogTitle>
@@ -1280,21 +1605,51 @@ onBeforeUnmount((): void => {
           <Label for="red-invoice-number">红字发票号码</Label>
           <Input id="red-invoice-number" v-model="completeReissueForm.red_invoice_number" :disabled="completingReissue" />
         </div>
-        <div class="form-field">
-          <Label for="red-invoice-file">红字发票文件<span class="required-mark">*</span></Label>
-          <Input id="red-invoice-file" type="file" :disabled="completingReissue" @change="handleReissueFileChange($event, 'red')" />
-        </div>
+        <FileAttachment
+          title="红字发票文件"
+          description="支持 PDF、JPG、PNG、OFD，最大 10MB"
+          mode="manage"
+          accept=".pdf,.jpg,.jpeg,.png,.ofd"
+          :max-size-mb="MAX_INVOICE_FILE_SIZE_MB"
+          :files="completeReissueRedFileItems"
+          :multiple="false"
+          :required="true"
+          :disabled="completingReissue"
+          :allow-download="false"
+          empty-text="暂无红字发票文件"
+          @upload="handleCompleteReissueFileUpload('red', $event)"
+          @remove="setCompleteReissueFile('red', null)"
+          @error="handleCompleteReissueFileError('red', $event)"
+        />
+        <p v-if="completeReissueRedFileError" class="text-sm text-destructive" role="alert">
+          {{ completeReissueRedFileError }}
+        </p>
         <div class="form-field">
           <Label for="new-invoice-number">新发票号码</Label>
           <Input id="new-invoice-number" v-model="completeReissueForm.new_invoice_number" :disabled="completingReissue" />
         </div>
-        <div class="form-field">
-          <Label for="new-invoice-file">新发票文件<span class="required-mark">*</span></Label>
-          <Input id="new-invoice-file" type="file" :disabled="completingReissue" @change="handleReissueFileChange($event, 'new')" />
-        </div>
+        <FileAttachment
+          title="新发票文件"
+          description="支持 PDF、JPG、PNG、OFD，最大 10MB"
+          mode="manage"
+          accept=".pdf,.jpg,.jpeg,.png,.ofd"
+          :max-size-mb="MAX_INVOICE_FILE_SIZE_MB"
+          :files="completeReissueNewFileItems"
+          :multiple="false"
+          :required="true"
+          :disabled="completingReissue"
+          :allow-download="false"
+          empty-text="暂无新发票文件"
+          @upload="handleCompleteReissueFileUpload('new', $event)"
+          @remove="setCompleteReissueFile('new', null)"
+          @error="handleCompleteReissueFileError('new', $event)"
+        />
+        <p v-if="completeReissueNewFileError" class="text-sm text-destructive" role="alert">
+          {{ completeReissueNewFileError }}
+        </p>
       </div>
       <DialogFooter>
-        <Button variant="outline" type="button" :disabled="completingReissue" @click="completeReissueDialogOpen = false">
+        <Button variant="outline" type="button" :disabled="completingReissue" @click="handleCompleteReissueDialogOpenChange(false)">
           取消
         </Button>
         <Button type="button" :disabled="completingReissue" @click="handleCompleteReissue">
@@ -1317,36 +1672,44 @@ onBeforeUnmount((): void => {
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
+$invoice-border-width: $wolf-focus-ring-width-subtle-v2;
+$invoice-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
+$invoice-sheet-min-height: ($wolf-touch-target-min-v2 * 12) + $wolf-space-2xl-v2;
+$invoice-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
+
 .invoice-sheet-header {
   padding: $wolf-space-xl-v2;
   padding-bottom: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-divider-v2;
-  background: $wolf-bg-card-v2;
+  border-bottom: $invoice-border-width solid $wolf-border-default-v2;
 }
 
 .invoice-header-summary {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
   gap: $wolf-space-md-v2;
   min-width: 0;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    align-items: flex-start;
+  }
 }
 
 .title-avatar {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: $wolf-touch-target-min-v2;
-  height: $wolf-touch-target-min-v2;
+  width: $invoice-title-avatar-size;
+  height: $invoice-title-avatar-size;
   border-radius: $wolf-radius-full-v2;
-  background: $wolf-primary-v2;
-  color: $wolf-text-inverse-v2;
-  font-size: $wolf-font-size-title-v2;
+  background: $wolf-primary-light-v2;
+  color: $wolf-primary-v2;
+  font-size: $wolf-topbar-title-font-size-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   flex-shrink: 0;
 }
 
 .header-title-block {
+  flex: 1;
   min-width: 0;
 }
 
@@ -1363,7 +1726,8 @@ onBeforeUnmount((): void => {
   align-items: center;
   flex-wrap: wrap;
   gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-sm-v2;
+  min-height: $wolf-touch-target-min-v2;
+  color: $wolf-text-tertiary-v2;
 }
 
 .type-badge,
@@ -1372,8 +1736,8 @@ onBeforeUnmount((): void => {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-full-v2;
+  padding: 0 $wolf-space-sm-v2;
+  border-radius: $wolf-radius-sm-v2;
   background: $wolf-bg-hover-v2;
   color: $wolf-text-secondary-v2;
   font-size: $wolf-font-size-caption-v2;
@@ -1392,10 +1756,11 @@ onBeforeUnmount((): void => {
 }
 
 .sheet-body {
+  padding: $wolf-space-xl-v2;
   display: flex;
   flex-direction: column;
   gap: $wolf-space-xl-v2;
-  padding: $wolf-space-xl-v2;
+  min-height: $invoice-sheet-min-height;
 
   @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
     padding: $wolf-space-md-v2;
@@ -1410,30 +1775,33 @@ onBeforeUnmount((): void => {
 }
 
 .state-card-content {
+  min-height: $invoice-empty-min-height;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: $wolf-space-md-v2;
-  padding: $wolf-space-2xl-v2;
+  padding: $wolf-space-xl-v2;
 }
 
 .info-card,
 .state-card {
   background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
+  border: $invoice-border-width solid $wolf-border-default-v2;
   border-radius: $wolf-radius-surface-v2;
   box-shadow: $wolf-shadow-card-v2;
 }
 
 .section-heading {
+  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
+  border-bottom: $invoice-border-width solid $wolf-border-light-v2;
   display: flex;
   flex-direction: column;
   gap: $wolf-space-xs-v2;
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
 }
 
 .section-title {
+  margin: 0;
   color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-body-v2;
   font-weight: $wolf-font-weight-semibold-v2;
@@ -1445,11 +1813,11 @@ onBeforeUnmount((): void => {
 
 .attributes-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: $wolf-space-md-v2 $wolf-space-lg-v2;
 
-  @media (min-width: $wolf-breakpoint-lg-v2) {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
@@ -1470,7 +1838,7 @@ onBeforeUnmount((): void => {
   gap: $wolf-space-xs-v2;
   color: $wolf-text-tertiary-v2;
   font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-normal-v2;
+  font-weight: $wolf-font-weight-medium-v2;
 
   svg {
     width: 14px;
@@ -1480,7 +1848,7 @@ onBeforeUnmount((): void => {
 }
 
 .attribute-value {
-  color: $wolf-text-primary-v2;
+  color: $wolf-text-secondary-v2;
   font-size: $wolf-font-size-body-v2;
   font-weight: $wolf-font-weight-medium-v2;
   line-height: $wolf-line-height-body-v2;
@@ -1502,7 +1870,7 @@ onBeforeUnmount((): void => {
   flex-direction: column;
   gap: $wolf-space-md-v2;
   padding-top: $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-light-v2;
+  border-top: $invoice-border-width solid $wolf-border-light-v2;
 
   &:first-child {
     padding-top: 0;
@@ -1538,10 +1906,19 @@ onBeforeUnmount((): void => {
 }
 
 .invoice-sheet-footer {
+  padding: $wolf-space-lg-v2;
+  border-top: $invoice-border-width solid $wolf-border-default-v2;
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
   gap: $wolf-space-sm-v2;
-  padding: $wolf-space-lg-v2 $wolf-space-xl-v2;
-  border-top: 1px solid $wolf-border-divider-v2;
-  background: $wolf-bg-card-v2;
+  flex-wrap: wrap;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    :deep(button) {
+      flex: 1 1 100%;
+    }
+  }
 }
 
 .dialog-form {

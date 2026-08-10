@@ -37,6 +37,7 @@ from app.models.sales_commitment import (
     FollowUpTaskTransitionPolicyDecisionLog,
     SalesCommitment,
 )
+from app.models.user import User
 from app.schemas.sales_commitment import (
     FollowUpTaskInternalCreate,
     FollowUpTaskProjectionRunInternalCreate,
@@ -67,6 +68,7 @@ def db_session():
     Base.metadata.create_all(
         engine,
         tables=[
+            User.__table__,
             Customer.__table__,
             CustomerMember.__table__,
             CustomerActivity.__table__,
@@ -129,6 +131,12 @@ def client(db_session, permission_codes):  # noqa: ARG001
 
 
 def _seed_customer_and_activity(db):
+    db.add_all(
+        [
+            User(id=2, email="owner@example.com", name="售前"),
+            User(id=9, email="customer-owner@example.com", name="销售负责人"),
+        ]
+    )
     db.add(
         Customer(
             id=1,
@@ -276,6 +284,7 @@ def test_list_follow_up_tasks_returns_public_ids_and_customer_summary(client, db
     assert payload["items"][0]["customer"]["id"] == "cus_11111111111111111111111111111111"
     assert payload["items"][0]["customer"]["name"] == "测试客户"
     assert payload["items"][0]["owner_id"] == "2"
+    assert payload["items"][0]["owner_info"]["name"] == "售前"
     assert "source_activity_id" not in payload["items"][0]
     assert len(payload["customer_summary"]) == 1
     assert payload["customer_summary"][0]["customer"]["id"] == "cus_11111111111111111111111111111111"
@@ -292,10 +301,132 @@ def test_customer_arrangement_returns_readonly_customer_scope_without_internal_i
     assert payload["total"] == 1
     assert payload["items"][0]["id"] == task.public_id
     assert payload["items"][0]["owner_id"] == "9"
+    assert payload["items"][0]["owner_info"]["name"] == "销售负责人"
     assert "source_activity_id" not in payload["items"][0]
     assert payload["filters"]["owner_scope"] == "customer"
     assert payload["display_policy"]["mode"] == "readonly"
     assert "public_id" in payload["display_policy"]["id_policy"]
+
+
+def test_get_follow_up_task_detail_returns_source_activity_context(client, db_session):
+    task = _create_task(db_session)
+
+    response = client.get(f"/v1/follow-up-tasks/{task.public_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == task.public_id
+    assert payload["customer"]["name"] == "测试客户"
+    assert payload["owner_info"]["name"] == "售前"
+    assert payload["title"] == "下周三回访预算进展"
+    assert payload["source_activity"]["title"] == "电话确认预算"
+    assert payload["source_activity"]["summary"] == "客户还在确认预算。"
+    assert payload["source_activity"]["next_action"] == "下周三回访预算进展"
+    assert payload["source_activity"]["owner_info"]["name"] == "售前"
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_status", "expected_event_type", "closed_at_field"),
+    [
+        ("complete", FollowUpTaskStatus.COMPLETED, FollowUpTaskEventType.COMPLETED, "completed_at"),
+        ("cancel", FollowUpTaskStatus.CANCELLED, FollowUpTaskEventType.CANCELLED, "cancelled_at"),
+    ],
+)
+def test_transition_follow_up_task_can_close_owned_open_task(
+    client,
+    db_session,
+    action,
+    expected_status,
+    expected_event_type,
+    closed_at_field,
+):
+    task = _create_task(db_session)
+
+    response = client.post(
+        f"/v1/follow-up-tasks/{task.public_id}/transition",
+        json={"action": action, "reason": "用户在客户追踪中操作"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["executed"] is True
+    assert payload["task"]["status"] == expected_status
+    assert payload["task"][closed_at_field] is not None
+
+    db_session.refresh(task)
+    assert task.status == expected_status
+    event = (
+        db_session.query(FollowUpTaskEvent)
+        .filter(FollowUpTaskEvent.task_id == task.id)
+        .order_by(FollowUpTaskEvent.id.desc())
+        .first()
+    )
+    assert event.event_type == expected_event_type
+    assert event.payload_json["plan_source"] == "manual_ui"
+    assert event.payload_json["execution_kind"] == "manual_ui"
+
+
+def test_transition_follow_up_task_can_delay_owned_open_task(client, db_session):
+    task = _create_task(db_session)
+
+    response = client.post(
+        f"/v1/follow-up-tasks/{task.public_id}/transition",
+        json={
+            "action": "delay",
+            "proposed_due_at": "2026-08-20T10:30:00",
+            "reason": "客户要求下周再确认",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["task"]["status"] == FollowUpTaskStatus.OPEN
+    assert payload["task"]["due_at"] == "2026-08-20T10:30:00"
+
+    db_session.refresh(task)
+    assert task.status == FollowUpTaskStatus.OPEN
+    assert task.due_at == datetime(2026, 8, 20, 10, 30, 0)
+    event = (
+        db_session.query(FollowUpTaskEvent)
+        .filter(FollowUpTaskEvent.task_id == task.id)
+        .order_by(FollowUpTaskEvent.id.desc())
+        .first()
+    )
+    assert event.event_type == FollowUpTaskEventType.UPDATED
+    assert event.payload_json["proposed_due_at"] == "2026-08-20T10:30:00"
+    assert event.payload_json["execution_kind"] == "manual_ui"
+
+
+def test_transition_follow_up_task_rejects_invalid_action_and_missing_delay_time(client, db_session):
+    task = _create_task(db_session)
+
+    invalid_response = client.post(
+        f"/v1/follow-up-tasks/{task.public_id}/transition",
+        json={"action": "reopen"},
+    )
+    missing_delay_response = client.post(
+        f"/v1/follow-up-tasks/{task.public_id}/transition",
+        json={"action": "delay"},
+    )
+
+    assert invalid_response.status_code == 400
+    assert invalid_response.json()["detail"] == "action 只支持 complete/cancel/delay"
+    assert missing_delay_response.status_code == 400
+    assert missing_delay_response.json()["detail"] == "延期操作必须提供 proposed_due_at"
+
+
+def test_transition_follow_up_task_blocks_non_owner(client, db_session):
+    task = _create_task(db_session, owner_id="9")
+
+    response = client.post(
+        f"/v1/follow-up-tasks/{task.public_id}/transition",
+        json={"action": "complete"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "TASK_OWNER_MISMATCH"
+    db_session.refresh(task)
+    assert task.status == FollowUpTaskStatus.OPEN
 
 
 def test_projection_runs_by_activity_requires_debug_permission_and_returns_public_ids(

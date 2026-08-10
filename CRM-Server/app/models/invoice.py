@@ -26,6 +26,11 @@ class InvoiceReissueApplicationStatus:
     COMPLETED = "COMPLETED"
 
 
+class InvoiceRedOffsetSourceType:
+    MANUAL = "MANUAL"
+    REISSUE = "REISSUE"
+
+
 class InvoiceType:
     VAT_SPECIAL = "VAT_SPECIAL"
     VAT_NORMAL = "VAT_NORMAL"
@@ -109,6 +114,7 @@ class InvoiceApplication(Base):
     payment_record = relationship("PaymentRecord", back_populates="invoice_applications")
     invoice_title = relationship("InvoiceTitle", back_populates="invoice_applications")
     reissue_applications = relationship("InvoiceReissueApplication", back_populates="original_invoice_application")
+    red_offsets = relationship("InvoiceRedOffset", back_populates="invoice_application")
 
     __table_args__ = (
         Index('idx_invoice_application_team_id', 'team_id'),
@@ -163,6 +169,7 @@ class InvoiceReissueApplication(Base):
     last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
     original_invoice_application = relationship("InvoiceApplication", back_populates="reissue_applications")
+    red_offset = relationship("InvoiceRedOffset", back_populates="reissue_application", uselist=False)
 
     __table_args__ = (
         Index("idx_invoice_reissue_team_id", "team_id"),
@@ -172,3 +179,42 @@ class InvoiceReissueApplication(Base):
 
     def __repr__(self):
         return f"<InvoiceReissueApplication(id={self.id}, application_number={self.application_number}, status={self.status})>"
+
+
+class InvoiceRedOffset(Base):
+    __tablename__ = "crm_invoice_red_offsets"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
+    invoice_application_id = Column(
+        BigInteger,
+        ForeignKey("crm_invoice_applications.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="被冲红的原发票申请ID",
+    )
+    source_type = Column(String(20), nullable=False, comment="冲红来源：MANUAL/REISSUE")
+    reissue_application_id = Column(
+        BigInteger,
+        ForeignKey("crm_invoice_reissue_applications.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="来源重开申请ID",
+    )
+    red_invoice_file_path = Column(String(500), nullable=False, comment="红字发票文件路径")
+    red_invoice_number = Column(String(100), comment="红字发票号码")
+    reason = Column(String(500), comment="冲红原因")
+    created_by = Column(String(100), nullable=False, comment="操作人系统用户ID")
+    red_offset_time = Column(DateTime, nullable=False, default=business_now, comment="冲红时间")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
+
+    invoice_application = relationship("InvoiceApplication", back_populates="red_offsets")
+    reissue_application = relationship("InvoiceReissueApplication", back_populates="red_offset")
+
+    __table_args__ = (
+        Index("idx_invoice_red_offset_team_id", "team_id"),
+        Index("idx_invoice_red_offset_invoice", "invoice_application_id"),
+        Index("idx_invoice_red_offset_reissue", "reissue_application_id"),
+    )
+
+    def __repr__(self):
+        return f"<InvoiceRedOffset(id={self.id}, invoice_application_id={self.invoice_application_id}, source_type={self.source_type})>"

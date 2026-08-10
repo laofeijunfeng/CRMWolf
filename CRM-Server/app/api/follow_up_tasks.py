@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,16 +17,32 @@ from app.crud.sales_commitment import (
 )
 from app.models.sales_commitment import FollowUpTaskProjectionStatus, FollowUpTaskSourceType
 from app.schemas.sales_commitment import FollowUpTaskProjectionRunResponse
+from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
 from app.services.follow_up_task_projection_service import follow_up_task_projection_service
 from app.services.follow_up_task_query_service import follow_up_task_query_service
+from app.services.follow_up_task_transition_execution_service import (
+    FollowUpTaskTransitionExecutionStatus,
+    follow_up_task_transition_execution_service,
+)
 from app.services.follow_up_task_transition_observability_service import (
     follow_up_task_transition_observability_service,
+)
+from app.services.follow_up_task_transition_plan_service import (
+    FollowUpTaskTransitionAction,
+    FollowUpTaskTransitionActionType,
+    FollowUpTaskTransitionPlan,
 )
 from app.utils.time import business_now
 
 router = APIRouter(prefix="/v1/follow-up-tasks", tags=["客户跟进任务"])
 projection_router = APIRouter(prefix="/v1/follow-up-task-projection-runs", tags=["客户跟进任务投影"])
 observability_router = APIRouter(prefix="/v1/follow-up-task-transition-observability", tags=["客户跟进任务观测"])
+
+
+class FollowUpTaskTransitionRequest(BaseModel):
+    action: str = Field(..., description="complete/cancel/delay")
+    proposed_due_at: str | None = Field(None, description="延期后的 ISO 时间")
+    reason: str | None = Field(None, max_length=500, description="操作原因")
 
 
 @router.get("", summary="查询我的客户跟进任务")
@@ -85,6 +102,89 @@ def get_customer_follow_up_arrangement(
         "id_policy": "对外只返回 task/customer public_id；来源活动当前沿用既有客户活动内部ID路由，不作为任务展示字段。",
     }
     return payload
+
+
+@router.get("/{task_id}", summary="查询客户跟进任务详情")
+def get_follow_up_task_detail(
+    task_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        return follow_up_task_query_service.get_task_detail(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            task_public_id=task_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post("/{task_id}/transition", summary="手动更新客户跟进任务状态")
+def transition_follow_up_task(
+    task_id: str,
+    payload: FollowUpTaskTransitionRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    action_map = {
+        "complete": FollowUpTaskTransitionActionType.COMPLETE,
+        "cancel": FollowUpTaskTransitionActionType.CANCEL,
+        "delay": FollowUpTaskTransitionActionType.DELAY,
+    }
+    normalized_action = action_map.get(payload.action.lower())
+    if normalized_action is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action 只支持 complete/cancel/delay")
+    if normalized_action == FollowUpTaskTransitionActionType.DELAY and not payload.proposed_due_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="延期操作必须提供 proposed_due_at")
+
+    plan = FollowUpTaskTransitionPlan(
+        decision=FollowUpTaskReconciliationDecision(
+            decision=normalized_action,
+            confidence=1.0,
+            task_public_id=task_id,
+            candidate_public_ids=(task_id,),
+            proposed_due_at=payload.proposed_due_at,
+        ),
+        actions=(
+            FollowUpTaskTransitionAction(
+                action=normalized_action,
+                task_public_id=task_id,
+                confidence=1.0,
+                executable=True,
+                requires_confirmation=False,
+                proposed_due_at=payload.proposed_due_at,
+                reason=payload.reason or "manual_ui_transition",
+            ),
+        ),
+        plan_source="manual_ui",
+    )
+    result = follow_up_task_transition_execution_service.execute_action(
+        db,
+        team_id=team_id,
+        action=plan.actions[0],
+        plan=plan,
+        actor_id=str(current_user.id),
+        expected_owner_id=str(current_user.id),
+        enabled=True,
+    )
+    if result.status != FollowUpTaskTransitionExecutionStatus.EXECUTED:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.skip_reason or "任务状态更新失败")
+    return {
+        "executed": True,
+        "result": result.to_dict(),
+        "task": follow_up_task_query_service.get_task_detail(
+            db,
+            team_id=team_id,
+            user_id=current_user.id,
+            task_public_id=task_id,
+        ),
+    }
 
 
 @projection_router.get("/by-activity/{activity_id}", response_model=list[FollowUpTaskProjectionRunResponse], summary="按客户活动查询任务投影运行")

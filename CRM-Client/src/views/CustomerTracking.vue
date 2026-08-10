@@ -1,0 +1,773 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, watchEffect } from 'vue'
+import { CheckCircle2, Clock3, FileText, Plus, RefreshCw, XCircle } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
+import { DataTable, HoverInfo, TableRowActions, type ActionConfig } from '@/components/crmwolf'
+import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
+import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import { DateField, TextareaField } from '@/components/crmwolf'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Sheet, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
+import { followUpTaskApi, type FollowUpTaskItem, type FollowUpTaskStatusFilter } from '@/api/followUpTask'
+import { handleApiError } from '@/utils/errorHandler'
+import { confirmDialog } from '@/utils/confirmDialog'
+import { useHeaderStore } from '@/stores/header'
+import { usePageTitle } from '@/composables/usePageTitle'
+import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
+import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
+import { formatLocalDate } from '@/utils/format'
+
+usePageTitle()
+
+type TrackingTabKey = 'all' | 'open' | 'completed' | 'cancelled'
+type TrackingRow = FollowUpTaskItem & {
+  customer_name: string
+  owner_name: string
+  tracking_content: string
+  tracking_time: string
+  status_label: string
+}
+
+const headerStore = useHeaderStore()
+const loading = ref(false)
+const tasks = ref<FollowUpTaskItem[]>([])
+const selectedTaskId = ref<string | null>(null)
+const selectedTask = ref<FollowUpTaskItem | null>(null)
+const detailLoading = ref(false)
+const followUpDialogOpen = ref(false)
+const delayDialogOpen = ref(false)
+const delaySubmitting = ref(false)
+const delayDate = ref<Date | null>(null)
+const delayReason = ref('')
+
+const activeTab = ref<TrackingTabKey>('open')
+const activeFilters = ref<ListFilterCondition[]>([])
+const activeSorts = ref<ListSortCondition[]>([])
+const activeColumns = ref<ViewPreferenceConfig['columns']>([])
+const page = ref(1)
+const pageSize = ref(20)
+
+const tabs = [
+  { key: 'all', label: '所有追踪' },
+  { key: 'open', label: '待处理' },
+  { key: 'completed', label: '已完成' },
+  { key: 'cancelled', label: '已关闭' },
+]
+
+const columns = [
+  { key: 'customer_name', title: '客户', width: '220px', filterable: true, filterType: 'text' as const, sortable: true, sortType: 'text' as const },
+  { key: 'tracking_content', title: '追踪内容', width: '520px', filterable: true, filterType: 'text' as const },
+  {
+    key: 'status_label',
+    title: '状态',
+    width: '110px',
+    align: 'center' as const,
+    filterable: true,
+    filterType: 'enum' as const,
+    filterOptions: [
+      { value: '待处理', label: '待处理' },
+      { value: '已完成', label: '已完成' },
+      { value: '已关闭', label: '已关闭' },
+    ],
+  },
+  { key: 'tracking_time', title: '追踪时间', width: '170px', sortable: true, sortType: 'date' as const },
+  { key: 'actions', title: '操作', width: '220px', align: 'center' as const, fixed: 'right' as const },
+]
+
+const customFilterViews = useCustomFilterViews({
+  viewKey: 'customer-tracking.list',
+  activeTab,
+  activeFilters,
+  activeSorts,
+  activeColumns,
+  refresh: fetchTasks,
+})
+const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
+const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({ version: 1, columns: activeColumns.value }))
+const columnPreferenceMode = computed<'default' | 'custom'>(() => isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default')
+
+const rows = computed<TrackingRow[]>(() => tasks.value.map((task) => ({
+  ...task,
+  customer_name: task.customer?.name ?? '-',
+  owner_name: task.owner_info?.name ?? task.owner_id,
+  tracking_content: task.title.trim().length > 0
+    ? task.title
+    : task.description !== undefined && task.description !== null && task.description.trim().length > 0
+      ? task.description
+      : '-',
+  tracking_time: formatDateTime(task.due_at),
+  status_label: statusLabel(task.status),
+})))
+
+const filteredRows = computed(() => applySorts(applyFilters(rows.value, activeFilters.value), activeSorts.value))
+const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+const selectedCustomerId = computed(() => selectedTask.value?.customer?.id ?? selectedTask.value?.customer?.public_id ?? null)
+
+async function fetchTasks(): Promise<void> {
+  loading.value = true
+  try {
+    const response = await followUpTaskApi.list({
+      status: activeTab.value as FollowUpTaskStatusFilter,
+      owner_scope: 'mine',
+      limit: 100,
+    })
+    tasks.value = response.items
+  } catch (error) {
+    handleApiError(error, '获取客户追踪')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function openDetail(row: TrackingRow): Promise<void> {
+  selectedTaskId.value = row.public_id
+  selectedTask.value = row
+  detailLoading.value = true
+  try {
+    selectedTask.value = await followUpTaskApi.getDetail(row.public_id)
+  } catch (error) {
+    handleApiError(error, '获取追踪详情')
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+async function transitionTask(task: FollowUpTaskItem, action: 'complete' | 'cancel'): Promise<void> {
+  const actionText = action === 'complete' ? '完成' : '关闭'
+  const confirmed = await confirmDialog(`确认${actionText}这条客户追踪吗？`, `确认${actionText}`)
+  if (!confirmed) return
+  try {
+    const response = await followUpTaskApi.transition(task.public_id, { action, reason: `manual_${action}` })
+    selectedTask.value = response.task
+    toast.success(`已${actionText}`)
+    await fetchTasks()
+  } catch (error) {
+    handleApiError(error, `${actionText}客户追踪`)
+  }
+}
+
+function openDelayDialog(task: FollowUpTaskItem): void {
+  selectedTask.value = task
+  delayDate.value = task.due_at !== null && task.due_at !== undefined && task.due_at.trim().length > 0
+    ? new Date(task.due_at)
+    : new Date()
+  delayReason.value = ''
+  delayDialogOpen.value = true
+}
+
+async function submitDelay(): Promise<void> {
+  if (!selectedTask.value || !delayDate.value) {
+    toast.error('请选择延期时间')
+    return
+  }
+  delaySubmitting.value = true
+  try {
+    const response = await followUpTaskApi.transition(selectedTask.value.public_id, {
+      action: 'delay',
+      proposed_due_at: formatLocalDate(delayDate.value),
+      reason: delayReason.value || 'manual_delay',
+    })
+    selectedTask.value = response.task
+    delayDialogOpen.value = false
+    toast.success('已延期')
+    await fetchTasks()
+  } catch (error) {
+    handleApiError(error, '延期客户追踪')
+  } finally {
+    delaySubmitting.value = false
+  }
+}
+
+const primaryActions = (row: TrackingRow): ActionConfig[] => [
+  { label: '完成', icon: CheckCircle2, visible: row.status === 'OPEN', handler: () => void transitionTask(row, 'complete') },
+  { label: '延期', icon: Clock3, visible: row.status === 'OPEN', handler: () => openDelayDialog(row) },
+]
+
+const secondaryActions = (row: TrackingRow): ActionConfig[] => [
+  { label: '关闭', icon: XCircle, visible: row.status === 'OPEN', destructive: true, handler: () => void transitionTask(row, 'cancel') },
+  { label: '添加跟进记录', icon: Plus, visible: Boolean(row.customer?.id), handler: () => openFollowUpDialog(row) },
+]
+
+function actionRow(row: TrackingRow): Record<string, unknown> {
+  return row as unknown as Record<string, unknown>
+}
+
+function openFollowUpDialog(task: FollowUpTaskItem): void {
+  selectedTask.value = task
+  followUpDialogOpen.value = true
+}
+
+function statusLabel(status: string): string {
+  if (status === 'COMPLETED') return '已完成'
+  if (status === 'CANCELLED') return '已关闭'
+  return '待处理'
+}
+
+function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+  if (status === 'COMPLETED') return 'default'
+  if (status === 'CANCELLED') return 'secondary'
+  return 'outline'
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (value === null || value === undefined || value.trim().length === 0) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function applyFilters(items: TrackingRow[], filters: ListFilterCondition[]): TrackingRow[] {
+  return filters.reduce((current, filter) => {
+    return current.filter((item) => {
+      const value = String(item[filter.field as keyof TrackingRow] ?? '')
+      const target = Array.isArray(filter.value) ? filter.value.map(String) : String(filter.value ?? '')
+      if (filter.op === 'eq') return Array.isArray(target) ? target.includes(value) : value === target
+      if (filter.op === 'neq') return value !== target
+      if (filter.op === 'is_empty') return value.trim() === ''
+      if (filter.op === 'is_not_empty') return value.trim() !== ''
+      return value.toLowerCase().includes(String(target).toLowerCase())
+    })
+  }, items)
+}
+
+function applySorts(items: TrackingRow[], sorts: ListSortCondition[]): TrackingRow[] {
+  if (sorts.length === 0) return items
+  const [sort] = sorts
+  if (!sort) return items
+  return [...items].sort((a, b) => {
+    const left = String(a[sort.field as keyof TrackingRow] ?? '')
+    const right = String(b[sort.field as keyof TrackingRow] ?? '')
+    const result = left.localeCompare(right)
+    return sort.direction === 'desc' ? -result : result
+  })
+}
+
+function handleFilterApply(filters: ListFilterCondition[]): void {
+  activeFilters.value = filters
+  page.value = 1
+  void customFilterViews.updateActiveCustomViewConfig()
+}
+
+function handleSortApply(sorts: ListSortCondition[]): void {
+  activeSorts.value = sorts
+  page.value = 1
+  void customFilterViews.updateActiveCustomViewConfig()
+}
+
+function handleFilterReset(): void {
+  activeFilters.value = []
+  page.value = 1
+}
+
+function handleSortReset(): void {
+  activeSorts.value = []
+  page.value = 1
+  void customFilterViews.updateActiveCustomViewConfig()
+}
+
+function handleColumnConfigSave(config: ViewPreferenceConfig): void {
+  activeColumns.value = config.columns
+  void customFilterViews.saveActiveCustomViewColumns(config.columns)
+}
+
+function handleColumnConfigReset(): void {
+  activeColumns.value = []
+  void customFilterViews.saveActiveCustomViewColumns([])
+}
+
+onMounted(() => {
+  void customFilterViews.loadCustomViews()
+  void fetchTasks()
+})
+
+useTopBarRegistration({
+  tabs: allTabs,
+  activeTab,
+  actions: () => [
+    {
+      id: 'refresh-tracking',
+      label: '刷新',
+      icon: RefreshCw,
+      type: 'default',
+      handler: (): void => {
+        void fetchTasks()
+      },
+      ariaLabel: '刷新客户追踪',
+    },
+  ],
+})
+
+watchEffect(() => {
+  if (headerStore.activeTab !== null && headerStore.activeTab !== undefined && headerStore.activeTab !== '' && headerStore.activeTab !== activeTab.value) {
+    page.value = 1
+    if (customFilterViews.applyCustomViewTab(headerStore.activeTab)) return
+    const restoredBuiltInState = customFilterViews.applyBuiltInTab(headerStore.activeTab)
+    if (!restoredBuiltInState) {
+      activeSorts.value = []
+    }
+    void fetchTasks()
+  }
+})
+</script>
+
+<template>
+  <div class="customer-tracking-page">
+    <DataTable
+      :columns="columns"
+      :data="pagedRows"
+      :loading="loading"
+      :page="page"
+      :page-size="pageSize"
+      :total="filteredRows.length"
+      height="calc(100vh - 121px)"
+      row-key="public_id"
+      row-interactive
+      empty-title="暂无客户追踪"
+      mobile-title-key="customer_name"
+      mobile-subtitle-key="tracking_content"
+      mobile-status-key="status_label"
+      :mobile-meta-keys="['tracking_time']"
+      v-model:filters="activeFilters"
+      v-model:sorts="activeSorts"
+      view-key="customer-tracking.list"
+      column-config-enabled
+      :column-preference-config="activeColumnPreferenceConfig"
+      :column-preference-mode="columnPreferenceMode"
+      filter-view-save-enabled
+      :filter-view-save-loading="customFilterViews.saving.value"
+      @update:page="page = $event"
+      @update:page-size="pageSize = $event"
+      @filter-apply="handleFilterApply"
+      @filter-reset="handleFilterReset"
+      @filter-save-view="customFilterViews.saveAsCustomView"
+      @sort-apply="handleSortApply"
+      @sort-reset="handleSortReset"
+      @column-config-current-change="activeColumns = $event.columns"
+      @column-config-save="handleColumnConfigSave"
+      @column-config-reset="handleColumnConfigReset"
+      @row-click="openDetail"
+    >
+      <template #cell-customer_name="{ row }">
+        <span class="tracking-cell-strong">{{ row.customer_name }}</span>
+      </template>
+
+      <template #cell-tracking_content="{ row }">
+        <HoverInfo side="top" align="start" content-class="tracking-content-hover-card">
+          <template #trigger>
+            <span class="tracking-content">{{ row.tracking_content }}</span>
+          </template>
+          <div class="tracking-content-hover-text">{{ row.tracking_content }}</div>
+        </HoverInfo>
+      </template>
+
+      <template #cell-status_label="{ row }">
+        <Badge :variant="statusVariant(row.status)">{{ row.status_label }}</Badge>
+      </template>
+
+      <template #cell-actions="{ row }">
+        <TableRowActions
+          :row="actionRow(row)"
+          :primary-actions="primaryActions(row)"
+          :secondary-actions="secondaryActions(row)"
+        />
+      </template>
+
+      <template #mobile-card="{ row }">
+        <div class="tracking-mobile-card-header">
+          <div class="tracking-mobile-card-title">
+            {{ row.customer_name }}
+          </div>
+          <Badge :variant="statusVariant(row.status)">{{ row.status_label }}</Badge>
+        </div>
+        <div class="tracking-mobile-card-content">
+          {{ row.tracking_content }}
+        </div>
+        <div class="tracking-mobile-card-meta">
+          <span>追踪时间：{{ row.tracking_time }}</span>
+        </div>
+      </template>
+
+      <template #mobile-actions="{ row }">
+        <TableRowActions
+          :row="actionRow(row)"
+          size="lg"
+          :primary-actions="primaryActions(row)"
+          :secondary-actions="secondaryActions(row)"
+        />
+      </template>
+    </DataTable>
+
+    <Sheet :open="selectedTaskId !== null" @update:open="(open) => { if (!open) selectedTaskId = null }">
+      <DetailSheetContent>
+        <SheetHeader class="tracking-sheet-header p-6 border-b border-wolf-border-default-v2">
+          <div class="tracking-sheet-title">
+            <FileText class="tracking-sheet-icon" aria-hidden="true" />
+            <SheetTitle class="truncate">客户追踪详情</SheetTitle>
+          </div>
+          <Button
+            v-if="selectedCustomerId"
+            size="sm"
+            @click="followUpDialogOpen = true"
+          >
+            <Plus class="tracking-button-icon" aria-hidden="true" />
+            添加跟进记录
+          </Button>
+        </SheetHeader>
+
+        <ScrollArea class="flex-1">
+          <div class="tracking-sheet-content">
+            <div v-if="detailLoading" class="tracking-sheet-muted">正在加载...</div>
+            <div v-else-if="selectedTask" class="tracking-detail">
+              <Card class="tracking-info-card">
+                <CardContent class="p-0">
+                  <div class="tracking-card-header">
+                    <h3 class="tracking-card-title">基本信息</h3>
+                  </div>
+                  <div class="tracking-card-body">
+                    <div class="tracking-attributes-grid">
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">客户</div>
+                        <div class="tracking-attribute-value">{{ selectedTask.customer?.name ?? '-' }}</div>
+                      </div>
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">负责人</div>
+                        <div class="tracking-attribute-value">{{ selectedTask.owner_info?.name ?? selectedTask.owner_id }}</div>
+                      </div>
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">状态</div>
+                        <div class="tracking-attribute-value">
+                          <Badge :variant="statusVariant(selectedTask.status)">{{ statusLabel(selectedTask.status) }}</Badge>
+                        </div>
+                      </div>
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">追踪时间</div>
+                        <div class="tracking-attribute-value">{{ formatDateTime(selectedTask.due_at) }}</div>
+                      </div>
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">完成时间</div>
+                        <div class="tracking-attribute-value">{{ formatDateTime(selectedTask.completed_at) }}</div>
+                      </div>
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">关闭时间</div>
+                        <div class="tracking-attribute-value">{{ formatDateTime(selectedTask.cancelled_at) }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card class="tracking-info-card">
+                <CardContent class="p-0">
+                  <div class="tracking-card-header">
+                    <h3 class="tracking-card-title">来源跟进</h3>
+                  </div>
+                  <div class="tracking-card-body">
+                    <p class="tracking-description">{{ selectedTask.source_activity?.summary || selectedTask.source_activity?.title || '-' }}</p>
+                    <div class="tracking-source-meta">
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">下一步</div>
+                        <div class="tracking-attribute-value">{{ selectedTask.source_activity?.next_action || '-' }}</div>
+                      </div>
+                      <div class="tracking-attribute-item">
+                        <div class="tracking-attribute-label">发生时间</div>
+                        <div class="tracking-attribute-value">{{ formatDateTime(selectedTask.source_activity?.occurred_at) }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </ScrollArea>
+
+        <SheetFooter class="tracking-sheet-footer p-4 border-t border-wolf-border-default-v2">
+          <Button variant="outline" @click="selectedTaskId = null">关闭</Button>
+          <template v-if="selectedTask?.status === 'OPEN'">
+            <Button variant="outline" @click="openDelayDialog(selectedTask)">延期</Button>
+            <Button variant="outline" @click="transitionTask(selectedTask, 'cancel')">关闭追踪</Button>
+            <Button @click="transitionTask(selectedTask, 'complete')">完成</Button>
+          </template>
+        </SheetFooter>
+      </DetailSheetContent>
+    </Sheet>
+
+    <FollowUpFormDialog
+      v-if="selectedCustomerId"
+      :customer-id="selectedCustomerId"
+      :open="followUpDialogOpen"
+      @update:open="followUpDialogOpen = $event"
+      @success="fetchTasks"
+    />
+
+    <Dialog v-model:open="delayDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>延期客户追踪</DialogTitle>
+          <DialogDescription class="sr-only">选择新的追踪时间</DialogDescription>
+        </DialogHeader>
+        <div class="tracking-delay-form">
+          <DateField
+            id="tracking-delay-date"
+            v-model="delayDate"
+            label="新的追踪时间"
+          />
+          <TextareaField
+            id="tracking-delay-reason"
+            v-model="delayReason"
+            label="延期原因"
+            :rows="3"
+            placeholder="可选"
+            control-class="resize-none"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="delayDialogOpen = false">取消</Button>
+          <Button :loading="delaySubmitting" @click="submitDelay">确认延期</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </div>
+</template>
+
+<style scoped lang="scss">
+@use '@/styles/variables-v2.scss' as *;
+
+.customer-tracking-page {
+  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
+  background: $wolf-bg-page-v2;
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-section-gap-v2;
+  min-height: 0;
+  flex: 1;
+}
+
+@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  .customer-tracking-page {
+    padding: $wolf-page-padding-mobile-v2;
+  }
+}
+
+.tracking-cell-strong {
+  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-link-v2;
+  cursor: pointer;
+
+  &:hover {
+    color: $wolf-text-link-hover-v2;
+  }
+}
+
+.tracking-content {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.tracking-content-hover-card) {
+  width: 360px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+}
+
+.tracking-content-hover-text {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.tracking-mobile-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-sm-v2;
+}
+
+.tracking-mobile-card-title {
+  min-width: 0;
+  color: $wolf-text-link-v2;
+  font-size: $wolf-font-size-body-mobile-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.tracking-mobile-card-content {
+  margin-top: $wolf-space-sm-v2;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-body-v2;
+  line-height: $wolf-line-height-body-v2;
+  overflow-wrap: anywhere;
+}
+
+.tracking-mobile-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  margin-top: $wolf-space-sm-v2;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-mobile-v2;
+}
+
+.tracking-sheet-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: $wolf-space-md-v2;
+  padding-right: 72px;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: $wolf-space-lg-v2 56px $wolf-space-lg-v2 $wolf-space-lg-v2;
+  }
+}
+
+.tracking-sheet-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+}
+
+.tracking-sheet-icon,
+.tracking-button-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.tracking-sheet-content {
+  padding: $wolf-space-xl-v2;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    padding: $wolf-space-lg-v2;
+  }
+}
+
+.tracking-sheet-muted {
+  color: $wolf-text-secondary-v2;
+}
+
+.tracking-detail {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-lg-v2;
+}
+
+.tracking-info-card {
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-surface-v2;
+  background: $wolf-bg-card-v2;
+}
+
+.tracking-card-header {
+  padding: $wolf-space-lg-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
+}
+
+.tracking-card-title {
+  margin: 0;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  color: $wolf-text-primary-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.tracking-card-body {
+  padding: $wolf-space-lg-v2;
+}
+
+.tracking-description {
+  margin: 0;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  line-height: $wolf-line-height-body-v2;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.tracking-attributes-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tracking-attribute-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: $wolf-space-xs-v2;
+}
+
+.tracking-attribute-label {
+  font-size: $wolf-font-size-caption-v2;
+  color: $wolf-text-tertiary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.tracking-attribute-value {
+  min-width: 0;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  overflow-wrap: anywhere;
+}
+
+.tracking-source-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  margin-top: $wolf-space-lg-v2;
+  padding-top: $wolf-space-lg-v2;
+  border-top: 1px solid $wolf-border-light-v2;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tracking-sheet-footer {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  gap: $wolf-space-sm-v2;
+  flex-wrap: wrap;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    :deep(button) {
+      flex: 1 1 100%;
+    }
+  }
+}
+
+.tracking-delay-form {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-md-v2;
+}
+
+</style>

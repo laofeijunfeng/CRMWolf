@@ -391,6 +391,8 @@ class FollowUpTaskTransitionExecutionService:
         }
 
     def _execution_kind(self, plan: FollowUpTaskTransitionPlan) -> str:
+        if plan.plan_source == "manual_ui":
+            return "manual_ui"
         if plan.plan_source == "confirmation_case_reply":
             return "manual_confirmation"
         return "automatic"

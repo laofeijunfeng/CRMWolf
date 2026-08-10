@@ -37,6 +37,7 @@ import {
   Columns3,
   FileText,
   Flag,
+  ListChecks,
   Receipt,
   Stamp,
   TrendingUp,
@@ -95,6 +96,12 @@ const navGroups = computed<NavMainGroup[]>(() => [
         path: '/customers',
         icon: Building2,
         active: currentPath.value.startsWith('/customers'),
+      },
+      {
+        label: '客户追踪',
+        path: '/customer-tracking',
+        icon: ListChecks,
+        active: currentPath.value.startsWith('/customer-tracking'),
       },
       {
         label: '商机管理',

@@ -9,6 +9,7 @@ from app.crud.sales_commitment import follow_up_task_crud
 from app.models.customer import Customer, CustomerMember
 from app.models.customer_activity import CustomerActivity
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
+from app.models.user import User
 from app.services.follow_up_task_query_intent import (
     extract_follow_up_task_semantic_query_text,
     normalize_follow_up_task_retrieval_mode,
@@ -95,10 +96,15 @@ class FollowUpTaskQueryService:
         )
 
         customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[task.customer_id for task in rows])
+        users_by_id = self._users_by_id(
+            db,
+            user_ids=[task.owner_id for task in rows] + [task.creator_id for task in rows],
+        )
         items = [
             self._task_payload(
                 task,
                 customers_by_id.get(task.customer_id),
+                users_by_id=users_by_id,
                 semantic_evidence=semantic_evidence_by_task_id.get(str(task.public_id)),
             )
             for task in rows
@@ -145,8 +151,16 @@ class FollowUpTaskQueryService:
                 .filter(CustomerActivity.team_id == team_id, CustomerActivity.id == task.source_activity_id)
                 .first()
             )
-        payload = self._task_payload(task, customer)
-        payload["source_activity"] = self._activity_payload(activity)
+        users_by_id = self._users_by_id(
+            db,
+            user_ids=[
+                task.owner_id,
+                task.creator_id,
+                activity.owner_id if activity is not None else None,
+            ],
+        )
+        payload = self._task_payload(task, customer, users_by_id=users_by_id)
+        payload["source_activity"] = self._activity_payload(activity, users_by_id=users_by_id)
         return payload
 
     def list_completed_work(
@@ -298,19 +312,42 @@ class FollowUpTaskQueryService:
         rows = db.query(Customer).filter(Customer.team_id == team_id, Customer.id.in_(ids)).all()
         return {customer.id: customer for customer in rows}
 
+    @staticmethod
+    def _users_by_id(db: Session, *, user_ids: list[str | None]) -> dict[str, dict[str, Any]]:
+        ids = [
+            int(user_id)
+            for user_id in dict.fromkeys(str(user_id) for user_id in user_ids if user_id)
+            if user_id.isdigit()
+        ]
+        if not ids:
+            return {}
+        rows = db.query(User).filter(User.id.in_(ids)).all()
+        return {
+            str(user.id): {
+                "id": str(user.id),
+                "name": user.name,
+                "avatar_url": user.avatar_url,
+            }
+            for user in rows
+        }
+
     def _task_payload(
         self,
         task: FollowUpTask,
         customer: Customer | None,
         *,
+        users_by_id: dict[str, dict[str, Any]] | None = None,
         semantic_evidence: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        users = users_by_id or {}
         return {
             "id": task.public_id,
             "public_id": task.public_id,
             "customer": self._customer_payload(customer),
             "owner_id": task.owner_id,
+            "owner_info": users.get(task.owner_id),
             "creator_id": task.creator_id,
+            "creator_info": users.get(task.creator_id),
             "title": task.title,
             "description": task.description,
             "status": task.status,
@@ -333,9 +370,12 @@ class FollowUpTaskQueryService:
         self,
         activity: CustomerActivity | None,
         customer: Customer | None = None,
+        *,
+        users_by_id: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         if activity is None:
             return None
+        users = users_by_id or {}
         return {
             "customer": self._customer_payload(customer),
             "activity_kind": activity.activity_kind,
@@ -345,6 +385,7 @@ class FollowUpTaskQueryService:
             "next_follow_time": activity.next_follow_time.isoformat() if activity.next_follow_time else None,
             "occurred_at": activity.occurred_at.isoformat() if activity.occurred_at else None,
             "owner_id": activity.owner_id,
+            "owner_info": users.get(activity.owner_id),
         }
 
     @staticmethod

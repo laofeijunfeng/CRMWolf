@@ -19,7 +19,7 @@ from app.core.deps import (
     require_permission,
 )
 from app.crud.approval import approval_crud
-from app.crud.invoice import invoice_application_crud, invoice_reissue_application_crud, invoice_title_crud
+from app.crud.invoice import invoice_application_crud, invoice_red_offset_crud, invoice_reissue_application_crud, invoice_title_crud
 from app.models.approval import ApprovalStatus
 from app.models.contract import Contract
 from app.models.customer import Customer
@@ -35,6 +35,7 @@ from app.schemas.invoice import (
     InvoiceReissueApplicationCreate,
     InvoiceReissueApplicationResponse,
     InvoiceReissueApplicationUpdate,
+    InvoiceRedOffsetResponse,
     InvoiceTitleCreate,
     InvoiceTitleListResponse,
     InvoiceTitleResponse,
@@ -319,7 +320,7 @@ def list_invoice_applications(
     status_exclude: Optional[str] = Query(None, description="排除的申请状态，多个值用逗号分隔"),
     invoice_type: Optional[str] = Query(None, description="发票类型，多个值用逗号分隔"),
     invoice_type_exclude: Optional[str] = Query(None, description="排除的发票类型，多个值用逗号分隔"),
-    invoice_effective_status: Optional[str] = Query(None, description="发票有效状态，多个值用逗号分隔：ACTIVE/REISSUE_PENDING/REISSUED"),
+    invoice_effective_status: Optional[str] = Query(None, description="发票有效状态，多个值用逗号分隔：ACTIVE/REISSUE_PENDING/RED_OFFSET/REISSUED"),
     applicant_id: Optional[str] = Query(None, description="申请人ID"),
     keyword: Optional[str] = Query(None, description="关键词，支持申请编号、客户、合同、抬头、税号、发票号码"),
     created_time_start: Optional[date] = Query(None, description="创建时间起始"),
@@ -550,6 +551,26 @@ async def download_invoice_reissue_file(
     return _download_invoice_path(file_path, invoice_number or f"invoice-reissue-{reissue_id}-{file_kind}")
 
 
+@invoice_router.get(
+    "/red-offsets/{red_offset_id}/file",
+    summary="下载发票冲红文件",
+    description="下载手动冲红或重开流程生成的红字发票文件",
+)
+async def download_invoice_red_offset_file(
+    red_offset_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    red_offset = invoice_red_offset_crud.get_by_id(db, red_offset_id, team_id)
+    if not red_offset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票冲红记录不存在")
+
+    check_invoice_view_permission(red_offset.invoice_application_id, team_id, current_user, db)
+    filename_base = f"red-offset-{red_offset.red_invoice_number or red_offset_id}"
+    return _download_invoice_path(red_offset.red_invoice_file_path, filename_base)
+
+
 @invoice_router.get("/{application_id}", response_model=InvoiceApplicationResponse, summary="获取发票申请详情", description="获取指定发票申请的完整信息及关联业务数据")
 def get_invoice_application(
     application_id: int,
@@ -678,6 +699,59 @@ async def mark_invoice_issued(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+
+
+@invoice_router.post(
+    "/{application_id}/red-offset",
+    response_model=InvoiceApplicationResponse,
+    summary="冲红发票",
+    description="财务上传红字发票后，将已开票发票标记为已冲红；不进入审批流程",
+)
+async def red_offset_invoice(
+    application_id: int,
+    file: UploadFile = File(..., description="红字发票文件"),
+    red_invoice_number: Optional[str] = Form(None, description="红字发票号码"),
+    reason: Optional[str] = Form(None, description="冲红原因"),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(require_permission("invoice:mark_issued")),
+    db: Session = Depends(get_db),
+):
+    application = invoice_application_crud.get_by_id(db, application_id, team_id)
+    if not application:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票申请不存在")
+
+    try:
+        invoice_red_offset_crud.assert_can_create_manual(db, application, team_id=team_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    try:
+        red_file_path = file_storage_service.save_invoice_file(
+            team_id=team_id,
+            invoice_id=application_id,
+            filename=file.filename or "",
+            content=await file.read(),
+        )
+    except FileStorageError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    red_number = red_invoice_number.strip() if red_invoice_number and red_invoice_number.strip() else None
+    normalized_reason = reason.strip() if reason and reason.strip() else None
+
+    try:
+        invoice_red_offset_crud.create_manual(
+            db,
+            application,
+            red_invoice_file_path=red_file_path,
+            red_invoice_number=red_number,
+            reason=normalized_reason,
+            created_by=str(current_user.id),
+            team_id=team_id,
+        )
+        db.refresh(application)
+        return _populate_application_info(db, application, team_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @invoice_router.delete("/{application_id}", response_model=MessageResponse, summary="删除发票申请", description="删除指定的发票申请（审批中或审批通过后不可删除）")
@@ -835,6 +909,7 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
             reviewer_name = reviewer.name
 
     reissues = invoice_reissue_application_crud.get_by_original_invoice(db, application.id, team_id)
+    red_offsets = invoice_red_offset_crud.get_by_invoice(db, application.id, team_id)
     reissue_status = "NONE"
     completed_reissues = [
         reissue
@@ -851,12 +926,24 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
     elif any(reissue.status in {"DRAFT", "PENDING_REVIEW", "APPROVED"} for reissue in reissues):
         reissue_status = "REISSUE_PENDING"
 
+    latest_red_offset = max(
+        red_offsets,
+        key=lambda red_offset: (red_offset.red_offset_time or red_offset.last_modified_time or red_offset.created_time, red_offset.id),
+        default=None,
+    )
+
     if latest_completed_reissue is not None:
         invoice_effective_status = "REISSUED"
         current_invoice_file_kind = "reissue_new"
         current_invoice_file_path = latest_completed_reissue.new_invoice_file_path
         current_invoice_number = latest_completed_reissue.new_invoice_number
         current_reissue_id = latest_completed_reissue.id
+    elif latest_red_offset is not None:
+        invoice_effective_status = "RED_OFFSET"
+        current_invoice_file_kind = None
+        current_invoice_file_path = None
+        current_invoice_number = None
+        current_reissue_id = None
     else:
         invoice_effective_status = "REISSUE_PENDING" if reissue_status == "REISSUE_PENDING" else "ACTIVE"
         current_invoice_file_kind = "original" if application.invoice_file_path else None
@@ -909,7 +996,31 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
         current_invoice_file_path=current_invoice_file_path,
         current_invoice_number=current_invoice_number,
         current_reissue_id=current_reissue_id,
+        red_offsets=[_populate_red_offset_info(db, red_offset) for red_offset in red_offsets],
         reissue_applications=[_populate_reissue_application_info(db, reissue) for reissue in reissues],
+    )
+
+
+def _populate_red_offset_info(db: Session, red_offset) -> InvoiceRedOffsetResponse:
+    created_by_name = None
+    if red_offset.created_by and str(red_offset.created_by).isdigit():
+        creator = db.query(User).filter(User.id == int(red_offset.created_by)).first()
+        if creator:
+            created_by_name = creator.name
+
+    return InvoiceRedOffsetResponse(
+        id=red_offset.id,
+        invoice_application_id=red_offset.invoice_application_id,
+        source_type=red_offset.source_type,
+        reissue_application_id=red_offset.reissue_application_id,
+        red_invoice_file_path=red_offset.red_invoice_file_path,
+        red_invoice_number=red_offset.red_invoice_number,
+        reason=red_offset.reason,
+        created_by=red_offset.created_by,
+        created_by_name=created_by_name,
+        red_offset_time=red_offset.red_offset_time,
+        created_time=red_offset.created_time,
+        last_modified_time=red_offset.last_modified_time,
     )
 
 

@@ -58,6 +58,8 @@ from app.models.im_bot import (
 from app.models.invoice import (
     InvoiceApplication,
     InvoiceApplicationStatus,
+    InvoiceRedOffset,
+    InvoiceRedOffsetSourceType,
     InvoiceReissueApplication,
     InvoiceReissueApplicationStatus,
     InvoiceTitle,
@@ -192,6 +194,8 @@ __all__ = [
     "IMInboundEventStatus",
     "InvoiceApplication",
     "InvoiceApplicationStatus",
+    "InvoiceRedOffset",
+    "InvoiceRedOffsetSourceType",
     "InvoiceReissueApplication",
     "InvoiceReissueApplicationStatus",
     "InvoiceTitle",

@@ -64,7 +64,7 @@ export interface InvoiceApplicationUpdate {
 export type InvoiceType = 'VAT_SPECIAL' | 'VAT_NORMAL'
 export type InvoiceReissueApplicationStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'COMPLETED'
 export type InvoiceReissueStatus = 'NONE' | 'REISSUE_PENDING' | 'REISSUED'
-export type InvoiceEffectiveStatus = 'ACTIVE' | 'REISSUE_PENDING' | 'REISSUED'
+export type InvoiceEffectiveStatus = 'ACTIVE' | 'REISSUE_PENDING' | 'RED_OFFSET' | 'REISSUED'
 export type CurrentInvoiceFileKind = 'original' | 'reissue_new'
 
 export interface InvoiceReissueApplicationCreate {
@@ -122,6 +122,21 @@ export interface InvoiceReissueApplicationResponse {
   last_modified_time: string
 }
 
+export interface InvoiceRedOffsetResponse {
+  id: number
+  invoice_application_id: number
+  source_type: 'MANUAL' | 'REISSUE' | string
+  reissue_application_id: number | null
+  red_invoice_file_path: string
+  red_invoice_number: string | null
+  reason: string | null
+  created_by: string
+  created_by_name: string | null
+  red_offset_time: string
+  created_time: string
+  last_modified_time: string
+}
+
 export interface InvoiceApplicationResponse {
   id: number
   application_number: string
@@ -165,6 +180,7 @@ export interface InvoiceApplicationResponse {
   current_invoice_file_path?: string | null
   current_invoice_number?: string | null
   current_reissue_id?: number | null
+  red_offsets: InvoiceRedOffsetResponse[]
   reissue_applications: InvoiceReissueApplicationResponse[]
 }
 
@@ -283,6 +299,30 @@ const invoiceApi = {
         headers: { 'Content-Type': 'multipart/form-data' }
       }
     ).then((response) => InvoiceReissueApplicationResponseSchema.parse(response))
+  },
+
+  redOffsetInvoice: (applicationId: number, data: {
+    file: File
+    red_invoice_number?: string
+    reason?: string
+  }): Promise<InvoiceApplicationResponse> => {
+    const formData = new FormData()
+    formData.append('file', data.file)
+    const redInvoiceNumber = data.red_invoice_number?.trim()
+    const reason = data.reason?.trim()
+    if (redInvoiceNumber !== undefined && redInvoiceNumber.length > 0) {
+      formData.append('red_invoice_number', redInvoiceNumber)
+    }
+    if (reason !== undefined && reason.length > 0) {
+      formData.append('reason', reason)
+    }
+    return request.post<InvoiceApplicationResponse>(
+      `/v1/invoice-applications/${applicationId}/red-offset`,
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      }
+    ).then((response) => InvoiceApplicationResponseSchema.parse(response))
   },
 
   deleteInvoiceApplication: async (applicationId: number): Promise<{ message: string }> => {

@@ -21,6 +21,9 @@ const getInvoiceFilePath = (invoiceId: number): string =>
 const getInvoiceReissueFilePath = (reissueId: number, fileKind: 'red' | 'new'): string =>
   `/v1/invoice-applications/reissues/${reissueId}/${fileKind}-file`
 
+const getInvoiceRedOffsetFilePath = (redOffsetId: number): string =>
+  `/v1/invoice-applications/red-offsets/${redOffsetId}/file`
+
 const getContractFilePath = (contractId: number): string =>
   `/v1/contracts/${contractId}/file`
 
@@ -67,6 +70,26 @@ export const downloadInvoiceReissueFile = async (
   const link = document.createElement('a')
   link.href = url
   link.download = resolveDownloadFileName(fileName, `invoice-reissue-${reissueId}-${fileKind}`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+export const downloadInvoiceRedOffsetFile = async (
+  redOffsetId: number,
+  fileName?: string
+): Promise<void> => {
+  const response = BlobPartResponseSchema.parse(
+    await request.get<unknown>(getInvoiceRedOffsetFilePath(redOffsetId), {
+      responseType: 'blob'
+    })
+  )
+  const blob = toBlob(response)
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = resolveDownloadFileName(fileName, `invoice-red-offset-${redOffsetId}`)
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
