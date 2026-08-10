@@ -57,8 +57,15 @@ class AgentApplicationService:
         turn_input: Optional[AgentTurnInput] = None,
     ) -> AsyncGenerator[JSONDict, None]:
         db = SessionLocal()
+        close_db_in_finally = True
         session = None
         user_message = None
+        runtime_task: asyncio.Task[AgentApplicationRuntimeResult] | None = None
+        runtime_event_queue: asyncio.Queue[JSONDict] | None = None
+        streamed_event_count = 0
+        streamed_final_content: str | None = None
+        streamed_final_content_format: str | None = None
+        assistant_message_persisted = False
         trace_events: list[JSONDict] = []
         try:
             agent_turn_input = turn_input or AgentTurnInput.text(content)
@@ -144,10 +151,7 @@ class AgentApplicationService:
                 return
 
             assistant_content = None
-            runtime_event_queue: asyncio.Queue[JSONDict] = asyncio.Queue()
-            streamed_event_count = 0
-            streamed_final_content: str | None = None
-            streamed_final_content_format: str | None = None
+            runtime_event_queue = asyncio.Queue()
 
             def emit(event: JSONDict) -> JSONDict:
                 event = interactions._with_interaction(event, db=db, team_id=team_id)
@@ -200,28 +204,25 @@ class AgentApplicationService:
                 except asyncio.TimeoutError:
                     continue
                 yield emit(runtime_event)
-            runtime_result = await runtime_task
+            runtime_result = await self._runtime_result_or_checkpoint_fallback(
+                db=db,
+                session=session,
+                runtime_task=runtime_task,
+                turn_input=agent_turn_input,
+                content=content,
+                team_id=team_id,
+                user_id=user_id,
+                authorization=authorization,
+            )
             while not runtime_event_queue.empty():
                 yield emit(runtime_event_queue.get_nowait())
-            runtime_state = runtime_result.state
-            for runtime_event in runtime_state.get("events", []):
-                interactions._append_trace_event(
-                    trace_events,
-                    interactions._with_interaction(runtime_event, db=db, team_id=team_id),
-                )
-
-            if runtime_result.checkpoint_unavailable:
-                runtime_result = await agent_checkpoint_fallback_runtime.run(
-                    db=db,
-                    session=session,
-                    task=None,
-                    turn_input=agent_turn_input,
-                    content=content,
-                    team_id=team_id,
-                    user_id=user_id,
-                    authorization=authorization,
-                )
-                runtime_state = runtime_result.state
+            runtime_state = self._collect_runtime_trace_events(
+                db=db,
+                team_id=team_id,
+                runtime_result=runtime_result,
+                runtime_event_queue=runtime_event_queue,
+                trace_events=trace_events,
+            )
 
             if streamed_event_count == 0:
                 for output_event in runtime_result.turn_output.events:
@@ -244,22 +245,18 @@ class AgentApplicationService:
                 assistant_content = agent_copy.generic_completed()
                 assistant_content_format = "text"
 
-            assistant_message = agent_message_crud.create(
+            assistant_message = self._persist_runtime_success_message(
                 db,
-                AgentMessageCreate(
-                    team_id=team_id,
-                    user_id=user_id,
-                    session_id=session.id,
-                    role=AgentMessageRole.ASSISTANT,
-                    event_type="assistant_message",
-                    content=assistant_content,
-                    payload_json={
-                        "source": "langgraph",
-                        "trace_events": trace_events,
-                        "content_format": assistant_content_format,
-                    },
-                ),
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session.id,
+                user_message_id=user_message.id,
+                content=assistant_content,
+                content_format=assistant_content_format,
+                trace_events=trace_events,
+                source="langgraph",
             )
+            assistant_message_persisted = True
             yield {
                 "event": "message",
                 "role": AgentMessageRole.ASSISTANT,
@@ -268,6 +265,34 @@ class AgentApplicationService:
                 "content_format": assistant_content_format,
             }
             yield {"event": "done", "session_id": session.id}
+        except (asyncio.CancelledError, GeneratorExit):
+            if (
+                runtime_task is not None
+                and runtime_event_queue is not None
+                and session is not None
+                and user_message is not None
+                and not assistant_message_persisted
+            ):
+                close_db_in_finally = False
+                asyncio.create_task(
+                    self._finalize_cancelled_stream_turn(
+                        db=db,
+                        runtime_task=runtime_task,
+                        runtime_event_queue=runtime_event_queue,
+                        session=session,
+                        turn_input=agent_turn_input,
+                        content=content,
+                        team_id=team_id,
+                        user_id=user_id,
+                        user_message_id=user_message.id,
+                        authorization=authorization,
+                        trace_events=trace_events,
+                        streamed_event_count=streamed_event_count,
+                        streamed_final_content=streamed_final_content,
+                        streamed_final_content_format=streamed_final_content_format,
+                    )
+                )
+            raise
         except HTTPException as exc:
             yield {"event": "error", "message": exc.detail, "status_code": exc.status_code}
         except Exception as exc:
@@ -290,6 +315,200 @@ class AgentApplicationService:
                     "content_format": "text",
                 }
             yield {"event": "error", "message": error_content}
+        finally:
+            if close_db_in_finally:
+                db.close()
+
+    async def _runtime_result_or_checkpoint_fallback(
+        self,
+        *,
+        db: Session,
+        session: object,
+        runtime_task: asyncio.Task[AgentApplicationRuntimeResult],
+        turn_input: AgentTurnInput,
+        content: str,
+        team_id: int,
+        user_id: int,
+        authorization: str,
+    ) -> AgentApplicationRuntimeResult:
+        runtime_result = await runtime_task
+        if not runtime_result.checkpoint_unavailable:
+            return runtime_result
+        return await agent_checkpoint_fallback_runtime.run(
+            db=db,
+            session=session,
+            task=None,
+            turn_input=turn_input,
+            content=content,
+            team_id=team_id,
+            user_id=user_id,
+            authorization=authorization,
+        )
+
+    def _collect_runtime_trace_events(
+        self,
+        *,
+        db: Session,
+        team_id: int,
+        runtime_result: AgentApplicationRuntimeResult,
+        runtime_event_queue: asyncio.Queue[JSONDict],
+        trace_events: list[JSONDict],
+    ) -> JSONDict:
+        while not runtime_event_queue.empty():
+            runtime_event = runtime_event_queue.get_nowait()
+            interactions._append_trace_event(
+                trace_events,
+                interactions._with_interaction(runtime_event, db=db, team_id=team_id),
+            )
+        runtime_state = runtime_result.state
+        for runtime_event in runtime_state.get("events", []):
+            interactions._append_trace_event(
+                trace_events,
+                interactions._with_interaction(runtime_event, db=db, team_id=team_id),
+            )
+        return runtime_state
+
+    def _persist_runtime_success_message(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        user_message_id: int,
+        content: str,
+        content_format: str,
+        trace_events: list[JSONDict],
+        source: str,
+    ) -> AgentMessage:
+        existing = self._find_persisted_assistant_for_user_message(
+            db,
+            team_id=team_id,
+            user_id=user_id,
+            session_id=session_id,
+            user_message_id=user_message_id,
+        )
+        if existing is not None:
+            return existing
+        return agent_message_crud.create(
+            db,
+            AgentMessageCreate(
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session_id,
+                role=AgentMessageRole.ASSISTANT,
+                event_type="assistant_message",
+                content=content,
+                payload_json={
+                    "source": source,
+                    "for_user_message_id": user_message_id,
+                    "trace_events": trace_events,
+                    "content_format": content_format,
+                },
+            ),
+        )
+
+    def _find_persisted_assistant_for_user_message(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        session_id: int,
+        user_message_id: int,
+    ) -> AgentMessage | None:
+        messages, _ = agent_message_crud.list_by_session(
+            db,
+            session_id=session_id,
+            team_id=team_id,
+            user_id=user_id,
+            limit=20,
+        )
+        for message in reversed(messages):
+            if message.role != AgentMessageRole.ASSISTANT:
+                continue
+            payload = message.payload_json if isinstance(message.payload_json, dict) else {}
+            if payload.get("for_user_message_id") == user_message_id:
+                return message
+        return None
+
+    async def _finalize_cancelled_stream_turn(
+        self,
+        *,
+        db: Session,
+        runtime_task: asyncio.Task[AgentApplicationRuntimeResult],
+        runtime_event_queue: asyncio.Queue[JSONDict],
+        session: object,
+        turn_input: AgentTurnInput,
+        content: str,
+        team_id: int,
+        user_id: int,
+        user_message_id: int,
+        authorization: str,
+        trace_events: list[JSONDict],
+        streamed_event_count: int,
+        streamed_final_content: str | None,
+        streamed_final_content_format: str | None,
+    ) -> None:
+        try:
+            runtime_result = await self._runtime_result_or_checkpoint_fallback(
+                db=db,
+                session=session,
+                runtime_task=runtime_task,
+                turn_input=turn_input,
+                content=content,
+                team_id=team_id,
+                user_id=user_id,
+                authorization=authorization,
+            )
+            runtime_state = self._collect_runtime_trace_events(
+                db=db,
+                team_id=team_id,
+                runtime_result=runtime_result,
+                runtime_event_queue=runtime_event_queue,
+                trace_events=trace_events,
+            )
+            if streamed_event_count == 0:
+                for output_event in runtime_result.turn_output.events:
+                    interactions._append_trace_event(
+                        trace_events,
+                        interactions._with_interaction(output_event, db=db, team_id=team_id),
+                    )
+
+            assistant_value = (
+                streamed_final_content
+                or runtime_result.turn_output.assistant_content
+                or runtime_state.get("assistant_content")
+            )
+            assistant_content = assistant_value if isinstance(assistant_value, str) else None
+            assistant_content_format = (
+                streamed_final_content_format
+                or _content_format_from_events(runtime_result.turn_output.events)
+                or _content_format_from_events(runtime_state.get("events", []))
+                or "text"
+            )
+            if not assistant_content:
+                assistant_content = agent_copy.generic_completed()
+                assistant_content_format = "text"
+
+            self._persist_runtime_success_message(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                session_id=session.id,
+                user_message_id=user_message_id,
+                content=assistant_content,
+                content_format=assistant_content_format,
+                trace_events=trace_events,
+                source="langgraph_stream_cancelled_finalizer",
+            )
+        except Exception:
+            logger.exception(
+                "Agent stream cancellation finalizer failed: team_id=%s session_id=%s user_message_id=%s",
+                team_id,
+                getattr(session, "id", None),
+                user_message_id,
+            )
         finally:
             db.close()
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import calendar
+import re
 from datetime import date, datetime, time, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -12,6 +13,38 @@ from app.services.agent.schemas import AgentTemporalExpression
 DEFAULT_AGENT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_FOLLOW_UP_HOUR = 9
 DEFAULT_FOLLOW_UP_MINUTE = 0
+
+_WEEKDAY_BY_TEXT = {
+    "一": 1,
+    "1": 1,
+    "二": 2,
+    "2": 2,
+    "三": 3,
+    "3": 3,
+    "四": 4,
+    "4": 4,
+    "五": 5,
+    "5": 5,
+    "六": 6,
+    "6": 6,
+    "日": 7,
+    "天": 7,
+    "7": 7,
+}
+_CHINESE_NUMBERS = {
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
 
 
 class AgentTemporalResolver:
@@ -47,6 +80,15 @@ class AgentTemporalResolver:
         )
         return datetime.combine(resolved_date, resolved_time).isoformat()
 
+    def resolve_follow_up_time_text(
+        self,
+        raw_text: Optional[str],
+        *,
+        base_datetime: Optional[datetime] = None,
+    ) -> Optional[str]:
+        expression = self.expression_from_text(raw_text)
+        return self.resolve_follow_up_time(expression, base_datetime=base_datetime)
+
     def resolve_date(
         self,
         expression: Optional[AgentTemporalExpression],
@@ -63,6 +105,78 @@ class AgentTemporalResolver:
         if resolved_date and self._looks_suspicious_for_raw_text(expression, base.date(), resolved_date):
             return None
         return resolved_date.isoformat() if resolved_date else None
+
+    def expression_from_text(self, raw_text: Optional[str]) -> Optional[AgentTemporalExpression]:
+        text = _normalize_temporal_text(raw_text)
+        if not text:
+            return None
+
+        if text in {"今天", "今日"}:
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_DAY",
+                direction="current",
+                amount=0,
+                unit="day",
+                confidence=0.95,
+            )
+        if text == "明天":
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_DAY",
+                direction="future",
+                amount=1,
+                unit="day",
+                confidence=0.95,
+            )
+        if text == "后天":
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_DAY",
+                direction="future",
+                amount=2,
+                unit="day",
+                confidence=0.95,
+            )
+        if text == "大后天":
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_DAY",
+                direction="future",
+                amount=3,
+                unit="day",
+                confidence=0.95,
+            )
+
+        weekday_expression = self._weekday_expression_from_text(raw_text, text)
+        if weekday_expression is not None:
+            return weekday_expression
+
+        relative_expression = self._relative_expression_from_text(raw_text, text)
+        if relative_expression is not None:
+            return relative_expression
+
+        month_day_expression = self._month_day_expression_from_text(raw_text, text)
+        if month_day_expression is not None:
+            return month_day_expression
+
+        if text in {"月底", "本月底", "这个月底", "本月末", "这个月末"}:
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="MONTH_END",
+                direction="current",
+                confidence=0.9,
+            )
+        if text in {"下月底", "下月末"}:
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_MONTH_END",
+                direction="future",
+                amount=1,
+                unit="month",
+                confidence=0.9,
+            )
+        return None
 
     def _resolve_date(self, expression: AgentTemporalExpression, base_date: date) -> Optional[date]:
         if not self._is_kind_unit_consistent(expression):
@@ -161,8 +275,9 @@ class AgentTemporalResolver:
 
         if expression.kind == "RELATIVE_WEEKDAY" and expression.weekday:
             if expression.direction == "next":
+                week_offset = expression.amount if expression.amount is not None else 1
                 monday = base_date - timedelta(days=base_date.isoweekday() - 1)
-                return monday + timedelta(days=7 + expression.weekday - 1)
+                return monday + timedelta(days=week_offset * 7 + expression.weekday - 1)
             if expression.direction in {"current", "future", None}:
                 delta = expression.weekday - base_date.isoweekday()
                 if delta < 0 or expression.direction == "future" and delta == 0:
@@ -170,6 +285,87 @@ class AgentTemporalResolver:
                 return base_date + timedelta(days=delta)
 
         return None
+
+    def _weekday_expression_from_text(
+        self,
+        raw_text: Optional[str],
+        text: str,
+    ) -> Optional[AgentTemporalExpression]:
+        match = re.fullmatch(r"(?:(本|这|下|下下)?(?:周|星期|礼拜))([一二三四五六日天1-7])", text)
+        if not match:
+            return None
+        prefix, weekday_text = match.groups()
+        weekday = _WEEKDAY_BY_TEXT.get(weekday_text)
+        if weekday is None:
+            return None
+        direction = "next" if prefix in {"下", "下下"} else "current"
+        if prefix == "下下":
+            return AgentTemporalExpression(
+                raw_text=raw_text,
+                kind="RELATIVE_WEEKDAY",
+                direction="next",
+                amount=2,
+                unit="week",
+                weekday=weekday,
+                confidence=0.9,
+            )
+        return AgentTemporalExpression(
+            raw_text=raw_text,
+            kind="RELATIVE_WEEKDAY",
+            direction=direction,
+            weekday=weekday,
+            confidence=0.95,
+        )
+
+    def _relative_expression_from_text(
+        self,
+        raw_text: Optional[str],
+        text: str,
+    ) -> Optional[AgentTemporalExpression]:
+        match = re.fullmatch(r"([0-9一二两三四五六七八九十]+)(天|日|周|星期|礼拜|个月|月|年)(?:后|以后|之后)", text)
+        if not match:
+            return None
+        amount = _parse_small_positive_int(match.group(1))
+        if amount is None:
+            return None
+        unit_text = match.group(2)
+        kind_by_unit = {
+            "天": ("RELATIVE_DAY", "day"),
+            "日": ("RELATIVE_DAY", "day"),
+            "周": ("RELATIVE_WEEK", "week"),
+            "星期": ("RELATIVE_WEEK", "week"),
+            "礼拜": ("RELATIVE_WEEK", "week"),
+            "个月": ("RELATIVE_MONTH", "month"),
+            "月": ("RELATIVE_MONTH", "month"),
+            "年": ("RELATIVE_YEAR", "year"),
+        }
+        kind, unit = kind_by_unit[unit_text]
+        return AgentTemporalExpression(
+            raw_text=raw_text,
+            kind=kind,
+            direction="future",
+            amount=amount,
+            unit=unit,
+            confidence=0.95,
+        )
+
+    def _month_day_expression_from_text(
+        self,
+        raw_text: Optional[str],
+        text: str,
+    ) -> Optional[AgentTemporalExpression]:
+        match = re.fullmatch(r"(?:(20[0-9]{2})年)?([0-9]{1,2})月([0-9]{1,2})(?:日|号)?", text)
+        if not match:
+            return None
+        year_text, month_text, day_text = match.groups()
+        return AgentTemporalExpression(
+            raw_text=raw_text,
+            kind="MONTH_DAY",
+            year=int(year_text) if year_text else None,
+            month=int(month_text),
+            day=int(day_text),
+            confidence=0.95,
+        )
 
     def _is_kind_unit_consistent(self, expression: AgentTemporalExpression) -> bool:
         expected_units = {
@@ -197,6 +393,8 @@ class AgentTemporalResolver:
     ) -> bool:
         if not expression.kind.startswith("RELATIVE_"):
             return False
+        if expression.kind == "RELATIVE_WEEKDAY":
+            return False
         raw_text = expression.raw_text or ""
         if any(marker in raw_text for marker in ("季度", "年")):
             return 0 < abs((resolved_date - base_date).days) < 28
@@ -205,6 +403,32 @@ class AgentTemporalResolver:
         if "周" in raw_text and (expression.amount or 1) >= 1:
             return 0 < abs((resolved_date - base_date).days) < 5
         return False
+
+
+def _normalize_temporal_text(raw_text: Optional[str]) -> str:
+    if not isinstance(raw_text, str):
+        return ""
+    return re.sub(r"\s+", "", raw_text.strip())
+
+
+def _parse_small_positive_int(value: str) -> Optional[int]:
+    if value.isdigit():
+        parsed = int(value)
+        return parsed if parsed >= 0 else None
+    if value in _CHINESE_NUMBERS:
+        return _CHINESE_NUMBERS[value]
+    if value.startswith("十") and len(value) == 2:
+        suffix = _CHINESE_NUMBERS.get(value[1])
+        return 10 + suffix if suffix is not None else None
+    if value.endswith("十") and len(value) == 2:
+        prefix = _CHINESE_NUMBERS.get(value[0])
+        return prefix * 10 if prefix is not None else None
+    if "十" in value and len(value) == 3:
+        prefix = _CHINESE_NUMBERS.get(value[0])
+        suffix = _CHINESE_NUMBERS.get(value[2])
+        if prefix is not None and suffix is not None:
+            return prefix * 10 + suffix
+    return None
 
 
 agent_temporal_resolver = AgentTemporalResolver()

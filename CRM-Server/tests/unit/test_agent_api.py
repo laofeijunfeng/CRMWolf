@@ -394,6 +394,70 @@ async def test_agent_application_uses_streamed_final_as_assistant_content(monkey
         engine.dispose()
 
 
+async def test_agent_application_persists_assistant_when_stream_is_closed_before_done(monkeypatch):
+    class FakeRootRuntime:
+        def __init__(self):
+            self.release = asyncio.Event()
+
+        async def run_turn(self, *, context, **kwargs):
+            if context.event_sink:
+                await context.event_sink({
+                    "event": "final",
+                    "content": "合同跟进记录已创建，周四继续跟进合同签订流程。",
+                    "content_format": "markdown",
+                })
+            await self.release.wait()
+            return {
+                "application_action": "run_new_flow",
+                "assistant_content": "合同跟进记录已创建，周四继续跟进合同签订流程。",
+            }
+
+    client, engine = _build_client(monkeypatch)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(agent_api.agent_application_module, "SessionLocal", lambda: Session())
+    fake_runtime = FakeRootRuntime()
+    monkeypatch.setattr(agent_api.agent_application_module, "agent_root_runtime", fake_runtime)
+    try:
+        session = client.post("/v1/agent/sessions", json={"title": "断流收尾"}).json()
+        stream = agent_api.agent_application_service.stream_chat_events(
+            content="今天和地平线采购确认合同内容，周四跟进合同签订流程",
+            team_id=1,
+            user_id=2,
+            authorization="Bearer test-token",
+            session_id=session["id"],
+        )
+
+        assert (await anext(stream))["event"] == "session"
+        assert (await anext(stream))["role"] == "USER"
+        final_event = await asyncio.wait_for(anext(stream), timeout=0.2)
+        assert final_event["event"] == "final"
+
+        await stream.aclose()
+        fake_runtime.release.set()
+        await asyncio.sleep(0.05)
+
+        db = Session()
+        try:
+            persisted_assistant = (
+                db.query(AgentMessage)
+                .filter(
+                    AgentMessage.session_id == session["id"],
+                    AgentMessage.role == "ASSISTANT",
+                )
+                .order_by(AgentMessage.id.desc())
+                .first()
+            )
+            assert persisted_assistant is not None
+            assert persisted_assistant.content == "合同跟进记录已创建，周四继续跟进合同签订流程。"
+            assert persisted_assistant.payload_json["source"] == "langgraph_stream_cancelled_finalizer"
+            assert persisted_assistant.payload_json["for_user_message_id"] > 0
+            assert persisted_assistant.payload_json["content_format"] == "markdown"
+        finally:
+            db.close()
+    finally:
+        engine.dispose()
+
+
 def test_agent_stream_and_im_gateway_do_not_prompt_unrelated_pending_confirmation_cases(monkeypatch):
     class FakeRootRuntime:
         async def run_turn(self, *, content, context, **kwargs):

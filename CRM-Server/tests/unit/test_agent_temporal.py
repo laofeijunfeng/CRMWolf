@@ -160,6 +160,28 @@ def test_agent_temporal_resolver_resolves_month_day_without_year():
     assert result == "2026-09-30"
 
 
+def test_agent_temporal_resolver_resolves_follow_up_time_text_weekday():
+    resolver = AgentTemporalResolver()
+
+    result = resolver.resolve_follow_up_time_text(
+        "周四",
+        base_datetime=datetime(2026, 8, 11, 0, 17, 47),
+    )
+
+    assert result == "2026-08-13T09:00:00"
+
+
+def test_agent_temporal_resolver_resolves_follow_up_time_text_relative_month():
+    resolver = AgentTemporalResolver()
+
+    result = resolver.resolve_follow_up_time_text(
+        "2 个月后",
+        base_datetime=datetime(2026, 8, 10, 0, 45, 25),
+    )
+
+    assert result == "2026-10-10T09:00:00"
+
+
 def test_agent_temporal_resolver_rolls_month_day_to_next_year_when_needed():
     resolver = AgentTemporalResolver()
     expression = AgentTemporalExpression(

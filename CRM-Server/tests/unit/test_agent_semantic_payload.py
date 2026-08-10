@@ -142,7 +142,7 @@ def test_parsed_from_semantic_resolves_relative_month_follow_up_time():
     assert parsed["next_follow_time_iso"] == "2026-10-10T09:00:00"
 
 
-def test_parsed_from_semantic_rejects_mismatched_relative_day_month_unit():
+def test_parsed_from_semantic_recovers_mismatched_structured_time_from_raw_text():
     semantic_result = AgentSemanticParseResult.model_validate({
         "intent": "CUSTOMER_ACTIVITY",
         "intent_confidence": 0.95,
@@ -171,4 +171,29 @@ def test_parsed_from_semantic_rejects_mismatched_relative_day_month_unit():
     )
 
     assert parsed["next_follow_time_text"] == "2 个月后"
-    assert parsed["next_follow_time_iso"] is None
+    assert parsed["next_follow_time_iso"] == "2026-10-10T09:00:00"
+
+
+def test_parsed_from_semantic_uses_time_text_fallback_when_structured_time_missing():
+    semantic_result = AgentSemanticParseResult.model_validate({
+        "intent": "CUSTOMER_ACTIVITY",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "地平线", "confidence": 0.95},
+        "follow_up": {
+            "content": "已和采购确认合同内容",
+            "method": "微信",
+            "next_action": "跟进合同签订相关流程",
+            "next_follow_time_text": "周四",
+            "next_follow_time": None,
+        },
+    })
+
+    parsed = parsed_from_semantic(
+        semantic_result,
+        "原始内容",
+        temporal_resolver=AgentTemporalResolver(),
+        base_datetime=datetime(2026, 8, 11, 0, 17, 47),
+    )
+
+    assert parsed["next_follow_time_text"] == "周四"
+    assert parsed["next_follow_time_iso"] == "2026-08-13T09:00:00"

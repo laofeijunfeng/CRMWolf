@@ -25,8 +25,10 @@ def parsed_from_semantic(
     customer_create = semantic_result.customer_create
     follow_up_task_transition = semantic_result.follow_up_task_transition
 
-    next_follow_time_iso = temporal_resolver.resolve_follow_up_time(
+    next_follow_time_iso = _resolve_follow_up_time_with_text_fallback(
+        temporal_resolver,
         semantic_result.follow_up.next_follow_time,
+        semantic_result.follow_up.next_follow_time_text,
         base_datetime=base_datetime,
     )
     payment_date_iso = (
@@ -34,12 +36,16 @@ def parsed_from_semantic(
         if hasattr(temporal_resolver, "resolve_date")
         else None
     )
-    lead_next_follow_time_iso = temporal_resolver.resolve_follow_up_time(
+    lead_next_follow_time_iso = _resolve_follow_up_time_with_text_fallback(
+        temporal_resolver,
         lead.next_follow_time,
+        lead.next_follow_time_text,
         base_datetime=base_datetime,
     )
-    customer_next_follow_time_iso = temporal_resolver.resolve_follow_up_time(
+    customer_next_follow_time_iso = _resolve_follow_up_time_with_text_fallback(
+        temporal_resolver,
         customer_create.next_follow_time,
+        customer_create.next_follow_time_text,
         base_datetime=base_datetime,
     )
     expected_closing_date_iso = (
@@ -47,8 +53,10 @@ def parsed_from_semantic(
         if hasattr(temporal_resolver, "resolve_date")
         else None
     )
-    follow_up_task_transition_due_at_iso = temporal_resolver.resolve_follow_up_time(
+    follow_up_task_transition_due_at_iso = _resolve_follow_up_time_with_text_fallback(
+        temporal_resolver,
         follow_up_task_transition.proposed_due_at,
+        follow_up_task_transition.proposed_due_at_text,
         base_datetime=base_datetime,
     )
     computed_missing_opportunity_fields = business_rules.missing_opportunity_fields({
@@ -199,3 +207,24 @@ def parsed_from_semantic(
         "next_follow_time_text": semantic_result.follow_up.next_follow_time_text,
         "next_follow_time_iso": next_follow_time_iso,
     }
+
+
+def _resolve_follow_up_time_with_text_fallback(
+    temporal_resolver: object,
+    expression: object,
+    raw_text: Optional[str],
+    *,
+    base_datetime: Optional[datetime],
+) -> Optional[str]:
+    resolved = temporal_resolver.resolve_follow_up_time(
+        expression,
+        base_datetime=base_datetime,
+    )
+    if resolved:
+        return resolved
+    if not raw_text or not hasattr(temporal_resolver, "resolve_follow_up_time_text"):
+        return None
+    return temporal_resolver.resolve_follow_up_time_text(
+        raw_text,
+        base_datetime=base_datetime,
+    )
