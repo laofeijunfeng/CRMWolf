@@ -34,11 +34,14 @@ import { formatLocalDate } from '@/utils/format'
 usePageTitle()
 
 type TrackingTabKey = 'all' | 'open' | 'completed' | 'cancelled'
+type TrackingDueTone = 'overdue' | 'today' | 'soon' | 'future' | 'closed' | 'empty'
 type TrackingRow = FollowUpTaskItem & {
   customer_name: string
   owner_name: string
   tracking_content: string
   tracking_time: string
+  tracking_time_tone: TrackingDueTone
+  tracking_time_tooltip_rows: { label: string; value: string }[]
   status_label: string
 }
 
@@ -84,7 +87,7 @@ const columns = [
       { value: '已关闭', label: '已关闭' },
     ],
   },
-  { key: 'tracking_time', title: '追踪时间', width: '170px', sortable: true, sortType: 'date' as const },
+  { key: 'tracking_time', title: '跟进时效', width: '150px', sortable: true, sortType: 'date' as const },
   { key: 'actions', title: '操作', width: '220px', align: 'center' as const, fixed: 'right' as const },
 ]
 
@@ -109,7 +112,9 @@ const rows = computed<TrackingRow[]>(() => tasks.value.map((task) => ({
     : task.description !== undefined && task.description !== null && task.description.trim().length > 0
       ? task.description
       : '-',
-  tracking_time: formatDateTime(task.due_at),
+  tracking_time: formatTrackingDueLabel(task),
+  tracking_time_tone: getTrackingDueTone(task),
+  tracking_time_tooltip_rows: getTrackingDueTooltipRows(task),
   status_label: statusLabel(task.status),
 })))
 
@@ -230,6 +235,73 @@ function formatDateTime(value: string | null | undefined): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
+function parseDate(value: string | null | undefined): Date | null {
+  if (value === null || value === undefined || value.trim().length === 0) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function diffLocalDays(date: Date, baseDate = new Date()): number {
+  const dayMs = 24 * 60 * 60 * 1000
+  return Math.round((startOfLocalDay(date).getTime() - startOfLocalDay(baseDate).getTime()) / dayMs)
+}
+
+function formatShortTime(date: Date): string {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function formatMonthDay(date: Date): string {
+  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function formatOptionalText(value: string | null | undefined): string {
+  const trimmed = value?.trim()
+  return trimmed !== undefined && trimmed.length > 0 ? trimmed : '-'
+}
+
+function formatTrackingDueLabel(task: FollowUpTaskItem): string {
+  const date = parseDate(task.due_at)
+  if (date === null) return '-'
+  if (task.status !== 'OPEN') return formatDateTime(task.due_at)
+
+  const overdueDays = task.overdue_days ?? 0
+  if (overdueDays > 0) return `已逾期 ${overdueDays} 天`
+
+  const days = diffLocalDays(date)
+  if (days === 0) return `今天 ${formatShortTime(date)}`
+  if (days === 1) return `明天 ${formatShortTime(date)}`
+  if (days > 1 && days <= 7) return `${days} 天后`
+  if (days < 0) return '今天'
+  return `${formatMonthDay(date)} ${formatShortTime(date)}`
+}
+
+function getTrackingDueTone(task: FollowUpTaskItem): TrackingDueTone {
+  const date = parseDate(task.due_at)
+  if (date === null) return 'empty'
+  if (task.status !== 'OPEN') return 'closed'
+  if ((task.overdue_days ?? 0) > 0) return 'overdue'
+  const days = diffLocalDays(date)
+  if (days <= 0) return 'today'
+  if (days <= 3) return 'soon'
+  return 'future'
+}
+
+function getTrackingDueTooltipRows(task: FollowUpTaskItem): { label: string; value: string }[] {
+  const rows = [
+    { label: '追踪时间', value: formatDateTime(task.due_at) },
+    { label: '原始表达', value: formatOptionalText(task.due_at_text) },
+    { label: '时区', value: formatOptionalText(task.due_at_timezone) },
+  ]
+  if (task.status === 'OPEN' && (task.overdue_days ?? 0) > 0) {
+    rows.splice(1, 0, { label: '逾期', value: `${task.overdue_days} 天` })
+  }
+  return rows
+}
+
 function applyFilters(items: TrackingRow[], filters: ListFilterCondition[]): TrackingRow[] {
   return filters.reduce((current, filter) => {
     return current.filter((item) => {
@@ -249,9 +321,9 @@ function applySorts(items: TrackingRow[], sorts: ListSortCondition[]): TrackingR
   const [sort] = sorts
   if (!sort) return items
   return [...items].sort((a, b) => {
-    const left = String(a[sort.field as keyof TrackingRow] ?? '')
-    const right = String(b[sort.field as keyof TrackingRow] ?? '')
-    const result = left.localeCompare(right)
+    const result = sort.field === 'tracking_time'
+      ? (parseDate(a.due_at)?.getTime() ?? 0) - (parseDate(b.due_at)?.getTime() ?? 0)
+      : String(a[sort.field as keyof TrackingRow] ?? '').localeCompare(String(b[sort.field as keyof TrackingRow] ?? ''))
     return sort.direction === 'desc' ? -result : result
   })
 }
@@ -378,6 +450,26 @@ watchEffect(() => {
         <Badge :variant="statusVariant(row.status)">{{ row.status_label }}</Badge>
       </template>
 
+      <template #cell-tracking_time="{ row }">
+        <HoverInfo side="top" align="start" content-class="tracking-time-hover-card">
+          <template #trigger>
+            <span class="tracking-time-badge" :class="`tracking-time-badge--${row.tracking_time_tone}`">
+              {{ row.tracking_time }}
+            </span>
+          </template>
+          <div class="tracking-time-hover-content">
+            <div
+              v-for="item in row.tracking_time_tooltip_rows"
+              :key="item.label"
+              class="tracking-time-hover-row"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+        </HoverInfo>
+      </template>
+
       <template #cell-actions="{ row }">
         <TableRowActions
           :row="actionRow(row)"
@@ -397,7 +489,9 @@ watchEffect(() => {
           {{ row.tracking_content }}
         </div>
         <div class="tracking-mobile-card-meta">
-          <span>追踪时间：{{ row.tracking_time }}</span>
+          <span class="tracking-time-badge" :class="`tracking-time-badge--${row.tracking_time_tone}`">
+            {{ row.tracking_time }}
+          </span>
         </div>
       </template>
 
@@ -592,6 +686,75 @@ watchEffect(() => {
   line-height: 18px;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.tracking-time-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 $wolf-space-sm-v2;
+  border: 1px solid $wolf-border-light-v2;
+  border-radius: $wolf-radius-v2;
+  background: $wolf-bg-muted-v2;
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tracking-time-badge--overdue {
+  border-color: $wolf-danger-bg-v2;
+  background: $wolf-danger-bg-v2;
+  color: $wolf-danger-text-v2;
+}
+
+.tracking-time-badge--today {
+  border-color: $wolf-warning-bg-v2;
+  background: $wolf-warning-bg-v2;
+  color: $wolf-warning-text-v2;
+}
+
+.tracking-time-badge--soon {
+  border-color: $wolf-primary-light-v2;
+  background: $wolf-primary-light-v2;
+  color: $wolf-primary-v2;
+}
+
+.tracking-time-badge--future,
+.tracking-time-badge--closed,
+.tracking-time-badge--empty {
+  border-color: $wolf-border-light-v2;
+  background: $wolf-bg-muted-v2;
+  color: $wolf-text-tertiary-v2;
+}
+
+:global(.tracking-time-hover-card) {
+  width: 280px;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+}
+
+.tracking-time-hover-content {
+  display: grid;
+  gap: $wolf-space-xs-v2;
+}
+
+.tracking-time-hover-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: $wolf-space-sm-v2;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: 18px;
+}
+
+.tracking-time-hover-row strong {
+  color: $wolf-text-secondary-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  overflow-wrap: anywhere;
 }
 
 .tracking-mobile-card-header {
