@@ -88,6 +88,7 @@ def _tool_name_for_action(action: Optional[str]) -> Optional[str]:
         "create_customer_member": "create_customer_member",
         "create_opportunity": "create_opportunity",
         "move_opportunity_stage": "move_opportunity_stage",
+        "transition_follow_up_task": "transition_follow_up_task",
         "create_payment_plan": "create_payment_plan",
         "create_payment_record": "create_payment_record",
     }.get(action or "")
@@ -148,6 +149,14 @@ def _tool_payload_for_action(action: Optional[str], payload: dict, customer: dic
         return {
             "opportunity_id": payload["opportunity_id"],
             "stage_template_id": payload["stage_template_id"],
+            "idempotency_suffix": task_key,
+        }
+    if action == "transition_follow_up_task":
+        return {
+            "task_id": payload["task_id"],
+            "action": payload["transition_action"],
+            "proposed_due_at": payload.get("proposed_due_at"),
+            "reason": payload.get("reason"),
             "idempotency_suffix": task_key,
         }
     if action == "create_payment_plan":

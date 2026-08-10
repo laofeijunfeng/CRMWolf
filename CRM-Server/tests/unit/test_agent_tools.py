@@ -2194,6 +2194,92 @@ async def test_agent_tool_unknown_confirmation_reply_keeps_case_pending_with_fol
 
 
 @pytest.mark.asyncio
+async def test_agent_tool_transition_follow_up_task_marks_owned_task_completed_by_public_id():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        _seed_follow_up_task_customer(db)
+        task = _seed_follow_up_task(
+            db,
+            task_id=1020,
+            public_id="fut_00000000000000000000000000001020",
+            owner_id="2",
+        )
+        db.commit()
+
+        result = await registry.execute(
+            "transition_follow_up_task",
+            _confirmed_context_for(db, "transition_follow_up_task"),
+            {"task_id": task.public_id, "action": "complete", "reason": "用户确认任务已完成"},
+        )
+        db.refresh(task)
+
+        assert result.success is True
+        assert result.data["executed"] is True
+        assert result.data["results"][0]["status"] == "EXECUTED"
+        assert result.data["results"][0]["task_public_id"] == task.public_id
+        assert task.status == FollowUpTaskStatus.COMPLETED
+        assert db.query(FollowUpTaskEvent).count() == 1
+        tool_call = db.query(AgentToolCall).one()
+        assert tool_call.tool_name == "transition_follow_up_task"
+        assert tool_call.request_json["task_id"] == task.public_id
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_transition_follow_up_task_non_owner_does_not_mutate_task():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        _seed_follow_up_task_customer(db)
+        task = _seed_follow_up_task(
+            db,
+            task_id=1021,
+            public_id="fut_00000000000000000000000000001021",
+            owner_id="9",
+        )
+        db.commit()
+
+        result = await registry.execute(
+            "transition_follow_up_task",
+            _confirmed_context_for(db, "transition_follow_up_task"),
+            {"task_id": task.public_id, "action": "complete", "reason": "用户确认任务已完成"},
+        )
+        db.refresh(task)
+
+        assert result.success is True
+        assert result.data["executed"] is False
+        assert result.data["results"][0]["status"] == "SKIPPED"
+        assert result.data["results"][0]["skip_reason"] == "TASK_OWNER_MISMATCH"
+        assert task.status == FollowUpTaskStatus.OPEN
+        assert db.query(FollowUpTaskEvent).count() == 0
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_transition_follow_up_task_rejects_internal_integer_task_id():
+    engine, db = _db_session(_sales_commitment_tables())
+    service = CRMAgentToolService(api_client=FakeCRMAPIClient())
+    registry = AgentToolRegistry(tool_service=service)
+    try:
+        with pytest.raises(ValidationError):
+            await registry.execute(
+                "transition_follow_up_task",
+                _confirmed_context_for(db, "transition_follow_up_task"),
+                {"task_id": "1020", "action": "complete"},
+            )
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_move_opportunity_stage_calls_existing_api():
     engine, db = _db_session([Opportunity.__table__])
     fake_client = FakeCRMAPIClient()

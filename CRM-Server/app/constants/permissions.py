@@ -137,6 +137,16 @@ ALL_PERMISSIONS = [
     {"name": "提交发票申请", "code": "invoice:submit", "resource": "invoice", "action": "submit"},
     {"name": "撤回发票申请", "code": "invoice:withdraw", "resource": "invoice", "action": "withdraw"},
 
+    # 发票重开申请 - 独立审批业务类型权限集
+    {"name": "查看所有发票重开申请", "code": "invoice_reissue:view:all", "resource": "invoice_reissue", "action": "view", "scope": "all"},
+    {"name": "查看自己的发票重开申请", "code": "invoice_reissue:view:own", "resource": "invoice_reissue", "action": "view", "scope": "own"},
+    {"name": "创建发票重开申请", "code": "invoice_reissue:create", "resource": "invoice_reissue", "action": "create"},
+    {"name": "提交发票重开申请", "code": "invoice_reissue:submit", "resource": "invoice_reissue", "action": "submit"},
+    {"name": "撤回发票重开申请", "code": "invoice_reissue:withdraw", "resource": "invoice_reissue", "action": "withdraw"},
+    {"name": "审批发票重开申请", "code": "invoice_reissue:approve", "resource": "invoice_reissue", "action": "approve"},
+    {"name": "审批自己的发票重开申请", "code": "invoice_reissue:approve:own", "resource": "invoice_reissue", "action": "approve", "scope": "own"},
+    {"name": "审批所有发票重开申请", "code": "invoice_reissue:approve:all", "resource": "invoice_reissue", "action": "approve", "scope": "all"},
+
     # 回款 - 补充完整权限集
     {"name": "提交回款审批", "code": "payment:submit", "resource": "payment", "action": "submit"},
     {"name": "撤回回款审批", "code": "payment:withdraw", "resource": "payment", "action": "withdraw"},
@@ -191,6 +201,8 @@ ROLE_PERMISSIONS_MAPPING = {
         "contract:submit", "contract:cancel", "contract:approve:own",
         "invoice:view:all", "invoice:view:own", "invoice:create",
         "invoice:approve:own",  # ← 审自己提交的发票
+        "invoice_reissue:view:all", "invoice_reissue:view:own", "invoice_reissue:create",
+        "invoice_reissue:submit", "invoice_reissue:withdraw", "invoice_reissue:approve:own",
         "payment:view:all", "payment:view:own", "payment:register",
         "payment:approve:own",  # ← 审自己提交的回款
         "payment:plan:create", "payment:plan:edit", "payment:plan:delete", "payment:plan:view:all",
@@ -215,6 +227,8 @@ ROLE_PERMISSIONS_MAPPING = {
         "invoice:view:own", "invoice:create", "invoice:edit:own", "invoice:delete:own",
         "invoice:submit", "invoice:withdraw",
         "invoice:title:create", "invoice:title:edit", "invoice:title:delete", "invoice:title:set_default",
+        "invoice_reissue:view:own", "invoice_reissue:create",
+        "invoice_reissue:submit", "invoice_reissue:withdraw",
         "payment:view:own", "payment:register",
         "payment:plan:view:all", "payment:plan:create", "payment:plan:edit", "payment:plan:delete",
         "statistics:view", "report:view:own", "sales_dashboard:view:own",
@@ -224,6 +238,8 @@ ROLE_PERMISSIONS_MAPPING = {
         "invoice:approve", "invoice:mark_issued",  # ← 补充核心财务权限
         "invoice:submit", "invoice:withdraw",  # ← 补充发票提交/撤回
         "invoice:title:create", "invoice:title:edit", "invoice:title:delete", "invoice:title:set_default",
+        "invoice_reissue:view:all", "invoice_reissue:view:own", "invoice_reissue:create",
+        "invoice_reissue:submit", "invoice_reissue:withdraw", "invoice_reissue:approve",
         "payment:view:all", "payment:view:own", "payment:register",
         "payment:confirm",  # ← 补充回款确认权限
         "payment:submit", "payment:approve",  # ← 补充回款提交/审批

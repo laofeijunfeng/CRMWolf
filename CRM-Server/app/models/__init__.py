@@ -55,7 +55,15 @@ from app.models.im_bot import (
     IMInboundEvent,
     IMInboundEventStatus,
 )
-from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle, InvoiceType, TitleTypeEnum
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceReissueApplication,
+    InvoiceReissueApplicationStatus,
+    InvoiceTitle,
+    InvoiceType,
+    TitleTypeEnum,
+)
 from app.models.lead import CompanyScale, FollowUpMethod, Lead, LeadFollowUp, LeadSource, LeadStatus
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
@@ -184,6 +192,8 @@ __all__ = [
     "IMInboundEventStatus",
     "InvoiceApplication",
     "InvoiceApplicationStatus",
+    "InvoiceReissueApplication",
+    "InvoiceReissueApplicationStatus",
     "InvoiceTitle",
     "InvoiceType",
     "Lead",

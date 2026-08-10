@@ -263,6 +263,7 @@ class CustomerResolutionGraphService:
             or (
                 semantic_result.intent != "UNKNOWN"
                 and semantic_result.intent != "CRM_READ_QUERY"
+                and semantic_result.intent != "FOLLOW_UP_TASK_TRANSITION"
                 and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
                 and not customer_from_memory
                 and semantic_result.customer.confidence < 0.7
@@ -308,7 +309,7 @@ class CustomerResolutionGraphService:
             return False
         if parsed.get("_customer_name_source") == "EXPLICIT_TEXT_HINT":
             return False
-        if semantic_result.intent in {"UNKNOWN", "CRM_READ_QUERY"}:
+        if semantic_result.intent in {"UNKNOWN", "CRM_READ_QUERY", "FOLLOW_UP_TASK_TRANSITION"}:
             return False
         if semantic_result.customer.resolution_source == "MEMORY":
             return True

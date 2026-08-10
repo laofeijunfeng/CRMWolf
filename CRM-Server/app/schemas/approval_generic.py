@@ -59,7 +59,7 @@ class ApprovalListItemResponse(BaseModel):
     """通用审批列表项（GET /v1/approvals items 元素）。"""
 
     id: int = Field(..., description="审批实例ID")
-    business_type: str = Field(..., description="业务单据类型：CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY")
+    business_type: str = Field(..., description="业务单据类型：CONTRACT / PAYMENT / INVOICE / INVOICE_REISSUE / LICENSE / OPPORTUNITY")
     business_id: int = Field(..., description="业务单据ID")
     business_public_id: Optional[str] = Field(None, description="业务单据对外ID；商机审批返回商机对外ID")
     application_number: str = Field(..., description="单号（合同 contract_number / 发票 application_number / 回款合成 PAY-{id}）")

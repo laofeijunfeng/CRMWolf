@@ -52,12 +52,13 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 - CREATE_INVOICE_TITLE：创建发票抬头或开票抬头。
 - CREATE_DEPLOYMENT_INFO：创建部署信息。
 - CREATE_CUSTOMER_MEMBER：添加或设置客户团队成员、协作成员、售前/交付/支持成员。
+- FOLLOW_UP_TASK_TRANSITION：将某个跟进任务标记完成、取消、延期或保持待跟进。
 - CRM_READ_QUERY：读取 CRM 事实，包括任务、工作总结、客户、合同、商机、回款、发票、License 等信息。
 - UNKNOWN：无法可靠判断。
 
 【输出 JSON Schema】
 {
-  "intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CRM_READ_QUERY|UNKNOWN",
+  "intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|CRM_READ_QUERY|UNKNOWN",
   "intent_confidence": 0.0,
   "customer": {
     "name_text": "客户名称或简称，无法识别则为 null",
@@ -73,6 +74,29 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
     "customer_name_text": "读取查询中的客户名称，无法识别则为 null",
     "query_text": "读取查询中的语义条件，例如预算、试用反馈、合同卡点；无则为 null"
   },
+  "follow_up_task_transition": {
+    "action": "complete|cancel|delay|keep_open|null",
+    "task_id": "明确提到的跟进任务对外ID，格式 fut_...；没有则为 null",
+    "task_reference_text": "用户原文中的任务指代表达，例如 这个任务、河南双汇那个任务；没有则为 null",
+    "proposed_due_at_text": "延期场景下用户原文中的新时间；没有则为 null",
+    "proposed_due_at": {
+      "raw_text": "用户原文中的延期时间表达",
+      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEK|RELATIVE_MONTH|RELATIVE_YEAR|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
+      "direction": "past|current|next|future|null",
+      "amount": 0,
+      "unit": "day|week|month|year|null",
+      "weekday": "ISO 星期数字，1=周一，7=周日；没有星期则为 null",
+      "year": "年份数字；用户未表达则为 null",
+      "month": "月份数字；用户未表达则为 null",
+      "day": "日期数字；用户未表达则为 null",
+      "date_text": "用户明确表达的日期，YYYY-MM-DD；没有明确日期则为 null",
+      "hour": "0-23；用户未指定具体小时则为 null",
+      "minute": "0-59；用户未指定具体分钟则为 null",
+      "confidence": 0.0
+    },
+    "proposed_due_at_iso": null,
+    "reason": "用户表达的状态变更原因；没有则为 null"
+  },
   "follow_up": {
     "content": "可沉淀为客户活动的业务事实，无法识别则为 null",
     "method": "电话|微信|拜访|邮件|线上会议|线下会议|会议|未指定|null",
@@ -80,10 +104,10 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
     "next_follow_time_text": "用户原文中的时间表达，无法识别则为 null",
     "next_follow_time": {
       "raw_text": "用户原文中的时间表达",
-      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
+      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEK|RELATIVE_MONTH|RELATIVE_YEAR|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
       "direction": "past|current|next|future|null",
       "amount": 0,
-      "unit": "day|week|month|null",
+      "unit": "day|week|month|year|null",
       "weekday": "ISO 星期数字，1=周一，7=周日；没有星期则为 null",
       "year": "年份数字；用户未表达则为 null",
       "month": "月份数字；用户未表达则为 null",
@@ -101,10 +125,10 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
     "payment_date_text": "用户原文中的实际回款日期表达，无法识别则为 null",
     "payment_date": {
       "raw_text": "用户原文中的实际回款日期表达",
-      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
+      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEK|RELATIVE_MONTH|RELATIVE_YEAR|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
       "direction": "past|current|next|future|null",
       "amount": 0,
-      "unit": "day|week|month|null",
+      "unit": "day|week|month|year|null",
       "weekday": "ISO 星期数字，1=周一，7=周日；没有星期则为 null",
       "year": "年份数字；用户未表达则为 null",
       "month": "月份数字；用户未表达则为 null",
@@ -130,10 +154,10 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
     "next_follow_time_text": "用户原文中的线索下次跟进时间，无法识别则为 null",
     "next_follow_time": {
       "raw_text": "用户原文中的时间表达",
-      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
+      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEK|RELATIVE_MONTH|RELATIVE_YEAR|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
       "direction": "past|current|next|future|null",
       "amount": 0,
-      "unit": "day|week|month|null",
+      "unit": "day|week|month|year|null",
       "weekday": "ISO 星期数字，1=周一，7=周日；没有星期则为 null",
       "year": "年份数字；用户未表达则为 null",
       "month": "月份数字；用户未表达则为 null",
@@ -174,10 +198,10 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
     "expected_closing_date_text": "用户原文中的预计成交日期表达，无法识别则为 null",
     "expected_closing_date": {
       "raw_text": "用户原文中的预计成交日期表达",
-      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
+      "kind": "NONE|EXPLICIT_DATE|MONTH_DAY|MONTH_END|RELATIVE_DAY|RELATIVE_WEEK|RELATIVE_MONTH|RELATIVE_YEAR|RELATIVE_WEEKDAY|RELATIVE_MONTH_END|UNKNOWN",
       "direction": "past|current|next|future|null",
       "amount": 0,
-      "unit": "day|week|month|null",
+      "unit": "day|week|month|year|null",
       "weekday": "ISO 星期数字，1=周一，7=周日；没有星期则为 null",
       "year": "年份数字；用户未表达则为 null",
       "month": "月份数字；用户未表达则为 null",
@@ -242,6 +266,10 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 - 用户表达预计成交日期时，只输出结构化时间要素 opportunity.expected_closing_date，不要自己换算最终日期。
 - next_follow_time_iso、payment_date_iso 和 expected_closing_date_iso 是系统计算字段，必须输出 null。
 - 例如“下周三”：next_follow_time_text 为“下周三”，next_follow_time.kind 为 RELATIVE_WEEKDAY，direction 为 next，weekday 为 3。
+- 例如“2 天后”：kind 为 RELATIVE_DAY，direction 为 future，amount 为 2，unit 为 day；不要用 RELATIVE_DAY 表达周、月、年。
+- 例如“2 周后”：kind 为 RELATIVE_WEEK，direction 为 future，amount 为 2，unit 为 week。
+- 例如“2 个月后”：kind 为 RELATIVE_MONTH，direction 为 future，amount 为 2，unit 为 month。
+- 例如“1 年后”：kind 为 RELATIVE_YEAR，direction 为 future，amount 为 1，unit 为 year。
 - 例如“9 月 30 号”：expected_closing_date_text 为“9 月 30 号”，expected_closing_date.kind 为 MONTH_DAY，month 为 9，day 为 30，year 为 null；不要自行补年份。
 - 例如“9 月底”：expected_closing_date_text 为“9 月底”，expected_closing_date.kind 为 MONTH_END，month 为 9，year 为 null；不要自行计算月末日期。
 - 例如“本月底”：kind 为 RELATIVE_MONTH_END，direction 为 current，amount 为 0，unit 为 month。
@@ -263,6 +291,10 @@ CRM_AGENT_SEMANTIC_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 语义解�
 - 设置客户成员时必须尽量提取 user_name、user_id、member_role、access_level；只说“加协作成员/团队成员”但没说人时，在 missing_fields 中包含 user_name。
 - “售前”映射 member_role=PRESALES，“销售”映射 SALES，“交付”映射 DELIVERY，“支持/客服”映射 SUPPORT，无法判断为 null。
 - 未明确访问级别时 access_level 默认可为 VIEW，不要追问；用户说“可跟进”映射 FOLLOW_UP，“可编辑”映射 EDIT。
+- 用户表达“这个任务完成了/把 fut_... 标记完成/取消这个待办/延期到明天再跟进”时，intent 必须为 FOLLOW_UP_TASK_TRANSITION，不要输出 CRM_READ_QUERY。
+- 用户表达“有哪些已完成任务/查询已完成任务/本周完成了哪些任务”时，intent 必须为 CRM_READ_QUERY，不要输出 FOLLOW_UP_TASK_TRANSITION。
+- 跟进任务状态变更时，task_id 只填写用户本轮明确提供的 fut_...；如果用户说“这个任务/刚才那个/某客户那个任务”，即使 recent_follow_up_tasks 中有候选，也先让 task_id 为 null，并用 task_reference_text 保留指代表达，后续由 LangGraph 引用解析节点决定是否可唯一绑定。
+- 延期任务时只输出结构化时间要素 follow_up_task_transition.proposed_due_at，不要自己换算最终日期；proposed_due_at_iso 必须输出 null。
 - intent_confidence 低于 0.75 时 need_clarification 必须为 true。
 - 对需要客户的意图，如果 customer.resolution_source 为 NONE 且客户名称置信度低于 0.7，need_clarification 必须为 true。
 - requested_actions 只表达用户可能需要的动作，不代表已经允许执行。
@@ -372,7 +404,7 @@ CRM_AGENT_PENDING_INTERRUPTION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agen
   "decision": "CONTINUE_PENDING|START_NEW_FLOW|ASK_USER",
   "confidence": 0.0,
   "detected_customer_name": "本轮明确提到的新客户名称，无法识别则为 null",
-  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CRM_READ_QUERY|UNKNOWN|null",
+  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|CRM_READ_QUERY|UNKNOWN|null",
   "is_field_supplement": false,
   "reason": "一句话说明判断依据",
   "question": "需要用户确认时的问题；无需确认则为 null"
@@ -393,6 +425,7 @@ CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 会�
 - active_task：当前正在等待用户补充、选择或确认的任务。
 - suspended_tasks：用户之前说“先不处理/放一下/取消当前动作”后被暂停的业务草稿。
 - session_context：最近客户、最近业务主题等会话记忆。
+- recent_follow_up_tasks：最近 Agent 展示过的跟进任务引用，包含 fut_... 对外 ID、客户名、标题、状态和到期时间；只能作为引用解析上下文，不能绕过确认直接执行状态变更。
 
 【关系枚举】
 - CONTINUE_ACTIVE_TASK：用户在继续当前等待任务，例如回答表单字段、选择项、确认/拒绝。
@@ -421,7 +454,7 @@ CRM_AGENT_TURN_RELATION_SYSTEM_PROMPT = """你是 CRMWolf 的 CRM AI Agent 会�
   "confidence": 0.0,
   "target_task_id": 123,
   "detected_customer_name": "本轮明确提到的客户名称，无法识别则为 null",
-  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|CRM_READ_QUERY|UNKNOWN|null",
+  "detected_intent": "CUSTOMER_ACTIVITY|PAYMENT_RECORD|CREATE_LEAD|CREATE_CUSTOMER|CREATE_OPPORTUNITY|CREATE_CONTACT|CREATE_INVOICE_TITLE|CREATE_DEPLOYMENT_INFO|CREATE_CUSTOMER_MEMBER|FOLLOW_UP_TASK_TRANSITION|CRM_READ_QUERY|UNKNOWN|null",
   "reason": "一句话说明判断依据",
   "question": "需要用户确认时的问题；无需确认则为 null"
 }

@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>发票详情 Sheet 优化样例</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --line: #e5e7eb;
+      --line-strong: #cbd5e1;
+      --text: #111827;
+      --muted: #64748b;
+      --soft: #f8fafc;
+      --blue: #2563eb;
+      --green: #059669;
+      --amber: #b45309;
+      --red: #dc2626;
+      --shadow: 0 18px 45px rgba(15, 23, 42, .16);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .page {
+      min-height: 100vh;
+      padding: 28px;
+      background:
+        linear-gradient(90deg, rgba(148, 163, 184, .12) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(148, 163, 184, .12) 1px, transparent 1px),
+        var(--bg);
+      background-size: 28px 28px;
+    }
+
+    .fake-app {
+      max-width: 1180px;
+      margin: 0 auto;
+      color: #334155;
+    }
+
+    .fake-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 52px;
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .72);
+    }
+
+    .fake-table {
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, .72);
+    }
+
+    .fake-row {
+      display: grid;
+      grid-template-columns: 170px 1fr 140px 120px;
+      gap: 16px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .fake-row:first-child {
+      border-top: 0;
+      color: var(--muted);
+      background: #f8fafc;
+    }
+
+    .sheet {
+      position: fixed;
+      inset: 0 0 0 auto;
+      width: min(760px, 100vw);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      background: var(--panel);
+      border-left: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .sheet-header {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.35;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .amount-box {
+      min-width: 150px;
+      text-align: right;
+    }
+
+    .amount-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .amount {
+      margin-top: 3px;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--blue);
+    }
+
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--soft);
+      color: #334155;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge.green {
+      color: var(--green);
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+    }
+
+    .badge.amber {
+      color: var(--amber);
+      border-color: #fde68a;
+      background: #fffbeb;
+    }
+
+    .sheet-body {
+      overflow: auto;
+      padding: 18px 20px 24px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .card-title {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.4;
+      font-weight: 700;
+    }
+
+    .card-desc {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .card-body {
+      padding: 16px 18px;
+    }
+
+    .section {
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .section:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .section:last-child {
+      padding-bottom: 0;
+    }
+
+    .section-title {
+      margin: 0 0 10px;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+
+    .field {
+      min-width: 0;
+    }
+
+    .field.wide {
+      grid-column: 1 / -1;
+    }
+
+    .label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .value {
+      display: block;
+      min-width: 0;
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+      font-weight: 500;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .result-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .result-main {
+      min-width: 0;
+    }
+
+    .result-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .result-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 32px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: #fff;
+      color: #0f172a;
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .btn.primary {
+      border-color: var(--blue);
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 16px 1fr;
+      gap: 10px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 4px #dcfce7;
+    }
+
+    .dot.pending {
+      background: var(--amber);
+      box-shadow: 0 0 0 4px #fef3c7;
+    }
+
+    .timeline-title {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .timeline-meta {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .reissue-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: flex-start;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .reissue-row:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+
+    .reissue-title {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .reissue-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .mini-box {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .sheet-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 14px 20px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+
+    @media (max-width: 640px) {
+      .page {
+        padding: 0;
+      }
+
+      .fake-app {
+        display: none;
+      }
+
+      .sheet {
+        width: 100vw;
+      }
+
+      .title-row {
+        display: block;
+      }
+
+      .amount-box {
+        margin-top: 12px;
+        text-align: left;
+      }
+
+      .grid,
+      .mini-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .result-line,
+      .reissue-row {
+        grid-template-columns: 1fr;
+      }
+
+      .sheet-footer {
+        flex-wrap: wrap;
+      }
+
+      .sheet-footer .btn {
+        flex: 1 1 45%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="fake-app" aria-hidden="true">
+      <div class="fake-toolbar">
+        <strong>发票管理</strong>
+        <span>筛选 / 搜索 / 新建</span>
+      </div>
+      <div class="fake-table">
+        <div class="fake-row">
+          <span>申请编号</span>
+          <span>开票抬头</span>
+          <span>金额</span>
+          <span>状态</span>
+        </div>
+        <div class="fake-row">
+          <span>INV-202608-0031</span>
+          <span>上海青岚科技有限公司</span>
+          <span>¥86,400.00</span>
+          <span>已开票</span>
+        </div>
+        <div class="fake-row">
+          <span>INV-202608-0030</span>
+          <span>杭州启明软件有限公司</span>
+          <span>¥42,800.00</span>
+          <span>审批中</span>
+        </div>
+      </div>
+    </div>
+
+    <aside class="sheet" aria-label="发票详情">
+      <header class="sheet-header">
+        <div class="title-row">
+          <div>
+            <h1>INV-202608-0031</h1>
+            <div class="subtitle">
+              <span>上海青岚科技有限公司</span>
+              <span>合同：CTR-2026-0188</span>
+              <span>回款阶段：首付款</span>
+            </div>
+          </div>
+          <div class="amount-box">
+            <div class="amount-label">开票金额</div>
+            <div class="amount">¥86,400.00</div>
+          </div>
+        </div>
+        <div class="badges">
+          <span class="badge green">已开票</span>
+          <span class="badge amber">重开处理中</span>
+          <span class="badge">增值税专用发票</span>
+        </div>
+      </header>
+
+      <section class="sheet-body">
+        <div class="stack">
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2 class="card-title">发票申请</h2>
+                <p class="card-desc">原始蓝字发票的申请内容、开票结果与审批记录集中展示。</p>
+              </div>
+              <span class="badge green">审批已通过</span>
+            </div>
+            <div class="card-body">
+              <section class="section">
+                <h3 class="section-title">基础信息</h3>
+                <div class="grid">
+                  <div class="field">
+                    <span class="label">客户名称</span>
+                    <span class="value">上海青岚科技有限公司</span>
+                  </div>
+                  <div class="field">
+                    <span class="label">关联合同</span>
+                    <span class="value">青岚 CRM 项目合同</span>
+                  </div>
+                  <div class="field">
+                    <span class="label">回款阶段</span>
+                    <span class="value">首付款</span>
+                  </div>
+                  <div class="field">
+                    <span class="label">申请人</span>
+                    <span class="value">王明</span>
+                  </div>
+                  <div class="field">
+                    <span class="label">申请时间</span>
+                    <span class="value mono">2026-08-08 10:16</span>
+                  </div>
+                  <div class="field">
+                    <span class="label">开票状态</span>
+                    <span class="value">已开票</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="section">
+                <h3 class="section-title">开票内容</h3>
+                <div class="grid">
+                  <div class="field">
+                    <span class="label">抬头类型</span>
+                    <span class="value">企业</span>
+                  </div>
+                  <div class="field">
+                    <span class="label">发票类型</span>
+                    <span class="value">增值税专用发票</span>
+                  </div>
+                  <div class="field wide">
+                    <span class="label">开票抬头</span>
+                    <span class="value">上海青岚科技有限公司</span>
+                  </div>
+                  <div class="field wide">
+                    <span class="label">纳税人识别号</span>
+                    <span class="value mono">91310115MA1K3X9B2A</span>
+                  </div>
+                  <div class="field">
+                    <span class="label">开户行</span>
+                    <span class="value">招商银行上海张江支行</span>
+                  </div>
+                  <div class="field">
+                    <span class="label">开户账号</span>
+                    <span class="value mono">6214 8380 0019 2588</span>
+                  </div>
+                  <div class="field wide">
+                    <span class="label">地址 / 电话</span>
+                    <span class="value">上海市浦东新区科苑路 88 号 / 021-6088-8899</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="section">
+                <h3 class="section-title">开票结果</h3>
+                <div class="result-line">
+                  <div class="result-main">
+                    <div class="result-title">原蓝字发票 <span class="badge green">已上传</span></div>
+                    <div class="result-meta">
+                      号码：<span class="mono">044002600211</span> · 开具时间：2026-08-09 15:42
+                    </div>
+                  </div>
+                  <button class="btn" type="button">下载</button>
+                </div>
+              </section>
+
+              <section class="section">
+                <h3 class="section-title">审批进度</h3>
+                <div class="timeline">
+                  <div class="timeline-item">
+                    <span class="dot"></span>
+                    <div>
+                      <div class="timeline-title">提交申请</div>
+                      <div class="timeline-meta">王明 · 2026-08-08 10:16</div>
+                    </div>
+                  </div>
+                  <div class="timeline-item">
+                    <span class="dot"></span>
+                    <div>
+                      <div class="timeline-title">财务主管审批通过</div>
+                      <div class="timeline-meta">陈洁 · 2026-08-08 14:23</div>
+                    </div>
+                  </div>
+                  <div class="timeline-item">
+                    <span class="dot"></span>
+                    <div>
+                      <div class="timeline-title">完成开票</div>
+                      <div class="timeline-meta">刘婷 · 2026-08-09 15:42</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <div>
+                <h2 class="card-title">重开记录</h2>
+                <p class="card-desc">原发票之后发生的冲红与新蓝字发票链路。</p>
+              </div>
+              <button class="btn primary" type="button">完成重开</button>
+            </div>
+            <div class="card-body">
+              <div class="reissue-row">
+                <div>
+                  <div class="reissue-title">INVR-202608-0007</div>
+                  <div class="reissue-meta">待财务重开 · 申请时间：2026-08-10 11:20</div>
+
+                  <div class="mini-grid">
+                    <div class="mini-box">
+                      <span class="label">重开原因</span>
+                      <span class="value">税号填写错误，需要冲红后重新开具。</span>
+                    </div>
+                    <div class="mini-box">
+                      <span class="label">新开票金额</span>
+                      <span class="value">¥86,400.00</span>
+                    </div>
+                    <div class="mini-box">
+                      <span class="label">新发票类型</span>
+                      <span class="value">增值税专用发票</span>
+                    </div>
+                  </div>
+
+                  <div class="mini-grid">
+                    <div class="mini-box">
+                      <span class="label">红字发票</span>
+                      <span class="value">待上传</span>
+                    </div>
+                    <div class="mini-box">
+                      <span class="label">新蓝字发票</span>
+                      <span class="value">待上传</span>
+                    </div>
+                    <div class="mini-box">
+                      <span class="label">审批状态</span>
+                      <span class="value">已通过</span>
+                    </div>
+                  </div>
+                </div>
+                <span class="badge amber">待财务处理</span>
+              </div>
+
+              <div class="section" style="margin-top: 14px;">
+                <h3 class="section-title">重开审批进度</h3>
+                <div class="timeline">
+                  <div class="timeline-item">
+                    <span class="dot"></span>
+                    <div>
+                      <div class="timeline-title">提交重开申请</div>
+                      <div class="timeline-meta">王明 · 2026-08-10 11:20</div>
+                    </div>
+                  </div>
+                  <div class="timeline-item">
+                    <span class="dot"></span>
+                    <div>
+                      <div class="timeline-title">团队所有者审批通过</div>
+                      <div class="timeline-meta">王明 · 2026-08-10 11:44</div>
+                    </div>
+                  </div>
+                  <div class="timeline-item">
+                    <span class="dot pending"></span>
+                    <div>
+                      <div class="timeline-title">等待财务上传红字发票和新发票</div>
+                      <div class="timeline-meta">文件必填，发票号码可选</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <footer class="sheet-footer">
+        <button class="btn" type="button">关闭</button>
+        <button class="btn" type="button">申请重开</button>
+        <button class="btn primary" type="button">完成重开</button>
+      </footer>
+    </aside>
+  </main>
+</body>
+</html>

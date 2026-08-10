@@ -505,6 +505,7 @@ watch(
                     <SelectItem value="CONTRACT">合同</SelectItem>
                     <SelectItem value="PAYMENT">回款登记</SelectItem>
                     <SelectItem value="INVOICE">发票申请</SelectItem>
+                    <SelectItem value="INVOICE_REISSUE">发票重开申请</SelectItem>
                     <SelectItem value="LICENSE">License申请</SelectItem>
                     <SelectItem value="OPPORTUNITY">商机</SelectItem>
                   </SelectContent>

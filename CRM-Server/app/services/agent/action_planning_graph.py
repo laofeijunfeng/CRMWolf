@@ -66,6 +66,7 @@ BusinessActionRoute = Literal[
     "create_invoice_title",
     "create_deployment_info",
     "create_customer_member",
+    "follow_up_task_transition",
     "customer_query",
     "unknown",
 ]
@@ -175,6 +176,7 @@ class ActionPlanningGraphService:
         graph.add_node("create_invoice_title_action", self._create_invoice_title_action)
         graph.add_node("create_deployment_info_action", self._create_deployment_info_action)
         graph.add_node("create_customer_member_action", self._create_customer_member_action)
+        graph.add_node("follow_up_task_transition_action", self._follow_up_task_transition_action)
         graph.add_node("unknown_business_action", self._unknown_business_action)
         graph.add_node("apply_business_suggestions", self._apply_business_suggestions)
         graph.add_node("emit_business_interaction_event", self._emit_business_interaction_event)
@@ -211,6 +213,7 @@ class ActionPlanningGraphService:
                 "create_invoice_title": "create_invoice_title_action",
                 "create_deployment_info": "create_deployment_info_action",
                 "create_customer_member": "create_customer_member_action",
+                "follow_up_task_transition": "follow_up_task_transition_action",
                 "customer_query": "apply_business_suggestions",
                 "unknown": "unknown_business_action",
             },
@@ -224,6 +227,7 @@ class ActionPlanningGraphService:
         graph.add_edge("create_invoice_title_action", "apply_business_suggestions")
         graph.add_edge("create_deployment_info_action", "apply_business_suggestions")
         graph.add_edge("create_customer_member_action", "apply_business_suggestions")
+        graph.add_edge("follow_up_task_transition_action", "apply_business_suggestions")
         graph.add_edge("unknown_business_action", "apply_business_suggestions")
         graph.add_edge("apply_business_suggestions", "emit_business_interaction_event")
         graph.add_edge("emit_business_interaction_event", "finalize_response")
@@ -419,6 +423,7 @@ class ActionPlanningGraphService:
             "create_invoice_title",
             "create_deployment_info",
             "create_customer_member",
+            "follow_up_task_transition",
             "customer_query",
             "unknown",
         }:
@@ -587,6 +592,92 @@ class ActionPlanningGraphService:
             "action": coerce_json_dict(result.get("action")),
         }
 
+    def _follow_up_task_transition_action(
+        self,
+        state: ActionPlanningGraphState,
+        runtime: Runtime[ActionPlanningRuntimeContext],
+    ) -> ActionPlanningGraphState:
+        parsed = state.get("parsed") or {}
+        transition = coerce_json_dict(parsed.get("follow_up_task_transition"))
+        task_id = _display_text(transition.get("task_id"))
+        action = _display_text(transition.get("action"))
+        if not action:
+            return {
+                "response": "我识别到你想更新跟进任务，但还不能确定要完成、取消还是延期。请补充具体操作。",
+                "action": {},
+            }
+        if action == "delay" and not _display_text(transition.get("proposed_due_at_iso")):
+            return {
+                "response": "我识别到你想延期跟进任务，但还缺少明确的新跟进时间。",
+                "action": {},
+            }
+        if not task_id:
+            reference = _display_text(transition.get("task_reference_text")) or "这项任务"
+            task_resolution = _resolve_recent_follow_up_task_reference(
+                reference_text=reference,
+                content=state.get("content") or "",
+                memory=runtime.context.memory,
+            )
+            if task_resolution.get("task_id"):
+                task_id = _display_text(task_resolution.get("task_id"))
+                transition = {
+                    **transition,
+                    "task_id": task_id,
+                    "task_reference_text": _display_text(task_resolution.get("title")) or reference,
+                }
+            else:
+                candidates = _json_dict_list(task_resolution.get("candidates"))
+                if candidates:
+                    candidate_lines = [
+                        f"- {_display_text(candidate.get('customer_name')) or '未关联客户'}："
+                        f"{_display_text(candidate.get('title')) or candidate.get('id')}"
+                        f"（ID：{candidate.get('id')}）"
+                        for candidate in candidates[:5]
+                    ]
+                    candidate_text = "\n".join(candidate_lines)
+                    return {
+                        "response": (
+                            f"我识别到你想更新「{reference}」，但近期任务里有多项可能相关。"
+                            "请从下面选择具体任务，或直接回复任务 ID：\n"
+                            f"{candidate_text}"
+                        ),
+                        "action": {},
+                    }
+                return {
+                    "response": (
+                        f"我识别到你想更新「{reference}」，但还不能唯一确定是哪一项跟进任务。"
+                        "请从任务卡片中选择具体任务，或提供任务 ID。"
+                    ),
+                    "action": {},
+                }
+        if not task_id.startswith("fut_"):
+            return {
+                "response": (
+                    "我识别到你想更新跟进任务，但任务标识不是有效的对外 ID。"
+                    "请从任务卡片中选择具体任务，或提供 fut_ 开头的任务 ID。"
+                ),
+                "action": {},
+            }
+        transition_action = {
+            "action": "transition_follow_up_task",
+            "content": _follow_up_task_transition_confirmation_text(
+                task_id=task_id,
+                action=action,
+                proposed_due_at=transition.get("proposed_due_at_iso"),
+            ),
+            "payload": {
+                "task_id": task_id,
+                "transition_action": action,
+                "proposed_due_at": transition.get("proposed_due_at_iso"),
+                "reason": transition.get("reason") or state.get("content"),
+            },
+            "customer": {},
+        }
+        return {
+            "response": str(transition_action["content"]),
+            "action": transition_action,
+        }
+
     def _unknown_business_action(
         self,
         state: ActionPlanningGraphState,
@@ -629,12 +720,15 @@ class ActionPlanningGraphService:
             state.get("selected_customer") or {},
         )
 
-        if runtime.context.suggestion_result and not action and state.get("intent") != "CRM_READ_QUERY":
+        if runtime.context.suggestion_result and not action and state.get("intent") not in {
+            "CRM_READ_QUERY",
+            "FOLLOW_UP_TASK_TRANSITION",
+        }:
             response = business_rules.append_suggestions_to_response(response, suggestions)
 
         stage_move = coerce_json_dict(stage_move_action)
         next_task = coerce_json_dict(opportunity_next_task)
-        if state.get("intent") != "CRM_READ_QUERY":
+        if state.get("intent") not in {"CRM_READ_QUERY", "FOLLOW_UP_TASK_TRANSITION"}:
             if stage_move:
                 if action.get("action") == "create_customer_activity":
                     _attach_next_task(action, stage_move)
@@ -1005,6 +1099,7 @@ def _business_action_route(intent: str) -> BusinessActionRoute:
         "CREATE_INVOICE_TITLE": "create_invoice_title",
         "CREATE_DEPLOYMENT_INFO": "create_deployment_info",
         "CREATE_CUSTOMER_MEMBER": "create_customer_member",
+        "FOLLOW_UP_TASK_TRANSITION": "follow_up_task_transition",
         "CRM_READ_QUERY": "customer_query",
     }
     return routes.get(intent, "unknown")
@@ -1054,8 +1149,134 @@ def _technical_intent_label(intent: str) -> str:
         "CREATE_INVOICE_TITLE": "创建发票抬头",
         "CREATE_DEPLOYMENT_INFO": "创建部署信息",
         "CREATE_CUSTOMER_MEMBER": "添加客户团队成员",
+        "FOLLOW_UP_TASK_TRANSITION": "更新跟进任务",
         "UNKNOWN": "无法识别",
     }.get(intent, intent)
+
+
+def _follow_up_task_transition_confirmation_text(
+    *,
+    task_id: str,
+    action: str,
+    proposed_due_at: object = None,
+) -> str:
+    label = {
+        "complete": "标记完成",
+        "cancel": "取消",
+        "delay": "延期",
+        "keep_open": "保持待跟进",
+    }.get(action, "更新")
+    if action == "delay" and proposed_due_at:
+        return f"我识别到你想将跟进任务 {task_id} 延期到 {proposed_due_at}。请确认是否执行？"
+    return f"我识别到你想将跟进任务 {task_id} {label}。请确认是否执行？"
+
+
+def _resolve_recent_follow_up_task_reference(
+    *,
+    reference_text: str,
+    content: str,
+    memory: AgentMemorySnapshot | None,
+) -> JSONDict:
+    tasks = _recent_follow_up_tasks(memory)
+    if not tasks:
+        return {"status": "not_found", "candidates": []}
+
+    text = f"{reference_text} {content}".strip()
+    explicit_id = _extract_follow_up_task_public_id(text)
+    if explicit_id:
+        for task in tasks:
+            if task.get("id") == explicit_id:
+                return {"status": "matched", "task_id": explicit_id, **task}
+        return {"status": "not_found", "candidates": []}
+
+    open_tasks = [task for task in tasks if _display_text(task.get("status")) != "completed"]
+    candidates = open_tasks or tasks
+    if len(candidates) == 1:
+        task = candidates[0]
+        return {"status": "matched", "task_id": task.get("id"), **task}
+
+    scored: list[tuple[int, JSONDict]] = []
+    normalized_text = _normalize_reference_text(text)
+    for task in candidates:
+        score = _recent_follow_up_task_match_score(normalized_text, task)
+        if score > 0:
+            scored.append((score, task))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if scored and (len(scored) == 1 or scored[0][0] >= scored[1][0] + 2) and scored[0][0] >= 2:
+        task = scored[0][1]
+        return {"status": "matched", "task_id": task.get("id"), **task}
+    return {"status": "ambiguous", "candidates": candidates[:5]}
+
+
+def _recent_follow_up_tasks(memory: AgentMemorySnapshot | None) -> list[JSONDict]:
+    if not memory:
+        return []
+    tasks: list[JSONDict] = []
+    seen: set[str] = set()
+    for item in memory.recent_follow_up_tasks:
+        task = coerce_json_dict(item)
+        task_id = _display_text(task.get("id") or task.get("task_id"))
+        if not task_id or not task_id.startswith("fut_") or task_id in seen:
+            continue
+        seen.add(task_id)
+        tasks.append({
+            "id": task_id,
+            "title": _display_text(task.get("title")) or "",
+            "customer_name": _display_text(task.get("customer_name")) or "",
+            "status": _display_text(task.get("status")) or "",
+            "due_at": task.get("due_at"),
+        })
+    return tasks
+
+
+def _extract_follow_up_task_public_id(text: str) -> str | None:
+    for token in text.replace("，", " ").replace(",", " ").split():
+        value = token.strip("。；;：:（）()[]【】")
+        if value.startswith("fut_"):
+            return value
+    return None
+
+
+def _recent_follow_up_task_match_score(normalized_text: str, task: JSONDict) -> int:
+    score = 0
+    task_id = _normalize_reference_text(_display_text(task.get("id")) or "")
+    title = _normalize_reference_text(_display_text(task.get("title")) or "")
+    customer_name = _normalize_reference_text(_display_text(task.get("customer_name")) or "")
+    if task_id and task_id in normalized_text:
+        score += 10
+    if customer_name and customer_name in normalized_text:
+        score += 4
+    if title and title in normalized_text:
+        score += 4
+    for token in _reference_tokens(title):
+        if token in normalized_text:
+            score += 1
+    for token in _reference_tokens(customer_name):
+        if token in normalized_text:
+            score += 1
+    return score
+
+
+def _reference_tokens(text: str) -> list[str]:
+    if not text:
+        return []
+    tokens: list[str] = []
+    for token in text.replace("/", " ").replace("-", " ").split():
+        if len(token) >= 2:
+            tokens.append(token)
+    if len(text) >= 4:
+        tokens.append(text[:4])
+    return list(dict.fromkeys(tokens))
+
+
+def _normalize_reference_text(text: str) -> str:
+    return (
+        str(text or "")
+        .replace(" ", "")
+        .replace("\n", "")
+        .replace("\t", "")
+        .strip()
+    )
 
 
 def _customer_query_unresolved_response(state: ActionPlanningGraphState) -> str:
@@ -1283,6 +1504,7 @@ def _requires_clarification(
         or (
             semantic_result.intent != "UNKNOWN"
             and semantic_result.intent != "CRM_READ_QUERY"
+            and semantic_result.intent != "FOLLOW_UP_TASK_TRANSITION"
             and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
             and not customer_from_memory
             and semantic_result.customer.confidence < 0.7

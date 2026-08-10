@@ -22,6 +22,7 @@ _ENTITY_TYPE_LABEL = {
     BusinessType.CONTRACT: "合同",
     BusinessType.PAYMENT: "回款登记",
     BusinessType.INVOICE: "发票申请",
+    BusinessType.INVOICE_REISSUE: "发票重开申请",
     BusinessType.LICENSE: "License申请",
     BusinessType.OPPORTUNITY: "商机",
 }

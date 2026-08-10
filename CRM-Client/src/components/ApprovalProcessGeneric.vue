@@ -1,29 +1,17 @@
 /**
- * ApprovalProcessGeneric — 通用审批操作组件（Phase C，C-DSG-5 / C-DSG-7）
+ * ApprovalProcessGeneric — 通用审批操作组件
  *
  * 嵌入业务详情页的审批区。Props：
- *   entityType : 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' | 'OPPORTUNITY'
+ *   entityType : 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'INVOICE_REISSUE' | 'LICENSE' | 'OPPORTUNITY'
  *   entityId   : number | string（OPPORTUNITY 使用 opp_ public_id）
  *   canApprove : 是否对当前节点具备审批权（控制同意/驳回按钮显隐）
  *   isSubmitter: 是否为提交人（控制撤回 + 草稿态"提交审批"CTA 显隐）
  *
- * 不直接调 API（COMPONENTS.md「组件禁直接调 API」），统一通过 useApprovalStore()
- * 的 actions：fetchDetail / submitEntity / approveEntity / cancelEntity。
- *
- * 五态覆盖（C-DSG-4）：Loading(Skeleton) / Empty(components/ui/empty 草稿态 CTA) /
- * Error(ErrorState 通用/forbidden) / Success(toast) / Conflict(409 重载保输入)。
- *
- * C-DSG-7 P0 已落：
- *   条2 驳回弹窗 reason 必填；同意 comment 可空（直接按钮）。
- *   条3 按钮 action pending 期间 :loading + :disabled，防双击。
- *   条8 乐观锁冲突→保留 rejectForm.reason→warning toast→重载 detail；
- *       重载后非 PENDING→禁用提交并提示「该审批已由他人处理，无需重复操作」。
- *
- * 响应式（C-DSG-6）：宽屏（≥1024px）水平 timeline，窄屏自动切垂直。matchMedia
- * 不可用时（如 jsdom）回退到水平（isWide=true），不影响功能。
+ * 只承载审批状态、审批记录和审批动作。业务附件、开票、重开发票完成、
+ * License 发放等动作由对应业务页面或审批中心 footer 承载。
  */
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { PropType } from 'vue'
 import { toast } from 'vue-sonner'
 import {
@@ -31,14 +19,13 @@ import {
   AlertTriangle
 } from 'lucide-vue-next'
 import { useApprovalStore } from '@/stores/approval'
-import { usePermissionStore } from '@/stores/permissions'
+import { handleApiError } from '@/utils/errorHandler'
 import type {
   EntityType,
   ApprovalDetail,
   ApprovalRecord
 } from '@/schemas/approvalGeneric'
 import type { ApprovalEntityId } from '@/api/approvalGeneric'
-import { FileAttachment } from '@/components/crmwolf'
 import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
 import ApprovalProcessStepper from './ApprovalProcessStepper.vue'
 import ErrorState from './ErrorState.vue'
@@ -71,20 +58,12 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
-import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
-import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
-import {
-  createContractFileObjectUrl,
-  createInvoiceFileObjectUrl,
-  downloadContractFile as downloadContractFileApi,
-  downloadInvoiceFile as downloadInvoiceFileApi,
-} from '@/api/fileUpload'
-import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 const SUBMIT_PERMISSIONS: Record<EntityType, string[]> = {
   CONTRACT: ['contract:submit'],
   PAYMENT: ['payment:submit'],
   INVOICE: ['invoice:submit'],
+  INVOICE_REISSUE: ['invoice_reissue:submit'],
   LICENSE: ['license:submit'],
   OPPORTUNITY: ['opportunity:create', 'opportunity:edit:own', 'opportunity:edit:all']
 }
@@ -106,9 +85,9 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  showInvoiceUploadAction: {
-    type: Boolean,
-    default: true
+  title: {
+    type: String,
+    default: ''
   }
 })
 
@@ -121,7 +100,6 @@ const emit = defineEmits<{
 }>()
 
 const store = useApprovalStore()
-const permissionStore = usePermissionStore()
 
 // ===== 本地 UI 状态（必须 ref<Type>(...) 显式类型）=====
 const detail = ref<ApprovalDetail | null>(null)
@@ -132,19 +110,7 @@ const rejectDialogVisible = ref<boolean>(false)
 const withdrawDialogVisible = ref<boolean>(false)
 const rejectForm = ref<{ reason: string }>({ reason: '' })
 const conflictNotice = ref<string>('')
-const invoiceFilePreviewUrl = ref<string>('')
-const invoiceFilePreviewLoading = ref<boolean>(false)
-const invoiceFilePreviewRequestId = ref<number>(0)
-const contractFilePreviewUrl = ref<string>('')
-const contractFilePreviewLoading = ref<boolean>(false)
-const contractFilePreviewRequestId = ref<number>(0)
 const detailRequestId = ref<number>(0)
-
-// 开票对话框
-const markIssuedDialogVisible = ref<boolean>(false)
-
-// License 发放对话框
-const issueLicenseDialogVisible = ref<boolean>(false)
 
 // ===== 计算属性（必须返回类型）=====
 const status = computed<ApprovalDetail['status'] | undefined>(() => detail.value?.status)
@@ -159,172 +125,14 @@ const isLocked = computed<boolean>(() => conflictNotice.value.length > 0)
 const records = computed<ApprovalRecord[]>(() => detail.value?.records ?? [])
 
 const submitPermissionCodes = computed<string[]>(() => SUBMIT_PERMISSIONS[props.entityType])
-
-// 发票是否已上传文件（用于显示下载链接）
-const hasInvoiceFile = computed<boolean>(() =>
-  props.entityType === 'INVOICE' &&
-  detail.value?.invoice_file_path != null &&
-  detail.value.invoice_file_path.length > 0
-)
-
-const invoiceFiles = computed<FileAttachmentItem[]>(() => {
-  if (!hasInvoiceFile.value || detail.value == null) return []
-
-  const file: FileAttachmentItem = {
-    id: props.entityId,
-    name: getInvoiceFileName(),
-    extension: getFileExtension(detail.value.invoice_file_path ?? ''),
-    status: invoiceFilePreviewLoading.value ? 'processing' : 'done'
-  }
-
-  if (invoiceFilePreviewUrl.value.length > 0) {
-    file.url = invoiceFilePreviewUrl.value
-  }
-
-  if (detail.value.invoice_number != null && detail.value.invoice_number.trim() !== '') {
-    file.description = `发票号码：${detail.value.invoice_number}`
-  }
-
-  return [file]
-})
-
-const hasContractFile = computed<boolean>(() =>
-  props.entityType === 'CONTRACT' &&
-  detail.value?.contract_file_path != null &&
-  detail.value.contract_file_path.length > 0
-)
-
-const contractFiles = computed<FileAttachmentItem[]>(() => {
-  if (!hasContractFile.value || detail.value == null) return []
-
-  const filePath = detail.value.contract_file_path ?? ''
-  const configuredFileName = detail.value.contract_file_name?.trim()
-  const fileName = configuredFileName != null && configuredFileName.length > 0
-    ? configuredFileName
-    : getContractFileName(filePath)
-  const file: FileAttachmentItem = {
-    id: props.entityId,
-    name: fileName,
-    extension: getFileExtension(fileName.length > 0 ? fileName : filePath),
-    status: contractFilePreviewLoading.value ? 'processing' : 'done'
-  }
-
-  if (detail.value.contract_file_size != null) {
-    file.size = detail.value.contract_file_size
-  }
-  if (detail.value.contract_file_mime_type != null) {
-    file.mimeType = detail.value.contract_file_mime_type
-  }
-  if (contractFilePreviewUrl.value.length > 0) {
-    file.url = contractFilePreviewUrl.value
-  }
-
-  return [file]
-})
-
-// 发票开票按钮显示条件
-const showMarkIssued = computed<boolean>(() =>
-  props.entityType === 'INVOICE' &&
-  status.value === 'APPROVED' &&
-  !hasInvoiceFile.value &&
-  permissionStore.hasPermission('invoice:mark_issued')
-)
-
-// License 发放按钮显示条件
-const showIssueLicense = computed<boolean>(() =>
-  props.entityType === 'LICENSE' &&
-  status.value === 'APPROVED' &&
-  detail.value?.license_status !== 'ISSUED' &&
-  permissionStore.hasPermission('license:issue')
+const approvalTitle = computed<string>(() =>
+  props.title.trim().length > 0 ? props.title.trim() : detail.value?.flow_name ?? '审批进度'
 )
 
 // ===== 错误识别：仅匹配 axios 风格 error.response.status，不用 any =====
 const isAxiosStatus = (err: unknown, code: number): boolean => {
   const r = (err as { response?: { status?: number } } | null)?.response
   return typeof r?.status === 'number' && r.status === code
-}
-
-const numericEntityId = (): number | null => {
-  const entityId = typeof props.entityId === 'number' ? props.entityId : Number(props.entityId)
-  return Number.isFinite(entityId) ? entityId : null
-}
-
-const numericEntityIdValue = computed<number | null>(() => numericEntityId())
-
-const revokeInvoiceFilePreviewUrl = (): void => {
-  if (invoiceFilePreviewUrl.value.length === 0) return
-  window.URL.revokeObjectURL(invoiceFilePreviewUrl.value)
-  invoiceFilePreviewUrl.value = ''
-}
-
-const revokeContractFilePreviewUrl = (): void => {
-  if (contractFilePreviewUrl.value.length === 0) return
-  window.URL.revokeObjectURL(contractFilePreviewUrl.value)
-  contractFilePreviewUrl.value = ''
-}
-
-const loadInvoiceFilePreviewUrl = async (showError = false): Promise<void> => {
-  const requestId = invoiceFilePreviewRequestId.value + 1
-  invoiceFilePreviewRequestId.value = requestId
-  revokeInvoiceFilePreviewUrl()
-
-  if (!hasInvoiceFile.value || props.entityType !== 'INVOICE') {
-    invoiceFilePreviewLoading.value = false
-    return
-  }
-
-  invoiceFilePreviewLoading.value = true
-  try {
-    const invoiceId = numericEntityId()
-    if (invoiceId === null) return
-    const objectUrl = await createInvoiceFileObjectUrl(invoiceId)
-    if (requestId === invoiceFilePreviewRequestId.value && hasInvoiceFile.value) {
-      invoiceFilePreviewUrl.value = objectUrl
-    } else {
-      window.URL.revokeObjectURL(objectUrl)
-    }
-  } catch {
-    // 自动预加载失败不打断详情查看；用户主动下载失败时再给明确反馈。
-    if (showError) {
-      toast.error('发票文件预览加载失败，请下载后查看')
-    }
-  } finally {
-    if (requestId === invoiceFilePreviewRequestId.value) {
-      invoiceFilePreviewLoading.value = false
-    }
-  }
-}
-
-const loadContractFilePreviewUrl = async (showError = false): Promise<void> => {
-  const requestId = contractFilePreviewRequestId.value + 1
-  contractFilePreviewRequestId.value = requestId
-  revokeContractFilePreviewUrl()
-
-  if (!hasContractFile.value || props.entityType !== 'CONTRACT') {
-    contractFilePreviewLoading.value = false
-    return
-  }
-
-  contractFilePreviewLoading.value = true
-  try {
-    const contractId = numericEntityId()
-    if (contractId === null) return
-    const objectUrl = await createContractFileObjectUrl(contractId)
-    if (requestId === contractFilePreviewRequestId.value && hasContractFile.value) {
-      contractFilePreviewUrl.value = objectUrl
-    } else {
-      window.URL.revokeObjectURL(objectUrl)
-    }
-  } catch {
-    // 自动预加载失败不打断详情查看；用户主动下载失败时再给明确反馈。
-    if (showError) {
-      toast.error('合同附件预览加载失败，请下载后查看')
-    }
-  } finally {
-    if (requestId === contractFilePreviewRequestId.value) {
-      contractFilePreviewLoading.value = false
-    }
-  }
 }
 
 // ===== 方法（必须参数和返回类型）=====
@@ -359,8 +167,8 @@ const handleSubmit = async (): Promise<void> => {
     toast.success('已提交审批，等待审批人处理')
     emit('submitted')
     await loadDetail()
-  } catch {
-    // 错误 toast 由 request 拦截器统一处理；这里不抛
+  } catch (error: unknown) {
+    handleApiError(error, '提交审批')
   } finally {
     actionPending.value = false
   }
@@ -469,65 +277,6 @@ const handleResubmitAction = (): void => {
   handleResubmit()
 }
 
-// 发票文件下载 - 使用 invoice API 的下载接口
-const downloadInvoiceFile = async (): Promise<void> => {
-  if (detail.value == null || props.entityType !== 'INVOICE') return
-  const invoiceId = numericEntityId()
-  if (invoiceId === null) return
-  try {
-    await downloadInvoiceFileApi(invoiceId)
-  } catch {
-    toast.error('文件下载失败')
-  }
-}
-
-const downloadContractFile = async (): Promise<void> => {
-  if (detail.value == null || props.entityType !== 'CONTRACT') return
-  const contractId = numericEntityId()
-  if (contractId === null) return
-  try {
-    await downloadContractFileApi(contractId, detail.value.contract_file_name ?? undefined)
-  } catch {
-    toast.error('合同附件下载失败')
-  }
-}
-
-const getFileExtension = (filePath: string): string => {
-  return filePath.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
-}
-
-const getInvoiceFileName = (): string => {
-  const extension = getFileExtension(detail.value?.invoice_file_path ?? '')
-  return extension ? `发票文件.${extension}` : '发票文件'
-}
-
-const getContractFileName = (filePath: string): string => {
-  const extension = getFileExtension(filePath)
-  return extension ? `合同附件.${extension}` : '合同附件'
-}
-
-// 打开对话框方法
-const openMarkIssuedDialog = (): void => {
-  markIssuedDialogVisible.value = true
-}
-
-const openIssueDialog = (): void => {
-  issueLicenseDialogVisible.value = true
-}
-
-// 对话框成功回调
-const onMarkIssuedSuccess = (): void => {
-  markIssuedDialogVisible.value = false
-  emit('approved')
-  loadDetail()
-}
-
-const onIssueSuccess = (): void => {
-  issueLicenseDialogVisible.value = false
-  emit('approved')
-  loadDetail()
-}
-
 // ===== 生命周期 =====
 watch(
   [(): EntityType => props.entityType, (): ApprovalEntityId => props.entityId],
@@ -536,38 +285,14 @@ watch(
   },
   { immediate: true }
 )
-
-watch(
-  [hasInvoiceFile, (): ApprovalEntityId => props.entityId],
-  (): void => {
-    void loadInvoiceFilePreviewUrl()
-  },
-  { immediate: true }
-)
-
-watch(
-  [hasContractFile, (): ApprovalEntityId => props.entityId],
-  (): void => {
-    void loadContractFilePreviewUrl()
-  },
-  { immediate: true }
-)
-
-onBeforeUnmount((): void => {
-  detailRequestId.value += 1
-  invoiceFilePreviewRequestId.value += 1
-  contractFilePreviewRequestId.value += 1
-  revokeInvoiceFilePreviewUrl()
-  revokeContractFilePreviewUrl()
-})
 </script>
 
 <template>
   <div class="approval-process-generic">
     <!-- 加载骨架（C-DSG-4 Loading） -->
-    <div v-if="loadError === false && notFound === false && detail === null" class="space-y-4">
-      <Skeleton class="h-32 w-full" />
-      <Skeleton class="h-48 w-full" />
+    <div v-if="loadError === false && notFound === false && detail === null" class="space-y-2">
+      <Skeleton class="h-8 w-full" />
+      <Skeleton class="h-20 w-full" />
     </div>
 
     <!-- 错误态（C-DSG-4 Error） -->
@@ -586,7 +311,7 @@ onBeforeUnmount((): void => {
     <!-- 草稿空态（detail===null 且 404）：提交 CTA -->
     <Empty
       v-else-if="detail === null && notFound"
-      class="min-h-[200px] border-0"
+      class="min-h-[112px] border-0 py-3"
     >
       <EmptyHeader>
         <EmptyMedia variant="icon">
@@ -598,6 +323,7 @@ onBeforeUnmount((): void => {
       <EmptyContent v-if="isSubmitter">
         <Button
           v-any-permission="submitPermissionCodes"
+          size="sm"
           data-testid="submit-approval-btn"
           :disabled="actionPending"
           @click="handleSubmit"
@@ -612,7 +338,7 @@ onBeforeUnmount((): void => {
     <div v-else-if="detail" class="approval-process-generic__body">
       <!-- 标题 + 状态徽章 -->
       <div class="approval-process-generic__header">
-        <span class="approval-process-generic__title">{{ detail?.flow_name ?? '审批进度' }}</span>
+        <span class="approval-process-generic__title">{{ approvalTitle }}</span>
         <ApprovalStatusBadge v-if="status" :status="status" size="small" />
       </div>
 
@@ -623,30 +349,9 @@ onBeforeUnmount((): void => {
       </div>
 
       <!-- 当前节点意见 -->
-      <div v-if="detail?.current_node_name" class="approval-process-generic__current-node">
+      <div v-if="detail?.current_node_name && records.length === 0" class="approval-process-generic__current-node">
         <span class="approval-process-generic__current-node-label">当前节点：</span>
         <span class="approval-process-generic__current-node-value">{{ detail.current_node_name }}</span>
-      </div>
-
-      <!-- Task 6: 已上传发票文件显示（仅 INVOICE 类型） -->
-      <div v-if="hasInvoiceFile" class="approval-process-generic__file-section">
-        <FileAttachment
-          title="发票文件"
-          mode="readonly"
-          :files="invoiceFiles"
-          empty-text="暂无发票文件"
-          @download="() => downloadInvoiceFile()"
-        />
-      </div>
-
-      <div v-if="hasContractFile" class="approval-process-generic__file-section">
-        <FileAttachment
-          title="合同邮件附件"
-          mode="readonly"
-          :files="contractFiles"
-          empty-text="暂无合同附件"
-          @download="() => downloadContractFile()"
-        />
       </div>
 
       <!-- 审批流程 Stepper -->
@@ -654,6 +359,7 @@ onBeforeUnmount((): void => {
         v-if="records.length > 0"
         :records="records"
         :is-pending="isPending"
+        :current-node-name="detail.current_node_name ?? ''"
       />
 
       <!-- 操作区 -->
@@ -661,6 +367,7 @@ onBeforeUnmount((): void => {
         <Button
           v-if="isSubmitter && isPending"
           variant="outline"
+          size="sm"
           data-testid="withdraw-btn"
           :disabled="actionPending || isLocked"
           @click="openWithdrawDialog"
@@ -670,6 +377,7 @@ onBeforeUnmount((): void => {
         </Button>
         <Button
           v-if="isSubmitter && canResubmit"
+          size="sm"
           data-testid="resubmit-btn"
           :disabled="actionPending || isLocked"
           @click="handleResubmitAction"
@@ -679,6 +387,7 @@ onBeforeUnmount((): void => {
         </Button>
         <Button
           v-if="canApprove && isPending"
+          size="sm"
           data-testid="approve-btn"
           :disabled="actionPending || isLocked"
           @click="handleApprove"
@@ -689,6 +398,7 @@ onBeforeUnmount((): void => {
         <Button
           v-if="canApprove && isPending"
           variant="destructive"
+          size="sm"
           data-testid="reject-btn"
           :disabled="actionPending || isLocked"
           @click="openRejectDialog"
@@ -697,28 +407,6 @@ onBeforeUnmount((): void => {
           驳回
         </Button>
 
-        <!-- 发票开票区 -->
-        <div v-if="showInvoiceUploadAction && showMarkIssued" class="mark-issued-section">
-          <Button
-            data-testid="mark-issued-btn"
-            aria-label="上传发票文件，审批已通过"
-            @click="openMarkIssuedDialog"
-          >
-            上传发票文件
-          </Button>
-        </div>
-
-        <!-- License 发放区 -->
-        <div v-if="showIssueLicense" class="issue-license-section">
-          <p class="text-sm text-muted-foreground mb-2">审批已通过，可进行发放操作</p>
-          <Button
-            data-testid="issue-license-btn"
-            aria-label="发放 License，审批已通过"
-            @click="openIssueDialog"
-          >
-            发放 License
-          </Button>
-        </div>
       </div>
 
       <!-- 驳回弹窗：reason 必填，C-DSG-7 条2 -->
@@ -784,22 +472,6 @@ onBeforeUnmount((): void => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <!-- 发票开票对话框 -->
-      <InvoiceMarkIssuedDialog
-        v-if="numericEntityIdValue !== null"
-        v-model:open="markIssuedDialogVisible"
-        :application-id="numericEntityIdValue"
-        @issued="onMarkIssuedSuccess"
-      />
-
-      <!-- License 发放对话框 -->
-      <LicenseIssueDialog
-        v-if="numericEntityIdValue !== null"
-        v-model:open="issueLicenseDialogVisible"
-        :application-id="numericEntityIdValue"
-        @issued="onIssueSuccess"
-      />
     </div>
   </div>
 </template>
@@ -809,15 +481,15 @@ onBeforeUnmount((): void => {
 
 .approval-process-generic {
   width: 100%;
-  background: $wolf-bg-card-v2;
+  background: transparent;
   border-radius: $wolf-radius-v2;
-  padding: $wolf-card-padding-v2;
+  padding: 0;
 }
 
 .approval-process-generic__body {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $wolf-space-sm-v2;
 }
 
 .approval-process-generic__header {
@@ -825,14 +497,14 @@ onBeforeUnmount((): void => {
   align-items: center;
   justify-content: space-between;
   gap: $wolf-space-sm-v2;
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: 0;
 }
 
 .approval-process-generic__title {
-  font-family: $wolf-font-display-v2;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
   color: $wolf-text-primary-v2;
+  line-height: $wolf-line-height-body-v2;
 }
 
 .approval-process-generic__conflict {
@@ -844,14 +516,12 @@ onBeforeUnmount((): void => {
   color: $wolf-danger-text-v2;
   border-radius: $wolf-radius-sm-v2;
   font-size: $wolf-font-size-auxiliary-v2;
-  margin-bottom: $wolf-space-md-v2;
 }
 
 .approval-process-generic__current-node {
   display: flex;
   align-items: center;
   gap: $wolf-space-xs-v2;
-  margin-bottom: $wolf-space-md-v2;
   font-size: $wolf-font-size-auxiliary-v2;
   color: $wolf-text-tertiary-v2;
 
@@ -866,28 +536,9 @@ onBeforeUnmount((): void => {
   align-items: center;
   justify-content: flex-end;
   gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-lg-v2;
-  padding-top: $wolf-space-md-v2;
+  margin-top: $wolf-space-xs-v2;
+  padding-top: $wolf-space-sm-v2;
   border-top: 1px solid $wolf-border-light-v2;
 }
 
-// 已上传文件显示区域样式
-.approval-process-generic__file-section {
-  background: $wolf-bg-hover-v2;
-  border-radius: $wolf-radius-sm-v2;
-  padding: $wolf-space-md-v2;
-  margin-bottom: $wolf-space-md-v2;
-}
-
-// 开票/发放操作区
-.mark-issued-section,
-.issue-license-section {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: $wolf-space-sm-v2;
-  padding-top: $wolf-space-md-v2;
-  border-top: 1px solid $wolf-border-light-v2;
-  margin-top: $wolf-space-md-v2;
-}
 </style>

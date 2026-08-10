@@ -16,6 +16,7 @@ AgentIntent = Literal[
     "CREATE_INVOICE_TITLE",
     "CREATE_DEPLOYMENT_INFO",
     "CREATE_CUSTOMER_MEMBER",
+    "FOLLOW_UP_TASK_TRANSITION",
     "CRM_READ_QUERY",
     "UNKNOWN",
 ]
@@ -74,12 +75,15 @@ AgentTemporalKind = Literal[
     "MONTH_DAY",
     "MONTH_END",
     "RELATIVE_DAY",
+    "RELATIVE_WEEK",
+    "RELATIVE_MONTH",
+    "RELATIVE_YEAR",
     "RELATIVE_WEEKDAY",
     "RELATIVE_MONTH_END",
     "UNKNOWN",
 ]
 AgentTemporalDirection = Literal["past", "current", "next", "future"]
-AgentTemporalUnit = Literal["day", "week", "month"]
+AgentTemporalUnit = Literal["day", "week", "month", "year"]
 
 
 class AgentCustomerEntity(BaseModel):
@@ -208,11 +212,27 @@ class AgentReadQueryEntity(BaseModel):
     query_text: Optional[str] = Field(None, description="读取查询中的语义条件，例如预算、试用反馈、合同卡点")
 
 
+class AgentFollowUpTaskTransitionEntity(BaseModel):
+    action: Optional[Literal["complete", "cancel", "delay", "keep_open"]] = Field(
+        None,
+        description="用户希望对跟进任务执行的状态动作",
+    )
+    task_id: Optional[str] = Field(None, description="明确提到的跟进任务对外ID，格式 fut_...；没有则为 null")
+    task_reference_text: Optional[str] = Field(None, description="用户原文中的任务指代表达，例如 这个任务、河南双汇那个任务")
+    proposed_due_at_text: Optional[str] = Field(None, description="延期场景下用户表达的新时间")
+    proposed_due_at: Optional["AgentTemporalExpression"] = Field(None, description="延期场景下结构化时间要素")
+    proposed_due_at_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+    reason: Optional[str] = Field(None, description="用户表达的任务状态变更原因")
+
+
 class AgentSemanticParseResult(BaseModel):
     intent: AgentIntent = Field("UNKNOWN", description="归一化意图")
     intent_confidence: float = Field(0.0, ge=0.0, le=1.0)
     customer: AgentCustomerEntity = Field(default_factory=AgentCustomerEntity)
     read_query: AgentReadQueryEntity = Field(default_factory=AgentReadQueryEntity)
+    follow_up_task_transition: AgentFollowUpTaskTransitionEntity = Field(
+        default_factory=AgentFollowUpTaskTransitionEntity
+    )
     follow_up: AgentFollowUpEntity = Field(default_factory=AgentFollowUpEntity)
     payment: AgentPaymentEntity = Field(default_factory=AgentPaymentEntity)
     lead: AgentLeadEntity = Field(default_factory=AgentLeadEntity)
@@ -317,6 +337,7 @@ class AgentMemorySnapshot(BaseModel):
     recent_messages: List[Dict[str, object]] = Field(default_factory=list)
     pending_task: Optional[Dict[str, object]] = None
     session_context: Dict[str, object] = Field(default_factory=dict)
+    recent_follow_up_tasks: List[Dict[str, object]] = Field(default_factory=list, max_length=20)
 
 
 class AgentPendingInterruptionDecision(BaseModel):

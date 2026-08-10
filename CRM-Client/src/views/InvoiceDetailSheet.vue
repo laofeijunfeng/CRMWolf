@@ -13,6 +13,7 @@ import {
   MapPin,
   Phone,
   RefreshCw,
+  RotateCcw,
   Stamp,
   Trash2,
   User,
@@ -30,7 +31,6 @@ import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -49,25 +49,31 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import { AmountText, FileAttachment } from '@/components/crmwolf'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import StatusBadge, { type InvoiceStatus as InvoiceBadgeStatus } from '@/components/StatusBadge.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
+import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
 import invoiceApi, {
   type InvoiceApplicationResponse,
   type InvoiceApplicationStatus,
+  type InvoiceReissueApplicationCreate,
+  type InvoiceReissueApplicationResponse,
   type InvoiceType,
+  type TitleType,
 } from '@/api/invoice'
+import approvalGenericApi from '@/api/approvalGeneric'
 import {
   createInvoiceFileObjectUrl,
   downloadInvoiceFile as downloadInvoiceFileApi,
+  downloadInvoiceReissueFile,
 } from '@/api/fileUpload'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
 import { usePermissionStore } from '@/stores/permissions'
@@ -98,12 +104,52 @@ const invoiceInfo = ref<InvoiceApplicationResponse | null>(null)
 const activeRequestId = ref<number>(0)
 const editDialogOpen = ref<boolean>(false)
 const markIssuedDialogOpen = ref<boolean>(false)
+const reissueDialogOpen = ref<boolean>(false)
+const completeReissueDialogOpen = ref<boolean>(false)
 const marking = ref<boolean>(false)
+const creatingReissue = ref<boolean>(false)
+const completingReissue = ref<boolean>(false)
 const deleting = ref<boolean>(false)
 const invoiceFilePreviewUrl = ref<string>('')
 const invoiceFilePreviewLoading = ref<boolean>(false)
 const invoicedForm = ref<{ invoice_number: string }>({
   invoice_number: '',
+})
+type ReissueFormState = Omit<
+  InvoiceReissueApplicationCreate,
+  'invoice_bank_name' | 'invoice_bank_account' | 'invoice_address' | 'invoice_phone'
+> & {
+  invoice_bank_name: string
+  invoice_bank_account: string
+  invoice_address: string
+  invoice_phone: string
+}
+type ReissueFileKind = 'red' | 'new'
+
+const reissueForm = ref<ReissueFormState>({
+  reason: '',
+  invoice_title_type: 'COMPANY',
+  invoice_title_text: '',
+  invoice_taxpayer_id: '',
+  invoice_bank_name: '',
+  invoice_bank_account: '',
+  invoice_address: '',
+  invoice_phone: '',
+  invoice_amount: 0,
+  invoice_type: 'VAT_NORMAL',
+})
+const editingReissueApplication = ref<InvoiceReissueApplicationResponse | null>(null)
+const completingReissueApplication = ref<InvoiceReissueApplicationResponse | null>(null)
+const completeReissueForm = ref<{
+  red_invoice_number: string
+  new_invoice_number: string
+  red_file: File | null
+  new_file: File | null
+}>({
+  red_invoice_number: '',
+  new_invoice_number: '',
+  red_file: null,
+  new_file: null,
 })
 
 const currentUserId = computed<string>(() => {
@@ -131,9 +177,38 @@ const canMarkIssued = computed<boolean>(() => {
     permissionStore.hasPermission('invoice:mark_issued')
 })
 
+const activeReissue = computed<InvoiceReissueApplicationResponse | null>(() => {
+  const reissues = invoiceInfo.value?.reissue_applications ?? []
+  return reissues.find((item) => ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(item.status)) ?? null
+})
+
+const canCreateReissue = computed<boolean>(() => {
+  return invoiceInfo.value?.status === 'ISSUED' &&
+    activeReissue.value === null &&
+    permissionStore.hasPermission('invoice_reissue:create')
+})
+
 const canApproveGeneric = computed<boolean>(() => {
   return invoiceInfo.value?.status === 'PENDING_REVIEW' &&
     permissionStore.hasPermission('invoice:approve')
+})
+
+const canApproveReissue = computed<boolean>(() =>
+  permissionStore.hasAnyPermission([
+    'invoice_reissue:approve',
+    'invoice_reissue:approve:own',
+    'invoice_reissue:approve:all'
+  ])
+)
+
+const reissueDialogTitle = computed<string>(() => {
+  return editingReissueApplication.value === null ? '申请重开发票' : '修改并重新提交重开发票'
+})
+
+const reissueDialogDescription = computed<string>(() => {
+  return editingReissueApplication.value === null
+    ? '重开不会覆盖原发票，审批通过后由财务上传红字发票和新发票。'
+    : '修改后会直接重新提交到审批流程。'
 })
 
 const isSubmitterGeneric = computed<boolean>(() => {
@@ -162,6 +237,49 @@ const invoiceFiles = computed<FileAttachmentItem[]>(() => {
   return [file]
 })
 
+const buildReissueFileName = (
+  reissue: InvoiceReissueApplicationResponse,
+  fileKind: ReissueFileKind,
+): string => {
+  const filePath = fileKind === 'red' ? reissue.red_invoice_file_path : reissue.new_invoice_file_path
+  const extension = getFileExtension(filePath)
+  const suffix = extension === '' ? '' : `.${extension}`
+  const fileLabel = fileKind === 'red' ? '红字发票' : '新蓝字发票'
+  return `${reissue.application_number}-${fileLabel}${suffix}`
+}
+
+const getReissueInvoiceFiles = (reissue: InvoiceReissueApplicationResponse): FileAttachmentItem[] => {
+  const files: FileAttachmentItem[] = []
+
+  if (reissue.red_invoice_file_path !== null && reissue.red_invoice_file_path.trim() !== '') {
+    const redFile: FileAttachmentItem = {
+      id: `reissue-${reissue.id}-red`,
+      name: buildReissueFileName(reissue, 'red'),
+      extension: getFileExtension(reissue.red_invoice_file_path),
+      status: 'done',
+    }
+    if (reissue.red_invoice_number !== null && reissue.red_invoice_number.trim() !== '') {
+      redFile.description = `发票号码：${reissue.red_invoice_number}`
+    }
+    files.push(redFile)
+  }
+
+  if (reissue.new_invoice_file_path !== null && reissue.new_invoice_file_path.trim() !== '') {
+    const newFile: FileAttachmentItem = {
+      id: `reissue-${reissue.id}-new`,
+      name: buildReissueFileName(reissue, 'new'),
+      extension: getFileExtension(reissue.new_invoice_file_path),
+      status: 'done',
+    }
+    if (reissue.new_invoice_number !== null && reissue.new_invoice_number.trim() !== '') {
+      newFile.description = `发票号码：${reissue.new_invoice_number}`
+    }
+    files.push(newFile)
+  }
+
+  return files
+}
+
 const revokeInvoiceFilePreviewUrl = (): void => {
   if (invoiceFilePreviewUrl.value.length === 0) return
   window.URL.revokeObjectURL(invoiceFilePreviewUrl.value)
@@ -174,6 +292,7 @@ const loadInvoiceFilePreviewUrl = async (
 ): Promise<void> => {
   revokeInvoiceFilePreviewUrl()
   if (invoice.invoice_file_path === null || invoice.invoice_file_path.trim() === '') return
+  if (invoice.invoice_effective_status === 'REISSUED') return
 
   invoiceFilePreviewLoading.value = true
   try {
@@ -225,9 +344,228 @@ const resetState = (): void => {
   invoiceInfo.value = null
   editDialogOpen.value = false
   markIssuedDialogOpen.value = false
+  reissueDialogOpen.value = false
+  completeReissueDialogOpen.value = false
   marking.value = false
+  creatingReissue.value = false
+  completingReissue.value = false
+  editingReissueApplication.value = null
+  completingReissueApplication.value = null
   deleting.value = false
   invoicedForm.value.invoice_number = ''
+}
+
+const fillReissueFormFromInvoice = (invoice: InvoiceApplicationResponse): void => {
+  reissueForm.value = {
+    reason: '',
+    invoice_title_type: (invoice.invoice_title_type === 'PERSONAL' ? 'PERSONAL' : 'COMPANY') as TitleType,
+    invoice_title_text: invoice.invoice_title_text,
+    invoice_taxpayer_id: invoice.invoice_taxpayer_id,
+    invoice_bank_name: invoice.invoice_bank_name ?? '',
+    invoice_bank_account: invoice.invoice_bank_account ?? '',
+    invoice_address: invoice.invoice_address ?? '',
+    invoice_phone: invoice.invoice_phone ?? '',
+    invoice_amount: Number(invoice.invoice_amount),
+    invoice_type: invoice.invoice_type,
+  }
+}
+
+const fillReissueFormFromReissue = (reissue: InvoiceReissueApplicationResponse): void => {
+  reissueForm.value = {
+    reason: reissue.reason,
+    invoice_title_type: (reissue.invoice_title_type === 'PERSONAL' ? 'PERSONAL' : 'COMPANY') as TitleType,
+    invoice_title_text: reissue.invoice_title_text,
+    invoice_taxpayer_id: reissue.invoice_taxpayer_id,
+    invoice_bank_name: reissue.invoice_bank_name ?? '',
+    invoice_bank_account: reissue.invoice_bank_account ?? '',
+    invoice_address: reissue.invoice_address ?? '',
+    invoice_phone: reissue.invoice_phone ?? '',
+    invoice_amount: Number(reissue.invoice_amount),
+    invoice_type: reissue.invoice_type,
+  }
+}
+
+const normalizeOptionalText = (value: string): string | null => {
+  const trimmed = value.trim()
+  return trimmed.length === 0 ? null : trimmed
+}
+
+const handleCreateReissue = (): void => {
+  const invoice = invoiceInfo.value
+  if (invoice === null) return
+  editingReissueApplication.value = null
+  fillReissueFormFromInvoice(invoice)
+  reissueDialogOpen.value = true
+}
+
+const buildReissuePayload = (): InvoiceReissueApplicationCreate => ({
+  ...reissueForm.value,
+  reason: reissueForm.value.reason.trim(),
+  invoice_title_text: reissueForm.value.invoice_title_text.trim(),
+  invoice_taxpayer_id: reissueForm.value.invoice_taxpayer_id.trim(),
+  invoice_bank_name: normalizeOptionalText(reissueForm.value.invoice_bank_name),
+  invoice_bank_account: normalizeOptionalText(reissueForm.value.invoice_bank_account),
+  invoice_address: normalizeOptionalText(reissueForm.value.invoice_address),
+  invoice_phone: normalizeOptionalText(reissueForm.value.invoice_phone),
+  invoice_amount: Number(reissueForm.value.invoice_amount),
+})
+
+const submitReissueApproval = async (
+  reissue: InvoiceReissueApplicationResponse,
+  actionText: string,
+): Promise<void> => {
+  try {
+    const result = await approvalGenericApi.submitApproval('INVOICE_REISSUE', reissue.id)
+    if (result.approval_id === 0 && result.status === 'APPROVED') {
+      toast.success(`发票重开申请已${actionText}并自动批准`)
+    } else {
+      toast.success(`发票重开申请已${actionText}并提交审批`)
+    }
+  } catch (error: unknown) {
+    handleApiError(error, '提交发票重开审批')
+    toast.warning(`发票重开申请已${actionText}，但提交审批失败，请在发票详情页手动提交`)
+  }
+}
+
+const handleEditReissue = (reissue: InvoiceReissueApplicationResponse): void => {
+  if (reissue.applicant_id !== currentUserId.value) return
+  if (reissue.status !== 'DRAFT' && reissue.status !== 'REJECTED') return
+  editingReissueApplication.value = reissue
+  fillReissueFormFromReissue(reissue)
+  reissueDialogOpen.value = true
+}
+
+const handleSubmitReissue = async (): Promise<void> => {
+  const invoice = invoiceInfo.value
+  if (invoice === null) return
+  if (reissueForm.value.reason.trim().length === 0) {
+    toast.warning('请输入重开原因')
+    return
+  }
+  if (reissueForm.value.invoice_title_text.trim().length === 0) {
+    toast.warning('请输入新开票抬头')
+    return
+  }
+  if (reissueForm.value.invoice_taxpayer_id.trim().length === 0) {
+    toast.warning('请输入新纳税人识别号')
+    return
+  }
+  if (!Number.isFinite(Number(reissueForm.value.invoice_amount)) || Number(reissueForm.value.invoice_amount) <= 0) {
+    toast.warning('请输入有效的新开票金额')
+    return
+  }
+  if (reissueForm.value.invoice_type !== 'VAT_SPECIAL' && reissueForm.value.invoice_type !== 'VAT_NORMAL') {
+    toast.warning('请选择新发票类型')
+    return
+  }
+
+  creatingReissue.value = true
+  try {
+    const editingReissue = editingReissueApplication.value
+    if (editingReissue === null) {
+      const created = await invoiceApi.createInvoiceReissueApplication(invoice.id, buildReissuePayload())
+      await submitReissueApproval(created, '创建')
+      logger.info('[InvoiceDetailSheet]', '发票重开申请已创建', { reissue_id: created.id })
+    } else {
+      const updated = await invoiceApi.updateInvoiceReissueApplication(editingReissue.id, buildReissuePayload())
+      await submitReissueApproval(updated, '更新')
+      logger.info('[InvoiceDetailSheet]', '发票重开申请已更新并重新提交', { reissue_id: updated.id })
+    }
+    reissueDialogOpen.value = false
+    editingReissueApplication.value = null
+    await fetchInvoiceDetail(invoice.id)
+    emit('refresh')
+  } catch (error: unknown) {
+    const actionText = editingReissueApplication.value === null ? '创建发票重开申请' : '更新发票重开申请'
+    logger.error('[InvoiceDetailSheet]', `${actionText}失败`, { error })
+    handleApiError(error, actionText)
+  } finally {
+    creatingReissue.value = false
+  }
+}
+
+const handleOpenCompleteReissue = (reissue: InvoiceReissueApplicationResponse): void => {
+  completingReissueApplication.value = reissue
+  completeReissueForm.value = {
+    red_invoice_number: reissue.red_invoice_number ?? '',
+    new_invoice_number: reissue.new_invoice_number ?? '',
+    red_file: null,
+    new_file: null,
+  }
+  completeReissueDialogOpen.value = true
+}
+
+const handleReissueFileChange = (event: Event, fileKind: 'red' | 'new'): void => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  if (fileKind === 'red') {
+    completeReissueForm.value.red_file = file
+  } else {
+    completeReissueForm.value.new_file = file
+  }
+}
+
+const handleCompleteReissue = async (): Promise<void> => {
+  const reissue = completingReissueApplication.value
+  const invoice = invoiceInfo.value
+  if (reissue === null || invoice === null) return
+
+  const redNumber = completeReissueForm.value.red_invoice_number.trim()
+  const newNumber = completeReissueForm.value.new_invoice_number.trim()
+  if (completeReissueForm.value.red_file === null || completeReissueForm.value.new_file === null) {
+    toast.warning('请上传红字发票和新发票文件')
+    return
+  }
+
+  completingReissue.value = true
+  try {
+    await invoiceApi.completeInvoiceReissue(reissue.id, {
+      red_file: completeReissueForm.value.red_file,
+      new_file: completeReissueForm.value.new_file,
+      red_invoice_number: redNumber,
+      new_invoice_number: newNumber,
+    })
+    toast.success('发票重开已完成')
+    completeReissueDialogOpen.value = false
+    completingReissueApplication.value = null
+    await fetchInvoiceDetail(invoice.id)
+    emit('refresh')
+  } catch (error: unknown) {
+    logger.error('[InvoiceDetailSheet]', '完成发票重开失败', { error })
+    handleApiError(error, '完成发票重开')
+  } finally {
+    completingReissue.value = false
+  }
+}
+
+const handleDownloadReissueFile = async (
+  reissue: InvoiceReissueApplicationResponse,
+  fileKind: ReissueFileKind,
+): Promise<void> => {
+  const invoiceNumber = fileKind === 'red' ? reissue.red_invoice_number : reissue.new_invoice_number
+  try {
+    await downloadInvoiceReissueFile(reissue.id, fileKind, invoiceNumber ?? undefined)
+    toast.success('发票文件下载成功')
+  } catch (error: unknown) {
+    logger.error('[InvoiceDetailSheet]', '下载重开发票文件失败', { error })
+    handleApiError(error, '下载重开发票文件')
+  }
+}
+
+const handleDownloadReissueAttachment = async (
+  reissue: InvoiceReissueApplicationResponse,
+  file: FileAttachmentItem,
+): Promise<void> => {
+  const id = String(file.id)
+  if (id.endsWith('-red')) {
+    await handleDownloadReissueFile(reissue, 'red')
+    return
+  }
+  if (id.endsWith('-new')) {
+    await handleDownloadReissueFile(reissue, 'new')
+    return
+  }
+  toast.warning('无法识别重开发票文件类型')
 }
 
 const handleOpenChange = (open: boolean): void => {
@@ -314,6 +652,10 @@ const handleConfirmIssued = async (): Promise<void> => {
 const handleDownloadWithFeedback = async (_file?: FileAttachmentItem): Promise<void> => {
   const invoice = invoiceInfo.value
   if (invoice === null) return
+  if (invoice.invoice_effective_status === 'REISSUED') {
+    toast.warning('原蓝字发票已红冲，不能下载')
+    return
+  }
 
   try {
     await downloadInvoiceFileApi(
@@ -328,6 +670,10 @@ const handleDownloadWithFeedback = async (_file?: FileAttachmentItem): Promise<v
 }
 
 const handlePreviewInvoiceFile = (_file: FileAttachmentItem): void => {
+  if (invoiceInfo.value?.invoice_effective_status === 'REISSUED') {
+    toast.warning('原蓝字发票已红冲，不能预览')
+    return
+  }
   if (invoiceFilePreviewUrl.value.length === 0) {
     toast.warning('发票文件预览加载中，请稍后再试')
   }
@@ -377,6 +723,10 @@ const getTitleTypeText = (type: string | undefined): string => {
   if (type === 'COMPANY') return '单位'
   if (type === 'PERSONAL') return '个人'
   return '-'
+}
+
+const canCompleteReissue = (reissue: InvoiceReissueApplicationResponse): boolean => {
+  return reissue.status === 'APPROVED' && permissionStore.hasPermission('invoice:mark_issued')
 }
 
 const formatDateTime = (dateStr: string | null | undefined): string => {
@@ -435,14 +785,22 @@ onBeforeUnmount((): void => {
                 type="invoice"
               />
               <span v-if="invoiceInfo" class="type-badge">{{ getInvoiceTypeText(invoiceInfo.invoice_type) }}</span>
-              <span v-else>{{ loading ? '正在加载发票申请' : '查看申请、审批与发票文件' }}</span>
+              <span
+                v-if="invoiceInfo?.reissue_status === 'REISSUE_PENDING'"
+                class="reissue-badge reissue-badge--pending"
+              >
+                重开处理中
+              </span>
+              <span
+                v-if="invoiceInfo?.reissue_status === 'REISSUED'"
+                class="reissue-badge reissue-badge--done"
+              >
+                已重开
+              </span>
+              <span v-if="!invoiceInfo">{{ loading ? '正在加载发票申请' : '查看申请、审批与发票文件' }}</span>
             </SheetDescription>
           </div>
 
-          <div v-if="invoiceInfo" class="amount-summary" aria-label="开票金额">
-            <span>开票金额</span>
-            <AmountText :value="invoiceInfo.invoice_amount" size="lg" tone="warning" />
-          </div>
         </div>
       </SheetHeader>
 
@@ -479,8 +837,7 @@ onBeforeUnmount((): void => {
           <template v-else-if="invoiceInfo">
             <Card class="info-card">
               <CardHeader class="section-heading">
-                <CardTitle class="section-title">基本信息</CardTitle>
-                <CardDescription>客户、合同、申请人与开票状态。</CardDescription>
+                <CardTitle class="section-title">基础信息</CardTitle>
               </CardHeader>
               <CardContent class="section-content">
                 <div class="attributes-grid">
@@ -544,115 +901,181 @@ onBeforeUnmount((): void => {
               </CardContent>
             </Card>
 
-            <Alert
-              v-if="invoiceInfo.status === 'ISSUED' && invoiceInfo.invoice_file_path"
-              class="issued-alert"
+            <Card
+              v-for="reissue in invoiceInfo.reissue_applications"
+              :key="reissue.id"
+              class="info-card"
             >
-              <Stamp aria-hidden="true" />
-              <AlertTitle>已开票</AlertTitle>
-              <AlertDescription>
-                {{ invoiceInfo.invoice_number ? `发票号码：${invoiceInfo.invoice_number}` : '发票文件已生成，可下载或预览。' }}
-              </AlertDescription>
-            </Alert>
-
-            <Card class="info-card">
-              <CardHeader class="section-heading">
-                <CardTitle class="section-title">开票抬头</CardTitle>
-                <CardDescription>发票抬头、税号、开户行与地址电话。</CardDescription>
+              <CardHeader class="section-heading reissue-card-header">
+                <div class="reissue-card-heading">
+                  <CardTitle class="section-title">重开记录</CardTitle>
+                </div>
+                <Button
+                  v-if="canCompleteReissue(reissue)"
+                  type="button"
+                  size="sm"
+                  @click="handleOpenCompleteReissue(reissue)"
+                >
+                  <Stamp data-icon="inline-start" aria-hidden="true" />
+                  完成重开
+                </Button>
               </CardHeader>
               <CardContent class="section-content">
                 <div class="attributes-grid">
                   <div class="attribute-item">
-                    <span class="attribute-label">
-                      <Building2 aria-hidden="true" />
-                      抬头类型
-                    </span>
-                    <Badge variant="secondary" class="title-type-badge">
-                      {{ getTitleTypeText(invoiceInfo.invoice_title_type) }}
-                    </Badge>
+                    <span class="attribute-label">重开原因</span>
+                    <span class="attribute-value">{{ reissue.reason }}</span>
                   </div>
                   <div class="attribute-item">
-                    <span class="attribute-label">
-                      <FileText aria-hidden="true" />
-                      开票抬头
-                    </span>
-                    <span class="attribute-value">{{ formatText(invoiceInfo.invoice_title_text) }}</span>
+                    <span class="attribute-label">新开票抬头</span>
+                    <span class="attribute-value">{{ reissue.invoice_title_text }}</span>
                   </div>
                   <div class="attribute-item">
-                    <span class="attribute-label">
-                      <Key aria-hidden="true" />
-                      纳税人识别号
-                    </span>
-                    <span class="attribute-value mono-value">{{ formatText(invoiceInfo.invoice_taxpayer_id) }}</span>
+                    <span class="attribute-label">新税号</span>
+                    <span class="attribute-value mono-value">{{ reissue.invoice_taxpayer_id }}</span>
                   </div>
                   <div class="attribute-item">
-                    <span class="attribute-label">
-                      <CreditCard aria-hidden="true" />
-                      开户行
-                    </span>
-                    <span class="attribute-value">{{ formatText(invoiceInfo.invoice_bank_name) }}</span>
+                    <span class="attribute-label">新开票金额</span>
+                    <AmountText class="attribute-amount" :value="reissue.invoice_amount" size="sm" tone="warning" />
                   </div>
                   <div class="attribute-item">
-                    <span class="attribute-label">
-                      <Wallet aria-hidden="true" />
-                      开户账号
-                    </span>
-                    <span class="attribute-value mono-value">{{ formatText(invoiceInfo.invoice_bank_account) }}</span>
+                    <span class="attribute-label">新发票类型</span>
+                    <span class="attribute-value">{{ getInvoiceTypeText(reissue.invoice_type) }}</span>
                   </div>
                   <div class="attribute-item">
-                    <span class="attribute-label">
-                      <MapPin aria-hidden="true" />
-                      开票地址
-                    </span>
-                    <span class="attribute-value">{{ formatText(invoiceInfo.invoice_address) }}</span>
+                    <span class="attribute-label">红字发票号码</span>
+                    <span class="attribute-value mono-value">{{ formatText(reissue.red_invoice_number) }}</span>
                   </div>
                   <div class="attribute-item">
-                    <span class="attribute-label">
-                      <Phone aria-hidden="true" />
-                      电话
-                    </span>
-                    <span class="attribute-value mono-value">{{ formatText(invoiceInfo.invoice_phone) }}</span>
+                    <span class="attribute-label">新发票号码</span>
+                    <span class="attribute-value mono-value">{{ formatText(reissue.new_invoice_number) }}</span>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
 
-            <Card v-if="invoiceInfo.invoice_file_path" class="info-card">
-              <CardHeader class="section-heading">
-                <CardTitle class="section-title">发票文件</CardTitle>
-                <CardDescription>上传由审批中心处理，发票管理仅支持查看、下载与预览。</CardDescription>
-              </CardHeader>
-              <CardContent class="section-content">
-                <FileAttachment
-                  title="发票文件"
-                  mode="readonly"
-                  :files="invoiceFiles"
-                  empty-text="暂无发票文件"
-                  @download="handleDownloadWithFeedback"
-                  @preview="handlePreviewInvoiceFile"
-                />
+                <div
+                  v-if="reissue.red_invoice_file_path || reissue.new_invoice_file_path"
+                  class="invoice-detail-group"
+                >
+                  <h4 class="invoice-detail-group-title">重开发票文件</h4>
+                  <FileAttachment
+                    mode="readonly"
+                    :files="getReissueInvoiceFiles(reissue)"
+                    :allow-preview="false"
+                    :show-header="false"
+                    empty-text="暂无重开发票文件"
+                    @download="handleDownloadReissueAttachment(reissue, $event)"
+                  />
+                </div>
+
+                <div class="invoice-detail-group">
+                  <ApprovalProcessGeneric
+                    entity-type="INVOICE_REISSUE"
+                    :entity-id="reissue.id"
+                    title="发票重开审批进度"
+                    :can-approve="canApproveReissue && reissue.status === 'PENDING_REVIEW'"
+                    :is-submitter="reissue.applicant_id === currentUserId"
+                    @submitted="handleApprovalChanged"
+                    @approved="handleApprovalChanged"
+                    @rejected="handleApprovalChanged"
+                    @withdrawn="handleApprovalChanged"
+                    @resubmit="handleEditReissue(reissue)"
+                  />
+                </div>
               </CardContent>
             </Card>
 
             <Card class="info-card">
               <CardHeader class="section-heading">
-                <CardTitle class="section-title">审批进度</CardTitle>
-                <CardDescription>发票申请的审批历史与当前处理状态。</CardDescription>
+                <CardTitle class="section-title">原发票</CardTitle>
               </CardHeader>
               <CardContent class="section-content">
-                <ApprovalProcessGeneric
-                  entity-type="INVOICE"
-                  :entity-id="invoiceInfo.id"
-                  :can-approve="canApproveGeneric"
-                  :is-submitter="isSubmitterGeneric"
-                  @submitted="handleApprovalChanged"
-                  @approved="handleApprovalChanged"
-                  @rejected="handleApprovalChanged"
-                  @withdrawn="handleApprovalChanged"
-                  @uploaded="handleApprovalChanged"
-                />
+                <div class="invoice-detail-group">
+                  <h4 class="invoice-detail-group-title">开票抬头</h4>
+                  <div class="attributes-grid">
+                    <div class="attribute-item">
+                      <span class="attribute-label">
+                        <Building2 aria-hidden="true" />
+                        抬头类型
+                      </span>
+                      <Badge variant="secondary" class="title-type-badge">
+                        {{ getTitleTypeText(invoiceInfo.invoice_title_type) }}
+                      </Badge>
+                    </div>
+                    <div class="attribute-item">
+                      <span class="attribute-label">
+                        <FileText aria-hidden="true" />
+                        开票抬头
+                      </span>
+                      <span class="attribute-value">{{ formatText(invoiceInfo.invoice_title_text) }}</span>
+                    </div>
+                    <div class="attribute-item">
+                      <span class="attribute-label">
+                        <Key aria-hidden="true" />
+                        纳税人识别号
+                      </span>
+                      <span class="attribute-value mono-value">{{ formatText(invoiceInfo.invoice_taxpayer_id) }}</span>
+                    </div>
+                    <div class="attribute-item">
+                      <span class="attribute-label">
+                        <CreditCard aria-hidden="true" />
+                        开户行
+                      </span>
+                      <span class="attribute-value">{{ formatText(invoiceInfo.invoice_bank_name) }}</span>
+                    </div>
+                    <div class="attribute-item">
+                      <span class="attribute-label">
+                        <Wallet aria-hidden="true" />
+                        开户账号
+                      </span>
+                      <span class="attribute-value mono-value">{{ formatText(invoiceInfo.invoice_bank_account) }}</span>
+                    </div>
+                    <div class="attribute-item">
+                      <span class="attribute-label">
+                        <MapPin aria-hidden="true" />
+                        开票地址
+                      </span>
+                      <span class="attribute-value">{{ formatText(invoiceInfo.invoice_address) }}</span>
+                    </div>
+                    <div class="attribute-item">
+                      <span class="attribute-label">
+                        <Phone aria-hidden="true" />
+                        电话
+                      </span>
+                      <span class="attribute-value mono-value">{{ formatText(invoiceInfo.invoice_phone) }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="invoiceInfo.invoice_file_path" class="invoice-detail-group">
+                  <h4 class="invoice-detail-group-title">原蓝字发票</h4>
+                  <FileAttachment
+                    mode="readonly"
+                    :files="invoiceFiles"
+                    :allow-download="invoiceInfo.invoice_effective_status !== 'REISSUED'"
+                    :allow-preview="invoiceInfo.invoice_effective_status !== 'REISSUED'"
+                    :show-header="false"
+                    empty-text="暂无发票文件"
+                    @download="handleDownloadWithFeedback"
+                    @preview="handlePreviewInvoiceFile"
+                  />
+                </div>
+
+                <div class="invoice-detail-group">
+                  <ApprovalProcessGeneric
+                    entity-type="INVOICE"
+                    :entity-id="invoiceInfo.id"
+                    title="原发票审批进度"
+                    :can-approve="canApproveGeneric"
+                    :is-submitter="isSubmitterGeneric"
+                    @submitted="handleApprovalChanged"
+                    @approved="handleApprovalChanged"
+                    @rejected="handleApprovalChanged"
+                    @withdrawn="handleApprovalChanged"
+                  />
+                </div>
               </CardContent>
             </Card>
+
           </template>
 
           <template v-else>
@@ -701,6 +1124,14 @@ onBeforeUnmount((): void => {
           <Stamp data-icon="inline-start" aria-hidden="true" />
           标记开票
         </Button>
+        <Button
+          v-if="canCreateReissue"
+          type="button"
+          @click="handleCreateReissue"
+        >
+          <RotateCcw data-icon="inline-start" aria-hidden="true" />
+          申请重开
+        </Button>
       </SheetFooter>
     </DetailSheetContent>
   </Sheet>
@@ -734,6 +1165,146 @@ onBeforeUnmount((): void => {
     </DialogContent>
   </Dialog>
 
+  <Dialog :open="reissueDialogOpen" @update:open="reissueDialogOpen = $event">
+    <DialogContent class="sm:max-w-[720px]">
+      <DialogHeader>
+        <DialogTitle>{{ reissueDialogTitle }}</DialogTitle>
+        <DialogDescription>{{ reissueDialogDescription }}</DialogDescription>
+      </DialogHeader>
+      <div class="dialog-form dialog-form-grid">
+        <div class="form-field form-field--full">
+          <Label for="reissue-reason">
+            重开原因
+            <span class="required-mark" aria-hidden="true">*</span>
+          </Label>
+          <Textarea
+            id="reissue-reason"
+            v-model="reissueForm.reason"
+            placeholder="请填写重开原因"
+            required
+            aria-required="true"
+            :disabled="creatingReissue"
+          />
+        </div>
+        <div class="form-field">
+          <Label for="reissue-title">
+            新开票抬头
+            <span class="required-mark" aria-hidden="true">*</span>
+          </Label>
+          <Input
+            id="reissue-title"
+            v-model="reissueForm.invoice_title_text"
+            required
+            aria-required="true"
+            :disabled="creatingReissue"
+          />
+        </div>
+        <div class="form-field">
+          <Label for="reissue-taxpayer">
+            新纳税人识别号
+            <span class="required-mark" aria-hidden="true">*</span>
+          </Label>
+          <Input
+            id="reissue-taxpayer"
+            v-model="reissueForm.invoice_taxpayer_id"
+            required
+            aria-required="true"
+            :disabled="creatingReissue"
+          />
+        </div>
+        <div class="form-field">
+          <Label for="reissue-amount">
+            新开票金额
+            <span class="required-mark" aria-hidden="true">*</span>
+          </Label>
+          <Input
+            id="reissue-amount"
+            v-model.number="reissueForm.invoice_amount"
+            type="number"
+            min="0"
+            step="0.01"
+            required
+            aria-required="true"
+            :disabled="creatingReissue"
+          />
+        </div>
+        <div class="form-field">
+          <Label id="reissue-invoice-type-label">
+            新发票类型
+            <span class="required-mark" aria-hidden="true">*</span>
+          </Label>
+          <InvoiceTypeSegmentedControl
+            v-model="reissueForm.invoice_type"
+            class="reissue-type-control"
+            :disabled="creatingReissue"
+            labelled-by="reissue-invoice-type-label"
+          />
+        </div>
+        <div class="form-field">
+          <Label for="reissue-bank">开户行</Label>
+          <Input id="reissue-bank" v-model="reissueForm.invoice_bank_name" :disabled="creatingReissue" />
+        </div>
+        <div class="form-field">
+          <Label for="reissue-account">开户账号</Label>
+          <Input id="reissue-account" v-model="reissueForm.invoice_bank_account" :disabled="creatingReissue" />
+        </div>
+        <div class="form-field">
+          <Label for="reissue-phone">电话</Label>
+          <Input id="reissue-phone" v-model="reissueForm.invoice_phone" :disabled="creatingReissue" />
+        </div>
+        <div class="form-field form-field--full">
+          <Label for="reissue-address">开票地址</Label>
+          <Input id="reissue-address" v-model="reissueForm.invoice_address" :disabled="creatingReissue" />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" type="button" :disabled="creatingReissue" @click="reissueDialogOpen = false">
+          取消
+        </Button>
+        <Button type="button" :disabled="creatingReissue" @click="handleSubmitReissue">
+          <Loader2 v-if="creatingReissue" data-icon="inline-start" aria-hidden="true" class="animate-spin" />
+          {{ creatingReissue ? '提交中...' : '提交审批' }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog :open="completeReissueDialogOpen" @update:open="completeReissueDialogOpen = $event">
+    <DialogContent class="sm:max-w-[560px]">
+      <DialogHeader>
+        <DialogTitle>完成发票重开</DialogTitle>
+        <DialogDescription>需要同时上传红字发票和新蓝字发票，发票号码可选。</DialogDescription>
+      </DialogHeader>
+      <div class="dialog-form">
+        <div class="form-field">
+          <Label for="red-invoice-number">红字发票号码</Label>
+          <Input id="red-invoice-number" v-model="completeReissueForm.red_invoice_number" :disabled="completingReissue" />
+        </div>
+        <div class="form-field">
+          <Label for="red-invoice-file">红字发票文件<span class="required-mark">*</span></Label>
+          <Input id="red-invoice-file" type="file" :disabled="completingReissue" @change="handleReissueFileChange($event, 'red')" />
+        </div>
+        <div class="form-field">
+          <Label for="new-invoice-number">新发票号码</Label>
+          <Input id="new-invoice-number" v-model="completeReissueForm.new_invoice_number" :disabled="completingReissue" />
+        </div>
+        <div class="form-field">
+          <Label for="new-invoice-file">新发票文件<span class="required-mark">*</span></Label>
+          <Input id="new-invoice-file" type="file" :disabled="completingReissue" @change="handleReissueFileChange($event, 'new')" />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" type="button" :disabled="completingReissue" @click="completeReissueDialogOpen = false">
+          取消
+        </Button>
+        <Button type="button" :disabled="completingReissue" @click="handleCompleteReissue">
+          <Loader2 v-if="completingReissue" data-icon="inline-start" aria-hidden="true" class="animate-spin" />
+          {{ completingReissue ? '提交中...' : '完成重开' }}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
   <InvoiceApplicationFormDialog
     :open="editDialogOpen"
     mode="edit"
@@ -755,14 +1326,10 @@ onBeforeUnmount((): void => {
 
 .invoice-header-summary {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: $wolf-space-md-v2;
   min-width: 0;
-
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
 }
 
 .title-avatar {
@@ -800,7 +1367,8 @@ onBeforeUnmount((): void => {
 }
 
 .type-badge,
-.title-type-badge {
+.title-type-badge,
+.reissue-badge {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
@@ -813,40 +1381,25 @@ onBeforeUnmount((): void => {
   line-height: $wolf-line-height-body-v2;
 }
 
-.amount-summary {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: $wolf-space-xs-v2;
+.reissue-badge--pending {
+  background: $wolf-warning-bg-v2;
+  color: $wolf-warning-text-v2;
+}
 
-  span {
-    color: $wolf-text-tertiary-v2;
-    font-size: $wolf-font-size-caption-v2;
-  }
-
-  strong {
-    color: $wolf-primary-v2;
-    font-family: $wolf-font-mono-v2;
-    font-size: $wolf-font-size-title-v2;
-    font-weight: $wolf-font-weight-semibold-v2;
-    font-variant-numeric: tabular-nums;
-  }
-
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    grid-column: 1 / -1;
-    align-items: flex-start;
-    padding-left: calc($wolf-touch-target-min-v2 + $wolf-space-md-v2);
-  }
+.reissue-badge--done {
+  background: $wolf-success-bg-v2;
+  color: $wolf-success-text-v2;
 }
 
 .sheet-body {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $wolf-space-xl-v2;
   padding: $wolf-space-xl-v2;
 
   @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
     padding: $wolf-space-md-v2;
+    gap: $wolf-space-lg-v2;
   }
 }
 
@@ -864,13 +1417,20 @@ onBeforeUnmount((): void => {
   padding: $wolf-space-2xl-v2;
 }
 
-.info-card {
-  border-radius: $wolf-radius-v2;
+.info-card,
+.state-card {
+  background: $wolf-bg-card-v2;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: $wolf-radius-surface-v2;
+  box-shadow: $wolf-shadow-card-v2;
 }
 
 .section-heading {
+  display: flex;
+  flex-direction: column;
   gap: $wolf-space-xs-v2;
-  padding-bottom: $wolf-space-sm-v2;
+  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
+  border-bottom: 1px solid $wolf-border-light-v2;
 }
 
 .section-title {
@@ -880,7 +1440,7 @@ onBeforeUnmount((): void => {
 }
 
 .section-content {
-  padding-top: 0;
+  padding: $wolf-space-lg-v2;
 }
 
 .attributes-grid {
@@ -927,15 +1487,54 @@ onBeforeUnmount((): void => {
   overflow-wrap: anywhere;
 }
 
+.attribute-item .attribute-amount {
+  align-self: flex-start;
+  justify-content: flex-start;
+}
+
 .mono-value {
   font-family: $wolf-font-mono-v2;
   font-variant-numeric: tabular-nums;
 }
 
-.issued-alert {
-  border-color: $wolf-success-v2;
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
+.invoice-detail-group {
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-md-v2;
+  padding-top: $wolf-space-lg-v2;
+  border-top: 1px solid $wolf-border-light-v2;
+
+  &:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+}
+
+.invoice-detail-group + .invoice-detail-group {
+  margin-top: $wolf-space-lg-v2;
+}
+
+.invoice-detail-group-title {
+  color: $wolf-text-secondary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  line-height: $wolf-line-height-body-v2;
+}
+
+.reissue-card-header {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $wolf-space-md-v2;
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    flex-direction: column;
+  }
+}
+
+.reissue-card-heading {
+  min-width: 0;
 }
 
 .invoice-sheet-footer {
@@ -951,9 +1550,27 @@ onBeforeUnmount((): void => {
   gap: $wolf-space-md-v2;
 }
 
+.dialog-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    grid-template-columns: 1fr;
+  }
+}
+
 .form-field {
   display: flex;
   flex-direction: column;
   gap: $wolf-space-xs-v2;
+}
+
+.required-mark {
+  margin-left: 2px;
+  color: $wolf-danger-text-v2;
+}
+
+.form-field--full {
+  grid-column: 1 / -1;
 }
 </style>

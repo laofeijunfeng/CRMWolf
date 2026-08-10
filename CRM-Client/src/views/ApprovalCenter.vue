@@ -407,7 +407,6 @@
               :entity-id="selectedApprovalEntityId"
               :can-approve="activeTab === 'pending'"
               :is-submitter="activeTab === 'submitted'"
-              :show-invoice-upload-action="false"
               @approved="onApprovalActionDone"
               @rejected="onApprovalActionDone"
               @withdrawn="onApprovalActionDone"
@@ -419,15 +418,15 @@
 
         <!-- Footer -->
         <SheetFooter
-          v-if="showInvoiceUploadFooter"
+          v-if="showBusinessActionFooter"
           class="p-4 border-t border-wolf-border-default-v2 flex flex-row justify-end gap-2"
         >
           <Button
-            data-testid="mark-issued-btn"
-            aria-label="上传发票文件，审批已通过"
-            @click="markIssuedDialogVisible = true"
+            :data-testid="businessActionTestId"
+            :aria-label="uploadFooterAriaLabel"
+            @click="openUploadFooterDialog"
           >
-            上传发票文件
+            {{ uploadFooterLabel }}
           </Button>
         </SheetFooter>
       </DetailSheetContent>
@@ -438,6 +437,20 @@
       v-model:open="markIssuedDialogVisible"
       :application-id="selectedApproval.business_id"
       @issued="handleInvoiceFileUploaded"
+    />
+
+    <InvoiceReissueCompleteDialog
+      v-if="selectedApproval?.business_type === 'INVOICE_REISSUE'"
+      v-model:open="reissueCompleteDialogVisible"
+      :reissue-id="selectedApproval.business_id"
+      @completed="handleInvoiceReissueCompleted"
+    />
+
+    <LicenseIssueDialog
+      v-if="selectedApproval?.business_type === 'LICENSE'"
+      v-model:open="licenseIssueDialogVisible"
+      :application-id="selectedApproval.business_id"
+      @issued="handleLicenseIssued"
     />
 
     <Dialog :open="attachmentPreviewVisible" @update:open="handleAttachmentPreviewOpenChange">
@@ -544,6 +557,8 @@ import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
+import InvoiceReissueCompleteDialog from '@/components/dialogs/InvoiceReissueCompleteDialog.vue'
+import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
@@ -593,6 +608,8 @@ const listLoading = ref<boolean>(false)
 const sheetVisible = ref<boolean>(false)
 const selectedApproval = ref<ApprovalListItem | null>(null)
 const markIssuedDialogVisible = ref<boolean>(false)
+const reissueCompleteDialogVisible = ref<boolean>(false)
+const licenseIssueDialogVisible = ref<boolean>(false)
 const triggerRowIndex = ref<number>(-1)
 const focusedRowEl = ref<HTMLElement | null>(null)
 
@@ -651,6 +668,62 @@ const showInvoiceUploadFooter = computed<boolean>(() =>
   permissionStore.hasPermission('invoice:mark_issued')
 )
 
+const showReissueCompleteFooter = computed<boolean>(() =>
+  selectedApproval.value?.business_type === 'INVOICE_REISSUE' &&
+  activeApprovalDetail.value?.business_type === 'INVOICE_REISSUE' &&
+  activeApprovalDetail.value.status === 'APPROVED' &&
+  entityDetailValue('status') !== 'COMPLETED' &&
+  permissionStore.hasPermission('invoice:mark_issued')
+)
+
+const showLicenseIssueFooter = computed<boolean>(() =>
+  selectedApproval.value?.business_type === 'LICENSE' &&
+  activeApprovalDetail.value?.business_type === 'LICENSE' &&
+  activeApprovalDetail.value.status === 'APPROVED' &&
+  activeApprovalDetail.value.license_status !== 'ISSUED' &&
+  permissionStore.hasPermission('license:issue')
+)
+
+const showBusinessActionFooter = computed<boolean>(() =>
+  showInvoiceUploadFooter.value || showReissueCompleteFooter.value || showLicenseIssueFooter.value
+)
+
+const uploadFooterLabel = computed<string>(() =>
+  showReissueCompleteFooter.value
+    ? '上传重开发票'
+    : showLicenseIssueFooter.value
+      ? '发放 License'
+      : '上传发票文件'
+)
+
+const uploadFooterAriaLabel = computed<string>(() =>
+  showReissueCompleteFooter.value
+    ? '上传红字发票和新发票，审批已通过'
+    : showLicenseIssueFooter.value
+      ? '发放 License，审批已通过'
+      : '上传发票文件，审批已通过'
+)
+
+const businessActionTestId = computed<string>(() =>
+  showReissueCompleteFooter.value
+    ? 'complete-reissue-btn'
+    : showLicenseIssueFooter.value
+      ? 'issue-license-btn'
+      : 'mark-issued-btn'
+)
+
+const openUploadFooterDialog = (): void => {
+  if (showReissueCompleteFooter.value) {
+    reissueCompleteDialogVisible.value = true
+    return
+  }
+  if (showLicenseIssueFooter.value) {
+    licenseIssueDialogVisible.value = true
+    return
+  }
+  markIssuedDialogVisible.value = true
+}
+
 const subjectNumber = computed<string>(() =>
   activeApprovalDetail.value?.application_number ?? selectedApproval.value?.application_number ?? '-'
 )
@@ -677,6 +750,7 @@ const approvalSubjectTitle = computed<string>(() => {
     CONTRACT: '合同信息',
     PAYMENT: '回款信息',
     INVOICE: '发票申请信息',
+    INVOICE_REISSUE: '发票重开申请信息',
     LICENSE: 'License 申请信息',
     OPPORTUNITY: '商机信息'
   }
@@ -752,6 +826,17 @@ const invoiceStatusLabel = (status?: string | null): string => {
     APPROVED: '已通过',
     REJECTED: '已驳回',
     ISSUED: '已开票'
+  }
+  return status == null ? '-' : (map[status] ?? status)
+}
+
+const invoiceReissueStatusLabel = (status?: string | null): string => {
+  const map: Record<string, string> = {
+    DRAFT: '草稿',
+    PENDING_REVIEW: '审批中',
+    APPROVED: '待财务重开',
+    REJECTED: '已驳回',
+    COMPLETED: '已重开'
   }
   return status == null ? '-' : (map[status] ?? status)
 }
@@ -905,6 +990,36 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
             : null
         }
       ]
+    case 'INVOICE_REISSUE':
+      return [
+        { key: 'number', label: '重开申请编号', value: entityDetailValue('application_number') ?? subjectNumber.value, type: 'copy' },
+        { key: 'original_number', label: '原发票申请', value: entityDetailValue('original_invoice_application_number'), type: 'copy' },
+        { key: 'reason', label: '重开原因', value: entityDetailValue('reason'), wide: true },
+        { key: 'title', label: '新开票抬头', value: entityDetailValue('invoice_title_text') ?? subjectName.value, wide: true },
+        commonCustomerField,
+        { key: 'amount', label: '新开票金额', value: entityDetailValue('invoice_amount') ?? subjectAmount.value, type: 'amount' },
+        { key: 'invoice_type', label: '新发票类型', value: invoiceTypeLabel(entityDetailValue('invoice_type')?.toString()) },
+        { key: 'status', label: '重开状态', value: invoiceReissueStatusLabel(entityDetailValue('status')?.toString()), type: 'status' },
+        { key: 'taxpayer_id', label: '新纳税人识别号', value: entityDetailValue('invoice_taxpayer_id'), type: 'mono', wide: true },
+        { key: 'bank', label: '开户行', value: entityDetailValue('invoice_bank_name') },
+        { key: 'bank_account', label: '银行账号', value: entityDetailValue('invoice_bank_account'), type: 'mono' },
+        { key: 'invoice_address', label: '地址', value: entityDetailValue('invoice_address'), wide: true },
+        { key: 'invoice_phone', label: '电话', value: entityDetailValue('invoice_phone') },
+        { key: 'red_invoice_number', label: '红字发票号码', value: entityDetailValue('red_invoice_number'), type: 'mono' },
+        { key: 'red_issued_time', label: '红字发票时间', value: formatDateValue(entityDetailValue('red_issued_time')) },
+        {
+          key: 'red_invoice_file',
+          label: '红字发票文件',
+          value: entityDetailValue('red_invoice_file_path') != null ? '已上传' : null
+        },
+        { key: 'new_invoice_number', label: '新发票号码', value: entityDetailValue('new_invoice_number'), type: 'mono' },
+        { key: 'new_issued_time', label: '新发票时间', value: formatDateValue(entityDetailValue('new_issued_time')) },
+        {
+          key: 'new_invoice_file',
+          label: '新发票文件',
+          value: entityDetailValue('new_invoice_file_path') != null ? '已上传' : null
+        }
+      ]
     case 'PAYMENT':
       return [
         { key: 'number', label: '回款编号', value: entityDetailValue('record_number') ?? subjectNumber.value, type: 'copy' },
@@ -997,6 +1112,7 @@ const filterFields: ListFilterField[] = [
     options: [
       { value: 'PAYMENT', label: '回款' },
       { value: 'INVOICE', label: '发票' },
+      { value: 'INVOICE_REISSUE', label: '发票重开' },
       { value: 'CONTRACT', label: '合同' },
       { value: 'LICENSE', label: 'License' },
       { value: 'OPPORTUNITY', label: '商机' }
@@ -1102,6 +1218,7 @@ const businessTypeLabel = (t: EntityType): string => {
   const map: Record<EntityType, string> = {
     PAYMENT: '回款',
     INVOICE: '发票',
+    INVOICE_REISSUE: '发票重开',
     CONTRACT: '合同',
     LICENSE: 'License',
     OPPORTUNITY: '商机'
@@ -1226,6 +1343,8 @@ const onSheetClosed = (): void => {
   selectedApproval.value = null
   store.clearDetail()
   markIssuedDialogVisible.value = false
+  reissueCompleteDialogVisible.value = false
+  licenseIssueDialogVisible.value = false
   triggerRowIndex.value = -1
 }
 
@@ -1237,6 +1356,18 @@ const onApprovalActionDone = (): void => {
 
 const handleInvoiceFileUploaded = (): void => {
   markIssuedDialogVisible.value = false
+  sheetVisible.value = false
+  fetchList()
+}
+
+const handleInvoiceReissueCompleted = (): void => {
+  reissueCompleteDialogVisible.value = false
+  sheetVisible.value = false
+  fetchList()
+}
+
+const handleLicenseIssued = (): void => {
+  licenseIssueDialogVisible.value = false
   sheetVisible.value = false
   fetchList()
 }
@@ -1277,6 +1408,7 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     // 跳转到对应实体编辑页
     const route: Record<Exclude<EntityType, 'CONTRACT'>, string | ReturnType<typeof customerDetailRoute>> = {
       INVOICE: `/invoices/${row.business_id}`,
+      INVOICE_REISSUE: '/invoices',
       // 回款无独立编辑页（/payments 为列表页）：跳列表页 + info 提示，
       // 保证不白屏/不断旅程；用户在列表内修改后重新提交审批。
       PAYMENT: `/payments`,
@@ -1297,6 +1429,9 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     }
     if (row.business_type === 'INVOICE') {
       toast.info('请在发票详情页编辑后重新提交审批')
+    }
+    if (row.business_type === 'INVOICE_REISSUE') {
+      toast.info('请在发票列表中打开原发票详情后处理重开申请')
     }
     if (row.business_type === 'LICENSE') {
       toast.info('请修改 License 申请后重新提交审批')

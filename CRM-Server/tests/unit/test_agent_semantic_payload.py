@@ -5,6 +5,7 @@ from datetime import datetime
 
 from app.services.agent.schemas import AgentSemanticParseResult
 from app.services.agent.semantic_payload import parsed_from_semantic
+from app.services.agent.temporal import AgentTemporalResolver
 
 
 class FakeTemporalResolver:
@@ -107,3 +108,67 @@ def test_parsed_from_semantic_computes_opportunity_missing_fields_with_resolved_
 
     assert parsed["opportunity"]["expected_closing_date"] == "2026-07-31"
     assert parsed["missing_opportunity_fields"] == ["subscription_years"]
+
+
+def test_parsed_from_semantic_resolves_relative_month_follow_up_time():
+    semantic_result = AgentSemanticParseResult.model_validate({
+        "intent": "CUSTOMER_ACTIVITY",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "叠纸互娱", "confidence": 0.95},
+        "follow_up": {
+            "content": "已和采购确认付款事宜",
+            "method": "微信",
+            "next_action": "找技术侧确认 CLI+Skill 使用情况",
+            "next_follow_time_text": "2 个月后",
+            "next_follow_time": {
+                "raw_text": "2 个月后",
+                "kind": "RELATIVE_MONTH",
+                "direction": "future",
+                "amount": 2,
+                "unit": "month",
+                "confidence": 0.95,
+            },
+        },
+    })
+
+    parsed = parsed_from_semantic(
+        semantic_result,
+        "原始内容",
+        temporal_resolver=AgentTemporalResolver(),
+        base_datetime=datetime(2026, 8, 10, 0, 45, 25),
+    )
+
+    assert parsed["next_follow_time_text"] == "2 个月后"
+    assert parsed["next_follow_time_iso"] == "2026-10-10T09:00:00"
+
+
+def test_parsed_from_semantic_rejects_mismatched_relative_day_month_unit():
+    semantic_result = AgentSemanticParseResult.model_validate({
+        "intent": "CUSTOMER_ACTIVITY",
+        "intent_confidence": 0.95,
+        "customer": {"name_text": "叠纸互娱", "confidence": 0.95},
+        "follow_up": {
+            "content": "已和采购确认付款事宜",
+            "method": "微信",
+            "next_action": "找技术侧确认 CLI+Skill 使用情况",
+            "next_follow_time_text": "2 个月后",
+            "next_follow_time": {
+                "raw_text": "2 个月后",
+                "kind": "RELATIVE_DAY",
+                "direction": "future",
+                "amount": 2,
+                "unit": "month",
+                "confidence": 0.95,
+            },
+        },
+    })
+
+    parsed = parsed_from_semantic(
+        semantic_result,
+        "原始内容",
+        temporal_resolver=AgentTemporalResolver(),
+        base_datetime=datetime(2026, 8, 10, 0, 45, 25),
+    )
+
+    assert parsed["next_follow_time_text"] == "2 个月后"
+    assert parsed["next_follow_time_iso"] is None

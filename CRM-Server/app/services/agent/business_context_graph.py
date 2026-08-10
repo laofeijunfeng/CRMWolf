@@ -203,7 +203,12 @@ class BusinessContextGraphService:
 
 
 def runtime_semantic_allows_suggestions(intent: object) -> bool:
-    return isinstance(intent, str) and intent not in {"CREATE_LEAD", "CREATE_CUSTOMER", "CRM_READ_QUERY"}
+    return isinstance(intent, str) and intent not in {
+        "CREATE_LEAD",
+        "CREATE_CUSTOMER",
+        "CRM_READ_QUERY",
+        "FOLLOW_UP_TASK_TRANSITION",
+    }
 
 
 def _attach_side_effects(

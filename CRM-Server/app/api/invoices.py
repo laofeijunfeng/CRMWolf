@@ -19,7 +19,7 @@ from app.core.deps import (
     require_permission,
 )
 from app.crud.approval import approval_crud
-from app.crud.invoice import invoice_application_crud, invoice_title_crud
+from app.crud.invoice import invoice_application_crud, invoice_reissue_application_crud, invoice_title_crud
 from app.models.approval import ApprovalStatus
 from app.models.contract import Contract
 from app.models.customer import Customer
@@ -32,6 +32,9 @@ from app.schemas.invoice import (
     InvoiceApplicationListResponse,
     InvoiceApplicationResponse,
     InvoiceApplicationUpdate,
+    InvoiceReissueApplicationCreate,
+    InvoiceReissueApplicationResponse,
+    InvoiceReissueApplicationUpdate,
     InvoiceTitleCreate,
     InvoiceTitleListResponse,
     InvoiceTitleResponse,
@@ -316,6 +319,7 @@ def list_invoice_applications(
     status_exclude: Optional[str] = Query(None, description="排除的申请状态，多个值用逗号分隔"),
     invoice_type: Optional[str] = Query(None, description="发票类型，多个值用逗号分隔"),
     invoice_type_exclude: Optional[str] = Query(None, description="排除的发票类型，多个值用逗号分隔"),
+    invoice_effective_status: Optional[str] = Query(None, description="发票有效状态，多个值用逗号分隔：ACTIVE/REISSUE_PENDING/REISSUED"),
     applicant_id: Optional[str] = Query(None, description="申请人ID"),
     keyword: Optional[str] = Query(None, description="关键词，支持申请编号、客户、合同、抬头、税号、发票号码"),
     created_time_start: Optional[date] = Query(None, description="创建时间起始"),
@@ -380,6 +384,7 @@ def list_invoice_applications(
         status_exclude=status_exclude,
         invoice_type=invoice_type,
         invoice_type_exclude=invoice_type_exclude,
+        invoice_effective_status=invoice_effective_status,
         applicant_id=applicant_id,
         current_user_id=current_user_id,
         keyword=keyword,
@@ -400,6 +405,149 @@ def list_invoice_applications(
         "page": current_page,
         "page_size": effective_limit
     }
+
+
+@invoice_router.post(
+    "/{application_id}/reissues",
+    response_model=InvoiceReissueApplicationResponse,
+    summary="创建发票重开申请",
+    description="对已开票的发票申请创建重开申请，原发票不被替换",
+)
+def create_invoice_reissue_application(
+    application_id: int,
+    reissue_data: InvoiceReissueApplicationCreate,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(require_permission("invoice_reissue:create")),
+    db: Session = Depends(get_db),
+):
+    original_invoice = check_invoice_view_permission(application_id, team_id, current_user, db)
+    try:
+        reissue = invoice_reissue_application_crud.create(
+            db,
+            original_invoice=original_invoice,
+            obj_in=reissue_data,
+            applicant_id=str(current_user.id),
+            team_id=team_id,
+        )
+        return _populate_reissue_application_info(db, reissue)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+
+@invoice_router.put(
+    "/reissues/{reissue_id}",
+    response_model=InvoiceReissueApplicationResponse,
+    summary="修改发票重开申请",
+    description="仅草稿或已拒绝状态可修改",
+)
+def update_invoice_reissue_application(
+    reissue_id: int,
+    reissue_data: InvoiceReissueApplicationUpdate,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    reissue = invoice_reissue_application_crud.get_by_id(db, reissue_id, team_id)
+    if not reissue:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票重开申请不存在")
+    if reissue.applicant_id != str(current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能编辑自己申请的发票重开申请")
+
+    try:
+        updated = invoice_reissue_application_crud.update(db, reissue, reissue_data)
+        return _populate_reissue_application_info(db, updated)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@invoice_router.post(
+    "/reissues/{reissue_id}/complete",
+    response_model=InvoiceReissueApplicationResponse,
+    summary="完成发票重开",
+    description="财务上传红字发票和新蓝字发票后完成重开",
+)
+async def complete_invoice_reissue(
+    reissue_id: int,
+    red_file: UploadFile = File(..., description="红字发票文件"),
+    new_file: UploadFile = File(..., description="新蓝字发票文件"),
+    red_invoice_number: Optional[str] = Form(None, description="红字发票号码"),
+    new_invoice_number: Optional[str] = Form(None, description="新蓝字发票号码"),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(require_permission("invoice:mark_issued")),
+    db: Session = Depends(get_db),
+):
+    reissue = invoice_reissue_application_crud.get_by_id(db, reissue_id, team_id)
+    if not reissue:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票重开申请不存在")
+
+    red_number = red_invoice_number.strip() if red_invoice_number else None
+    new_number = new_invoice_number.strip() if new_invoice_number else None
+
+    try:
+        red_file_path = file_storage_service.save_invoice_file(
+            team_id=team_id,
+            invoice_id=reissue_id,
+            filename=red_file.filename or "",
+            content=await red_file.read(),
+        )
+        new_file_path = file_storage_service.save_invoice_file(
+            team_id=team_id,
+            invoice_id=reissue_id,
+            filename=new_file.filename or "",
+            content=await new_file.read(),
+        )
+    except FileStorageError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    try:
+        completed = invoice_reissue_application_crud.complete(
+            db,
+            reissue_id,
+            team_id,
+            red_invoice_file_path=red_file_path,
+            red_invoice_number=red_number,
+            new_invoice_file_path=new_file_path,
+            new_invoice_number=new_number,
+        )
+        if not completed:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票重开申请不存在")
+        return _populate_reissue_application_info(db, completed)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@invoice_router.get(
+    "/reissues/{reissue_id}/{file_kind}-file",
+    summary="下载发票重开相关文件",
+    description="下载红字发票或新蓝字发票文件，file_kind 为 red 或 new",
+)
+async def download_invoice_reissue_file(
+    reissue_id: int,
+    file_kind: Literal["red", "new"],
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    reissue = invoice_reissue_application_crud.get_by_id(db, reissue_id, team_id)
+    if not reissue:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票重开申请不存在")
+
+    original = reissue.original_invoice_application
+    if original is None:
+        original = invoice_application_crud.get_by_id(db, reissue.original_invoice_application_id, team_id)
+    if original is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="原发票申请不存在")
+    check_invoice_view_permission(original.id, team_id, current_user, db)
+
+    file_path = reissue.red_invoice_file_path if file_kind == "red" else reissue.new_invoice_file_path
+    invoice_number = reissue.red_invoice_number if file_kind == "red" else reissue.new_invoice_number
+    if not file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该发票文件未上传")
+
+    return _download_invoice_path(file_path, invoice_number or f"invoice-reissue-{reissue_id}-{file_kind}")
 
 
 @invoice_router.get("/{application_id}", response_model=InvoiceApplicationResponse, summary="获取发票申请详情", description="获取指定发票申请的完整信息及关联业务数据")
@@ -616,50 +764,7 @@ async def download_invoice_file(
             detail="该发票未上传文件",
         )
 
-    # 获取文件完整路径（含安全校验）
-    try:
-        full_path = file_storage_service.get_full_path(application.invoice_file_path)
-    except FileStorageError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="文件路径非法",
-        )
-
-    # 检查文件是否存在
-    if not os.path.exists(full_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="文件不存在",
-        )
-
-    # 读取文件内容
-    with open(full_path, "rb") as f:
-        content = f.read()
-
-    # 根据扩展名设置 Content-Type
-    ext = os.path.splitext(application.invoice_file_path)[1].lower()
-    content_type_map = {
-        ".pdf": "application/pdf",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".ofd": "application/octet-stream",
-    }
-    content_type = content_type_map.get(ext, "application/octet-stream")
-
-    # 文件名：优先使用发票号码，否则用申请 ID
-    filename = application.invoice_number or f"invoice_{application_id}"
-    # 确保文件名有扩展名
-    if not filename.endswith(ext):
-        filename = f"{filename}{ext}"
-
-    return Response(
-        content=content,
-        media_type=content_type,
-        headers={
-            "Content-Disposition": f"attachment; filename=\"{filename}\""
-        },
-    )
+    return _download_invoice_path(application.invoice_file_path, application.invoice_number or f"invoice_{application_id}")
 
 
 @invoice_router.get("/payment-plans/{payment_plan_id}/invoices", response_model=PaymentPlanInvoiceSummary, summary="获取回款计划关联发票", description="查询指定回款计划关联的所有发票申请及状态")
@@ -729,6 +834,36 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
         if reviewer:
             reviewer_name = reviewer.name
 
+    reissues = invoice_reissue_application_crud.get_by_original_invoice(db, application.id, team_id)
+    reissue_status = "NONE"
+    completed_reissues = [
+        reissue
+        for reissue in reissues
+        if reissue.status == "COMPLETED" and reissue.new_invoice_file_path
+    ]
+    latest_completed_reissue = max(
+        completed_reissues,
+        key=lambda reissue: (reissue.completed_time or reissue.last_modified_time or reissue.created_time, reissue.id),
+        default=None,
+    )
+    if latest_completed_reissue is not None:
+        reissue_status = "REISSUED"
+    elif any(reissue.status in {"DRAFT", "PENDING_REVIEW", "APPROVED"} for reissue in reissues):
+        reissue_status = "REISSUE_PENDING"
+
+    if latest_completed_reissue is not None:
+        invoice_effective_status = "REISSUED"
+        current_invoice_file_kind = "reissue_new"
+        current_invoice_file_path = latest_completed_reissue.new_invoice_file_path
+        current_invoice_number = latest_completed_reissue.new_invoice_number
+        current_reissue_id = latest_completed_reissue.id
+    else:
+        invoice_effective_status = "REISSUE_PENDING" if reissue_status == "REISSUE_PENDING" else "ACTIVE"
+        current_invoice_file_kind = "original" if application.invoice_file_path else None
+        current_invoice_file_path = application.invoice_file_path
+        current_invoice_number = application.invoice_number
+        current_reissue_id = None
+
     return InvoiceApplicationResponse(
         id=application.id,
         application_number=application.application_number,
@@ -768,4 +903,80 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
         invoice_title_title=application.invoice_title_text,
         applicant_name=applicant_name,
         reviewer_name=reviewer_name,
+        reissue_status=reissue_status,
+        invoice_effective_status=invoice_effective_status,
+        current_invoice_file_kind=current_invoice_file_kind,
+        current_invoice_file_path=current_invoice_file_path,
+        current_invoice_number=current_invoice_number,
+        current_reissue_id=current_reissue_id,
+        reissue_applications=[_populate_reissue_application_info(db, reissue) for reissue in reissues],
+    )
+
+
+def _populate_reissue_application_info(db: Session, reissue) -> InvoiceReissueApplicationResponse:
+    applicant_name = None
+    if reissue.applicant_id:
+        applicant = db.query(User).filter(User.id == int(reissue.applicant_id)).first()
+        if applicant:
+            applicant_name = applicant.name
+
+    return InvoiceReissueApplicationResponse(
+        id=reissue.id,
+        application_number=reissue.application_number,
+        original_invoice_application_id=reissue.original_invoice_application_id,
+        applicant_id=reissue.applicant_id,
+        applicant_name=applicant_name,
+        reason=reissue.reason,
+        status=reissue.status,
+        approval_phase=reissue.approval_phase,
+        invoice_title_type=reissue.invoice_title_type,
+        invoice_title_text=reissue.invoice_title_text,
+        invoice_taxpayer_id=reissue.invoice_taxpayer_id,
+        invoice_bank_name=reissue.invoice_bank_name,
+        invoice_bank_account=reissue.invoice_bank_account,
+        invoice_address=reissue.invoice_address,
+        invoice_phone=reissue.invoice_phone,
+        invoice_amount=reissue.invoice_amount,
+        invoice_type=reissue.invoice_type,
+        red_invoice_file_path=reissue.red_invoice_file_path,
+        red_invoice_number=reissue.red_invoice_number,
+        red_issued_time=reissue.red_issued_time,
+        new_invoice_file_path=reissue.new_invoice_file_path,
+        new_invoice_number=reissue.new_invoice_number,
+        new_issued_time=reissue.new_issued_time,
+        completed_time=reissue.completed_time,
+        created_time=reissue.created_time,
+        last_modified_time=reissue.last_modified_time,
+    )
+
+
+def _download_invoice_path(file_path: str, filename_base: str) -> Response:
+    try:
+        full_path = file_storage_service.get_full_path(file_path)
+    except FileStorageError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件路径非法")
+
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
+
+    with open(full_path, "rb") as f:
+        content = f.read()
+
+    ext = os.path.splitext(file_path)[1].lower()
+    content_type_map = {
+        ".pdf": "application/pdf",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".ofd": "application/octet-stream",
+    }
+    content_type = content_type_map.get(ext, "application/octet-stream")
+    filename = filename_base
+    if not filename.endswith(ext):
+        filename = f"{filename}{ext}"
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
     )

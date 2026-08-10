@@ -7,6 +7,11 @@
 import { z } from 'zod'
 
 export const ApiResponseSchema = <T>(): z.ZodType<T> => z.custom<T>((value) => value !== undefined)
+export const BlobPartResponseSchema = z.union([
+  z.instanceof(Blob),
+  z.instanceof(ArrayBuffer),
+  z.string()
+])
 
 // ===== API 响应兼容类型 =====
 // 后端 Pydantic Optional 字段会序列化为 null；前端展示字段统一在响应边界兼容 null。

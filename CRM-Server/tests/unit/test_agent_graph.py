@@ -55,13 +55,15 @@ class FakeSemanticParserSequence:
 
 
 class FakeMemoryService:
-    def __init__(self, session_context=None):
+    def __init__(self, session_context=None, recent_follow_up_tasks=None):
         self.session_context = session_context or {}
+        self.recent_follow_up_tasks = recent_follow_up_tasks or []
 
     def load_snapshot(self, db, *, team_id, user_id, session_id, session_context=None, message_limit=12):
         return AgentMemorySnapshot(
             recent_messages=[{"role": "USER", "content": "上一轮消息"}],
             session_context=session_context or self.session_context,
+            recent_follow_up_tasks=self.recent_follow_up_tasks,
         )
 
 
@@ -371,11 +373,16 @@ class FakeTemporalResolver:
     def resolve_follow_up_time(self, expression, *, base_datetime=None):
         if expression is None:
             return None
-        assert expression.raw_text == "下周三"
-        assert expression.kind == "RELATIVE_WEEKDAY"
-        assert expression.direction == "next"
-        assert expression.weekday == 3
-        return "2026-07-29T09:00:00"
+        if expression.raw_text == "明天":
+            assert expression.kind == "RELATIVE_DAY"
+            assert expression.direction == "next"
+            return "2026-07-25T09:00:00"
+        if expression.raw_text == "下周三":
+            assert expression.kind == "RELATIVE_WEEKDAY"
+            assert expression.direction == "next"
+            assert expression.weekday == 3
+            return "2026-07-29T09:00:00"
+        return None
 
     def resolve_date(self, expression, *, base_datetime=None):
         if expression is None:
@@ -587,11 +594,14 @@ def build_checkpointed_service_with_parser(parser, tool_service=None):
     )
 
 
-def build_service_with_memory(result, tool_service=None, session_context=None):
+def build_service_with_memory(result, tool_service=None, session_context=None, recent_follow_up_tasks=None):
     return CRMAgentGraphService(
         tool_service=tool_service or FakeToolService(),
         semantic_parser=FakeSemanticParser(result),
-        memory_service=FakeMemoryService(session_context=session_context),
+        memory_service=FakeMemoryService(
+            session_context=session_context,
+            recent_follow_up_tasks=recent_follow_up_tasks,
+        ),
         temporal_resolver=FakeTemporalResolver(),
         suggestion_generator=FakeSuggestionGenerator(),
         follow_up_quality_evaluator=FakeFollowUpQualityEvaluator(),
@@ -737,6 +747,8 @@ async def test_agent_graph_routes_follow_up_schedule_queries_to_task_tool():
     assert tool_service.follow_up_task_queries[0]["due_window"] == "next_week"
     assert tool_service.work_summary_queries == []
     assert "确认预算进展" in result["response"]
+    read_events = [event for event in result["events"] if event["event"] == "agent_read_tool_executed"]
+    assert read_events[0]["recent_follow_up_tasks"][0]["id"] == "fut_00000000000000000000000000001001"
 
 
 @pytest.mark.asyncio
@@ -836,6 +848,185 @@ async def test_agent_graph_does_not_route_customer_activity_with_task_word_to_re
     assert tool_service.work_summary_queries == []
     assert tool_service.context_queries[0]["customer_id"] == "101"
     assert "请确认是否创建这条客户活动？" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_routes_explicit_follow_up_task_transition_to_confirmation_action():
+    task_id = "fut_00000000000000000000000000001001"
+    tool_service = FakeReadQueryToolService()
+    result = await build_service(
+        semantic_result(
+            intent="FOLLOW_UP_TASK_TRANSITION",
+            customer={"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+            follow_up={},
+            follow_up_task_transition={
+                "action": "complete",
+                "task_id": task_id,
+                "task_reference_text": None,
+                "proposed_due_at_text": None,
+                "proposed_due_at_iso": None,
+                "reason": "用户要求标记完成",
+            },
+        ),
+        tool_service,
+    ).run(input_state(f"把 {task_id} 标记完成"))
+
+    assert result["intent"] == "FOLLOW_UP_TASK_TRANSITION"
+    assert tool_service.searches == []
+    assert tool_service.follow_up_task_queries == []
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "transition_follow_up_task"
+    assert confirmation_events[0]["payload"]["task_id"] == task_id
+    assert confirmation_events[0]["payload"]["transition_action"] == "complete"
+    assert "标记完成" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_clarifies_ambiguous_follow_up_task_transition_without_mutation_action():
+    tool_service = FakeReadQueryToolService()
+    result = await build_service(
+        semantic_result(
+            intent="FOLLOW_UP_TASK_TRANSITION",
+            customer={"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+            follow_up={},
+            follow_up_task_transition={
+                "action": "complete",
+                "task_id": None,
+                "task_reference_text": "这个任务",
+                "proposed_due_at_text": None,
+                "proposed_due_at_iso": None,
+                "reason": "用户要求标记完成",
+            },
+        ),
+        tool_service,
+    ).run(input_state("这个任务已经完成了"))
+
+    assert result["intent"] == "FOLLOW_UP_TASK_TRANSITION"
+    assert tool_service.searches == []
+    assert tool_service.follow_up_task_queries == []
+    assert [event for event in result["events"] if event["event"] == "confirmation_required"] == []
+    assert "不能唯一确定是哪一项跟进任务" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_resolves_single_recent_follow_up_task_reference_to_confirmation_action():
+    task_id = "fut_00000000000000000000000000001001"
+    tool_service = FakeReadQueryToolService()
+    result = await build_service_with_memory(
+        semantic_result(
+            intent="FOLLOW_UP_TASK_TRANSITION",
+            customer={"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+            follow_up={},
+            follow_up_task_transition={
+                "action": "complete",
+                "task_id": None,
+                "task_reference_text": "这个任务",
+                "proposed_due_at_text": None,
+                "proposed_due_at_iso": None,
+                "reason": "用户要求标记完成",
+            },
+        ),
+        tool_service,
+        recent_follow_up_tasks=[{
+            "id": task_id,
+            "customer_name": "越秀金融",
+            "title": "确认预算进展",
+            "status": "open",
+        }],
+    ).run(input_state("这个任务已经完成了"))
+
+    assert result["intent"] == "FOLLOW_UP_TASK_TRANSITION"
+    assert tool_service.searches == []
+    assert tool_service.follow_up_task_queries == []
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "transition_follow_up_task"
+    assert confirmation_events[0]["payload"]["task_id"] == task_id
+    assert confirmation_events[0]["payload"]["transition_action"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_resolves_follow_up_task_delay_time_before_confirmation_action():
+    task_id = "fut_00000000000000000000000000001001"
+    tool_service = FakeReadQueryToolService()
+    result = await build_service_with_memory(
+        semantic_result(
+            intent="FOLLOW_UP_TASK_TRANSITION",
+            customer={"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+            follow_up={},
+            follow_up_task_transition={
+                "action": "delay",
+                "task_id": None,
+                "task_reference_text": "这个任务",
+                "proposed_due_at_text": "明天",
+                "proposed_due_at": {
+                    "raw_text": "明天",
+                    "kind": "RELATIVE_DAY",
+                    "direction": "next",
+                    "amount": 1,
+                    "unit": "day",
+                    "confidence": 0.95,
+                },
+                "proposed_due_at_iso": None,
+                "reason": "用户要求延期",
+            },
+        ),
+        tool_service,
+        recent_follow_up_tasks=[{
+            "id": task_id,
+            "customer_name": "越秀金融",
+            "title": "确认预算进展",
+            "status": "open",
+        }],
+    ).run(input_state("这个任务延期到明天再跟进"))
+
+    confirmation_events = [event for event in result["events"] if event["event"] == "confirmation_required"]
+    assert confirmation_events[0]["action"] == "transition_follow_up_task"
+    assert confirmation_events[0]["payload"]["task_id"] == task_id
+    assert confirmation_events[0]["payload"]["transition_action"] == "delay"
+    assert confirmation_events[0]["payload"]["proposed_due_at"] == "2026-07-25T09:00:00"
+    assert "延期到 2026-07-25T09:00:00" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_clarifies_multiple_recent_follow_up_task_references_without_match():
+    tool_service = FakeReadQueryToolService()
+    result = await build_service_with_memory(
+        semantic_result(
+            intent="FOLLOW_UP_TASK_TRANSITION",
+            customer={"name_text": None, "confidence": 0.0, "resolution_source": "NONE"},
+            follow_up={},
+            follow_up_task_transition={
+                "action": "complete",
+                "task_id": None,
+                "task_reference_text": "这个任务",
+                "proposed_due_at_text": None,
+                "proposed_due_at_iso": None,
+                "reason": "用户要求标记完成",
+            },
+        ),
+        tool_service,
+        recent_follow_up_tasks=[
+            {
+                "id": "fut_00000000000000000000000000001001",
+                "customer_name": "越秀金融",
+                "title": "确认预算进展",
+                "status": "open",
+            },
+            {
+                "id": "fut_00000000000000000000000000001002",
+                "customer_name": "华米科技",
+                "title": "等待客户评估结论",
+                "status": "open",
+            },
+        ],
+    ).run(input_state("这个任务已经完成了"))
+
+    assert tool_service.searches == []
+    assert tool_service.follow_up_task_queries == []
+    assert [event for event in result["events"] if event["event"] == "confirmation_required"] == []
+    assert "有多项可能相关" in result["response"]
+    assert "fut_00000000000000000000000000001001" in result["response"]
+    assert "fut_00000000000000000000000000001002" in result["response"]
 
 
 @pytest.mark.asyncio

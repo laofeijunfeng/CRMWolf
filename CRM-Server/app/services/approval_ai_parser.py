@@ -39,7 +39,7 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 - min_amount: 最小金额（元，可选，用于金额范围匹配）
 - max_amount: 最大金额（元，可选，用于金额范围匹配）
 - license_type: 授权类型（可选，如：STANDARD、PROFESSIONAL、ENTERPRISE）
-- business_type: 流程适用的单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY，默认 CONTRACT，识别规则见下）
+- business_type: 流程适用的单据类型（CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY，默认 CONTRACT，识别规则见下）
 
 **审批节点列表**（每个节点包含）：
 - node_name: 节点名称（如：销售总监审批）
@@ -75,6 +75,7 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 |----------------|---------------|------|
 | 回款 / 收款 / 入账 / 付款登记 / 回款登记 | PAYMENT | 回款类审批流程 |
 | 发票 / 开票 / 发票申请 / 增值税发票 | INVOICE | 发票类审批流程 |
+| 发票重开 / 重开发票 / 红冲重开 / 冲红重开 | INVOICE_REISSUE | 发票重开申请审批流程 |
 | License / 授权申请 / 试用授权 / 正式授权 | LICENSE | License申请审批流程 |
 | 商机 / 机会 / 销售机会 / 商机创建 | OPPORTUNITY | 商机类审批流程 |
 | 合同 / 签约 / 合同审批 / 协议 / 未明确说明 | CONTRACT | 合同类审批流程（默认） |
@@ -83,7 +84,7 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 1. 必须根据用户描述的**单据类型**（而非审批角色）判断 business_type
 2. "财务审批"是审批角色，不是单据类型——若用户只说"财务审批流程"未说明单据类型，默认 CONTRACT
 3. 若用户同时提及多种单据（如"回款和发票"），按主语优先（描述中第一个出现的单据类型），并在 thinking_process 注明
-4. business_type 必须是 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY 之一，不允许其他值
+4. business_type 必须是 CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY 之一，不允许其他值
 
 ## 金额匹配规则
 
@@ -148,7 +149,7 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
     "min_amount": 最小金额或null,
     "max_amount": 最大金额或null,
     "license_type": "授权类型或null",
-    "business_type": "CONTRACT或PAYMENT或INVOICE或LICENSE或OPPORTUNITY",
+    "business_type": "CONTRACT或PAYMENT或INVOICE或INVOICE_REISSUE或LICENSE或OPPORTUNITY",
     "nodes": [
       {{
         "node_name": "节点名称",

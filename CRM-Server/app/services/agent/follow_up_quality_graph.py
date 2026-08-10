@@ -213,6 +213,7 @@ def _requires_clarification(
         or (
             semantic_result.intent != "UNKNOWN"
             and semantic_result.intent != "CRM_READ_QUERY"
+            and semantic_result.intent != "FOLLOW_UP_TASK_TRANSITION"
             and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
             and not customer_from_memory
             and semantic_result.customer.confidence < 0.7

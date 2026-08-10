@@ -62,6 +62,65 @@ export interface InvoiceApplicationUpdate {
 }
 
 export type InvoiceType = 'VAT_SPECIAL' | 'VAT_NORMAL'
+export type InvoiceReissueApplicationStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'COMPLETED'
+export type InvoiceReissueStatus = 'NONE' | 'REISSUE_PENDING' | 'REISSUED'
+export type InvoiceEffectiveStatus = 'ACTIVE' | 'REISSUE_PENDING' | 'REISSUED'
+export type CurrentInvoiceFileKind = 'original' | 'reissue_new'
+
+export interface InvoiceReissueApplicationCreate {
+  reason: string
+  invoice_title_type: TitleType
+  invoice_title_text: string
+  invoice_taxpayer_id: string
+  invoice_bank_name?: string | null
+  invoice_bank_account?: string | null
+  invoice_address?: string | null
+  invoice_phone?: string | null
+  invoice_amount: number
+  invoice_type: InvoiceType
+}
+
+export interface InvoiceReissueApplicationUpdate {
+  reason?: string
+  invoice_title_type?: TitleType
+  invoice_title_text?: string
+  invoice_taxpayer_id?: string
+  invoice_bank_name?: string | null
+  invoice_bank_account?: string | null
+  invoice_address?: string | null
+  invoice_phone?: string | null
+  invoice_amount?: number
+  invoice_type?: InvoiceType
+}
+
+export interface InvoiceReissueApplicationResponse {
+  id: number
+  application_number: string
+  original_invoice_application_id: number
+  applicant_id: string
+  applicant_name: string | null
+  reason: string
+  status: InvoiceReissueApplicationStatus
+  approval_phase?: ApprovalPhase | null
+  invoice_title_type: string
+  invoice_title_text: string
+  invoice_taxpayer_id: string
+  invoice_bank_name: string | null
+  invoice_bank_account: string | null
+  invoice_address: string | null
+  invoice_phone: string | null
+  invoice_amount: string | number
+  invoice_type: InvoiceType
+  red_invoice_file_path: string | null
+  red_invoice_number: string | null
+  red_issued_time: string | null
+  new_invoice_file_path: string | null
+  new_invoice_number: string | null
+  new_issued_time: string | null
+  completed_time: string | null
+  created_time: string
+  last_modified_time: string
+}
 
 export interface InvoiceApplicationResponse {
   id: number
@@ -100,6 +159,13 @@ export interface InvoiceApplicationResponse {
   invoice_title_title: string | null
   applicant_name: string | null
   reviewer_name: string | null
+  reissue_status?: InvoiceReissueStatus | null
+  invoice_effective_status?: InvoiceEffectiveStatus | null
+  current_invoice_file_kind?: CurrentInvoiceFileKind | null
+  current_invoice_file_path?: string | null
+  current_invoice_number?: string | null
+  current_reissue_id?: number | null
+  reissue_applications: InvoiceReissueApplicationResponse[]
 }
 
 export interface InvoiceApplicationListResponse {
@@ -117,6 +183,7 @@ export interface InvoiceApplicationQueryParams {
   status_exclude?: string
   invoice_type?: string
   invoice_type_exclude?: string
+  invoice_effective_status?: string
   keyword?: string
   created_time_start?: string
   created_time_end?: string
@@ -134,6 +201,7 @@ export interface FinanceApprovalRequest {
 const InvoiceTitleResponseSchema = ApiResponseSchema<InvoiceTitleResponse>()
 const InvoiceTitleListResponseSchema = ApiResponseSchema<InvoiceTitleListResponse>()
 const InvoiceApplicationResponseSchema = ApiResponseSchema<InvoiceApplicationResponse>()
+const InvoiceReissueApplicationResponseSchema = ApiResponseSchema<InvoiceReissueApplicationResponse>()
 const InvoiceApplicationListResponseSchema = ApiResponseSchema<InvoiceApplicationListResponse>()
 const DeleteResponseSchema = ApiResponseSchema<{ message: string }>()
 const InvoiceApplicationArraySchema = ApiResponseSchema<InvoiceApplicationResponse[]>()
@@ -181,6 +249,40 @@ const invoiceApi = {
 
   updateInvoiceApplication: async (applicationId: number, data: InvoiceApplicationUpdate): Promise<InvoiceApplicationResponse> => {
     return InvoiceApplicationResponseSchema.parse(await request.put<InvoiceApplicationResponse>(`/v1/invoice-applications/${applicationId}`, data))
+  },
+
+  createInvoiceReissueApplication: async (applicationId: number, data: InvoiceReissueApplicationCreate): Promise<InvoiceReissueApplicationResponse> => {
+    return InvoiceReissueApplicationResponseSchema.parse(await request.post<InvoiceReissueApplicationResponse>(`/v1/invoice-applications/${applicationId}/reissues`, data))
+  },
+
+  updateInvoiceReissueApplication: async (reissueId: number, data: InvoiceReissueApplicationUpdate): Promise<InvoiceReissueApplicationResponse> => {
+    return InvoiceReissueApplicationResponseSchema.parse(await request.put<InvoiceReissueApplicationResponse>(`/v1/invoice-applications/reissues/${reissueId}`, data))
+  },
+
+  completeInvoiceReissue: (reissueId: number, data: {
+    red_file: File
+    new_file: File
+    red_invoice_number?: string
+    new_invoice_number?: string
+  }): Promise<InvoiceReissueApplicationResponse> => {
+    const formData = new FormData()
+    formData.append('red_file', data.red_file)
+    formData.append('new_file', data.new_file)
+    const redInvoiceNumber = data.red_invoice_number?.trim()
+    const newInvoiceNumber = data.new_invoice_number?.trim()
+    if (redInvoiceNumber !== undefined && redInvoiceNumber.length > 0) {
+      formData.append('red_invoice_number', redInvoiceNumber)
+    }
+    if (newInvoiceNumber !== undefined && newInvoiceNumber.length > 0) {
+      formData.append('new_invoice_number', newInvoiceNumber)
+    }
+    return request.post<InvoiceReissueApplicationResponse>(
+      `/v1/invoice-applications/reissues/${reissueId}/complete`,
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      }
+    ).then((response) => InvoiceReissueApplicationResponseSchema.parse(response))
   },
 
   deleteInvoiceApplication: async (applicationId: number): Promise<{ message: string }> => {

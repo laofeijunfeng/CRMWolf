@@ -14,7 +14,7 @@
 import { z } from 'zod'
 
 // ===== 业务单据类型（A1 BusinessType） =====
-export const EntityTypeSchema = z.enum(['CONTRACT', 'PAYMENT', 'INVOICE', 'LICENSE', 'OPPORTUNITY'])
+export const EntityTypeSchema = z.enum(['CONTRACT', 'PAYMENT', 'INVOICE', 'INVOICE_REISSUE', 'LICENSE', 'OPPORTUNITY'])
 export type EntityType = z.infer<typeof EntityTypeSchema>
 
 // ===== 审批动作枚举（ApprovalActionEnum） =====

@@ -24,6 +24,7 @@ class BusinessNumberGenerator:
         'PAY': ('crm_payment_records', 'record_number'),
         'PP': ('crm_contract_payment_plans', 'plan_number'),
         'INV': ('crm_invoice_applications', 'application_number'),
+        'INVR': ('crm_invoice_reissue_applications', 'application_number'),
         'LIC': ('crm_license_applications', 'application_number'),
         'OPP': ('crm_opportunities', 'opportunity_number'),
     }

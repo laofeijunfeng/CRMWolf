@@ -365,19 +365,26 @@ class CRMAgentGraphService:
             tool_context,
             read_query.payload,
         )
+        recent_follow_up_tasks = _recent_follow_up_tasks_from_tool_result(
+            read_query.tool_name,
+            result.data,
+        )
+        event: JSONDict = {
+            "event": "agent_read_tool_executed",
+            "tool_name": read_query.tool_name,
+            "query_type": read_query.query_type,
+            "trace_label": read_query.trace_label,
+            "success": result.success,
+        }
+        if recent_follow_up_tasks:
+            event["recent_follow_up_tasks"] = recent_follow_up_tasks
         return {
             "read_tool_name": read_query.tool_name,
             "read_tool_payload": coerce_json_dict(read_query.payload),
             "read_query_type": read_query.query_type,
             "read_query_trace_label": read_query.trace_label,
             "read_tool_result": coerce_json_dict(result.to_event()),
-            "events": [{
-                "event": "agent_read_tool_executed",
-                "tool_name": read_query.tool_name,
-                "query_type": read_query.query_type,
-                "trace_label": read_query.trace_label,
-                "success": result.success,
-            }],
+            "events": [event],
         }
 
     async def _evaluate_follow_up_quality(
@@ -840,6 +847,7 @@ class CRMAgentGraphService:
             or (
                 semantic_result.intent != "UNKNOWN"
                 and semantic_result.intent != "CRM_READ_QUERY"
+                and semantic_result.intent != "FOLLOW_UP_TASK_TRANSITION"
                 and semantic_result.intent not in {"CREATE_LEAD", "CREATE_CUSTOMER"}
                 and not customer_from_memory
                 and semantic_result.customer.confidence < 0.7
@@ -895,7 +903,7 @@ class CRMAgentGraphService:
             return False
         if parsed.get("_customer_name_source") == "EXPLICIT_TEXT_HINT":
             return False
-        if semantic_result.intent in {"UNKNOWN", "CRM_READ_QUERY"}:
+        if semantic_result.intent in {"UNKNOWN", "CRM_READ_QUERY", "FOLLOW_UP_TASK_TRANSITION"}:
             return False
         if semantic_result.customer.resolution_source == "MEMORY":
             return True
@@ -1060,6 +1068,43 @@ def _suggestion_from_state(state: AgentGraphState) -> AgentSuggestionResult | No
         return AgentSuggestionResult.model_validate(suggestion)
     except ValueError:
         return None
+
+
+def _recent_follow_up_tasks_from_tool_result(tool_name: object, data: object) -> list[JSONDict]:
+    if tool_name not in {"list_follow_up_tasks", "get_follow_up_task_detail"}:
+        return []
+    payload = coerce_json_dict(data)
+    raw_items: list[object]
+    if tool_name == "get_follow_up_task_detail":
+        raw_items = [payload]
+    else:
+        items = payload.get("items")
+        raw_items = items if isinstance(items, list) else []
+
+    tasks: list[JSONDict] = []
+    seen: set[str] = set()
+    for raw_item in raw_items:
+        item = coerce_json_dict(raw_item)
+        task_id = str(item.get("id") or item.get("task_id") or "").strip()
+        if not task_id.startswith("fut_") or task_id in seen:
+            continue
+        seen.add(task_id)
+        customer = coerce_json_dict(item.get("customer"))
+        customer_name = (
+            str(customer.get("name") or customer.get("account_name") or "").strip()
+            if customer
+            else ""
+        )
+        tasks.append({
+            "id": task_id,
+            "title": str(item.get("title") or item.get("description") or "").strip(),
+            "customer_name": customer_name,
+            "status": str(item.get("status") or "").strip(),
+            "due_at": item.get("due_at"),
+        })
+        if len(tasks) >= 20:
+            break
+    return tasks
 
 
 crm_agent_graph_service = CRMAgentGraphService(checkpointer=agent_checkpoint_saver)

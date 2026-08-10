@@ -1,17 +1,25 @@
 from datetime import date, datetime, time
 from typing import List, Optional, Tuple
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, exists, not_, or_
 from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
 from app.models.contract import Contract
 from app.models.customer import Customer
-from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceReissueApplication,
+    InvoiceReissueApplicationStatus,
+    InvoiceTitle,
+)
 from app.models.payment import PaymentPlan
 from app.schemas.invoice import (
     InvoiceApplicationCreate,
     InvoiceApplicationUpdate,
+    InvoiceReissueApplicationCreate,
+    InvoiceReissueApplicationUpdate,
     InvoiceTitleCreate,
     InvoiceTitleUpdate,
 )
@@ -162,6 +170,7 @@ class InvoiceApplicationCRUD:
         status_exclude: Optional[str] = None,
         invoice_type: Optional[str] = None,
         invoice_type_exclude: Optional[str] = None,
+        invoice_effective_status: Optional[str] = None,
         applicant_id: Optional[str] = None,
         current_user_id: Optional[str] = None,
         keyword: Optional[str] = None,
@@ -190,6 +199,38 @@ class InvoiceApplicationCRUD:
             query = query.filter(InvoiceApplication.invoice_type.in_(_split_csv(invoice_type)))
         if invoice_type_exclude:
             query = query.filter(InvoiceApplication.invoice_type.notin_(_split_csv(invoice_type_exclude)))
+
+        invoice_effective_status_values = _split_csv(invoice_effective_status)
+        if invoice_effective_status_values:
+            completed_reissue_exists = exists().where(
+                and_(
+                    InvoiceReissueApplication.team_id == team_id,
+                    InvoiceReissueApplication.original_invoice_application_id == InvoiceApplication.id,
+                    InvoiceReissueApplication.status == InvoiceReissueApplicationStatus.COMPLETED,
+                    InvoiceReissueApplication.new_invoice_file_path.isnot(None),
+                    InvoiceReissueApplication.new_invoice_file_path != "",
+                )
+            )
+            pending_reissue_exists = exists().where(
+                and_(
+                    InvoiceReissueApplication.team_id == team_id,
+                    InvoiceReissueApplication.original_invoice_application_id == InvoiceApplication.id,
+                    InvoiceReissueApplication.status.in_([
+                        InvoiceReissueApplicationStatus.DRAFT,
+                        InvoiceReissueApplicationStatus.PENDING_REVIEW,
+                        InvoiceReissueApplicationStatus.APPROVED,
+                    ]),
+                )
+            )
+            status_predicates = []
+            if "REISSUED" in invoice_effective_status_values:
+                status_predicates.append(completed_reissue_exists)
+            if "REISSUE_PENDING" in invoice_effective_status_values:
+                status_predicates.append(and_(not_(completed_reissue_exists), pending_reissue_exists))
+            if "ACTIVE" in invoice_effective_status_values:
+                status_predicates.append(and_(not_(completed_reissue_exists), not_(pending_reissue_exists)))
+            if status_predicates:
+                query = query.filter(or_(*status_predicates))
         
         if applicant_id:
             query = query.filter(InvoiceApplication.applicant_id == applicant_id)
@@ -435,8 +476,8 @@ class InvoiceApplicationCRUD:
     def _generate_application_number(self, db: Session) -> str:
         return BusinessNumberGenerator.generate('INV', db)
     
-    def get_payment_plan_invoice_summary(self, db: Session, payment_plan_id: int) -> dict:
-        applications = self.get_by_payment_plan(db, payment_plan_id)
+    def get_payment_plan_invoice_summary(self, db: Session, payment_plan_id: int, team_id: Optional[int] = None) -> dict:
+        applications = self.get_by_payment_plan(db, payment_plan_id, team_id)
         
         payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == payment_plan_id).first()
         if not payment_plan:
@@ -454,5 +495,135 @@ class InvoiceApplicationCRUD:
         }
 
 
+class InvoiceReissueApplicationCRUD:
+    ACTIVE_STATUSES = (
+        InvoiceReissueApplicationStatus.DRAFT,
+        InvoiceReissueApplicationStatus.PENDING_REVIEW,
+        InvoiceReissueApplicationStatus.APPROVED,
+    )
+
+    def get_by_id(self, db: Session, reissue_id: int, team_id: Optional[int] = None) -> Optional[InvoiceReissueApplication]:
+        query = db.query(InvoiceReissueApplication).filter(InvoiceReissueApplication.id == reissue_id)
+        if team_id is not None:
+            query = query.filter(InvoiceReissueApplication.team_id == team_id)
+        return query.first()
+
+    def get_by_original_invoice(
+        self,
+        db: Session,
+        original_invoice_application_id: int,
+        team_id: Optional[int] = None,
+    ) -> List[InvoiceReissueApplication]:
+        query = db.query(InvoiceReissueApplication).filter(
+            InvoiceReissueApplication.original_invoice_application_id == original_invoice_application_id
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceReissueApplication.team_id == team_id)
+        return query.order_by(InvoiceReissueApplication.created_time.asc(), InvoiceReissueApplication.id.asc()).all()
+
+    def get_active_by_original_invoice(
+        self,
+        db: Session,
+        original_invoice_application_id: int,
+        team_id: Optional[int] = None,
+    ) -> Optional[InvoiceReissueApplication]:
+        query = db.query(InvoiceReissueApplication).filter(
+            InvoiceReissueApplication.original_invoice_application_id == original_invoice_application_id,
+            InvoiceReissueApplication.status.in_(self.ACTIVE_STATUSES),
+        )
+        if team_id is not None:
+            query = query.filter(InvoiceReissueApplication.team_id == team_id)
+        return query.first()
+
+    def create(
+        self,
+        db: Session,
+        original_invoice: InvoiceApplication,
+        obj_in: InvoiceReissueApplicationCreate,
+        applicant_id: str,
+        team_id: int,
+    ) -> InvoiceReissueApplication:
+        if original_invoice.team_id != team_id:
+            raise ValueError("原发票申请不存在")
+        if original_invoice.status != InvoiceApplicationStatus.ISSUED:
+            raise ValueError("只有已开票的发票申请可以申请重开")
+        if self.get_active_by_original_invoice(db, original_invoice.id, team_id):
+            raise ValueError("该发票已有未完成的重开申请")
+
+        application_number = self._generate_application_number(db)
+        db_obj = InvoiceReissueApplication(
+            application_number=application_number,
+            team_id=team_id,
+            original_invoice_application_id=original_invoice.id,
+            applicant_id=applicant_id,
+            status=InvoiceReissueApplicationStatus.DRAFT,
+            **obj_in.model_dump(),
+        )
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def update(
+        self,
+        db: Session,
+        db_obj: InvoiceReissueApplication,
+        obj_in: InvoiceReissueApplicationUpdate,
+    ) -> InvoiceReissueApplication:
+        if db_obj.status not in [InvoiceReissueApplicationStatus.DRAFT, InvoiceReissueApplicationStatus.REJECTED]:
+            raise ValueError("只有草稿或已拒绝状态的重开申请可以编辑")
+
+        update_data = obj_in.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def complete(
+        self,
+        db: Session,
+        reissue_id: int,
+        team_id: int,
+        *,
+        red_invoice_file_path: str,
+        red_invoice_number: Optional[str],
+        new_invoice_file_path: str,
+        new_invoice_number: Optional[str],
+    ) -> Optional[InvoiceReissueApplication]:
+        from app.constants.business_types import BusinessType
+        from app.crud.approval import approval_crud
+        from app.models.approval import ApprovalStatus
+
+        reissue = self.get_by_id(db, reissue_id, team_id)
+        if not reissue:
+            return None
+
+        approval = approval_crud.get_by_entity(db, BusinessType.INVOICE_REISSUE, reissue_id, team_id)
+        if not approval or approval.status != ApprovalStatus.APPROVED:
+            raise ValueError("重开申请未通过审批，不可完成重开")
+
+        if reissue.status != InvoiceReissueApplicationStatus.APPROVED:
+            raise ValueError(f"重开申请状态为 {reissue.status}，不可完成重开")
+
+        now = business_now()
+        reissue.red_invoice_file_path = red_invoice_file_path
+        reissue.red_invoice_number = red_invoice_number
+        reissue.red_issued_time = now
+        reissue.new_invoice_file_path = new_invoice_file_path
+        reissue.new_invoice_number = new_invoice_number
+        reissue.new_issued_time = now
+        reissue.completed_time = now
+        reissue.status = InvoiceReissueApplicationStatus.COMPLETED
+        db.commit()
+        db.refresh(reissue)
+        return reissue
+
+    def _generate_application_number(self, db: Session) -> str:
+        return BusinessNumberGenerator.generate("INVR", db)
+
+
 invoice_title_crud = InvoiceTitleCRUD()
 invoice_application_crud = InvoiceApplicationCRUD()
+invoice_reissue_application_crud = InvoiceReissueApplicationCRUD()

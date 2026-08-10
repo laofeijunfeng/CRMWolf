@@ -18,6 +18,14 @@ class InvoiceApplicationStatus:
     ISSUED = "ISSUED"
 
 
+class InvoiceReissueApplicationStatus:
+    DRAFT = "DRAFT"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    COMPLETED = "COMPLETED"
+
+
 class InvoiceType:
     VAT_SPECIAL = "VAT_SPECIAL"
     VAT_NORMAL = "VAT_NORMAL"
@@ -100,6 +108,7 @@ class InvoiceApplication(Base):
     payment_plan = relationship("PaymentPlan", back_populates="invoice_applications")
     payment_record = relationship("PaymentRecord", back_populates="invoice_applications")
     invoice_title = relationship("InvoiceTitle", back_populates="invoice_applications")
+    reissue_applications = relationship("InvoiceReissueApplication", back_populates="original_invoice_application")
 
     __table_args__ = (
         Index('idx_invoice_application_team_id', 'team_id'),
@@ -108,3 +117,58 @@ class InvoiceApplication(Base):
 
     def __repr__(self):
         return f"<InvoiceApplication(id={self.id}, application_number={self.application_number}, status={self.status})>"
+
+
+class InvoiceReissueApplication(Base):
+    __tablename__ = "crm_invoice_reissue_applications"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
+    application_number = Column(String(50), nullable=False, unique=True, comment="重开申请单号")
+    original_invoice_application_id = Column(
+        BigInteger,
+        ForeignKey("crm_invoice_applications.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="原发票申请ID",
+    )
+    applicant_id = Column(String(100), nullable=False, comment="申请人系统用户ID")
+    reason = Column(String(500), nullable=False, comment="重开原因")
+    status = Column(String(20), nullable=False, default=InvoiceReissueApplicationStatus.DRAFT, comment="重开申请状态")
+    approval_phase = Column(
+        String(20),
+        nullable=False,
+        default=ApprovalPhase.DRAFT.value,
+        comment="审批流程状态：draft/pending_review/approved/rejected"
+    )
+
+    invoice_title_type = Column(String(10), nullable=False, comment="新发票抬头类型快照")
+    invoice_title_text = Column(String(255), nullable=False, comment="新发票开票抬头快照")
+    invoice_taxpayer_id = Column(String(100), nullable=False, comment="新发票纳税人识别号快照")
+    invoice_bank_name = Column(String(255), comment="新发票开户行快照")
+    invoice_bank_account = Column(String(100), comment="新发票开户账号快照")
+    invoice_address = Column(String(500), comment="新发票开票地址快照")
+    invoice_phone = Column(String(50), comment="新发票电话快照")
+    invoice_amount = Column(Numeric(12, 2), nullable=False, comment="新发票金额")
+    invoice_type = Column(String(20), nullable=False, comment="新发票类型")
+
+    red_invoice_file_path = Column(String(500), comment="红字发票文件路径")
+    red_invoice_number = Column(String(100), comment="红字发票号码")
+    red_issued_time = Column(DateTime, comment="红字发票开具时间")
+    new_invoice_file_path = Column(String(500), comment="新蓝字发票文件路径")
+    new_invoice_number = Column(String(100), comment="新蓝字发票号码")
+    new_issued_time = Column(DateTime, comment="新蓝字发票开具时间")
+    completed_time = Column(DateTime, comment="重开完成时间")
+
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
+
+    original_invoice_application = relationship("InvoiceApplication", back_populates="reissue_applications")
+
+    __table_args__ = (
+        Index("idx_invoice_reissue_team_id", "team_id"),
+        Index("idx_invoice_reissue_original_invoice", "original_invoice_application_id"),
+        Index("idx_invoice_reissue_status", "status"),
+    )
+
+    def __repr__(self):
+        return f"<InvoiceReissueApplication(id={self.id}, application_number={self.application_number}, status={self.status})>"

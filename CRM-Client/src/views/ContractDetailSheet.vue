@@ -32,6 +32,8 @@ const visibleModel = computed({
   set: (value: boolean) => emit('update:visible', value)
 })
 
+const canApproveValue = computed<boolean>(() => props.canApprove ?? false)
+
 function closeSheet(): void {
   emit('update:visible', false)
 }
@@ -43,7 +45,7 @@ function closeSheet(): void {
       <ContractDetailContent
         v-if="contractId !== null"
         :contract-id="contractId"
-        :can-approve="canApprove"
+        :can-approve="canApproveValue"
         @close="closeSheet"
         @approve="emit('approve', $event)"
         @reject="emit('reject', $event)"

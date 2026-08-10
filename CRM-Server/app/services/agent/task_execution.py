@@ -216,6 +216,26 @@ async def _execute_waiting_task(
                 f"商机阶段已推进{f'到「{stage_name}」' if stage_name else ''}。",
                 progress_events=progress_events,
             )
+        if action == "transition_follow_up_task":
+            if isinstance(result.data, dict) and result.data.get("executed") is False:
+                results = result.data.get("results")
+                first_result = results[0] if isinstance(results, list) and results else {}
+                skip_reason = first_result.get("skip_reason") if isinstance(first_result, dict) else None
+                return WaitingTaskExecutionResult(
+                    result,
+                    _follow_up_transition_skip_response(skip_reason),
+                    progress_events=progress_events,
+                )
+            transition_action = payload.get("transition_action")
+            if transition_action == "complete":
+                return WaitingTaskExecutionResult(result, "任务已标记完成。", progress_events=progress_events)
+            if transition_action == "cancel":
+                return WaitingTaskExecutionResult(result, "任务已取消。", progress_events=progress_events)
+            if transition_action == "delay":
+                return WaitingTaskExecutionResult(result, "任务已延期。", progress_events=progress_events)
+            if transition_action == "keep_open":
+                return WaitingTaskExecutionResult(result, "任务已保持待跟进。", progress_events=progress_events)
+            return WaitingTaskExecutionResult(result, "任务状态已更新。", progress_events=progress_events)
         if action == "create_customer_activity" and isinstance(payload.get("_next_task"), dict):
             next_action = payload["_next_task"]
             next_payload = next_action.get("payload") or {}
@@ -378,3 +398,14 @@ async def _append_progress_event(
     progress_events.append(event)
     if event_sink:
         await event_sink(event)
+
+
+def _follow_up_transition_skip_response(skip_reason: object) -> str:
+    reason = str(skip_reason or "").strip()
+    return {
+        "TASK_NOT_FOUND": "没有找到这项跟进任务，可能已被删除或你没有访问权限。",
+        "TASK_OWNER_MISMATCH": "这项跟进任务不属于你，不能由当前账号标记。",
+        "TASK_NOT_OPEN": "这项跟进任务当前不是待跟进状态，不能重复更新。",
+        "DELAY_DUE_AT_INVALID": "延期时间无法识别，请补充一个明确的新跟进时间。",
+        "TASK_PUBLIC_ID_MISSING": "缺少跟进任务 ID，请从任务卡片中选择具体任务后再确认。",
+    }.get(reason, "这项跟进任务暂时没有更新成功，请重新选择任务或补充更明确的信息。")

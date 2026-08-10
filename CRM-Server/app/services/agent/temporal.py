@@ -38,6 +38,8 @@ class AgentTemporalResolver:
         resolved_date = self._resolve_date(expression, base.date())
         if resolved_date is None:
             return None
+        if self._looks_suspicious_for_raw_text(expression, base.date(), resolved_date):
+            return None
 
         resolved_time = time(
             hour=expression.hour if expression.hour is not None else DEFAULT_FOLLOW_UP_HOUR,
@@ -58,9 +60,14 @@ class AgentTemporalResolver:
 
         base = base_datetime or self.now()
         resolved_date = self._resolve_date(expression, base.date())
+        if resolved_date and self._looks_suspicious_for_raw_text(expression, base.date(), resolved_date):
+            return None
         return resolved_date.isoformat() if resolved_date else None
 
     def _resolve_date(self, expression: AgentTemporalExpression, base_date: date) -> Optional[date]:
+        if not self._is_kind_unit_consistent(expression):
+            return None
+
         if expression.kind == "EXPLICIT_DATE" and expression.date_text:
             try:
                 return date.fromisoformat(expression.date_text)
@@ -112,6 +119,46 @@ class AgentTemporalResolver:
                 return base_date - timedelta(days=amount)
             return base_date + timedelta(days=amount)
 
+        if expression.kind == "RELATIVE_WEEK":
+            amount = expression.amount
+            if amount is None:
+                if expression.direction == "current":
+                    amount = 0
+                elif expression.direction in {"next", "future"}:
+                    amount = 1
+            if amount is None:
+                return None
+            days = amount * 7
+            if expression.direction == "past":
+                return base_date - timedelta(days=days)
+            return base_date + timedelta(days=days)
+
+        if expression.kind == "RELATIVE_MONTH":
+            amount = expression.amount
+            if amount is None:
+                if expression.direction == "current":
+                    amount = 0
+                elif expression.direction in {"next", "future"}:
+                    amount = 1
+            if amount is None:
+                return None
+            if expression.direction == "past":
+                amount = -amount
+            return self._add_months(base_date, amount)
+
+        if expression.kind == "RELATIVE_YEAR":
+            amount = expression.amount
+            if amount is None:
+                if expression.direction == "current":
+                    amount = 0
+                elif expression.direction in {"next", "future"}:
+                    amount = 1
+            if amount is None:
+                return None
+            if expression.direction == "past":
+                amount = -amount
+            return self._add_months(base_date, amount * 12)
+
         if expression.kind == "RELATIVE_WEEKDAY" and expression.weekday:
             if expression.direction == "next":
                 monday = base_date - timedelta(days=base_date.isoweekday() - 1)
@@ -123,6 +170,41 @@ class AgentTemporalResolver:
                 return base_date + timedelta(days=delta)
 
         return None
+
+    def _is_kind_unit_consistent(self, expression: AgentTemporalExpression) -> bool:
+        expected_units = {
+            "RELATIVE_DAY": "day",
+            "RELATIVE_WEEK": "week",
+            "RELATIVE_MONTH": "month",
+            "RELATIVE_YEAR": "year",
+            "RELATIVE_MONTH_END": "month",
+        }
+        expected_unit = expected_units.get(expression.kind)
+        return expected_unit is None or expression.unit in {None, expected_unit}
+
+    def _add_months(self, value: date, months: int) -> date:
+        total_month = value.month - 1 + months
+        year = value.year + total_month // 12
+        month = total_month % 12 + 1
+        day = min(value.day, calendar.monthrange(year, month)[1])
+        return date(year, month, day)
+
+    def _looks_suspicious_for_raw_text(
+        self,
+        expression: AgentTemporalExpression,
+        base_date: date,
+        resolved_date: date,
+    ) -> bool:
+        if not expression.kind.startswith("RELATIVE_"):
+            return False
+        raw_text = expression.raw_text or ""
+        if any(marker in raw_text for marker in ("季度", "年")):
+            return 0 < abs((resolved_date - base_date).days) < 28
+        if any(marker in raw_text for marker in ("个月", "月后", "月以后", "月之后")):
+            return 0 < abs((resolved_date - base_date).days) < 21
+        if "周" in raw_text and (expression.amount or 1) >= 1:
+            return 0 < abs((resolved_date - base_date).days) < 5
+        return False
 
 
 agent_temporal_resolver = AgentTemporalResolver()

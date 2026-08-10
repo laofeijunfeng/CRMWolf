@@ -177,6 +177,20 @@ class ResolveFollowUpTaskConfirmationCaseInput(BaseModel):
     idempotency_suffix: Optional[str] = None
 
 
+class TransitionFollowUpTaskInput(BaseModel):
+    task_id: str = Field(..., min_length=1, pattern=r"^fut_[A-Za-z0-9]+$", description="跟进任务对外ID（fut_...）")
+    action: Literal["complete", "cancel", "delay", "keep_open"]
+    proposed_due_at: Optional[str] = Field(None, description="延期到的新时间，ISO 日期时间")
+    reason: Optional[str] = Field(None, max_length=500)
+    idempotency_suffix: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_delay_due_at(self) -> "TransitionFollowUpTaskInput":
+        if self.action == "delay" and not self.proposed_due_at:
+            raise ValueError("延期任务必须提供 proposed_due_at")
+        return self
+
+
 class CreateCustomerActivityInput(BaseModel):
     customer_id: CustomerIdentifier = Field(..., description="客户对外ID；兼容历史任务中的数据库ID")
     customer_name: Optional[str] = None
@@ -445,6 +459,16 @@ class AgentToolRegistry:
                 idempotency_suffix=model.idempotency_suffix,
             )
 
+        async def transition_follow_up_task(service, context, model):
+            return await service.transition_follow_up_task(
+                context,
+                task_id=model.task_id,
+                action=model.action,
+                proposed_due_at=model.proposed_due_at,
+                reason=model.reason,
+                idempotency_suffix=model.idempotency_suffix,
+            )
+
         async def create_customer_activity(service, context, model):
             return await service.create_customer_activity(
                 context,
@@ -622,6 +646,14 @@ class AgentToolRegistry:
                 False,
                 resolve_follow_up_task_confirmation_case,
                 True,
+            ),
+            AgentToolSpec(
+                "transition_follow_up_task",
+                "按已确认的用户意图更新跟进任务状态；只接受跟进任务对外ID fut_...",
+                TransitionFollowUpTaskInput,
+                True,
+                True,
+                transition_follow_up_task,
             ),
             AgentToolSpec("create_customer_activity", "创建客户活动记录", CreateCustomerActivityInput, True, True, create_customer_activity),
             AgentToolSpec("create_lead", "通过现有线索 API 创建线索", CreateLeadInput, True, True, create_lead),

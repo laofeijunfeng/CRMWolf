@@ -121,6 +121,8 @@ def _create_waiting_task_from_event(db: Session, event: dict, team_id: int, user
         intent = "CREATE_OPPORTUNITY"
     elif action in {"move_opportunity_stage", "select_opportunity_for_stage_move"}:
         intent = "CUSTOMER_ACTIVITY"
+    elif action == "transition_follow_up_task":
+        intent = "FOLLOW_UP_TASK_TRANSITION"
     elif action in {"create_contact", "select_customer_for_contact", "collect_contact_fields"}:
         intent = "CREATE_CONTACT"
     elif action in {"create_invoice_title", "select_customer_for_invoice_title", "collect_invoice_title_fields"}:

@@ -23,6 +23,7 @@ def parsed_from_semantic(
     opportunity = semantic_result.opportunity
     lead = semantic_result.lead
     customer_create = semantic_result.customer_create
+    follow_up_task_transition = semantic_result.follow_up_task_transition
 
     next_follow_time_iso = temporal_resolver.resolve_follow_up_time(
         semantic_result.follow_up.next_follow_time,
@@ -45,6 +46,10 @@ def parsed_from_semantic(
         temporal_resolver.resolve_date(opportunity.expected_closing_date, base_datetime=base_datetime)
         if hasattr(temporal_resolver, "resolve_date")
         else None
+    )
+    follow_up_task_transition_due_at_iso = temporal_resolver.resolve_follow_up_time(
+        follow_up_task_transition.proposed_due_at,
+        base_datetime=base_datetime,
     )
     computed_missing_opportunity_fields = business_rules.missing_opportunity_fields({
         "procurement_method_id": opportunity.procurement_method_id,
@@ -182,6 +187,14 @@ def parsed_from_semantic(
             if semantic_result.intent == "CREATE_CUSTOMER_MEMBER"
             else []
         ),
+        "follow_up_task_transition": business_rules.drop_empty_values({
+            "action": follow_up_task_transition.action,
+            "task_id": follow_up_task_transition.task_id,
+            "task_reference_text": follow_up_task_transition.task_reference_text,
+            "proposed_due_at_text": follow_up_task_transition.proposed_due_at_text,
+            "proposed_due_at_iso": follow_up_task_transition_due_at_iso,
+            "reason": follow_up_task_transition.reason,
+        }),
         "next_action": semantic_result.follow_up.next_action,
         "next_follow_time_text": semantic_result.follow_up.next_follow_time_text,
         "next_follow_time_iso": next_follow_time_iso,

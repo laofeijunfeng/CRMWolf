@@ -5,7 +5,7 @@
  * 仅负责合同详情内容、数据加载与业务动作意图，不包含 Sheet 外壳。
  * 可被 ContractDetailSheet 和 CustomerDetailSheet 内部下钻复用。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { AlertCircle, FileText, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
 import {
@@ -37,11 +37,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ContractPaymentPlans from '@/components/ContractPaymentPlans.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
-import { AmountText } from '@/components/crmwolf'
+import { AmountText, FileAttachment } from '@/components/crmwolf'
 import contractApi, { type ContractResponse, type ContractStatus, type LicenseType } from '@/api/contract'
+import {
+  createContractFileObjectUrl,
+  downloadContractFile as downloadContractFileApi
+} from '@/api/fileUpload'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { handleApiError } from '@/utils/errorHandler'
+import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -82,6 +87,8 @@ const contractInfo = ref<ContractResponse | null>(null)
 const errorMessage = ref('')
 const activeRequestId = ref(0)
 const editDialogOpen = ref<boolean>(false)
+const contractFilePreviewUrl = ref<string>('')
+const contractFilePreviewLoading = ref<boolean>(false)
 
 const statusesWithPaymentPlans: readonly ContractStatus[] = [
   'SIGNED',
@@ -147,6 +154,70 @@ const paymentContractInfo = computed<PaymentContractInfo | undefined>(() => {
   return info
 })
 
+const hasContractFile = computed<boolean>(() => {
+  const filePath = contractInfo.value?.contract_file_path
+  return filePath !== undefined && filePath !== null && filePath.trim().length > 0
+})
+
+const contractFiles = computed<FileAttachmentItem[]>(() => {
+  const contract = contractInfo.value
+  if (contract === null || !hasContractFile.value) return []
+
+  const filePath = contract.contract_file_path ?? ''
+  const configuredName = contract.contract_file_name?.trim()
+  const fileName = configuredName !== undefined && configuredName.length > 0
+    ? configuredName
+    : getContractFileName(filePath)
+  const file: FileAttachmentItem = {
+    id: contract.id,
+    name: fileName,
+    extension: getFileExtension(fileName.length > 0 ? fileName : filePath),
+    status: contractFilePreviewLoading.value ? 'processing' : 'done'
+  }
+
+  if (contract.contract_file_size !== undefined && contract.contract_file_size !== null) {
+    file.size = contract.contract_file_size
+  }
+  if (contract.contract_file_mime_type !== undefined && contract.contract_file_mime_type !== null) {
+    file.mimeType = contract.contract_file_mime_type
+  }
+  if (contractFilePreviewUrl.value.length > 0) {
+    file.url = contractFilePreviewUrl.value
+  }
+
+  return [file]
+})
+
+const revokeContractFilePreviewUrl = (): void => {
+  if (contractFilePreviewUrl.value.length === 0) return
+  window.URL.revokeObjectURL(contractFilePreviewUrl.value)
+  contractFilePreviewUrl.value = ''
+}
+
+const loadContractFilePreviewUrl = async (
+  contract: ContractResponse,
+  requestId: number
+): Promise<void> => {
+  revokeContractFilePreviewUrl()
+  if (contract.contract_file_path === undefined || contract.contract_file_path === null || contract.contract_file_path.trim() === '') return
+
+  contractFilePreviewLoading.value = true
+  try {
+    const objectUrl = await createContractFileObjectUrl(contract.id)
+    if (requestId === activeRequestId.value && contractInfo.value?.id === contract.id) {
+      contractFilePreviewUrl.value = objectUrl
+    } else {
+      window.URL.revokeObjectURL(objectUrl)
+    }
+  } catch {
+    // 附件预览失败不影响合同详情；用户仍可通过下载入口获取文件。
+  } finally {
+    if (requestId === activeRequestId.value && contractInfo.value?.id === contract.id) {
+      contractFilePreviewLoading.value = false
+    }
+  }
+}
+
 // ==================== Data Loading ====================
 const fetchContractDetail = async (contractId: number): Promise<void> => {
   const requestId = activeRequestId.value + 1
@@ -161,6 +232,7 @@ const fetchContractDetail = async (contractId: number): Promise<void> => {
     if (requestId !== activeRequestId.value) return
 
     contractInfo.value = data
+    void loadContractFilePreviewUrl(data, requestId)
   } catch (error) {
     if (requestId !== activeRequestId.value) return
 
@@ -176,6 +248,8 @@ const fetchContractDetail = async (contractId: number): Promise<void> => {
 
 const resetState = (): void => {
   activeRequestId.value += 1
+  revokeContractFilePreviewUrl()
+  contractFilePreviewLoading.value = false
   loading.value = false
   contractInfo.value = null
   errorMessage.value = ''
@@ -233,6 +307,17 @@ const handleApprovalRejected = async (): Promise<void> => {
 const handleApprovalResubmit = (): void => {
   if (!isSubmitterGeneric.value) return
   editDialogOpen.value = true
+}
+
+const handleDownloadContractFile = async (_file?: FileAttachmentItem): Promise<void> => {
+  const contract = contractInfo.value
+  if (contract === null) return
+
+  try {
+    await downloadContractFileApi(contract.id, contract.contract_file_name ?? undefined)
+  } catch (error) {
+    handleApiError(error, '下载合同附件')
+  }
 }
 
 // ==================== Format Helpers ====================
@@ -305,6 +390,15 @@ const getLicenseTypeText = (type: LicenseType | undefined): string => {
   return map[type]
 }
 
+const getFileExtension = (filePath: string): string => {
+  return filePath.toLowerCase().split('?')[0]?.split('.').pop() ?? ''
+}
+
+const getContractFileName = (filePath: string): string => {
+  const extension = getFileExtension(filePath)
+  return extension.length > 0 ? `合同附件.${extension}` : '合同附件'
+}
+
 // ==================== Watch ====================
 watch(
   (): number => props.contractId,
@@ -314,6 +408,11 @@ watch(
   },
   { immediate: true }
 )
+
+onBeforeUnmount((): void => {
+  activeRequestId.value += 1
+  revokeContractFilePreviewUrl()
+})
 </script>
 
 <template>
@@ -473,6 +572,23 @@ watch(
                       <div class="attribute-value">{{ formatDateTime(contractInfo.created_time) }}</div>
                     </div>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card v-if="hasContractFile" class="info-card">
+              <CardContent class="p-0">
+                <div class="section-heading">
+                  <h3 class="section-title">合同附件</h3>
+                </div>
+                <div class="section-content">
+                  <FileAttachment
+                    title="合同附件"
+                    mode="readonly"
+                    :files="contractFiles"
+                    empty-text="暂无合同附件"
+                    @download="handleDownloadContractFile"
+                  />
                 </div>
               </CardContent>
             </Card>

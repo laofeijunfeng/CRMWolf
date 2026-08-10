@@ -28,10 +28,14 @@ import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
-import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
+import {
+  downloadInvoiceFile as downloadInvoiceFileApi,
+  downloadInvoiceReissueFile,
+} from '@/api/fileUpload'
 import invoiceApi, {
   type InvoiceApplicationResponse,
-  type InvoiceApplicationQueryParams
+  type InvoiceApplicationQueryParams,
+  type InvoiceEffectiveStatus
 } from '@/api/invoice'
 import customerApi from '@/api/customer'
 import type { CustomerResponse } from '@/api/customer'
@@ -110,6 +114,16 @@ const filterFields: ListFilterField[] = [
       { value: 'VAT_NORMAL', label: '增值税普通发票' }
     ]
   },
+  {
+    key: 'invoice_effective_status',
+    type: 'enum',
+    label: '发票状态',
+    options: [
+      { value: 'ACTIVE', label: '有效' },
+      { value: 'REISSUE_PENDING', label: '重开中' },
+      { value: 'REISSUED', label: '已重开' }
+    ]
+  },
   { key: 'created_time', type: 'date', label: '创建时间' }
 ]
 
@@ -156,6 +170,7 @@ const columns = [
   { key: 'invoice_amount', title: '开票金额', align: 'right' as const, width: '130px' },
   { key: 'invoice_title_text', title: '开票抬头', width: '200px' },
   { key: 'status', title: '状态', align: 'center' as const, width: '100px' },
+  { key: 'invoice_effective_status', title: '发票状态', align: 'center' as const, width: '110px' },
   { key: 'applicant_name', title: '申请人', width: '110px' },
   { key: 'created_time', title: '创建时间', width: '170px' },
   { key: 'actions', title: '操作', align: 'center' as const, width: '220px' }
@@ -210,6 +225,7 @@ const fetchInvoiceApplications = async (): Promise<void> => {
 
     const keyword = getFilterValue(activeFilters.value, 'keyword')
     const invoiceType = getDelimitedFilterValues(activeFilters.value, 'invoice_type')
+    const invoiceEffectiveStatus = getDelimitedFilterValues(activeFilters.value, 'invoice_effective_status')
     const createdTimeBounds = getDateBounds(activeFilters.value, 'created_time')
 
     if (keyword !== null && keyword !== '') {
@@ -217,6 +233,9 @@ const fetchInvoiceApplications = async (): Promise<void> => {
     }
     if (invoiceType !== null) {
       params.invoice_type = invoiceType
+    }
+    if (invoiceEffectiveStatus !== null) {
+      params.invoice_effective_status = invoiceEffectiveStatus
     }
     const invoiceTypeExclude = getDelimitedFilterValues(activeFilters.value, 'invoice_type', ['neq', 'not_contains'])
     if (invoiceTypeExclude !== null) {
@@ -460,12 +479,20 @@ const handleConfirmInvoiced = async (): Promise<void> => {
 }
 
 const downloadInvoiceFile = async (row: InvoiceApplicationResponse): Promise<void> => {
+  const filePath = row.current_invoice_file_path ?? row.invoice_file_path
+  if (filePath === null || filePath === undefined || filePath.trim() === '') {
+    toast.warning('该发票暂无可下载文件')
+    return
+  }
+
   try {
     toast.info('正在下载发票文件')
-    await downloadInvoiceFileApi(
-      row.id,
-      buildInvoiceDownloadFileName(row.customer_name, row.invoice_file_path)
-    )
+    const fileName = buildInvoiceDownloadFileName(row.customer_name, filePath)
+    if (row.current_invoice_file_kind === 'reissue_new' && row.current_reissue_id !== null && row.current_reissue_id !== undefined) {
+      await downloadInvoiceReissueFile(row.current_reissue_id, 'new', fileName)
+    } else {
+      await downloadInvoiceFileApi(row.id, fileName)
+    }
   } catch (error) {
     handleApiError(error, '下载发票文件')
   }
@@ -502,6 +529,29 @@ const getInvoiceTypeClass = (type: string): string => {
     'COMMON': 'status-default'
   }
   return map[type] ?? 'status-default'
+}
+
+const getInvoiceEffectiveStatusText = (status: InvoiceEffectiveStatus | null | undefined): string => {
+  const map: Record<InvoiceEffectiveStatus, string> = {
+    ACTIVE: '有效',
+    REISSUE_PENDING: '重开中',
+    REISSUED: '已重开'
+  }
+  return status === null || status === undefined ? '有效' : map[status] ?? '有效'
+}
+
+const getInvoiceEffectiveStatusClass = (status: InvoiceEffectiveStatus | null | undefined): string => {
+  const map: Record<InvoiceEffectiveStatus, string> = {
+    ACTIVE: 'status-success',
+    REISSUE_PENDING: 'status-warning',
+    REISSUED: 'status-muted'
+  }
+  return status === null || status === undefined ? 'status-success' : map[status] ?? 'status-success'
+}
+
+const hasDownloadableInvoiceFile = (row: InvoiceApplicationResponse): boolean => {
+  const filePath = row.current_invoice_file_path ?? row.invoice_file_path
+  return row.status === 'ISSUED' && filePath !== null && filePath !== undefined && filePath.trim() !== ''
 }
 
 const formatDateTime = (dateStr: string): string => {
@@ -615,6 +665,9 @@ watchEffect(() => {
           <span :class="['status-badge', getInvoiceTypeClass(row.invoice_type)]">
             {{ getInvoiceTypeText(row.invoice_type) }}
           </span>
+          <span :class="['status-badge', getInvoiceEffectiveStatusClass(row.invoice_effective_status)]">
+            {{ getInvoiceEffectiveStatusText(row.invoice_effective_status) }}
+          </span>
           <span>申请人：{{ row.applicant_name || '-' }}</span>
           <span>{{ formatDateTime(row.created_time) }}</span>
         </div>
@@ -638,7 +691,7 @@ watchEffect(() => {
             {
               label: '下载',
               handler: downloadInvoiceRow,
-              visible: row.status === 'ISSUED' && Boolean(row.invoice_file_path),
+              visible: hasDownloadableInvoiceFile(row),
               icon: Download
             }
           ]"
@@ -715,6 +768,13 @@ watchEffect(() => {
         <StatusBadge :status="mapInvoiceStatus(row.status)" type="invoice" />
       </template>
 
+      <!-- 发票状态 -->
+      <template #cell-invoice_effective_status="{ row }">
+        <span :class="['status-badge', getInvoiceEffectiveStatusClass(row.invoice_effective_status)]">
+          {{ getInvoiceEffectiveStatusText(row.invoice_effective_status) }}
+        </span>
+      </template>
+
       <!-- 申请人 -->
       <template #cell-applicant_name="{ row }">
         {{ row.applicant_name || '-' }}
@@ -744,7 +804,7 @@ watchEffect(() => {
             {
               label: '下载',
               handler: downloadInvoiceRow,
-              visible: row.status === 'ISSUED' && Boolean(row.invoice_file_path),
+              visible: hasDownloadableInvoiceFile(row),
               icon: Download
             }
           ]"
@@ -852,6 +912,40 @@ watchEffect(() => {
   display: flex;
   align-items: center;
   gap: $wolf-space-sm-v2;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 $wolf-space-sm-v2;
+  border-radius: $wolf-radius-sm-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+  line-height: $wolf-line-height-body-v2;
+  white-space: nowrap;
+}
+
+.status-primary {
+  background: rgba($wolf-primary-v2, 0.1);
+  color: $wolf-primary-v2;
+}
+
+.status-success {
+  background: $wolf-success-bg-v2;
+  color: $wolf-success-text-v2;
+}
+
+.status-warning {
+  background: $wolf-warning-bg-v2;
+  color: $wolf-warning-text-v2;
+}
+
+.status-muted,
+.status-default {
+  background: $wolf-bg-hover-v2;
+  color: $wolf-text-secondary-v2;
 }
 
 .invoice-mobile-card-header {

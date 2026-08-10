@@ -46,6 +46,7 @@ const props = withDefaults(defineProps<{
   allowDownload?: boolean
   allowRemove?: boolean
   previewInDialog?: boolean
+  showHeader?: boolean
 }>(), {
   mode: 'readonly',
   title: '附件',
@@ -60,7 +61,8 @@ const props = withDefaults(defineProps<{
   allowPreview: true,
   allowDownload: true,
   allowRemove: true,
-  previewInDialog: true
+  previewInDialog: true,
+  showHeader: true
 })
 
 const emit = defineEmits<{
@@ -209,6 +211,14 @@ const getStatusText = (file: FileAttachmentItem): string => {
   return statusMap[status] ?? '未知'
 }
 
+const shouldShowStatus = (file: FileAttachmentItem): boolean => {
+  return (file.status ?? 'done') !== 'done'
+}
+
+const hasMeta = (file: FileAttachmentItem): boolean => {
+  return formatSize(file.size) !== '' || (file.description ?? '') !== '' || shouldShowStatus(file)
+}
+
 const isPreviewable = (file: FileAttachmentItem): boolean => {
   const ext = getExtension(file)
   return ['pdf', 'docx', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)
@@ -251,8 +261,8 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
 
 <template>
   <section :class="['file-attachment', { 'file-attachment--compact': compact }]">
-    <div class="file-attachment__header">
-      <div class="file-attachment__heading">
+    <div v-if="showHeader || canUpload" class="file-attachment__header">
+      <div v-if="showHeader" class="file-attachment__heading">
         <h3 class="file-attachment__title">
           {{ title }}
           <span v-if="required" class="file-attachment__required">*</span>
@@ -296,10 +306,10 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
             <span class="file-attachment__name">{{ file.name }}</span>
             <span class="file-attachment__type">{{ getTypeLabel(file) }}</span>
           </div>
-          <div class="file-attachment__meta">
+          <div v-if="hasMeta(file)" class="file-attachment__meta">
             <span v-if="formatSize(file.size)">{{ formatSize(file.size) }}</span>
             <span v-if="file.description">{{ file.description }}</span>
-            <span class="file-attachment__status">{{ getStatusText(file) }}</span>
+            <span v-if="shouldShowStatus(file)" class="file-attachment__status">{{ getStatusText(file) }}</span>
           </div>
           <Progress
             v-if="file.status === 'uploading' || file.status === 'processing'"
@@ -407,7 +417,7 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
 .file-attachment {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $wolf-space-sm-v2;
   min-width: 0;
 }
 
@@ -427,7 +437,7 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
   color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-body-v2;
   font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-title-v2;
+  line-height: $wolf-line-height-body-v2;
 }
 
 .file-attachment__required {
@@ -468,9 +478,9 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: $wolf-space-md-v2;
-  min-height: $wolf-touch-target-min-v2;
-  padding: $wolf-space-md-v2;
+  gap: $wolf-space-sm-v2;
+  min-height: 40px;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
   border-bottom: 1px solid $wolf-border-light-v2;
 
   &:last-child {
@@ -483,8 +493,8 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
 }
 
 .file-attachment__icon {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   color: $wolf-primary-v2;
 }
 
@@ -559,8 +569,8 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
 }
 
 .file-attachment__action {
-  width: $wolf-touch-target-min-v2;
-  height: $wolf-touch-target-min-v2;
+  width: 32px;
+  height: 32px;
   color: $wolf-text-secondary-v2;
 
   &:focus-visible {
@@ -578,8 +588,8 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
   align-items: center;
   justify-content: center;
   gap: $wolf-space-sm-v2;
-  min-height: 72px;
-  padding: $wolf-space-md-v2;
+  min-height: 56px;
+  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
   border: 1px dashed $wolf-border-default-v2;
   border-radius: $wolf-radius-v2;
   color: $wolf-text-tertiary-v2;

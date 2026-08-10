@@ -17,6 +17,7 @@ _ENTITY_TYPE_LABEL = {
     BusinessType.CONTRACT: "合同",
     BusinessType.PAYMENT: "回款登记",
     BusinessType.INVOICE: "发票申请",
+    BusinessType.INVOICE_REISSUE: "发票重开申请",
     BusinessType.LICENSE: "License申请",
     BusinessType.OPPORTUNITY: "商机",
 }
@@ -25,6 +26,7 @@ _APPROVAL_TYPE_HEADER_TEMPLATE = {
     BusinessType.CONTRACT: "blue",
     BusinessType.PAYMENT: "green",
     BusinessType.INVOICE: "orange",
+    BusinessType.INVOICE_REISSUE: "orange",
     BusinessType.LICENSE: "purple",
     BusinessType.OPPORTUNITY: "blue",
 }

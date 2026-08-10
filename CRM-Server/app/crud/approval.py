@@ -218,7 +218,7 @@ class ApprovalFlowCRUD:
         license_type: Optional[str],
     ) -> Tuple[Optional[ApprovalFlow], Optional[str]]:
         """
-        通用审批流程匹配（支持 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
+        通用审批流程匹配（支持 CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY）
 
         E1 合同回归契约（P0）：business_type='CONTRACT' 的匹配结果必须与改造前
         match_flow(contract) 逐字一致——仅多 `ApprovalFlow.business_type == 'CONTRACT'`
@@ -230,7 +230,7 @@ class ApprovalFlowCRUD:
 
         Args:
             db: 数据库会话
-            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
+            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY）
             team_id: 团队ID（可选，用于团队隔离）
             amount: 单据金额（合同 total_amount / 回款 actual_amount / 发票 invoice_amount）
             license_type: 授权类型（仅合同有值，回款/发票传 None）
@@ -262,6 +262,7 @@ class ApprovalFlowCRUD:
                 BusinessType.CONTRACT: "合同",
                 BusinessType.PAYMENT: "回款",
                 BusinessType.INVOICE: "发票",
+                BusinessType.INVOICE_REISSUE: "发票重开申请",
                 BusinessType.LICENSE: "License",
                 BusinessType.OPPORTUNITY: "商机",
             }
@@ -477,7 +478,7 @@ class ApprovalCRUD:
 
         Args:
             db: 数据库会话
-            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
+            business_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY）
             business_id: 业务单据ID
             team_id: 团队ID（可选，团队隔离）
 
@@ -605,7 +606,7 @@ class ApprovalCRUD:
         submitter_name: str,
     ) -> Approval:
         """
-        通用审批实例创建（支持 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
+        通用审批实例创建（支持 CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY）
 
         - 通过适配器 get_entity 取业务单据；不存在则 raise ValueError（防幻觉单据ID）
         - 写 Approval.business_type/business_id；CONTRACT 额外写 contract_id=business_id 兼容旧字段
@@ -860,7 +861,7 @@ class ApprovalCRUD:
         limit: int = 100
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        查询超时的审批实例列表（泛化覆盖 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）。
+        查询超时的审批实例列表（泛化覆盖 CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY）。
 
         I-1 修复：原实现 `JOIN Contract ON Approval.contract_id == Contract.id`
         为 INNER JOIN，非合同审批 contract_id 可能为 NULL，导致超时审批在
@@ -1181,7 +1182,7 @@ class ApprovalCRUD:
         """
         from app.models.contract import Contract
         from app.models.customer import Customer
-        from app.models.invoice import InvoiceApplication
+        from app.models.invoice import InvoiceApplication, InvoiceReissueApplication
         from app.models.license_application import LicenseApplication
         from app.models.opportunity import Opportunity
         from app.models.payment import PaymentRecord, PaymentPlan
@@ -1189,6 +1190,7 @@ class ApprovalCRUD:
         ids_by_type: Dict[str, List[int]] = {
             BusinessType.CONTRACT: [],
             BusinessType.INVOICE: [],
+            BusinessType.INVOICE_REISSUE: [],
             BusinessType.PAYMENT: [],
             BusinessType.LICENSE: [],
             BusinessType.OPPORTUNITY: [],
@@ -1266,6 +1268,28 @@ class ApprovalCRUD:
                     "invoice_file_path": inv.invoice_file_path,
                     "invoice_number": inv.invoice_number,
                     "issued_time": inv.issued_time,
+                }
+
+        # INVOICE_REISSUE（通过原发票申请关联获取客户信息）
+        if ids_by_type["INVOICE_REISSUE"]:
+            reissues = safe_all(db.query(InvoiceReissueApplication).filter(
+                InvoiceReissueApplication.id.in_(ids_by_type["INVOICE_REISSUE"]),
+                InvoiceReissueApplication.team_id == team_id,
+            ))
+            original_ids = [item.original_invoice_application_id for item in reissues if item.original_invoice_application_id]
+            originals = safe_all(db.query(InvoiceApplication).filter(
+                InvoiceApplication.id.in_(list(set(original_ids))),
+                InvoiceApplication.team_id == team_id,
+            )) if original_ids else []
+            originals_by_id = {item.id: item for item in originals}
+            customers_by_id = fetch_customers([item.customer_id for item in originals])
+            for item in reissues:
+                original = originals_by_id.get(item.original_invoice_application_id)
+                summaries[(BusinessType.INVOICE_REISSUE, item.id)] = {
+                    "application_number": item.application_number or f"INVR-{item.id}",
+                    "entity_name": item.invoice_title_text,
+                    "entity_amount": float(item.invoice_amount) if item.invoice_amount is not None else None,
+                    "customer_info": customers_by_id.get(original.customer_id) if original else None,
                 }
 
         # PAYMENT（通过 payment_plan_id 批量关联获取合同名称和客户信息）

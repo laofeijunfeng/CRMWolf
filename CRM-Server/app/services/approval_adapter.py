@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.constants.business_types import BusinessType
 from app.models.contract import Contract, ContractStatus
 from app.models.payment import PaymentPlan, PaymentRecord, PaymentConfirmationStatus
-from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
+from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceReissueApplicationStatus
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
 from app.models.opportunity import Opportunity
 from app.models.customer import Customer
@@ -31,6 +31,7 @@ _BUSINESS_TYPE_DISPLAY_NAMES = {
     BusinessType.CONTRACT: "合同",
     BusinessType.PAYMENT: "回款登记",
     BusinessType.INVOICE: "发票申请",
+    BusinessType.INVOICE_REISSUE: "发票重开申请",
     BusinessType.LICENSE: "License申请",
     BusinessType.OPPORTUNITY: "商机",
 }
@@ -243,6 +244,39 @@ class InvoiceApplicationAdapter:
         return f"发票申请#{entity.id}"
 
 
+class InvoiceReissueApplicationAdapter:
+    business_type = BusinessType.INVOICE_REISSUE
+
+    def get_entity(self, db, business_id, team_id):
+        from app.crud.invoice import invoice_reissue_application_crud
+        return invoice_reissue_application_crud.get_by_id(db, business_id, team_id)
+
+    def get_submitter(self, entity):
+        return entity.applicant_id, None
+
+    def match_kwargs(self, entity):
+        return {"amount": float(entity.invoice_amount or 0), "license_type": None}
+
+    def on_submit(self, db, entity):
+        if entity is None: return
+        entity.status = InvoiceReissueApplicationStatus.PENDING_REVIEW
+
+    def on_approved(self, db, entity):
+        if entity is None: return
+        entity.status = InvoiceReissueApplicationStatus.APPROVED
+
+    def on_rejected(self, db, entity):
+        if entity is None: return
+        entity.status = InvoiceReissueApplicationStatus.REJECTED
+
+    def on_cancelled(self, db, entity):
+        if entity is None: return
+        entity.status = InvoiceReissueApplicationStatus.DRAFT
+
+    def get_name(self, entity):
+        return f"发票重开申请#{entity.application_number or entity.id}"
+
+
 class LicenseApplicationAdapter:
     """License 申请审批适配器
 
@@ -358,6 +392,7 @@ _REGISTRY: dict[str, ApprovalEntityAdapter] = {
     BusinessType.CONTRACT: ContractAdapter(),
     BusinessType.PAYMENT: PaymentRecordAdapter(),
     BusinessType.INVOICE: InvoiceApplicationAdapter(),
+    BusinessType.INVOICE_REISSUE: InvoiceReissueApplicationAdapter(),
     BusinessType.LICENSE: LicenseApplicationAdapter(),
     BusinessType.OPPORTUNITY: OpportunityAdapter(),
 }
@@ -379,6 +414,7 @@ def get_approval_action_path(business_type: str) -> str:
         BusinessType.CONTRACT: "/contracts",
         BusinessType.PAYMENT: "/payments/records",
         BusinessType.INVOICE: "/invoices",
+        BusinessType.INVOICE_REISSUE: "/invoices",
         BusinessType.LICENSE: "/customers",
         BusinessType.OPPORTUNITY: "/opportunities",
     }
@@ -416,6 +452,16 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
             "开票抬头": getattr(entity, "invoice_title_text", None),
             "发票类型": _invoice_type_label(getattr(entity, "invoice_type", None)),
             "开票金额": _format_currency(getattr(entity, "invoice_amount", None)),
+        }
+
+    if business_type == BusinessType.INVOICE_REISSUE:
+        original = getattr(entity, "original_invoice_application", None)
+        return {
+            "客户名称": _customer_name(db, business_type, entity),
+            "原发票申请": getattr(original, "application_number", None),
+            "新开票抬头": getattr(entity, "invoice_title_text", None),
+            "重开金额": _format_currency(getattr(entity, "invoice_amount", None)),
+            "重开原因": getattr(entity, "reason", None),
         }
 
     if business_type == BusinessType.PAYMENT:
@@ -469,6 +515,26 @@ def get_approval_customer_name(db: Session, business_type: str, entity: Any) -> 
             customer = getattr(contract, "customer", None) if contract is not None else None
             if customer is not None:
                 return getattr(customer, "account_name", None)
+
+    if business_type == BusinessType.INVOICE_REISSUE:
+        original = getattr(entity, "original_invoice_application", None)
+        if original is None:
+            original_id = getattr(entity, "original_invoice_application_id", None)
+            if original_id:
+                original = db.query(InvoiceApplication).filter(
+                    InvoiceApplication.id == original_id,
+                    InvoiceApplication.team_id == getattr(entity, "team_id", None),
+                ).first()
+        customer = getattr(original, "customer", None) if original is not None else None
+        if customer is not None:
+            return getattr(customer, "account_name", None)
+        customer_id = getattr(original, "customer_id", None) if original is not None else None
+        if customer_id:
+            customer = db.query(Customer).filter(
+                Customer.id == customer_id,
+                Customer.team_id == getattr(entity, "team_id", None),
+            ).first()
+            return customer.account_name if customer else None
 
     customer_id = getattr(entity, "customer_id", None)
     if customer_id:

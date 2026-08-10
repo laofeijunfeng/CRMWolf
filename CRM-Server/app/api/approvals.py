@@ -1226,6 +1226,7 @@ _SELF_APPROVE_DENY_MSG = {
     BusinessType.CONTRACT: "您没有权限审批自己创建的合同",
     BusinessType.PAYMENT: "您没有权限审批自己创建的回款",
     BusinessType.INVOICE: "您没有权限审批自己创建的发票",
+    BusinessType.INVOICE_REISSUE: "您没有权限审批自己创建的发票重开申请",
     BusinessType.LICENSE: "您没有权限审批自己创建的License申请",
     BusinessType.OPPORTUNITY: "您没有权限审批自己创建的商机",
 }
@@ -1246,7 +1247,7 @@ def _check_self_approval_permission(
 
     - entity 为 None（单据已删 / 跨 team）时跳过（对齐原 `if contract and ...` 语义）
     - 提交人 id == str(current_user.id) 视为自审，查用户权限码，
-      缺 `<resource>:approve:own`（contract/payment/invoice）→ 403
+      缺 `<resource>:approve:own`（contract/payment/invoice/invoice_reissue/...）→ 403
     - 重复查 DB（approve 端点已取过 entity）可接受——审批非高频，留 M-1 一并优化
     """
     adapter = get_adapter(entity_type)
@@ -1296,7 +1297,7 @@ def _check_approve_permissions(
             detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}",
         )
 
-    # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY 通用）
+    # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY 通用）
     if entity_type is not None and entity_id is not None:
         _check_self_approval_permission(
             db, current_user, team_id, entity_type, entity_id
@@ -1530,7 +1531,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
     from app.models.contract import Contract
     from app.models.customer import Contact
     from app.models.deployment import DeploymentInfo
-    from app.models.invoice import InvoiceApplication
+    from app.models.invoice import InvoiceApplication, InvoiceReissueApplication
     from app.models.license_application import LicenseApplication
     from app.models.opportunity import Opportunity
     from app.models.payment import PaymentPlan, PaymentRecord
@@ -1630,6 +1631,36 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "contract_name": contract.contract_name if contract else None,
             "opportunity_name": opportunity.opportunity_name if opportunity else None,
             "payment_plan_stage_name": plan.stage_name if plan else None,
+        }
+
+    if approval.business_type == BusinessType.INVOICE_REISSUE:
+        reissue = db.query(InvoiceReissueApplication).filter(
+            InvoiceReissueApplication.id == business_id,
+            InvoiceReissueApplication.team_id == team_id,
+        ).first()
+        if not reissue:
+            return {}
+        original = reissue.original_invoice_application
+        return {
+            "application_number": reissue.application_number,
+            "original_invoice_application_number": original.application_number if original else None,
+            "reason": reissue.reason,
+            "invoice_title_text": reissue.invoice_title_text,
+            "invoice_type": reissue.invoice_type,
+            "invoice_amount": money(reissue.invoice_amount),
+            "invoice_taxpayer_id": reissue.invoice_taxpayer_id,
+            "invoice_bank_name": reissue.invoice_bank_name,
+            "invoice_bank_account": reissue.invoice_bank_account,
+            "invoice_address": reissue.invoice_address,
+            "invoice_phone": reissue.invoice_phone,
+            "status": reissue.status,
+            "red_invoice_file_path": reissue.red_invoice_file_path,
+            "red_invoice_number": reissue.red_invoice_number,
+            "red_issued_time": reissue.red_issued_time,
+            "new_invoice_file_path": reissue.new_invoice_file_path,
+            "new_invoice_number": reissue.new_invoice_number,
+            "new_issued_time": reissue.new_issued_time,
+            "completed_time": reissue.completed_time,
         }
 
     if approval.business_type == BusinessType.LICENSE:

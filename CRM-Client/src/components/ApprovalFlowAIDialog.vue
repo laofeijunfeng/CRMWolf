@@ -384,11 +384,12 @@ import {
   type ErrorAction
 } from '@/api/approvalAI'
 
-type BusinessType = 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'LICENSE' | 'OPPORTUNITY'
+type BusinessType = 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'INVOICE_REISSUE' | 'LICENSE' | 'OPPORTUNITY'
 const businessTypeOptions = [
   { value: 'CONTRACT', label: '合同' },
   { value: 'PAYMENT', label: '回款登记' },
   { value: 'INVOICE', label: '发票申请' },
+  { value: 'INVOICE_REISSUE', label: '发票重开申请' },
   { value: 'LICENSE', label: 'License申请' },
   { value: 'OPPORTUNITY', label: '商机' },
 ]

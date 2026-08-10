@@ -46,6 +46,17 @@ from app.services.follow_up_task_query_service import (
     FollowUpTaskQueryService,
     follow_up_task_query_service,
 )
+from app.services.follow_up_task_reconciliation_evaluation_service import FollowUpTaskReconciliationDecision
+from app.services.follow_up_task_transition_execution_service import (
+    FollowUpTaskTransitionExecutionService,
+    FollowUpTaskTransitionExecutionStatus,
+    follow_up_task_transition_execution_service,
+)
+from app.services.follow_up_task_transition_plan_service import (
+    FollowUpTaskTransitionAction,
+    FollowUpTaskTransitionActionType,
+    FollowUpTaskTransitionPlan,
+)
 from app.services.work_summary_narrative_service import WorkSummaryNarrativeService
 from app.services.work_summary_narrative_service import (
     work_summary_narrative_service as default_work_summary_narrative_service,
@@ -73,6 +84,7 @@ class CRMAgentToolService:
         identity_resolution_service: Optional[CustomerIdentityResolutionService] = None,
         follow_up_query_service: Optional[FollowUpTaskQueryService] = None,
         follow_up_confirmation_channel_service: Optional[FollowUpTaskConfirmationChannelService] = None,
+        follow_up_transition_execution_service: Optional[FollowUpTaskTransitionExecutionService] = None,
         work_summary_service: Optional[WorkSummaryService] = None,
         work_summary_narrative_service: Optional[WorkSummaryNarrativeService] = None,
     ) -> None:
@@ -84,6 +96,9 @@ class CRMAgentToolService:
         self.follow_up_query_service = follow_up_query_service or follow_up_task_query_service
         self.follow_up_confirmation_channel_service = (
             follow_up_confirmation_channel_service or follow_up_task_confirmation_channel_service
+        )
+        self.follow_up_transition_execution_service = (
+            follow_up_transition_execution_service or follow_up_task_transition_execution_service
         )
         self.work_summary_service = work_summary_service or default_work_summary_service
         self.work_summary_narrative_service = work_summary_narrative_service or default_work_summary_narrative_service
@@ -623,6 +638,93 @@ class CRMAgentToolService:
             action_key,
             call_db,
         )
+
+    async def transition_follow_up_task(
+        self,
+        context: AgentToolContext,
+        *,
+        task_id: str,
+        action: str,
+        proposed_due_at: Optional[str] = None,
+        reason: Optional[str] = None,
+        idempotency_suffix: Optional[str] = None,
+    ) -> AgentToolResult:
+        payload = {
+            "task_id": task_id,
+            "action": action,
+            "proposed_due_at": proposed_due_at,
+            "reason": reason,
+        }
+        action_key = self._action_key("transition_follow_up_task", context, payload, idempotency_suffix)
+
+        async def call_db():
+            return self._execute_follow_up_task_transition(
+                context,
+                task_id=task_id,
+                action=action,
+                proposed_due_at=proposed_due_at,
+                reason=reason,
+            )
+
+        return await self._run_write_tool(context, "transition_follow_up_task", payload, action_key, call_db)
+
+    def _execute_follow_up_task_transition(
+        self,
+        context: AgentToolContext,
+        *,
+        task_id: str,
+        action: str,
+        proposed_due_at: Optional[str],
+        reason: Optional[str],
+    ) -> JsonDict:
+        action_type = _follow_up_transition_action_type(action)
+        decision = FollowUpTaskReconciliationDecision(
+            decision=action_type,
+            confidence=1.0,
+            task_public_id=task_id,
+            candidate_public_ids=(task_id,),
+            needs_confirmation=False,
+            proposed_due_at=proposed_due_at,
+            evidence_terms=tuple(filter(None, [reason, "agent_confirmed_task_transition"])),
+        )
+        plan = FollowUpTaskTransitionPlan(
+            decision=decision,
+            actions=(
+                FollowUpTaskTransitionAction(
+                    action=action_type,
+                    task_public_id=task_id,
+                    confidence=1.0,
+                    executable=action_type
+                    in {
+                        FollowUpTaskTransitionActionType.COMPLETE,
+                        FollowUpTaskTransitionActionType.CANCEL,
+                        FollowUpTaskTransitionActionType.DELAY,
+                    },
+                    requires_confirmation=False,
+                    proposed_due_at=proposed_due_at,
+                    reason=reason or "AGENT_CONFIRMED_TASK_TRANSITION",
+                    evidence_terms=tuple(filter(None, [reason])),
+                ),
+            ),
+            plan_source="agent_confirmed_task_transition",
+            state_mutation_requested=False,
+        )
+        results = self.follow_up_transition_execution_service.execute_plan(
+            context.db,
+            team_id=context.team_id,
+            plan=plan,
+            actor_id=str(context.user_id),
+            expected_owner_id=str(context.user_id),
+            enabled=True,
+            commit=True,
+        )
+        return {
+            "plan": plan.to_dict(),
+            "results": [result.to_dict() for result in results],
+            "executed": any(
+                result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED for result in results
+            ),
+        }
 
     @staticmethod
     def _customer_internal_id(context: AgentToolContext, customer_public_id: Union[str, int]) -> int:
@@ -1292,6 +1394,15 @@ def _compact_text(value: str | None, *, limit: int) -> str | None:
     if len(compacted) <= limit:
         return compacted
     return f"{compacted[:limit - 1]}..."
+
+
+def _follow_up_transition_action_type(action: str) -> str:
+    return {
+        "complete": FollowUpTaskTransitionActionType.COMPLETE,
+        "cancel": FollowUpTaskTransitionActionType.CANCEL,
+        "delay": FollowUpTaskTransitionActionType.DELAY,
+        "keep_open": FollowUpTaskTransitionActionType.KEEP_OPEN,
+    }.get(str(action or "").strip(), FollowUpTaskTransitionActionType.NOOP)
 
 
 def _semantic_retrieval_metadata(event: JsonDict) -> JsonDict:
