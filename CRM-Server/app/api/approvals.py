@@ -1475,6 +1475,7 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
         "id": approval.id,
         "business_type": approval.business_type,
         "business_id": approval.business_id,
+        "original_invoice_application_id": summary.get("original_invoice_application_id") if summary else None,
         "contract_id": approval.contract_id,
         "flow_id": approval.flow_id,
         "flow_name": approval.flow.flow_name if approval.flow else None,
@@ -1643,6 +1644,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
         original = reissue.original_invoice_application
         return {
             "application_number": reissue.application_number,
+            "original_invoice_application_id": reissue.original_invoice_application_id,
             "original_invoice_application_number": original.application_number if original else None,
             "reason": reissue.reason,
             "invoice_title_text": reissue.invoice_title_text,

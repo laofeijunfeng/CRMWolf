@@ -446,6 +446,22 @@
       @completed="handleInvoiceReissueCompleted"
     />
 
+    <InvoiceApplicationFormDialog
+      :open="invoiceEditDialogVisible"
+      mode="edit"
+      :application="editingInvoiceApplication"
+      @update:open="handleInvoiceEditDialogOpenChange"
+      @success="handleInvoiceEditSuccess"
+    />
+
+    <InvoiceDetailSheet
+      :invoice-id="selectedInvoiceDetailId"
+      :visible="invoiceDetailSheetVisible"
+      :auto-edit-reissue-id="selectedApproval?.business_type === 'INVOICE_REISSUE' ? selectedApproval.business_id : null"
+      @update:visible="handleInvoiceDetailSheetVisibleChange"
+      @refresh="handleInvoiceDetailRefresh"
+    />
+
     <LicenseIssueDialog
       v-if="selectedApproval?.business_type === 'LICENSE'"
       v-model:open="licenseIssueDialogVisible"
@@ -556,9 +572,11 @@ import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
+import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import InvoiceReissueCompleteDialog from '@/components/dialogs/InvoiceReissueCompleteDialog.vue'
 import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
+import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
@@ -571,6 +589,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { customerDetailRoute } from '@/utils/customerRoutes'
 import approvalGenericApi from '@/api/approvalGeneric'
 import contractApi from '@/api/contract'
+import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery } from '@/schemas/approvalGeneric'
 import type { ContractResponse } from '@/api/contract'
 
@@ -620,6 +639,10 @@ const remindPendingId = ref<number | null>(null)
 const contractEditVisible = ref<boolean>(false)
 const editingContract = ref<ContractResponse | null>(null)
 const contractLoading = ref<boolean>(false)
+const invoiceEditDialogVisible = ref<boolean>(false)
+const editingInvoiceApplication = ref<InvoiceApplicationResponse | null>(null)
+const invoiceDetailSheetVisible = ref<boolean>(false)
+const selectedInvoiceDetailId = ref<number | null>(null)
 
 // 快速驳回弹窗
 const quickRejectVisible = ref<boolean>(false)
@@ -1372,16 +1395,11 @@ const handleLicenseIssued = (): void => {
   fetchList()
 }
 
-// 条4：REJECTED 行修改并重新提交（先 update 回 DRAFT 再 submitApproval）
-// 注：update 回 DRAFT 由各实体编辑页负责；审批中心 entry 仅 router.push 跳
-// 对应编辑页（PAYMENT 无独立编辑页，跳列表页 + info 提示），避免审批中心耦合
-// 各实体的 update API（COMPONENTS.md「视图不直接发业务 update」亦不在此处内嵌
-// 多条合同/回款/发票的 update 调用，保持中心单一职责）。
-// 修复：合同编辑使用弹窗而非路由跳转
+// 条4：REJECTED 行修改并重新提交。
+// 合同、发票在审批中心内打开既有编辑弹窗；其他业务仍进入对应业务页面处理。
 const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
   resubmitPendingId.value = row.id
   try {
-    // 合同类型：直接打开编辑弹窗
     if (row.business_type === 'CONTRACT') {
       contractLoading.value = true
       try {
@@ -1396,7 +1414,27 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
       return
     }
 
-    // 其他实体类型：路由跳转
+    if (row.business_type === 'INVOICE') {
+      try {
+        editingInvoiceApplication.value = await invoiceApi.getInvoiceApplication(row.business_id)
+        invoiceEditDialogVisible.value = true
+      } catch (error: unknown) {
+        handleApiError(error, '获取发票申请')
+      }
+      return
+    }
+
+    if (row.business_type === 'INVOICE_REISSUE') {
+      const originalInvoiceApplicationId = getOriginalInvoiceApplicationId(row)
+      if (originalInvoiceApplicationId === null) {
+        toast.error('未找到原发票申请，无法修改重开申请')
+        return
+      }
+      selectedInvoiceDetailId.value = originalInvoiceApplicationId
+      invoiceDetailSheetVisible.value = true
+      return
+    }
+
     const confirmed = await createConfirmDialog({
       title: '修改并重新提交',
       message: `将跳转到 ${businessTypeLabel(row.business_type)} 编辑页修改后重新提交审批。是否继续？`,
@@ -1406,9 +1444,7 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     })
     if (!confirmed) return
     // 跳转到对应实体编辑页
-    const route: Record<Exclude<EntityType, 'CONTRACT'>, string | ReturnType<typeof customerDetailRoute>> = {
-      INVOICE: `/invoices/${row.business_id}`,
-      INVOICE_REISSUE: '/invoices',
+    const route: Record<Exclude<EntityType, 'CONTRACT' | 'INVOICE' | 'INVOICE_REISSUE'>, string | ReturnType<typeof customerDetailRoute>> = {
       // 回款无独立编辑页（/payments 为列表页）：跳列表页 + info 提示，
       // 保证不白屏/不断旅程；用户在列表内修改后重新提交审批。
       PAYMENT: `/payments`,
@@ -1420,18 +1456,12 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
         ? `/opportunities?opportunityId=${row.business_public_id}`
         : '/opportunities'
     }
-    const target = route[row.business_type as Exclude<EntityType, 'CONTRACT'>]
+    const target = route[row.business_type as Exclude<EntityType, 'CONTRACT' | 'INVOICE' | 'INVOICE_REISSUE'>]
     await router.push(target)
     // PAYMENT 目标是列表页，无法直接进入驳回回款的编辑入口——补 info 引导，
     // 旅程不断（比原 window.location.assign hash bug 强）。
     if (row.business_type === 'PAYMENT') {
       toast.info('请修改回款记录后重新提交审批')
-    }
-    if (row.business_type === 'INVOICE') {
-      toast.info('请在发票详情页编辑后重新提交审批')
-    }
-    if (row.business_type === 'INVOICE_REISSUE') {
-      toast.info('请在发票列表中打开原发票详情后处理重开申请')
     }
     if (row.business_type === 'LICENSE') {
       toast.info('请修改 License 申请后重新提交审批')
@@ -1452,6 +1482,39 @@ const handleContractEditSuccess = (): void => {
   editingContract.value = null
   toast.success('合同已修改，请重新提交审批')
   fetchList()
+}
+
+const handleInvoiceEditDialogOpenChange = (open: boolean): void => {
+  invoiceEditDialogVisible.value = open
+  if (!open) {
+    editingInvoiceApplication.value = null
+  }
+}
+
+const handleInvoiceEditSuccess = (): void => {
+  invoiceEditDialogVisible.value = false
+  editingInvoiceApplication.value = null
+  sheetVisible.value = false
+  fetchList()
+}
+
+const handleInvoiceDetailSheetVisibleChange = (visible: boolean): void => {
+  invoiceDetailSheetVisible.value = visible
+  if (!visible) {
+    selectedInvoiceDetailId.value = null
+  }
+}
+
+const handleInvoiceDetailRefresh = (): void => {
+  fetchList()
+}
+
+const getOriginalInvoiceApplicationId = (row: ApprovalListItem): number | null => {
+  const listValue = row.original_invoice_application_id
+  if (typeof listValue === 'number') return listValue
+
+  const detailValue = activeApprovalDetail.value?.entity_detail?.['original_invoice_application_id']
+  return typeof detailValue === 'number' ? detailValue : null
 }
 
 const handleRemind = async (row: ApprovalListItem): Promise<void> => {

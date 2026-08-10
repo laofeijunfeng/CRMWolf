@@ -1130,6 +1130,7 @@ class ApprovalCRUD:
                 "business_type": ap.business_type,
                 "business_id": ap.business_id if ap.business_id is not None else 0,
                 "business_public_id": summary.get("business_public_id") if summary else None,
+                "original_invoice_application_id": summary.get("original_invoice_application_id") if summary else None,
                 "application_number": summary["application_number"] if summary else f"{ap.business_type}-{ap.business_id}",
                 "entity_name": summary["entity_name"] if summary else None,
                 "entity_amount": summary["entity_amount"] if summary else None,
@@ -1287,6 +1288,7 @@ class ApprovalCRUD:
                 original = originals_by_id.get(item.original_invoice_application_id)
                 summaries[(BusinessType.INVOICE_REISSUE, item.id)] = {
                     "application_number": item.application_number or f"INVR-{item.id}",
+                    "original_invoice_application_id": item.original_invoice_application_id,
                     "entity_name": item.invoice_title_text,
                     "entity_amount": float(item.invoice_amount) if item.invoice_amount is not None else None,
                     "customer_info": customers_by_id.get(original.customer_id) if original else None,

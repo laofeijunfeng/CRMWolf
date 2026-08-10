@@ -110,18 +110,31 @@ const visible = computed({
 })
 
 const isCreateMode = computed<boolean>(() => props.mode === 'create')
+const isRejectedEditMode = computed<boolean>(() => !isCreateMode.value && props.application?.status === 'REJECTED')
 const hasFixedCustomer = computed<boolean>(() => props.fixedCustomer !== null)
 const hasFixedInvoiceTitle = computed<boolean>(() => props.fixedInvoiceTitle !== null)
 const hasFixedContract = computed<boolean>(() => props.fixedContractId !== null)
-const title = computed<string>(() => isCreateMode.value ? '申请发票' : '编辑发票申请')
+const title = computed<string>(() => {
+  if (isCreateMode.value) return '申请发票'
+  return isRejectedEditMode.value ? '修改并重新提交发票申请' : '编辑发票申请'
+})
 const description = computed<string>(() => {
   if (isCreateMode.value && hasFixedInvoiceTitle.value) {
     return '使用当前发票抬头创建申请，并提交到审批流程。'
   }
 
-  return isCreateMode.value
-    ? '选择客户、合同、回款计划和发票抬头后提交审批。'
+  if (isCreateMode.value) {
+    return '选择客户、合同、回款计划和发票抬头后提交审批。'
+  }
+
+  return isRejectedEditMode.value
+    ? '调整发票抬头、发票类型或开票金额后重新提交审批。'
     : '调整发票抬头、发票类型或开票金额。'
+})
+const submitButtonText = computed<string>(() => {
+  if (submitting.value) return '提交中...'
+  if (isCreateMode.value) return '提交申请'
+  return isRejectedEditMode.value ? '修改并重新提交' : '保存'
 })
 const selectedInvoiceTitle = computed<InvoiceTitleResponse | null>(() => {
   if (props.fixedInvoiceTitle !== null) return props.fixedInvoiceTitle
@@ -411,8 +424,22 @@ async function handleSubmit(): Promise<void> {
         toast.warning('发票申请已创建，但审批提交失败，请在发票管理页面手动提交')
       }
     } else if (props.application !== null) {
-      await invoiceApi.updateInvoiceApplication(props.application.id, buildUpdatePayload())
-      toast.success('发票申请已更新')
+      const updatedInvoice = await invoiceApi.updateInvoiceApplication(props.application.id, buildUpdatePayload())
+      if (isRejectedEditMode.value) {
+        try {
+          const result = await approvalGenericApi.submitApproval('INVOICE', updatedInvoice.id)
+          if (result.approval_id === 0 && result.status === 'APPROVED') {
+            toast.success('发票申请已更新并自动批准')
+          } else {
+            toast.success('发票申请已更新并重新提交审批')
+          }
+        } catch (error: unknown) {
+          handleApiError(error, '重新提交审批')
+          toast.warning('发票申请已更新，但审批提交失败，请在发票管理页面手动提交')
+        }
+      } else {
+        toast.success('发票申请已更新')
+      }
     }
 
     visible.value = false
@@ -627,7 +654,7 @@ watch(
             取消
           </Button>
           <Button type="submit" :disabled="submitting">
-            {{ submitting ? '提交中...' : isCreateMode ? '提交申请' : '保存' }}
+            {{ submitButtonText }}
           </Button>
         </DialogFooter>
       </form>

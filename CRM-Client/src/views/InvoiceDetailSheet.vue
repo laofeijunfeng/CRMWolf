@@ -88,9 +88,12 @@ import { logger } from '@/utils/logger'
 interface Props {
   invoiceId: number | null
   visible: boolean
+  autoEditReissueId?: number | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  autoEditReissueId: null,
+})
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
@@ -151,6 +154,7 @@ const reissueForm = ref<ReissueFormState>({
 })
 const editingReissueApplication = ref<InvoiceReissueApplicationResponse | null>(null)
 const completingReissueApplication = ref<InvoiceReissueApplicationResponse | null>(null)
+const handledAutoEditReissueId = ref<number | null>(null)
 const completeReissueForm = ref<{
   red_invoice_number: string
   new_invoice_number: string
@@ -443,6 +447,7 @@ const fetchInvoiceDetail = async (invoiceId: number): Promise<void> => {
     const data = await invoiceApi.getInvoiceApplication(invoiceId)
     if (requestId !== activeRequestId.value) return
     invoiceInfo.value = data
+    openAutoEditReissueIfNeeded(data)
     void loadInvoiceFilePreviewUrl(data, requestId)
   } catch (error: unknown) {
     if (requestId !== activeRequestId.value) return
@@ -474,6 +479,7 @@ const resetState = (): void => {
   redOffsetting.value = false
   editingReissueApplication.value = null
   completingReissueApplication.value = null
+  handledAutoEditReissueId.value = null
   deleting.value = false
   invoicedForm.value.invoice_number = ''
   resetCompleteReissueUploadForm()
@@ -558,6 +564,17 @@ const handleEditReissue = (reissue: InvoiceReissueApplicationResponse): void => 
   editingReissueApplication.value = reissue
   fillReissueFormFromReissue(reissue)
   reissueDialogOpen.value = true
+}
+
+const openAutoEditReissueIfNeeded = (invoice: InvoiceApplicationResponse): void => {
+  const reissueId = props.autoEditReissueId
+  if (reissueId === null || handledAutoEditReissueId.value === reissueId) return
+
+  const reissue = invoice.reissue_applications.find((item) => item.id === reissueId)
+  if (reissue === undefined) return
+
+  handledAutoEditReissueId.value = reissueId
+  handleEditReissue(reissue)
 }
 
 const handleSubmitReissue = async (): Promise<void> => {
